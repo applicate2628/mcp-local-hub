@@ -26,23 +26,26 @@ func (f *fakeLogs) Logs(server, daemon string, tail int) (string, error) {
 	return f.body, f.err
 }
 
-// scriptedLogs returns a different body per call so a test can simulate
-// the realistic sequence streamLogs observes when Follow is enabled
-// before the daemon has written anything: prime returns the "no log
-// yet" placeholder, the first few ticks keep returning the placeholder
-// (the file still doesn't exist), and a later tick finally returns the
-// real log once the daemon has written to stderr. Calls past the end of
-// seq keep returning the last entry so the streaming loop does not
-// observe an artificial truncation.
+func (f *fakeLogs) PollDaemonLog(server, daemon string, offset int64, prime bool) (api.DaemonLogPoll, error) {
+	f.gotServer, f.gotDaemon = server, daemon
+	return api.DaemonLogPoll{Offset: offset}, f.err
+}
+
+// scriptedLogs returns one incremental result per poll. An exhausted sequence
+// leaves the current cursor unchanged.
 type scriptedLogs struct {
 	mu        sync.Mutex
-	seq       []string
+	seq       []api.DaemonLogPoll
 	idx       int
 	gotServer string
 	gotDaemon string
 }
 
 func (f *scriptedLogs) Logs(server, daemon string, tail int) (string, error) {
+	panic("stream used the snapshot provider")
+}
+
+func (f *scriptedLogs) PollDaemonLog(server, daemon string, offset int64, prime bool) (api.DaemonLogPoll, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.gotServer, f.gotDaemon = server, daemon
@@ -51,7 +54,13 @@ func (f *scriptedLogs) Logs(server, daemon string, tail int) (string, error) {
 		f.idx++
 		return out, nil
 	}
-	return f.seq[len(f.seq)-1], nil
+	return api.DaemonLogPoll{Offset: offset}, nil
+}
+
+func (f *scriptedLogs) observation() (calls int, server, daemon string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.idx, f.gotServer, f.gotDaemon
 }
 
 func TestLogs_GetReturnsText(t *testing.T) {
@@ -342,45 +351,17 @@ func TestLogs_RejectsPathTraversalServer(t *testing.T) {
 	}
 }
 
-// TestStreamLogs_DoesNotEmitOrAdvanceCursorOnPlaceholder pins the R14
-// fix to streamLogs's per-tick loop. R12 added the isLogPlaceholder
-// check for the INITIAL prime of lastLen only; without an equivalent
-// check inside the ticker.C branch, enabling Follow before the daemon
-// writes anything produced this sequence:
-//
-//  1. prime skipped (body is placeholder)  -> lastLen = 0
-//  2. tick 1: body is still placeholder; len(body) > lastLen=0 so the
-//     emission branch ran, pushing "(no log output yet ...)" into the
-//     SSE stream as a log-line event and seeding lastLen ~= 30.
-//  3. tick 2: daemon has now written a short first line (typically
-//     shorter than the placeholder); len(body) < lastLen hits the
-//     rotation branch, which resets the cursor to the new size and
-//     `continue`s -- the first real bytes of that session are never
-//     emitted.
-//
-// The fix detects the placeholder inside the tick loop and `continue`s
-// without advancing lastLen. This test confirms:
-//   - the placeholder text never appears as a log-line payload in the
-//     SSE output (it is not streamable content);
-//   - once the real log appears, its bytes ARE emitted in full (the
-//     rotation branch does not eat them).
+// TestStreamLogs_DoesNotEmitOrAdvanceCursorOnPlaceholder verifies the stream
+// stays quiet until the provider sees real bytes.
 func TestStreamLogs_DoesNotEmitOrAdvanceCursorOnPlaceholder(t *testing.T) {
 	// Exact placeholder body for (server=test, daemon=default).
-	// isLogPlaceholder now matches by full-string equality via
-	// api.LogPlaceholderFor (not by prefix), so the scripted body must
-	// reproduce the exact bytes LogsGet would emit for this pair.
-	// URL path "/api/logs/test/stream" resolves to server=test and
-	// daemon="" at the handler boundary; realLogs.Logs (and
-	// isLogPlaceholder) normalize empty daemon to "default" before
-	// composing the comparison string — we mirror that here.
-	placeholder := api.LogPlaceholderFor("test", "default")
 	realLog := "first-line\nsecond-line\n"
-	fl := &scriptedLogs{seq: []string{
-		placeholder, // prime
-		placeholder, // tick 1
-		placeholder, // tick 2
-		realLog,     // tick 3: daemon finally wrote; stays at this body afterwards
+	fl := &scriptedLogs{seq: []api.DaemonLogPoll{
+		{}, // prime while the log is absent
+		{}, // still absent
+		{Offset: int64(len(realLog)), Suffix: realLog},
 	}}
+
 	s := NewServer(Config{})
 	s.logs = fl
 
@@ -452,11 +433,12 @@ func TestStreamLogs_DoesNotEmitOrAdvanceCursorOnPlaceholder(t *testing.T) {
 // is exactly "Loading..." (the premature partial), and passes once the
 // merged "Loading... done" appears.
 func TestStreamLogs_PreservesPartialLineAcrossTicks(t *testing.T) {
-	fl := &scriptedLogs{seq: []string{
-		"",                  // prime: empty file
-		"Loading...",        // tick 1: partial line, no "\n"
-		"Loading... done\n", // tick 2: completion
+	fl := &scriptedLogs{seq: []api.DaemonLogPoll{
+		{},
+		{Offset: int64(len("Loading...")), Suffix: "Loading..."},
+		{Offset: int64(len("Loading... done\n")), Suffix: " done\n"},
 	}}
+
 	s := NewServer(Config{})
 	s.logs = fl
 

@@ -458,29 +458,27 @@ func (realSecretsAPI) Delete(name string, confirm bool) error {
 	return api.NewAPI().SecretsDelete(name, confirm)
 }
 
-// logsProvider is the narrow interface the /api/logs/:server handler needs.
-// The handler converts the stored log text to either a plain GET body or an
-// SSE tail-follow stream. The daemon parameter threads a specific daemon
-// name through to api.LogsGet; an empty string resolves to "default" in
-// realLogs below, preserving single-daemon-per-server behavior while
-// letting multi-daemon servers (serena ships claude + codex with no
-// "default") pick the correct log file.
+// logsProvider serves daemon log snapshots and incremental Follow reads.
 type logsProvider interface {
 	Logs(server, daemon string, tail int) (string, error)
+	PollDaemonLog(server, daemon string, offset int64, prime bool) (api.DaemonLogPoll, error)
 }
 
 type realLogs struct{}
 
-// Logs delegates to api.LogsGet. An empty daemon falls back to "default",
-// which matches the single-daemon-per-server manifest shape used by most
-// Phase 3B servers. Multi-daemon servers (e.g. serena, which exposes
-// claude + codex daemons and no "default") can pass the explicit daemon
-// name the GUI picker selected — see /api/status rows for daemon values.
 func (realLogs) Logs(server, daemon string, tail int) (string, error) {
+	return api.NewAPI().LogsGet(server, logDaemonName(daemon), tail)
+}
+
+func (realLogs) PollDaemonLog(server, daemon string, offset int64, prime bool) (api.DaemonLogPoll, error) {
+	return api.PollDaemonLog(server, logDaemonName(daemon), offset, prime)
+}
+
+func logDaemonName(daemon string) string {
 	if daemon == "" {
-		daemon = "default"
+		return "default"
 	}
-	return api.NewAPI().LogsGet(server, daemon, tail)
+	return daemon
 }
 
 type lspRegistrar interface {
