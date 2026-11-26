@@ -21,6 +21,12 @@ func TestClassifyAPITestHelperDispatch(t *testing.T) {
 		{name: "ordinary suite"},
 		{name: "oracle parent", selector: "^TestIntentAudit_CallerStartTimeAgainstIndependentOracle$"},
 		{name: "fence parent", selector: "^TestUpgradeFenceReacquiresAfterHolderProcessDeath$"},
+		{name: "canonical manifest without child marker", selector: "^TestCanonicalManifestDirHelperProcess$"},
+		{
+			name: "canonical manifest child", selector: "^TestCanonicalManifestDirHelperProcess$",
+			env:  map[string]string{canonicalManifestDirHelperEnv: filepath.Join(root, "canonical-bin", "mcphub.exe")},
+			want: apiTestHelperDispatch{runSelectedTest: true},
+		},
 		{
 			name: "oracle child", selector: "^TestIntentAudit_CallerStartTimeAgainstIndependentOracle$",
 			env:  map[string]string{callerStartTimeChildStateDirEnv: root, callerStartTimeChildDelayEnv: "3000"},
@@ -83,6 +89,7 @@ func TestClassifyAPITestHelperDispatchRejectsUnsafeInputs(t *testing.T) {
 		{"fence", "^TestUpgradeFenceReacquiresAfterHolderProcessDeath$", map[string]string{"MCPHUB_TEST_UPGRADE_FENCE_HOLDER": "1", "MCPHUB_TEST_UPGRADE_FENCE_STATE_DIR": root}},
 		{"adopt", "^TestAdoptLeaseRaceChild$", map[string]string{"MCPHUB_A2_ROLE": "try", "MCPHUB_A2_STATE": root, "MCPHUB_A2_ENTRY": "owned-entry"}},
 		{"stdio", "^TestFrozenStdioBridgeAdmissionHelper$", map[string]string{stdioBridgeAdmissionHelperEnv: "ready", stdioBridgeAdmissionHelperPortEnv: "12345"}},
+		{"canonical manifest", "^TestCanonicalManifestDirHelperProcess$", map[string]string{canonicalManifestDirHelperEnv: filepath.Join(root, "canonical-bin", "mcphub.exe")}},
 	}
 	reject := func(t *testing.T, args []string, env map[string]string) {
 		t.Helper()
@@ -136,6 +143,7 @@ func TestClassifyAPITestHelperDispatchRejectsUnsafeInputs(t *testing.T) {
 		{3, "MCPHUB_A2_ENTRY", []string{"", "../escape", "owned.lease", "NUL"}},
 		{4, stdioBridgeAdmissionHelperEnv, []string{"unknown"}},
 		{4, stdioBridgeAdmissionHelperPortEnv, []string{"", "0", "-1", "65536", "not-an-integer"}},
+		{5, canonicalManifestDirHelperEnv, []string{"relative", root + "\x00", root + string(filepath.Separator) + ".."}},
 	} {
 		fixture := fixtures[tt.fixture]
 		for _, value := range tt.values {

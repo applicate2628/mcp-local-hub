@@ -30,6 +30,7 @@ func classifyAPITestHelperDispatch(args []string, getenv func(string) string) ap
 	fenceMarker := getenv("MCPHUB_TEST_UPGRADE_FENCE_HOLDER")
 	adoptRole := getenv("MCPHUB_A2_ROLE")
 	adoptEntry := getenv("MCPHUB_A2_ENTRY")
+	canonicalManifest := getenv(canonicalManifestDirHelperEnv)
 	stdioMode := getenv(stdioBridgeAdmissionHelperEnv)
 	port, portErr := strconv.Atoi(getenv(stdioBridgeAdmissionHelperPortEnv))
 
@@ -72,6 +73,12 @@ func classifyAPITestHelperDispatch(args []string, getenv func(string) string) ap
 				validAPITestHelperPath(getenv("MCPHUB_A2_STATE")) && CheckManifestName(adoptEntry) == nil &&
 				!strings.HasSuffix(adoptEntry, adoptManifestLeaseSuffix),
 			dispatch: apiTestHelperDispatch{runSelectedTest: true, mustExit: adoptRole == "crash"},
+		},
+		{
+			active: canonicalManifest != "",
+			valid: selector == "^TestCanonicalManifestDirHelperProcess$" &&
+				validAPITestHelperPath(canonicalManifest),
+			dispatch: apiTestHelperDispatch{runSelectedTest: true},
 		},
 		{
 			active: stdioMode != "",
