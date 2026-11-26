@@ -813,7 +813,7 @@ func NewServer(cfg Config) *Server {
 	s.daemonRecover = realDaemonRecoverer{}
 	s.stop = realStopper{}
 	s.logs = realLogs{}
-	s.extractor = realExtractor{}
+	s.extractor = realExtractor{api: s.api}
 	s.events = NewBroadcaster()
 	shutdownDrainTimeout := cfg.GUIShutdownDrainTimeout
 	if shutdownDrainTimeout <= 0 {
