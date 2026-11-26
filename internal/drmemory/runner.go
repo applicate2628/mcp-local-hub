@@ -14,6 +14,7 @@ import (
 	"mcp-local-hub/internal/hubtemp"
 	"mcp-local-hub/internal/oneapi"
 	"mcp-local-hub/internal/process"
+	"mcp-local-hub/internal/reportfile"
 )
 
 // waitDelayAfterKill bounds how long cmd.Wait blocks AFTER the context deadline
@@ -57,7 +58,7 @@ type runOutput struct {
 //   - checkUninit: when false pass -no_check_uninitialized
 type runFunc func(ctx context.Context, exePath, target string, args []string, cwd string, light, checkUninit bool) (*runOutput, error)
 
-// drMemoryOutputCap bounds the bytes read from results.txt / stderr so a
+// drMemoryOutputCap bounds the bytes retained from results.txt / stderr so a
 // pathological report can't blow up memory or overrun the daemon stdio
 // scanner. Matches the perftools "tool body cap < scanner cap" convention.
 const drMemoryOutputCap = 512 * 1024
@@ -319,7 +320,7 @@ func readResultsTxt(logdir string) (path string, body string) {
 		}
 	}
 
-	raw, err := os.ReadFile(candidate)
+	raw, err := reportfile.ReadPrefix(candidate, drMemoryOutputCap)
 	if err != nil {
 		return candidate, ""
 	}

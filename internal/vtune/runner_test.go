@@ -164,6 +164,40 @@ func TestReadReportFile(t *testing.T) {
 }
 
 // TestReportPathIfPresent returns the path only when the file exists.
+func TestReadReportFileTruncatesBytes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "report.csv")
+	prefix := strings.Repeat("x", vtuneOutputCap-1) + "\xc3"
+	for _, tc := range []struct {
+		report string
+		want   string
+	}{
+		{prefix, prefix},
+		{prefix + "\xa9,tail", prefix + "\n…[truncated]"},
+	} {
+		if err := os.WriteFile(path, []byte(tc.report), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got := readReportFile(path); got != tc.want {
+			t.Fatalf("%d-byte report: returned %d bytes, want %d with exact content", len(tc.report), len(got), len(tc.want))
+		}
+	}
+}
+
+func TestReadReportFileRejectsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.csv")
+	if err := os.WriteFile(target, []byte("target report"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "report.csv")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("cannot create test symlink: %v", err)
+	}
+	if got := readReportFile(link); got != "" {
+		t.Fatalf("readReportFile returned contents of symlink target: %q", got)
+	}
+}
+
 func TestReportPathIfPresent(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "report.csv")
