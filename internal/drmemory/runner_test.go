@@ -136,6 +136,31 @@ func TestReadResultsTxt_PicksNewestSubdir(t *testing.T) {
 // TestFormatCommandLine quotes space-bearing tokens (the real drmemory.exe
 // lives under "C:\Program Files (x86)\Dr. Memory\bin64\") so the surfaced
 // command line stays one pasteable token per arg.
+func TestReadResultsTxtTruncatesBytes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "results.txt")
+	prefix := strings.Repeat("x", drMemoryOutputCap-1) + "\xc3"
+	if err := os.WriteFile(path, []byte(prefix+"\xa9 tail"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gotPath, got := readResultsTxt(dir)
+	if gotPath != path || got != prefix+"\n…[truncated]" {
+		t.Fatalf("readResultsTxt returned path %q and %d bytes, want %q and the exact truncated body", gotPath, len(got), path)
+	}
+}
+
+func TestReadResultsTxtUnreadableCandidateRetainsPath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "run", "results.txt")
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	gotPath, got := readResultsTxt(dir)
+	if gotPath != path || got != "" {
+		t.Fatalf("readResultsTxt = (%q, %q), want (%q, empty)", gotPath, got, path)
+	}
+}
+
 func TestFormatCommandLine(t *testing.T) {
 	exe := `C:\Program Files (x86)\Dr. Memory\bin64\drmemory.exe`
 	args := []string{"-batch", "-logdir", `C:\tmp\logs`, "--", `C:\proj\app.exe`, "--flag"}

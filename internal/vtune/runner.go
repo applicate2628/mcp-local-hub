@@ -15,6 +15,7 @@ import (
 	"mcp-local-hub/internal/hubtemp"
 	"mcp-local-hub/internal/oneapi"
 	"mcp-local-hub/internal/process"
+	"mcp-local-hub/internal/reportfile"
 )
 
 // waitDelayAfterKill bounds how long cmd.Wait blocks after the context deadline
@@ -79,7 +80,7 @@ type runFunc func(ctx context.Context, exePath, target string, args []string, cw
 //     name, which is always "hotspots" today — see reportName)
 type reportFunc func(ctx context.Context, exePath, resultDir, analysis string) (*runOutput, error)
 
-// vtuneOutputCap bounds the bytes read from the report CSV / summary / stderr
+// vtuneOutputCap bounds the bytes retained from the report CSV / summary / stderr
 // so a pathological report can't blow up memory or overrun the daemon stdio
 // scanner. Matches the drmemory "tool body cap < scanner cap" convention.
 const vtuneOutputCap = 512 * 1024
@@ -469,7 +470,7 @@ func reportName(analysis string) string {
 // vtuneOutputCap. Returns "" when the file is absent (the report phase failed
 // before writing it) or unreadable.
 func readReportFile(path string) string {
-	// Lstat-guard before ReadFile: a co-resident TOCTOU attacker who planted a
+	// Lstat-guard before opening the report: a co-resident TOCTOU attacker who planted a
 	// symlink at path (between VTune's write and this read, on a host where the
 	// scratch dir is not owner-only) would otherwise leak the symlink target's
 	// bytes into the structured result. Read only a real regular file the run
@@ -477,7 +478,7 @@ func readReportFile(path string) string {
 	if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() {
 		return ""
 	}
-	raw, err := os.ReadFile(path)
+	raw, err := reportfile.ReadPrefix(path, vtuneOutputCap)
 	if err != nil {
 		return ""
 	}
