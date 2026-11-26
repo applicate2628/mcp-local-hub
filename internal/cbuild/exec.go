@@ -56,6 +56,7 @@ type boundedBuffer struct {
 	mu        sync.Mutex
 	buf       []byte
 	max       int
+	next      int  // oldest byte index once full
 	truncated bool // set once any leading output was dropped
 }
 
@@ -67,23 +68,61 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	n := len(p)
-	b.buf = append(b.buf, p...)
-	if len(b.buf) > b.max {
-		over := len(b.buf) - b.max
-		// Retain only the last b.max bytes; copy into a fresh slice so the old
-		// head is released to the GC rather than pinned by a re-slice.
-		trimmed := make([]byte, b.max)
-		copy(trimmed, b.buf[over:])
-		b.buf = trimmed
-		b.truncated = true
+	held := len(b.buf)
+	if n <= b.max-held {
+		b.resize(held + n)
+		copy(b.buf[held:], p)
+		return n, nil
+	}
+
+	b.truncated = true
+	if n >= b.max {
+		// This write replaces every held byte, including when max is zero.
+		b.buf = b.buf[:0]
+		b.resize(b.max)
+		copy(b.buf, p[n-b.max:])
+		b.next = 0
+		return n, nil
+	}
+
+	start := b.next
+	if held < b.max {
+		start = held
+		b.resize(b.max)
+	}
+	written := copy(b.buf[start:], p)
+	b.next = start + written
+	if b.next == b.max {
+		b.next = copy(b.buf, p[written:])
 	}
 	return n, nil
+}
+
+// resize grows lazily up to max. Callers hold b.mu and select sizes no greater
+// than max, so both the retained length and backing capacity stay bounded.
+func (b *boundedBuffer) resize(size int) {
+	current := cap(b.buf)
+	if size <= current {
+		b.buf = b.buf[:size]
+		return
+	}
+	capacity := max(size, current+min(current, b.max-current))
+	grown := make([]byte, size, capacity)
+	copy(grown, b.buf)
+	b.buf = grown
 }
 
 func (b *boundedBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return string(b.buf)
+	if b.next == 0 {
+		return string(b.buf)
+	}
+	var snapshot strings.Builder
+	snapshot.Grow(len(b.buf))
+	snapshot.Write(b.buf[b.next:])
+	snapshot.Write(b.buf[:b.next])
+	return snapshot.String()
 }
 
 func (b *boundedBuffer) Truncated() bool {
