@@ -19,3 +19,9 @@ This search was through a direct Product child, not the npm launcher or the work
 The same f49e7ea0 Test Source and eight selected API roots passed with test_state_path_env on WSL2 Ubuntu, Go 1.26.4 linux/amd64. There were 30 named tests and subtests, no failures or skips, empty stderr and a confirmed original exit 0. Both temporary paths were in a private native Linux tmpfs workspace; the test tag and the regular vault checks stayed enabled. SHA-256 of the tagged JSONL: 304189229ccf25d4b4372b8bd378839758d0e8241360e929cc3a6006c7375162.
 
 On Windows Go 1.27.4 the comparison remained in build/vet after the initial collector's 470-second wait. The original Go process and scoped compiler/vet children were verified after the collector stopped. Its event and stderr files were empty at that observation. This is not evidence that tests started, failed, or passed, and is not a replacement for the distinct isolated Windows profile required by Product acceptance. No duplicate Windows command or test involving the working Hub was started.
+
+## cReCS tagged Windows API follow-up
+
+The exact Test Source f49e7ea000db8a8a186da737eac5aa6aed326416, tree bf2c64429082f04de2197b1e5845dd70d13b4c2b, was reconstructed on cReCS from the two published and hash-checked receiving patches and both original commit objects. Windows/amd64 with Go 1.27.4 ran the same eight selected API roots with test_state_path_env, a dedicated state and IPC scope, no live Hub, and scheduling and outbound module fetch disabled. The original process returned 0 and both readers settled. Package PASS, eight roots and 30 named including subtests, no FAIL/SKIP, empty stderr. JSONL SHA-256 c34b9240612ad01f097abd92c2e44140e98eb9a3560cce62c45487aff88ae74c.
+
+This new execution does not reclassify the earlier Wave timeout. It is not a full default/tagged suite, a production executable, or evidence of Ready, upgrade, rollback, or installed behavior.
