@@ -1,0 +1,41 @@
+{
+  "base": "d9f809e58ec1d55efb7b6a50a9ac3c42d7461835",
+  "candidate_tree_before_native_format": "62a7f688d20616941dbc08f2b8ecd8a06cc0052f",
+  "paths": [
+    {
+      "path": "internal/vcpkgmcp/cmaketrace/parse.go",
+      "before_blob": "27d5f57e46012567c8ee9d33a81a21333ef3c6d6",
+      "after_blob": "40b3ba7e0d70e9b1ad332d7b95b406956bf49a79",
+      "source_commit": "beff0af24862a552a3e54360166728181c2ee00e",
+      "decision": "exact current owner postimage; P02 preimage equals audit5c36f626"
+    },
+    {
+      "path": "internal/vcpkgmcp/cmaketrace/projection.go",
+      "before_blob": "84f1bae7b1f5fd489dd45c76c9099b5e29d45839",
+      "after_blob": "2a7e5e84f1a2598933eeab9fb0699f6a353b5e5e",
+      "source_commit": "beff0af24862a552a3e54360166728181c2ee00e",
+      "decision": "exact current owner postimage; P02 preimage equals audit5c36f626"
+    },
+    {
+      "path": "internal/vcpkgmcp/cmaketrace/r22_bot_regressions_test.go",
+      "before_blob": "73e585c102d8bcc13af20f009243c0379edb484c",
+      "after_blob": "c91ae4e70456924c7841ac68eae542a616a921b8",
+      "source_commit": "beff0af24862a552a3e54360166728181c2ee00e",
+      "decision": "exact current owner postimage; P02 preimage equals audit5c36f626"
+    },
+    {
+      "path": "internal/vcpkgmcp/cmaketrace/r32_bot_regressions_test.go",
+      "before_blob": "addd70fe9f7c2ccdb31f625bf859d62ff7e4619c",
+      "after_blob": "d8ed7589c05386a25bd843c8d770d31a667a16c9",
+      "source_commit": "beff0af24862a552a3e54360166728181c2ee00e",
+      "decision": "exact current owner postimage; P02 preimage equals audit5c36f626"
+    },
+    {
+      "path": "internal/api/supervisor_intent_lock_ownership_test.go",
+      "decision": "rename the one existing raw-owner inventory key after source review; runtime already moved flock.New into acquireLedgeredObservedLeaf",
+      "regression": "TestSupervisorIntentLockOwnershipProductionInventory failed on Source d9f809e5 with calls1/reviewed0",
+      "legacy_recovery_row_remains_removed": true
+    }
+  ],
+  "patch_sha256": "be4bb041bd604726022eb203f19b99a6445cd86de96198451ff258e3480dafb8"
+}

@@ -1,0 +1,45 @@
+{
+  "status": "PASS_EXACT_SOURCE_RECONSTRUCTION",
+  "base_capsule_verification_sha256": "0010c70a7adf1cb2e554944101a7403b037489615d792d286776124ea36dfe8f",
+  "steps": [
+    {
+      "commit": "d9f809e58ec1d55efb7b6a50a9ac3c42d7461835",
+      "tree": "10d889f005efafa8e0a9f273b1f3cc4fd2ac6be2",
+      "parent": "b6f82b3f531bb3eec197049167cdc5971b44e2b0",
+      "patch": "p02-pr660-composed.patch",
+      "patch_bytes": 210229,
+      "patch_sha256": "7ae016999b967ee4b389abcfd6665277cfad3d40f76b5c59521179213475e948",
+      "raw_commit_bytes": 289,
+      "raw_commit_sha256": "e12f131540c0fef6fc2aaa55a12326640a7744d16722a01b449bd0999f2c30ee"
+    },
+    {
+      "commit": "20807d2b0a713fff7900f3cd62b3db5561a0bdcf",
+      "tree": "62a7f688d20616941dbc08f2b8ecd8a06cc0052f",
+      "parent": "d9f809e58ec1d55efb7b6a50a9ac3c42d7461835",
+      "patch": "source-v2-delta.patch",
+      "patch_bytes": 9370,
+      "patch_sha256": "be4bb041bd604726022eb203f19b99a6445cd86de96198451ff258e3480dafb8",
+      "raw_commit_bytes": 273,
+      "raw_commit_sha256": "a23b68663fcd2c463a6544d44427707f08a56290e491ed499486571e65ab84ce"
+    },
+    {
+      "commit": "e66f5c6fab7da2a2eff16ff1f0891991ca1a839c",
+      "tree": "4df69e99dca3f808b26e6a5bf7721bdd0ba3a91c",
+      "parent": "20807d2b0a713fff7900f3cd62b3db5561a0bdcf",
+      "patch": "source-v3-delta.patch",
+      "patch_bytes": 2233,
+      "patch_sha256": "0d3d7543602a36bbfdec98839fc5738575011db9f9e8460c8526e9ad9c1e2bc1",
+      "raw_commit_bytes": 273,
+      "raw_commit_sha256": "9ff9ca0f39150ba8c40f0f23bb51d26adf2639f9b0b556bbd5ea170448c97676"
+    }
+  ],
+  "source_commit": "e66f5c6fab7da2a2eff16ff1f0891991ca1a839c",
+  "source_tree": "4df69e99dca3f808b26e6a5bf7721bdd0ba3a91c",
+  "paths": 3867,
+  "changed_paths_from_p02": 43,
+  "history_claim": "source snapshot plus three exact consecutive commits; original older parent history remains incomplete",
+  "native_qualification": "separate",
+  "source_worktree_created": false,
+  "original_capsule_objects_replaced": false,
+  "network_fetches": 0
+}

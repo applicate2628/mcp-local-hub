@@ -1,0 +1,460 @@
+{
+  "schema": "B-exact-selected-hunks-v1",
+  "native_patch_sha256": "535124f4353e0d1a50339c3606751120c1cb602f1bd7616d8586f1f54c808454",
+  "native_bytes": 31251,
+  "projection_difference": "projection omitted exactly final two bytes; no CRLF in native patch",
+  "selected_patch_sha256": "1f8a698bf6e0748e242f2c895f758e791a18cac7abebe37b2d06907e921462a0",
+  "selected_patch_bytes": 23979,
+  "selected_hunks": 49,
+  "selected_paths": 12,
+  "retained_hunks": 6,
+  "pre_B_candidate_tree": "4aa9dc376576e739ead7a124645ca4f75f8392f3",
+  "decisions": [
+    {
+      "path": "internal/api/adopt_codex_transport_test.go",
+      "native_hunk_header": "-1,6 +1,7 @@",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_codex_transport_test.go",
+      "native_hunk_header": "-23,7 +24,7 @@ tool_timeout_sec = 900",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_codex_transport_test.go",
+      "native_hunk_header": "-163,7 +164,7 @@ url = \"http://127.0.0.1:9999/mcp\"",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_codex_transport_test.go",
+      "native_hunk_header": "-211,7 +212,7 @@ url = \"http://127.0.0.1:9999/mcp\"",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Two identical short contexts refer to first plan and repeat inside TestExecuteAndDeAdoptCodexCollisionUsesFrozenTargetEntry; use positional/function context, first gets bindable port, repeat gets plan.Port.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_codex_transport_test.go",
+      "native_hunk_header": "-226,7 +227,7 @@ url = \"http://127.0.0.1:9999/mcp\"",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_codex_transport_test.go",
+      "native_hunk_header": "-243,7 +244,7 @@ url = \"http://127.0.0.1:9999/mcp\"",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Two identical short contexts refer to first plan and repeat inside TestExecuteAndDeAdoptCodexCollisionUsesFrozenTargetEntry; use positional/function context, first gets bindable port, repeat gets plan.Port.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_deadopt_lifecycle_test.go",
+      "native_hunk_header": "-50,7 +50,7 @@ args = [\"version\"]",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_h4_summary_signal_test.go",
+      "native_hunk_header": "-33,7 +33,7 @@ url = \"http://127.0.0.1:9999/mcp\"",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_h4_summary_signal_test.go",
+      "native_hunk_header": "-77,7 +77,7 @@ url = \"http://127.0.0.1:9999/mcp\"",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_h4_summary_signal_test.go",
+      "native_hunk_header": "-110,7 +110,7 @@ url = \"http://127.0.0.1:9999/mcp\"",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_h4_summary_signal_test.go",
+      "native_hunk_header": "-165,7 +165,7 @@ url = \"http://127.0.0.1:9999/mcp\"",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_h4_summary_signal_test.go",
+      "native_hunk_header": "-210,7 +210,7 @@ url = \"http://127.0.0.1:9999/mcp\"",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_h4_summary_signal_test.go",
+      "native_hunk_header": "-255,7 +255,7 @@ url = \"http://127.0.0.1:9999/mcp\"",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_h4_summary_signal_test.go",
+      "native_hunk_header": "-289,7 +289,7 @@ url = \"http://127.0.0.1:9999/mcp\"",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_h4_summary_signal_test.go",
+      "native_hunk_header": "-307,7 +307,7 @@ args = [\"version\"]",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "native_hunk_header": "-84,7 +84,7 @@ args = [\"version\"]",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "native_hunk_header": "-108,7 +108,7 @@ args = [\"version\"]",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "native_hunk_header": "-139,7 +139,7 @@ command = \"go\"",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "native_hunk_header": "-172,7 +172,7 @@ command = \"go\"",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "native_hunk_header": "-207,7 +207,7 @@ command = \"go\"",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "native_hunk_header": "-240,7 +240,7 @@ command = \"go\"",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "native_hunk_header": "-276,7 +276,7 @@ args = [\"version\"]",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "native_hunk_header": "-298,7 +298,7 @@ args = [\"version\"]",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "native_hunk_header": "-332,7 +332,7 @@ args = [\"version\"]",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "native_hunk_header": "-381,7 +381,7 @@ args = [\"version\"]",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "native_hunk_header": "-480,7 +480,7 @@ args = [\"version\"]",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_lease_owner_test.go",
+      "native_hunk_header": "-503,7 +503,7 @@ func TestAdoptExecutedEventRequiresLeaseSettlement(t *testing.T) {",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_mcpcompat_test.go",
+      "native_hunk_header": "-23,7 +23,7 @@ args = [\"version\"]",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_mcpcompat_test.go",
+      "native_hunk_header": "-118,7 +118,7 @@ func TestAdoptWithoutLegacyProfileRemainsStrict(t *testing.T) {",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_project_plan_test.go",
+      "native_hunk_header": "-203,7 +203,7 @@ MODE = \"project\"",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_project_plan_test.go",
+      "native_hunk_header": "-234,11 +234,11 @@ func TestBuildAdoptPlanProjectSourceDerivesDistinctSameNameIdentities(t *testing",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_project_plan_test.go",
+      "native_hunk_header": "-308,7 +308,7 @@ func TestBuildAdoptPlanGlobalLegacyBehaviorRemainsUnchanged(t *testing.T) {",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_provider_working_directory_windows_test.go",
+      "native_hunk_header": "-15,6 +15,7 @@ import (",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Apply paired TestMain root lifetime and immutable per-architecture provider helper-image reuse together; preserve current helper-role dispatch and #659 prepareSupervisorRemovedStopFn save/seal/restore.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_provider_working_directory_windows_test.go",
+      "native_hunk_header": "-598,19 +599,42 @@ type ownedProviderWorkingDirectoryHelper struct {",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Apply paired TestMain root lifetime and immutable per-architecture provider helper-image reuse together; preserve current helper-role dispatch and #659 prepareSupervisorRemovedStopFn save/seal/restore.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_test.go",
+      "native_hunk_header": "-182,7 +182,7 @@ args = [\"version\"]",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_test.go",
+      "native_hunk_header": "-200,8 +200,8 @@ args = [\"version\"]",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_test.go",
+      "native_hunk_header": "-234,8 +234,8 @@ args = [\"version\"]",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_test.go",
+      "native_hunk_header": "-261,7 +261,7 @@ args = [\"version\"]",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_test.go",
+      "native_hunk_header": "-296,7 +296,7 @@ command = \"go\"",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_test.go",
+      "native_hunk_header": "-364,7 +364,7 @@ args = [\"version\"]",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_test.go",
+      "native_hunk_header": "-459,7 +459,7 @@ args = [\"version\"]",
+      "selected": false,
+      "semantic_decision": "EQUIVALENT_P02_KEEP",
+      "reason": "P02 already removed the explicit port in this test. BuildAdoptPlan selects pickNextFreeAdoptPort for Port zero, preserving the intended bindable-port scenario without another change.",
+      "final_disposition": "RETAINED_EXISTING_P02_SEMANTICS"
+    },
+    {
+      "path": "internal/api/adopt_test.go",
+      "native_hunk_header": "-511,7 +511,7 @@ VISIBLE = \"not-secret\"",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_test.go",
+      "native_hunk_header": "-958,7 +958,7 @@ args = [\"version\"]",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_test.go",
+      "native_hunk_header": "-978,7 +978,7 @@ args = [\"version\"]",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/adopt_test.go",
+      "native_hunk_header": "-1059,7 +1059,7 @@ API_TOKEN = \"`+literalToken+`\"",
+      "selected": false,
+      "semantic_decision": "EQUIVALENT_P02_KEEP",
+      "reason": "P02 already removed the explicit port in this test. BuildAdoptPlan selects pickNextFreeAdoptPort for Port zero, preserving the intended bindable-port scenario without another change.",
+      "final_disposition": "RETAINED_EXISTING_P02_SEMANTICS"
+    },
+    {
+      "path": "internal/api/adopt_test.go",
+      "native_hunk_header": "-1541,7 +1541,7 @@ args = [\"version\"]",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/main_test.go",
+      "native_hunk_header": "-12,6 +12,10 @@ import (",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Apply paired TestMain root lifetime and immutable per-architecture provider helper-image reuse together; preserve current helper-role dispatch and #659 prepareSupervisorRemovedStopFn save/seal/restore.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/api/main_test.go",
+      "native_hunk_header": "-268,7 +272,9 @@ func TestMain(m *testing.M) {",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Apply paired TestMain root lifetime and immutable per-architecture provider helper-image reuse together; preserve current helper-role dispatch and #659 prepareSupervisorRemovedStopFn save/seal/restore.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/cli/adopt_mcpcompat_test.go",
+      "native_hunk_header": "-42,7 +42,7 @@ func TestAdoptCLIProfilePersistsAndBuildsLegacyHost(t *testing.T) {",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/cli/adopt_test.go",
+      "native_hunk_header": "-143,7 +143,7 @@ API_KEY = \"` + fixtureKey + `\"",
+      "selected": false,
+      "semantic_decision": "ALREADY_PRESENT_P02_KEEP",
+      "reason": "Real planner redaction test already omits fixed --port, with the existing stage38 explanatory comment and canary assertions.",
+      "final_disposition": "RETAINED_EXISTING_P02_SEMANTICS"
+    },
+    {
+      "path": "internal/cli/adopt_test.go",
+      "native_hunk_header": "-224,7 +224,7 @@ args = [\"version\"]",
+      "selected": false,
+      "semantic_decision": "SUPERSEDED_P02_KEEP",
+      "reason": "P02 plan-builder seam supplies the plan then exercises the real namespace preflight; its explicit 9314 is only plan data and no bind/allocation runs, so keep stronger refusal isolation.",
+      "final_disposition": "RETAINED_EXISTING_P02_SEMANTICS"
+    },
+    {
+      "path": "internal/cli/adopt_test.go",
+      "native_hunk_header": "-338,7 +338,7 @@ args = [\"version\"]",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/cli/adopt_test.go",
+      "native_hunk_header": "-414,7 +414,7 @@ func TestAdoptCLI_GlobalCodexSameNamePathHasNoHSettlement(t *testing.T) {",
+      "selected": true,
+      "semantic_decision": "MISSING_B_DELTA",
+      "reason": "Missing test-only bindable-port or plan.Port reuse/assertion change. Preserve surrounding P02 assertions.",
+      "final_disposition": "APPLIED_EXACT_NATIVE_HUNK"
+    },
+    {
+      "path": "internal/cli/gui_force_test.go",
+      "native_hunk_header": "-196,19 +196,26 @@ func TestForce_StuckIncumbent_RevealFlagOpensFolder(t *testing.T) {",
+      "selected": false,
+      "semantic_decision": "ALREADY_PRESENT",
+      "reason": "Entire B hunk postimage is already present. Preserve P02 additional GUI fixture changes; no replacement or replay.",
+      "final_disposition": "RETAINED_EXISTING_P02_SEMANTICS"
+    },
+    {
+      "path": "internal/cli/gui_force_test.go",
+      "native_hunk_header": "-216,57 +223,64 @@ func TestForce_KillHappyPath_SeamMocked(t *testing.T) {",
+      "selected": false,
+      "semantic_decision": "ALREADY_PRESENT",
+      "reason": "Entire B hunk postimage is already present. Preserve P02 additional GUI fixture changes; no replacement or replay.",
+      "final_disposition": "RETAINED_EXISTING_P02_SEMANTICS"
+    }
+  ],
+  "final_candidate_tree": "10d889f005efafa8e0a9f273b1f3cc4fd2ac6be2",
+  "apply_status": "PASS_NO_CONFLICTS",
+  "all_49_selected_hunks_applied": true,
+  "six_P02_hunks_retained": true,
+  "no_additional_manual_source_edits": true,
+  "applied_result_patch": "composition-evidence/p02-pr660-composed.patch"
+}
