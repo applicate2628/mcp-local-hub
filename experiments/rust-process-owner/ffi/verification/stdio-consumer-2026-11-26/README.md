@@ -1,5 +1,11 @@
 # Go and Rust stdio consumer evidence
 
+## Completed consumer sequence and full source review
+
+The [continuation report](continuation-363b/README.md) records **v6 PASS: four accepted Go–Rust–Rust–Go runs, 12 cases and 264 RPC** on private Source `3ebe335a2f666a5279d7fafc31a6f4dc3feedff4` and the designated native DLL. Seven zero elapsed samples remain resolution-unresolved; two observations per arm do not justify adoption. It also preserves the separate v3 oracle, v4 compiler and v5 timing-gate failures and contains the complete 64-file a217 static review with its unresolved findings.
+
+## Historical preparation record at public commit 62c853e8
+
 **Consumer comparison NOT_RUN on 26 November 2026.** Two isolated attempts reached closed preparation failures at the original 300-second deadline. A third attempt stopped during original-owner admission before the private Git checkout started. The latest guard missed the reader cleanup deadline and retained the failure even after the original readers were physically received. [Normalized evidence](evidence.json)
 
 ## Sources and intended workload

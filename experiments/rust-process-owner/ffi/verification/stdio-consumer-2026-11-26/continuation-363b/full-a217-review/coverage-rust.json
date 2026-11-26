@@ -1,0 +1,495 @@
+{
+  "source_commit": "a217c7799a0214967bf86211542e508162c680b5",
+  "source_tree": "ca118ff1ec513cc830bb8b96b4d6782d23915a26",
+  "reviewer": "functional_review",
+  "scope": "31 Rust/ABI/Cargo files fully read and reviewed; no native or local test/build execution",
+  "files": [
+    {
+      "path": "experiments/rust-process-owner/Cargo.lock",
+      "blob": "2395f800e796dfae7a6f3b1ffa241de573b37873",
+      "size": 633,
+      "sha256": "4198fa4fdbc041142493b86b1183f3446b1e5c24236cfab1020a888bbb46c63c",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 25,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full lock read: exact windows-sys0.61.2 and windows-link0.2.1 checksums; consistent with ffi lock."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": []
+    },
+    {
+      "path": "experiments/rust-process-owner/Cargo.toml",
+      "blob": "a6e8d41637e2b3d755f81b52565b999255f79c3f",
+      "size": 460,
+      "sha256": "4abbdc2936ced47001a6eb474143ddabad7a4235ca52e8920ae9e4d593299cdd",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 12,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full manifest read: nonpublishable edition2021 Rust 1.100 Windows-only windows-sys0.61.2 feature set; no production rollout or Unix fallback asserted."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": []
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/Cargo.lock",
+      "blob": "f81b4c8ac7de43021692d5072fb3f0b143dfc85f",
+      "size": 746,
+      "sha256": "76b59b101ff09d63eca5fe56751167ef2dab1cbf1dfded80c771e0f7c475e30d",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 32,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full lock read: parent path dependency and same exact Windows crates/checksums as parent lock."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": []
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/Cargo.toml",
+      "blob": "35df5080fe63636219021cbc7840b25167374af1",
+      "size": 325,
+      "sha256": "799e8e79ff6cd009ef9715b2c68b5c7a3d03e61ba3e2a5f69957f1848590f65f",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 20,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full manifest read: cdylib+rlib over path parent; panic=abort in dev/release matches ABI host-termination contract; no new dependencies."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": []
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/include/identity_v1.h",
+      "blob": "13d535c80c1fd1fdd0f075799cc18b9611772fb8",
+      "size": 6145,
+      "sha256": "8735b65a7fb2a58ced76d829b0ad7c66fab0fd35dbae304a7174c2586c260f1d",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 107,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 107-line contract read: schema/layout, original-handle evidence, temporary token-close errors, admission vs query semantics and exact callback lifetime. Implementation crosscheck completed."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": [
+        "RUST-01"
+      ]
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/include/members_v1.h",
+      "blob": "4ced211c17c8c5977f4e9c394c2ba07083cf5924",
+      "size": 10860,
+      "sha256": "d8baf33952a41383ec24a954e6e9363b93fa136d9b81a8723a1805dbb54b71ac",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 197,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 197-line contract read: reservation generation, partial snapshots, irreversible finalized scalar, native failure presence even code 0, exact close/revalidate/array/layout contracts. Implementation crosscheck completed."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": []
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/include/owner_v1.h",
+      "blob": "3bda9dce0dd1f316da99985eec3300bc78f67a68",
+      "size": 10869,
+      "sha256": "441ee6dfb105e00c3073d42bd69d828864711cc3053aafa3676f9da928e60615",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 159,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 159-line contract read: exclusive owner, borrowed inputs/callbacks, v1/v2/v3 argv/console, separate wait/close and release, outcome/status invariants. Crosscheck against implementations completed."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": [
+        "RUST-02"
+      ]
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/src/argv0_tests.rs",
+      "blob": "6661864cf1fa863d89c96c8e62d35a26c3173f71",
+      "size": 6619,
+      "sha256": "b2dc5ea754413ca83e4729592ae35dfb2342a2a46a0554bdfa7db0c73b3121cf",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 195,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 195-line review: isolated argv0 fixtures, v2/v3 malformed shapes/count/copied and encoded budgets, no-owner refusal, max allowed argument count reaches missing-image native error, legacy export version rejection. No actual run."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": []
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/src/identity.rs",
+      "blob": "a01f21656d55b3689a0ac0eb700cd6c74dc3a73d",
+      "size": 25005,
+      "sha256": "f4a091e54e31975482fcca4943c69085701caf30fbcc133faeaca452f7ba5ec5",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 688,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 688-line review including tests: separate query/admission callback, copied identity lifetime, fixed layouts and preflight, no lifecycle mutation from query; zero-code Cleanup presence lost in report, native-zero violates header; existing classification tests omit zero."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": [
+        "RUST-01"
+      ]
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/src/lib.rs",
+      "blob": "2a89392d5cf7d18fa9139170b7fea4a2ce31cac2",
+      "size": 25843,
+      "sha256": "4bbb985928887c11b311baa7194a38de39c6e4fbdaf8480a4bd25700a27fb025",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 799,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 799-line review: create validation/copy bounds, single publish, admission callback and single-use behavior, wait/close/release ownership; native-zero encoding diverges from base header (conditional native reachability)."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": [
+        "RUST-02"
+      ]
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/src/members.rs",
+      "blob": "69dddfc5016f66a936ece97e5769d650a3e1136e",
+      "size": 23779,
+      "sha256": "a666f1f1493199d8539513aaacab407561b2ec83ccfe7fcf9b994aa536f2d88b",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 704,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 704-line review: count/identity/prefix validation, stable projected backing lifetime, generation transfer before report, irreversible finalized scalar before projection/callback, strict stale/closed epochs and zero native error presence preserved."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": []
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/src/members_tests.rs",
+      "blob": "d362d8339ec67147691f5678640bef7247010745",
+      "size": 33559,
+      "sha256": "f4fdc69e4231684c3714a8a91345006a213c76255414251f8318625b84a506cc",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 1033,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 1033-line review: ABI layouts, zero-code presence and nested token failures, projection bounds/prefix/identity semantics, preflight no reservation, occupied/stale epoch protection, close finalized scalar and replay, historical zero-resource snapshots after original close. No actual run."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": []
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/src/process_borrow.rs",
+      "blob": "8af6740dfd0ef4538e1b90b9a248b7b691fda01a",
+      "size": 1659,
+      "sha256": "7df96b3a204297629d1217d7c13e8a335f8942c6f7b8cc7dd9079c0463a3e575",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 44,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 44-line review: synchronous original-handle callback, no admission/lifecycle mutation, explicit callback decision and null checks."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": []
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/src/process_borrow_tests.rs",
+      "blob": "b2fa752d807c325cd17721bd7d1c3cbeeeef6a88",
+      "size": 5545,
+      "sha256": "7699969906725b8d05d1398654e53b438b7c35058b43f03ba8f9cb2e17936dbe",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 153,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 153-line review: callback decisions1/0/invalid preserve admission, exact original handle and repeated query, invalid metadata no callback, stop/terminal refuse. Asserts outside extern C callback."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": []
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/src/tests.rs",
+      "blob": "6799d78d143d20daabdf5ee0751ca304b00a4018",
+      "size": 13334,
+      "sha256": "d4700a00cc24958869078a1a0e1a0c2bf1f982ba19f9621abffa0d10786d0716",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 455,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 455-line review: ABI layout and structural buffers, enum/state encoding, input/env bounds and raw UTF16 ownership, stdio sentinels, wait/close separation. Synthetic encoding cases omit native/cleanup code 0."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": [
+        "RUST-02"
+      ]
+    },
+    {
+      "path": "experiments/rust-process-owner/src/argv0_tests.rs",
+      "blob": "b81b42423ff66b5e049ac5dd5e32a8d8336f814d",
+      "size": 1625,
+      "sha256": "d1ed861fd8cf6fd8c7a757193e44eba649d89873b3bd23879fbfa71b25623afe",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 60,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 60-line review: v1 byte compatibility, explicit argv0 Go first-token vectors, NUL and encoded bound refusal; static test review only."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": []
+    },
+    {
+      "path": "experiments/rust-process-owner/src/bin/owner_child.rs",
+      "blob": "a084e8e1b4a4740b7f9064434d9240266c96892f",
+      "size": 13902,
+      "sha256": "b7fb2b2084aabecb35963acee9e975d63cc40a37b169be97c73ca67fee326758",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 343,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 343-line review: owned finite child modes for byte commandline/context/identity/SID/NUL/stdio/tree; independent child-side token and creation oracles, raw-byte reporting, bounded tree watchdog and no actual product runtime."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": []
+    },
+    {
+      "path": "experiments/rust-process-owner/src/bin/owner_crash_fixture.rs",
+      "blob": "9f716015bfbcd8f9a2824ad050b5a4a58566dce4",
+      "size": 9044,
+      "sha256": "12b12ec814778c6de86eb7cf959c4d5f24f94bad785437f878862e4bb073323e",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 219,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 219-line review: owned control/leaf/root/creator roles, atomic barrier publication, independent process-time record, optional inherited stdio/context, Drop witness; normal running control vs abrupt phases match tests."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": []
+    },
+    {
+      "path": "experiments/rust-process-owner/src/foreground_console_tests.rs",
+      "blob": "11316ffbc6400e44ea3dd0a6a02c9020ca47f903",
+      "size": 1423,
+      "sha256": "e48bef218af28e0952fc71bbdae7e3f8347c28818781e1a475018d0456db2012",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 43,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 43-line review: background no query; foreground one query and attachment/error split including code 0 refusal; mocks only, no actual console qualification."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": []
+    },
+    {
+      "path": "experiments/rust-process-owner/src/job_member_tests.rs",
+      "blob": "22e8d9ae5671a58b7081d3f7519656155167ef23",
+      "size": 23506,
+      "sha256": "23c7b213c8fba97d71665f057d099a12c51cff8067c1ce86b3db57a19ec31a28",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 606,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 606-line review: malformed complete PID byte parser, restricted native query partial ownership, generation exhaustion, owned descendant capture/deadline retention, independent FILETIME oracle and same-held-handle revalidation, protected member close caches failure while closing other members."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": []
+    },
+    {
+      "path": "experiments/rust-process-owner/src/job_members.rs",
+      "blob": "2291e3d523b9dc33c5dcc929550df37e59ac0637",
+      "size": 25516,
+      "sha256": "47a8581a90130db5288fe1a188b357b5aa1a95fc4edffab7375d51c6e6b44db0",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 672,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 672-line review: reserve generation before acquisition; partial resource retention, pre/post census, identity liveness/Job/time binding, same-handle revalidation, explicit cached close and active guard, bounded PID list parser/deadlines."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": []
+    },
+    {
+      "path": "experiments/rust-process-owner/src/launch_context.rs",
+      "blob": "13cd1fbac2881a2535fd74c92cba3e74cd0cd96d",
+      "size": 11377,
+      "sha256": "bd6aad65d1a753076da0b81a41ab1dec31b67e8da6f0d451c1d6e8ed8be5322a",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 296,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 296-line read including embedded tests: absolute cwd, bounded UTF16 counting, ordinal-sorted unique names, complete empty block, drive names, NUL and surrogate behavior; no concrete defect found in this file."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": []
+    },
+    {
+      "path": "experiments/rust-process-owner/src/lib.rs",
+      "blob": "91f684a82616de706b87b351e3f92ef78459827d",
+      "size": 2108,
+      "sha256": "8619ae0038dce21748270284180913a91e5340e1de91f898f25758a95101a8d9",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 73,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full file read: exit observation vs settlement enums retain Pending/CleanupFailed distinctions; Windows exports and explicit unsupported non-Windows owner checked."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": []
+    },
+    {
+      "path": "experiments/rust-process-owner/src/native_failure_tests.rs",
+      "blob": "46f37a23a0104bf5e7a6f85bf3197ffb6fcfea63",
+      "size": 33708,
+      "sha256": "adda0b64a265e3daa58387366b0e4056903f6f06027c33778a90e021cab20a6f",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 940,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 940-line review: restricted real fixture handles, protected native closes with fixture-only recovery, state/no retry/no lost root result, token query+close independence, split wait/close, invalid deadline. Handle-count tests require documented serial execution. Zero last-error not a native tested case."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": []
+    },
+    {
+      "path": "experiments/rust-process-owner/src/process_borrow_tests.rs",
+      "blob": "7819cd248c4cb66c9f16aeecdbec0216a568913c",
+      "size": 3687,
+      "sha256": "115b4141c8059d4dd7f6da690571d959c3bb5ae28edbe195acb306265b853244",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 103,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 103-line review: original HANDLE exact callback, no resume/admission consumption, deny/exit availability, stop/terminal/incomplete-custody refusals and explicit cleanup."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": []
+    },
+    {
+      "path": "experiments/rust-process-owner/src/token_user.rs",
+      "blob": "9a2dbd58f52800b6c35300afcf51a1c5036d5113",
+      "size": 13337,
+      "sha256": "e42eb6063b51e7b8e7284c460548b3f182ff4f9097880e379370e989cb44f839",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 323,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 323-line review including embedded tests: original process token opened read-only; explicit close both query success/failure; separate Cleanup variant; bounded aligned in-buffer SID parsing, raw byte copy; malformed fixture coverage."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": [
+        "RUST-01"
+      ]
+    },
+    {
+      "path": "experiments/rust-process-owner/src/windows.rs",
+      "blob": "63d1c91514f6f84753d50eb12a0a6bbe2b0ee514",
+      "size": 42672,
+      "sha256": "4c031c1a3824b83c7cec4a63a61120c5d9597f893c0819f6dee8613cc14e90a9",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 1078,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 1078-line review including embedded history tests: at-create Job/attribute lifetimes, borrowed stdio allowlist, original handle/time binding, single admission, finite waits, explicit close and cached failed receipts, Drop fallback, command quoting. Native-zero result preserved by core; FFI representation crosscheck tracked."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": [
+        "RUST-02"
+      ]
+    },
+    {
+      "path": "experiments/rust-process-owner/tests/launch_context.rs",
+      "blob": "a60704b07ec9b71388d129e1ba47bb04ec647ecd",
+      "size": 13066,
+      "sha256": "d493658aa4b3ba42d86cf40773b0c7868785f6ed201af7a69393ee209c91dcee",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 394,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 394-line review: child-observed Unicode/empty/rawUTF16/case environment, fake parent sentinel exclusion, cwd and relative artifact, no parent mutation, source lifetime, deny/malformed/native missing cwd, two simultaneous contexts."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": []
+    },
+    {
+      "path": "experiments/rust-process-owner/tests/lifecycle.rs",
+      "blob": "0aa1350c7e2ac6288122a7c38d11dd5f02052e1d",
+      "size": 37408,
+      "sha256": "fe94856d11533d2966e1c73eeaa1fffee7185df0a28bf6a34283d3efd385e6cd",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 1067,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 1067-line review: original suspension/Job membership/admission, query lifetime and independent child identity oracles, Pending and exit 259, cached settlement/root result, single admit, member epoch ownership/deadlines/stale/empty/tree/revalidate integration. No actual run."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": []
+    },
+    {
+      "path": "experiments/rust-process-owner/tests/owner_crash.rs",
+      "blob": "5431f3ece763aea6ad86ce75a29ccbe503065e27",
+      "size": 11077,
+      "sha256": "0e37033ec3845a6fd0d881b4ab5ee12edc60a4a011406e1d9b189ce6d386cd8e",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 321,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 321-line review: own creator handles and PID+FILETIME+image-bound observation, owned unrelated control, crash vs normal Drop witness, sample actual exit before fixture cleanup, four abrupt phases plus normal running control; cleanup cannot promote measured timeout."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": []
+    },
+    {
+      "path": "experiments/rust-process-owner/tests/stdio.rs",
+      "blob": "956033ecd1246eceed9738fa3b7aef103ed1bffd",
+      "size": 17152,
+      "sha256": "fb7183d8fe2d3adc2bcb74a93fbe929b0277212079048c58d6f1d105c430476f",
+      "owner": "functional_review",
+      "review_status": "reviewed",
+      "line_count": 507,
+      "read_status": "full_file_read",
+      "notes": [
+        "Full 507-line review: real inherited disk/NUL/pipe bytes, parent flags/lifetime and alias preservation, explicit denial, noninheritable and nonfile refusal, unrelated event inheritance control, EOF via Peek and bounded payload; product asynchronous drain/cancel not claimed."
+      ],
+      "verification": "full-file static source and contract review; no test/build execution",
+      "finding_ids": []
+    }
+  ],
+  "review_status": "complete_static_review",
+  "full_file_read_count": 31,
+  "reviewed_file_count": 31,
+  "total_bytes": 425989,
+  "total_lines": 11668,
+  "source_pin_verification": "All 31 current local byte lengths, SHA-256 digests and Git blob IDs matched the acquired exact a217 inventory when the report was finalized.",
+  "report": "RUST-ABI-REVIEW.md",
+  "native_supplement": "NATIVE-DELTA-REVIEW.md"
+}

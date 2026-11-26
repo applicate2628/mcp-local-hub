@@ -1,0 +1,20 @@
+--- consumer-v4/zz_rust_adoption_stdio_consumer_windows_test.go
++++ consumer-v5/zz_rust_adoption_stdio_consumer_windows_test.go
+@@ -13,6 +13,8 @@
+ 	"syscall"
+ 	"testing"
+ 	"time"
++
++	"golang.org/x/sys/windows"
+ 
+ 	"mcp-local-hub/internal/buildinfo"
+ 	"mcp-local-hub/internal/process"
+@@ -232,7 +234,7 @@
+ 			t.Fatalf("original file %d retains a live Go descriptor after close", index)
+ 		}
+ 		// Windows Stat probes the invalidated native handle after os.File.Close.
+-		if _, err := file.file.Stat(); !errors.Is(err, os.ErrClosed) && !errors.Is(err, syscall.ERROR_INVALID_HANDLE) {
++		if _, err := file.file.Stat(); !errors.Is(err, os.ErrClosed) && !errors.Is(err, windows.ERROR_INVALID_HANDLE) {
+ 			t.Fatalf("original file %d did not report a closed state: %v", index, err)
+ 		}
+ 	}

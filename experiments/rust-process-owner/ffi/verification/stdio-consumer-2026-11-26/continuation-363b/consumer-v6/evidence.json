@@ -1,0 +1,1164 @@
+{
+  "schema": "rust-go-stdio-consumer-continuation-v6-draft-v1",
+  "attempt": "consumer-v6",
+  "status": "PASS_COMPLETE_GO_RUST_ABBA_CONSUMER",
+  "native_phases": {
+    "guard": "PASS",
+    "prepare": "PASS",
+    "format": "PASS",
+    "compile": "PASS",
+    "measure": "PASS"
+  },
+  "measure": "PASS",
+  "source": {
+    "private_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+    "tree": "67c13b8fc1317b4fd60e3135a3eb8a376fe01817",
+    "overlay": {
+      "path": "internal/daemon/zz_rust_adoption_stdio_consumer_windows_test.go",
+      "bytes": 11107,
+      "sha256": "c7218f274e9ef00906eff79975ca439f48974ef0fd9593f7198fc27a65a7b6c8"
+    },
+    "native_original_commit": "efa73c0e23f7af16b8aa2ccb047b745a58ba4f71",
+    "dll_sha256": "dfa87a10a39e9110cda735ae6a987bfa64b03446529072710723e9b6ea0dca56",
+    "production_changed": false,
+    "payload_all_bytes_unchanged": true
+  },
+  "staging": {
+    "files": 23,
+    "inputs_sha256": "8dbb95d722b843cffa743ee3d044006af908d51454f971eef7f9f6cfcd43845d",
+    "runner_sha256": "463d1b1782c2ba60e426e61d2086eb0c940ecdbb79b09b3e77b1c871d5ac3f57",
+    "spec_sha256": "fc60974ab502787a39aadf61267565a798b83eb270d17989727240b9f347d5d0",
+    "guard_plan_sha256": "894c5e555c1265a3ac9a41a9c6e881c6478e6fe8e62f30e8a1f71dcc334d4ab4",
+    "staging_receipt_sha256": "380f2abc920eed4b111cac548815a9767235ea4bc429fe8bb3fb7fe76cc61c44"
+  },
+  "prelaunch": {
+    "exact_23_files": "PASS"
+  },
+  "parser_check_attempts": [
+    {
+      "attempt": "original-staged-checker",
+      "status": "FAIL_BEFORE_PARSER_EXECUTION",
+      "checker_sha256": "2f1e3e37249780eafd503bf598000cf29dfcadab72d982b06b553621804c0a55",
+      "diagnostic": "AST loader expected require definition in runner; actual runner aliases lifecycle.require",
+      "native_phase_started": false
+    },
+    {
+      "attempt": "supplemental-exact-dependency-checker",
+      "checker_sha256": "b14756cc58df38447ea2c8b6059c6b233f6a5ab9ea4b19f113c50fc2c63f0082",
+      "lifecycle_sha256": "7c509aefed299c536587455c4ebe146b0f1666e9e3f16381a62491c7f271f517",
+      "schema": "consumer-timing-parser-checks-v1",
+      "status": "PASS",
+      "checks": [
+        "original-v5-parser-rejects-actual-zero-samples",
+        "candidate-retains-actual-zeros-and-distinct-controller-metadata",
+        "synthetic-positive-integers-accepted",
+        "synthetic-all-zero-fields-retained-and-classified",
+        "reject-negative-elapsed",
+        "reject-float-elapsed",
+        "reject-boolean-elapsed",
+        "reject-string-elapsed",
+        "reject-null-elapsed",
+        "reject-missing-start_ns",
+        "reject-missing-rpc_ns",
+        "reject-missing-stop_ns",
+        "reject-missing-case_ns",
+        "preserve-handles_closed-guard",
+        "preserve-same_stop_deadline-guard",
+        "preserve-received_before_stop_deadline-guard",
+        "preserve-source-pin-guard",
+        "preserve-natural-exit-guard",
+        "preserve-three-original-identities-guard"
+      ],
+      "checks_count": 19,
+      "native_processes_started": false,
+      "original_v5_fail_reclassified": false,
+      "synthetic_values_published_as_measurements": false
+    }
+  ],
+  "phase_history": [
+    {
+      "phase": "guard",
+      "schema": "rust-stdio-consumer-original-parent-v1",
+      "status": "PASS",
+      "controller_exit_code": 0,
+      "controller_direct_reaped": true,
+      "controller_capture_handles_closed": true,
+      "seconds": 2.525361799984239,
+      "diagnostic_deadline_exceeded": false,
+      "parent_error": null,
+      "receipt_sha256": "b62c930ec62e8b565ed4b1b29ff8d95022da5e3af1c39e96c4221a733c00ab6a",
+      "manifest_sha256": "894c5e555c1265a3ac9a41a9c6e881c6478e6fe8e62f30e8a1f71dcc334d4ab4",
+      "old_attempt_reclassified": false,
+      "focused_only": true,
+      "preparation_only": false,
+      "qualification_passed": false,
+      "commands": [
+        {
+          "label": "native-normal",
+          "exit_code": 0,
+          "seconds": 0.2616965000052005,
+          "work_seconds": 5,
+          "cleanup_seconds": 10,
+          "timed_out": false,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_owner_retained": true,
+          "original_readers_joined": true,
+          "captures": {
+            "stdout": {
+              "bytes": 40,
+              "sha256": "f38a01eb7442a1bfc59bb98e59327914730104b2d705ccd87f8b3cfb8bb929c4",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            }
+          }
+        },
+        {
+          "label": "native-timeout",
+          "exit_code": 1,
+          "seconds": 2.0066251999814995,
+          "work_seconds": 2,
+          "cleanup_seconds": 10,
+          "timed_out": true,
+          "work_deadline_exceeded": true,
+          "cleanup_deadline_exceeded": false,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 1,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": true,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_owner_retained": true,
+          "original_readers_joined": true,
+          "captures": {
+            "stdout": {
+              "bytes": 24,
+              "sha256": "dd62ee631ed85bc57a26a97f2abedd6133c80b26a02451af32a799ea894be2e2",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            }
+          }
+        }
+      ],
+      "admission": {
+        "manifest_sha256": "894c5e555c1265a3ac9a41a9c6e881c6478e6fe8e62f30e8a1f71dcc334d4ab4",
+        "receipt_sha256": "b62c930ec62e8b565ed4b1b29ff8d95022da5e3af1c39e96c4221a733c00ab6a",
+        "parent_sha256": "b8a412b7631246df7397323f0f1681dafbdcad94048c4463928743e008ea74d2",
+        "native_sha256": "cd12d578af2f7b8ab52f5c362e867dbfcff409653481e05a48c770ae862e15c2"
+      }
+    },
+    {
+      "phase": "prepare",
+      "schema": "rust-stdio-consumer-original-parent-v1",
+      "status": "PASS",
+      "controller_exit_code": 0,
+      "controller_direct_reaped": true,
+      "controller_capture_handles_closed": true,
+      "seconds": 57.884943999990355,
+      "diagnostic_deadline_exceeded": false,
+      "parent_error": null,
+      "receipt_sha256": "77472589fb6fbb5e7ff7fde1325d875be8d9fea5a13a2c15a0672ede95c679bd",
+      "manifest_sha256": "c8bcacfcaad33b0c2f04a7833179dfc5b444125ec92bf15bc4d012f37e48db1f",
+      "old_attempt_reclassified": false,
+      "focused_only": true,
+      "preparation_only": true,
+      "qualification_passed": false,
+      "commands": [
+        {
+          "label": "materialize-private-inputs",
+          "exit_code": 0,
+          "seconds": 57.62244419998024,
+          "work_seconds": 300,
+          "cleanup_seconds": 10,
+          "timed_out": false,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_owner_retained": true,
+          "original_readers_joined": true,
+          "captures": {
+            "stdout": {
+              "bytes": 5719,
+              "sha256": "ad781edf46ca2be7baa7dadc0cb5b54b1bf0a69751c5b41bd8941d50e2213122",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            }
+          }
+        }
+      ],
+      "admission": {
+        "manifest_sha256": "c8bcacfcaad33b0c2f04a7833179dfc5b444125ec92bf15bc4d012f37e48db1f",
+        "receipt_sha256": "77472589fb6fbb5e7ff7fde1325d875be8d9fea5a13a2c15a0672ede95c679bd",
+        "parent_sha256": "8465fb03723d2c58d3c9f14c15d919bb109330ea13231552121124a3684a83b6",
+        "materialization_sha256": "5b7408cd35481a03512bdfb1827413299dbbf3f9ec0ddd47911496a3365443c9",
+        "source_files_sha256": "14432775c06fa88d6c65786e9f662f405a68b441dc078e0bfb3ff755a814172c",
+        "input_files_sha256": "7b0a1bbb5a5f432c8e83c4c37f11d44aa7e4ae47ec41fe661a249d1d6c9483b8",
+        "proxy_files_sha256": "e415018d622b50559878a4bdf5fd0a9404ddc9e52acce0c21110a54bd4e1b4ec"
+      }
+    },
+    {
+      "phase": "format",
+      "schema": "rust-stdio-consumer-original-parent-v1",
+      "status": "PASS",
+      "controller_exit_code": 0,
+      "controller_direct_reaped": true,
+      "controller_capture_handles_closed": true,
+      "seconds": 4.11567049997393,
+      "diagnostic_deadline_exceeded": false,
+      "parent_error": null,
+      "receipt_sha256": "c5a4657262f0f65b6cdba80c2df57c7860e4f60e0a495f7fdd29f62a23832b7d",
+      "manifest_sha256": "2bba5b122ca6eeb28853719f38390487d6903bc4a9f45d4c3d198991729a4606",
+      "old_attempt_reclassified": false,
+      "focused_only": true,
+      "preparation_only": true,
+      "qualification_passed": false,
+      "commands": [
+        {
+          "label": "format-test-overlay",
+          "exit_code": 0,
+          "seconds": 0.12247270002262667,
+          "work_seconds": 30,
+          "cleanup_seconds": 10,
+          "timed_out": false,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_owner_retained": true,
+          "original_readers_joined": true,
+          "captures": {
+            "stdout": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            }
+          }
+        }
+      ],
+      "admission": {
+        "manifest_sha256": "2bba5b122ca6eeb28853719f38390487d6903bc4a9f45d4c3d198991729a4606",
+        "receipt_sha256": "c5a4657262f0f65b6cdba80c2df57c7860e4f60e0a495f7fdd29f62a23832b7d",
+        "parent_sha256": "2d7c7d289e464e21d9c147377aa2267974f541e915b6123990eea2a5aa9f4635",
+        "source_files_after_sha256": "14432775c06fa88d6c65786e9f662f405a68b441dc078e0bfb3ff755a814172c"
+      }
+    },
+    {
+      "phase": "compile",
+      "schema": "rust-stdio-consumer-original-parent-v1",
+      "status": "PASS",
+      "controller_exit_code": 0,
+      "controller_direct_reaped": true,
+      "controller_capture_handles_closed": true,
+      "seconds": 153.47329809999792,
+      "diagnostic_deadline_exceeded": false,
+      "parent_error": null,
+      "receipt_sha256": "40e6adc3a4c6d6950febf8ab0253cd5bcc8d29eea1e982b150f9ff05d1691529",
+      "manifest_sha256": "8e8cbb3fc127ac856f727b2fc8eef6d441783734aed9229f0135f04dc646fbc6",
+      "old_attempt_reclassified": false,
+      "focused_only": true,
+      "preparation_only": false,
+      "qualification_passed": false,
+      "admission": {
+        "manifest_sha256": "8e8cbb3fc127ac856f727b2fc8eef6d441783734aed9229f0135f04dc646fbc6",
+        "receipt_sha256": "40e6adc3a4c6d6950febf8ab0253cd5bcc8d29eea1e982b150f9ff05d1691529",
+        "parent_sha256": "affaa33a23d57d60bd505936f1a1d69f0b26de718cb9a7e8fc02099704706f94"
+      },
+      "commands": [
+        {
+          "label": "go-version",
+          "exit_code": 0,
+          "seconds": 0.11713009997038171,
+          "work_seconds": 30,
+          "cleanup_seconds": 10,
+          "timed_out": false,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_owner_retained": true,
+          "original_readers_joined": true,
+          "captures": {
+            "stdout": {
+              "bytes": 34,
+              "sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            }
+          }
+        },
+        {
+          "label": "offline-modules",
+          "exit_code": 0,
+          "seconds": 1.5226002000272274,
+          "work_seconds": 300,
+          "cleanup_seconds": 10,
+          "timed_out": false,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_owner_retained": true,
+          "original_readers_joined": true,
+          "captures": {
+            "stdout": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            }
+          }
+        },
+        {
+          "label": "build-pe-validator",
+          "exit_code": 0,
+          "seconds": 39.61189200001536,
+          "work_seconds": 300,
+          "cleanup_seconds": 10,
+          "timed_out": false,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_owner_retained": true,
+          "original_readers_joined": true,
+          "captures": {
+            "stdout": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            }
+          }
+        },
+        {
+          "label": "validate-native-identity",
+          "exit_code": 0,
+          "seconds": 0.3581935999682173,
+          "work_seconds": 30,
+          "cleanup_seconds": 10,
+          "timed_out": false,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_owner_retained": true,
+          "original_readers_joined": true,
+          "captures": {
+            "stdout": {
+              "bytes": 547,
+              "sha256": "64d7fe1bb4b9bd9ae4e837ef2d7926a90304cd9ccf5a5f1a6a9f4942d9be6d3c",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            }
+          }
+        },
+        {
+          "label": "compile-helper",
+          "exit_code": 0,
+          "seconds": 69.58802010002546,
+          "work_seconds": 300,
+          "cleanup_seconds": 10,
+          "timed_out": false,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_owner_retained": true,
+          "original_readers_joined": true,
+          "captures": {
+            "stdout": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            }
+          }
+        },
+        {
+          "label": "compile-go",
+          "exit_code": 0,
+          "seconds": 24.02898090000963,
+          "work_seconds": 300,
+          "cleanup_seconds": 10,
+          "timed_out": false,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_owner_retained": true,
+          "original_readers_joined": true,
+          "captures": {
+            "stdout": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            }
+          }
+        },
+        {
+          "label": "compile-rust",
+          "exit_code": 0,
+          "seconds": 11.07248630002141,
+          "work_seconds": 300,
+          "cleanup_seconds": 10,
+          "timed_out": false,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_owner_retained": true,
+          "original_readers_joined": true,
+          "captures": {
+            "stdout": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "phase": "measure",
+      "schema": "rust-stdio-consumer-original-parent-v1",
+      "status": "PASS",
+      "controller_exit_code": 0,
+      "controller_direct_reaped": true,
+      "controller_capture_handles_closed": true,
+      "seconds": 6.943508500000462,
+      "diagnostic_deadline_exceeded": false,
+      "parent_error": null,
+      "receipt_sha256": "26595afe69d4a034cec040afadf3b4abe6bd51648681deccc262d0b4b92ae245",
+      "manifest_sha256": "fee8d396a39a4e9f235513f04d438ebe7336626d9ba53adbc1c69979156385cc",
+      "old_attempt_reclassified": false,
+      "focused_only": true,
+      "preparation_only": false,
+      "qualification_passed": true,
+      "commands": [
+        {
+          "label": "consumer-1-go",
+          "exit_code": 0,
+          "seconds": 0.5639151000068523,
+          "work_seconds": 190,
+          "cleanup_seconds": 10,
+          "timed_out": false,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_owner_retained": true,
+          "original_readers_joined": true,
+          "captures": {
+            "stdout": {
+              "bytes": 2939,
+              "sha256": "c445a2a909cf655e67ace4d0b6b530fd8ac47341460dc945cef63e212fef178f",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            }
+          }
+        },
+        {
+          "label": "consumer-2-rust",
+          "exit_code": 0,
+          "seconds": 0.7261858999845572,
+          "work_seconds": 190,
+          "cleanup_seconds": 10,
+          "timed_out": false,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_owner_retained": true,
+          "original_readers_joined": true,
+          "captures": {
+            "stdout": {
+              "bytes": 3010,
+              "sha256": "95258f78bc1e4e907073fb0be6501bcf47094cb8668d0826636370a7446f29f8",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            }
+          }
+        },
+        {
+          "label": "consumer-3-rust",
+          "exit_code": 0,
+          "seconds": 0.5794615999911912,
+          "work_seconds": 190,
+          "cleanup_seconds": 10,
+          "timed_out": false,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_owner_retained": true,
+          "original_readers_joined": true,
+          "captures": {
+            "stdout": {
+              "bytes": 3011,
+              "sha256": "37545649e463d2bd0ca3eedabfbc64a434649d060e9d1cdccb0f4b75182327a2",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            }
+          }
+        },
+        {
+          "label": "consumer-4-go",
+          "exit_code": 0,
+          "seconds": 0.6745949999894947,
+          "work_seconds": 190,
+          "cleanup_seconds": 10,
+          "timed_out": false,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_owner_retained": true,
+          "original_readers_joined": true,
+          "captures": {
+            "stdout": {
+              "bytes": 2947,
+              "sha256": "0dfaaa9a90a7fbb8d262f4b3fca5b95f68f93c9e74796268aedf1f1c6ae19622",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "eof": true,
+              "worker_complete": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "prior_FAIL_UNKNOWN_V1_preserved": true,
+  "qualification_passed": true,
+  "performance_improvement_asserted": false,
+  "measured_fields_policy": "All counts and timings come from four accepted original terminal consumer receipts. Zero deltas retained as resolution-unresolved; no ratios derived.",
+  "native_measurement_hold": false,
+  "compiled_files": [
+    {
+      "path": "go/mcphub-owner-identity.json",
+      "bytes": 547,
+      "sha256": "64d7fe1bb4b9bd9ae4e837ef2d7926a90304cd9ccf5a5f1a6a9f4942d9be6d3c"
+    },
+    {
+      "path": "go/mcphub-owner.dll",
+      "bytes": 192512,
+      "sha256": "dfa87a10a39e9110cda735ae6a987bfa64b03446529072710723e9b6ea0dca56"
+    },
+    {
+      "path": "go/mcphub.exe",
+      "bytes": 18804224,
+      "sha256": "46873d88b3b14a80d44abe437169ce41714389bdf30a660c4bcbc414ee2bf5e0"
+    },
+    {
+      "path": "helper/helper.exe",
+      "bytes": 18804224,
+      "sha256": "46873d88b3b14a80d44abe437169ce41714389bdf30a660c4bcbc414ee2bf5e0"
+    },
+    {
+      "path": "rust/mcphub-owner-identity.json",
+      "bytes": 547,
+      "sha256": "64d7fe1bb4b9bd9ae4e837ef2d7926a90304cd9ccf5a5f1a6a9f4942d9be6d3c"
+    },
+    {
+      "path": "rust/mcphub-owner.dll",
+      "bytes": 192512,
+      "sha256": "dfa87a10a39e9110cda735ae6a987bfa64b03446529072710723e9b6ea0dca56"
+    },
+    {
+      "path": "rust/mcphub.exe",
+      "bytes": 18804224,
+      "sha256": "a1a91702c5342d19f13adbe9e3da83bbc536df340e9a3d1297a69f191161b209"
+    },
+    {
+      "path": "tools/windows-product-validate.exe",
+      "bytes": 6475776,
+      "sha256": "fd5ce723a97d0f5a553e15f207a2555a40d588604dffc9531a1ae4e16f11717c"
+    }
+  ],
+  "measure_plan_sha256": "fee8d396a39a4e9f235513f04d438ebe7336626d9ba53adbc1c69979156385cc",
+  "qualification_scope": "Exact private Source, Go/Rust host variants and same helper for these three consumer cases; no installed Product, adoption decision or cross-source transfer.",
+  "measurement": {
+    "status": "PASS",
+    "plan_sha256": "fee8d396a39a4e9f235513f04d438ebe7336626d9ba53adbc1c69979156385cc",
+    "receipt_sha256": "26595afe69d4a034cec040afadf3b4abe6bd51648681deccc262d0b4b92ae245",
+    "started_utc": "2026-11-26T15:10:47.268869+00:00",
+    "finished_utc": "2026-11-26T15:10:52.056568+00:00",
+    "accepted_runs": 4,
+    "accepted_cases": 12,
+    "accepted_rpc": 264,
+    "zero_sample_count": 7,
+    "raw_samples": "timings.json",
+    "commands": [
+      {
+        "label": "consumer-1-go",
+        "exit_code": 0,
+        "seconds": 0.5639151000068523,
+        "work_seconds": 190,
+        "cleanup_seconds": 10,
+        "timed_out": false,
+        "work_deadline_exceeded": false,
+        "cleanup_deadline_exceeded": false,
+        "quiescence_state": "complete",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "captures": {
+          "stdout": {
+            "bytes": 2939,
+            "sha256": "c445a2a909cf655e67ace4d0b6b530fd8ac47341460dc945cef63e212fef178f",
+            "eof": true,
+            "worker_complete": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "eof": true,
+            "worker_complete": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null
+          }
+        },
+        "arm": "go",
+        "oracle_pass": true,
+        "accepted_cases": 3,
+        "accepted_rpc": 66,
+        "elapsed_timing": {
+          "schema": "consumer-elapsed-clock-observation-v1",
+          "measurement_source": "Go time.Since(...).Nanoseconds()",
+          "unit": "ns",
+          "zero_interpretation": "resolution_unresolved",
+          "zero_samples": [
+            {
+              "case": "final-reply",
+              "metric": "rpc_ns",
+              "raw_value": 0
+            },
+            {
+              "case": "lifetime-cancel",
+              "metric": "rpc_ns",
+              "raw_value": 0
+            }
+          ],
+          "clock_quantum_measured": false,
+          "zero_latency_claimed": false,
+          "speed_ratio_from_zero_permitted": false
+        }
+      },
+      {
+        "label": "consumer-2-rust",
+        "exit_code": 0,
+        "seconds": 0.7261858999845572,
+        "work_seconds": 190,
+        "cleanup_seconds": 10,
+        "timed_out": false,
+        "work_deadline_exceeded": false,
+        "cleanup_deadline_exceeded": false,
+        "quiescence_state": "complete",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "captures": {
+          "stdout": {
+            "bytes": 3010,
+            "sha256": "95258f78bc1e4e907073fb0be6501bcf47094cb8668d0826636370a7446f29f8",
+            "eof": true,
+            "worker_complete": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "eof": true,
+            "worker_complete": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null
+          }
+        },
+        "arm": "rust",
+        "oracle_pass": true,
+        "accepted_cases": 3,
+        "accepted_rpc": 66,
+        "elapsed_timing": {
+          "schema": "consumer-elapsed-clock-observation-v1",
+          "measurement_source": "Go time.Since(...).Nanoseconds()",
+          "unit": "ns",
+          "zero_interpretation": "resolution_unresolved",
+          "zero_samples": [
+            {
+              "case": "final-reply",
+              "metric": "rpc_ns",
+              "raw_value": 0
+            },
+            {
+              "case": "lifetime-cancel",
+              "metric": "rpc_ns",
+              "raw_value": 0
+            }
+          ],
+          "clock_quantum_measured": false,
+          "zero_latency_claimed": false,
+          "speed_ratio_from_zero_permitted": false
+        }
+      },
+      {
+        "label": "consumer-3-rust",
+        "exit_code": 0,
+        "seconds": 0.5794615999911912,
+        "work_seconds": 190,
+        "cleanup_seconds": 10,
+        "timed_out": false,
+        "work_deadline_exceeded": false,
+        "cleanup_deadline_exceeded": false,
+        "quiescence_state": "complete",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "captures": {
+          "stdout": {
+            "bytes": 3011,
+            "sha256": "37545649e463d2bd0ca3eedabfbc64a434649d060e9d1cdccb0f4b75182327a2",
+            "eof": true,
+            "worker_complete": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "eof": true,
+            "worker_complete": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null
+          }
+        },
+        "arm": "rust",
+        "oracle_pass": true,
+        "accepted_cases": 3,
+        "accepted_rpc": 66,
+        "elapsed_timing": {
+          "schema": "consumer-elapsed-clock-observation-v1",
+          "measurement_source": "Go time.Since(...).Nanoseconds()",
+          "unit": "ns",
+          "zero_interpretation": "resolution_unresolved",
+          "zero_samples": [
+            {
+              "case": "final-reply",
+              "metric": "rpc_ns",
+              "raw_value": 0
+            },
+            {
+              "case": "lifetime-cancel",
+              "metric": "rpc_ns",
+              "raw_value": 0
+            }
+          ],
+          "clock_quantum_measured": false,
+          "zero_latency_claimed": false,
+          "speed_ratio_from_zero_permitted": false
+        }
+      },
+      {
+        "label": "consumer-4-go",
+        "exit_code": 0,
+        "seconds": 0.6745949999894947,
+        "work_seconds": 190,
+        "cleanup_seconds": 10,
+        "timed_out": false,
+        "work_deadline_exceeded": false,
+        "cleanup_deadline_exceeded": false,
+        "quiescence_state": "complete",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "captures": {
+          "stdout": {
+            "bytes": 2947,
+            "sha256": "0dfaaa9a90a7fbb8d262f4b3fca5b95f68f93c9e74796268aedf1f1c6ae19622",
+            "eof": true,
+            "worker_complete": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "eof": true,
+            "worker_complete": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null
+          }
+        },
+        "arm": "go",
+        "oracle_pass": true,
+        "accepted_cases": 3,
+        "accepted_rpc": 66,
+        "elapsed_timing": {
+          "schema": "consumer-elapsed-clock-observation-v1",
+          "measurement_source": "Go time.Since(...).Nanoseconds()",
+          "unit": "ns",
+          "zero_interpretation": "resolution_unresolved",
+          "zero_samples": [
+            {
+              "case": "final-reply",
+              "metric": "rpc_ns",
+              "raw_value": 0
+            }
+          ],
+          "clock_quantum_measured": false,
+          "zero_latency_claimed": false,
+          "speed_ratio_from_zero_permitted": false
+        }
+      }
+    ],
+    "parent": {
+      "schema": "rust-stdio-consumer-original-parent-v1",
+      "status": "PASS",
+      "controller_exit_code": 0,
+      "controller_direct_reaped": true,
+      "controller_capture_handles_closed": true,
+      "seconds": 6.943508500000462,
+      "diagnostic_deadline_exceeded": false,
+      "parent_error": null,
+      "receipt_sha256": "26595afe69d4a034cec040afadf3b4abe6bd51648681deccc262d0b4b92ae245",
+      "manifest_sha256": "fee8d396a39a4e9f235513f04d438ebe7336626d9ba53adbc1c69979156385cc",
+      "old_attempt_reclassified": false,
+      "focused_only": true,
+      "preparation_only": false,
+      "qualification_passed": true
+    },
+    "outer_original_closure": {
+      "same_process_start_object": true,
+      "exit_code": 0,
+      "wait_returned": true,
+      "original_process_object_disposed": true,
+      "new_job_or_tree_wait": false,
+      "wait_errors": []
+    },
+    "comparison_completed": true,
+    "performance_improvement_asserted": false
+  }
+}

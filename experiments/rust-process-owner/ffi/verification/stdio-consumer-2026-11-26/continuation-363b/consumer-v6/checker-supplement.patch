@@ -1,0 +1,15 @@
+--- failed-review/check_timing_validator.py
++++ supplement/check_c631_v6_timing_validator_363b_v2.py
+@@ -22,6 +22,12 @@
+ def functions(path, names):
+     tree = ast.parse(Path(path).read_text(encoding="utf-8"))
+     definitions = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
++    if "require" in names and not any(node.name == "require" for node in definitions):
++        lifecycle_raw = Path(path).with_name("focused_runner.py").read_bytes()
++        assert hashlib.sha256(lifecycle_raw).hexdigest() == "7c509aefed299c536587455c4ebe146b0f1666e9e3f16381a62491c7f271f517"
++        lifecycle_tree = ast.parse(lifecycle_raw.decode("utf-8"))
++        definitions = [node for node in lifecycle_tree.body
++                       if isinstance(node, ast.FunctionDef) and node.name == "require"] + definitions
+     assert {node.name for node in definitions} == set(names)
+     namespace = {"json": json, "spec": SPEC}
+     exec(compile(ast.Module(body=definitions, type_ignores=[]), "pure-parser-slice", "exec"), namespace)

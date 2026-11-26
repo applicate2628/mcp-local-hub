@@ -1,0 +1,45 @@
+{
+  "schema": "v6-pure-parser-check-history-v1",
+  "attempts": [
+    {
+      "attempt": "original-staged-checker",
+      "status": "FAIL_BEFORE_PARSER_EXECUTION",
+      "checker_sha256": "2f1e3e37249780eafd503bf598000cf29dfcadab72d982b06b553621804c0a55",
+      "diagnostic": "AST loader expected require definition in runner; actual runner aliases lifecycle.require",
+      "native_phase_started": false
+    },
+    {
+      "attempt": "supplemental-exact-dependency-checker",
+      "checker_sha256": "b14756cc58df38447ea2c8b6059c6b233f6a5ab9ea4b19f113c50fc2c63f0082",
+      "lifecycle_sha256": "7c509aefed299c536587455c4ebe146b0f1666e9e3f16381a62491c7f271f517",
+      "schema": "consumer-timing-parser-checks-v1",
+      "status": "PASS",
+      "checks": [
+        "original-v5-parser-rejects-actual-zero-samples",
+        "candidate-retains-actual-zeros-and-distinct-controller-metadata",
+        "synthetic-positive-integers-accepted",
+        "synthetic-all-zero-fields-retained-and-classified",
+        "reject-negative-elapsed",
+        "reject-float-elapsed",
+        "reject-boolean-elapsed",
+        "reject-string-elapsed",
+        "reject-null-elapsed",
+        "reject-missing-start_ns",
+        "reject-missing-rpc_ns",
+        "reject-missing-stop_ns",
+        "reject-missing-case_ns",
+        "preserve-handles_closed-guard",
+        "preserve-same_stop_deadline-guard",
+        "preserve-received_before_stop_deadline-guard",
+        "preserve-source-pin-guard",
+        "preserve-natural-exit-guard",
+        "preserve-three-original-identities-guard"
+      ],
+      "checks_count": 19,
+      "native_processes_started": false,
+      "original_v5_fail_reclassified": false,
+      "synthetic_values_published_as_measurements": false
+    }
+  ],
+  "native_workload_counts": false
+}

@@ -1,0 +1,565 @@
+{
+  "schema": "a217-native-source-map-public-v1",
+  "status": "63_BYTE_IDENTICAL_ONE_SEMANTIC_DELTA",
+  "reviewed_source_commit": "a217c7799a0214967bf86211542e508162c680b5",
+  "reviewed_source_tree": "ca118ff1ec513cc830bb8b96b4d6782d23915a26",
+  "native_build_commit": "efa73c0e23f7af16b8aa2ccb047b745a58ba4f71",
+  "consumer_private_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+  "consumer_private_tree": "67c13b8fc1317b4fd60e3135a3eb8a376fe01817",
+  "comparison": {
+    "same_relative_paths": 64,
+    "byte_equal": 63,
+    "byte_different": 1,
+    "extra_native_paths": [],
+    "full_byte_equivalence": false
+  },
+  "files": [
+    {
+      "path": "experiments/rust-process-owner/Cargo.lock",
+      "a217_blob": "2395f800e796dfae7a6f3b1ffa241de573b37873",
+      "a217_bytes": 633,
+      "a217_sha256": "4198fa4fdbc041142493b86b1183f3446b1e5c24236cfab1020a888bbb46c63c",
+      "native_sha256": "4198fa4fdbc041142493b86b1183f3446b1e5c24236cfab1020a888bbb46c63c",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/Cargo.toml",
+      "a217_blob": "a6e8d41637e2b3d755f81b52565b999255f79c3f",
+      "a217_bytes": 460,
+      "a217_sha256": "4abbdc2936ced47001a6eb474143ddabad7a4235ca52e8920ae9e4d593299cdd",
+      "native_sha256": "4abbdc2936ced47001a6eb474143ddabad7a4235ca52e8920ae9e4d593299cdd",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/Cargo.lock",
+      "a217_blob": "f81b4c8ac7de43021692d5072fb3f0b143dfc85f",
+      "a217_bytes": 746,
+      "a217_sha256": "76b59b101ff09d63eca5fe56751167ef2dab1cbf1dfded80c771e0f7c475e30d",
+      "native_sha256": "76b59b101ff09d63eca5fe56751167ef2dab1cbf1dfded80c771e0f7c475e30d",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/Cargo.toml",
+      "a217_blob": "35df5080fe63636219021cbc7840b25167374af1",
+      "a217_bytes": 325,
+      "a217_sha256": "799e8e79ff6cd009ef9715b2c68b5c7a3d03e61ba3e2a5f69957f1848590f65f",
+      "native_sha256": "799e8e79ff6cd009ef9715b2c68b5c7a3d03e61ba3e2a5f69957f1848590f65f",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/admission_windows.go",
+      "a217_blob": "f5203d071b4a8913a44d36285a794b77c6144180",
+      "a217_bytes": 2439,
+      "a217_sha256": "4a3185d4edd221e943ffae73192c7a4b75501c9a80624426612ce88078e939c2",
+      "native_sha256": "4a3185d4edd221e943ffae73192c7a4b75501c9a80624426612ce88078e939c2",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/admission_windows_test.go",
+      "a217_blob": "437f1765bff85aa12bc845c1d2d942a4d2d6941d",
+      "a217_bytes": 7843,
+      "a217_sha256": "650c67c78d4a69d999493735a05e6203859f8805c5f64b95d2d41e8226da9575",
+      "native_sha256": "650c67c78d4a69d999493735a05e6203859f8805c5f64b95d2d41e8226da9575",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/bridge_windows.go",
+      "a217_blob": "0f7ff1b6675a6acc5dc172e5e432b36fb93d094f",
+      "a217_bytes": 33852,
+      "a217_sha256": "c2e6055dbe2874dcc9544fc455b8a190cc2f75c9b02ea01b62a4ea12fab91811",
+      "native_sha256": "c2e6055dbe2874dcc9544fc455b8a190cc2f75c9b02ea01b62a4ea12fab91811",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/bridge_windows_test.go",
+      "a217_blob": "084b46d6ebc67581ca787f5bc2b257b726f27d34",
+      "a217_bytes": 9104,
+      "a217_sha256": "6dff0a3d8d8bbdd8e7e61e827347dc9ffbcb256c15aa4c6ddf32761532c59bef",
+      "native_sha256": "6dff0a3d8d8bbdd8e7e61e827347dc9ffbcb256c15aa4c6ddf32761532c59bef",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/environment_windows.go",
+      "a217_blob": "3d358e24c12655f49bbab6e509713a15f955010b",
+      "a217_bytes": 778,
+      "a217_sha256": "2131922df4d2686606c9a759c90c8eaf504b8e3d4060861e610c25a899d89ef0",
+      "native_sha256": "2131922df4d2686606c9a759c90c8eaf504b8e3d4060861e610c25a899d89ef0",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/environment_windows_test.go",
+      "a217_blob": "ffc0db2c1ea507fcf657e3c59e776f7d7b62a4d5",
+      "a217_bytes": 11476,
+      "a217_sha256": "e5f31851d4507722b8db2d12926cbc71b8cf1cb88a391d1d61bdcf8cdc76f373",
+      "native_sha256": "e5f31851d4507722b8db2d12926cbc71b8cf1cb88a391d1d61bdcf8cdc76f373",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/faults_windows_test.go",
+      "a217_blob": "5bc13caaf6342bac6fada0bddefef1e0fe6c71e7",
+      "a217_bytes": 6759,
+      "a217_sha256": "34419e6249fcc08b4a2fd7a0db022ec6cd14ad039afcd60c68af3497b0f5b3fc",
+      "native_sha256": "34419e6249fcc08b4a2fd7a0db022ec6cd14ad039afcd60c68af3497b0f5b3fc",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/finish_context_windows.go",
+      "a217_blob": "d11fc4b252f9e533263dbc4a738a6b14591d775d",
+      "a217_bytes": 2581,
+      "a217_sha256": "64046068cab96d7a0e587091a3e0b2a7909a8870ddc7ccbfa28d1bdbe43a271d",
+      "native_sha256": "64046068cab96d7a0e587091a3e0b2a7909a8870ddc7ccbfa28d1bdbe43a271d",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/finish_context_windows_test.go",
+      "a217_blob": "52fc25444eb5bd7a9d4f4819c5abadcbaec2e6c9",
+      "a217_bytes": 8915,
+      "a217_sha256": "aadfaccf34fe5b69a7b7f2e3f9e600544a843ca0dbdcdaeb0777722c6dcc1cad",
+      "native_sha256": "aadfaccf34fe5b69a7b7f2e3f9e600544a843ca0dbdcdaeb0777722c6dcc1cad",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/go.mod",
+      "a217_blob": "199b42593568e3b007d0f3f413c3d27f4d501d2f",
+      "a217_bytes": 42,
+      "a217_sha256": "99502c9ced07df2ba8052a397081e34f6254cd91c7f0d3d47388a060538bef93",
+      "native_sha256": "99502c9ced07df2ba8052a397081e34f6254cd91c7f0d3d47388a060538bef93",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/identity_faults_windows_test.go",
+      "a217_blob": "de66d28b78b71bb4dc4dca6e3e9fd2556f54783c",
+      "a217_bytes": 2826,
+      "a217_sha256": "e3bd5b296d13915f4d2d21748fea401e58f3f6301dea96006a53c1710696c997",
+      "native_sha256": "e3bd5b296d13915f4d2d21748fea401e58f3f6301dea96006a53c1710696c997",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/identity_legacy_windows_test.go",
+      "a217_blob": "94c813d7c8d8323b7903278d3a4e97e90ba7f0eb",
+      "a217_bytes": 1329,
+      "a217_sha256": "6021fbefba3b648901452f653aa0f5cf4b40490a8fd85965f0f4b4b917d74e7b",
+      "native_sha256": "6021fbefba3b648901452f653aa0f5cf4b40490a8fd85965f0f4b4b917d74e7b",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/identity_query_faults_windows_test.go",
+      "a217_blob": "dc323fa8434ca87119f9f273a3dffce70d853259",
+      "a217_bytes": 2496,
+      "a217_sha256": "d0423f0cf7f6a42ac7516f06bec47f21d994b3f4ac18bb898068e8c93ca7939a",
+      "native_sha256": "d0423f0cf7f6a42ac7516f06bec47f21d994b3f4ac18bb898068e8c93ca7939a",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/identity_query_legacy_windows_test.go",
+      "a217_blob": "df53da8b222d8e0229d0429a2095a944f68b6b65",
+      "a217_bytes": 1549,
+      "a217_sha256": "1579ae6d3ed64083ec39611db1e121e2566dffee261f2a7aef2f52d5acefcc9d",
+      "native_sha256": "1579ae6d3ed64083ec39611db1e121e2566dffee261f2a7aef2f52d5acefcc9d",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/identity_query_windows_test.go",
+      "a217_blob": "09c46fd2dd868ec8339ed85e2e52eafa2e283ced",
+      "a217_bytes": 5754,
+      "a217_sha256": "ae57f3fff161157fcfe8a93eefaa8691fe74c1e84b6b336bda22cda7aaf04caa",
+      "native_sha256": "ae57f3fff161157fcfe8a93eefaa8691fe74c1e84b6b336bda22cda7aaf04caa",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/identity_windows.go",
+      "a217_blob": "7f963020fa5f8fe2e5db64bab1776ed66d380827",
+      "a217_bytes": 8623,
+      "a217_sha256": "9408ed59ccc01e0333d53e7347766ea49ba148138142fee67857ed3ca84f6b97",
+      "native_sha256": "9408ed59ccc01e0333d53e7347766ea49ba148138142fee67857ed3ca84f6b97",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/identity_windows_test.go",
+      "a217_blob": "6283b931293ca1863c2e3ba7d824eb699d699340",
+      "a217_bytes": 7666,
+      "a217_sha256": "cf95db6c1a2882e379d266f5f7862ec459655abd5796e1ef211313380e60201e",
+      "native_sha256": "cf95db6c1a2882e379d266f5f7862ec459655abd5796e1ef211313380e60201e",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/io_lifecycle_windows_test.go",
+      "a217_blob": "5ac8808f85bcbf46a472dd752a1c1cf9084b9c5b",
+      "a217_bytes": 8881,
+      "a217_sha256": "797fdd4b33b40e14264d8e107d488a649e14cad500f9002f60803d21a970f74b",
+      "native_sha256": "797fdd4b33b40e14264d8e107d488a649e14cad500f9002f60803d21a970f74b",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/loader_windows_test.go",
+      "a217_blob": "7aca5bf2b38bcea857d6267e53576763c2e14365",
+      "a217_bytes": 8468,
+      "a217_sha256": "41a0450e6d0096f95b1514af3807deb0ace9474f7bb749c58cf04af7cd1e9263",
+      "native_sha256": "41a0450e6d0096f95b1514af3807deb0ace9474f7bb749c58cf04af7cd1e9263",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/members_faults_windows_test.go",
+      "a217_blob": "0f46b1796532613eebfd8e74842eb44217c1dd7a",
+      "a217_bytes": 6466,
+      "a217_sha256": "455e617e0f29d4d758b0c2597724bb548da8d926e92721453f0365f689cdb2bc",
+      "native_sha256": "455e617e0f29d4d758b0c2597724bb548da8d926e92721453f0365f689cdb2bc",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/members_legacy_windows_test.go",
+      "a217_blob": "026b4b45b37cedefcd3014a6a75bdabd43e1c7c5",
+      "a217_bytes": 2056,
+      "a217_sha256": "9ef493577c54ea3cb607dd7fac95b536e2d430fcff740b51efe2d0d1922cd424",
+      "native_sha256": "9ef493577c54ea3cb607dd7fac95b536e2d430fcff740b51efe2d0d1922cd424",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/members_report_windows_test.go",
+      "a217_blob": "b1da3dc082f14ffc07a1ea04cff68a47e6588296",
+      "a217_bytes": 2583,
+      "a217_sha256": "1e619517ba2dd3abc490f12b2e345052ebb60785741a7e1dd6ea17de24fc5c42",
+      "native_sha256": "1e619517ba2dd3abc490f12b2e345052ebb60785741a7e1dd6ea17de24fc5c42",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/members_windows.go",
+      "a217_blob": "b9b5488128888d7eca4e14b0642d57b723f3299f",
+      "a217_bytes": 18885,
+      "a217_sha256": "0cfc5364d54b4177adbd8926bda478acd24acf9f207e43e3645c34df88837940",
+      "native_sha256": "0cfc5364d54b4177adbd8926bda478acd24acf9f207e43e3645c34df88837940",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/members_windows_test.go",
+      "a217_blob": "9c97e52a029da819a5032c40715735546eb844b8",
+      "a217_bytes": 15223,
+      "a217_sha256": "508732e3a61f9e44f659b15b51c5f78cc595de6ba2d8a30978fc3e3fbb8700bb",
+      "native_sha256": "508732e3a61f9e44f659b15b51c5f78cc595de6ba2d8a30978fc3e3fbb8700bb",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/native_cleanup_windows_test.go",
+      "a217_blob": "e17b0086ef9c417d53716eafc2c714d9f46a55ee",
+      "a217_bytes": 9229,
+      "a217_sha256": "310f9ca2a26f93740ebc81ad4acb3e792fb47c8266ccf80c9c5b5aad399b6d60",
+      "native_sha256": "310f9ca2a26f93740ebc81ad4acb3e792fb47c8266ccf80c9c5b5aad399b6d60",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/outcome_faults_windows_test.go",
+      "a217_blob": "4b54d43dfce901cd56ad7d4bd7b90b886ea44727",
+      "a217_bytes": 4776,
+      "a217_sha256": "85d7340070eb96c24ee9406484c57dc0e338b57b9d12912de0425a996a58cfea",
+      "native_sha256": "85d7340070eb96c24ee9406484c57dc0e338b57b9d12912de0425a996a58cfea",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/outcome_windows.go",
+      "a217_blob": "39cb54ab8fd2c0589f6aecd85e1d9ac18bdcba38",
+      "a217_bytes": 2115,
+      "a217_sha256": "6ce7b2f82c52f163b6a17e93fef66cf65e76f2ee41cfdaa619e045cca0cb0448",
+      "native_sha256": "6ce7b2f82c52f163b6a17e93fef66cf65e76f2ee41cfdaa619e045cca0cb0448",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/outcome_windows_test.go",
+      "a217_blob": "39febddd51b659d483d3799f1c0ae2ffcd4ca07e",
+      "a217_bytes": 2815,
+      "a217_sha256": "0627df97b50054cc9382e35e461b8e28a6d5dbcb5407a35a56b2fccf78f41f18",
+      "native_sha256": "0627df97b50054cc9382e35e461b8e28a6d5dbcb5407a35a56b2fccf78f41f18",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/stdio_windows.go",
+      "a217_blob": "98beaedf13824b08e5d49624c9c6a8767620db8f",
+      "a217_bytes": 3148,
+      "a217_sha256": "d1fada91384230ff84d68dd3359ce5f066637cf0ca6448976d078f37bd11a2d9",
+      "native_sha256": "d1fada91384230ff84d68dd3359ce5f066637cf0ca6448976d078f37bd11a2d9",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/stdio_windows_test.go",
+      "a217_blob": "2fdd1245ebfa3d2dc8e536facdc4183b51032905",
+      "a217_bytes": 14079,
+      "a217_sha256": "5c1d333eabd8c700c343f2c415d859e022add6a91db1494a737858946837c68f",
+      "native_sha256": "5c1d333eabd8c700c343f2c415d859e022add6a91db1494a737858946837c68f",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/wait_legacy_windows_test.go",
+      "a217_blob": "01311adcc77cfb1a443bdc41498fa2b2274aa19f",
+      "a217_bytes": 1195,
+      "a217_sha256": "a45cfed4aa9fb9d67ef6d1201f6225db149d64ed4feface8aba698c384fe3bbb",
+      "native_sha256": "a45cfed4aa9fb9d67ef6d1201f6225db149d64ed4feface8aba698c384fe3bbb",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/wait_windows.go",
+      "a217_blob": "064a3777627712b04f29eef73704ca4897a150f6",
+      "a217_bytes": 2431,
+      "a217_sha256": "e68d3c473974ca6d22964f1d211b50edb020663c3c1a669152499f6421ba6925",
+      "native_sha256": "e68d3c473974ca6d22964f1d211b50edb020663c3c1a669152499f6421ba6925",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/wait_windows_test.go",
+      "a217_blob": "c6c6fb5c7e109b1f3d8c96b0112d49eae08c4543",
+      "a217_bytes": 7380,
+      "a217_sha256": "43d79be4ba2701d9b8ed6d0ff849c71c9b92f1f5072ef4b9fce1b95e119b205d",
+      "native_sha256": "43d79be4ba2701d9b8ed6d0ff849c71c9b92f1f5072ef4b9fce1b95e119b205d",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/include/identity_v1.h",
+      "a217_blob": "13d535c80c1fd1fdd0f075799cc18b9611772fb8",
+      "a217_bytes": 6145,
+      "a217_sha256": "8735b65a7fb2a58ced76d829b0ad7c66fab0fd35dbae304a7174c2586c260f1d",
+      "native_sha256": "8735b65a7fb2a58ced76d829b0ad7c66fab0fd35dbae304a7174c2586c260f1d",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/include/members_v1.h",
+      "a217_blob": "4ced211c17c8c5977f4e9c394c2ba07083cf5924",
+      "a217_bytes": 10860,
+      "a217_sha256": "d8baf33952a41383ec24a954e6e9363b93fa136d9b81a8723a1805dbb54b71ac",
+      "native_sha256": "d8baf33952a41383ec24a954e6e9363b93fa136d9b81a8723a1805dbb54b71ac",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/include/owner_v1.h",
+      "a217_blob": "3bda9dce0dd1f316da99985eec3300bc78f67a68",
+      "a217_bytes": 10869,
+      "a217_sha256": "441ee6dfb105e00c3073d42bd69d828864711cc3053aafa3676f9da928e60615",
+      "native_sha256": "441ee6dfb105e00c3073d42bd69d828864711cc3053aafa3676f9da928e60615",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/src/argv0_tests.rs",
+      "a217_blob": "6661864cf1fa863d89c96c8e62d35a26c3173f71",
+      "a217_bytes": 6619,
+      "a217_sha256": "b2dc5ea754413ca83e4729592ae35dfb2342a2a46a0554bdfa7db0c73b3121cf",
+      "native_sha256": "b2dc5ea754413ca83e4729592ae35dfb2342a2a46a0554bdfa7db0c73b3121cf",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/src/identity.rs",
+      "a217_blob": "a01f21656d55b3689a0ac0eb700cd6c74dc3a73d",
+      "a217_bytes": 25005,
+      "a217_sha256": "f4a091e54e31975482fcca4943c69085701caf30fbcc133faeaca452f7ba5ec5",
+      "native_sha256": "f4a091e54e31975482fcca4943c69085701caf30fbcc133faeaca452f7ba5ec5",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/src/lib.rs",
+      "a217_blob": "2a89392d5cf7d18fa9139170b7fea4a2ce31cac2",
+      "a217_bytes": 25843,
+      "a217_sha256": "4bbb985928887c11b311baa7194a38de39c6e4fbdaf8480a4bd25700a27fb025",
+      "native_sha256": "4bbb985928887c11b311baa7194a38de39c6e4fbdaf8480a4bd25700a27fb025",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/src/members.rs",
+      "a217_blob": "69dddfc5016f66a936ece97e5769d650a3e1136e",
+      "a217_bytes": 23779,
+      "a217_sha256": "a666f1f1493199d8539513aaacab407561b2ec83ccfe7fcf9b994aa536f2d88b",
+      "native_sha256": "a666f1f1493199d8539513aaacab407561b2ec83ccfe7fcf9b994aa536f2d88b",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/src/members_tests.rs",
+      "a217_blob": "d362d8339ec67147691f5678640bef7247010745",
+      "a217_bytes": 33559,
+      "a217_sha256": "f4fdc69e4231684c3714a8a91345006a213c76255414251f8318625b84a506cc",
+      "native_sha256": "f4fdc69e4231684c3714a8a91345006a213c76255414251f8318625b84a506cc",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/src/process_borrow.rs",
+      "a217_blob": "8af6740dfd0ef4538e1b90b9a248b7b691fda01a",
+      "a217_bytes": 1659,
+      "a217_sha256": "7df96b3a204297629d1217d7c13e8a335f8942c6f7b8cc7dd9079c0463a3e575",
+      "native_sha256": "7df96b3a204297629d1217d7c13e8a335f8942c6f7b8cc7dd9079c0463a3e575",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/src/process_borrow_tests.rs",
+      "a217_blob": "b2fa752d807c325cd17721bd7d1c3cbeeeef6a88",
+      "a217_bytes": 5545,
+      "a217_sha256": "7699969906725b8d05d1398654e53b438b7c35058b43f03ba8f9cb2e17936dbe",
+      "native_sha256": "7699969906725b8d05d1398654e53b438b7c35058b43f03ba8f9cb2e17936dbe",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/src/tests.rs",
+      "a217_blob": "6799d78d143d20daabdf5ee0751ca304b00a4018",
+      "a217_bytes": 13334,
+      "a217_sha256": "d4700a00cc24958869078a1a0e1a0c2bf1f982ba19f9621abffa0d10786d0716",
+      "native_sha256": "d4700a00cc24958869078a1a0e1a0c2bf1f982ba19f9621abffa0d10786d0716",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/src/argv0_tests.rs",
+      "a217_blob": "b81b42423ff66b5e049ac5dd5e32a8d8336f814d",
+      "a217_bytes": 1625,
+      "a217_sha256": "d1ed861fd8cf6fd8c7a757193e44eba649d89873b3bd23879fbfa71b25623afe",
+      "native_sha256": "d1ed861fd8cf6fd8c7a757193e44eba649d89873b3bd23879fbfa71b25623afe",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/src/bin/owner_child.rs",
+      "a217_blob": "a084e8e1b4a4740b7f9064434d9240266c96892f",
+      "a217_bytes": 13902,
+      "a217_sha256": "b7fb2b2084aabecb35963acee9e975d63cc40a37b169be97c73ca67fee326758",
+      "native_sha256": "b7fb2b2084aabecb35963acee9e975d63cc40a37b169be97c73ca67fee326758",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/src/bin/owner_crash_fixture.rs",
+      "a217_blob": "9f716015bfbcd8f9a2824ad050b5a4a58566dce4",
+      "a217_bytes": 9044,
+      "a217_sha256": "12b12ec814778c6de86eb7cf959c4d5f24f94bad785437f878862e4bb073323e",
+      "native_sha256": "12b12ec814778c6de86eb7cf959c4d5f24f94bad785437f878862e4bb073323e",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/src/foreground_console_tests.rs",
+      "a217_blob": "11316ffbc6400e44ea3dd0a6a02c9020ca47f903",
+      "a217_bytes": 1423,
+      "a217_sha256": "e48bef218af28e0952fc71bbdae7e3f8347c28818781e1a475018d0456db2012",
+      "native_sha256": "e48bef218af28e0952fc71bbdae7e3f8347c28818781e1a475018d0456db2012",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/src/job_member_tests.rs",
+      "a217_blob": "22e8d9ae5671a58b7081d3f7519656155167ef23",
+      "a217_bytes": 23506,
+      "a217_sha256": "23c7b213c8fba97d71665f057d099a12c51cff8067c1ce86b3db57a19ec31a28",
+      "native_sha256": "23c7b213c8fba97d71665f057d099a12c51cff8067c1ce86b3db57a19ec31a28",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/src/job_members.rs",
+      "a217_blob": "2291e3d523b9dc33c5dcc929550df37e59ac0637",
+      "a217_bytes": 25516,
+      "a217_sha256": "47a8581a90130db5288fe1a188b357b5aa1a95fc4edffab7375d51c6e6b44db0",
+      "native_sha256": "47a8581a90130db5288fe1a188b357b5aa1a95fc4edffab7375d51c6e6b44db0",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/src/launch_context.rs",
+      "a217_blob": "13cd1fbac2881a2535fd74c92cba3e74cd0cd96d",
+      "a217_bytes": 11377,
+      "a217_sha256": "bd6aad65d1a753076da0b81a41ab1dec31b67e8da6f0d451c1d6e8ed8be5322a",
+      "native_sha256": "bd6aad65d1a753076da0b81a41ab1dec31b67e8da6f0d451c1d6e8ed8be5322a",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/src/lib.rs",
+      "a217_blob": "91f684a82616de706b87b351e3f92ef78459827d",
+      "a217_bytes": 2108,
+      "a217_sha256": "8619ae0038dce21748270284180913a91e5340e1de91f898f25758a95101a8d9",
+      "native_sha256": "8619ae0038dce21748270284180913a91e5340e1de91f898f25758a95101a8d9",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/src/native_failure_tests.rs",
+      "a217_blob": "46f37a23a0104bf5e7a6f85bf3197ffb6fcfea63",
+      "a217_bytes": 33708,
+      "a217_sha256": "adda0b64a265e3daa58387366b0e4056903f6f06027c33778a90e021cab20a6f",
+      "native_sha256": "adda0b64a265e3daa58387366b0e4056903f6f06027c33778a90e021cab20a6f",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/src/process_borrow_tests.rs",
+      "a217_blob": "7819cd248c4cb66c9f16aeecdbec0216a568913c",
+      "a217_bytes": 3687,
+      "a217_sha256": "115b4141c8059d4dd7f6da690571d959c3bb5ae28edbe195acb306265b853244",
+      "native_sha256": "115b4141c8059d4dd7f6da690571d959c3bb5ae28edbe195acb306265b853244",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/src/token_user.rs",
+      "a217_blob": "9a2dbd58f52800b6c35300afcf51a1c5036d5113",
+      "a217_bytes": 13337,
+      "a217_sha256": "e42eb6063b51e7b8e7284c460548b3f182ff4f9097880e379370e989cb44f839",
+      "native_sha256": "e42eb6063b51e7b8e7284c460548b3f182ff4f9097880e379370e989cb44f839",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/src/windows.rs",
+      "a217_blob": "63d1c91514f6f84753d50eb12a0a6bbe2b0ee514",
+      "a217_bytes": 42672,
+      "a217_sha256": "4c031c1a3824b83c7cec4a63a61120c5d9597f893c0819f6dee8613cc14e90a9",
+      "native_sha256": "110d7cec3dc450cf4049c8e8435fd54f50f734fb4c7d42bd126a75158459f499",
+      "byte_equal": false
+    },
+    {
+      "path": "experiments/rust-process-owner/tests/launch_context.rs",
+      "a217_blob": "a60704b07ec9b71388d129e1ba47bb04ec647ecd",
+      "a217_bytes": 13066,
+      "a217_sha256": "d493658aa4b3ba42d86cf40773b0c7868785f6ed201af7a69393ee209c91dcee",
+      "native_sha256": "d493658aa4b3ba42d86cf40773b0c7868785f6ed201af7a69393ee209c91dcee",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/tests/lifecycle.rs",
+      "a217_blob": "0aa1350c7e2ac6288122a7c38d11dd5f02052e1d",
+      "a217_bytes": 37408,
+      "a217_sha256": "fe94856d11533d2966e1c73eeaa1fffee7185df0a28bf6a34283d3efd385e6cd",
+      "native_sha256": "fe94856d11533d2966e1c73eeaa1fffee7185df0a28bf6a34283d3efd385e6cd",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/tests/owner_crash.rs",
+      "a217_blob": "5431f3ece763aea6ad86ce75a29ccbe503065e27",
+      "a217_bytes": 11077,
+      "a217_sha256": "0e37033ec3845a6fd0d881b4ab5ee12edc60a4a011406e1d9b189ce6d386cd8e",
+      "native_sha256": "0e37033ec3845a6fd0d881b4ab5ee12edc60a4a011406e1d9b189ce6d386cd8e",
+      "byte_equal": true
+    },
+    {
+      "path": "experiments/rust-process-owner/tests/stdio.rs",
+      "a217_blob": "956033ecd1246eceed9738fa3b7aef103ed1bffd",
+      "a217_bytes": 17152,
+      "a217_sha256": "fb7183d8fe2d3adc2bcb74a93fbe929b0277212079048c58d6f1d105c430476f",
+      "native_sha256": "fb7183d8fe2d3adc2bcb74a93fbe929b0277212079048c58d6f1d105c430476f",
+      "byte_equal": true
+    }
+  ],
+  "native_dll": {
+    "bytes": 192512,
+    "sha256": "dfa87a10a39e9110cda735ae6a987bfa64b03446529072710723e9b6ea0dca56"
+  },
+  "provenance": {
+    "native_root_receiving_sha256": "f1d6a3ac66b16fc58e1681693d5940baca3e561fae5def873f5cd3e63e734ad9",
+    "native_original_receipt_sha256": "d375c2a1368c602d34477546e42fceada914dffb732be9f40f21e86c549542d7",
+    "original_source_manifest_sha256": "a2e93e16783e54e8afe94d78a9f73236a526fd614e84bba27740284c55d83c2b",
+    "consumer_materialization_sha256": "10e3518c4f2592de3731a2970f8bdeef3dc65b970700262d9e8cd0cd60e9b7f7",
+    "consumer_source_files_sha256": "259d3040d44f51233c7ae60daca4482f8ac75d3d06f7ce8e25f0ca768d56e4ca",
+    "consumer_fresh_bytes_match_native_manifest": true,
+    "original_mapping_sha256": "af5067f6121e8b3ccdd66af1b503a85288a720b61565f1fc4d32720915f0e6cf"
+  },
+  "semantic_delta": {
+    "path": "experiments/rust-process-owner/src/windows.rs",
+    "a217_sha256": "4c031c1a3824b83c7cec4a63a61120c5d9597f893c0819f6dee8613cc14e90a9",
+    "native_sha256": "110d7cec3dc450cf4049c8e8435fd54f50f734fb4c7d42bd126a75158459f499",
+    "a217_bytes": 42672,
+    "native_bytes": 43064,
+    "patch": "native-vs-a217-windows.patch",
+    "full_diff_read": true,
+    "formatting_only": false,
+    "description": "Adds STARTF_USESHOWWINDOW and SW_HIDE only for !foreground. This changes initial GUI show policy and supplies the intended later-console policy; target console visibility is not established by static review.",
+    "supplemental_review": "NATIVE-DELTA-REVIEW.md",
+    "supplemental_review_status": "complete_exact_delta_static_review"
+  },
+  "review_applicability": {
+    "byte_identical_files": 63,
+    "different_files": 1,
+    "full_source_byte_equivalence": false,
+    "all_a217_files_reviewed_in_full": true,
+    "windows_rs_review": "Full a217 file plus bounded exact native delta; no second full native-file read claimed.",
+    "native_test_or_behavior_result_inferred": false,
+    "prior_results_reclassified": false
+  }
+}
