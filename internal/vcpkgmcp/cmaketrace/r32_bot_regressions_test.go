@@ -61,3 +61,24 @@ func TestR32OversizedLineDrainStopsOnCancellation(t *testing.T) {
 }
 
 var _ io.Reader = (*r32CancelAfterChunkReader)(nil)
+
+type traceStallReader struct {
+	remaining int
+}
+
+func (r *traceStallReader) Read([]byte) (int, error) {
+	if r.remaining == 0 {
+		return 0, errors.New("trace parser kept retrying a stalled reader")
+	}
+	r.remaining--
+	return 0, nil
+}
+
+func TestParseTraceStreamReportsNoProgress(t *testing.T) {
+	line := strings.NewReader(`{"file":"f","line":1,"cmd":"set","args":[]}` + "\n")
+	reader := io.MultiReader(line, &traceStallReader{remaining: 1024})
+	result, err := parseTraceStream(t.Context(), reader, Limits{})
+	if !errors.Is(err, io.ErrNoProgress) || len(result.records) != 0 || result.sawAnyContent {
+		t.Fatalf("stalled trace returned records=%d content=%t error=%v", len(result.records), result.sawAnyContent, err)
+	}
+}

@@ -2,11 +2,11 @@ package cmaketrace
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
-	"strings"
 )
 
 // traceLine is the raw json-v1 shape this package reads off one line.
@@ -95,7 +95,7 @@ func (p parseResult) incompleteReasons() []Reason {
 const cancellationCheckInterval = 4096
 
 // readChunkBytes is the size of the bufio.Reader buffer, and therefore the
-// largest single allocation one ReadSlice can hand back. It is stated
+// largest single slice one ReadSlice can hand back. It is stated
 // explicitly rather than left to bufio's default so the memory ceiling
 // readLine documents (maxBytes + readChunkBytes) is a property of this file
 // and not of a library default that could change.
@@ -171,18 +171,19 @@ func parseTraceStream(ctx context.Context, r io.Reader, lim Limits) (parseResult
 	}
 }
 
-// consumeLine folds one raw line into res. It returns stop=true when either
-// record-retention ceiling was reached, so the caller abandons the rest.
-func (p *parseResult) consumeLine(raw string, maxRecords int, maxRetainedRecordBytes int64) (stop bool) {
-	line := strings.TrimRight(raw, "\r\n")
-	line = strings.TrimRight(line, "\r")
-	if strings.TrimSpace(line) == "" {
+// consumeLine decodes the raw line before the next read. Retained records own
+// their decoded fields and never hold the reader's byte slice. It returns true
+// when a retention ceiling or an unsupported version stops the parse.
+func (p *parseResult) consumeLine(raw []byte, maxRecords int, maxRetainedRecordBytes int64) (stop bool) {
+	line := bytes.TrimRight(raw, "\r\n")
+	line = bytes.TrimRight(line, "\r")
+	if len(bytes.TrimSpace(line)) == 0 {
 		return false
 	}
 	p.sawAnyContent = true
 
 	var tl traceLine
-	if err := json.Unmarshal([]byte(line), &tl); err != nil {
+	if err := json.Unmarshal(line, &tl); err != nil {
 		p.malformedCount++
 		return false
 	}
@@ -260,38 +261,38 @@ func retainedTraceRecordBytes(tl traceLine) int64 {
 // bound the memory it was there to bound. ReadSlice instead returns at most one
 // reader-buffer's worth and reports bufio.ErrBufferFull, so an oversized line
 // arrives as a sequence of readChunkBytes-sized pieces that are counted,
-// discarded once the ceiling trips, and never concatenated. Peak retention is
-// therefore maxBytes + readChunkBytes regardless of how long the line is.
-func readLine(ctx context.Context, br *bufio.Reader, maxBytes int) (line string, consumed int, tooLong bool, err error) {
-	var b strings.Builder
-	overflowed := false
+// discarded once the ceiling trips, and never concatenated. Multi-buffer
+// lines copy accepted chunks into storage capped at maxBytes. A single-buffer
+// line borrows the reader buffer and is usable only until its next read.
+func readLine(ctx context.Context, br *bufio.Reader, maxBytes int) (line []byte, consumed int, tooLong bool, err error) {
+	var accumulated []byte
 	for {
 		if err := ctx.Err(); err != nil {
-			return b.String(), consumed, overflowed, err
+			return accumulated, consumed, tooLong, err
 		}
 		chunk, readErr := br.ReadSlice('\n')
 		consumed += len(chunk)
-		if !overflowed {
-			if b.Len()+len(chunk) > maxBytes {
-				overflowed = true
-				// Release what was accumulated so far: the line is already
-				// known unusable, so retaining its prefix would keep exactly
-				// the memory this ceiling exists to cap.
-				b.Reset()
+		if !tooLong {
+			if len(chunk) > maxBytes-len(accumulated) {
+				tooLong = true
+				accumulated = nil
+			} else if accumulated == nil && !errors.Is(readErr, bufio.ErrBufferFull) {
+				// The caller finishes decoding before the next bufio read.
+				return chunk, consumed, false, readErr
 			} else {
-				// Write COPIES chunk, which is required: ReadSlice hands back a
-				// slice aliasing br's internal buffer, invalidated by the next
-				// read.
-				b.Write(chunk)
+				needed := len(accumulated) + len(chunk)
+				if needed > cap(accumulated) {
+					capacity := cap(accumulated) + cap(accumulated)/2
+					capacity = min(maxBytes, max(needed, capacity))
+					grown := make([]byte, len(accumulated), capacity)
+					copy(grown, accumulated)
+					accumulated = grown
+				}
+				accumulated = append(accumulated, chunk...)
 			}
 		}
-		if errors.Is(readErr, bufio.ErrBufferFull) {
-			// No delimiter within one buffer: keep draining this same line in
-			// bounded pieces. Not an error and not EOF.
-			continue
+		if !errors.Is(readErr, bufio.ErrBufferFull) {
+			return accumulated, consumed, tooLong, readErr
 		}
-		// Any other outcome ends the line: nil means the delimiter was found,
-		// io.EOF means the stream ended, anything else is a real read error.
-		return b.String(), consumed, overflowed, readErr
 	}
 }
