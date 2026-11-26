@@ -1,6 +1,10 @@
 package patchesapply
 
-import "strings"
+import (
+	"strings"
+
+	"mcp-local-hub/internal/vcpkgmcp/internal/cmakelex"
+)
 
 // This file implements a deliberately narrow CMake lexer: it is NOT a CMake
 // parser and does not execute anything. It recognizes just enough shape —
@@ -88,11 +92,11 @@ func splitStatementsChecked(src string) (out []statement, ok bool) {
 		c := src[i]
 		switch {
 		case c == '#':
-			if eq, contentStart, isBracket := matchBracketOpen(src, i+1); isBracket {
+			if eq, contentStart, isBracket := cmakelex.MatchBracketOpen(src, i+1); isBracket {
 				// bracket_comment ::= '#' bracket_argument — spans lines;
 				// the ENTIRE thing (including any decoy statement text
 				// inside it) must never be treated as code.
-				_, afterClose, closed := findBracketClose(src, contentStart, eq)
+				_, afterClose, closed := cmakelex.FindBracketClose(src, contentStart, eq)
 				if !closed {
 					countLines(i, n)
 					return out, false
@@ -114,12 +118,12 @@ func splitStatementsChecked(src string) (out []statement, ok bool) {
 		case c == '"':
 			// Skip a bare quoted string sitting outside any call (rare, but
 			// don't misinterpret its contents as statement syntax).
-			end := skipQuoted(src, i)
+			end := cmakelex.SkipQuoted(src, i)
 			countLines(i, end)
 			i = end
 		case c == '[':
-			if eq, contentStart, isBracket := matchBracketOpen(src, i); isBracket {
-				_, afterClose, closed := findBracketClose(src, contentStart, eq)
+			if eq, contentStart, isBracket := cmakelex.MatchBracketOpen(src, i); isBracket {
+				_, afterClose, closed := cmakelex.FindBracketClose(src, contentStart, eq)
 				if !closed {
 					countLines(i, n)
 					return out, false
@@ -166,11 +170,11 @@ func splitStatementsChecked(src string) (out []statement, ok bool) {
 					}
 					continue
 				case src[k] == '"':
-					k = skipQuoted(src, k)
+					k = cmakelex.SkipQuoted(src, k)
 					continue
 				case src[k] == '#':
-					if eq, contentStart, isBracket := matchBracketOpen(src, k+1); isBracket {
-						_, afterClose, closed := findBracketClose(src, contentStart, eq)
+					if eq, contentStart, isBracket := cmakelex.MatchBracketOpen(src, k+1); isBracket {
+						_, afterClose, closed := cmakelex.FindBracketClose(src, contentStart, eq)
 						if !closed {
 							k = n
 							break
@@ -186,8 +190,8 @@ func splitStatementsChecked(src string) (out []statement, ok bool) {
 					}
 					continue
 				case src[k] == '[':
-					if eq, contentStart, isBracket := matchBracketOpen(src, k); isBracket {
-						if _, afterClose, closed := findBracketClose(src, contentStart, eq); closed {
+					if eq, contentStart, isBracket := cmakelex.MatchBracketOpen(src, k); isBracket {
+						if _, afterClose, closed := cmakelex.FindBracketClose(src, contentStart, eq); closed {
 							k = afterClose
 							continue
 						}
@@ -228,73 +232,6 @@ func splitStatementsChecked(src string) (out []statement, ok bool) {
 		}
 	}
 	return out, true
-}
-
-// skipQuoted returns the index just past a double-quoted string starting at
-// src[start] (src[start] == '"'), honoring backslash escapes — including a
-// quoted_continuation ('\' + newline), which this simply treats as an
-// escaped pair like any other and keeps scanning across, never ending the
-// string at that newline.
-func skipQuoted(src string, start int) int {
-	i := start + 1
-	n := len(src)
-	for i < n {
-		if src[i] == '\\' && i+1 < n {
-			i += 2
-			continue
-		}
-		if src[i] == '"' {
-			return i + 1
-		}
-		i++
-	}
-	return n
-}
-
-// matchBracketOpen checks whether src[at] begins a bracket_open
-// ('[' '='* '['). Returns the number of '=' characters and the index just
-// past the opening pair when it does.
-func matchBracketOpen(src string, at int) (equals int, contentStart int, ok bool) {
-	n := len(src)
-	if at >= n || src[at] != '[' {
-		return 0, 0, false
-	}
-	p := at + 1
-	for p < n && src[p] == '=' {
-		p++
-	}
-	if p >= n || src[p] != '[' {
-		return 0, 0, false
-	}
-	return p - (at + 1), p + 1, true
-}
-
-// findBracketClose searches from contentStart for a bracket_close
-// (']' '='* ']') with EXACTLY the given equals count — per the grammar, a
-// bracket_close with a DIFFERENT equals count does not terminate the
-// bracket (e.g. a literal "]]" inside a "[=[ ... ]=]" argument is just
-// content). Returns the content end (start of the close sequence) and the
-// index just past it; ok is false if no matching close exists before EOF.
-func findBracketClose(src string, contentStart, equals int) (contentEnd, afterClose int, ok bool) {
-	n := len(src)
-	for p := contentStart; p < n; p++ {
-		if src[p] != ']' {
-			continue
-		}
-		q := p + 1
-		matched := true
-		for e := 0; e < equals; e++ {
-			if q >= n || src[q] != '=' {
-				matched = false
-				break
-			}
-			q++
-		}
-		if matched && q < n && src[q] == ']' {
-			return p, q + 1, true
-		}
-	}
-	return 0, 0, false
 }
 
 func isIdentStart(c byte) bool {
@@ -347,8 +284,8 @@ func tokenize(s string) []token {
 		case isSpaceOrNL(c):
 			i++
 		case c == '#':
-			if eq, contentStart, isBracket := matchBracketOpen(s, i+1); isBracket {
-				if _, afterClose, closed := findBracketClose(s, contentStart, eq); closed {
+			if eq, contentStart, isBracket := cmakelex.MatchBracketOpen(s, i+1); isBracket {
+				if _, afterClose, closed := cmakelex.FindBracketClose(s, contentStart, eq); closed {
 					i = afterClose
 					continue
 				}
@@ -360,14 +297,14 @@ func tokenize(s string) []token {
 				i = i + j + 1
 			}
 		case c == '"':
-			end := skipQuoted(s, i)
+			end := cmakelex.SkipQuoted(s, i)
 			raw := s[i+1 : end-1]
 			text := unescapeQuoted(raw)
 			tokens = append(tokens, token{Text: text, listText: text, Quoted: true})
 			i = end
 		case c == '[':
-			if eq, contentStart, isBracket := matchBracketOpen(s, i); isBracket {
-				if contentEnd, afterClose, closed := findBracketClose(s, contentStart, eq); closed {
+			if eq, contentStart, isBracket := cmakelex.MatchBracketOpen(s, i); isBracket {
+				if contentEnd, afterClose, closed := cmakelex.FindBracketClose(s, contentStart, eq); closed {
 					content := s[contentStart:contentEnd]
 					// CMake bracket arguments ignore one newline immediately after
 					// the opening delimiter; keeping it turns a real filename into

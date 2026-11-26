@@ -4,12 +4,9 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
-)
 
-// This is a small, faithful mirror of patchesapply/lexer.go's CMake lexical
-// rules. Keep the two implementations aligned: bracket comments/arguments
-// have delimiter-matched closing brackets, bracket values are Raw, and a
-// quoted trailing-backslash newline is a continuation, not a token boundary.
+	"mcp-local-hub/internal/vcpkgmcp/internal/cmakelex"
+)
 
 // statement is one `name(args...)` call found in a portfile. Name is always
 // LOWER-CASE: CMake command names are case-insensitive (cmake-language(7)),
@@ -135,8 +132,8 @@ func stripComments(content string) string {
 	for i := 0; i < len(content); {
 		switch content[i] {
 		case '#':
-			if eq, start, ok := matchBracketOpen(content, i+1); ok {
-				_, after, closed := findBracketClose(content, start, eq)
+			if eq, start, ok := cmakelex.MatchBracketOpen(content, i+1); ok {
+				_, after, closed := cmakelex.FindBracketClose(content, start, eq)
 				if !closed {
 					return out.String()
 				}
@@ -156,12 +153,12 @@ func stripComments(content string) string {
 			out.WriteString(content[i : i+j+1])
 			i += j + 1
 		case '"':
-			end := skipQuoted(content, i)
+			end := cmakelex.SkipQuoted(content, i)
 			out.WriteString(content[i:end])
 			i = end
 		case '[':
-			if eq, start, ok := matchBracketOpen(content, i); ok {
-				_, after, closed := findBracketClose(content, start, eq)
+			if eq, start, ok := cmakelex.MatchBracketOpen(content, i); ok {
+				_, after, closed := cmakelex.FindBracketClose(content, start, eq)
 				if closed {
 					out.WriteString(content[i:after])
 					i = after
@@ -183,8 +180,8 @@ func splitStatementsChecked(src string) (out []statement, ok bool) {
 	for i < n {
 		switch {
 		case src[i] == '#':
-			if eq, start, bracket := matchBracketOpen(src, i+1); bracket {
-				_, after, closed := findBracketClose(src, start, eq)
+			if eq, start, bracket := cmakelex.MatchBracketOpen(src, i+1); bracket {
+				_, after, closed := cmakelex.FindBracketClose(src, start, eq)
 				if !closed {
 					return out, false
 				}
@@ -197,10 +194,10 @@ func splitStatementsChecked(src string) (out []statement, ok bool) {
 				i = n
 			}
 		case src[i] == '"':
-			i = skipQuoted(src, i)
+			i = cmakelex.SkipQuoted(src, i)
 		case src[i] == '[':
-			if eq, start, bracket := matchBracketOpen(src, i); bracket {
-				_, after, closed := findBracketClose(src, start, eq)
+			if eq, start, bracket := cmakelex.MatchBracketOpen(src, i); bracket {
+				_, after, closed := cmakelex.FindBracketClose(src, start, eq)
 				if !closed {
 					return out, false
 				}
@@ -229,10 +226,10 @@ func splitStatementsChecked(src string) (out []statement, ok bool) {
 			for k < n && depth > 0 {
 				switch {
 				case src[k] == '"':
-					k = skipQuoted(src, k)
+					k = cmakelex.SkipQuoted(src, k)
 				case src[k] == '#':
-					if eq, start, bracket := matchBracketOpen(src, k+1); bracket {
-						_, after, closed := findBracketClose(src, start, eq)
+					if eq, start, bracket := cmakelex.MatchBracketOpen(src, k+1); bracket {
+						_, after, closed := cmakelex.FindBracketClose(src, start, eq)
 						if !closed {
 							return out, false
 						}
@@ -243,8 +240,8 @@ func splitStatementsChecked(src string) (out []statement, ok bool) {
 						k = n
 					}
 				case src[k] == '[':
-					if eq, start, bracket := matchBracketOpen(src, k); bracket {
-						_, after, closed := findBracketClose(src, start, eq)
+					if eq, start, bracket := cmakelex.MatchBracketOpen(src, k); bracket {
+						_, after, closed := cmakelex.FindBracketClose(src, start, eq)
 						if !closed {
 							return out, false
 						}
@@ -283,49 +280,6 @@ func splitStatementsChecked(src string) (out []statement, ok bool) {
 	return out, true
 }
 
-func skipQuoted(src string, start int) int {
-	for i := start + 1; i < len(src); i++ {
-		if src[i] == '\\' && i+1 < len(src) {
-			i++
-			continue
-		}
-		if src[i] == '"' {
-			return i + 1
-		}
-	}
-	return len(src)
-}
-
-func matchBracketOpen(src string, at int) (equals, contentStart int, ok bool) {
-	if at >= len(src) || src[at] != '[' {
-		return 0, 0, false
-	}
-	p := at + 1
-	for p < len(src) && src[p] == '=' {
-		p++
-	}
-	if p >= len(src) || src[p] != '[' {
-		return 0, 0, false
-	}
-	return p - at - 1, p + 1, true
-}
-
-func findBracketClose(src string, contentStart, equals int) (contentEnd, afterClose int, ok bool) {
-	for p := contentStart; p < len(src); p++ {
-		if src[p] != ']' {
-			continue
-		}
-		q := p + 1
-		for e := 0; e < equals && q < len(src) && src[q] == '='; e++ {
-			q++
-		}
-		if q == p+1+equals && q < len(src) && src[q] == ']' {
-			return p, q + 1, true
-		}
-	}
-	return 0, 0, false
-}
-
 func isIdentStart(c byte) bool { return c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' }
 func isIdentByte(c byte) bool  { return isIdentStart(c) || c >= '0' && c <= '9' }
 func isSpaceOrNL(c byte) bool  { return c == ' ' || c == '\t' || c == '\r' || c == '\n' }
@@ -337,8 +291,8 @@ func tokenize(s string) []token {
 		case isSpaceOrNL(s[i]):
 			i++
 		case s[i] == '#':
-			if eq, start, bracket := matchBracketOpen(s, i+1); bracket {
-				if _, after, closed := findBracketClose(s, start, eq); closed {
+			if eq, start, bracket := cmakelex.MatchBracketOpen(s, i+1); bracket {
+				if _, after, closed := cmakelex.FindBracketClose(s, start, eq); closed {
 					i = after
 					continue
 				}
@@ -349,13 +303,13 @@ func tokenize(s string) []token {
 				i = len(s)
 			}
 		case s[i] == '"':
-			end := skipQuoted(s, i)
+			end := cmakelex.SkipQuoted(s, i)
 			text, literalDollars := unescapeQuoted(s[i+1 : end-1])
 			out = append(out, token{Text: text, Quoted: true, literalDollars: literalDollars})
 			i = end
 		case s[i] == '[':
-			if eq, start, bracket := matchBracketOpen(s, i); bracket {
-				if end, after, closed := findBracketClose(s, start, eq); closed {
+			if eq, start, bracket := cmakelex.MatchBracketOpen(s, i); bracket {
+				if end, after, closed := cmakelex.FindBracketClose(s, start, eq); closed {
 					out = append(out, token{Text: s[start:end], Quoted: true, Raw: true})
 					i = after
 					continue
