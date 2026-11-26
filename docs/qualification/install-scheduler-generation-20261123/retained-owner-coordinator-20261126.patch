@@ -1,7 +1,13 @@
 --- a/run_wave_commands.py
 +++ b/run_wave_commands.py
-@@ -91,8 +91,22 @@
-         run.save()
+@@ -10,4 +10,4 @@
+ GUARD_SHA = "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2"
+-GO = r"C:\msys64\ucrt64\lib\go\bin\go.exe"
+-GOFMT = r"C:\msys64\ucrt64\lib\go\bin\gofmt.exe"
++GO = r"Q:\msys64\ucrt64\lib\go\bin\go.exe"
++GOFMT = r"Q:\msys64\ucrt64\lib\go\bin\gofmt.exe"
+ GIT = r"C:\Program Files\Git\cmd\git.exe"
+@@ -92,7 +92,21 @@
          if not run.commands_quiescent():
 -            # Keep the original in-memory owners alive; no new command or capture access.
 +            # Physical receiving has its own window. The failed command and gate stay failed.
@@ -27,11 +33,28 @@
 +                while True:
 +                    time.sleep(1)
          return 1
-@@ -116,4 +130,7 @@
-             "controller_capture_handles_closed":stdout.closed and stderr.closed,
+@@ -112,4 +126,16 @@
+                                 startupinfo=startup,creationflags=subprocess.CREATE_NEW_CONSOLE)
+-        write_json(out/"launch.json", {"pid":proc.pid, "original_controller_retained":True})
+-        code = proc.wait()
++        try:
++            write_json(out/"launch.json", {"pid":proc.pid, "original_controller_retained":True})
++            code = proc.wait()
++        finally:
++            # Retain the original controller and captures even if publication or
++            # waiting is interrupted. Its child keeps the original native owners.
++            while True:
++                try:
++                    if proc.wait(timeout=1) is not None:
++                        break
++                except subprocess.TimeoutExpired:
++                    continue
++                except BaseException:
++                    continue
+     result={"controller_exit_code":code,"original_controller_reaped":True,
+@@ -117,2 +143,5 @@
              "seconds":time.monotonic()-started,"receipt_sha256":sha(out/"receipt.json")}
 +    physical = out/"failed-worker-physical-closure.json"
 +    if physical.is_file():
 +        result["physical_closure_receipt_sha256"] = sha(physical)
      write_json(out/"root-receiving.json",result)
-     print(json.dumps(result),flush=True)
