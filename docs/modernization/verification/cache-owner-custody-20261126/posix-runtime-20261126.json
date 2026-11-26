@@ -1,0 +1,435 @@
+{
+  "schema": "posix-reader-668-runtime-receiving-projection-v1",
+  "date_utc": "2026-11-26",
+  "pr": 668,
+  "status": "PASS",
+  "source_before": {
+    "changed_from_base": [
+      "docs/modernization/verification/go-reader-close-errors-20261122/README.md",
+      "docs/modernization/verification/go-reader-close-errors-20261122/raw-evidence.tar.gz",
+      "docs/modernization/verification/go-reader-close-errors-20261122/runtime-review.json",
+      "docs/modernization/verification/go-reader-close-errors-20261122/runtime-summary.json",
+      "docs/modernization/verification/go-reader-close-errors-20261122/source-review.json",
+      "internal/api/managed_backend_install.go",
+      "internal/api/managed_backend_reader_failures_test.go",
+      "internal/api/state_read_beneath_root_common.go",
+      "internal/api/state_read_beneath_root_failures_posix_test.go",
+      "internal/api/state_read_beneath_root_failures_test.go",
+      "internal/api/state_read_beneath_root_failures_windows_test.go",
+      "internal/api/state_read_beneath_root_posix.go",
+      "internal/api/state_read_beneath_root_windows.go"
+    ],
+    "head": "1b7655ae9a0dec7d6821d8419087fd92ccadbb62",
+    "parent": "75dbc6406123e22468f168b861d5e0622c9d5769",
+    "porcelain": "",
+    "selected_file_sha256": {
+      "go.mod": "805a7dd76431a24ebd6ce346682e7bc321e4dae0e37488448811bfa624122edd",
+      "go.sum": "61f4a30f006f3bc99b1d2500646d9fd381c3c8d72050ca76dce2f9321c3ecae2",
+      "internal/api/main_test.go": "a34d3b8e14f610945662a7aeee122068641b931af19ffd9535ba6e24b186d869",
+      "internal/api/state_read_beneath_root_failures_posix_test.go": "807066c79c0cbf1afeda6fcb7048cbf5c7837f42bf43425a53c53cc34b0734c7",
+      "internal/api/state_read_beneath_root_failures_test.go": "0e4d6bb0420fc05983600f40c1f9d8832bb8e904cc4042305be894a9c6656f8b",
+      "internal/api/state_read_beneath_root_posix.go": "40fd197685cb5a1679713eb86af3895f1756f943d8b88e577e4375c349fd27c5"
+    },
+    "tree": "d4fa28257ecd088b4c7cf49c974633cd93b796a4"
+  },
+  "source_after": {
+    "changed_from_base": [
+      "docs/modernization/verification/go-reader-close-errors-20261122/README.md",
+      "docs/modernization/verification/go-reader-close-errors-20261122/raw-evidence.tar.gz",
+      "docs/modernization/verification/go-reader-close-errors-20261122/runtime-review.json",
+      "docs/modernization/verification/go-reader-close-errors-20261122/runtime-summary.json",
+      "docs/modernization/verification/go-reader-close-errors-20261122/source-review.json",
+      "internal/api/managed_backend_install.go",
+      "internal/api/managed_backend_reader_failures_test.go",
+      "internal/api/state_read_beneath_root_common.go",
+      "internal/api/state_read_beneath_root_failures_posix_test.go",
+      "internal/api/state_read_beneath_root_failures_test.go",
+      "internal/api/state_read_beneath_root_failures_windows_test.go",
+      "internal/api/state_read_beneath_root_posix.go",
+      "internal/api/state_read_beneath_root_windows.go"
+    ],
+    "head": "1b7655ae9a0dec7d6821d8419087fd92ccadbb62",
+    "parent": "75dbc6406123e22468f168b861d5e0622c9d5769",
+    "porcelain": "",
+    "selected_file_sha256": {
+      "go.mod": "805a7dd76431a24ebd6ce346682e7bc321e4dae0e37488448811bfa624122edd",
+      "go.sum": "61f4a30f006f3bc99b1d2500646d9fd381c3c8d72050ca76dce2f9321c3ecae2",
+      "internal/api/main_test.go": "a34d3b8e14f610945662a7aeee122068641b931af19ffd9535ba6e24b186d869",
+      "internal/api/state_read_beneath_root_failures_posix_test.go": "807066c79c0cbf1afeda6fcb7048cbf5c7837f42bf43425a53c53cc34b0734c7",
+      "internal/api/state_read_beneath_root_failures_test.go": "0e4d6bb0420fc05983600f40c1f9d8832bb8e904cc4042305be894a9c6656f8b",
+      "internal/api/state_read_beneath_root_posix.go": "40fd197685cb5a1679713eb86af3895f1756f943d8b88e577e4375c349fd27c5"
+    },
+    "tree": "d4fa28257ecd088b4c7cf49c974633cd93b796a4"
+  },
+  "source_unchanged": true,
+  "source_diff_applied": false,
+  "host": {
+    "operating_system": "Linux",
+    "environment": "Ubuntu WSL2",
+    "kernel": "6.18.58.1-microsoft-standard-WSL2",
+    "architecture": "x86_64",
+    "filesystem_scope": "Windows-backed task mount",
+    "go_version": "go version go1.26.8 linux/amd64",
+    "cgo_enabled": false
+  },
+  "process_scope": {
+    "common_work_cleanup_deadline_seconds": 600,
+    "final_cleanup_reserve_seconds": 10,
+    "elapsed_seconds": 536.1076315360115,
+    "parent_shell_wrapped_command_exit_code": 0,
+    "parent_shell_elapsed_seconds": 559.64,
+    "original_linux_process_identity": "Each Go command retained original subprocess and Linux pidfd. Subreaper reaped adopted children and received ECHILD.",
+    "original_linux_capture": "Direct stdout/stderr files received and closed. Original bytes retained and SHA-256 independently recomputed.",
+    "exercised_timeout_path": false,
+    "windows_job_or_general_git_deadline_claim": false
+  },
+  "dependency_scope": {
+    "proxy": "Two existing read-only file proxies, private writable module and build caches",
+    "network_download": false,
+    "old_gate_or_other_source_reused_as_execution": false
+  },
+  "runs": [
+    {
+      "lane": "default",
+      "argv": [
+        "/usr/bin/go",
+        "test",
+        "-count=1",
+        "-timeout=90s",
+        "-p=4",
+        "-json",
+        "-run",
+        "^(TestReadStateBeneathRootRetainsPrimaryAndCloseFailures|TestReadStateBeneathRootParentCloseConsumedOnce|TestStateReadBeneathRootAbsenceRequiresOnlyMissing|TestReadStateBeneathRootMissingRetainsParentCloseFailure|TestCompleteStateReadCloseZeroesBytes)$",
+        "./internal/api"
+      ],
+      "status": "PASS",
+      "exit_code": 0,
+      "wall_seconds": 366.611520475999,
+      "go_package_event_seconds": 0.802,
+      "original_pidfd_acquired": true,
+      "original_process_reaped": true,
+      "adopted_children_reaped_count": 1,
+      "linux_tree_closure": true,
+      "no_children": true,
+      "capture_files_closed": true,
+      "work_deadline_exceeded": false,
+      "roots": [
+        "TestCompleteStateReadCloseZeroesBytes",
+        "TestReadStateBeneathRootMissingRetainsParentCloseFailure",
+        "TestReadStateBeneathRootParentCloseConsumedOnce",
+        "TestReadStateBeneathRootRetainsPrimaryAndCloseFailures",
+        "TestStateReadBeneathRootAbsenceRequiresOnlyMissing"
+      ],
+      "test_and_subtest_results": {
+        "TestCompleteStateReadCloseZeroesBytes": [
+          "run",
+          "pass"
+        ],
+        "TestCompleteStateReadCloseZeroesBytes/prior-failure": [
+          "run",
+          "pass"
+        ],
+        "TestCompleteStateReadCloseZeroesBytes/successful-read": [
+          "run",
+          "pass"
+        ],
+        "TestReadStateBeneathRootMissingRetainsParentCloseFailure": [
+          "run",
+          "pass"
+        ],
+        "TestReadStateBeneathRootParentCloseConsumedOnce": [
+          "run",
+          "pass"
+        ],
+        "TestReadStateBeneathRootRetainsPrimaryAndCloseFailures": [
+          "run",
+          "pass"
+        ],
+        "TestReadStateBeneathRootRetainsPrimaryAndCloseFailures/both-closes": [
+          "run",
+          "pass"
+        ],
+        "TestReadStateBeneathRootRetainsPrimaryAndCloseFailures/cancel-and-both-closes": [
+          "run",
+          "pass"
+        ],
+        "TestReadStateBeneathRootRetainsPrimaryAndCloseFailures/final-close": [
+          "run",
+          "pass"
+        ],
+        "TestReadStateBeneathRootRetainsPrimaryAndCloseFailures/parent-close": [
+          "run",
+          "pass"
+        ],
+        "TestReadStateBeneathRootRetainsPrimaryAndCloseFailures/stat-and-both-closes": [
+          "run",
+          "pass"
+        ],
+        "TestReadStateBeneathRootRetainsPrimaryAndCloseFailures/step-and-both-closes": [
+          "run",
+          "pass"
+        ],
+        "TestStateReadBeneathRootAbsenceRequiresOnlyMissing": [
+          "run",
+          "pass"
+        ],
+        "TestStateReadBeneathRootAbsenceRequiresOnlyMissing/close-caused-not-exist": [
+          "run",
+          "pass"
+        ],
+        "TestStateReadBeneathRootAbsenceRequiresOnlyMissing/joined-missing-and-close": [
+          "run",
+          "pass"
+        ],
+        "TestStateReadBeneathRootAbsenceRequiresOnlyMissing/joined-single-missing-is-not-direct": [
+          "run",
+          "pass"
+        ],
+        "TestStateReadBeneathRootAbsenceRequiresOnlyMissing/open-with-compound-cause": [
+          "run",
+          "pass"
+        ],
+        "TestStateReadBeneathRootAbsenceRequiresOnlyMissing/original-missing": [
+          "run",
+          "pass"
+        ],
+        "TestStateReadBeneathRootAbsenceRequiresOnlyMissing/untyped-not-exist": [
+          "run",
+          "pass"
+        ],
+        "TestStateReadBeneathRootAbsenceRequiresOnlyMissing/wrapped-missing-is-not-direct": [
+          "run",
+          "pass"
+        ]
+      },
+      "counts": {
+        "fail": 0,
+        "pass": 20,
+        "run": 20,
+        "skip": 0
+      },
+      "package_terminal": [
+        "pass"
+      ],
+      "independent_raw_event_counts": [
+        {
+          "action": "run",
+          "count": 20
+        },
+        {
+          "action": "pass",
+          "count": 20
+        }
+      ],
+      "stdout": {
+        "bytes": 18691,
+        "sha256": "a3cf6f8f9113268cc16fb12c38934b60fba1e634f192ce7e76ec371b9d26f032"
+      },
+      "stderr": {
+        "bytes": 555,
+        "sha256": "9f3fdebcab50e9fa0ddd198dbf93220b6a42edfe00e989733591d0a2a10b3003"
+      }
+    },
+    {
+      "lane": "tagged",
+      "argv": [
+        "/usr/bin/go",
+        "test",
+        "-count=1",
+        "-timeout=90s",
+        "-p=4",
+        "-json",
+        "-tags=test_state_path_env",
+        "-run",
+        "^(TestReadStateBeneathRootRetainsPrimaryAndCloseFailures|TestReadStateBeneathRootParentCloseConsumedOnce|TestStateReadBeneathRootAbsenceRequiresOnlyMissing|TestReadStateBeneathRootMissingRetainsParentCloseFailure|TestCompleteStateReadCloseZeroesBytes)$",
+        "./internal/api"
+      ],
+      "status": "PASS",
+      "exit_code": 0,
+      "wall_seconds": 164.06542545299453,
+      "go_package_event_seconds": 1.826,
+      "original_pidfd_acquired": true,
+      "original_process_reaped": true,
+      "adopted_children_reaped_count": 0,
+      "linux_tree_closure": true,
+      "no_children": true,
+      "capture_files_closed": true,
+      "work_deadline_exceeded": false,
+      "roots": [
+        "TestCompleteStateReadCloseZeroesBytes",
+        "TestReadStateBeneathRootMissingRetainsParentCloseFailure",
+        "TestReadStateBeneathRootParentCloseConsumedOnce",
+        "TestReadStateBeneathRootRetainsPrimaryAndCloseFailures",
+        "TestStateReadBeneathRootAbsenceRequiresOnlyMissing"
+      ],
+      "test_and_subtest_results": {
+        "TestCompleteStateReadCloseZeroesBytes": [
+          "run",
+          "pass"
+        ],
+        "TestCompleteStateReadCloseZeroesBytes/prior-failure": [
+          "run",
+          "pass"
+        ],
+        "TestCompleteStateReadCloseZeroesBytes/successful-read": [
+          "run",
+          "pass"
+        ],
+        "TestReadStateBeneathRootMissingRetainsParentCloseFailure": [
+          "run",
+          "pass"
+        ],
+        "TestReadStateBeneathRootParentCloseConsumedOnce": [
+          "run",
+          "pass"
+        ],
+        "TestReadStateBeneathRootRetainsPrimaryAndCloseFailures": [
+          "run",
+          "pass"
+        ],
+        "TestReadStateBeneathRootRetainsPrimaryAndCloseFailures/both-closes": [
+          "run",
+          "pass"
+        ],
+        "TestReadStateBeneathRootRetainsPrimaryAndCloseFailures/cancel-and-both-closes": [
+          "run",
+          "pass"
+        ],
+        "TestReadStateBeneathRootRetainsPrimaryAndCloseFailures/final-close": [
+          "run",
+          "pass"
+        ],
+        "TestReadStateBeneathRootRetainsPrimaryAndCloseFailures/parent-close": [
+          "run",
+          "pass"
+        ],
+        "TestReadStateBeneathRootRetainsPrimaryAndCloseFailures/stat-and-both-closes": [
+          "run",
+          "pass"
+        ],
+        "TestReadStateBeneathRootRetainsPrimaryAndCloseFailures/step-and-both-closes": [
+          "run",
+          "pass"
+        ],
+        "TestStateReadBeneathRootAbsenceRequiresOnlyMissing": [
+          "run",
+          "pass"
+        ],
+        "TestStateReadBeneathRootAbsenceRequiresOnlyMissing/close-caused-not-exist": [
+          "run",
+          "pass"
+        ],
+        "TestStateReadBeneathRootAbsenceRequiresOnlyMissing/joined-missing-and-close": [
+          "run",
+          "pass"
+        ],
+        "TestStateReadBeneathRootAbsenceRequiresOnlyMissing/joined-single-missing-is-not-direct": [
+          "run",
+          "pass"
+        ],
+        "TestStateReadBeneathRootAbsenceRequiresOnlyMissing/open-with-compound-cause": [
+          "run",
+          "pass"
+        ],
+        "TestStateReadBeneathRootAbsenceRequiresOnlyMissing/original-missing": [
+          "run",
+          "pass"
+        ],
+        "TestStateReadBeneathRootAbsenceRequiresOnlyMissing/untyped-not-exist": [
+          "run",
+          "pass"
+        ],
+        "TestStateReadBeneathRootAbsenceRequiresOnlyMissing/wrapped-missing-is-not-direct": [
+          "run",
+          "pass"
+        ]
+      },
+      "counts": {
+        "fail": 0,
+        "pass": 20,
+        "run": 20,
+        "skip": 0
+      },
+      "package_terminal": [
+        "pass"
+      ],
+      "independent_raw_event_counts": [
+        {
+          "action": "run",
+          "count": 20
+        },
+        {
+          "action": "pass",
+          "count": 20
+        }
+      ],
+      "stdout": {
+        "bytes": 18688,
+        "sha256": "4a3c5f6b23cee407a90668cb285203b19422969578e7c332bb1093b3a3439739"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    }
+  ],
+  "original_file_paths_relative_to": "isolated qualification task root",
+  "original_files": [
+    {
+      "path": "qualify_reader668.py",
+      "bytes": 10451,
+      "sha256": "ebbee4c5f31fd969b8af3027c6c91fbbdb8b9f6292387b108731cf034fb8d6d6"
+    },
+    {
+      "path": "qualification/start.json",
+      "bytes": 2169,
+      "sha256": "c26df904f93c320b76437acc8a67f3bb21a2c3453a7f7092c993c20e0eea4f63"
+    },
+    {
+      "path": "qualification/default.receipt.json",
+      "bytes": 3595,
+      "sha256": "d254f8545f9cf16afa6330a6d479f57ea65e25c658a8fe38ceca934a0b1df66e"
+    },
+    {
+      "path": "qualification/default.stdout.jsonl",
+      "bytes": 18691,
+      "sha256": "a3cf6f8f9113268cc16fb12c38934b60fba1e634f192ce7e76ec371b9d26f032"
+    },
+    {
+      "path": "qualification/default.stderr",
+      "bytes": 555,
+      "sha256": "9f3fdebcab50e9fa0ddd198dbf93220b6a42edfe00e989733591d0a2a10b3003"
+    },
+    {
+      "path": "qualification/tagged.receipt.json",
+      "bytes": 3568,
+      "sha256": "64e3bf12ff70e353a6a9fea86c321d63c580bf2c98f4c5167c7005bee996a407"
+    },
+    {
+      "path": "qualification/tagged.stdout.jsonl",
+      "bytes": 18688,
+      "sha256": "4a3c5f6b23cee407a90668cb285203b19422969578e7c332bb1093b3a3439739"
+    },
+    {
+      "path": "qualification/tagged.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "qualification/receipt.json",
+      "bytes": 12419,
+      "sha256": "1330ab03093b413e86daecc4f9472af74c939003d0d6d190922219c6ac515d2c"
+    }
+  ],
+  "limits": {
+    "full_b_regression": "NOT_RUN_ON_CURRENT_TEST_SOURCE",
+    "unix_arm64_runtime": "NOT_RUN",
+    "native_stat_close_faults": "NOT_RUN",
+    "other_filesystems_and_linux_race": "NOT_RUN",
+    "installed_product_or_scheduler_mutated": false
+  },
+  "anchors": {
+    "pr": "https://github.com/applicate2628/mcp-local-hub/pull/668",
+    "original_windows_and_linux_compile": "https://github.com/applicate2628/mcp-local-hub/blob/1b7655ae9a0dec7d6821d8419087fd92ccadbb62/docs/modernization/verification/go-reader-close-errors-20261122/README.md"
+  }
+}

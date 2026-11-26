@@ -1,0 +1,537 @@
+{
+  "schema": "cache-qualification-b-reconciliation-v1",
+  "observed_date_msk": "2026-11-26",
+  "basis": "Saved original receipts and live read-only Git and availability readback",
+  "receipt_paths_relative_to": "private task root",
+  "originals_included": false,
+  "publication_heads": {
+    "657": {
+      "sha": "f20bc4ae5a369e7c0be0f7ad4a0f0ba9ea758a57",
+      "draft": true,
+      "source_parser_only": {
+        "version": "Windows PowerShell Desktop 5.1.26100.10068",
+        "code_page": 1251,
+        "prior_errors": 3,
+        "candidate_errors": 0,
+        "builder_executed": false
+      }
+    },
+    "664": {
+      "sha": "fe76130b88da9a854219c2bd4143244cefb3b31c",
+      "draft": true,
+      "full_regression": "NOT_RUN"
+    },
+    "665": {
+      "sha": "d30326c099ced46984cee38d4455498d3209a967",
+      "draft": true,
+      "full_regression": "NOT_RUN",
+      "provider_helper": {
+        "pass": 3,
+        "skip": 0,
+        "source": "aca81a1743ccfbf3e10902769a9b071eb911919e",
+        "overlay_count": 2
+      }
+    },
+    "666": {
+      "sha": "50d94a7854d98b31e2c29e35e06cefedc1a2d496",
+      "draft": true,
+      "full_regression": "NOT_RUN",
+      "historical_targeted_cli_pass": 3
+    },
+    "668": {
+      "sha": "1b7655ae9a0dec7d6821d8419087fd92ccadbb62",
+      "draft": true
+    }
+  },
+  "source_v4": {
+    "status": "FAIL",
+    "closed": true,
+    "exit_code": 1,
+    "commands_completed": 3,
+    "commands_planned": 14,
+    "captures_verified": 6,
+    "failure": "checkout-c3 reached work deadline",
+    "work_deadline_seconds": 120,
+    "postmortem_status": "INCOMPLETE",
+    "in_git_cause": "UNKNOWN",
+    "source_issued": false,
+    "files": [
+      {
+        "path": "native-consumer-source-v4-launch.json",
+        "bytes": 2489,
+        "sha256": "3763922b8a43fc33446a8501c97640c18667cb1b56d21d8b54d9998f5a2bab1a"
+      },
+      {
+        "path": "runs/native-consumer-source-admission-v4/receipt.json",
+        "bytes": 30284,
+        "sha256": "d8eadddd92172870b2c1bc5ad97077640970e98fc7ea1eda50cd63472d65d3a8"
+      },
+      {
+        "path": "runs/native-consumer-source-v4-postmortem-v1/postmortem.json",
+        "bytes": 2242,
+        "sha256": "e34548fb2b90b9e81315202cb8bacb9e0e1970621ed62f608cd1ccea1e6dbf15"
+      }
+    ]
+  },
+  "source_v5": {
+    "status": "PASS",
+    "scope": "Materialization only",
+    "candidate_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+    "tree": "67c13b8fc1317b4fd60e3135a3eb8a376fe01817",
+    "parent_commit": "c3b8c802be190c335b84ff7323a14d9eb63518b6",
+    "source_count": 3508,
+    "changed_paths_count": 15,
+    "commands_received": 14,
+    "captures_verified": 28,
+    "commands_quiescent": true,
+    "parent_exit_code": 0,
+    "parent_seconds": 108.89985539996997,
+    "checkout_seconds": 1.9214543999987654,
+    "checkout_deadline_seconds": 120,
+    "original_inputs_unchanged": true,
+    "donor_unchanged": true,
+    "new_commit_identity_issued": false,
+    "qualification_passed": false,
+    "ready_issued": false,
+    "files": [
+      {
+        "path": "native-consumer-source-v5-launch.json",
+        "bytes": 3915,
+        "sha256": "ab370096899c08fbca868a319fed4ce7450f61607aa0d5403bc762eec4e623a9"
+      },
+      {
+        "path": "runs/native-consumer-source-admission-v5/receipt.json",
+        "bytes": 980291,
+        "sha256": "1a74b0aa5a346bfb5c48f4fe26f57375e97ee8124159a85ec3cdaccb0a725c70"
+      },
+      {
+        "path": "runs/native-consumer-source-admission-v5/root-receiving.json",
+        "bytes": 3750,
+        "sha256": "374f4bb359fa81b35de0f3ace9ca73c9ed88d91298f2d7d74ce219022afcba50"
+      },
+      {
+        "path": "runs/native-consumer-source-admission-v5/source-after.json",
+        "bytes": 423970,
+        "sha256": "671d60c8f1e96de28eb616b9e7aeacccae50d00359ab27a59418bea61648ee16"
+      },
+      {
+        "path": "runs/native-consumer-source-admission-v5/source-before.json",
+        "bytes": 423529,
+        "sha256": "2e1288677140b90c4018fb55d992b9e975af6908b35b6bc15f38401440aea4b9"
+      },
+      {
+        "path": "native-consumer-source-inputs-v5/plan.json",
+        "bytes": 5685,
+        "sha256": "a584ded0d9231944c6e5a656dfc26e98efe56a4018b8ddb1876c4d535b2065b3"
+      },
+      {
+        "path": "native-consumer-source-inputs-v5/issue_native_consumer_source_v5.py",
+        "bytes": 52017,
+        "sha256": "25825ade0f44c4b25445593f3de2668fc0c1a4457afc6ba8d70c01e11d193059"
+      },
+      {
+        "path": "native-consumer-source-v5-launch.stderr.txt",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ]
+  },
+  "test_source_update_v2": {
+    "status": "PASS",
+    "scope": "13 tracked Go test updates only",
+    "source_commit": "001648f44bf6ef0191f1e21d92f1aecf2a2a3022",
+    "tree": "9700ffd68a009ec714b1962427d53567d07a228d",
+    "parent_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+    "source_count": 3508,
+    "changed_file_count": 13,
+    "commands_received": 10,
+    "captures_verified": 20,
+    "parent_exit_code": 0,
+    "parent_seconds": 19.04218089999631,
+    "commands_quiescent": true,
+    "working_tree_clean": true,
+    "outside_reviewed_paths_unchanged": true,
+    "original_inputs_unchanged": true,
+    "source_access": "immutable-tracked-source-only",
+    "owned_build_staging_authorized": false,
+    "qualification_passed": false,
+    "ready_issued": false,
+    "tests_or_installation_issued": false,
+    "cache_access_granted": false,
+    "prior_gate_status": "FAIL",
+    "prior_gate_custody": "UNKNOWN",
+    "prior_gate_rewritten": false,
+    "changed_files": [
+      "internal/api/adopt_codex_transport_test.go",
+      "internal/api/adopt_deadopt_lifecycle_test.go",
+      "internal/api/adopt_h4_summary_signal_test.go",
+      "internal/api/adopt_lease_namespace_windows_test.go",
+      "internal/api/adopt_lease_owner_test.go",
+      "internal/api/adopt_mcpcompat_test.go",
+      "internal/api/adopt_project_plan_test.go",
+      "internal/api/adopt_provider_working_directory_windows_test.go",
+      "internal/api/adopt_test.go",
+      "internal/api/main_test.go",
+      "internal/cli/adopt_mcpcompat_test.go",
+      "internal/cli/adopt_test.go",
+      "internal/cli/gui_force_test.go"
+    ],
+    "files": [
+      {
+        "path": "test-source-update-v2-launch.json",
+        "bytes": 3528,
+        "sha256": "deb49a9aec43da26b4b5903e8797d2c6646f9b6d4d45df072d9dbfebd76c239a"
+      },
+      {
+        "path": "runs/test-source-update-v2/receipt.json",
+        "bytes": 947460,
+        "sha256": "0ee814004ae40631bfc24da8e1afd996094defeac036f8eaafcd785e44d00818"
+      },
+      {
+        "path": "runs/test-source-update-v2/root-receiving.json",
+        "bytes": 3574,
+        "sha256": "6ab9ba365a968f27d5f30d85e6074df16158912ce8e22c9b215f9c397fce33c1"
+      },
+      {
+        "path": "runs/test-source-update-v2/source-before.json",
+        "bytes": 423970,
+        "sha256": "671d60c8f1e96de28eb616b9e7aeacccae50d00359ab27a59418bea61648ee16"
+      },
+      {
+        "path": "runs/test-source-update-v2/source-after.json",
+        "bytes": 423970,
+        "sha256": "08bfb69180f70b6f2cfd2c46429c0f4047e449f6bb4508501151d17578a12e16"
+      },
+      {
+        "path": "test-source-update-inputs-v2/plan.json",
+        "bytes": 4811,
+        "sha256": "ab0a7e5f886e85f9d95853f4b618d750d72f8c8e484be6704662e3e7c2084680"
+      },
+      {
+        "path": "test-source-update-inputs-v2/delta-map.json",
+        "bytes": 4417,
+        "sha256": "747eb2b7d2632da92912b32bc3ed2128ab11ad44c05a8cc7ddecef654eef3d92"
+      },
+      {
+        "path": "test-source-update-inputs-v2/test-source.patch",
+        "bytes": 29007,
+        "sha256": "588eebd14517a0133ff3762f1db23b866a740d4fcb1e3a18a6c4d89debfd0113"
+      },
+      {
+        "path": "test-source-update-inputs-v2/issue_test_source_update_v2.py",
+        "bytes": 45976,
+        "sha256": "26764b122777ef21d6756c05d1cd3131e16fb92330762675c3b0a75b2e76f7ac"
+      }
+    ]
+  },
+  "full_v10": {
+    "status": "FAIL",
+    "source_commit": "aca81a1743ccfbf3e10902769a9b071eb911919e",
+    "product_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+    "exit_code": 1,
+    "seconds": 2295.1359646999917,
+    "outer_commands_received": 19,
+    "build": {
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 83.083
+    },
+    "vet": {
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 139.276
+    },
+    "default": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "seconds": 1148.33,
+      "adapter_total": 64,
+      "adapter_pass": 62,
+      "prep_deadline_seconds": 30,
+      "api": {
+        "status": "NOT_STARTED",
+        "prep_seconds": 40.893
+      },
+      "cli": {
+        "status": "NOT_STARTED",
+        "prep_seconds": 48.929
+      }
+    },
+    "tagged": {
+      "status": "FAIL",
+      "outer_exit_code": 1,
+      "seconds": 730.021,
+      "package_deadline_seconds": 300,
+      "api": {
+        "exit_code": 2,
+        "pass": 266,
+        "skip": 1,
+        "not_completed": 3262,
+        "never_started": 3261,
+        "running_at_deadline": 1
+      },
+      "cli": {
+        "exit_code": 2,
+        "pass": 980,
+        "skip": 11,
+        "not_completed": 1000,
+        "never_started": 985,
+        "paused_without_resume": 14,
+        "running_at_deadline": 1
+      }
+    },
+    "files": [
+      {
+        "path": "literal-final-v10-launch.json",
+        "bytes": 24367,
+        "sha256": "3812d74a5a4b9d02eabae0a05a67ba7bb3dd79a729b40d91d29e05d0fbf6e7cb"
+      },
+      {
+        "path": "runs/literal-final-v10/receipt.json",
+        "bytes": 8129880,
+        "sha256": "555263b0add9ceec75e35967bc62e84c68c5e820e2e9bf5ba48be8bf551a225b"
+      }
+    ]
+  },
+  "product": {
+    "v1_historical": {
+      "source_commit": "4fa52b60b719664ede441be339e196a8b9766c50",
+      "version": "0.4.60",
+      "fixture_native_build": "PASS",
+      "test": "TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade",
+      "test_status": "PASS",
+      "exit_code": 0,
+      "stdout_bytes": 141,
+      "stderr_bytes": 0,
+      "stdout_sha256": "8921409dbd0c82cec05418c5550e7e5c2c3b33973b66fe9e414b0de7d1f3648e",
+      "scope": "Corrupt-intent refusal and preservation of prior Product and intent"
+    },
+    "historical_publishers": {
+      "source_commit": "4c3eb47d002ea729fe80370a75506a1d0c9650ac",
+      "builds": "PASS",
+      "roles": [
+        "ordinary-product-0.4.65",
+        "command-test-product-0.4.65",
+        "serena-qualification"
+      ],
+      "runtime_lifecycle": "NOT_RUN",
+      "exclusions": [
+        "new #660 A1/A2",
+        "all #663",
+        "B1 #669"
+      ]
+    },
+    "serena_headless_historical": {
+      "status": "PASS",
+      "product_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4"
+    },
+    "latest_full_install_upgrade_recovery": "NOT_RUN"
+  },
+  "powershell": {
+    "namespace_historical": {
+      "status": "FAIL",
+      "launcher_exit_code": 1,
+      "launcher_seconds": 4.37,
+      "tests_started": false,
+      "api": "CreateFileW",
+      "ancestor": "C:\\Program Files\\WindowsApps",
+      "required_access": "READ_CONTROL",
+      "win32_error": 5,
+      "source_tmp_go_ancestors_passed_read_only_probe": true
+    },
+    "controls": [
+      {
+        "run": "guarded-winps-qualification-v1",
+        "status": "UNKNOWN",
+        "exit_code": 86,
+        "scope": "Original descendant lifetime was not received"
+      },
+      {
+        "run": "guarded-winps-timeout-v2",
+        "status": "PASS",
+        "exit_code": 0,
+        "scope": "Native Windows PowerShell owned timeout fixture only"
+      },
+      {
+        "run": "guarded-pwsh-broker-qualification-v1",
+        "status": "FAIL",
+        "exit_code": 1
+      },
+      {
+        "run": "guarded-pwsh-broker-timeout-v2",
+        "status": "FAIL",
+        "exit_code": 1,
+        "scope": "Controlled child outside expected job, timeout not qualified"
+      }
+    ],
+    "files": [
+      {
+        "path": "guarded-winps-qualification-v1-launch.json",
+        "bytes": 1869,
+        "sha256": "33b02fb101c9f515e69b94f2bc340f0c4a2ea769b0f1636e8e418a71ad1ed294"
+      },
+      {
+        "path": "guarded-winps-qualification-v1/receipt.json",
+        "bytes": 21693,
+        "sha256": "069fd569a1e64f41680aedf587c75d806b0cb22090463358d1415bb590e8c8d1"
+      },
+      {
+        "path": "guarded-winps-timeout-v2-launch.json",
+        "bytes": 1748,
+        "sha256": "5f9ba5a92793e084a9effc4039b923f3fd624dc8b8dff33b366e1c332ad8cdb4"
+      },
+      {
+        "path": "guarded-winps-timeout-v2/receipt.json",
+        "bytes": 9361,
+        "sha256": "bd11e6ebfc5ae9d936ae25549aba511f876e78e7df08f32b31b3531f1d9304ef"
+      },
+      {
+        "path": "guarded-pwsh-broker-qualification-v1-launch.json",
+        "bytes": 2032,
+        "sha256": "60cd4385942c572192a07307a1eb54fc6fdff8b778ac2b17894c81ef5a02515b"
+      },
+      {
+        "path": "guarded-pwsh-broker-qualification-v1/receipt.json",
+        "bytes": 45147,
+        "sha256": "4dd3e9d31fa9ddf413b8d27b3a6e64058438f3f91eaab2220ac975445d7908dc"
+      },
+      {
+        "path": "guarded-pwsh-broker-timeout-v2-launch.json",
+        "bytes": 1893,
+        "sha256": "e312be9edd55a90877b486d05a97c3f8ecda4ea9c962948b7c5a1a23ff31b18d"
+      },
+      {
+        "path": "guarded-pwsh-broker-timeout-v2/receipt.json",
+        "bytes": 17758,
+        "sha256": "116f74cc999d4be64cfe3438973f0235c707eebae639822445a21adf2d796d69"
+      }
+    ],
+    "namespace_relocated_runtime": {
+      "status": "PASS",
+      "source_commit": "001648f44bf6ef0191f1e21d92f1aecf2a2a3022",
+      "named_roots_pass": 3,
+      "skip": 0,
+      "exit_code": 0,
+      "historical_store_failure_reclassified": false,
+      "original_receipt_sha256": "65f9d89f52a3e413c33645b615bbf4b55ba5e71df0c41574ac1c1680760af08d",
+      "projection": "powershell-namespace-20261126.json",
+      "report": "powershell-namespace-20261126.md"
+    }
+  },
+  "platforms": {
+    "go_reader_published": {
+      "status_windows": "PASS",
+      "windows_named_pass": 30,
+      "windows_race": true,
+      "composition_base": "858812988833a84368c60fba1540ae601155fa71",
+      "overlay_count": 13,
+      "linux_amd64_compile": "PASS",
+      "linux_amd64_binary_sha256": "a655baf38218b16c729db21769e8036cc5bfba95c944c8a65fa06af6972ecde7",
+      "linux_amd64_runtime_in_original_evidence": "NOT_RUN",
+      "real_stat_close_failure": "NOT_RUN"
+    },
+    "availability": {
+      "scope": "Read-only tool and environment observation",
+      "ubuntu_wsl2": {
+        "state": "Running",
+        "kernel": "6.18.58.1-microsoft-standard-WSL2",
+        "architecture": "x86_64",
+        "go": [
+          "1.26.8 linux/amd64",
+          "1.26.4 linux/amd64"
+        ],
+        "gofmt_present": true,
+        "rustc": "1.100.0",
+        "cargo": "1.100.0",
+        "go_cache_module_archives": 39,
+        "cargo_cache_archives": 365,
+        "cache_closure_verified": false,
+        "aarch64_qemu_available": false,
+        "aarch64_binfmt_registered": false
+      },
+      "debian_wsl2": {
+        "state": "Stopped",
+        "started_for_this_check": false
+      },
+      "second_linux": {
+        "architecture": "x86_64",
+        "listed_qualification_tools_found": false
+      },
+      "tests_or_builds_executed": false
+    },
+    "unix_arm64_runtime": "NOT_RUN",
+    "go_reader_current_linux_amd64_runtime": {
+      "status": "PASS",
+      "source_sha": "1b7655ae9a0dec7d6821d8419087fd92ccadbb62",
+      "default": {
+        "root_pass": 5,
+        "subtest_pass": 15,
+        "fail": 0,
+        "skip": 0,
+        "exit_code": 0
+      },
+      "tagged": {
+        "root_pass": 5,
+        "subtest_pass": 15,
+        "fail": 0,
+        "skip": 0,
+        "exit_code": 0
+      },
+      "aggregate_original_sha256": "1330ab03093b413e86daecc4f9472af74c939003d0d6d190922219c6ac515d2c",
+      "projection": "posix-runtime-20261126.json",
+      "report": "posix-runtime-20261126.md"
+    }
+  },
+  "next": {
+    "full_regression_for_current_test_source": "CHILD_FAIL_PARENT_TERMINAL_RECEIVING_PENDING",
+    "old_v13_reused": false,
+    "old_v13_fixed_input": "aca81a1743ccfbf3e10902769a9b071eb911919e",
+    "old_v13_fixed_run": "runs/literal-final-v10",
+    "remaining": [
+      "receive original terminal outcomes of both mandatory full regression commands",
+      "greater platform coverage, including Unix/ARM64 execution",
+      "current install/upgrade/recovery with real consumers",
+      "exact-head external review"
+    ],
+    "external_review": "REVIEW_PENDING",
+    "active_full_run_observation": {
+      "runtime": "final-gates-v14-root",
+      "run": "runs/literal-final-v11",
+      "state": "child_FAIL_parent_running",
+      "last_observed_child_update_utc": "2026-11-26T00:40:26.9010789Z",
+      "source_commit": "001648f44bf6ef0191f1e21d92f1aecf2a2a3022",
+      "product_source_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+      "terminal_status_received": false,
+      "build_exit_code": 0,
+      "vet_exit_code": 0,
+      "complete_commands": 15,
+      "default_command_direct_exit_known": true,
+      "default_original_command_custody": "UNKNOWN",
+      "tagged_command_issued_in_observed_ledger": false,
+      "child_failure": "RuntimeError: an original receiver retained unknown custody",
+      "original_command_quiescence": false,
+      "retained_source_resource": "internal/api/zz_qualified_api_versioninfo_windows_amd64.syso",
+      "source_after": "NOT_PERFORMED",
+      "input_hashes_after": "NOT_PERFORMED",
+      "resource_disposition": "NOT_PERFORMED"
+    },
+    "fresh_binding": {
+      "isolated_physical_source": "New accepted physical 001648f checkout, separate from retained full-v11 state",
+      "isolated_new_run_scopes": true,
+      "tool_resolution_owner": "qualified_windows_products_consumer_v1.py",
+      "native_suite_owner": "tools/test-recovery-namespace/main_windows.go",
+      "native_only_verified_runtime": "powershell-namespace-20261126.json",
+      "pin_original_copy_receipt_full_inventory_executable_and_ordinary_runtime_path": true,
+      "literal_command_deadlines_unchanged": true,
+      "product_serena_source_commit_unchanged": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+      "fresh_full_gate_prepared_and_executed": false
+    }
+  },
+  "published_evidence": {
+    "source_v4": "https://github.com/applicate2628/mcp-local-hub/blob/fe76130b88da9a854219c2bd4143244cefb3b31c/docs/modernization/verification/cache-owner-custody-20261126/source-v4-closed-failure-20261126.md",
+    "full_v10": "https://github.com/applicate2628/mcp-local-hub/blob/fe76130b88da9a854219c2bd4143244cefb3b31c/docs/modernization/verification/cache-owner-custody-20261126/README.md",
+    "provider_helper": "https://github.com/applicate2628/mcp-local-hub/blob/0cd8f7679af2db43f736897b6ca8c8e688644608/docs/modernization/verification/cache-owner-custody-20261126/provider-helper-qualification-20261126.md",
+    "publisher_roles": "https://github.com/applicate2628/mcp-local-hub/blob/5268b91f178bf598efb78287291ca43909294b0b/docs/modernization/verification/publisher-roles-20261123/README.md",
+    "reader": "https://github.com/applicate2628/mcp-local-hub/blob/1b7655ae9a0dec7d6821d8419087fd92ccadbb62/docs/modernization/verification/go-reader-close-errors-20261122/README.md"
+  }
+}
