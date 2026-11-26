@@ -1,0 +1,950 @@
+{
+  "schema": "ab-functional-latest-completed-evidence-363b-v1",
+  "repository": "applicate2628/mcp-local-hub",
+  "target_pr": 664,
+  "date_utc": "2026-11-26",
+  "evidence_boundary": {
+    "included": "Completed standalone #660 liveness selection, Source52 initial campaign, separate Parole stack diagnostic, Source52 original controller/P1/P2 build and native HAPPY v3; later #660 verified publication, separate Parole controls link, original public42 formatting failure and a prepared publication-only correction",
+    "incomplete_later_activity_included": false,
+    "previous_documents_modified": false,
+    "record_is_derivative_not_original_receipt": true
+  },
+  "source": {
+    "commit": "52a2d9ef57b7c372b9fa149adf062ad7e503b22d",
+    "tree": "51258ebd9ad3a654418b6ecb9163947734ef0314",
+    "parent": "6d4fa7b8f9b86079020af125b030a26350cb5bb0",
+    "source52_capsule": "../composed-functional-source-20261126/source52-363b/README.md",
+    "source6d_capsule": "../composed-functional-source-20261126/source6d-363b/README.md",
+    "source_identity_is_not_runtime_acceptance": true
+  },
+  "current_summary": {
+    "standalone_public660_liveness_default": "PASS",
+    "standalone_public660_liveness_tagged": "PASS",
+    "source52_build": "PASS",
+    "source52_vet": "PASS",
+    "source52_default_controller": "FAIL/CLOSED",
+    "parole_diagnostic_overlay": "FAIL/CLOSED",
+    "source52_controller_P1_P2_build": "PASS/CLOSED_BUILD_ONLY",
+    "source52_native_happy_v3": "FAIL/CLOSED",
+    "native_happy_qualification_passed": false,
+    "dependent_run_return_probe": "NOT_RUN",
+    "dependent_stdout_reader_probe": "NOT_RUN",
+    "source52_tagged_controller_selection": "NOT_RUN",
+    "full_default_suite": "NOT_RUN",
+    "full_tagged_api_cli_suite": "NOT_RUN",
+    "full_A_acceptance": false,
+    "full_B_acceptance": false,
+    "installed_lifecycle_acceptance": false,
+    "release_acceptance": false,
+    "public660_companion_evidence_publication": "PUBLISHED_SEVEN_FILES_AND_BODY_READBACK_VERIFIED",
+    "public664_v2_staging": "PASS_ALL42_READBACK",
+    "public664_v2_formatting_batch": "FAIL_CLOSED",
+    "public664_v3_correction": "PREPARED_NOT_RUN",
+    "separate_Parole_barrier_controls": "POSITIVE_PASS_EXPECTED_NEGATIVE_FAIL_SELECTED_DEFAULT_OVERLAYS_ONLY"
+  },
+  "A_public660": {
+    "source": {
+      "commit": "99c89e9fd12e7bf50a703940c099f568a5c99628",
+      "tree": "f74954deb26871bf2e292b5f2dd8e3bb6162cc90",
+      "parent": "25508f8bfe5950daca3df1b0faf338d77913640a"
+    },
+    "scope": "native Windows/amd64; selected API and CLI tests with substituted scheduler; standalone PR660 code revision",
+    "original_receipt_sha256": "87fc35a3455c8ce5cae2a4ae134466d3c5b8fee9361e3bc81406065bb83bbe13",
+    "source_pins": [
+      {
+        "path": "internal/api/liveness_task.go",
+        "bytes": 23493,
+        "sha256": "7423c2a7fa8e20b117a5db72349e7840fa7adcbdc396ee26adf9caa5c0d09d61",
+        "git_blob": "6c852d6eb172b51708f2d5618163b8ebc4138ff2"
+      },
+      {
+        "path": "internal/api/liveness_task_test.go",
+        "bytes": 34055,
+        "sha256": "f4ee80c59c92fa87b81671d8063682322fb1c6cf665acb7161122c43131d0039",
+        "git_blob": "c9ac7dbd7f3f561cb192177cfa9158c13126a38d"
+      },
+      {
+        "path": "internal/cli/setup_watchdog_test.go",
+        "bytes": 34980,
+        "sha256": "1205eaa4edf0f779acfd595be22ca8c1abf90d12cc78932dc7501918fafc51c2",
+        "git_blob": "1801bb7925ea115839ac72b1d8d8807ac5e59045"
+      }
+    ],
+    "three_changed_files_equal_source52": true,
+    "whole_trees_equal": false,
+    "original_parent": {
+      "controller_exit_code": 0,
+      "original_controller_reaped": true,
+      "controller_capture_handles_closed": true,
+      "seconds": 291.1030377999996
+    },
+    "command_count": 5,
+    "original_reader_count": 10,
+    "physical_lifecycle": "CLOSED",
+    "all_original_commands_reaped": true,
+    "all_original_native_groups_empty_and_handles_closed": true,
+    "all_original_readers_EOF_closed_and_joined": true,
+    "commands": [
+      {
+        "mode": "default",
+        "status": "PASS",
+        "exit_code": 0,
+        "command_seconds": 161.16484529996524,
+        "counts": {
+          "root_pass": 29,
+          "subtest_pass": 32,
+          "pass_including_subtests": 61,
+          "root_skip": 1,
+          "fail": 0
+        },
+        "packages": [
+          {
+            "package": "mcp-local-hub/internal/cli",
+            "action": "pass",
+            "elapsed": 13.21
+          },
+          {
+            "package": "mcp-local-hub/internal/api",
+            "action": "pass",
+            "elapsed": 43.039
+          }
+        ],
+        "stdout_sha256": "731906273e2503e355337b951cfbf30f58f91710738b5971b11010c854e2ddfd",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "logical_arguments": [
+          "go",
+          "test",
+          "-json",
+          "-count=1",
+          "-timeout",
+          "5m",
+          "-run",
+          "^(TestLivenessTask.*|TestEnsureLivenessTask.*|TestInstallLivenessTask.*|TestLivenessWorkingDir_OSIndependent|TestUninstallLivenessTask_DeletesByName|TestRetainLegacyWatchdogTaskForSetup|TestSetup_.*)$",
+          "./internal/api/",
+          "./internal/cli/"
+        ]
+      },
+      {
+        "mode": "test_state_path_env",
+        "status": "PASS",
+        "exit_code": 0,
+        "command_seconds": 127.93769829999655,
+        "counts": {
+          "root_pass": 29,
+          "subtest_pass": 32,
+          "pass_including_subtests": 61,
+          "root_skip": 1,
+          "fail": 0
+        },
+        "packages": [
+          {
+            "package": "mcp-local-hub/internal/cli",
+            "action": "pass",
+            "elapsed": 2.892
+          },
+          {
+            "package": "mcp-local-hub/internal/api",
+            "action": "pass",
+            "elapsed": 81.515
+          }
+        ],
+        "stdout_sha256": "e7fbde40914563bb54acf87a73d60c8ab15d1dd1c8c0f86b831092385c9ad8fd",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "logical_arguments": [
+          "go",
+          "test",
+          "-tags=test_state_path_env",
+          "-json",
+          "-count=1",
+          "-timeout",
+          "5m",
+          "-run",
+          "^(TestLivenessTask.*|TestEnsureLivenessTask.*|TestInstallLivenessTask.*|TestLivenessWorkingDir_OSIndependent|TestUninstallLivenessTask_DeletesByName|TestRetainLegacyWatchdogTaskForSetup|TestSetup_.*)$",
+          "./internal/api/",
+          "./internal/cli/"
+        ]
+      }
+    ],
+    "expected_platform_skip": {
+      "test": "TestSetup_NonWindowsLivenessNotImplementedContinues",
+      "file": "internal/cli/setup_watchdog_test.go",
+      "line": 306,
+      "reason": "ErrNotImplemented liveness installs must fail closed on Windows",
+      "occurrences_per_lane": 1
+    },
+    "tracked_source_clean_after_tests": true,
+    "companion_pr": "https://github.com/applicate2628/mcp-local-hub/pull/660",
+    "companion_report_expected_path": "docs/qualification/install-scheduler-generation-20261123/public-liveness-99c-20261126/README.md",
+    "companion_publication_completion_claimed": true,
+    "limits": {
+      "real_task_scheduler": "NOT_EXECUTED_BY_THIS_SELECTION",
+      "fixed_production_task_name_mutation": "NOT_EXECUTED_BY_THIS_SELECTION",
+      "full_standard_suite": "NOT_RUN",
+      "full_tagged_api_cli_suite": "NOT_RUN",
+      "installed_lifecycle": "NOT_RUN",
+      "source52_controller_failure": "PRESERVED",
+      "old_fail_unknown_v1": "PRESERVED"
+    },
+    "companion_publication": {
+      "head": "a706b5b2a71ca850136398f7d4a45e624d107151",
+      "tree": "c9049b24f90da2bfe9d563e5feb0b15212f03da4",
+      "draft": true,
+      "remote_files_byte_and_git_blob_verified": 7,
+      "body_readback_exact": true,
+      "previous_body_preserved": true,
+      "push_receipt_sha256": "19f4f96c3c6fa917d73b60e6f0febd0e1214c3f36b0d1f3d0ba0d340e0ad4d32",
+      "original_commands_closed": 4,
+      "original_readers_closed": 8,
+      "tested_code_commit_remains": "99c89e9fd12e7bf50a703940c099f568a5c99628"
+    }
+  },
+  "source52_initial": {
+    "report": "../ab-functional-source52-20261126/README.md",
+    "evidence": "../ab-functional-source52-20261126/evidence.json",
+    "original_receipt_sha256": "5ce22474571013d116634bf2b08043372487b594e577122e341f08eb8ca7b430",
+    "status": "FAIL",
+    "physical_lifecycle": "CLOSED",
+    "command_count": 4,
+    "original_reader_count": 8,
+    "command_quiescence_complete": true,
+    "commands": [
+      {
+        "name": "source-identity",
+        "program": "git",
+        "args": [
+          "rev-parse",
+          "HEAD"
+        ],
+        "exit_code": 0,
+        "seconds": 0.07330829999409616,
+        "lifecycle_state": "CLOSED",
+        "captures_measured": true,
+        "original_readers_joined": true,
+        "stdout_sha256": "ef3e4f771265c261306e8bfb2144e4e0aee244c988be4fe8e0410516b3e3154e",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "build-all",
+        "program": "go",
+        "args": [
+          "build",
+          "./..."
+        ],
+        "exit_code": 0,
+        "seconds": 25.69068060000427,
+        "lifecycle_state": "CLOSED",
+        "captures_measured": true,
+        "original_readers_joined": true,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "vet-all",
+        "program": "go",
+        "args": [
+          "vet",
+          "./..."
+        ],
+        "exit_code": 0,
+        "seconds": 36.90420350001659,
+        "lifecycle_state": "CLOSED",
+        "captures_measured": true,
+        "original_readers_joined": true,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "controller-fixtures-default",
+        "program": "go",
+        "args": [
+          "test",
+          "-json",
+          "-count=1",
+          "-timeout",
+          "5m",
+          "-run",
+          "^TestSupervisorController_(OrphanReap.*|StaleLivenessDisownDroppedByGeneration|QuarantineParole_.*|Parole.*)$",
+          "./internal/cli/"
+        ],
+        "exit_code": 1,
+        "seconds": 41.856602300016675,
+        "lifecycle_state": "CLOSED",
+        "captures_measured": true,
+        "original_readers_joined": true,
+        "stdout_sha256": "75a0c0947eea3dcd73817ee3ee150333d5e8fe6743ac6eed6901a705bc16f855",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "default_controller_selection": {
+      "regex": "^TestSupervisorController_(OrphanReap.*|StaleLivenessDisownDroppedByGeneration|QuarantineParole_.*|Parole.*)$",
+      "package": "mcp-local-hub/internal/cli",
+      "status": "FAIL",
+      "counts": {
+        "top_level_pass": 47,
+        "pass_including_subtests": 49,
+        "top_level_fail": 1,
+        "fail_including_subtests": 1
+      },
+      "package_elapsed_seconds": 24.367,
+      "original_command_seconds": 41.856602300016675,
+      "observed_passes": [
+        {
+          "selector": "^TestSupervisorController_OrphanReap.*$",
+          "scope": "selected cases in this command",
+          "status": "PASS",
+          "provenance": "root result receiving; not all tests outside this selector"
+        },
+        {
+          "test": "TestSupervisorController_StaleLivenessDisownDroppedByGeneration",
+          "status": "PASS",
+          "provenance": "root result receiving"
+        }
+      ],
+      "failure": {
+        "test": "TestSupervisorController_ParoleQueuedStop_PostSelfHonorsStop",
+        "file": "internal/cli/supervise_lostchild_f6_f2_test.go",
+        "line": 651,
+        "observed_state": "spawning",
+        "expected_state": "exiting",
+        "elapsed_seconds": 14.05,
+        "helper_observation_seconds": 2,
+        "runtime_blocking_instruction": "UNDETERMINED",
+        "queue_order_defect_proven": false,
+        "delta_causation_proven": false,
+        "total_duration_is_not_handler_or_join_duration": true
+      }
+    },
+    "tagged_controller_selection": "NOT_RUN",
+    "cause_of_initial_14_05_second_failure": "UNDETERMINED",
+    "later_diagnostic_does_not_reclassify_initial_cause": true
+  },
+  "parole_diagnostic": {
+    "report": "../ab-functional-source52-20261126/parole-diagnostic-20261126.md",
+    "evidence": "../ab-functional-source52-20261126/parole-diagnostic-20261126.json",
+    "status": "FAIL",
+    "physical_closure": "CLOSED",
+    "overlay": {
+      "scope": "Failure-only bounded stack diagnostic; not an unchanged-Source test result",
+      "file": "internal/cli/supervise_lostchild_f6_f2_test.go",
+      "before_sha256": "8bd40a8b1d41becc6d21192044883f994516e666951d781a61cc1eda71e65be4",
+      "after_sha256": "3ac226efd68d34c6109aa79b2e36b91d9f4cb16add8bff57416fe026748b3d66",
+      "patch_sha256": "1c645109a1665b3baeadff2a3bf35cf34c1f74b9c1fd1223306b4f489902f858",
+      "added_lines": 3,
+      "buffer_limit_bytes": 1048576,
+      "all_original_goroutine_stacks": true,
+      "stack_truncated": false,
+      "state_wait_seconds": 2,
+      "cleanup_join_changed": false
+    },
+    "campaign": {
+      "original_receipt_sha256": "99124603fad77b49a254559dda80025e1ef7ba5b74f91a40b5990caec92d888f",
+      "receipt_hash_provenance": "Reported by the original root receiving owner; local inputs are parsed derivative JSON, not original receipt byte verification.",
+      "original_commands": 2,
+      "original_readers": 4,
+      "all_original_commands_and_readers_closed": true,
+      "controller_exit_code": 1,
+      "controller_reaped": true,
+      "controller_capture_handles_closed": true,
+      "controller_seconds_reported": 26.314,
+      "controller_timing_provenance": "Root receiving report, rounded seconds",
+      "exact_test": "TestSupervisorController_ParoleQueuedStop_PostSelfHonorsStop",
+      "mode": "default",
+      "run_filter": "^TestSupervisorController_ParoleQueuedStop_PostSelfHonorsStop$",
+      "count": 1,
+      "outer_test_timeout": "5m",
+      "test_action": "fail",
+      "test_seconds": 3.16,
+      "package_action": "fail",
+      "package_seconds": 4.639,
+      "command_exit_code": 1,
+      "command_seconds": 25.568672999972478,
+      "stdout_sha256_reported_in_receipt": "66b85c4cd902ff9638550f433d1fe06f0a599d1295b819b7c2a20c93a9a29150",
+      "stderr_sha256_reported_in_receipt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "observation": {
+      "actual_state": "spawning",
+      "expected_state": "exiting",
+      "original_loop_instruction_localized": true,
+      "selected_stack_frames": [
+        {
+          "function": "windows.FlushFileBuffers",
+          "classification": "instruction observed in the original loop stack"
+        },
+        {
+          "function": "secureWriteClientConfigToResolvedParentObserved",
+          "path": "internal/api/secure_write_windows.go",
+          "line": 330
+        },
+        {
+          "function": "WriteStateFileBytesLockHeld",
+          "path": "internal/api/state_file_helper.go",
+          "line": 115
+        },
+        {
+          "function": "MutateSupervisorStateIfChangedContext",
+          "path": "internal/api/supervisor_state.go",
+          "line": 455
+        },
+        {
+          "function": "DaemonRuntimeTracker.PersistTo",
+          "path": "internal/cli/supervisor_runtime_tracker.go",
+          "line": 1320
+        },
+        {
+          "function": "persistDaemonRuntimeTracker",
+          "path": "internal/cli/supervisor_runtime_tracker.go",
+          "line": 1385
+        },
+        {
+          "function": "supervisorController.handleLoopEvent",
+          "path": "internal/cli/supervisor_controller.go",
+          "line": 3427
+        },
+        {
+          "function": "EventLoop.Run",
+          "path": "internal/api/supervisor_event_loop.go",
+          "line": 271
+        },
+        {
+          "function": "startLostChildParoleLoop.func2",
+          "path": "internal/cli/supervise_lostchild_f6_f2_test.go",
+          "line": 294
+        }
+      ],
+      "ordering": "The published spawning state precedes synchronous persistence at controller line 3427; fake spawn at line 3698 and HealthOK self-post at line 3755 had not been reached at the captured point.",
+      "syscall_duration": "UNDETERMINED",
+      "external_cause_of_flush_latency": "UNDETERMINED",
+      "production_postself_ordering_defect_proven": false
+    },
+    "claim_limits": [
+      "This is a failure-only diagnostic overlay result on immutable Source52, not full qualification of that source.",
+      "The stack locates the original loop instruction at this diagnostic snapshot; it neither measures the syscall duration nor proves the earlier run blocked at the same instruction.",
+      "Build and vet PASS and prior focused FAIL remain recorded separately in the original Source52 overview.",
+      "Tagged focused and full suites are not newly qualified by this default single-test diagnostic.",
+      "No production durability, timeout or source-level generation refusal was changed."
+    ],
+    "completed_corrective_followup_acceptance": "SEPARATE_SELECTED_DEFAULT_OVERLAY_CONTROLS_RECEIVED; INITIAL_SOURCE52_AND_DIAGNOSTIC_FAILURES_PRESERVED",
+    "original_source52_modified": false,
+    "separate_controls_report": "../ab-functional-source52-20261126/parole-barrier-controls-20261126.md"
+  },
+  "B_build": {
+    "status": "PASS",
+    "scope": "BUILD_ONLY",
+    "original_receipt_sha256": "6c030d82340d562d1ab438be3b83d4973a519996f783734069e04c42768c0e04",
+    "original_parent_seconds": 242.44629340001848,
+    "original_commands_closed": 4,
+    "original_readers_joined": 8,
+    "no_deadline_exceeded": true,
+    "steps": [
+      {
+        "name": "head",
+        "seconds": 2.0095900000305846,
+        "exit_code": 0,
+        "lifecycle": "CLOSED"
+      },
+      {
+        "name": "compile-b-native-52a2d-controller",
+        "seconds": 20.32418219995452,
+        "exit_code": 0,
+        "lifecycle": "CLOSED"
+      },
+      {
+        "name": "build-b-v1-native-product",
+        "seconds": 146.86388449999504,
+        "exit_code": 0,
+        "lifecycle": "CLOSED"
+      },
+      {
+        "name": "build-b-v1-command-product",
+        "seconds": 71.70776740001747,
+        "exit_code": 0,
+        "lifecycle": "CLOSED"
+      }
+    ],
+    "controller": {
+      "bytes": 6620672,
+      "sha256": "6204e702dfb1be238793aea9b5c5f2b2f67eb5dea40a2ec0e4d672cd62e6fd01"
+    },
+    "products": {
+      "P1": {
+        "source_commit": "52a2d9ef57b7c372b9fa149adf062ad7e503b22d",
+        "source_tree": "51258ebd9ad3a654418b6ecb9163947734ef0314",
+        "role": "native",
+        "package": "./cmd/mcphub",
+        "build_kind": "go build",
+        "build_tags": [
+          "test_state_path_env"
+        ],
+        "builder_sha256": "36f1ed1da7e6a961b50356a156cf5fc29c532593f3f0dcfb9b1f5cb6dbf59ada",
+        "same_dot_sourced_build": true,
+        "build_id": "6026b2fd7c2148dbab21fd793806addc",
+        "artifacts": {
+          "launcher": {
+            "bytes": 10361344,
+            "sha256": "53f015cf448e6242f7d876343ffc5ba82cc8cff9d7d15a158ae82a2651eb2ff7"
+          },
+          "product": {
+            "bytes": 49445888,
+            "sha256": "e8dfe4bbcec53fc8db2540706dda88d222263ddcda10dc695b4a986fc8671bd8"
+          },
+          "identity": {
+            "bytes": 295,
+            "sha256": "26498d423cc66551dc57bceb62eb7beec17b851da860e55a62f136ad7bf7bcdb"
+          },
+          "fixture": {
+            "bytes": 521,
+            "sha256": "41e93a03cc5df37dd13b8f0575275761059de9255cb2039d155925c76c2f006f"
+          }
+        },
+        "installed_or_release_acceptance": false,
+        "future_incoming_full_test_image": false
+      },
+      "P2": {
+        "source_commit": "52a2d9ef57b7c372b9fa149adf062ad7e503b22d",
+        "source_tree": "51258ebd9ad3a654418b6ecb9163947734ef0314",
+        "role": "command",
+        "package": "./internal/cli",
+        "build_kind": "go test -c",
+        "build_tags": [
+          "test_state_path_env"
+        ],
+        "builder_sha256": "36f1ed1da7e6a961b50356a156cf5fc29c532593f3f0dcfb9b1f5cb6dbf59ada",
+        "same_dot_sourced_build": true,
+        "build_id": "1848d5b73d6243ed8eebafb1739cd0fb",
+        "artifacts": {
+          "launcher": {
+            "bytes": 10361344,
+            "sha256": "4842c9630aec979a3472e3504c597574db31c9de3f84eb110fa39cdaa527f66a"
+          },
+          "product": {
+            "bytes": 65721344,
+            "sha256": "93e56542d6c2987a255d8ff85727354fdee8316f3f7518f00aeb706b87c4e546"
+          },
+          "identity": {
+            "bytes": 295,
+            "sha256": "c1a3427690d12ae4dcc18d3ab8d12b0651eb6a1c0cea51a7488fe4c87950e218"
+          },
+          "fixture": {
+            "bytes": 480,
+            "sha256": "e4e04799f6007b6ae99e2be7b173c3ff599fb0dd575875328c5f39b35c4ce432"
+          }
+        },
+        "installed_or_release_acceptance": false,
+        "future_incoming_full_test_image": false
+      }
+    },
+    "same_build_observation_and_artifact_pins_match": true,
+    "raw_metadata_transfer_files": 12,
+    "raw_metadata_transfer_hashes_matched": true,
+    "postclosure_pin_check_files": 54,
+    "postclosure_pin_view_is_not_producer_receipt": true,
+    "future_incoming_test_images_built_in_this_step": false,
+    "build_pass_is_not_runtime_qualification": true
+  },
+  "B_happy_v3": {
+    "status": "FAIL",
+    "qualification_passed": false,
+    "original_physical_closure": "CLOSED",
+    "scope": "Merged guard named-controller branch, original prebound callback and canonical receiver only; not full-adapter role wiring or its separate ordinary Windows Job owner",
+    "exact_test": "TestCanonicalSuccessorNativeControlRetainsOriginalFiles",
+    "pins": {
+      "guard": "52d0b4bb292230c8e6099f55f12d0b3513171908aa79702f11b869cad06cfc48",
+      "runner": "835cc21b2896e49a1ed03e24fb852dffc2d40f50e67e110147e3b3ff506f6141",
+      "plan": "cedbd9c5aa2192c5582ac487072cb9fee58ec803ba0dcf4dfe87b7637cb3cbcc",
+      "happy_binding": "879dc74c948fa19bdade5e924ba9a8492bf2dad08e47f1e90e8fd0c867415c0f",
+      "callback": "50c7140aa84d7783df8c2e7a7a158f22ed976e70c680cd1afbcbfab7f77b7199",
+      "canonical_receiver": "6ad13e7c57e604111552fd553f10a66a174c9ba9b96dc37484dfba071a9bf2a0",
+      "controller": "6204e702dfb1be238793aea9b5c5f2b2f67eb5dea40a2ec0e4d672cd62e6fd01",
+      "P1_product": "e8dfe4bbcec53fc8db2540706dda88d222263ddcda10dc695b4a986fc8671bd8",
+      "P2_product": "93e56542d6c2987a255d8ff85727354fdee8316f3f7518f00aeb706b87c4e546"
+    },
+    "original_metadata_files": {
+      "outer-original.json": {
+        "bytes": 442,
+        "sha256": "50bacbaa6c1e9dce1abcbe6e50b3068466db7185d16146fbd5679c075723c252"
+      },
+      "launch.json": {
+        "bytes": 2324,
+        "sha256": "384d5ccdecd866f481a4bffeb00d57a8f6aa4b86ae1348ede3701f5f6226b642"
+      },
+      "run/receipt.json": {
+        "bytes": 1385,
+        "sha256": "bdc93eb1af04ea897bc18050f869388b04cca9a0e1dbcbd2f251262f8a8bd743"
+      },
+      "run/command-receipt.json": {
+        "bytes": 5602,
+        "sha256": "f578f307b39a7d041850493d953dcde2cec2842356069da05c44eff4375dc2db"
+      },
+      "controller/result.json": {
+        "bytes": 718907,
+        "sha256": "f231c3df44f8370e21686db84d09d144560aee7ca99ad60093b7c248fd9eb954"
+      }
+    },
+    "original_parent": {
+      "exit_code": 1,
+      "terminal_exit_received": true,
+      "parent_capture_files_closed": true,
+      "deadline_exceeded": false,
+      "outer_same_process_start_object": true,
+      "outer_wait_returned": true,
+      "outer_disposed": true
+    },
+    "normal_capture_admission": {
+      "quiescence_state": "complete",
+      "commands_quiescent": true,
+      "captures_measured": true,
+      "normal_physical_receiving": true,
+      "normal_qualification": false,
+      "composite_complete": true,
+      "captures_finalized": true,
+      "original_command_error": null,
+      "late_physical_access_used": false
+    },
+    "timing": {
+      "started_utc": "2026-11-26T16:33:11.6359049Z",
+      "finished_utc": "2026-11-26T16:35:16.54005Z",
+      "parent_seconds": 128.1724635999999,
+      "guarded_command_seconds": 127.262,
+      "actor_work_deadline": "2026-11-26T16:35:02.3564002Z",
+      "actor_cleanup_deadline": "2026-11-26T16:35:12.3564002Z",
+      "actor_complete_received_at": "2026-11-26T16:35:09.5648Z",
+      "original_process_events": [
+        {
+          "role": "actor",
+          "event": "create",
+          "sequence": 1,
+          "utc": "2026-11-26T16:33:15.6856713Z",
+          "original_exit_code": 87
+        },
+        {
+          "role": "product",
+          "event": "create",
+          "sequence": 37,
+          "utc": "2026-11-26T16:33:34.5198875Z",
+          "original_exit_code": 0
+        },
+        {
+          "role": "product",
+          "event": "exit",
+          "sequence": 5517,
+          "utc": "2026-11-26T16:33:50.2482625Z",
+          "original_exit_code": 0
+        },
+        {
+          "role": "product",
+          "event": "create",
+          "sequence": 5520,
+          "utc": "2026-11-26T16:33:59.1272764Z",
+          "original_exit_code": 0
+        },
+        {
+          "role": "product",
+          "event": "exit",
+          "sequence": 10993,
+          "utc": "2026-11-26T16:34:13.2530015Z",
+          "original_exit_code": 0
+        },
+        {
+          "role": "actor",
+          "event": "exit",
+          "sequence": 11020,
+          "utc": "2026-11-26T16:35:09.495064Z",
+          "original_exit_code": 87
+        }
+      ]
+    },
+    "case": {
+      "ready_received": true,
+      "grant_published": true,
+      "final_received": false,
+      "native_complete": true,
+      "io_complete": true,
+      "complete": true,
+      "unknown": false,
+      "process_count": 43,
+      "thread_count": 580,
+      "critical_event_count": 1160,
+      "auxiliary_bin_count": 144,
+      "observed_event_count": 11020,
+      "role_counts": {
+        "actor": 1,
+        "product": 2,
+        "netstat": 6,
+        "netsh": 2,
+        "powershell": 12,
+        "conhost": 20
+      },
+      "stdout": {
+        "WorkerReturned": true,
+        "EOF": true,
+        "WriterCloseAttempted": true,
+        "WriterClosed": true,
+        "ReaderClosed": true,
+        "Bytes": 300,
+        "Overflow": false,
+        "ReadError": "",
+        "ReaderCloseError": "",
+        "WriterCloseError": ""
+      },
+      "stderr": {
+        "WorkerReturned": true,
+        "EOF": true,
+        "WriterCloseAttempted": true,
+        "WriterClosed": true,
+        "ReaderClosed": true,
+        "Bytes": 0,
+        "Overflow": false,
+        "ReadError": "",
+        "ReaderCloseError": "",
+        "WriterCloseError": ""
+      },
+      "failure": "*errors.joinError: context deadline exceeded\nexit status 87\noriginal canonical actor/control/ledger did not pass",
+      "ledger": {
+        "root_runs": 1,
+        "root_passes": 0,
+        "root_fails": 0,
+        "root_skips": 0,
+        "terminals": null,
+        "complete": false,
+        "passed": false
+      },
+      "closure_model": "fixed-canonical-case-observed-debug-chain-v1",
+      "closure_limit": "Completion covers the original observed debug chain under the fixed-source/no-new-debug-chain assumption; it is not universal process-tree containment."
+    },
+    "admitted_capture_hashes_and_lengths": {
+      "run/canonical-focused.stdout.txt": {
+        "bytes": 287,
+        "sha256": "29c0b846ae06043cb09f691524385430d3fd277fd830e2cfcb60472b2b056128"
+      },
+      "run/canonical-focused.stderr.txt": {
+        "bytes": 1913,
+        "sha256": "9047aec09bed6bfabe00f5f6cebdc89c72163a88fe5bdabba77bf323c5a59fd3"
+      },
+      "controller/stdout.raw": {
+        "bytes": 287,
+        "sha256": "29c0b846ae06043cb09f691524385430d3fd277fd830e2cfcb60472b2b056128"
+      },
+      "controller/stderr.txt": {
+        "bytes": 1812,
+        "sha256": "43f8978bfa9bcd0246e2a141bbc884340bce564d631556aa4c672ef0d6fdf898"
+      },
+      "controller/channel/successor/stdout.raw": {
+        "bytes": 300,
+        "sha256": "b2cf0c21246ae3447e20041c6d6b4f27709965d45c11e9addc38fbeab8395368"
+      },
+      "controller/channel/successor/stderr.txt": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "postclosure_stage_observations": [
+      {
+        "member": "launcher",
+        "bytes": 10361344,
+        "created_utc": "2026-11-26T16:34:33.799Z",
+        "modified_utc": "2026-11-26T16:34:33.814Z"
+      },
+      {
+        "member": "product",
+        "bytes": 49445888,
+        "created_utc": "2026-11-26T16:34:44.273Z",
+        "modified_utc": "2026-11-26T16:34:46.634Z"
+      }
+    ],
+    "identity_stage_file_observed": false,
+    "third_Product_launch_observed": false,
+    "first_two_Product_exit_codes": [
+      0,
+      0
+    ],
+    "earlier_subtest_PASS_inferred": false,
+    "stage_timestamps_are_operation_completion_times": false,
+    "diagnosis": {
+      "observed": "Actor entered the three sequential subcases; two Product processes launched and exited 0; no third Product launch; full-size launcher and Product stage files retained, no identity stage file observed.",
+      "supported_source_localization": "Third-fixture staging or its error-cleanup interval before successor launch.",
+      "exact_actor_blocking_instruction": "UNDETERMINED",
+      "original_actor_stack_available": false,
+      "Sync_FlushFileBuffers_is_a_hypothesis": true,
+      "hash_close_seal_and_cleanup_not_excluded": true,
+      "Parole_diagnostic_cause_transferred_to_B": false,
+      "outer_test_timeout_stack_is_original_actor_stack": false
+    },
+    "negative_probes": {
+      "run_return": "NOT_RUN",
+      "stdout_reader": "NOT_RUN"
+    },
+    "deadline_increase_claimed": false,
+    "production_durability_change_claimed": false,
+    "runtime_retry_claimed": false,
+    "historical_HOLD_capture_access_used": false
+  },
+  "frozen_snapshot_interpretation": [
+    {
+      "snapshot": "Source6d progress",
+      "rule": "NOT_RUN remains true for checks not executed on that older Source; later Source52 runs do not execute or qualify Source6d."
+    },
+    {
+      "snapshot": "Initial Source52 overview",
+      "old_status": "Parole diagnostic NOT_RUN",
+      "later_separate_evidence": "Failure-only overlay FAIL/CLOSED; original Source52 FAIL and its unknown exact instruction remain."
+    },
+    {
+      "snapshot": "Source52 P1/P2 build-only packet",
+      "old_status": "Native HAPPY NOT_RUN",
+      "later_separate_evidence": "Original retained Products used by named-path HAPPY v3: FAIL/CLOSED; no qualification."
+    },
+    {
+      "snapshot": "Initial latest A/B v2 packet",
+      "old_status": "#660 companion publication prepared; Parole follow-up outside initial cutoff",
+      "later_separate_evidence": "#660 publication read back; sibling selected positive/negative Parole controls received. Frozen v2 bytes unchanged."
+    }
+  ],
+  "preserved_history": {
+    "source6d_focused_campaign": "FAIL/CLOSED",
+    "initial_source52_controller": "FAIL/CLOSED",
+    "e66_happy": "FAIL",
+    "e66_negative_qualification": "Original failed/UNKNOWN classifications preserved; separate physical CLOSED receipts do not promote qualification",
+    "older_negative_check_batch": {
+      "original_result": "FAIL/HOLD",
+      "separate_physical_receiving": "UNKNOWN",
+      "historically_reclassified": false,
+      "held_owner_released": false,
+      "held_captures_used": false
+    },
+    "history_report": "../ab-functional-source6d-20261126/README.md",
+    "e66_probe_report": "../ab-functional-source6d-20261126/history/e66-negative-probes/README.md"
+  },
+  "acceptance_limits": [
+    "Standalone substituted-Scheduler tests do not establish native Calendar StartBoundary normalization or fixed production task-name behavior.",
+    "Build success is separate from native successor/Abort acceptance.",
+    "Two clean original Product exits do not provide missing root/subtest terminals.",
+    "The exact B Stage blocking instruction is not known; no cause is transferred from another run.",
+    "Full default and tagged API/CLI commands, wider A behavior, private runtime and installed/release qualification are not established.",
+    "A new diagnostic actor or test-source child requires its actual source and byte admissions; prior P1/P2 evidence is not relabeled."
+  ],
+  "input_provenance": {
+    "standalone_liveness_evidence_sha256": "da656a80efa0846b8a843b01e2cd6d06f7ba7c0a7a2f2b4c7b5d2676411d24b4",
+    "initial_source52_evidence_sha256": "769199c3290d18fa437e3b1487b8291fda0c6bf8098fa9218b349cf5167bd307",
+    "parole_diagnostic_evidence_sha256": "57c072c89107125691be39a4f74c837a3c80685597c26a12ac579029e43793da",
+    "build_summary_derivative_sha256": "aa80c07c70793148d4e81b54202cee8feb449f951132db2c15e91c1522918384",
+    "happy_evidence_derivative_sha256": "64a90032032f29954dbac4d021839fbb3d46ae22547ab5394460fc08d7480275",
+    "closed_native_metadata_extraction": {
+      "bytes": 142298,
+      "sha256": "0a0c9a8a5439dee4fc89e143ceb6544ec7ef9aed87e4c87e0ff4ba3d04e438fb"
+    },
+    "runtime_results_received_by": "original root and qualification owners",
+    "this_packet": "functional_review static consolidation only; no native run or Source mutation",
+    "publication_v3_sources": {
+      "v2_package_sha256": "15910c0b70f1d06a455a4c5d976ca85984f39238cf220c1d670aeddf257a334f",
+      "stage_failed_receiving_summary_sha256": "06639ff3eaa8b463f1802193dfd01ac6373a6c0aeedc6be6955b7ef41d3782ff",
+      "public660_publication_complete_sha256": "f5dba231f4de2d3705805025d6410c36899fe997d654baba72e5662efc91b948",
+      "public660_remote_readback_verified_sha256": "3422e4b61e4ad9e76da3bf343a7126d0fc529e2d516e5ae2228c50daf06b6a12",
+      "parole_controls_evidence_sha256": "e384039169b74e1365d88d333d477a7f0bfcd9366d6bcbc230625fb698c51bbc",
+      "source52_snapshot_sha256": "8b5cc7554238f8c2f677568b9cf9ca4dcf8d200efadb566fad216aac51d2038e"
+    }
+  },
+  "sanitization": {
+    "native_machine_paths_included": false,
+    "process_identifiers_included": false,
+    "local_usernames_included": false,
+    "raw_captures_included": false,
+    "raw_goroutine_stacks_included": false,
+    "selected_repository_relative_stack_frames_included": true,
+    "original_receipt_and_capture_hashes_retained": true
+  },
+  "publication_progress_v3": {
+    "evidence_boundary": "Completed v2 staging and formatting failure; v3 correction prepared, not executed",
+    "public660": {
+      "head": "a706b5b2a71ca850136398f7d4a45e624d107151",
+      "tree": "c9049b24f90da2bfe9d563e5feb0b15212f03da4",
+      "draft": true,
+      "remote_files_byte_and_git_blob_verified": 7,
+      "body_readback_exact": true,
+      "previous_body_preserved": true,
+      "push_receipt_sha256": "19f4f96c3c6fa917d73b60e6f0febd0e1214c3f36b0d1f3d0ba0d340e0ad4d32",
+      "original_commands_closed": 4,
+      "original_readers_closed": 8,
+      "tested_code_commit_remains": "99c89e9fd12e7bf50a703940c099f568a5c99628"
+    },
+    "public664_v2_staging": {
+      "status": "PASS",
+      "files_read_back": 42,
+      "original_step_exit_code": 0,
+      "seconds": 1.5118002999806777,
+      "staging_receipt_sha256": "19fa8d5536d166a8a03228beca6d7641a77726d7111524fa55b91e0e3e570b69",
+      "package_v2_sha256": "15910c0b70f1d06a455a4c5d976ca85984f39238cf220c1d670aeddf257a334f",
+      "git_index_changed": false
+    },
+    "public664_v2_batch": {
+      "status": "FAIL",
+      "physical_lifecycle": "CLOSED",
+      "HOLD": false,
+      "original_receipt_sha256": "0e5c35dfef1314f59c6e5fa72242190b217979b91ec2cd740f5ebd4acbe2ad89",
+      "original_commands": 3,
+      "original_readers": 6,
+      "original_parent_seconds": 2.2566038999939337,
+      "original_parent_exit_code": 1,
+      "failed_command": "git diff --check",
+      "failed_command_exit_code": 2,
+      "following_diff_stat": "NOT_RUN",
+      "failure_category": "CRLF line endings in publication snapshot Go file",
+      "all_original_commands_complete": true,
+      "all_original_readers_joined": true
+    },
+    "publication_only_normalization": {
+      "repository_path": "internal/cli/supervise_status_snapshot_test.go",
+      "before": {
+        "bytes": 28454,
+        "sha256": "ab357bcba5ccd283c439a2b496c5bbff2c6d606faa8ca86f2d2668c63dfb0c5e",
+        "git_blob": "f958d1b5b835b2b4bd83636f5f9bc04c9f9e47ec"
+      },
+      "after": {
+        "bytes": 27618,
+        "sha256": "a95b26f2eb3564f3bcefb247064189f9533bb8bfa31e10738f310ef7d5f86298",
+        "git_blob": "63657630d1c9a1c5a78fc8c2acad629ea45dad93"
+      },
+      "CRLF_pairs_replaced": 836,
+      "lone_CR_present": false,
+      "transformation": "replace each CRLF with LF",
+      "normalized_sha256_equals_exact_Source52_census_entry": true,
+      "source52_commit": "52a2d9ef57b7c372b9fa149adf062ad7e503b22d",
+      "source52_modified": false,
+      "code_semantics_changed": false,
+      "native_correction_status": "PREPARED_NOT_RUN",
+      "native_postcorrection_format_check": "NOT_RUN",
+      "new_tests": "NOT_RUN"
+    },
+    "separate_Parole_controls": {
+      "report": "../ab-functional-source52-20261126/parole-barrier-controls-20261126.md",
+      "evidence": "../ab-functional-source52-20261126/parole-barrier-controls-20261126.json",
+      "positive_default_overlay": "PASS",
+      "positive_test_seconds": 0.27,
+      "positive_package_seconds": 0.799,
+      "negative_PostSelf_to_TryPost": "EXPECTED_FAIL",
+      "negative_test_seconds": 0.06,
+      "negative_package_seconds_json": 0.584,
+      "original_receipt_sha256": "f558bde54cb3f313859d856ddf11913fae93f4244a617164577769193aec47f5",
+      "original_commands": 5,
+      "original_readers": 10,
+      "physical_lifecycle": "CLOSED",
+      "immutable_source52_changed": false,
+      "full_acceptance": false,
+      "report_status_at_preparation": "IN_REVIEWED_PUBLIC42_PACKET_NOT_YET_PUBLISHED"
+    },
+    "history_preserved": {
+      "source6d_and_source52_capsules": true,
+      "initial_Source52_FAIL": true,
+      "separate_Parole_diagnostic_FAIL": true,
+      "B_HAPPY_v3_FAIL_CLOSED": true,
+      "older_held_negative_FAIL_UNKNOWN": true,
+      "PACKAGE_v2_bytes": true
+    },
+    "correction_only_changes": [
+      "internal/cli/supervise_status_snapshot_test.go",
+      "docs/modernization/verification/ab-functional-latest-363b-20261126/README.md",
+      "docs/modernization/verification/ab-functional-latest-363b-20261126/evidence.json"
+    ],
+    "native_correction_executed_by_preparation": false,
+    "public664_index_commit_push_performed_by_preparation": false
+  }
+}

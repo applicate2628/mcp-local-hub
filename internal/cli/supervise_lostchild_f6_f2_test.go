@@ -279,6 +279,22 @@ func lostChildParoleController(t *testing.T, threshold int) (*supervisorControll
 	return ctrl, loop, statePath
 }
 
+// Join the original loop before the fixture's log and temporary directory cleanup.
+func startLostChildParoleLoop(t *testing.T, ctrl *supervisorController) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(ctrl.ctx)
+	ctrl.ctx = ctx
+	done := make(chan struct{})
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	go func() {
+		defer close(done)
+		ctrl.eventLoop.Run(ctx)
+	}()
+}
+
 func lostChildWaitForSMState(t *testing.T, ctrl *supervisorController, task string, want api.SMState) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -305,7 +321,7 @@ func TestSupervisorController_QuarantineParole_FiresAfterCooldownAndClears(t *te
 	ctrl.intentCache.Refresh(&api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{descriptor}})
 	ctrl.smStates.Store(task, api.StRunning)
 	loop.RegisterHandler(ctrl.handleLoopEvent)
-	go loop.Run(ctrl.ctx)
+	startLostChildParoleLoop(t, ctrl)
 
 	// Drive the REAL threshold path: one non-clean child exit at StRunning →
 	// StBackoffWaiting → handleBackoffWaiting → failures(1) >= threshold(1) →
@@ -369,7 +385,7 @@ func TestSupervisorController_QuarantineParole_ExponentialAndBounded(t *testing.
 			restarts <- e
 		}
 	})
-	go loop.Run(ctrl.ctx)
+	startLostChildParoleLoop(t, ctrl)
 
 	ctrl.smStates.Store(key, api.StQuarantined)
 	t0 := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
@@ -439,7 +455,7 @@ func TestSupervisorController_QuarantineParole_RespectsStoppedIntent(t *testing.
 			restarts <- e
 		}
 	})
-	go loop.Run(ctrl.ctx)
+	startLostChildParoleLoop(t, ctrl)
 
 	ctrl.smStates.Store(key, api.StQuarantined)
 	t0 := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
@@ -479,7 +495,7 @@ func TestSupervisorController_ParoleTick_OnLoopDispatchFires(t *testing.T) {
 	key := canonicalSupervisorTaskName(task)
 	ctrl.intentCache.Refresh(&api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{{TaskName: task, Server: "test", Daemon: "default"}}})
 	loop.RegisterHandler(ctrl.handleLoopEvent)
-	go loop.Run(ctrl.ctx)
+	startLostChildParoleLoop(t, ctrl)
 
 	// A quarantined daemon whose cooldown has already elapsed (nextAttemptAt in the
 	// past), running intent (default). Seeding the map from the test goroutine BEFORE
@@ -512,7 +528,7 @@ func TestSupervisorController_ParoleGraduationVsThreshold_NoWedge(t *testing.T) 
 	key := canonicalSupervisorTaskName(task)
 	ctrl.intentCache.Refresh(&api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{{TaskName: task, Server: "test", Daemon: "default"}}})
 	loop.RegisterHandler(ctrl.handleLoopEvent)
-	go loop.Run(ctrl.ctx)
+	startLostChildParoleLoop(t, ctrl)
 
 	// A daemon on the parole ladder (attempts=1) that has dwelled in StRunning past
 	// the stabilize dwell, so a parole tick would GRADUATE it (Delete the ladder).
@@ -562,7 +578,7 @@ func TestSupervisorController_ParolePostRoutesThroughQuarantined(t *testing.T) {
 	key := canonicalSupervisorTaskName(task)
 	ctrl.intentCache.Refresh(&api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{{TaskName: task, Server: "test", Daemon: "default"}}})
 	loop.RegisterHandler(ctrl.handleLoopEvent)
-	go loop.Run(ctrl.ctx)
+	startLostChildParoleLoop(t, ctrl)
 
 	// The ONLY smStates row is canonical — production stores every StQuarantined row
 	// canonical (all 8 smStates.Store sites key canonical post-r8). No bare-key row
@@ -627,7 +643,7 @@ func TestSupervisorController_ParoleQueuedStop_PostSelfHonorsStop(t *testing.T) 
 	loop.Post(api.LoopEvent{Kind: evParoleTick})
 	loop.Post(api.LoopEvent{Kind: flipStopsSentinel})
 	loop.Post(api.LoopEvent{Kind: api.EvIntentUpdate, TaskName: task})
-	go loop.Run(ctrl.ctx)
+	startLostChildParoleLoop(t, ctrl)
 
 	// PostSelf: the restart drains first, the daemon spawns, then the queued stop
 	// drives it to StExiting. A TryPost revert leaves it stuck at StRunning → this
@@ -679,7 +695,7 @@ func TestSupervisorController_StaleLivenessDisownDroppedByGeneration(t *testing.
 	ctrl.tracker.MarkSpawned(task, 200, time.Now().UTC())
 	ctrl.smStates.Store(task, api.StRunning)
 	loop.RegisterHandler(ctrl.handleLoopEvent)
-	go loop.Run(ctrl.ctx)
+	startLostChildParoleLoop(t, ctrl)
 
 	// Stale disown (generation 1 < current 2): P1a drops it; the child survives.
 	loop.Post(api.LoopEvent{Kind: api.EvChildExit, TaskName: task, Body: map[string]any{"pid": 100, "pid_generation": 1, "reason": "pid_identity_mismatch"}})
@@ -788,7 +804,7 @@ func TestSupervisorController_QuarantineParole_ClassFlipToJobRefusedClearsLadder
 	}
 	ctrl.smStates.Store(task, api.StRunning)
 	loop.RegisterHandler(ctrl.handleLoopEvent)
-	go loop.Run(ctrl.ctx)
+	startLostChildParoleLoop(t, ctrl)
 
 	// Threshold quarantine via the real path (threshold=1) → eligibility recorded.
 	loop.Post(api.LoopEvent{Kind: api.EvChildExit, TaskName: task})
@@ -843,7 +859,7 @@ func TestSupervisorController_QuarantineParole_BareTaskNameKeyParoled(t *testing
 			restarts <- e
 		}
 	})
-	go loop.Run(ctrl.ctx)
+	startLostChildParoleLoop(t, ctrl)
 
 	ctrl.runQuarantineParoleTick(t0.Add(quarantineParoleBaseDelay + time.Minute))
 	select {

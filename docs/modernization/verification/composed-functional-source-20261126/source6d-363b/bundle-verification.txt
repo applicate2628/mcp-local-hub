@@ -1,0 +1,5 @@
+The bundle contains this ref:
+6d4fa7b8f9b86079020af125b030a26350cb5bb0 HEAD
+The bundle requires this ref:
+e66f5c6fab7da2a2eff16ff1f0891991ca1a839c 
+The bundle uses this hash algorithm: sha1

@@ -746,3 +746,91 @@ func TestSupervisorStatusDaemonsFailLoudAndSnapshotErrorWithCoalescer(t *testing
 		}
 	})
 }
+
+func TestSupervisorStatusInactiveRowsDoNotProbePorts(t *testing.T) {
+	for _, state := range []string{"idle", "stopped"} {
+		for _, withCoalescer := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/coalescer=%t", state, withCoalescer), func(t *testing.T) {
+				stateDir, tracker, meta := seedRunningDaemons(t, 2)
+				wantState := "Idle"
+				if state == "idle" {
+					tracker = NewDaemonRuntimeTracker()
+				} else {
+					wantState = "Stopped"
+					for task := range meta {
+						tracker.MarkExited(task)
+					}
+				}
+				installOwnsPortProbe(t)
+				calls := withFakePortOwnersSnapshot(t, func() (map[int]int, error) {
+					return nil, errors.New("inactive status must not query port owners")
+				})
+				var coalescer *statusPortOwnersCoalescer
+				if withCoalescer {
+					coalescer = newStatusPortOwnersCoalescer(tracker)
+					coalescer.snapshotFn = func(context.Context) (map[int]int, error) {
+						return loopbackPortOwnersSnapshotFn()
+					}
+				}
+				rows, err := supervisorStatusDaemons(stateDir, tracker, coalescer)
+				if err != nil || len(rows) != len(meta) {
+					t.Fatalf("inactive status: rows=%+v err=%v", rows, err)
+				}
+				if *calls != 0 {
+					t.Fatalf("inactive status took %d port snapshots, want none", *calls)
+				}
+				for _, row := range rows {
+					m, known := meta[row["task_name"].(string)]
+					if !known || row["state"] != wantState || row["current_pid"] != 0 || row["port"] != m.port {
+						t.Errorf("inactive row changed: %+v, want state=%s with original port and no pid", row, wantState)
+					}
+					if _, stale := row["stale_pid"]; stale {
+						t.Errorf("inactive row gained stale_pid: %+v", row)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestSupervisorStatusPendingStopSharesPortOwnerSnapshot(t *testing.T) {
+	for _, withCoalescer := range []bool{false, true} {
+		t.Run(fmt.Sprintf("coalescer=%t", withCoalescer), func(t *testing.T) {
+			stateDir, tracker, meta := seedRunningDaemons(t, 2)
+			const pendingTask = "\\mcp-local-hub-srv0-default"
+			pending := meta[pendingTask]
+			receipt := beginStopSettlementForTest(t, tracker, filepath.Join(stateDir, "supervisor-state.json"), pendingTask)
+			installOwnsPortProbe(t)
+			snapshot := map[int]int{}
+			for _, m := range meta {
+				snapshot[m.port] = m.pid
+			}
+			calls := withFakePortOwnersSnapshot(t, func() (map[int]int, error) { return snapshot, nil })
+			var coalescer *statusPortOwnersCoalescer
+			if withCoalescer {
+				coalescer = newStatusPortOwnersCoalescer(tracker)
+				coalescer.snapshotFn = func(context.Context) (map[int]int, error) {
+					return loopbackPortOwnersSnapshotFn()
+				}
+			}
+			rows, err := supervisorStatusDaemons(stateDir, tracker, coalescer)
+			if err != nil || len(rows) != len(meta) {
+				t.Fatalf("pending and running status: rows=%+v err=%v", rows, err)
+			}
+			if *calls != 1 {
+				t.Fatalf("pending and running status took %d port snapshots, want one", *calls)
+			}
+			for _, row := range rows {
+				if row["task_name"] == pendingTask {
+					diagnostic, ok := row["stop_settlement"].(map[string]any)
+					if row["state"] != "Stopping" || !ok ||
+						diagnostic["phase"] != string(receipt.Phase) || diagnostic["observed_port_owner_pid"] != pending.pid {
+						t.Errorf("pending-stop diagnostic changed: %+v", row)
+					}
+				} else if row["state"] != "Running" {
+					t.Errorf("running row changed: %+v", row)
+				}
+			}
+		})
+	}
+}

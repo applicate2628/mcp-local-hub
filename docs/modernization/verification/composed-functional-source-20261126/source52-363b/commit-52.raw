@@ -1,0 +1,6 @@
+tree 51258ebd9ad3a654418b6ecb9163947734ef0314
+parent 6d4fa7b8f9b86079020af125b030a26350cb5bb0
+author applicate2628 <dima_den@inbox.ru> 1795707384 +0300
+committer applicate2628 <dima_den@inbox.ru> 1795707384 +0300
+
+test(cli): join the original lost-child event loop before cleanup

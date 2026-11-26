@@ -1,0 +1,125 @@
+{
+  "schema": "composed-functional-source52-v2-text",
+  "source_commit": "52a2d9ef57b7c372b9fa149adf062ad7e503b22d",
+  "source_tree": "51258ebd9ad3a654418b6ecb9163947734ef0314",
+  "parent_commit": "6d4fa7b8f9b86079020af125b030a26350cb5bb0",
+  "parent_tree": "277dad42f9e9080d66955fa7469fbc68bc8618e4",
+  "inherited_composition_commit": "e66f5c6fab7da2a2eff16ff1f0891991ca1a839c",
+  "inherited_composition_tree": "4df69e99dca3f808b26e6a5bf7721bdd0ba3a91c",
+  "parent_capsule": "../source6d-363b/README.md",
+  "original_composition_capsule": "../README.md",
+  "changed_paths": [
+    {
+      "path": "internal/cli/supervise_lostchild_f6_f2_test.go",
+      "parent_blob": "607e3dd5ce78970f5af027200718d20c350b37a8",
+      "source_blob": "8d6414f0e64d6dd02fbacbca357a6edd692aa359",
+      "parent_working_file_sha256": "db977a528f7b8c85d8d5198ffe82f1f2caad5ce7da42ecc7fb78255c339d06d0",
+      "source_working_file_sha256": "8bd40a8b1d41becc6d21192044883f994516e666951d781a61cc1eda71e65be4",
+      "mode": "100644"
+    }
+  ],
+  "changed_paths_basis": "One-path native exported parent-to-Source52 full-index diff, root's source-commit receiving, and exact known before/after blob bytes.",
+  "inherited_go_module_pins": {
+    "go.mod": "6d61e480d392b8ff20530467851e45d92c01bbde65468796f013d7eb30315392",
+    "go.sum": "61f4a30f006f3bc99b1d2500646d9fd381c3c8d72050ca76dce2f9321c3ecae2"
+  },
+  "inherited_go_module_pins_basis": "Parent Source6d capsule; not remeasured by this local capsule preparation.",
+  "native_source_commit_receipt_sha256": "7310b496e3d248c41f2035ff0c4aa942c142330f4131fade9b4ba235a422c9a3",
+  "native_export_receipt_sha256": "06c2f3047b2255b2c57fdf1a0339869a045320174e88b9cfe32bb225e94bc078",
+  "native_export": {
+    "status": "PASS",
+    "command_count": 10,
+    "original_reader_count": 20,
+    "all_original_commands_closed": true,
+    "parent_exit_code": 0,
+    "parent_reaped": true,
+    "parent_captures_closed": true,
+    "parent_elapsed_seconds": 1.68955,
+    "basis": "root original export receiving"
+  },
+  "test_report": "../../ab-functional-source52-20261126/README.md",
+  "test_results": {
+    "receipt_sha256": "5ce22474571013d116634bf2b08043372487b594e577122e341f08eb8ca7b430",
+    "build_all": "PASS",
+    "vet_all": "PASS",
+    "focused_default_controller": "FAIL/CLOSED",
+    "tagged_controller": "NOT_RUN",
+    "full_qualification": false
+  },
+  "source_identity_is_not_test_acceptance": true,
+  "old_results_reclassified": false,
+  "raw_git_authorship_preserved_for_exact_object_id": true,
+  "files": {
+    "source6d-to-source52.patch": {
+      "bytes": 5486,
+      "sha256": "ac62d653d3040133653c28e8268d58c948c26e9fa62567e791a0d5073f2b9f32"
+    },
+    "commit-52.raw": {
+      "bytes": 280,
+      "sha256": "f0a3db2f1290a5106a3656bc8cc130a23ffce1a23537b44992bbdc9777145f73"
+    },
+    "source52-files.txt": {
+      "bytes": 100,
+      "sha256": "5feef5947e137ffffc1acbd93944b3808101786835fec5ade7106bcd5058a2c7"
+    },
+    "source6d-files.txt": {
+      "bytes": 100,
+      "sha256": "02d299c62cd0d6f0e56c995e3f38ff4134724e4568e64153d3f78204772d8d44"
+    },
+    "source52-identity.txt": {
+      "bytes": 123,
+      "sha256": "4045154eff08842baad42836b0b739b347dfadeba21292eefd3fe01b93192e3c"
+    },
+    "bundle-verification.txt": {
+      "bytes": 190,
+      "sha256": "8f5892ae6ac753ca8c87ad77eb7dc07b725180f81b1fbf3a039791832b80d9e4"
+    },
+    "bundle-heads.txt": {
+      "bytes": 46,
+      "sha256": "c00e2d8a64a0ec584882d720800a5a3af08d6153c5b7b815b9e959bcd6538bbc"
+    }
+  },
+  "historical_binary_export": {
+    "file": "source52.bundle",
+    "bytes": 955,
+    "sha256": "c338040dd2c34767c6d0f077b964899b98da4ae22ec35f5f1cce103a2d3bda2b",
+    "included_in_text_capsule": false,
+    "original_bytes_preserved_locally": true,
+    "export_receipt_sha256": "06c2f3047b2255b2c57fdf1a0339869a045320174e88b9cfe32bb225e94bc078",
+    "verification_outputs_retained_as_historical_text": true,
+    "superseded_as_active_reconstruction_input": true
+  },
+  "original_export_local_verification": {
+    "all_exported_bytes_and_sha256_match": true,
+    "raw_git_commit_oid_recomputed": true,
+    "raw_commit_parent_and_tree_match": true,
+    "exact_known_single_file_blob_ids_recomputed": true,
+    "bundle_prerequisite_header_matches": true,
+    "independent_full_source_reconstruction": false,
+    "independent_native_bundle_verify": false
+  },
+  "native_text_reconstruction": {
+    "receipt_sha256": "f059068dcfefe637e8048bfa6f8bc7b77157c8818b2a038a74cb38d4334a90fd",
+    "evidence": "../text-source-reconstruction-363b/evidence.json",
+    "instructions": "../text-source-reconstruction-363b/README.md",
+    "status": "PASS/CLOSED",
+    "complete_git_index_tree_identity": true,
+    "path_count_each": 3867,
+    "original_command_count": 14,
+    "original_reader_count": 28,
+    "full_checkout_created": false,
+    "unchanged_blob_content_reread": false,
+    "new_public_cold_bootstrap": false,
+    "git_ancestry_walk": false,
+    "native_tests_run": false,
+    "old_results_reclassified": false
+  },
+  "complete_base_inventory": {
+    "path": "../text-source-reconstruction-363b/e66-tree-files.tsv",
+    "bytes": 368899,
+    "sha256": "bf51dd7dd3008c34b918ca5785c288aa4c49dcc0c206e32362469bda100de84f",
+    "base_tree": "4df69e99dca3f808b26e6a5bf7721bdd0ba3a91c",
+    "paths": 3867,
+    "target_derivation": "Apply exact changed_paths mode/blob replacements to this complete public e66 inventory; Source52 first applies Source6d changes."
+  }
+}

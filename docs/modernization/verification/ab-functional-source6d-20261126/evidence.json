@@ -1,0 +1,347 @@
+{
+  "schema_version": 1,
+  "record_kind": "source6d-functional-progress",
+  "repository": "applicate2628/mcp-local-hub",
+  "source": {
+    "commit": "6d4fa7b8f9b86079020af125b030a26350cb5bb0",
+    "tree": "277dad42f9e9080d66955fa7469fbc68bc8618e4",
+    "parent": "5ed87ff759405efa739229b7307b5c2f9579c8fc",
+    "clean_native_commit_received_by": "root",
+    "commit_receipt_sha256": "f75c328af2d5d072fc538619d41593d63a8b62e8480ba2660481ae8f1eaa99ea",
+    "capsule": {
+      "repository_path": "docs/modernization/verification/composed-functional-source-20261126/source6d-363b/README.md",
+      "export_status": "PASS",
+      "export_receipt_sha256": "72936aae5ebac8ba7ef5f6d6cbc4a6235956202a23d464ed2aa3f6b75df91864",
+      "commands_received_closed": 11,
+      "readers_received_closed": 22,
+      "bundle_bytes": 12115,
+      "bundle_sha256": "71b3a9d700ca47f2005bcd36d340b420fb6f261f1aca8b3255cdeeec25b86d28",
+      "raw_parent_and_current_commit_object_ids_verified_by_root": true,
+      "publication_assembly": "separate root-owned capsule export"
+    }
+  },
+  "source6d_focused_batch": {
+    "source_commit": "6d4fa7b8f9b86079020af125b030a26350cb5bb0",
+    "status": "FAIL",
+    "physical": "CLOSED",
+    "new_hold": false,
+    "receipt_sha256": "fc4e69767c640a4584e914213fbea35731d992e67975ca05c5a8bcfd076a700a",
+    "root_received_original_commands": 3,
+    "root_received_original_output_readers": 6,
+    "all_original_command_and_reader_resources_closed": true,
+    "parent_seconds": 309.6139396,
+    "steps": [
+      {
+        "exit": 0,
+        "seconds": 152.53037440002663,
+        "counts": {
+          "pass": 88,
+          "top_pass": 40
+        },
+        "packages": [
+          {
+            "package": "mcp-local-hub/internal/cli",
+            "action": "pass",
+            "elapsed": 72.958
+          }
+        ],
+        "stdout_sha256": "17e0e52974199c7fa919923e2197023c26e9c15ee31a33b226a0954a1a8e3f44",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "logical_stdout_name": "status-focused-default.stdout.txt",
+        "failures": []
+      },
+      {
+        "exit": 1,
+        "seconds": 156.57040990004316,
+        "counts": {
+          "pass": 315,
+          "top_pass": 151,
+          "skip": 1,
+          "top_skip": 1,
+          "fail": 1,
+          "top_fail": 1
+        },
+        "packages": [
+          {
+            "package": "mcp-local-hub/internal/api",
+            "action": "pass",
+            "elapsed": 64.524
+          },
+          {
+            "package": "mcp-local-hub/internal/cli",
+            "action": "fail",
+            "elapsed": 89.696
+          }
+        ],
+        "stdout_sha256": "6a0ffb37142a07bced601de73e3978d1be93f88376289f359a0fdf3768bb3567",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "logical_stdout_name": "liveness-abort-status-focused-tagged.stdout.txt",
+        "failures": [
+          {
+            "package": "mcp-local-hub/internal/cli",
+            "test": "TestSupervisorController_StaleLivenessDisownDroppedByGeneration",
+            "diagnostic": "TempDir RemoveAll cleanup failed: directory not empty",
+            "actual_path_omitted": true
+          }
+        ]
+      }
+    ],
+    "provenance": {
+      "receiver": "root",
+      "reviewer_input": "root parsed closed-capture metadata",
+      "reviewer_input_sha256": "d50b440430c818267db8fbdf9c125b9f61882df6a22e578af8f261a174ffafbe",
+      "reviewer_input_bytes": 2139,
+      "reviewer_read_native_captures": false,
+      "failed_held_capture_access": false
+    },
+    "root_cause_status": "cleanup diagnostic observed; further diagnosis/correction outside this Source6d snapshot"
+  },
+  "remaining": {
+    "dedicated_orphan_regression": "NOT_RUN",
+    "go_build_all": "NOT_RUN",
+    "go_vet_all": "NOT_RUN",
+    "native_happy_qualification": "NOT_RUN",
+    "full_default_go_test": "NOT_RUN",
+    "full_tagged_api_cli_go_test": "NOT_RUN",
+    "native_calendar_start_boundary_normalization": "NOT_QUALIFIED",
+    "initial_orphan_handler_timeout_cause": "UNDETERMINED",
+    "overall_functional_acceptance": "NOT_ESTABLISHED"
+  },
+  "older_negative_batch_hold": {
+    "source_commit": "5ed87ff759405efa739229b7307b5c2f9579c8fc",
+    "status": "FAIL_HOLD",
+    "physical_receiving": "UNKNOWN",
+    "preceding_expected_negative_checks_received": 3,
+    "preceding_restoration_steps_received": true,
+    "final_command_role": "read-only verification",
+    "final_command_exit_code": 120,
+    "original_direct_process_reaped": true,
+    "original_native_active_zero": true,
+    "original_native_handles_closed": true,
+    "original_output_workers_joined": true,
+    "original_pipe_close_returned": true,
+    "output_eof": false,
+    "capture_close_returned": false,
+    "error_class": "FileExistsError",
+    "captures_measured": false,
+    "new_commands_permitted": false,
+    "supported_post_hold_release_path": "NONE_IN_INSPECTED_RUNNING_COORDINATOR",
+    "receipt": {
+      "logical_name": "receipt.json",
+      "bytes": 99694,
+      "sha256": "ad50e0a1a66cbf53a051518920f9f4db8574447f95e7c66d979dd566b60b4d84"
+    },
+    "physical_receipt": {
+      "logical_name": "failed-worker-physical-closure.json",
+      "bytes": 2707,
+      "sha256": "5b95d83b0feaa8276e587242036e1051d1058c03d2d8bc07eb4784c549ad1f7a"
+    },
+    "provenance": "root read safe original metadata only; author did not read held captures",
+    "historical_verdict_changed": false,
+    "held_owner_changed": false
+  },
+  "publication_performed_by_packet_author": false,
+  "pull_request": 664,
+  "public_preimage_head": "0e8bec723af3f4a52f158e29d2447836ae887374",
+  "public_source_files": [
+    {
+      "path": "internal/cli/supervise_status.go",
+      "before": {
+        "bytes": 23233,
+        "sha256": "5d48bd11d41bb85237fc055ce0882500bf8a0f65c3a8956412471a9561c46153",
+        "git_blob": "1ec81b81c91ecb15b314e3412dbe5516fb39e558"
+      },
+      "after": {
+        "bytes": 23276,
+        "sha256": "79ade1a56aabe3f81dfb3de34b6ebb11af649d1ea7d6c670430b86d88c97406b",
+        "git_blob": "f5f75e0756fa111ada5fb2f35008e38b318d43f2"
+      }
+    },
+    {
+      "path": "internal/cli/supervise_status_snapshot_test.go",
+      "before": {
+        "bytes": 25017,
+        "sha256": "9f0f9daedbb498cd8d3365b053bab2313197d7278288a8de8842c24dfad14854",
+        "git_blob": "31472aa8bc73de0312efb717277ce5983114cf87"
+      },
+      "after": {
+        "bytes": 28454,
+        "sha256": "ab357bcba5ccd283c439a2b496c5bbff2c6d606faa8ca86f2d2668c63dfb0c5e",
+        "git_blob": "f958d1b5b835b2b4bd83636f5f9bc04c9f9e47ec"
+      },
+      "line_endings": {
+        "public_preimage": "CRLF",
+        "public_postimage": "CRLF",
+        "lf_normalized_after_sha256": "a95b26f2eb3564f3bcefb247064189f9533bb8bfa31e10738f310ef7d5f86298",
+        "reason": "preserve public preimage line endings; normalized Go text matches the reviewed source candidate"
+      }
+    },
+    {
+      "path": "internal/cli/supervisor_controller_orphan_reap_test.go",
+      "before": {
+        "bytes": 126966,
+        "sha256": "3a642f72e01763f5c7db435229c2724adf2611b940e276920a46ae59d2fc6b7e",
+        "git_blob": "14abb540847502c65473ed2a75446e34a73d16d3"
+      },
+      "after": {
+        "bytes": 127515,
+        "sha256": "034e4baf23c5f87ceb9a141449b64f94e59f6045d3da80e7a017ca073b97a420",
+        "git_blob": "fd6a9e2e0c4b1b80ebc60143408559ae2208fef0"
+      }
+    },
+    {
+      "path": "internal/cli/supervisor_launch_windows.go",
+      "before": {
+        "bytes": 16650,
+        "sha256": "53971482e3a738529455506435657899e5419f0072808c0a8449d66ec42e3ea7",
+        "git_blob": "fb2427b00558e7180248b4ef96c52f63d42267a7"
+      },
+      "after": {
+        "bytes": 17186,
+        "sha256": "8eee6bfdfae5e65afd048bfc3cb29ceac7f5705d687125452ac807228ba64bb6",
+        "git_blob": "6cc8c490f14f4fa000a4f764faaa42da9ec7f2e9"
+      }
+    },
+    {
+      "path": "internal/cli/supervisor_launch_windows_test.go",
+      "before": {
+        "bytes": 18512,
+        "sha256": "7ddc3a344e3962be67d5a8521d6f84bd9cd06782c7c45f350e9e53902f2d481e",
+        "git_blob": "367cc534b73f43ecaed1c3d634754016e56ad2c7"
+      },
+      "after": {
+        "bytes": 20149,
+        "sha256": "5cd79d4d25573c06e5a5d77173062fb7a26ef947ca0e40c65258ae2fae79b6b2",
+        "git_blob": "1857ca9fb83c6ad1353bd3c67ab18514342c30a9"
+      }
+    }
+  ],
+  "public_branch_tests_run": false,
+  "review": {
+    "author": "functional_review",
+    "public_preimages": "fresh GitHub fetch at exact head; Git blobs match preserved local preimages",
+    "scope": "reviewed exact code deltas and publication projection; no target execution by packet author",
+    "own_diff_review": true,
+    "independent_review": "root and functional_review checks retained for their respective authored deltas",
+    "source_receipt_is_not_test_pass": true
+  },
+  "code_scope": "Abort proof reuse, request-local lazy snapshot with pre-PIDStatus ordering, snapshot tests, original orphan loop join",
+  "linked_a_source_files": [
+    {
+      "path": "internal/api/liveness_task.go",
+      "before": {
+        "bytes": 23560,
+        "sha256": "f17872de8e8390c650f59c364ea43ad45653fc9a2bde0054a58b7589a28c36fe",
+        "git_blob": "dfb417d4f0f51eee221f0f42cd115cb066ddf4db"
+      },
+      "after": {
+        "bytes": 23493,
+        "sha256": "7423c2a7fa8e20b117a5db72349e7840fa7adcbdc396ee26adf9caa5c0d09d61",
+        "git_blob": "6c852d6eb172b51708f2d5618163b8ebc4138ff2"
+      }
+    },
+    {
+      "path": "internal/api/liveness_task_test.go",
+      "before": {
+        "bytes": 29974,
+        "sha256": "748280d678dfd1d3f092e10bad91bec97ecf55d2f7c790d0e9a31bccd5d4d963",
+        "git_blob": "d1452e90aea536762e0589632f8a86b196e81ccf"
+      },
+      "after": {
+        "bytes": 34055,
+        "sha256": "f4ee80c59c92fa87b81671d8063682322fb1c6cf665acb7161122c43131d0039",
+        "git_blob": "c9ac7dbd7f3f561cb192177cfa9158c13126a38d"
+      }
+    },
+    {
+      "path": "internal/cli/setup_watchdog_test.go",
+      "before": {
+        "bytes": 34357,
+        "sha256": "0663f6a8773e336c1f2c5af8508439d30b01101deefca2468050284fbc45e8a4",
+        "git_blob": "c735b55bf72873ce26ae288ea42ae4476594e227"
+      },
+      "after": {
+        "bytes": 34980,
+        "sha256": "1205eaa4edf0f779acfd595be22ca8c1abf90d12cc78932dc7501918fafc51c2",
+        "git_blob": "1801bb7925ea115839ac72b1d8d8807ac5e59045"
+      }
+    }
+  ],
+  "public_projection": {
+    "private_pid_generation_expected_map_fix_included": false,
+    "private_composition_fixture_path": "internal/cli/supervise_status_process_test.go",
+    "private_composition_fixture_after_sha256": "f378ea01b58ff2767b5261d176bd09eb618823a6bb13c7eed9d23e6f71b951bd",
+    "public_status_retains_existing_absence_of_pid_generation_row_field": true
+  },
+  "earlier_e66_negative_probes": {
+    "source_commit": "e66f5c6fab7da2a2eff16ff1f0891991ca1a839c",
+    "source_tree": "4df69e99dca3f808b26e6a5bf7721bdd0ba3a91c",
+    "report": "history/e66-negative-probes/README.md",
+    "evidence": "history/e66-negative-probes/evidence.json",
+    "preserved_byte_for_byte": true,
+    "report_sha256": "7fed7e47259ace96b4477f58f1e2269800fbe9ace8d50d289b58a9fc7fd8c58c",
+    "evidence_sha256": "2cf4f20fcc3684e541dbd2b0c3d875de804ff5bf26a828837ba1e32a042160d8",
+    "native_happy": "FAIL",
+    "run_return_original": "FAIL",
+    "run_return_separate_physical": "CLOSED",
+    "stdout_reader_original": "FAIL",
+    "stdout_reader_original_native": "UNKNOWN",
+    "stdout_reader_separate_physical": "CLOSED"
+  },
+  "future_coordinator": {
+    "before_sha256": "0997ef9baef811f0748fe764488a23ff556f75cc36ca43dae3523ceb8aa91bbd",
+    "after_sha256": "74ddf8a3610dc6c8f1bfcda4dbc349833bf334baf0f695999196fe5bd340b5fe",
+    "patch": "capture-preflight.patch",
+    "patch_sha256": "fcb176ae1fa6ab5036a2f5437d77c3877f9f594f133c4472e9c93bcf44541b43",
+    "pure_actual_inserted_ast_checks": [
+      {
+        "names": [
+          "one",
+          "two"
+        ],
+        "accepted": true
+      },
+      {
+        "names": [
+          "verify-positive",
+          "verify-positive"
+        ],
+        "accepted": false
+      },
+      {
+        "names": [
+          "HEAD"
+        ],
+        "accepted": false
+      },
+      {
+        "names": [
+          "One",
+          "one"
+        ],
+        "accepted": false
+      },
+      {
+        "names": [
+          ""
+        ],
+        "accepted": false
+      },
+      {
+        "names": [
+          "one/../head"
+        ],
+        "accepted": false
+      }
+    ],
+    "ast_outside_inserted_block_unchanged": true,
+    "checked_by": [
+      "root",
+      "functional_review"
+    ],
+    "native_processes_started_for_pure_checks": false,
+    "running_coordinator_changed": false,
+    "held_invocation_released": false,
+    "scope": "capture destination uniqueness; not general path confinement"
+  }
+}

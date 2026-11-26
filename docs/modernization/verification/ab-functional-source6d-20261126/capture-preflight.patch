@@ -1,0 +1,15 @@
+--- a/run_wave_commands.py
++++ b/run_wave_commands.py
+@@ -152,5 +152,12 @@
+     if not (sys.flags.isolated and sys.flags.no_site and sys.flags.dont_write_bytecode):
+         raise RuntimeError("isolated interpreter flags required")
+     config = json.loads((ROOT/sys.argv[1]).read_text(encoding="utf-8"))
++    names = ["head", *(step["name"] for step in config["steps"])]
++    if any(not isinstance(name, str) or not name for name in names):
++        raise RuntimeError("command capture names must be nonempty strings")
++    capture_paths = [os.path.normcase(os.path.abspath(ROOT / config["run"] / (name + suffix)))
++                     for name in names for suffix in (".stdout.txt", ".stderr.txt")]
++    if len(capture_paths) != len(set(capture_paths)):
++        raise RuntimeError("command capture paths must be unique, including reserved head")
+     config["config_file"] = sys.argv[1]
+     raise SystemExit(child(config, ROOT/config["run"]) if len(sys.argv)==3 and sys.argv[2]=="--child" else parent(config))

@@ -1,0 +1,14 @@
+--- a/internal/cli/supervise_status.go
++++ b/internal/cli/supervise_status.go
+@@ -326,6 +326,11 @@
+ 		var pidStatusErr error
+ 		usedPIDStatus := false
+ 		if ok && !stopPending && runtimeState.State == daemonRuntimeStateRunning {
++			// Keep the port snapshot before a potentially blocking process query.
++			// Inactive requests still avoid it entirely.
++			if loadPortOwners != nil {
++				loadPortOwners()
++			}
+ 			rowProbe := livenessProbe
+ 			if observe := rowProbe.PIDStatus; observe != nil {
+ 				usedPIDStatus = true
