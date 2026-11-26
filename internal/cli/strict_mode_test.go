@@ -679,9 +679,14 @@ func TestStrictModeWindowsExistingTaskRefusalPreservesRecovery(t *testing.T) {
 				tmp.backend.statusSpecFn = tornShimSpecFn("before", "after")
 			}
 			deps := tmp.Deps()
+			var stderr strings.Builder
+			deps.Stderr = &stderr
 			var err error
 			if tc.recovery {
-				if err := writeStrictModeBreadcrumb(deps.BreadcrumbPath, &strictModeBreadcrumb{Intended: true}); err != nil {
+				bc := strictModeBreadcrumb{
+					Intended: true, IntendedOwnerMode: api.OwnerModeSupervise, ActualIntentOwnerMode: api.OwnerModeGUI,
+				}
+				if err := writeStrictModeBreadcrumb(deps.BreadcrumbPath, &bc); err != nil {
 					t.Fatal(err)
 				}
 				err = RunStrictModeRecover(deps)
@@ -704,6 +709,16 @@ func TestStrictModeWindowsExistingTaskRefusalPreservesRecovery(t *testing.T) {
 			intent, readErr := api.ReadSupervisorIntent(deps.IntentPath)
 			if readErr != nil || intent.StrictMode != tc.recovery {
 				t.Fatalf("intent did not reflect the settled step: intent=%+v err=%v", intent, readErr)
+			}
+			if tc.recovery {
+				bc := tmp.ReadBreadcrumb()
+				if intent.EffectiveOwnerMode() != api.OwnerModeSupervise || !bc.ActualIntentState ||
+					bc.ActualIntentOwnerMode != api.OwnerModeSupervise || !strings.Contains(bc.RevertError, api.ErrSchedulerReplacementUnowned.Error()) {
+					t.Fatalf("recovery did not record applied intent and projection refusal: intent=%+v breadcrumb=%+v", intent, bc)
+				}
+				if !strings.Contains(stderr.String(), api.ErrSchedulerReplacementUnowned.Error()) {
+					t.Fatalf("recovery did not print the refusal: %q", stderr.String())
+				}
 			}
 			if tmp.backend.disableCalls != 0 {
 				t.Fatal("strict-mode tried to remove the refused task")
@@ -1927,6 +1942,7 @@ func TestStrictModeRecover_OrdinaryIntentFailureStopsBeforeShim(t *testing.T) {
 	tmp := setupSupervisorFixture(t)
 	bc := strictModeBreadcrumb{
 		Intended: true, ActualIntentState: false, ActualShimState: false,
+		IntendedOwnerMode: api.OwnerModeSupervise, ActualIntentOwnerMode: api.OwnerModeGUI,
 		Step2Error: "prior shim failure", RevertError: "prior revert failure",
 		TS: "2026-08-08T00:00:00Z", Phase: strictModeBreadcrumbPhaseTorn,
 	}
@@ -1949,6 +1965,11 @@ func TestStrictModeRecover_OrdinaryIntentFailureStopsBeforeShim(t *testing.T) {
 	}
 	if _, statErr := os.Stat(tmp.BreadcrumbPath()); statErr != nil {
 		t.Fatalf("ordinary recovery failure removed breadcrumb: %v", statErr)
+	}
+	refreshed := tmp.ReadBreadcrumb()
+	if refreshed.ActualIntentState || refreshed.ActualIntentOwnerMode != api.OwnerModeGUI ||
+		!strings.Contains(refreshed.RevertError, ordinaryCause.Error()) {
+		t.Fatalf("ordinary recovery failure claimed intent was applied: %+v", refreshed)
 	}
 }
 

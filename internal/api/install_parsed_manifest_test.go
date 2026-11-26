@@ -2040,12 +2040,19 @@ func TestInstallPlanCore_GlobalFreshInstall_WritesSupervisorIntent_NoSchedulerTa
 }
 
 func TestInstallPlanCore_GlobalDryRunPrintsSupervisorMutationPlan(t *testing.T) {
-	daemonIntentTestHelper(t)
+	stateDir := daemonIntentTestHelper(t)
 	preparePreflightBinaryChecks(t)
 	f := newInstallFakeScheduler()
 	installFakeScheduler(t, f)
 
 	m := globalTwoDaemonManifest()
+	const removedTask = `\mcp-local-hub-demo-gamma`
+	if err := WriteSupervisorIntent(filepath.Join(stateDir, supervisorIntentFileLeaf), &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{{TaskName: removedTask, Server: m.Name, Daemon: "gamma", Command: "old", Port: 9213}},
+	}); err != nil {
+		t.Fatalf("seed supervisor intent: %v", err)
+	}
 	plan, err := BuildPlan(m, "")
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
@@ -2056,6 +2063,13 @@ func TestInstallPlanCore_GlobalDryRunPrintsSupervisorMutationPlan(t *testing.T) 
 		t.Fatalf("installPlanCore(global dry-run): %v", err)
 	}
 	out := buf.String()
+	removedHeading := "Removed supervisor targets to kill (1)"
+	if runtime.GOOS == "windows" {
+		removedHeading = "Removed supervisor intent targets (1; automatic force-stop refused on Windows)"
+		if strings.Contains(out, "Removed supervisor targets to kill") {
+			t.Errorf("Windows dry-run claimed a force-stop:\n%s", out)
+		}
+	}
 	for _, want := range []string{
 		"Supervisor intent rows to write",
 		"mcp-local-hub-demo-alpha",
@@ -2064,7 +2078,8 @@ func TestInstallPlanCore_GlobalDryRunPrintsSupervisorMutationPlan(t *testing.T) 
 		"mcp-local-hub-demo-weekly-refresh",
 		"Autostart owner to ensure",
 		"Legacy scheduler tasks retained",
-		"Removed supervisor targets to kill",
+		removedHeading,
+		"mcp-local-hub-demo-gamma  [port 9213]",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("global dry-run output missing %q:\n%s", want, out)
@@ -2499,7 +2514,7 @@ func TestInstallPlanCore_GlobalFilteredInstall_ReplacesOnlySelectedDaemon(t *tes
 	}
 }
 
-func TestInstallPlanCore_GlobalFullReinstall_KillsRemovedSupervisorDaemon(t *testing.T) {
+func TestInstallPlanCore_GlobalFullReinstall_RemovesSupervisorDaemon(t *testing.T) {
 	fakeMcphubIdentityForTest(t)
 	stateDir := daemonIntentTestHelper(t)
 	preparePreflightBinaryChecks(t)
@@ -2607,17 +2622,20 @@ func TestInstallPlanCore_GlobalFullReinstall_KillsRemovedSupervisorDaemon(t *tes
 			t.Fatalf("removed daemon %s survived merged intent: %+v", betaTask, written.Daemons)
 		}
 	}
-	// The captured supervisor-reported PID (4244) is killed first. The
-	// descriptor port is only polled for release; it must not fall through to a
-	// blind port kill because the removed row's port may already be reused.
 	if len(killPorts) != 0 {
-		t.Fatalf("forceKillByPortFn ports = %v, want none after the PID kill", killPorts)
+		t.Fatalf("forceKillByPortFn ports = %v, want none", killPorts)
 	}
-	if len(killedPIDs) != 1 || killedPIDs[0] != 4244 {
-		t.Fatalf("PID kills = %v, want exactly [4244]", killedPIDs)
+	wantPIDs := []int{4244}
+	wantOrder := []string{"ipc-status", "nudge", "kill-pid"}
+	if runtime.GOOS == "windows" {
+		wantPIDs = nil
+		wantOrder = []string{"ipc-status", "nudge"}
 	}
-	if len(order) != 3 || order[0] != "ipc-status" || order[1] != "nudge" || order[2] != "kill-pid" {
-		t.Fatalf("ipc/reconcile/kill order = %v, want [ipc-status nudge kill-pid]", order)
+	if !reflect.DeepEqual(killedPIDs, wantPIDs) {
+		t.Fatalf("PID kills = %v, want %v", killedPIDs, wantPIDs)
+	}
+	if !reflect.DeepEqual(order, wantOrder) {
+		t.Fatalf("IPC / nudge / force-stop order = %v, want %v", order, wantOrder)
 	}
 	if _, ok := written.Stops[betaTask]; ok {
 		t.Fatalf("removed daemon %s retained a dangling stop entry: %+v", betaTask, written.Stops)
@@ -2630,6 +2648,103 @@ func TestInstallPlanCore_GlobalFullReinstall_KillsRemovedSupervisorDaemon(t *tes
 	}
 	if _, ok := written.LegacyStopWatermarks[otherTask]; ok {
 		t.Fatalf("sibling stop %s retained redundant legacy-stop watermark: %+v", otherTask, written.LegacyStopWatermarks)
+	}
+}
+
+func TestInstallPlanCore_WindowsFullReinstallRetainsLegacyGeneration(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows install force-stop refusal")
+	}
+	const legacyName = "mcp-local-hub-demo-beta"
+	const removedTask = `\` + legacyName
+	priorXML := []byte("<Task>original legacy registration</Task>")
+	for _, tc := range []struct {
+		name   string
+		listed bool
+		pid    int
+	}{
+		{name: "listed with port fallback", listed: true},
+		{name: "listed with captured PID", listed: true, pid: 4244},
+		{name: "unlisted with port fallback"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fakeMcphubIdentityForTest(t)
+			stateDir := daemonIntentTestHelper(t)
+			preparePreflightBinaryChecks(t)
+			f := newInstallFakeScheduler()
+			f.tasks[legacyName], f.xml[legacyName] = true, bytes.Clone(priorXML)
+			if tc.listed {
+				f.listSeed = []scheduler.TaskStatus{{Name: removedTask}}
+			}
+			installFakeScheduler(t, f)
+			installFakeAutostartBackend(t, &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped})
+
+			m := globalTwoDaemonManifest()
+			removed := m.Daemons[1]
+			m.Daemons = m.Daemons[:1]
+			m.WeeklyRefresh = false
+			intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+			if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{
+				Version: 1,
+				Daemons: []SupervisorDaemon{{TaskName: removedTask, Server: m.Name, Daemon: removed.Name, Command: "old", Port: removed.Port}},
+			}); err != nil {
+				t.Fatalf("seed supervisor intent: %v", err)
+			}
+
+			origStatus, origPIDKill := supervisorIPCStatusFn, stopForceKillPIDFn
+			origPortKill, origLookup := forceKillByPortFn, lookupProcess
+			t.Cleanup(func() {
+				supervisorIPCStatusFn, stopForceKillPIDFn = origStatus, origPIDKill
+				forceKillByPortFn, lookupProcess = origPortKill, origLookup
+			})
+			supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
+				if tc.pid == 0 {
+					return nil, nil
+				}
+				return []DaemonStatus{{TaskName: removedTask, PID: tc.pid, State: "Running"}}, nil
+			}
+			stopForceKillPIDFn = func(pid int) error {
+				t.Errorf("automatic install attempted to kill PID %d", pid)
+				return nil
+			}
+			forceKillByPortFn = func(port int, _ time.Duration) (portKillOutcome, error) {
+				t.Errorf("automatic install attempted to kill the listener on port %d", port)
+				return portKillKilled, nil
+			}
+			lookupProcess = func(int) (int, uint64, int64, bool) { return 0, 0, 0, false }
+			var nudges int
+			t.Cleanup(setSupervisorReconcileApplyHookForTest(func(_ context.Context, apply bool) (ReconcileResponse, error) {
+				if !apply {
+					t.Error("install did not request reconcile apply")
+				}
+				nudges++
+				return ReconcileResponse{}, nil
+			}))
+
+			plan, err := BuildPlan(m, "")
+			if err != nil {
+				t.Fatalf("BuildPlan: %v", err)
+			}
+			var out bytes.Buffer
+			if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", false, &out); err != nil {
+				t.Fatalf("installPlanCore: %v", err)
+			}
+			written, err := ReadSupervisorIntent(intentPath)
+			if err != nil || len(written.Daemons) != 1 || written.Daemons[0].Daemon != "alpha" {
+				t.Fatalf("install did not replace the old supervisor intent: %+v, err=%v", written, err)
+			}
+			if !f.tasks[legacyName] || !bytes.Equal(f.xml[legacyName], priorXML) || len(f.deleteNames) != 0 || len(f.importNames) != 0 || f.createCount != 0 || f.runCount != 0 {
+				t.Fatalf("install mutated the legacy scheduler: exists=%v XML=%q deletes=%v imports=%v creates=%d runs=%d", f.tasks[legacyName], f.xml[legacyName], f.deleteNames, f.importNames, f.createCount, f.runCount)
+			}
+			if tc.listed {
+				readInstallRecoverySnapshot(t, stateDir, legacyName, priorXML)
+			} else if snapshots, err := filepath.Glob(filepath.Join(stateDir, "scheduler-recovery-*.json")); err != nil || len(snapshots) != 0 {
+				t.Fatalf("install recorded an unobserved task: snapshots=%v err=%v", snapshots, err)
+			}
+			if nudges != 1 || !strings.Contains(out.String(), "force kill removed supervisor targets skipped on Windows ("+legacyName+")") {
+				t.Fatalf("nudges=%d, output:\n%s", nudges, out.String())
+			}
+		})
 	}
 }
 

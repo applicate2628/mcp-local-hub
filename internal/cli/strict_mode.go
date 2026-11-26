@@ -213,20 +213,20 @@ func newStrictModeCmd() *cobra.Command {
 	var recover bool
 	cmd := &cobra.Command{
 		Use:   "strict-mode {enable|disable}",
-		Short: "Atomically toggle supervisor strict-mode (intent + autostart shim)",
+		Short: "Set supervisor strict-mode policy and project it to autostart",
 		// Hidden: advanced security-posture toggle. The one path that
 		// REQUIRES it — recovery from a STRICT_MODE_REVERT_FAILED (exit 10)
 		// breadcrumb — names `mcphub strict-mode --recover` verbatim in its
 		// own error text, so hiding it costs no discoverability.
 		Hidden: true,
 		Long: `mcphub strict-mode updates supervisor-intent.json and projects the
-policy to the autostart shim. If projection fails, the command reverts
-intent and keeps a recovery record when the shim observation is uncertain.
+policy to the autostart shim. Enable and disable revert intent if projection
+fails and keep a recovery record when the shim observation is uncertain.
 
   enable     — set strict_mode=true; shim launches with --strict-mode.
   disable    — set strict_mode=false; shim launches without the flag.
-  --recover  — read the breadcrumb left by a torn previous run and
-               reconcile both resources interactively.
+  --recover  — choose an intent policy and retry autostart projection.
+               A recorded intent remains in effect if projection fails.
 
 On Windows an existing task blocks enablement of the projected shim. To
 change its policy, inspect the task, explicitly run mcphub autostart disable,
@@ -819,9 +819,8 @@ func (b strictModeBreadcrumb) actualShimOwnerMode() api.OwnerMode {
 }
 
 // RunStrictModeRecover is the testable entry point for `mcphub
-// strict-mode --recover`. Reads the breadcrumb, prompts the operator
-// with two exhaustive branches, atomically reconciles, and deletes
-// the breadcrumb on success.
+// strict-mode --recover`. Reads the breadcrumb, prompts for the target
+// policy, and deletes the breadcrumb after intent and projection converge.
 func RunStrictModeRecover(deps StrictModeDeps) error {
 	// Read breadcrumb.
 	raw, err := api.ReadStateFileInodeAnchoredEnvStrictOnly(deps.BreadcrumbPath)
@@ -899,22 +898,19 @@ func RunStrictModeRecover(deps StrictModeDeps) error {
 	return fmt.Errorf("strict-mode --recover: no valid branch chosen after 3 attempts")
 
 reconcile:
-	// Atomic two-resource reconcile, same pipeline as RunStrictMode but
-	// without the breadcrumb-refusal pre-check (we're recovering FROM a
-	// breadcrumb, so it MUST exist).
 	settlement := reconcileBothResources(target, targetOwnerMode, deps)
 	if !settlement.converged {
-		// Re-assert breadcrumb on failure with refreshed TS, so the
-		// operator can retry --recover.
 		newBC := bc
-		if strictModeAppliedIntentError(deps, settlement.err) {
-			// The target intent is durable even though release is poisoned.
+		if settlement.intentApplied {
 			newBC.ActualIntentState = target
 			newBC.ActualIntentOwnerMode = targetOwnerMode
 		}
 		newBC.TS = time.Now().UTC().Format(time.RFC3339Nano)
 		newBC.RevertError = fmt.Sprintf("recover failed: %v", settlement.err)
-		_ = writeStrictModeBreadcrumb(deps.BreadcrumbPath, &newBC)
+		if err := writeStrictModeBreadcrumb(deps.BreadcrumbPath, &newBC); err != nil {
+			settlement.err = errors.Join(settlement.err, fmt.Errorf("refresh breadcrumb: %w", err))
+		}
+		fmt.Fprintf(stderrOrDefault(deps), "strict-mode --recover: %v\n", settlement.err)
 		return errors.Join(&forceExitError{code: ExitStrictModeRevertFailed}, settlement.err)
 	}
 
@@ -931,14 +927,13 @@ reconcile:
 }
 
 type strictModeSettlement struct {
-	converged bool
-	err       error
+	intentApplied bool
+	converged     bool
+	err           error
 }
 
-// reconcileBothResources drives intent + shim to target in one
-// transactional unit. Used by --recover; mirrors the step 4 + step 5
-// sequence of runAutostartPolicyUnderLocks but without revert (recover is
-// the revert path, so a failure here is terminal).
+// reconcileBothResources records the selected intent before projecting it to
+// autostart. The recorded intent remains in effect if projection fails.
 func reconcileBothResources(target bool, targetOwnerMode api.OwnerMode, deps StrictModeDeps) strictModeSettlement {
 	var result strictModeSettlement
 	if !targetOwnerMode.Valid() {
@@ -951,6 +946,7 @@ func reconcileBothResources(target bool, targetOwnerMode api.OwnerMode, deps Str
 			return result
 		}
 	}
+	result.intentApplied = true
 	if err := projectAutostartWithGUIControl(deps, false, autostart.Options{StrictMode: target, OwnerMode: targetOwnerMode}); err != nil {
 		result.err = errors.Join(result.err, fmt.Errorf("shim enable: %w", err))
 		return result

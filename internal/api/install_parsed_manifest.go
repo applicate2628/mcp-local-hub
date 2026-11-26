@@ -1261,7 +1261,11 @@ func (a *API) printSupervisorGlobalInstallDryRun(m *config.ServerManifest, plan 
 		}
 	}
 
-	fmt.Fprintf(w, "\n  Removed supervisor targets to kill (%d):\n", len(removed))
+	if runtime.GOOS == "windows" {
+		fmt.Fprintf(w, "\n  Removed supervisor intent targets (%d; automatic force-stop refused on Windows):\n", len(removed))
+	} else {
+		fmt.Fprintf(w, "\n  Removed supervisor targets to kill (%d):\n", len(removed))
+	}
 	if priorDiffUnavailable != "" {
 		fmt.Fprintf(w, "    \u2022 Prior supervisor-intent diff unavailable: %s; removed-target preview omitted.\n", priorDiffUnavailable)
 	}
@@ -1396,7 +1400,7 @@ func warnAutostartOwner(w io.Writer, action string, err error) {
 		fmt.Fprintf(w, "  warning: supervisor autostart owner %s failed: %v (inspect the existing task before changing autostart)\n", action, err)
 		return
 	}
-	fmt.Fprintf(w, "  warning: supervisor autostart owner %s failed: %v (manual: mcphub autostart enable)\n", action, err)
+	fmt.Fprintf(w, "  warning: supervisor autostart owner %s failed: %v (inspect `mcphub autostart status --details` and the saved autorun policy before retrying)\n", action, err)
 }
 
 type supervisorReconcileNudgeStatus int
@@ -1678,6 +1682,22 @@ func supervisorOwnedLivePIDsForTargets(ctx context.Context, targets []Supervisor
 }
 
 func killRemovedSupervisorTargetsAfterGlobalInstall(targets []SupervisorDaemon, pidByTask map[string]int, nudgeResult supervisorReconcileNudgeResult, retryPath string, w io.Writer) {
+	// Install may retain a legacy registration with the same name or port. On
+	// Windows, neither a supervisor PID snapshot nor a port lookup proves the
+	// current process belongs to the removed descriptor's original generation.
+	if runtime.GOOS == "windows" && len(targets) > 0 {
+		if w != nil {
+			names := make([]string, 0, len(targets))
+			for _, target := range targets {
+				names = append(names, strings.TrimPrefix(target.TaskName, `\`))
+			}
+			fmt.Fprintf(w, "  warning: force kill removed supervisor targets skipped on Windows (%s). The original process generation could not be verified. Inspect the task registrations and running processes before stopping them manually.\n", strings.Join(names, ", "))
+			if !nudgeResult.allowsRemovedTargetKill() && nudgeResult.err != nil {
+				fmt.Fprintf(w, "  warning: supervisor reconcile nudge failed (%v)\n", nudgeResult.err)
+			}
+		}
+		return
+	}
 	killRemovedSupervisorTargetsAfterNudge(targets, pidByTask, nudgeResult, retryPath, func(format string, args ...any) {
 		if w != nil {
 			fmt.Fprintf(w, "  warning: "+format+"\n", args...)
