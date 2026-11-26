@@ -1,5 +1,7 @@
 # Windows autostart repeat Enable — scoped evidence, 2026-11-26
 
+> Historical `c0b0cc22` checkpoint. The later real-registration failure, minimal correction, and native PASS are recorded in [the native roundtrip follow-up](autostart-native-roundtrip-20261126.md). The results and limits below retain their original scope.
+
 **Selected functional checks and final metadata: PASS / RECEIVED. Historical v1 and remainder wrappers remain FAIL.** The v1 timeout and the remainder profile-receiving failure are retained separately from passing test results.
 
 Repository: `applicate2628/mcp-local-hub`; existing PR #660. Source base / code parent: `b14cdeba95b2a69815d1677ee3f0dc236e8f1c79`. Full derived terminal events and exact command filters are in [the JSON evidence](autostart-repeat-20261126.json).
