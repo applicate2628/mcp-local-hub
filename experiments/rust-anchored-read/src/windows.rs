@@ -40,6 +40,15 @@ pub(crate) enum Step {
 }
 type ReadResult = Result<Zeroizing<Vec<u8>>, ReadError>;
 
+// One invocation owns these operations. Production uses the native functions;
+// tests may observe real handle use and independently substitute an outcome.
+// No callback, handle or operation state is retained after the read returns.
+struct ReadOperations<StepHook, Inspect, Close> {
+    step: StepHook,
+    inspect: Inspect,
+    close: Close,
+}
+
 // The optional hook is per invocation, not a global callback or production API.
 // It makes path-replacement/growth/cancellation schedules deterministic in tests.
 pub(crate) fn read_with_hook(
@@ -48,16 +57,50 @@ pub(crate) fn read_with_hook(
     cap: usize,
     expected: &[u8; 32],
     canceled: &AtomicBool,
-    mut hook: impl FnMut(Step) -> Result<(), ReadError>,
+    hook: impl FnMut(Step) -> Result<(), ReadError>,
 ) -> ReadResult {
+    read_with_operations(
+        root,
+        components,
+        cap,
+        expected,
+        canceled,
+        ReadOperations {
+            step: hook,
+            inspect,
+            close: close_once,
+        },
+    )
+}
+
+fn read_with_operations<StepHook, Inspect, Close>(
+    root: &Path,
+    components: &[OsString],
+    cap: usize,
+    expected: &[u8; 32],
+    canceled: &AtomicBool,
+    mut operations: ReadOperations<StepHook, Inspect, Close>,
+) -> ReadResult
+where
+    StepHook: FnMut(Step) -> Result<(), ReadError>,
+    Inspect:
+        FnMut(&OwnedHandle, bool, &'static str) -> Result<BY_HANDLE_FILE_INFORMATION, ReadError>,
+    Close: FnMut(OwnedHandle) -> Result<(), NativeCode>,
+{
     validate(root, components, cap)?;
     let mut owned: Vec<OwnedHandle> = Vec::with_capacity(2);
     let result = read_inner(
-        root, components, cap, expected, canceled, &mut hook, &mut owned,
+        root,
+        components,
+        cap,
+        expected,
+        canceled,
+        &mut operations,
+        &mut owned,
     );
     let mut failures = Vec::new();
     while let Some(handle) = owned.pop() {
-        if let Err(code) = close_once(handle) {
+        if let Err(code) = (operations.close)(handle) {
             failures.push(code)
         }
     }
@@ -79,22 +122,28 @@ pub(crate) fn read_with_hook(
     }
 }
 
-fn read_inner(
+fn read_inner<StepHook, Inspect, Close>(
     root: &Path,
     components: &[OsString],
     cap: usize,
     expected: &[u8; 32],
     canceled: &AtomicBool,
-    hook: &mut impl FnMut(Step) -> Result<(), ReadError>,
+    operations: &mut ReadOperations<StepHook, Inspect, Close>,
     owned: &mut Vec<OwnedHandle>,
-) -> ReadResult {
+) -> ReadResult
+where
+    StepHook: FnMut(Step) -> Result<(), ReadError>,
+    Inspect:
+        FnMut(&OwnedHandle, bool, &'static str) -> Result<BY_HANDLE_FILE_INFORMATION, ReadError>,
+    Close: FnMut(OwnedHandle) -> Result<(), NativeCode>,
+{
     check_cancel(canceled, "before-root-open")?;
     let native_root = native_root_name(root)?;
     owned.push(open_native(null_mut(), &native_root, true, "open-root")?);
-    inspect(owned.last().unwrap(), true, "stat-root")?;
+    (operations.inspect)(owned.last().unwrap(), true, "stat-root")?;
     for (index, component) in components.iter().enumerate() {
         check_cancel(canceled, "before-component-open")?;
-        hook(Step::BeforeOpen(index))?;
+        (operations.step)(Step::BeforeOpen(index))?;
         check_cancel(canceled, "after-component-hook")?;
         let directory = index + 1 < components.len();
         let operation = if directory {
@@ -112,15 +161,15 @@ fn read_inner(
         // parent is needed; the number of owned handles stays bounded by two.
         owned.push(next);
         if directory {
-            inspect(owned.last().unwrap(), true, "stat-component")?;
+            (operations.inspect)(owned.last().unwrap(), true, "stat-component")?;
             let previous = owned.remove(0);
-            close_once(previous).map_err(|code| {
+            (operations.close)(previous).map_err(|code| {
                 ReadError::new(Category::UnsafeObjectOrIo, "close-parent", Some(code))
             })?;
         }
     }
     let final_handle = owned.last().unwrap();
-    let info = inspect(final_handle, false, "stat-final")?;
+    let info = (operations.inspect)(final_handle, false, "stat-final")?;
     let size = ((info.nFileSizeHigh as u64) << 32) | info.nFileSizeLow as u64;
     if size > cap as u64 {
         return Err(ReadError::new(Category::TooLarge, "stat-final", None));
@@ -134,7 +183,7 @@ fn read_inner(
         check_cancel(canceled, "before-read")?;
         // One sentinel byte, including at the cap, detects growth after stat.
         let requested = (cap - bytes.len() + 1).min(chunk.len());
-        hook(Step::BeforeRead { requested })?;
+        (operations.step)(Step::BeforeRead { requested })?;
         check_cancel(canceled, "after-read-hook")?;
         let mut count = 0;
         // SAFETY: original synchronous handle and writable requested-byte span;

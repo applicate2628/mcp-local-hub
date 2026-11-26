@@ -457,3 +457,6 @@ fn exact_cap_still_checks_eof_and_returns_complete_payload() {
     assert_eq!(requests, vec![4096, 1]);
     assert_eq!(result.as_slice(), payload);
 }
+
+#[path = "failure_tests.rs"]
+mod failures;
