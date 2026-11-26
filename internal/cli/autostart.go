@@ -75,11 +75,12 @@ shim re-runs the persisted owner at each user logon: GUI by default, or
 supervise when ` + "`--owner-mode supervise`" + ` is selected.
 
 On Windows this records autorun ON without launching now or undoing Quit.
-It can create the task only when the name is absent. An existing task is
-preserved and enable returns an error, even when its visible arguments
-match. To replace it, inspect the task and explicitly run mcphub autostart
-disable before running enable. Without explicit flags, enable uses the
-persisted owner and strict policy. On Linux and macOS, enable can rewrite
+It creates the task when the name is absent. Repeating enable succeeds
+without changing an already enabled task whose complete definition matches.
+A disabled or different task is preserved and enable returns an error.
+To replace it, inspect the task and explicitly run mcphub autostart disable
+before running enable. Without explicit flags, enable uses the persisted
+owner and strict policy. On Linux and macOS, enable can rewrite
 the existing shim.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return enableAutostartForPlatform(

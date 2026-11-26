@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os/user"
 	"strings"
 	"testing"
 
@@ -27,6 +28,7 @@ type fakeScheduler struct {
 	createCalls     []scheduler.TaskSpec
 	deleteCalls     []string
 	exportCalls     []string
+	statusCalls     []string
 	exportReplies   []testTaskExport
 	statusReturn    scheduler.TaskStatus
 	statusErr       error
@@ -56,6 +58,7 @@ func (f *fakeScheduler) Delete(name string) error {
 }
 
 func (f *fakeScheduler) Status(name string) (scheduler.TaskStatus, error) {
+	f.statusCalls = append(f.statusCalls, name)
 	if err, ok := f.statusErrByName[name]; ok {
 		return scheduler.TaskStatus{}, err
 	}
@@ -239,7 +242,95 @@ func TestWindowsBackend_EnableRejectsInvalidOwnerBeforeMutatingTask(t *testing.T
 	}
 }
 
-func TestWindowsBackend_EnableRefusesExistingTask(t *testing.T) {
+func TestWindowsBackend_EnableExistingTaskIsReadOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		opts  Options
+		args  string
+		state scheduler.TaskRuntimeState
+	}{
+		{name: "gui_ready", opts: Options{OwnerMode: OwnerModeGUI, MCPHubPath: "fixture-mcphub.exe"}, args: "gui --no-browser", state: scheduler.TaskRuntimeReady},
+		{name: "supervise_running", opts: Options{OwnerMode: OwnerModeSupervise, StrictMode: true, MCPHubPath: "fixture-mcphub.exe"}, args: "supervise --strict-mode", state: scheduler.TaskRuntimeRunning},
+		{name: "gui_queued", opts: Options{MCPHubPath: "fixture-mcphub.exe"}, args: "gui --no-browser", state: scheduler.TaskRuntimeQueued},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			original := buildEnabledAutostartXML(t, tc.opts.MCPHubPath, tc.args)
+			f := &fakeScheduler{xmlReturn: bytes.Clone(original), statusReturn: scheduler.TaskStatus{RuntimeState: tc.state}}
+			withFakeScheduler(t, f)
+			for range 2 {
+				if err := (&windowsBackend{}).Enable(tc.opts); err != nil {
+					t.Fatalf("repeat Enable: %v", err)
+				}
+			}
+			if len(f.createCalls) != 0 || len(f.deleteCalls) != 0 || len(f.exportCalls) != 2 || len(f.statusCalls) != 2 || !bytes.Equal(f.xmlReturn, original) {
+				t.Fatalf("existing task was changed: create=%v delete=%v export=%v status=%v", f.createCalls, f.deleteCalls, f.exportCalls, f.statusCalls)
+			}
+			// Run, Stop, and ImportXML panic in this fake if ever called.
+		})
+	}
+}
+
+func TestWindowsBackend_EnableRetainsDifferentOrDisabledDefinition(t *testing.T) {
+	opts := Options{MCPHubPath: "fixture-mcphub.exe"}
+	canonical := buildEnabledAutostartXML(t, opts.MCPHubPath, "gui --no-browser")
+	for _, tc := range []struct {
+		name string
+		opts Options
+		xml  []byte
+	}{
+		{name: "strict_policy_changed", opts: Options{MCPHubPath: opts.MCPHubPath, StrictMode: true}, xml: canonical},
+		{name: "owner_mode_changed", opts: Options{MCPHubPath: opts.MCPHubPath, OwnerMode: OwnerModeSupervise}, xml: canonical},
+		{name: "disabled_definition", opts: opts, xml: []byte(strings.Replace(string(canonical), "<Settings>", "<Settings><Enabled>false</Enabled>", 1))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeScheduler{xmlReturn: bytes.Clone(tc.xml), statusReturn: scheduler.TaskStatus{RuntimeState: scheduler.TaskRuntimeReady}}
+			withFakeScheduler(t, f)
+			err := (&windowsBackend{}).Enable(tc.opts)
+			refusal, ok := err.(*ObservedTaskReplacementRefusal)
+			if !ok || !errors.Is(err, scheduler.ErrTaskReplacementUnowned) || !bytes.Equal(refusal.ObservedXML(), tc.xml) {
+				t.Fatalf("definition was not retained: %v", err)
+			}
+			if len(f.createCalls) != 0 || len(f.deleteCalls) != 0 || len(f.statusCalls) != 0 || !bytes.Equal(f.xmlReturn, tc.xml) {
+				t.Fatalf("different task was changed or accepted: create=%v delete=%v status=%v", f.createCalls, f.deleteCalls, f.statusCalls)
+			}
+		})
+	}
+}
+
+func TestWindowsBackend_EnableRequiresObservedEnabledRuntime(t *testing.T) {
+	opts := Options{MCPHubPath: "fixture-mcphub.exe"}
+	canonical := buildEnabledAutostartXML(t, opts.MCPHubPath, "gui --no-browser")
+	for _, tc := range []struct {
+		name   string
+		status scheduler.TaskStatus
+		err    error
+		reason string
+	}{
+		{name: "disabled", status: scheduler.TaskStatus{RuntimeState: scheduler.TaskRuntimeDisabled}, reason: "disabled"},
+		{name: "disabled_display", status: scheduler.TaskStatus{RuntimeState: scheduler.TaskRuntimeReady, State: "Disabled"}, reason: "disabled"},
+		{name: "unknown", status: scheduler.TaskStatus{RuntimeState: scheduler.TaskRuntimeUnknown, State: "Ready"}, reason: "unknown"},
+		{name: "disappeared", err: scheduler.ErrTaskNotFound, reason: "observe existing autostart runtime state"},
+		{name: "unavailable", err: scheduler.ErrUnavailable, reason: "observe existing autostart runtime state"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeScheduler{xmlReturn: bytes.Clone(canonical), statusReturn: tc.status, statusErr: tc.err}
+			withFakeScheduler(t, f)
+			err := (&windowsBackend{}).Enable(opts)
+			refusal, ok := err.(*ObservedTaskReplacementRefusal)
+			if !ok || !errors.Is(err, scheduler.ErrTaskReplacementUnowned) || !bytes.Equal(refusal.ObservedXML(), canonical) || !strings.Contains(err.Error(), tc.reason) {
+				t.Fatalf("runtime uncertainty was not retained: %v", err)
+			}
+			if tc.err != nil && !errors.Is(err, tc.err) {
+				t.Fatalf("runtime observation cause lost: %v", err)
+			}
+			if len(f.createCalls) != 0 || len(f.deleteCalls) != 0 || len(f.exportCalls) != 1 || len(f.statusCalls) != 1 || !bytes.Equal(f.xmlReturn, canonical) {
+				t.Fatalf("runtime refusal changed the task: create=%v delete=%v export=%v status=%v", f.createCalls, f.deleteCalls, f.exportCalls, f.statusCalls)
+			}
+		})
+	}
+}
+
+func TestWindowsBackend_EnableRefusesExistingIncompleteTask(t *testing.T) {
 	opts := Options{MCPHubPath: `fixture-mcphub.exe`}
 	for _, tc := range []struct {
 		name string
@@ -256,13 +347,17 @@ func TestWindowsBackend_EnableRefusesExistingTask(t *testing.T) {
 				t.Fatal(err)
 			}
 			err = b.Enable(opts)
-			var refusal *ObservedTaskReplacementRefusal
-			if !errors.Is(err, scheduler.ErrTaskReplacementUnowned) || !errors.As(err, &refusal) || refusal.TaskName != WindowsTaskName {
+			refusal, ok := err.(*ObservedTaskReplacementRefusal)
+			if !ok || !errors.Is(err, scheduler.ErrTaskReplacementUnowned) || refusal.TaskName != WindowsTaskName {
 				t.Fatalf("Enable error = %v, want a named generation refusal", err)
+			}
+			if !errors.Is(err, scheduler.ErrTaskCorrupt) {
+				t.Fatalf("definition observation cause lost: %v", err)
 			}
 			refusal.ObservedXML()[0] ^= 0xff
 			f.xmlReturn[0] ^= 0xff
 			if !bytes.Equal(refusal.ObservedXML(), tc.xml) || strings.Contains(err.Error(), string(tc.xml)) ||
+				strings.Contains(fmt.Sprintf("%#v", err), string(tc.xml)) ||
 				fmt.Sprintf("%#v", err) != err.Error() {
 				t.Fatal("refusal changed or exposed the captured definition")
 			}
@@ -303,6 +398,7 @@ func TestWindowsBackend_EnableAfterCreateFailureOnlyObserves(t *testing.T) {
 		after     testTaskExport
 	}{
 		{name: "conflict", createErr: scheduler.ErrTaskAlreadyExists, after: testTaskExport{xml: prior}},
+		{name: "matching_conflict", createErr: scheduler.ErrTaskAlreadyExists, after: testTaskExport{xml: buildEnabledAutostartXML(t, "fixture-mcphub.exe", "gui --no-browser")}},
 		{name: "lost_acknowledgment", createErr: scheduler.ErrMutationOutcomeUnknown, after: testTaskExport{xml: prior}},
 		{name: "absent", createErr: scheduler.ErrPermissionDenied, after: testTaskExport{err: scheduler.ErrTaskNotFound}},
 		{name: "read_unavailable", createErr: scheduler.ErrMutationOutcomeUnknown, after: testTaskExport{err: scheduler.ErrUnavailable}},
@@ -803,6 +899,22 @@ func buildMatchingXML(command string, strictMode bool) []byte {
 			"</Exec></Actions></Task>\n",
 		command, args,
 	))
+}
+
+// buildEnabledAutostartXML is a native-style readback with default-valued fields
+// omitted. The scheduler tests separately compare the actual Create XML writer.
+func buildEnabledAutostartXML(t *testing.T, command, args string) []byte {
+	t.Helper()
+	current, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return []byte(fmt.Sprintf(`<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+<Triggers><LogonTrigger><UserId>%s</UserId></LogonTrigger></Triggers>
+<Principals><Principal id="Author"><UserId>%s</UserId><LogonType>InteractiveToken</LogonType></Principal></Principals>
+<Settings><MultipleInstancesPolicy>StopExisting</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd></IdleSettings><ExecutionTimeLimit>PT0S</ExecutionTimeLimit></Settings>
+<Actions Context="Author"><Exec><Command>%s</Command><Arguments>%s</Arguments></Exec></Actions>
+</Task>`, current.Uid, current.Uid, command, args))
 }
 
 func buildWindowsStatusSnapshotXML(command, args, enabled, volatileBody string) []byte {

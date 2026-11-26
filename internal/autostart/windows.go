@@ -84,8 +84,9 @@ func superviseArgs(opts Options) ([]string, error) {
 	return args, nil
 }
 
-// Enable creates the autostart task after confirmed absence. An existing
-// registration is retained, including one whose visible arguments match.
+// Enable creates the autostart task after confirmed absence. A fully matching,
+// enabled registration succeeds without mutation; other existing tasks remain
+// untouched and return a refusal containing their observed definition.
 func (w *windowsBackend) Enable(opts Options) error {
 	args, err := superviseArgs(opts)
 	if err != nil {
@@ -98,13 +99,6 @@ func (w *windowsBackend) Enable(opts Options) error {
 	cmd, err := resolveWindowsOwnedEntrypoint(opts)
 	if err != nil {
 		return err
-	}
-	prior, err := observeWindowsAutostartDefinition(sched)
-	if err != nil {
-		return err
-	}
-	if len(prior) != 0 {
-		return NewObservedTaskReplacementRefusal(WindowsTaskName, prior, nil)
 	}
 	spec := scheduler.TaskSpec{
 		Name:         WindowsTaskName,
@@ -121,6 +115,13 @@ func (w *windowsBackend) Enable(opts Options) error {
 		// decision narrow to the watchdog task and out of autostart.
 		RestartOnFailure: false,
 	}
+	prior, err := observeWindowsAutostartDefinition(sched)
+	if err != nil {
+		return err
+	}
+	if len(prior) != 0 {
+		return checkExistingWindowsAutostart(sched, prior, spec)
+	}
 	if err := sched.Create(spec); err != nil {
 		createErr := fmt.Errorf("create autostart task %s: %w", WindowsTaskName, err)
 		observed, readErr := observeWindowsAutostartDefinition(sched)
@@ -133,6 +134,36 @@ func (w *windowsBackend) Enable(opts Options) error {
 		return createErr
 	}
 	return nil
+}
+
+func checkExistingWindowsAutostart(sched scheduler.Scheduler, observed []byte, spec scheduler.TaskSpec) error {
+	refusal := NewObservedTaskReplacementRefusal(WindowsTaskName, observed, nil)
+	match, err := scheduler.WindowsTaskSpecMatchesXML(observed, spec)
+	if err != nil {
+		refusal.Cause = fmt.Errorf("compare existing autostart definition: %w", err)
+		return refusal
+	}
+	if !match {
+		return refusal
+	}
+	status, err := sched.Status(WindowsTaskName)
+	if err != nil {
+		refusal.Cause = fmt.Errorf("observe existing autostart runtime state: %w", err)
+		return refusal
+	}
+	if status.RuntimeState == scheduler.TaskRuntimeDisabled || strings.EqualFold(status.State, "Disabled") {
+		refusal.Cause = errors.New("existing autostart task is disabled")
+		return refusal
+	}
+	switch status.RuntimeState {
+	case scheduler.TaskRuntimeReady, scheduler.TaskRuntimeRunning, scheduler.TaskRuntimeQueued:
+		// Equality permits this no-op only. It grants no replacement or cleanup
+		// authority over the observed registration or a later occupant.
+		return nil
+	default:
+		refusal.Cause = errors.New("existing autostart task runtime state is unknown")
+		return refusal
+	}
 }
 
 func observeWindowsAutostartDefinition(sched scheduler.Scheduler) ([]byte, error) {

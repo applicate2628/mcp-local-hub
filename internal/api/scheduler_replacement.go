@@ -54,15 +54,15 @@ func refuseSchedulerTaskReplacement(name string, priorXML []byte) error {
 
 // RetainAutostartTaskReplacementRefusal finalizes a direct Enable result.
 // Snapshot the exact observation carried by the refusal, preserving any
-// original create error. Other Enable results pass through.
+// original cause. Other Enable results pass through.
 func RetainAutostartTaskReplacementRefusal(err error) error {
 	refusal, ok := err.(*autostart.ObservedTaskReplacementRefusal)
 	if !ok {
 		return err
 	}
 	retained := refuseSchedulerTaskReplacement(refusal.TaskName, refusal.ObservedXML())
-	if refusal.CreateErr != nil {
-		return errors.Join(refusal.CreateErr, retained)
+	if refusal.Cause != nil {
+		return errors.Join(refusal.Cause, retained)
 	}
 	return retained
 }

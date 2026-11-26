@@ -69,16 +69,17 @@ var ErrStatusObservationUnavailable = errors.New("autostart status observation u
 
 // ObservedTaskReplacementRefusal carries the exact observed definition to the
 // caller that owns protected snapshot storage. The definition stays out of
-// diagnostics. CreateErr is set when this observation followed a failed create.
+// diagnostics. Cause preserves a failed create or observation, or the reason
+// an existing task cannot be accepted as enabled.
 type ObservedTaskReplacementRefusal struct {
-	TaskName  string
-	CreateErr error
-	xml       []byte
+	TaskName string
+	Cause    error
+	xml      []byte
 }
 
 // NewObservedTaskReplacementRefusal copies the observed bytes into the refusal.
-func NewObservedTaskReplacementRefusal(taskName string, observedXML []byte, createErr error) *ObservedTaskReplacementRefusal {
-	return &ObservedTaskReplacementRefusal{TaskName: taskName, CreateErr: createErr, xml: bytes.Clone(observedXML)}
+func NewObservedTaskReplacementRefusal(taskName string, observedXML []byte, cause error) *ObservedTaskReplacementRefusal {
+	return &ObservedTaskReplacementRefusal{TaskName: taskName, Cause: cause, xml: bytes.Clone(observedXML)}
 }
 
 // ObservedXML returns a copy for the caller's protected snapshot store.
@@ -87,8 +88,8 @@ func (e *ObservedTaskReplacementRefusal) ObservedXML() []byte {
 }
 
 func (e *ObservedTaskReplacementRefusal) Error() string {
-	if e.CreateErr != nil {
-		return fmt.Sprintf("refuse replacement of task %s: %v (%v)", e.TaskName, scheduler.ErrTaskReplacementUnowned, e.CreateErr)
+	if e.Cause != nil {
+		return fmt.Sprintf("refuse replacement of task %s: %v (%v)", e.TaskName, scheduler.ErrTaskReplacementUnowned, e.Cause)
 	}
 	return fmt.Sprintf("refuse replacement of task %s: %v", e.TaskName, scheduler.ErrTaskReplacementUnowned)
 }
@@ -98,8 +99,8 @@ func (e *ObservedTaskReplacementRefusal) GoString() string {
 }
 
 func (e *ObservedTaskReplacementRefusal) Unwrap() []error {
-	if e.CreateErr != nil {
-		return []error{scheduler.ErrTaskReplacementUnowned, e.CreateErr}
+	if e.Cause != nil {
+		return []error{scheduler.ErrTaskReplacementUnowned, e.Cause}
 	}
 	return []error{scheduler.ErrTaskReplacementUnowned}
 }
@@ -215,8 +216,9 @@ type StatusSnapshot struct {
 // `internal/cli/autostart.go` drives all three.
 type Backend interface {
 	// Enable installs an autostart shim. POSIX can rewrite the installed
-	// artifact. Windows creates only an absent registration and reports a
-	// typed refusal with the observed definition if the task exists.
+	// artifact. Windows creates only an absent registration or accepts a fully
+	// matching enabled task without mutation. Other existing tasks return a
+	// typed refusal with the observed definition.
 	Enable(opts Options) error
 
 	// Disable removes the autostart shim. Idempotent: returns nil
@@ -226,7 +228,7 @@ type Backend interface {
 
 	// Status reports the current State. Its drift observation compares the
 	// command-line and binary path to opts. Windows Enable independently
-	// checks registration absence.
+	// checks the complete definition and runtime enabled state for a no-op.
 	Status(opts Options) (State, error)
 
 	// StatusSnapshot reports State plus a comparable liveness-free shim spec.
