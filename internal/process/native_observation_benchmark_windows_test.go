@@ -7,7 +7,6 @@ import (
 	"os"
 	"testing"
 	"time"
-	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -24,17 +23,13 @@ func readRetainedObservation(h windows.Handle) (nativeObservation, error) {
 	if err := windows.GetProcessTimes(h, &creation, &exit, &kernel, &user); err != nil {
 		return nativeObservation{}, err
 	}
-	var counters processMemoryCounters
-	counters.CB = uint32(unsafe.Sizeof(counters))
-	ok, _, callErr := procGetProcessMemoryInfo.Call(
-		uintptr(h), uintptr(unsafe.Pointer(&counters)), uintptr(counters.CB),
-	)
-	if ok == 0 {
-		return nativeObservation{}, fmt.Errorf("native memory observation failed: %v", callErr)
+	residentBytes, ok := residentSetSizeFromHandle(h)
+	if !ok {
+		return nativeObservation{}, fmt.Errorf("native memory observation failed")
 	}
 	return nativeObservation{
 		Created:       time.Unix(0, creation.Nanoseconds()).UTC(),
-		ResidentBytes: uint64(counters.WorkingSetSize),
+		ResidentBytes: residentBytes,
 	}, nil
 }
 
