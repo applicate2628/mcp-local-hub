@@ -282,13 +282,17 @@ func (l *ownedSupervisorLaunch) Abort(ctx context.Context) error {
 		if !graceful && l.proof != nil && l.deps.sendIPCPeer == nil {
 			errs = append(errs, errSupervisorPeerIPCSenderRequired)
 		} else if !graceful && l.proof != nil {
-			limit, cancel := context.WithTimeout(ctx, time.Duration(defaultExitTimeoutMs)*time.Millisecond)
-			owner, err := l.observeControl(limit, l.proof.expected)
+			// Check the original before starting its graceful-exit timeout.
+			// Both deadlines stay within the existing caller cleanup context.
+			check, stopCheck := context.WithTimeout(ctx, time.Duration(defaultExitTimeoutMs)*time.Millisecond)
+			owner, err := l.observeControl(check, l.proof.expected)
+			stopCheck()
 			if err == nil && owner == l.proof.owner {
 				select {
 				case <-l.waitDone:
 					graceful = true // Retained original outcome: do not contact a replacement.
 				default:
+					limit, cancel := context.WithTimeout(ctx, time.Duration(defaultExitTimeoutMs)*time.Millisecond)
 					resp, exitErr := l.deps.sendIPCPeer(limit, l.deps.pipePath, owner, l.proof.peer, "exit", map[string]any{"graceful": true, "timeout_ms": defaultExitTimeoutMs}, time.Duration(defaultExitTimeoutMs)*time.Millisecond)
 					if exitErr == nil && resp.OK && resp.Final && resp.Error == nil {
 						select {
@@ -298,6 +302,7 @@ func (l *ownedSupervisorLaunch) Abort(ctx context.Context) error {
 							exitErr = limit.Err()
 						}
 					}
+					cancel()
 					if exitErr != nil {
 						errs = append(errs, fmt.Errorf("created supervisor graceful exit: %w", exitErr))
 					}
@@ -305,7 +310,6 @@ func (l *ownedSupervisorLaunch) Abort(ctx context.Context) error {
 			} else if err != nil {
 				errs = append(errs, err)
 			}
-			cancel()
 		}
 		if !graceful {
 			if err := l.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
