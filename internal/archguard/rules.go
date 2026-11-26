@@ -28,7 +28,7 @@ func ruleSymbolCalls(ctx fileContext, policy Policy, rules []SymbolRule, kind Vi
 	var out []Violation
 	blockedImports := make(map[string]struct{})
 	for _, rule := range rules {
-		if matchesAnyGlob(rule.AllowedGlobs, ctx.Path, false) {
+		if ctx.globExpressions.matchesAny(rule.AllowedGlobs, ctx.Path) {
 			continue
 		}
 		line, unresolved := ctx.UnaliasedImports[rule.ImportPath]
@@ -50,7 +50,7 @@ func ruleSymbolCalls(ctx fileContext, policy Policy, rules []SymbolRule, kind Vi
 			return true
 		}
 		for _, rule := range rules {
-			if matchesAnyGlob(rule.AllowedGlobs, ctx.Path, false) {
+			if ctx.globExpressions.matchesAny(rule.AllowedGlobs, ctx.Path) {
 				continue
 			}
 			if _, blocked := blockedImports[rule.ImportPath]; blocked {
@@ -143,7 +143,7 @@ func ruleProductionTestHooks(ctx fileContext, policy Policy) []Violation {
 }
 
 func ruleHistoryComments(ctx fileContext, policy Policy) []Violation {
-	if ctx.Generated || matchesAnyGlob(policy.HistoryAllowedGlobs, ctx.Path, false) {
+	if ctx.Generated || ctx.globExpressions.matchesAny(policy.HistoryAllowedGlobs, ctx.Path) {
 		return nil
 	}
 	var out []Violation
@@ -443,12 +443,12 @@ func ruleImports(ctx fileContext, policy Policy) []Violation {
 		packageDir = "."
 	}
 	for _, rule := range policy.ImportRules {
-		if !matchesAnyGlob(rule.From, packageDir, false) {
+		if !ctx.globExpressions.matchesAny(rule.From, packageDir) {
 			continue
 		}
 		for _, importPath := range sortedImportPaths(ctx.ImportPaths) {
 			repositoryPath := repositoryImportPath(policy.Module, importPath)
-			if !matchesAnyGlob(rule.Deny, repositoryPath, false) && !matchesAnyGlob(rule.Deny, importPath, false) {
+			if !ctx.globExpressions.matchesAny(rule.Deny, repositoryPath) && !ctx.globExpressions.matchesAny(rule.Deny, importPath) {
 				continue
 			}
 			out = append(out, Violation{

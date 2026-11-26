@@ -34,7 +34,8 @@ func Scan(ctx context.Context, opts ScanOptions) (Report, error) {
 	if err := validatePolicyModule(opts.Root, opts.Policy.Module); err != nil {
 		return Report{}, err
 	}
-	files, err := collectFiles(ctx, opts.Root, opts.Policy)
+	globs := make(globExpressions)
+	files, err := collectFiles(ctx, opts.Root, opts.Policy, globs)
 	if err != nil {
 		return Report{}, err
 	}
@@ -70,6 +71,7 @@ func Scan(ctx context.Context, opts ScanOptions) (Report, error) {
 		if err := ctx.Err(); err != nil {
 			return Report{}, err
 		}
+		file.globExpressions = globs
 		for _, rule := range rules {
 			for _, violation := range rule(file, opts.Policy) {
 				if isCountedOccurrenceKind(violation.Kind) && violation.Metric <= 0 {

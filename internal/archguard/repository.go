@@ -32,9 +32,10 @@ type fileContext struct {
 	LineCount        int
 	Source           []byte
 	StringValues     map[ast.Expr][]string
+	globExpressions  globExpressions
 }
 
-func collectFiles(ctx context.Context, root string, policy Policy) ([]fileContext, error) {
+func collectFiles(ctx context.Context, root string, policy Policy, globs globExpressions) ([]fileContext, error) {
 	rootAbs, err := filepath.Abs(root)
 	if err != nil {
 		return nil, fmt.Errorf("resolve root: %w", err)
@@ -85,12 +86,12 @@ func collectFiles(ctx context.Context, root string, policy Policy) ([]fileContex
 				return nil
 			}
 			if entry.IsDir() {
-				if path != start && matchesApplicableExcludeGlob(policy.ExcludeGlobs, sourceRoot, rel, true) {
+				if path != start && globs.matchesApplicableExcludeGlob(policy.ExcludeGlobs, sourceRoot, rel, true) {
 					return filepath.SkipDir
 				}
 				return nil
 			}
-			if filepath.Ext(path) != ".go" || matchesApplicableExcludeGlob(policy.ExcludeGlobs, sourceRoot, rel, false) {
+			if filepath.Ext(path) != ".go" || globs.matchesApplicableExcludeGlob(policy.ExcludeGlobs, sourceRoot, rel, false) {
 				return nil
 			}
 			if _, ok := seen[rel]; ok {
@@ -115,12 +116,12 @@ func collectFiles(ctx context.Context, root string, policy Policy) ([]fileContex
 	return out, nil
 }
 
-func matchesApplicableExcludeGlob(patterns []string, sourceRoot, path string, directory bool) bool {
+func (globs globExpressions) matchesApplicableExcludeGlob(patterns []string, sourceRoot, path string, directory bool) bool {
 	for _, pattern := range patterns {
 		if isWholeSpecialRootExclusion(pattern, sourceRoot) {
 			continue
 		}
-		if matchGlob(pattern, path) || (directory && matchGlob(pattern, strings.TrimSuffix(path, "/")+"/")) {
+		if globs.match(pattern, path) || (directory && globs.match(pattern, strings.TrimSuffix(path, "/")+"/")) {
 			return true
 		}
 	}
@@ -288,9 +289,12 @@ func isGeneratedFile(file *ast.File) bool {
 	return false
 }
 
-func matchesAnyGlob(patterns []string, value string, directory bool) bool {
+// globExpressions reuses compiled patterns within a single evaluation.
+type globExpressions map[string]*regexp.Regexp
+
+func (globs globExpressions) matchesAny(patterns []string, value string) bool {
 	for _, pattern := range patterns {
-		if matchGlob(pattern, value) || (directory && matchGlob(pattern, strings.TrimSuffix(value, "/")+"/")) {
+		if globs.match(pattern, value) {
 			return true
 		}
 	}
@@ -302,6 +306,10 @@ func MatchPathGlob(pattern, value string) bool {
 }
 
 func matchGlob(pattern, value string) bool {
+	return globExpressions(nil).match(pattern, value)
+}
+
+func (globs globExpressions) match(pattern, value string) bool {
 	pattern = normalizeGlob(pattern)
 	value = filepath.ToSlash(strings.TrimPrefix(value, "./"))
 	if pattern == "" {
@@ -309,10 +317,21 @@ func matchGlob(pattern, value string) bool {
 	}
 	if strings.HasSuffix(pattern, "/**") {
 		prefix := strings.TrimSuffix(pattern, "/**")
-		if matchGlob(prefix, value) {
+		if globs.match(prefix, value) {
 			return true
 		}
 	}
+	expression, ok := globs[pattern]
+	if !ok {
+		expression = compileGlobExpression(pattern)
+		if globs != nil {
+			globs[pattern] = expression
+		}
+	}
+	return expression != nil && expression.MatchString(value)
+}
+
+func compileGlobExpression(pattern string) *regexp.Regexp {
 	var b strings.Builder
 	b.WriteString("^")
 	for i := 0; i < len(pattern); {
@@ -336,20 +355,23 @@ func matchGlob(pattern, value string) bool {
 		case '[':
 			class, next, ok := translateGlobClass(pattern, i)
 			if !ok {
-				return false
+				return nil
 			}
 			b.WriteString(class)
 			i = next
 		default:
 			r, size := utf8.DecodeRuneInString(pattern[i:])
 			if r == utf8.RuneError && size == 1 {
-				return false
+				return nil
 			}
 			b.WriteString(regexp.QuoteMeta(string(r)))
 			i += size
 		}
 	}
 	b.WriteString("$")
-	matched, err := regexp.MatchString(b.String(), value)
-	return err == nil && matched
+	expression, err := regexp.Compile(b.String())
+	if err != nil {
+		return nil
+	}
+	return expression
 }

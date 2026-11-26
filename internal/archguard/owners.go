@@ -9,10 +9,11 @@ import (
 
 func ApplyOwners(report Report, owners Owners) (Baseline, error) {
 	baseline := Baseline{SchemaVersion: 1, GeneratedFrom: report.Module, Entries: make([]BaselineEntry, 0, len(report.Violations))}
+	globs := make(globExpressions)
 	for _, violation := range report.Violations {
 		matched := false
 		for i, rule := range owners.Rules {
-			if !ownerRuleMatches(rule, violation) {
+			if !ownerRuleMatches(globs, rule, violation) {
 				continue
 			}
 			if err := validateOwnerRule(rule); err != nil {
@@ -40,8 +41,8 @@ func ApplyOwners(report Report, owners Owners) (Baseline, error) {
 	return baseline, nil
 }
 
-func ownerRuleMatches(rule OwnerRule, violation Violation) bool {
-	if !matchesAnyGlob(rule.Globs, violation.Location.Path, false) {
+func ownerRuleMatches(globs globExpressions, rule OwnerRule, violation Violation) bool {
+	if !globs.matchesAny(rule.Globs, violation.Location.Path) {
 		return false
 	}
 	if len(rule.Kinds) == 0 {

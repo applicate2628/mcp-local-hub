@@ -135,7 +135,7 @@ func embeddedFieldName(expr ast.Expr) (string, token.Pos) {
 }
 
 func ruleHistoryEmptyMatches(ctx fileContext, policy Policy) []Violation {
-	if ctx.Generated || matchesAnyGlob(policy.HistoryAllowedGlobs, ctx.Path, false) {
+	if ctx.Generated || ctx.globExpressions.matchesAny(policy.HistoryAllowedGlobs, ctx.Path) {
 		return nil
 	}
 	var out []Violation
