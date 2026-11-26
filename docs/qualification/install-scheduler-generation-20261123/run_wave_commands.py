@@ -1,0 +1,127 @@
+"""Use the existing qualified native command owner for this isolated source checkout."""
+import sys
+sys.dont_write_bytecode = True
+import hashlib, importlib.util, json, os, subprocess, time
+from pathlib import Path
+from types import SimpleNamespace
+
+ROOT = Path(__file__).resolve().parent
+GUARD = Path(r"D:\dev\ChatGPT\cache-continuation-20261124-owner-v3\guard-custody.py")
+GUARD_SHA = "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2"
+GO = r"C:\msys64\ucrt64\lib\go\bin\go.exe"
+GOFMT = r"C:\msys64\ucrt64\lib\go\bin\gofmt.exe"
+GIT = r"C:\Program Files\Git\cmd\git.exe"
+
+def sha(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+def write_json(path, value):
+    tmp = path.with_suffix(path.suffix + ".pending")
+    tmp.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+class CoreRun:
+    def __init__(self, root, env):
+        self.root, self.env = root, env
+        self.receipt = {"commands": [], "guard_sha256": GUARD_SHA}
+    def save(self):
+        write_json(self.root / "receipt.json", self.receipt)
+
+def child(config, out):
+    raw = GUARD.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != GUARD_SHA:
+        raise RuntimeError("qualified command owner changed")
+    spec = importlib.util.spec_from_file_location("audit_qualified_guard", GUARD)
+    guard = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = guard
+    exec(compile(raw, str(GUARD), "exec"), guard.__dict__)
+    env = dict(os.environ)
+    for key in list(env):
+        if key.startswith("MCPHUB_"):
+            del env[key]
+    temp = out / "tmp"
+    temp.mkdir()
+    cache = ROOT / "go-build"
+    cache.mkdir(exist_ok=True)
+    env.update(TEMP=str(temp), TMP=str(temp), TMPDIR=str(temp), GOTMPDIR=str(temp),
+               GOCACHE=str(cache), GOMODCACHE=r"D:\dev\ChatGPT\pr671-0467-20261124\go-mod",
+               GOPROXY="off", GOSUMDB="off", GOTOOLCHAIN="local", GOFLAGS="-mod=readonly",
+               CGO_ENABLED="0", PYTHONDONTWRITEBYTECODE="1")
+    env.update(config.get("environment", {}))
+    core = SimpleNamespace(Run=CoreRun, REPO=Path(config["source"]), sha=sha, subprocess=subprocess)
+    run = guard.make_guarded_run_class(core)(out, env)
+    run.receipt.update(config_sha256=sha(ROOT / config["config_file"]),
+                       expected_head=config["head"], source=config["source"], status="RUNNING")
+    run.save()
+    try:
+        head = run.command([GIT, "rev-parse", "HEAD"], "head", timeout=30).strip()
+        if head != config["head"]:
+            raise RuntimeError("source head changed")
+        for index, step in enumerate(config["steps"]):
+            for rel, contents in step.get("files", {}).items():
+                target = Path(config["source"]) / rel
+                if not target.resolve().is_relative_to(Path(config["source"]).resolve()):
+                    raise RuntimeError("input path escaped checkout")
+                target.write_text(contents, encoding="utf-8", newline="\n")
+            pins = {rel: sha(Path(config["source"]) / rel) for rel in config.get("observed_files", [])}
+            run.receipt.setdefault("step_inputs", []).append({"name":step["name"], "files":pins})
+            run.save()
+            argv = [{"go":GO,"gofmt":GOFMT,"git":GIT}.get(step["argv"][0], step["argv"][0]), *step["argv"][1:]]
+            run.command(argv, step["name"], timeout=step.get("timeout",360), check=False)
+            row = run.receipt["commands"][-1]
+            expected = step.get("expected_exit", 0)
+            if row["exit_code"] != expected:
+                raise RuntimeError(step["name"] + " exit " + str(row["exit_code"]) + " expected " + str(expected))
+            if step.get("stdout_contains"):
+                output = Path(row["stdout"]).read_text(encoding="utf-8-sig")
+                for marker in step["stdout_contains"]:
+                    if marker not in output:
+                        raise RuntimeError("expected negative-control diagnostic absent: " + marker)
+            if not step.get("mutates_inputs", False):
+                after = {rel: sha(Path(config["source"]) / rel) for rel in pins}
+                if after != pins:
+                    raise RuntimeError("test changed observed source inputs")
+            run.receipt.setdefault("steps_received", []).append(step["name"])
+            run.save()
+        run.receipt["status"] = "PASS"
+        run.save()
+        return 0
+    except BaseException as error:
+        run.receipt.update(status="FAIL", error=type(error).__name__ + ": " + str(error))
+        run.save()
+        if not run.commands_quiescent():
+            # Keep the original in-memory owners alive; no new command or capture access.
+            run.receipt["retained_owner_wait"] = True
+            run.save()
+            while True:
+                time.sleep(1)
+        return 1
+
+def parent(config):
+    out = ROOT / config["run"]
+    out.mkdir(parents=True, exist_ok=False)
+    env = dict(os.environ)
+    env.update(PYTHONDONTWRITEBYTECODE="1", TEMP=str(ROOT), TMP=str(ROOT))
+    startup = subprocess.STARTUPINFO()
+    startup.dwFlags = subprocess.STARTF_USESHOWWINDOW
+    startup.wShowWindow = subprocess.SW_HIDE
+    started = time.monotonic()
+    with (out/"controller.stdout").open("xb") as stdout, (out/"controller.stderr").open("xb") as stderr:
+        proc = subprocess.Popen([sys.executable,"-I","-S","-B",str(Path(__file__).resolve()),config["config_file"],"--child"],
+                                cwd=ROOT,env=env,stdin=subprocess.DEVNULL,stdout=stdout,stderr=stderr,
+                                startupinfo=startup,creationflags=subprocess.CREATE_NEW_CONSOLE)
+        write_json(out/"launch.json", {"pid":proc.pid, "original_controller_retained":True})
+        code = proc.wait()
+    result={"controller_exit_code":code,"original_controller_reaped":True,
+            "controller_capture_handles_closed":stdout.closed and stderr.closed,
+            "seconds":time.monotonic()-started,"receipt_sha256":sha(out/"receipt.json")}
+    write_json(out/"root-receiving.json",result)
+    print(json.dumps(result),flush=True)
+    return code
+
+if __name__ == "__main__":
+    if not (sys.flags.isolated and sys.flags.no_site and sys.flags.dont_write_bytecode):
+        raise RuntimeError("isolated interpreter flags required")
+    config = json.loads((ROOT/sys.argv[1]).read_text(encoding="utf-8"))
+    config["config_file"] = sys.argv[1]
+    raise SystemExit(child(config, ROOT/config["run"]) if len(sys.argv)==3 and sys.argv[2]=="--child" else parent(config))
