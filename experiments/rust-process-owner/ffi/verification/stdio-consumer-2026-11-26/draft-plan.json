@@ -1,0 +1,300 @@
+{
+  "schema": "rust-go-stdio-consumer-prepared-plan-redacted-v1",
+  "status": "CONSUMER_NOT_RUN",
+  "candidate_overlay": {
+    "repository_relative_path": "internal/daemon/zz_rust_adoption_stdio_consumer_windows_test.go",
+    "frozen_artifact": "testdata/zz_rust_adoption_stdio_consumer_windows_test.go",
+    "bytes": 10147,
+    "sha256": "9155ea3c0808b9006804defcd5ff28a3f3dd700b0cf381e14ba9bbe796ba4fd4",
+    "formatted_in_experiment": false
+  },
+  "path_roles": {
+    "<EXPERIMENT_ROOT>": "A newly admitted and empty temporary experiment root on the existing Windows x64 host. The plan must be rebound to the actual role and receipt before execution."
+  },
+  "private_source_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+  "private_source_tree": "67c13b8fc1317b4fd60e3135a3eb8a376fe01817",
+  "source_paths_exactly_checked": 3508,
+  "source_paths_with_overlay": 3509,
+  "dll_original_build": "efa73c0e23f7af16b8aa2ccb047b745a58ba4f71",
+  "dll_sha256": "dfa87a10a39e9110cda735ae6a987bfa64b03446529072710723e9b6ea0dca56",
+  "planned_native_runtime_preserved": {
+    "guard": [
+      {
+        "role": "real normal tree",
+        "work_seconds": 5,
+        "expected_exit_code": 0
+      },
+      {
+        "role": "real timeout tree",
+        "work_seconds": 2,
+        "expected_exit_code": 1
+      }
+    ],
+    "cleanup_seconds_per_original_command": 10,
+    "prepare_budget_total_seconds": 300,
+    "comparison_command_work_budget_seconds": 190,
+    "go_test_inner_timeout_seconds": 180,
+    "source_git_checkout": {
+      "index": "fresh private GIT_INDEX_FILE",
+      "read_tree": "exact pinned commit",
+      "checkout_index": "all into empty private source",
+      "native_git_children": "same original Job and one 300-second deadline",
+      "original_donor_head_index_config_unchanged_required": true,
+      "no_worktree_admin_in_source": true,
+      "hooks_disabled": true,
+      "filters_absent": true,
+      "line_endings_unconverted": true,
+      "failure_policy": "no runtime admission after any source mismatch, timeout or missing receipt"
+    }
+  },
+  "original_receipt_chain": {
+    "phase_order": [
+      "guard",
+      "prepare",
+      "format",
+      "compile",
+      "measure"
+    ],
+    "bind_successor_to_actual_predecessor_receipt": true,
+    "require_original_native_and_reader_closure_before_deadline": true,
+    "keep_failed_or_unknown_gates_unchanged_after_late_physical_receive": true,
+    "git_scope_last_outcome": {
+      "prepare": "NOT_RUN",
+      "format": "NOT_RUN",
+      "compile": "NOT_RUN",
+      "measure": "NOT_RUN"
+    }
+  },
+  "planned_comparison": {
+    "order": [
+      "go",
+      "rust",
+      "rust",
+      "go"
+    ],
+    "hosts": 4,
+    "cases_per_host": 3,
+    "rpc_per_host": 66,
+    "total_rpc": 264
+  },
+  "git_scope_frozen_command_and_delta": {
+    "planned_commands_normalized": {
+      "guard": [],
+      "prepare": [
+        {
+          "label": "materialize-private-inputs",
+          "tool": "python",
+          "args": [
+            "-I",
+            "-B",
+            "<EXPERIMENT_ROOT>/control/materialize_rust_inputs.py",
+            "06a3585bdc61a96b7465e877266b3fab063e954f238bd0a2cc9bce61d2524ba3"
+          ],
+          "kind": "prepare",
+          "timeout_seconds": 300,
+          "expected_exit_code": 0
+        }
+      ],
+      "format": [
+        {
+          "label": "format-test-overlay",
+          "tool": "gofmt",
+          "args": [
+            "-w",
+            "internal/daemon/zz_rust_adoption_stdio_consumer_windows_test.go"
+          ],
+          "kind": "format",
+          "timeout_seconds": 30,
+          "expected_exit_code": 0
+        }
+      ],
+      "compile": [
+        {
+          "label": "go-version",
+          "tool": "go",
+          "args": [
+            "version"
+          ],
+          "kind": "version",
+          "timeout_seconds": 30,
+          "expected_exit_code": 0
+        },
+        {
+          "label": "offline-modules",
+          "tool": "go",
+          "args": [
+            "mod",
+            "download"
+          ],
+          "kind": "modules",
+          "timeout_seconds": 300,
+          "expected_exit_code": 0
+        },
+        {
+          "label": "build-pe-validator",
+          "tool": "go",
+          "args": [
+            "build",
+            "-buildvcs=false",
+            "-mod=readonly",
+            "-p=2",
+            "-o",
+            "<EXPERIMENT_ROOT>/compiled/tools/windows-product-validate.exe",
+            "./tools/windows-product-validate"
+          ],
+          "kind": "build",
+          "timeout_seconds": 300,
+          "expected_exit_code": 0,
+          "output": "<EXPERIMENT_ROOT>/compiled/tools/windows-product-validate.exe"
+        },
+        {
+          "label": "validate-native-identity",
+          "tool": "validator",
+          "args": [
+            "--runtime-library",
+            "<EXPERIMENT_ROOT>/inputs/native/mcphub-owner.dll",
+            "--runtime-library-profile",
+            "owner-v1-members-v1-borrow-v1",
+            "--expected-commit",
+            "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4"
+          ],
+          "kind": "identity",
+          "timeout_seconds": 30,
+          "expected_exit_code": 0
+        },
+        {
+          "label": "compile-helper",
+          "tool": "go",
+          "args": [
+            "test",
+            "-c",
+            "-buildvcs=false",
+            "-mod=readonly",
+            "-p=2",
+            "-ldflags",
+            "-X mcp-local-hub/internal/buildinfo.commit=3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+            "-o",
+            "<EXPERIMENT_ROOT>/compiled/helper/helper.exe",
+            "./internal/daemon"
+          ],
+          "kind": "build",
+          "timeout_seconds": 300,
+          "expected_exit_code": 0,
+          "output": "<EXPERIMENT_ROOT>/compiled/helper/helper.exe",
+          "arm": "helper"
+        },
+        {
+          "label": "compile-go",
+          "tool": "go",
+          "args": [
+            "test",
+            "-c",
+            "-buildvcs=false",
+            "-mod=readonly",
+            "-p=2",
+            "-ldflags",
+            "-X mcp-local-hub/internal/buildinfo.commit=3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+            "-o",
+            "<EXPERIMENT_ROOT>/compiled/go/mcphub.exe",
+            "./internal/daemon"
+          ],
+          "kind": "build",
+          "timeout_seconds": 300,
+          "expected_exit_code": 0,
+          "output": "<EXPERIMENT_ROOT>/compiled/go/mcphub.exe",
+          "arm": "go"
+        },
+        {
+          "label": "compile-rust",
+          "tool": "go",
+          "args": [
+            "test",
+            "-c",
+            "-buildvcs=false",
+            "-mod=readonly",
+            "-p=2",
+            "-ldflags",
+            "-X mcp-local-hub/internal/buildinfo.commit=3ebe335a2f666a5279d7fafc31a6f4dc3feedff4 -X mcp-local-hub/internal/buildinfo.rustOwnerSHA256=dfa87a10a39e9110cda735ae6a987bfa64b03446529072710723e9b6ea0dca56",
+            "-o",
+            "<EXPERIMENT_ROOT>/compiled/rust/mcphub.exe",
+            "./internal/daemon"
+          ],
+          "kind": "build",
+          "timeout_seconds": 300,
+          "expected_exit_code": 0,
+          "output": "<EXPERIMENT_ROOT>/compiled/rust/mcphub.exe",
+          "arm": "rust"
+        }
+      ],
+      "measure": [
+        {
+          "label": "consumer-1-go",
+          "tool": "host",
+          "args": [
+            "-test.run=^TestRustAdoptionStdioConsumer$",
+            "-test.v=true",
+            "-test.count=1",
+            "-test.timeout=180s"
+          ],
+          "kind": "consumer",
+          "timeout_seconds": 190,
+          "expected_exit_code": 0,
+          "arm": "go",
+          "executable": "<EXPERIMENT_ROOT>/compiled/go/mcphub.exe"
+        },
+        {
+          "label": "consumer-2-rust",
+          "tool": "host",
+          "args": [
+            "-test.run=^TestRustAdoptionStdioConsumer$",
+            "-test.v=true",
+            "-test.count=1",
+            "-test.timeout=180s"
+          ],
+          "kind": "consumer",
+          "timeout_seconds": 190,
+          "expected_exit_code": 0,
+          "arm": "rust",
+          "executable": "<EXPERIMENT_ROOT>/compiled/rust/mcphub.exe"
+        },
+        {
+          "label": "consumer-3-rust",
+          "tool": "host",
+          "args": [
+            "-test.run=^TestRustAdoptionStdioConsumer$",
+            "-test.v=true",
+            "-test.count=1",
+            "-test.timeout=180s"
+          ],
+          "kind": "consumer",
+          "timeout_seconds": 190,
+          "expected_exit_code": 0,
+          "arm": "rust",
+          "executable": "<EXPERIMENT_ROOT>/compiled/rust/mcphub.exe"
+        },
+        {
+          "label": "consumer-4-go",
+          "tool": "host",
+          "args": [
+            "-test.run=^TestRustAdoptionStdioConsumer$",
+            "-test.v=true",
+            "-test.count=1",
+            "-test.timeout=180s"
+          ],
+          "kind": "consumer",
+          "timeout_seconds": 190,
+          "expected_exit_code": 0,
+          "arm": "go",
+          "executable": "<EXPERIMENT_ROOT>/compiled/go/mcphub.exe"
+        }
+      ]
+    },
+    "planned_commands_original_sha256": "8c266fd01e714bfc2eaedd77841bf24dfb6dd4d475ba644b069956aa21bc5be2",
+    "functional_diff_sha256": "d4bf3f25f04fdcd58d2487bca44d8cd4844ffd939720b5722162bb1a17efd025",
+    "functional_diff": "--- materializer-before\n+++ materializer-v3\n@@ -97,6 +97,95 @@\n     actual.sort(key=lambda item: item[\"path\"])\n     require(actual == sorted(expected, key=lambda item: item[\"path\"]), \"Complete new destination census differs: \" + str(root))\n     return actual\n+\n+\n+\n+def checkout_source(donor, expected_names):\n+    import subprocess\n+    import time\n+    git = Path(str(spec.GIT))\n+    for part in (*reversed(git.parents), git):\n+        info = part.lstat()\n+        require(not stat.S_ISLNK(info.st_mode) and not getattr(info, \"st_file_attributes\", 0) & 0x400,\n+                \"Git executable path has a reparse point\")\n+    require(git.is_file() and hashlib.sha256(git.read_bytes()).hexdigest() == spec.GIT_SHA,\n+            \"Pinned Git executable differs\")\n+    gitdir = ordinary(donor / \".git\", True)\n+    expected_meta = spec.DONOR_GIT_METADATA_SHA256\n+    for leaf, pin in expected_meta.items():\n+        read_pin(gitdir / leaf, pin)\n+    for leaf in (\"info/attributes\", \"objects/info/alternates\"):\n+        require(not os.path.lexists(gitdir / leaf), \"Unexpected donor Git attribute/alternate control\")\n+    require(not any(name.rsplit(\"/\", 1)[-1] == \".gitattributes\" for name in expected_names),\n+            \"Tracked attributes require separate admission\")\n+    destination = ordinary(SCOPE / \"source\", True)\n+    require(not any(destination.iterdir()), \"Private checkout destination is not empty\")\n+    index = SCOPE / \"git-index\"\n+    hooks = SCOPE / \"disabled-hooks\"\n+    hooks.mkdir()\n+    ordinary(hooks, True)\n+    require(not os.path.lexists(index) and not os.path.lexists(index.with_suffix(\".lock\")),\n+            \"Private Git index already exists\")\n+    env = {key: value for key, value in os.environ.items() if not key.upper().startswith(\"GIT_\")}\n+    env.update(GIT_INDEX_FILE=str(index), GIT_OPTIONAL_LOCKS=\"0\", GIT_NO_LAZY_FETCH=\"1\",\n+               GIT_TERMINAL_PROMPT=\"0\", GIT_NO_REPLACE_OBJECTS=\"1\", GIT_ALLOW_PROTOCOL=\"\",\n+               GIT_CONFIG_NOSYSTEM=\"1\", GIT_CONFIG_GLOBAL=os.devnull, GIT_ATTR_NOSYSTEM=\"1\")\n+    argv = [str(git), \"--no-optional-locks\", \"--git-dir=\" + str(gitdir),\n+            \"--work-tree=\" + str(destination), \"-c\", \"core.fsmonitor=false\", \"-c\", \"gc.auto=0\",\n+            \"-c\", \"maintenance.auto=false\", \"-c\", \"core.hooksPath=\" + str(hooks),\n+            \"-c\", \"core.attributesFile=\" + os.devnull, \"-c\", \"core.autocrlf=false\",\n+            \"-c\", \"core.eol=lf\", \"-c\", \"core.symlinks=false\"]\n+    commands = []\n+    def command(label, args, input_bytes=None):\n+        start = time.monotonic()\n+        options = {\"stdin\": subprocess.DEVNULL} if input_bytes is None else {\"input\": input_bytes}\n+        run = subprocess.run([*argv, *args], cwd=destination, env=env, capture_output=True, **options)\n+        result = {\"role\": label, \"exit\": run.returncode, \"seconds\": time.monotonic()-start,\n+                  \"stdout_bytes\": len(run.stdout), \"stderr_bytes\": len(run.stderr),\n+                  \"stdout_sha256\": hashlib.sha256(run.stdout).hexdigest(),\n+                  \"stderr_sha256\": hashlib.sha256(run.stderr).hexdigest()}\n+        commands.append(result)\n+        print(json.dumps({\"checkpoint\": \"git_command_closed\", **result}), flush=True)\n+        require(run.returncode == 0 and not run.stderr, \"Git preparation command failed: \" + label)\n+        return run.stdout\n+    tree = command(\"tree_identity\", [\"rev-parse\", spec.COMMIT + \"^{tree}\"]).decode().strip()\n+    require(tree == spec.SOURCE_TREE, \"Private Git tree differs\")\n+    require(not command(\"read_private_index\", [\"read-tree\", spec.COMMIT]), \"Unexpected read-tree output\")\n+    slots = {}\n+    for line in command(\"private_index_inventory\", [\"ls-files\", \"--stage\", \"-z\"]).split(b\"\\0\"):\n+        if not line:\n+            continue\n+        metadata, name = line.split(b\"\\t\", 1)\n+        mode, oid, stage = metadata.decode().split()\n+        require(mode in (\"100644\", \"100755\") and stage == \"0\" and re.fullmatch(r\"[a-f0-9]{40}\", oid),\n+                \"Private Git index contains an unsupported entry\")\n+        key = name.decode(\"utf-8\")\n+        require(key not in slots, \"Duplicate private Git index path\")\n+        slots[key] = oid\n+    require(set(slots) == set(expected_names), \"Private Git index does not match the exact tracked file set\")\n+    attributes = (\"filter\", \"working-tree-encoding\", \"eol\", \"ident\")\n+    names = b\"\\0\".join(name.encode() for name in sorted(slots)) + b\"\\0\"\n+    values = command(\"conversion_attributes\", [\"check-attr\", \"--cached\", \"-z\", \"--stdin\", *attributes], names).split(b\"\\0\")\n+    require(values[-1] == b\"\", \"Unterminated Git attributes\")\n+    values.pop()\n+    observations = {(path.decode(), attr.decode()): value for path, attr, value in\n+                    zip(values[0::3], values[1::3], values[2::3], strict=True)}\n+    require(len(values) == 3*len(observations) and len(observations) == len(slots)*len(attributes)\n+            and set(observations) == {(name, attr) for name in slots for attr in attributes}\n+            and all(value in (b\"unspecified\", b\"unset\") for value in observations.values()),\n+            \"Unexpected checkout transformation/filter\")\n+    require(not command(\"checkout_index\", [\"checkout-index\", \"--all\"]), \"Unexpected checkout-index output\")\n+    require(not (destination / \".git\").exists(), \"Private source has Git admin data\")\n+    require(not os.path.lexists(Path(str(index) + \".lock\")) and not any(hooks.iterdir()),\n+            \"Unexpected index lock or hook files\")\n+    for leaf, pin in expected_meta.items():\n+        read_pin(gitdir / leaf, pin)\n+    require(hashlib.sha256(git.read_bytes()).hexdigest() == spec.GIT_SHA, \"Git executable changed\")\n+    return {\"source_tree\": tree, \"source_files\": len(slots), \"git_sha256\": spec.GIT_SHA,\n+            \"private_index_sha256\": hashlib.sha256(ordinary(index).read_bytes()).hexdigest(),\n+            \"donor_metadata_sha256\": expected_meta, \"donor_metadata_unchanged\": True,\n+            \"hooks_disabled\": True, \"filters_absent\": True, \"line_endings_unconverted\": True,\n+            \"source_has_git_admin_data\": False, \"commands\": commands}\n \n \n def main():\n@@ -152,8 +241,9 @@\n     for name, pin in sorted(source[\"files\"].items()):\n         relative(name)\n         raw = read_pin(donor / name, pin)\n-        new_bytes(SCOPE / \"source\" / name, raw)\n         source_rows.append({\"path\": name, \"bytes\": len(raw), \"sha256\": pin})\n+    print(json.dumps({\"checkpoint\": \"donor_source_before\", \"files\": len(source_rows)}), flush=True)\n+    git_checkout = checkout_source(donor, source[\"files\"])\n     overlay = next(item for item in inputs[\"payload_files\"] if item[\"path\"] == Path(spec.OVERLAY).name)\n     raw_overlay = read_pin(SCOPE / \"payload\" / overlay[\"path\"], overlay[\"sha256\"], overlay[\"bytes\"])\n     new_bytes(SCOPE / \"source\" / spec.OVERLAY, raw_overlay)\n@@ -161,6 +251,7 @@\n     source_rows.sort(key=lambda item: item[\"path\"])\n     require(len(source_rows) == 3509, \"Wrong materialized source count\")\n     census(SCOPE / \"source\", source_rows)\n+    print(json.dumps({\"checkpoint\": \"destination_census\", \"files\": len(source_rows)}), flush=True)\n     for item in proxy:\n         name = str(relative(item[\"path\"]))\n         raw = read_pin(Path(str(spec.PROXY_DONOR)) / name, item[\"sha256\"], item[\"bytes\"])\n@@ -186,7 +277,7 @@\n     new_json(SCOPE / \"input-files.json\", input_rows)\n     new_bytes(SCOPE / \"proxy-files.json\", read_pin(SCOPE / \"payload/proxy-files.json\", spec.PROVENANCE_PINS[\"proxy-files.json\"]))\n     report = {\"schema\": \"rust-stdio-consumer-materialization-v1\", \"scope\": str(SCOPE), \"status\": \"PASS\",\n-        \"inputs_sha256\": sys.argv[1], \"children_started\": False, \"fresh_runtime_authority_from_old_build\": False,\n+        \"inputs_sha256\": sys.argv[1], \"children_started\": True, \"git_checkout\": git_checkout, \"fresh_runtime_authority_from_old_build\": False,\n         \"historical_native_descendant_closure_claimed\": False, \"source_commit\": spec.COMMIT,\n         \"tracked_source_files\": 3508, \"new_overlay_files\": 1, \"complete_destination_files\": 3509,\n         \"donor_semantics\": \"exact named tracked files only; no complete donor filesystem or git namespace claim\",\n\n--- admission-before\n+++ admission-v3\n@@ -132,7 +132,12 @@\n     prepared = records[\"materialization_sha256\"]\n     require(prepared[\"schema\"] == \"rust-stdio-consumer-materialization-v1\" and prepared[\"scope\"] == str(SCOPE)\n             and prepared[\"status\"] == \"PASS\" and prepared[\"inputs_sha256\"] == plan[\"inputs_sha256\"]\n-            and prepared[\"children_started\"] is False and prepared[\"expanded_or_build_cache_reused\"] is False\n+            and prepared[\"children_started\"] is True and prepared[\"expanded_or_build_cache_reused\"] is False\n+            and prepared[\"git_checkout\"][\"source_tree\"] == spec.SOURCE_TREE\n+            and prepared[\"git_checkout\"][\"source_files\"] == 3508\n+            and prepared[\"git_checkout\"][\"git_sha256\"] == spec.GIT_SHA\n+            and prepared[\"git_checkout\"][\"donor_metadata_unchanged\"] is True\n+            and prepared[\"git_checkout\"][\"source_has_git_admin_data\"] is False\n             and prepared[\"fresh_runtime_authority_from_old_build\"] is False\n             and prepared[\"historical_native_descendant_closure_claimed\"] is False\n             and prepared[\"tracked_source_files\"] == 3508 and prepared[\"complete_destination_files\"] == 3509\n"
+  },
+  "result_links": [
+    "README.md",
+    "evidence.json"
+  ]
+}
