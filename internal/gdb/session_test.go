@@ -1,28 +1,38 @@
 package gdb
 
 import (
-	"bufio"
+	"context"
 	"io"
+	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // nopWriteCloser is a discard io.WriteCloser for the session's stdin: the MI
 // parser tests don't care what gets written to gdb, only what is read back.
 type nopWriteCloser struct{ io.Writer }
 
-func (nopWriteCloser) Close() error { return nil }
+func (nopWriteCloser) Close() error                     { return nil }
+func (nopWriteCloser) SetWriteDeadline(time.Time) error { return nil }
 
 // newFakeSession builds a session whose MI output is the canned miOutput string
-// and whose stdin is discarded. No real gdb is spawned (cmd is nil), so Command
+// and whose stdin is discarded. No real gdb is spawned, so Command
 // can be exercised purely against the parser. The canned output must terminate
 // every command (a `^`-result line) or readResult would block until the 30s
 // deadline.
-func newFakeSession(miOutput string) *session {
-	return &session{
-		stdin:  nopWriteCloser{io.Discard},
-		reader: bufio.NewReader(strings.NewReader(miOutput)),
-	}
+func newFakeSession(t *testing.T, miOutput string) *session {
+	t.Helper()
+	s := newSession(nopWriteCloser{io.Discard}, testReadCloser{Reader: strings.NewReader(miOutput)}, nil)
+	go s.reap(func() (*os.ProcessState, error) {
+		<-s.closing
+		return new(os.ProcessState), nil
+	})
+	t.Cleanup(func() {
+		s.beginClosing()
+		<-s.done
+	})
+	return s
 }
 
 func TestUnescapeMIString(t *testing.T) {
@@ -65,9 +75,9 @@ func TestCommand_ConsoleThenDone(t *testing.T) {
 		"~\"world\\n\"\n" +
 		"^done\n" +
 		"(gdb) \n"
-	s := newFakeSession(mi)
+	s := newFakeSession(t, mi)
 
-	out, err := s.Command("print x")
+	out, err := s.Command(context.Background(), "print x")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -84,9 +94,9 @@ func TestCommand_StreamKinds(t *testing.T) {
 		"~\"console line\\n\"\n" + // console stream: surfaced
 		"^done\n" +
 		"(gdb) \n"
-	s := newFakeSession(mi)
+	s := newFakeSession(t, mi)
 
-	out, err := s.Command("anything")
+	out, err := s.Command(context.Background(), "anything")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -101,9 +111,9 @@ func TestCommand_StreamKinds(t *testing.T) {
 func TestCommand_Error(t *testing.T) {
 	mi := "^error,msg=\"No symbol \\\"foo\\\" in current context.\"\n" +
 		"(gdb) \n"
-	s := newFakeSession(mi)
+	s := newFakeSession(t, mi)
 
-	out, err := s.Command("print foo")
+	out, err := s.Command(context.Background(), "print foo")
 	if err == nil {
 		t.Fatalf("expected an error, got output %q", out)
 	}
@@ -120,9 +130,9 @@ func TestCommand_RunningThenStopped(t *testing.T) {
 		"~\"some program output\\n\"\n" +
 		"*stopped,reason=\"breakpoint-hit\",disp=\"keep\",bkptno=\"1\",frame={func=\"main\",file=\"a.c\",line=\"10\"}\n" +
 		"(gdb) \n"
-	s := newFakeSession(mi)
+	s := newFakeSession(t, mi)
 
-	out, err := s.Command("-exec-continue")
+	out, err := s.Command(context.Background(), "-exec-continue")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -147,9 +157,9 @@ func TestCommand_RunningThenExit(t *testing.T) {
 	mi := "^running\n" +
 		"~\"[Inferior 1 exited normally]\\n\"\n" +
 		"^exit\n"
-	s := newFakeSession(mi)
+	s := newFakeSession(t, mi)
 
-	out, err := s.Command("-exec-run")
+	out, err := s.Command(context.Background(), "-exec-run")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -164,9 +174,9 @@ func TestReadUntilPrompt(t *testing.T) {
 	mi := "=thread-group-added,id=\"i1\"\n" +
 		"~\"GNU gdb (GDB) 14.2\\n\"\n" +
 		"(gdb) \n"
-	s := newFakeSession(mi)
+	s := newFakeSession(t, mi)
 
-	banner, err := s.readUntilPrompt(runResultDeadline)
+	banner, err := s.startupBanner(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -179,18 +189,18 @@ func TestReadUntilPrompt(t *testing.T) {
 }
 
 // TestCommand_EOFBeforeResult: if gdb closes its output before producing a
-// result record, Command surfaces an explicit "process exited" error rather than
+// result record, Command surfaces an explicit stream closure error rather than
 // hanging.
 func TestCommand_EOFBeforeResult(t *testing.T) {
 	mi := "~\"partial output\\n\"\n" // no ^result, then EOF
-	s := newFakeSession(mi)
+	s := newFakeSession(t, mi)
 
-	_, err := s.Command("info registers")
+	_, err := s.Command(context.Background(), "info registers")
 	if err == nil {
-		t.Fatalf("expected an EOF/process-exited error")
+		t.Fatalf("expected a stream EOF error")
 	}
-	if !strings.Contains(err.Error(), "process exited") {
-		t.Errorf("error = %q, want it to mention the process exiting", err.Error())
+	if !strings.Contains(err.Error(), "closed its output stream") {
+		t.Errorf("error = %q, want it to report stream closure", err.Error())
 	}
 }
 
@@ -207,18 +217,6 @@ func TestAsyncSummary(t *testing.T) {
 	}
 	if bare := asyncSummary("*stopped"); !strings.Contains(bare, "stopped") {
 		t.Errorf("bare *stopped summary = %q, want it to mention stopped", bare)
-	}
-}
-
-// TestDefaultStartVersion_ProbeFailureReturnsEmpty: when the `<gdb> --version`
-// exec fails (here a guaranteed-nonexistent binary, so no real gdb is spawned),
-// defaultStartVersion returns "" without erroring — a version-probe failure must
-// never abort an otherwise-healthy session start. The non-error path (a real
-// gdb) is covered end-to-end by the injected-probe startTool tests in
-// server_test.go.
-func TestDefaultStartVersion_ProbeFailureReturnsEmpty(t *testing.T) {
-	if v := defaultStartVersion(`Z:\does\not\exist\nope-gdb.exe`); v != "" {
-		t.Errorf("defaultStartVersion on a missing binary = %q, want \"\"", v)
 	}
 }
 

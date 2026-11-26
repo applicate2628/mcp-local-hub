@@ -3,6 +3,7 @@ package gdb
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"sort"
@@ -53,18 +54,38 @@ type GdbServer struct {
 // and serves the MCP protocol over stdio until ctx is cancelled or the transport
 // closes. Single source of truth for every entry point.
 func Run(ctx context.Context) error {
-	gs := newServer()
+	return newServer().run(ctx, &mcp.StdioTransport{})
+}
+
+func (gs *GdbServer) run(ctx context.Context, transport mcp.Transport) error {
 	gs.server = mcp.NewServer(&mcp.Implementation{
 		Name:    "mcp-local-hub-gdb",
 		Version: "1.0.0",
 	}, nil)
 
-	registerTools(gs)
+	registerTools(gs, ctx)
 
-	if err := gs.server.Run(ctx, &mcp.StdioTransport{}); err != nil {
-		return fmt.Errorf("gdb server run: %w", err)
+	runErr := gs.server.Run(ctx, transport)
+	if runErr != nil {
+		runErr = fmt.Errorf("gdb server run: %w", runErr)
 	}
-	return nil
+	return errors.Join(runErr, gs.shutdown())
+}
+
+// The MCP connection has joined its handlers before Run returns, so no new
+// sessions can be added during this pass. Each session retains its own waiter.
+func (gs *GdbServer) shutdown() error {
+	var shutdownErr error
+	for _, id := range gs.sessionIDs() {
+		sess := gs.lookup(id)
+		if sess == nil {
+			continue
+		}
+		if err := sess.terminate(context.Background(), terminateGrace); err != nil {
+			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("gdb shutdown %s: %w", id, err))
+		}
+	}
+	return shutdownErr
 }
 
 // newServer constructs a GdbServer with the production seams and an empty
@@ -91,7 +112,7 @@ func newServer() *GdbServer {
 // bridge had dropped the debugger_* family). debugger_status keeps its name (it
 // is already the canonical generic status tool; gdb_status is added as a
 // symmetric alias so an agent that prefixes everything with gdb_ also resolves).
-func registerTools(gs *GdbServer) {
+func registerTools(gs *GdbServer, ownerCtx context.Context) {
 	startSchema := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -144,8 +165,8 @@ func registerTools(gs *GdbServer) {
 		"until the inferior next stops (or a 30s deadline) and includes the stop reason/location. Returns " +
 		"the human-readable output text, or an error result if the session_id is unknown."
 	terminateDesc := "Terminate a GDB session (sends -gdb-exit, then force-kills if it does not exit promptly) " +
-		"and remove it from the session registry. Returns a confirmation, or an error result if the " +
-		"session_id is unknown."
+		"and remove it from the session registry after its process and pipes are released. Returns a " +
+		"confirmation, or an error result if the session is unknown or settlement remains unresolved."
 	listDesc := "List the ids of all active GDB sessions. Returns JSON {sessions: [\"gdb-1\", ...]}."
 	statusDesc := "Report whether gdb is available and at what version. Resolves the toolchain gdb path " +
 		"and runs `<gdb> --version` via Go exec (which works in the console-less mcphub daemon, unlike " +
@@ -153,7 +174,24 @@ func registerTools(gs *GdbServer) {
 		"Returns JSON {available, gdb_path, version}."
 
 	add := func(name, desc string, schema map[string]any, h mcp.ToolHandler) {
-		gs.server.AddTool(&mcp.Tool{Name: name, Description: desc, InputSchema: schema}, h)
+		gs.server.AddTool(&mcp.Tool{Name: name, Description: desc, InputSchema: schema},
+			func(requestCtx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				// The SDK's connection deliberately detaches cancellation from
+				// handler contexts, then joins its handlers during Run shutdown.
+				if deadline, ok := ownerCtx.Deadline(); ok {
+					var cancel context.CancelFunc
+					requestCtx, cancel = context.WithDeadline(requestCtx, deadline)
+					defer cancel()
+				}
+				ctx, cancel := context.WithCancelCause(requestCtx)
+				defer cancel(nil)
+				stop := context.AfterFunc(ownerCtx, func() { cancel(context.Cause(ownerCtx)) })
+				defer stop()
+				if err := context.Cause(ownerCtx); err != nil {
+					cancel(err)
+				}
+				return h(ctx, req)
+			})
 	}
 
 	// Canonical gdb_* names + generic debugger_* aliases share handlers.
@@ -186,16 +224,14 @@ func (gs *GdbServer) startTool(ctx context.Context, req *mcp.CallToolRequest) (*
 		gdbPath = gs.resolveGdbPath()
 	}
 
-	sess, err := gs.startSession(gdbPath, strings.TrimSpace(args.Program))
+	sess, err := gs.startSession(ctx, gdbPath, strings.TrimSpace(args.Program))
+	var id string
+	if sess != nil {
+		id = gs.trackSession(sess)
+	}
 	if err != nil {
 		return errResult(fmt.Sprintf("start gdb session: %v", err)), nil
 	}
-
-	gs.mu.Lock()
-	gs.counter++
-	id := fmt.Sprintf("gdb-%d", gs.counter)
-	gs.sessions[id] = sess
-	gs.mu.Unlock()
 
 	body, _ := json.Marshal(map[string]string{
 		"session_id": id,
@@ -203,6 +239,23 @@ func (gs *GdbServer) startTool(ctx context.Context, req *mcp.CallToolRequest) (*
 		"version":    sess.version,
 	})
 	return textResult(string(body)), nil
+}
+
+func (gs *GdbServer) trackSession(sess *session) string {
+	gs.mu.Lock()
+	gs.counter++
+	id := fmt.Sprintf("gdb-%d", gs.counter)
+	gs.sessions[id] = sess
+	gs.mu.Unlock()
+
+	sess.onSettled(func() {
+		gs.mu.Lock()
+		defer gs.mu.Unlock()
+		if gs.sessions[id] == sess {
+			delete(gs.sessions, id)
+		}
+	})
+	return id
 }
 
 // commandTool handles gdb_command: it looks up the session and runs the command,
@@ -228,7 +281,7 @@ func (gs *GdbServer) commandTool(ctx context.Context, req *mcp.CallToolRequest) 
 		return errResult(fmt.Sprintf("unknown session_id %q (use gdb_list_sessions to see active sessions)", args.SessionID)), nil
 	}
 
-	out, err := sess.Command(args.Command)
+	out, err := sess.Command(ctx, args.Command)
 	if err != nil {
 		// A gdb-level error (^error,msg=...) is a real result the caller should
 		// see, not a transport failure. Surface the message plus any partial
@@ -242,8 +295,7 @@ func (gs *GdbServer) commandTool(ctx context.Context, req *mcp.CallToolRequest) 
 	return textResult(out), nil
 }
 
-// terminateTool handles gdb_terminate: it removes the session from the registry
-// and terminates the gdb process.
+// terminateTool asks the session to exit and observes settlement of its owner.
 func (gs *GdbServer) terminateTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var args struct {
 		SessionID string `json:"session_id"`
@@ -255,17 +307,13 @@ func (gs *GdbServer) terminateTool(ctx context.Context, req *mcp.CallToolRequest
 		return errResult("missing required parameter: session_id"), nil
 	}
 
-	gs.mu.Lock()
-	sess, ok := gs.sessions[args.SessionID]
-	if ok {
-		delete(gs.sessions, args.SessionID)
-	}
-	gs.mu.Unlock()
-
-	if !ok {
+	sess := gs.lookup(args.SessionID)
+	if sess == nil {
 		return errResult(fmt.Sprintf("unknown session_id %q", args.SessionID)), nil
 	}
-	sess.Terminate()
+	if err := sess.terminate(ctx, terminateGrace); err != nil {
+		return errResult(fmt.Sprintf("terminate gdb session: %v", err)), nil
+	}
 
 	body, _ := json.Marshal(map[string]string{
 		"session_id": args.SessionID,
@@ -276,6 +324,11 @@ func (gs *GdbServer) terminateTool(ctx context.Context, req *mcp.CallToolRequest
 
 // listTool handles gdb_list_sessions: it returns the sorted active session ids.
 func (gs *GdbServer) listTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	body, _ := json.Marshal(map[string][]string{"sessions": gs.sessionIDs()})
+	return textResult(string(body)), nil
+}
+
+func (gs *GdbServer) sessionIDs() []string {
 	gs.mu.Lock()
 	ids := make([]string, 0, len(gs.sessions))
 	for id := range gs.sessions {
@@ -283,9 +336,7 @@ func (gs *GdbServer) listTool(ctx context.Context, req *mcp.CallToolRequest) (*m
 	}
 	gs.mu.Unlock()
 	sort.Strings(ids)
-
-	body, _ := json.Marshal(map[string][]string{"sessions": ids})
-	return textResult(string(body)), nil
+	return ids
 }
 
 // statusTool handles debugger_status: it probes gdb availability via the
@@ -319,14 +370,8 @@ func defaultVersionProbe() (string, string, bool) {
 	return path, version, ok
 }
 
-// gdbVersionLine runs `<path> --nx --version` via Go exec and returns the first
-// non-empty line of its output and whether the probe succeeded. It is the single
-// owner of the version-exec logic shared by debugger_status (via
-// defaultVersionProbe) and gdb_start (via defaultStartVersion in session.go) —
-// startSession spawns gdb with `-q`, which suppresses the startup banner the
-// version used to be scraped from, so the session version must come from this
-// dedicated `--version` probe instead. The Go exec works in the console-less
-// daemon, the exact thing GDB-MCP's python subprocess probe could not do.
+// gdbVersionLine runs the independent debugger_status availability probe and
+// returns its first non-empty output line and whether the probe succeeded.
 func gdbVersionLine(path string) (string, bool) {
 	cmd := exec.Command(path, "--nx", "--version")
 	process.NoConsole(cmd)
