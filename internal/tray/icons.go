@@ -2,7 +2,6 @@ package tray
 
 import (
 	"bytes"
-	"encoding/binary"
 	"image/color"
 	"image/png"
 	"runtime"
@@ -81,59 +80,11 @@ func buildIconCache() {
 	for state, col := range stateColors {
 		png := renderStateIcon(col)
 		if runtime.GOOS == "windows" {
-			iconCache.bytes[state] = wrapPngInIco(png, 16, 16)
+			iconCache.bytes[state] = branding.PackPNGICO(branding.PNGIcon{Width: 16, Height: 16, PNG: png})
 		} else {
 			iconCache.bytes[state] = png
 		}
 	}
-}
-
-// wrapPngInIco produces a minimal ICO container holding one image
-// in the modern PNG-embedded variant. Windows Vista+ Shell_NotifyIcon
-// accepts PNG-inside-ICO, which lets us reuse the existing PNG
-// rendering without writing a DIB encoder.
-//
-// Layout (22-byte header + payload):
-//
-//	0x00  00 00              ICONDIR.reserved
-//	0x02  01 00              ICONDIR.type    = 1 (icon, not cursor)
-//	0x04  01 00              ICONDIR.count   = 1 image
-//	0x06  width              ICONDIRENTRY.width  (0 means 256)
-//	0x07  height             ICONDIRENTRY.height
-//	0x08  00                 ICONDIRENTRY.colorCount (0 for >256 colors)
-//	0x09  00                 ICONDIRENTRY.reserved
-//	0x0A  01 00              ICONDIRENTRY.planes
-//	0x0C  20 00              ICONDIRENTRY.bitsPerPixel = 32
-//	0x0E  <png-len LE-32>    ICONDIRENTRY.imageSize
-//	0x12  16 00 00 00        ICONDIRENTRY.imageOffset (22)
-//	0x16  <png bytes>        the PNG payload
-//
-// The width/height fields use a single byte each; values > 255 are
-// encoded as 0 (which Windows interprets as 256). For 16×16 we just
-// write 16 directly.
-func wrapPngInIco(pngBytes []byte, w, h int) []byte {
-	if w == 256 {
-		w = 0
-	}
-	if h == 256 {
-		h = 0
-	}
-	hdr := make([]byte, 22)
-	binary.LittleEndian.PutUint16(hdr[0:2], 0)              // reserved
-	binary.LittleEndian.PutUint16(hdr[2:4], 1)              // type = icon
-	binary.LittleEndian.PutUint16(hdr[4:6], 1)              // count = 1
-	hdr[6] = byte(w)                                        // width
-	hdr[7] = byte(h)                                        // height
-	hdr[8] = 0                                              // colorCount
-	hdr[9] = 0                                              // reserved
-	binary.LittleEndian.PutUint16(hdr[10:12], 1)            // planes
-	binary.LittleEndian.PutUint16(hdr[12:14], 32)           // bitsPerPixel
-	binary.LittleEndian.PutUint32(hdr[14:18], uint32(len(pngBytes)))
-	binary.LittleEndian.PutUint32(hdr[18:22], 22)           // imageOffset
-	out := make([]byte, 0, len(hdr)+len(pngBytes))
-	out = append(out, hdr...)
-	out = append(out, pngBytes...)
-	return out
 }
 
 // renderStateIcon paints the mcphub hub-mark in the given color onto

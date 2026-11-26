@@ -447,10 +447,8 @@ func createIconFromResourceEx(data []byte, w, h int32) (uintptr, error) {
 	// expect an ICO file). For CreateIconFromResourceEx we strip
 	// the wrapper and pass only the PNG bytes inside.
 	//
-	// The 22-byte offset is hard-coded because wrapPngInIco builds
-	// a single-image ICO with a fixed header layout (see icons.go
-	// `wrapPngInIco`). If a different IconBytes layout ships, this
-	// must be adjusted to read ICONDIRENTRY.imageOffset.
+	// IconBytes packs exactly one image, so its PNG starts at byte 22.
+	// If that layout changes, read ICONDIRENTRY.imageOffset instead.
 	const icoHeaderBytes = 22
 	src := data
 	if len(data) > icoHeaderBytes {

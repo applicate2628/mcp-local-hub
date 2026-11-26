@@ -32,7 +32,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"image/color"
 	"image/png"
@@ -53,8 +52,8 @@ var iconSizes = []int{16, 32, 48, 256}
 // build step writes the same bytes to each — single source of truth
 // for the visual identity, no duplicate maintenance.
 var outPaths = []string{
-	filepath.Join("cmd", "mcphub", "mcphub.ico"),                            // Windows .exe embedded icon
-	filepath.Join("internal", "gui", "frontend", "public", "favicon.ico"),  // Vite-served favicon
+	filepath.Join("cmd", "mcphub", "mcphub.ico"),                          // Windows .exe embedded icon
+	filepath.Join("internal", "gui", "frontend", "public", "favicon.ico"), // Vite-served favicon
 }
 
 func main() {
@@ -89,61 +88,14 @@ func main() {
 // is rasterized via branding.NewHubMarkImage, PNG-encoded, then
 // referenced from a fixed-position ICONDIRENTRY in the directory.
 func buildICO(sizes []int, col color.RGBA) ([]byte, error) {
-	// Encode each size to PNG bytes upfront so we know the imageSize
-	// fields for the directory entries.
-	pngs := make([][]byte, len(sizes))
-	for i, size := range sizes {
+	images := make([]branding.PNGIcon, 0, len(sizes))
+	for _, size := range sizes {
 		img := branding.NewHubMarkImage(size, col)
 		var buf bytes.Buffer
 		if err := png.Encode(&buf, img); err != nil {
 			return nil, fmt.Errorf("encode png size=%d: %w", size, err)
 		}
-		pngs[i] = buf.Bytes()
+		images = append(images, branding.PNGIcon{Width: size, Height: size, PNG: buf.Bytes()})
 	}
-
-	// ICONDIR (6 bytes): reserved(2) + type(2) + count(2).
-	const iconDirSize = 6
-	const iconDirEntrySize = 16
-	headerSize := iconDirSize + iconDirEntrySize*len(sizes)
-
-	out := bytes.NewBuffer(nil)
-
-	// ICONDIR.
-	binary.Write(out, binary.LittleEndian, uint16(0)) // reserved
-	binary.Write(out, binary.LittleEndian, uint16(1)) // type = icon
-	binary.Write(out, binary.LittleEndian, uint16(len(sizes)))
-
-	// ICONDIRENTRY × N. imageOffset accumulates as we walk the list.
-	offset := headerSize
-	for i, size := range sizes {
-		// Per the ICO format, the width and height fields are
-		// single bytes; the value 0 means 256. Anything larger
-		// than 256 is not representable in this slot.
-		wByte := byte(size)
-		hByte := byte(size)
-		if size == 256 {
-			wByte = 0
-			hByte = 0
-		}
-		entry := []byte{
-			wByte,
-			hByte,
-			0, // colorCount = 0 (32bpp)
-			0, // reserved
-		}
-		out.Write(entry)
-		binary.Write(out, binary.LittleEndian, uint16(1))                 // planes
-		binary.Write(out, binary.LittleEndian, uint16(32))                // bitsPerPixel
-		binary.Write(out, binary.LittleEndian, uint32(len(pngs[i])))      // imageSize
-		binary.Write(out, binary.LittleEndian, uint32(offset))            // imageOffset
-		offset += len(pngs[i])
-	}
-
-	// PNG payloads in the same order as the directory entries.
-	for _, p := range pngs {
-		out.Write(p)
-	}
-
-	return out.Bytes(), nil
+	return branding.PackPNGICO(images...), nil
 }
-
