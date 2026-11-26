@@ -88,30 +88,29 @@ func defaultCurrentWindowsUser() (string, error) {
 // constant so callers reference one literal.
 const LivenessTaskName = "\\mcp-local-hub-liveness"
 
-// LivenessTaskResult identifies the pre-state that an EnsureLivenessTask
-// receipt can restore. It is an internal transaction result, not a public CLI
-// state string.
+// LivenessTaskResult identifies the outcome of EnsureLivenessTask. It is an
+// internal transaction result, not a public CLI state string or task-generation
+// authority.
 type LivenessTaskResult string
 
 const (
 	LivenessTaskUnchanged LivenessTaskResult = "unchanged"
 	LivenessTaskCreated   LivenessTaskResult = "created-from-absent"
-	LivenessTaskReplaced  LivenessTaskResult = "replaced-with-prior-xml"
+	// LivenessTaskReplaced is retained for old receipts; EnsureLivenessTask no
+	// longer replaces an occupied name and RestoreLivenessTask refuses it.
+	LivenessTaskReplaced LivenessTaskResult = "replaced-with-prior-xml"
 )
 
-// LivenessTaskReceipt is valid only for the setup transaction that received
-// it. The captured settled XML is a compare-before-restore fence: rollback
-// refuses to delete or overwrite a liveness task changed after settlement.
+// LivenessTaskReceipt records creation or an unchanged observation. Neither an
+// acknowledged creation nor matching XML permits deletion by task name.
 type LivenessTaskReceipt struct {
-	Result     LivenessTaskResult
-	priorXML   []byte
-	settledXML []byte
+	Result LivenessTaskResult
 }
 
 var ErrLivenessTaskRollbackConflict = errors.New("api: liveness task rollback conflict")
 
 // LivenessTaskPostImportStage identifies a failure after Task Scheduler has
-// accepted a replacement liveness-task definition.
+// accepted liveness XML creation. The type name is kept for existing callers.
 type LivenessTaskPostImportStage string
 
 const (
@@ -119,8 +118,8 @@ const (
 	LivenessTaskPostImportSemanticDrift LivenessTaskPostImportStage = "semantic-drift"
 )
 
-// LivenessTaskPostImportError preserves the original post-import failure and,
-// when necessary, the failure to restore the exact captured pre-state.
+// LivenessTaskPostImportError preserves the original post-create failure and,
+// when necessary, the refusal or failure to confirm the prior absent state.
 type LivenessTaskPostImportError struct {
 	Stage    LivenessTaskPostImportStage
 	Cause    error
@@ -129,9 +128,9 @@ type LivenessTaskPostImportError struct {
 
 func (e *LivenessTaskPostImportError) Error() string {
 	if e.Rollback != nil {
-		return fmt.Sprintf("liveness task post-import %s failure: %v; rollback failed: %v", e.Stage, e.Cause, e.Rollback)
+		return fmt.Sprintf("liveness task post-create %s failure: %v; rollback incomplete: %v", e.Stage, e.Cause, e.Rollback)
 	}
-	return fmt.Sprintf("liveness task post-import %s failure: %v", e.Stage, e.Cause)
+	return fmt.Sprintf("liveness task post-create %s failure: %v", e.Stage, e.Cause)
 }
 
 func (e *LivenessTaskPostImportError) Unwrap() []error {
@@ -152,24 +151,24 @@ func (e *LivenessTaskPostImportError) LivenessTaskRollbackError() error {
 // InstallLivenessTask is the idempotent install of the supervisor-liveness
 // scheduled task: resolve the canonical mcphub.exe path + the current Windows
 // user, render the liveness XML via scheduler.BuildLivenessXML, encode it
-// for Task Scheduler's /XML parser, and ImportXML it under LivenessTaskName.
+// for Task Scheduler's XML parser, and create it only under an absent name.
 //
 // CLI-level concerns (admin-elevation refusal, audit entry, interactive
 // confirm) live in the CLI layer that calls this (runSetupWatchdog rides the
 // same state-dir-sanity + elevation gates); this API method is the
-// unconditional execution path.
+// scheduler execution owner.
 //
 // On Linux/macOS scheduler.New() returns "not implemented" so this fails
-// loud at the ImportXML call — the liveness task is a Windows-GA capability
+// loud at the scheduler call — the liveness task is a Windows-GA capability
 // in v0.6.
 func (a *API) InstallLivenessTask() error {
 	_, err := a.EnsureLivenessTask()
 	return err
 }
 
-// EnsureLivenessTask settles the API-owned liveness task and returns an exact
-// rollback receipt. The caller is responsible for proving the supervisor
-// target first; this owner never creates or mutates that separate resource.
+// EnsureLivenessTask accepts a matching liveness definition or creates one after
+// confirmed absence. It retains and refuses an observed differing definition.
+// The caller proves the separate supervisor target; this owner never mutates it.
 func (a *API) EnsureLivenessTask() (LivenessTaskReceipt, error) {
 	canonicalExe, err := canonicalMcphubPathFn()
 	if err != nil {
@@ -198,33 +197,35 @@ func ensureLivenessTaskResolved(canonicalExe, workingDir, principalSID, userName
 	prior, exportErr := sch.ExportXML(LivenessTaskName)
 	receipt := LivenessTaskReceipt{}
 	if exportErr != nil {
-		if !errors.Is(exportErr, scheduler.ErrTaskNotFound) {
-			return receipt, fmt.Errorf("snapshot liveness task: %w", exportErr)
+		if !errors.Is(exportErr, scheduler.ErrTaskNotFound) || len(prior) != 0 {
+			cause := fmt.Errorf("snapshot liveness task: %w", exportErr)
+			if len(prior) != 0 {
+				cause = errors.Join(cause, refuseSchedulerTaskReplacement(LivenessTaskName, prior))
+			}
+			return receipt, cause
 		}
-		receipt.Result = LivenessTaskCreated
 	} else {
-		receipt.Result = LivenessTaskReplaced
-		receipt.priorXML = append([]byte(nil), prior...)
-		if !livenessTaskReadable(prior) {
-			return receipt, fmt.Errorf("liveness task definition is corrupt")
+		if difference := livenessTaskDifference(prior, canonicalExe, workingDir, principalSID, userName); difference != nil {
+			return receipt, errors.Join(difference, refuseSchedulerTaskReplacement(LivenessTaskName, prior))
 		}
-		if livenessTaskDifference(prior, canonicalExe, workingDir, principalSID, userName) == nil {
-			receipt.Result = LivenessTaskUnchanged
-			receipt.settledXML = append([]byte(nil), prior...)
-			return receipt, nil
-		}
+		receipt.Result = LivenessTaskUnchanged
+		return receipt, nil
+	}
+	creator, ok := sch.(scheduler.XMLCreator)
+	if !ok {
+		return receipt, fmt.Errorf("create liveness task XML: %w", scheduler.ErrNotImplemented)
 	}
 	xmlBytes := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(canonicalExe, workingDir, principalSID, userName))
-	if err := sch.ImportXML(LivenessTaskName, xmlBytes); err != nil {
-		return receipt, fmt.Errorf("import liveness task: %w", err)
+	if err := creator.CreateXMLIfAbsent(LivenessTaskName, xmlBytes); err != nil {
+		return receipt, errors.Join(fmt.Errorf("create liveness task: %w", err), rollbackInstallTaskCreation(sch, LivenessTaskName))
 	}
+	receipt.Result = LivenessTaskCreated
 	settled, err := sch.ExportXML(LivenessTaskName)
 	if err != nil {
 		return receipt, livenessTaskPostImportFailure(sch, receipt, LivenessTaskPostImportReadback, fmt.Errorf("read back liveness task: %w", err))
 	}
-	receipt.settledXML = append([]byte(nil), settled...)
 	if difference := livenessTaskDifference(settled, canonicalExe, workingDir, principalSID, userName); difference != nil {
-		return receipt, livenessTaskPostImportFailure(sch, receipt, LivenessTaskPostImportSemanticDrift, fmt.Errorf("liveness task definition drifted after import: %w", difference))
+		return receipt, livenessTaskPostImportFailure(sch, receipt, LivenessTaskPostImportSemanticDrift, fmt.Errorf("liveness task definition drifted after creation: %w", difference))
 	}
 	return receipt, nil
 }
@@ -237,48 +238,30 @@ func livenessTaskPostImportFailure(sch scheduler.Scheduler, receipt LivenessTask
 	}
 }
 
-// RestoreLivenessTask restores only the exact pre-state captured in receipt.
+// RestoreLivenessTask confirms prior absence or retains and refuses the current
+// occupant. A creation receipt cannot authorize deletion or replacement by name.
 func (a *API) RestoreLivenessTask(receipt LivenessTaskReceipt) error {
 	if receipt.Result == LivenessTaskUnchanged {
 		return nil
-	}
-	if len(receipt.settledXML) == 0 {
-		return fmt.Errorf("%w: receipt has no settled liveness XML", ErrLivenessTaskRollbackConflict)
 	}
 	sch, err := newScheduler()
 	if err != nil {
 		return err
 	}
-	current, err := sch.ExportXML(LivenessTaskName)
-	if err != nil || !bytes.Equal(current, receipt.settledXML) {
-		return fmt.Errorf("%w: liveness task changed after settlement", ErrLivenessTaskRollbackConflict)
-	}
 	return restoreLivenessTaskSnapshot(sch, receipt)
 }
 
-// restoreLivenessTaskSnapshot restores the exact state captured before a
-// replacement. Callers that run after settlement must establish their own
-// ownership fence first; the immediate post-import failure path owns the same
-// scheduler transaction and must always attempt this recovery.
+// restoreLivenessTaskSnapshot uses the existing absence-only rollback owner.
+// It never turns an XML observation into authority over a task generation.
 func restoreLivenessTaskSnapshot(sch scheduler.Scheduler, receipt LivenessTaskReceipt) error {
 	switch receipt.Result {
 	case LivenessTaskCreated:
-		if err := sch.Delete(LivenessTaskName); err != nil {
-			return fmt.Errorf("delete created liveness task: %w", err)
-		}
-		if _, err := sch.ExportXML(LivenessTaskName); !errors.Is(err, scheduler.ErrTaskNotFound) {
-			return fmt.Errorf("%w: created liveness task remains after deletion: %v", ErrLivenessTaskRollbackConflict, err)
+		if err := rollbackInstallTaskCreation(sch, LivenessTaskName); err != nil {
+			return errors.Join(ErrLivenessTaskRollbackConflict, err)
 		}
 		return nil
 	case LivenessTaskReplaced:
-		if err := sch.ImportXML(LivenessTaskName, receipt.priorXML); err != nil {
-			return fmt.Errorf("restore liveness task XML: %w", err)
-		}
-		restored, err := sch.ExportXML(LivenessTaskName)
-		if err != nil || !bytes.Equal(restored, receipt.priorXML) {
-			return fmt.Errorf("%w: liveness XML readback differs from captured pre-state", ErrLivenessTaskRollbackConflict)
-		}
-		return nil
+		return fmt.Errorf("%w: old replacement receipt has no generation authority: %w", ErrLivenessTaskRollbackConflict, ErrSchedulerReplacementUnowned)
 	default:
 		return fmt.Errorf("%w: receipt has no replaceable liveness task state", ErrLivenessTaskRollbackConflict)
 	}
@@ -293,6 +276,8 @@ const (
 	livenessTaskFieldPrincipalLogonType              LivenessTaskDifferenceField = "principal.logon_type"
 	livenessTaskFieldPrincipalRunLevel               LivenessTaskDifferenceField = "principal.run_level"
 	livenessTaskFieldCalendarTriggerCount            LivenessTaskDifferenceField = "trigger.calendar.count"
+	livenessTaskFieldCalendarStartBoundary           LivenessTaskDifferenceField = "trigger.calendar.start_boundary"
+	livenessTaskFieldCalendarEnabled                 LivenessTaskDifferenceField = "trigger.calendar.enabled"
 	livenessTaskFieldCalendarRepetitionInterval      LivenessTaskDifferenceField = "trigger.calendar.repetition.interval"
 	livenessTaskFieldCalendarDaysInterval            LivenessTaskDifferenceField = "trigger.calendar.schedule_by_day.days_interval"
 	livenessTaskFieldCalendarStopAtDurationEnd       LivenessTaskDifferenceField = "trigger.calendar.repetition.stop_at_duration_end"
@@ -330,7 +315,9 @@ type livenessPrincipalXML struct {
 }
 
 type livenessCalendarTriggerXML struct {
-	Repetition struct {
+	StartBoundary string `xml:"StartBoundary"`
+	Enabled       string `xml:"Enabled"`
+	Repetition    struct {
 		Interval          string `xml:"Interval"`
 		StopAtDurationEnd string `xml:"StopAtDurationEnd"`
 	} `xml:"Repetition"`
@@ -394,6 +381,12 @@ func livenessTaskDifference(xmlBlob []byte, canonicalExe, workingDir, principalS
 		return difference(livenessTaskFieldCalendarTriggerCount)
 	}
 	calendar, expectedCalendar := actual.CalendarTrigger[0], expected.CalendarTrigger[0]
+	if calendar.StartBoundary != expectedCalendar.StartBoundary {
+		return difference(livenessTaskFieldCalendarStartBoundary)
+	}
+	if !sameLivenessTriggerEnabled(calendar.Enabled, expectedCalendar.Enabled) {
+		return difference(livenessTaskFieldCalendarEnabled)
+	}
 	if calendar.Repetition.Interval != expectedCalendar.Repetition.Interval {
 		return difference(livenessTaskFieldCalendarRepetitionInterval)
 	}
@@ -410,7 +403,7 @@ func livenessTaskDifference(xmlBlob []byte, canonicalExe, workingDir, principalS
 	if !scheduler.WindowsUsersEquivalent(logon.UserID, expectedLogon.UserID) {
 		return difference(livenessTaskFieldLogonTriggerUser)
 	}
-	if !sameLivenessLogonEnabled(logon.Enabled, expectedLogon.Enabled) {
+	if !sameLivenessTriggerEnabled(logon.Enabled, expectedLogon.Enabled) {
 		return difference(livenessTaskFieldLogonTriggerEnabled)
 	}
 	if !sameLivenessSettingsEnabled(actual.Settings.Enabled, expected.Settings.Enabled) {
@@ -451,19 +444,14 @@ func sameLivenessStopAtDurationEnd(actual, canonical string) bool {
 	return canonical == "false" && (actual == "false" || actual == "0" || actual == "")
 }
 
-func sameLivenessLogonEnabled(actual, canonical string) bool {
+func sameLivenessTriggerEnabled(actual, canonical string) bool {
 	actual, canonical = strings.TrimSpace(actual), strings.TrimSpace(canonical)
-	return canonical == "true" && (actual == "true" || actual == "1" || actual == "")
+	return (canonical == "true" || canonical == "") && (actual == "true" || actual == "1" || actual == "")
 }
 
 func sameLivenessSettingsEnabled(actual, canonical string) bool {
 	actual, canonical = strings.TrimSpace(actual), strings.TrimSpace(canonical)
 	return canonical == "true" && (actual == "true" || actual == "1" || actual == "")
-}
-
-func livenessTaskReadable(xmlBlob []byte) bool {
-	_, ok := parseLivenessTaskXML(xmlBlob)
-	return ok
 }
 
 func parseLivenessTaskXML(xmlBlob []byte) (livenessTaskXML, bool) {
