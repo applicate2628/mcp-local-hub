@@ -19,9 +19,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 
+	"github.com/tailscale/hujson"
 	"gopkg.in/yaml.v3"
 )
 
@@ -34,13 +34,14 @@ const (
 )
 
 var (
-	commitPattern        = regexp.MustCompile(`^[0-9a-f]{40}$`)
-	calverPattern        = regexp.MustCompile(`^[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}$`)
-	sha256Pattern        = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	semverPattern        = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
-	npmIntegrityPattern  = regexp.MustCompile(`^sha512-[A-Za-z0-9+/]+={0,2}$`)
-	nodeEnginePattern    = regexp.MustCompile(`^>=[1-9][0-9]*$`)
-	pinnedCommentPattern = regexp.MustCompile(`pinned serena commit [0-9a-f]{40}`)
+	commitPattern                   = regexp.MustCompile(`^[0-9a-f]{40}$`)
+	calverPattern                   = regexp.MustCompile(`^[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}$`)
+	sha256Pattern                   = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	semverPattern                   = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
+	serenaDevelopmentVersionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.dev(0|[1-9][0-9]*)$`)
+	npmIntegrityPattern             = regexp.MustCompile(`^sha512-[A-Za-z0-9+/]+={0,2}$`)
+	nodeEnginePattern               = regexp.MustCompile(`^>=[1-9][0-9]*$`)
+	pinnedCommentPattern            = regexp.MustCompile(`pinned serena commit [0-9a-f]{40}`)
 )
 
 var sequentialV2VersionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
@@ -408,8 +409,8 @@ func (d Descriptor) validate() error {
 	if d.UpstreamRepository != repositoryURL {
 		return fmt.Errorf("upstream_repository = %q, want %q", d.UpstreamRepository, repositoryURL)
 	}
-	if !semverPattern.MatchString(d.Version) {
-		return fmt.Errorf("version = %q, want an exact semantic version", d.Version)
+	if !semverPattern.MatchString(d.Version) && !serenaDevelopmentVersionPattern.MatchString(d.Version) {
+		return fmt.Errorf("version = %q, want a numeric Serena version with an optional .devN suffix", d.Version)
 	}
 	if !commitPattern.MatchString(d.Commit) {
 		return fmt.Errorf("commit must be a 40-character lower-case revision")
@@ -508,9 +509,13 @@ type publishOps struct {
 	remove     func(string) error
 }
 
+// V3 is checked and generated when a checkout carries that catalog.
+const optionalReleaseCatalogPath = "marketplace/v3/catalog.json"
+
 var releaseCatalogPaths = [...]string{
 	"marketplace/v1/catalog.json",
 	"marketplace/v2/catalog.json",
+	optionalReleaseCatalogPath,
 }
 
 type projectionPathError struct {
@@ -585,19 +590,33 @@ func loadDeclaredProjections(root string) ([]loadedProjection, error) {
 	return loaded, nil
 }
 
-func readReleaseCatalogs(root string) ([len(releaseCatalogPaths)][]byte, error) {
-	var catalogs [len(releaseCatalogPaths)][]byte
-	for index, relative := range releaseCatalogPaths {
+func readReleaseCatalogs(root string) ([]target, error) {
+	catalogs := make([]target, 0, len(releaseCatalogPaths))
+	for _, relative := range releaseCatalogPaths {
 		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relative)))
-		if err != nil {
-			return catalogs, atProjectionPath(relative, err)
+		if relative == optionalReleaseCatalogPath && errors.Is(err, os.ErrNotExist) {
+			continue
 		}
-		catalogs[index] = data
+		if err != nil {
+			return nil, atProjectionPath(relative, err)
+		}
+		if relative == optionalReleaseCatalogPath {
+			var header struct {
+				SchemaVersion string `json:"schema_version"`
+			}
+			if err := json.Unmarshal(data, &header); err != nil {
+				return nil, atProjectionPath(relative, err)
+			}
+			if header.SchemaVersion != "3" {
+				return nil, atProjectionPath(relative, errors.New("V3 catalog must declare schema_version 3"))
+			}
+		}
+		catalogs = append(catalogs, target{path: relative, data: data})
 	}
 	return catalogs, nil
 }
 
-func checkDeclaredProjection(root string, projection loadedProjection, catalogs [len(releaseCatalogPaths)][]byte) error {
+func checkDeclaredProjection(root string, projection loadedProjection, catalogs []target) error {
 	if err := projection.checkManifest(projection.manifest); err != nil {
 		return atProjectionPath(projection.registration.manifestPath, err)
 	}
@@ -610,24 +629,24 @@ func checkDeclaredProjection(root string, projection loadedProjection, catalogs 
 			return atProjectionPath(projection.registration.readmePath, errors.New("README does not equal descriptor-derived release metadata"))
 		}
 	}
-	for index, data := range catalogs {
-		if err := projection.checkCatalog(data); err != nil {
-			return atProjectionPath(releaseCatalogPaths[index], err)
+	for _, catalog := range catalogs {
+		if err := projection.checkCatalog(catalog.data); err != nil {
+			return atProjectionPath(catalog.path, err)
 		}
 	}
 	return nil
 }
 
-func generateDeclaredProjection(projection loadedProjection, catalogs [len(releaseCatalogPaths)][]byte) ([]target, [len(releaseCatalogPaths)][]byte, error) {
+func generateDeclaredProjection(projection loadedProjection, catalogs []target) ([]target, []target, error) {
 	generatedManifest, err := projection.generateManifest(projection.manifest)
 	if err != nil {
 		return nil, catalogs, atProjectionPath(projection.registration.manifestPath, err)
 	}
-	generatedCatalogs := catalogs
-	for index, data := range catalogs {
-		generatedCatalogs[index], err = projection.generateCatalog(data)
+	generatedCatalogs := slices.Clone(catalogs)
+	for index, catalog := range catalogs {
+		generatedCatalogs[index].data, err = projection.generateCatalog(catalog.data)
 		if err != nil {
-			return nil, catalogs, atProjectionPath(releaseCatalogPaths[index], err)
+			return nil, catalogs, atProjectionPath(catalog.path, err)
 		}
 	}
 	if err := projection.checkManifest(generatedManifest); err != nil {
@@ -737,7 +756,7 @@ func Generate(root string) error {
 	if err != nil {
 		return wrapProjectionPath(err, generationError)
 	}
-	targets := make([]target, 0, len(projections)*2+len(releaseCatalogPaths))
+	targets := make([]target, 0, len(projections)*2+len(catalogs))
 	for _, projection := range projections {
 		projectionTargets, generatedCatalogs, generateErr := generateDeclaredProjection(projection, catalogs)
 		if generateErr != nil {
@@ -750,17 +769,15 @@ func Generate(root string) error {
 		catalogs = generatedCatalogs
 	}
 	for _, projection := range projections {
-		for index, data := range catalogs {
-			if err := projection.checkCatalog(data); err != nil {
-				return generationError(releaseCatalogPaths[index], fmt.Errorf("generated output invalid: %w", err))
+		for _, catalog := range catalogs {
+			if err := projection.checkCatalog(catalog.data); err != nil {
+				return generationError(catalog.path, fmt.Errorf("generated output invalid: %w", err))
 			}
 		}
 	}
-	for index, relative := range releaseCatalogPaths {
-		targets = append(targets, target{
-			path: filepath.Join(root, filepath.FromSlash(relative)),
-			data: catalogs[index],
-		})
+	for _, catalog := range catalogs {
+		catalog.path = filepath.Join(root, filepath.FromSlash(catalog.path))
+		targets = append(targets, catalog)
 	}
 	return publishTargets(targets)
 }
@@ -1061,28 +1078,50 @@ func mappingStrings(root *yaml.Node, key string) ([]string, error) {
 	return values, nil
 }
 
-type catalogDocument struct {
-	Entries []json.RawMessage `json:"entries"`
-}
-
 type catalogEntry struct {
-	ID        string   `json:"id"`
-	ReadmeURL string   `json:"readme_url"`
-	Transport string   `json:"transport"`
-	Command   string   `json:"command"`
-	Args      []string `json:"args"`
+	ID        catalogTargetID `json:"id"`
+	ReadmeURL string          `json:"readme_url"`
+	Transport string          `json:"transport"`
+	Command   string          `json:"command"`
+	Args      []string        `json:"args"`
 }
 
-var catalogArgsPattern = regexp.MustCompile(`(?s)"args"\s*:\s*\[[^\]]*\]`)
+type catalogTargetID struct {
+	target      string
+	occurrences int
+	matches     bool
+}
+
+func (id *catalogTargetID) UnmarshalJSON(data []byte) error {
+	var value string
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	id.occurrences++
+	id.matches = id.matches || value == id.target
+	return nil
+}
+
+type catalogProjection struct {
+	start, end int
+	entry      catalogEntry
+	args       *hujson.ObjectMember
+	readme     *hujson.Value
+}
+
+func (p catalogProjection) bytes(data []byte) []byte {
+	return data[p.start:p.end]
+}
 
 func checkPackageCatalog(data []byte, serverID, command string, args []string, readmeURL string) error {
-	row, entry, err := catalogRow(data, serverID)
+	projection, err := catalogRow(data, serverID)
 	if err != nil {
 		return err
 	}
-	if bytes.Contains(row, []byte("\r")) {
+	if bytes.IndexByte(projection.bytes(data), '\r') >= 0 {
 		return fmt.Errorf("%s catalog row must use LF line endings", serverID)
 	}
+	entry := projection.entry
 	if entry.Command != command || entry.Transport != "stdio" || !equalStrings(entry.Args, args) || entry.ReadmeURL != readmeURL {
 		return fmt.Errorf("catalog projection mismatch for %s", serverID)
 	}
@@ -1090,63 +1129,171 @@ func checkPackageCatalog(data []byte, serverID, command string, args []string, r
 }
 
 func generatePackageCatalog(data []byte, serverID, command string, args []string, readmeURL string) ([]byte, error) {
-	row, entry, err := catalogRow(data, serverID)
+	projection, err := catalogRow(data, serverID)
 	if err != nil {
 		return nil, err
 	}
+	entry := projection.entry
 	if entry.Command != command || entry.Transport != "stdio" {
 		return nil, fmt.Errorf("unexpected catalog command shape for %s", serverID)
 	}
-	updated := append([]byte(nil), row...)
-	updated, err = replaceJSONStringExactlyOwned(updated, entry.ReadmeURL, readmeURL, serverID)
-	if err != nil {
-		return nil, err
-	}
-	match := catalogArgsPattern.FindIndex(updated)
-	if match == nil {
-		return nil, fmt.Errorf("missing args field in %s catalog row", serverID)
-	}
-	matched := updated[match[0]:match[1]]
-	arrayOffset := bytes.IndexByte(matched, '[')
-	if arrayOffset < 0 {
-		return nil, fmt.Errorf("missing args array in %s catalog row", serverID)
-	}
-	lineStart := bytes.LastIndex(updated[:match[0]], []byte("\n")) + 1
-	indent := append([]byte(nil), updated[lineStart:match[0]]...)
-	formattedArgs := formatJSONArray(args, indent)
-	replacement := append(append([]byte(nil), matched[:arrayOffset]...), formattedArgs...)
-	updated = append(append(append([]byte(nil), updated[:match[0]]...), replacement...), updated[match[1]:]...)
-	if bytes.Count(data, row) != 1 {
-		return nil, fmt.Errorf("%s catalog row is not uniquely addressable", serverID)
-	}
-	return bytes.Replace(data, row, normalizeCatalogLineEndings(updated), 1), nil
+
+	nameStart := projection.start + projection.args.Name.StartOffset
+	lineStart := bytes.LastIndexAny(data[:nameStart], "\r\n") + 1
+	linePrefix := data[lineStart:nameStart]
+	indent := linePrefix[:len(linePrefix)-len(bytes.TrimLeft(linePrefix, " \t"))]
+	argsEdit := catalogEdit{&projection.args.Value, formatJSONArray(args, indent)}
+	readmeEdit := catalogStringEdit(projection.bytes(data), projection.readme, entry.ReadmeURL, readmeURL)
+	return applyCatalogEdits(data, projection, argsEdit, readmeEdit), nil
 }
 
-func catalogRow(data []byte, serverID string) ([]byte, catalogEntry, error) {
-	var document catalogDocument
-	if err := json.Unmarshal(data, &document); err != nil {
-		return nil, catalogEntry{}, err
+func catalogRow(data []byte, serverID string) (catalogProjection, error) {
+	// Validate the entire document as strict JSON, including fields we skip.
+	if !json.Valid(data) {
+		var invalid json.RawMessage
+		return catalogProjection{}, json.Unmarshal(data, &invalid)
 	}
-	var row []byte
-	var entry catalogEntry
-	for _, raw := range document.Entries {
-		var candidate catalogEntry
-		if err := json.Unmarshal(raw, &candidate); err != nil {
-			return nil, catalogEntry{}, err
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	root, err := decoder.Token()
+	if err != nil {
+		return catalogProjection{}, err
+	}
+	if root == nil {
+		return catalogProjection{}, fmt.Errorf("missing %s catalog row", serverID)
+	}
+	if root != json.Delim('{') {
+		return catalogProjection{}, errors.New("catalog root must be an object")
+	}
+	var projection catalogProjection
+	var entriesFound bool
+	for decoder.More() {
+		key, err := decoder.Token()
+		if err != nil {
+			return catalogProjection{}, err
 		}
-		if candidate.ID != serverID {
+		if !strings.EqualFold(key.(string), "entries") {
+			var skipped json.RawMessage
+			if err := decoder.Decode(&skipped); err != nil {
+				return catalogProjection{}, err
+			}
 			continue
 		}
-		if row != nil {
-			return nil, catalogEntry{}, fmt.Errorf("duplicate %s catalog rows", serverID)
+		if entriesFound {
+			return catalogProjection{}, errors.New("duplicate entries catalog field")
 		}
-		row = raw
-		entry = candidate
+		entriesFound = true
+		projection, err = decodeCatalogRows(decoder, data, serverID)
+		if err != nil {
+			return catalogProjection{}, err
+		}
 	}
-	if row == nil {
-		return nil, catalogEntry{}, fmt.Errorf("missing %s catalog row", serverID)
+	if projection.end == 0 {
+		return catalogProjection{}, fmt.Errorf("missing %s catalog row", serverID)
 	}
-	return row, entry, nil
+
+	row, err := hujson.Parse(projection.bytes(data))
+	if err != nil {
+		return catalogProjection{}, err
+	}
+	record := row.Value.(*hujson.Object)
+	args, err := catalogMember(record, "args")
+	if err != nil {
+		return catalogProjection{}, err
+	}
+	if args == nil || args.Value.Value.Kind() != '[' {
+		return catalogProjection{}, fmt.Errorf("missing args field in %s catalog row", serverID)
+	}
+	readme, err := catalogMember(record, "readme_url")
+	if err != nil {
+		return catalogProjection{}, err
+	}
+	if readme == nil || readme.Value.Value.Kind() != '"' {
+		return catalogProjection{}, fmt.Errorf("missing readme_url field in %s catalog row", serverID)
+	}
+	projection.args, projection.readme = args, &readme.Value
+	return projection, nil
+}
+
+func decodeCatalogRows(decoder *json.Decoder, data []byte, serverID string) (catalogProjection, error) {
+	startToken, err := decoder.Token()
+	if err != nil || startToken == nil {
+		return catalogProjection{}, err
+	}
+	if startToken != json.Delim('[') {
+		return catalogProjection{}, errors.New("catalog entries must be an array")
+	}
+	var projection catalogProjection
+	for decoder.More() {
+		before := int(decoder.InputOffset())
+		entry := catalogEntry{ID: catalogTargetID{target: serverID}}
+		if err := decoder.Decode(&entry); err != nil {
+			return catalogProjection{}, err
+		}
+		if !entry.ID.matches {
+			continue
+		}
+		// A shadowed ID still claimed the target.
+		if entry.ID.occurrences != 1 {
+			return catalogProjection{}, fmt.Errorf("duplicate id in %s catalog row", serverID)
+		}
+		if projection.end != 0 {
+			return catalogProjection{}, fmt.Errorf("duplicate %s catalog rows", serverID)
+		}
+		end := int(decoder.InputOffset())
+		// InputOffset before Decode may precede the preceding comma.
+		row := bytes.TrimLeft(data[before:end], ", \t\r\n")
+		projection = catalogProjection{start: end - len(row), end: end, entry: entry}
+	}
+	_, err = decoder.Token()
+	return projection, err
+}
+
+func catalogMember(object *hujson.Object, name string) (*hujson.ObjectMember, error) {
+	var match *hujson.ObjectMember
+	for i := range object.Members {
+		member := &object.Members[i]
+		if !strings.EqualFold(member.Name.Value.(hujson.Literal).String(), name) {
+			continue
+		}
+		if match != nil {
+			return nil, fmt.Errorf("duplicate %s catalog field", name)
+		}
+		match = member
+	}
+	return match, nil
+}
+
+type catalogEdit struct {
+	value       *hujson.Value
+	replacement []byte
+}
+
+func catalogStringEdit(data []byte, value *hujson.Value, current, desired string) catalogEdit {
+	replacement := data[value.StartOffset:value.EndOffset]
+	if current != desired {
+		replacement = hujson.String(desired)
+	}
+	return catalogEdit{value, replacement}
+}
+
+func applyCatalogEdits(data []byte, projection catalogProjection, first, second catalogEdit) []byte {
+	if first.value.StartOffset > second.value.StartOffset {
+		first, second = second, first
+	}
+	row := projection.bytes(data)
+	updated := make([]byte, 0, len(row))
+	updated = append(updated, row[:first.value.StartOffset]...)
+	updated = append(updated, first.replacement...)
+	updated = append(updated, row[first.value.EndOffset:second.value.StartOffset]...)
+	updated = append(updated, second.replacement...)
+	updated = append(updated, row[second.value.EndOffset:]...)
+	if bytes.IndexByte(updated, '\r') >= 0 {
+		updated = normalizeCatalogLineEndings(updated)
+	}
+	out := make([]byte, 0, len(data)-len(row)+len(updated))
+	out = append(out, data[:projection.start]...)
+	out = append(out, updated...)
+	return append(out, data[projection.end:]...)
 }
 
 func formatJSONArray(values []string, indent []byte) []byte {
@@ -1155,7 +1302,7 @@ func formatJSONArray(values []string, indent []byte) []byte {
 	for index, value := range values {
 		output.Write(indent)
 		output.WriteString("  ")
-		output.WriteString(strconv.Quote(value))
+		output.Write(hujson.String(value))
 		if index+1 < len(values) {
 			output.WriteByte(',')
 		}
@@ -1164,17 +1311,6 @@ func formatJSONArray(values []string, indent []byte) []byte {
 	output.Write(indent)
 	output.WriteByte(']')
 	return output.Bytes()
-}
-
-func replaceJSONStringExactlyOwned(data []byte, oldValue, newValue, owner string) ([]byte, error) {
-	if oldValue == newValue {
-		return data, nil
-	}
-	oldJSON := []byte(strconv.Quote(oldValue))
-	if bytes.Count(data, oldJSON) != 1 {
-		return nil, fmt.Errorf("expected one JSON value %q in %s row", oldValue, owner)
-	}
-	return bytes.Replace(data, oldJSON, []byte(strconv.Quote(newValue)), 1), nil
 }
 
 func replaceTextExactlyOwned(data []byte, oldValue, newValue, owner string) ([]byte, error) {
@@ -1189,13 +1325,14 @@ func replaceTextExactlyOwned(data []byte, oldValue, newValue, owner string) ([]b
 }
 
 func checkCatalog(data []byte, descriptor Descriptor) error {
-	row, entry, err := catalogRow(data, "serena")
+	projection, err := catalogRow(data, "serena")
 	if err != nil {
 		return err
 	}
-	if bytes.Contains(row, []byte("\r")) {
+	if bytes.IndexByte(projection.bytes(data), '\r') >= 0 {
 		return errors.New("Serena catalog row must use LF line endings")
 	}
+	entry := projection.entry
 	if err := validateCatalogShape(entry); err != nil {
 		return err
 	}
@@ -1205,33 +1342,26 @@ func checkCatalog(data []byte, descriptor Descriptor) error {
 	if entry.ReadmeURL != descriptor.readmeURL() {
 		return fmt.Errorf("readme_url = %q, want descriptor-pinned URL", entry.ReadmeURL)
 	}
-	if strings.Count(string(data), "git+"+repositoryURL+"@") != 1 || bytes.Count(data, row) != 1 {
+	if bytes.Count(data, []byte("git+"+repositoryURL+"@")) != 1 {
 		return errors.New("catalog must contain exactly one Serena Git source row")
 	}
 	return nil
 }
 
 func generateCatalog(data []byte, descriptor Descriptor) ([]byte, error) {
-	row, entry, err := catalogRow(data, "serena")
+	projection, err := catalogRow(data, "serena")
 	if err != nil {
 		return nil, err
 	}
+	entry := projection.entry
 	if err := validateCatalogShape(entry); err != nil {
 		return nil, err
 	}
-	updatedRow := append([]byte(nil), row...)
-	updatedRow, err = replaceJSONStringExactlyOwned(updatedRow, entry.Args[1], descriptor.SourceArgument(), "Serena")
-	if err != nil {
-		return nil, err
-	}
-	updatedRow, err = replaceJSONStringExactlyOwned(updatedRow, entry.ReadmeURL, descriptor.readmeURL(), "Serena")
-	if err != nil {
-		return nil, err
-	}
-	if bytes.Count(data, row) != 1 {
-		return nil, errors.New("Serena catalog row is not uniquely addressable")
-	}
-	return bytes.Replace(data, row, normalizeCatalogLineEndings(updatedRow), 1), nil
+	args := projection.args.Value.Value.(*hujson.Array)
+	row := projection.bytes(data)
+	sourceEdit := catalogStringEdit(row, &args.Elements[1], entry.Args[1], descriptor.SourceArgument())
+	readmeEdit := catalogStringEdit(row, projection.readme, entry.ReadmeURL, descriptor.readmeURL())
+	return applyCatalogEdits(data, projection, sourceEdit, readmeEdit), nil
 }
 
 func normalizeCatalogLineEndings(data []byte) []byte {
