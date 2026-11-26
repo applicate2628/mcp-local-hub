@@ -66,9 +66,7 @@ var errGroupNotFound = errors.New("group not found")
 
 // groupsAPI is the narrow seam the groups handler needs over the api data
 // layer. Behind an interface so handler tests inject a fake and never
-// touch the real groups.yaml / hub snapshot. Production wires
-// realGroupsAPI (lazy api.NewAPI() per call, matching the realDemigrater /
-// realDismisser idiom in server.go).
+// touch the real groups.yaml / hub snapshot. Production reuses the server API.
 type groupsAPI interface {
 	// LoadGroups returns the parsed groups.yaml (empty + nil error when
 	// the file is absent). Read-only — the GET path uses it.
@@ -94,14 +92,14 @@ type groupsAPI interface {
 	GroupToken(group string) (string, bool)
 }
 
-type realGroupsAPI struct{}
+type realGroupsAPI struct{ api *api.API }
 
 func (realGroupsAPI) LoadGroups() (api.GroupsConfig, error) { return api.LoadGroups() }
 func (realGroupsAPI) ReadModifyWriteGroups(mutate func(cfg *api.GroupsConfig) ([]string, error)) error {
 	return api.ReadModifyWriteGroups(mutate)
 }
-func (realGroupsAPI) AvailableServers() ([]string, error) {
-	return api.NewAPI().RoutableServerNames()
+func (g realGroupsAPI) AvailableServers() ([]string, error) {
+	return g.api.RoutableServerNames()
 }
 func (realGroupsAPI) HubInstanceID() (string, bool) {
 	ep, err := api.LoadHubEndpoint()

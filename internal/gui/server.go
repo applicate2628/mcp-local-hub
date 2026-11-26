@@ -849,7 +849,7 @@ func NewServer(cfg Config) *Server {
 	s.symlinkWriter = realSymlinkResolveWriter{}
 	s.lspRegistrar = realLSPRegistrar{}
 	s.lspRouterControl = s.api
-	s.groups = realGroupsAPI{}
+	s.groups = realGroupsAPI{api: s.api}
 	registerPingRoutes(s)
 	registerAssetRoutes(s)
 	registerScanRoutes(s)
