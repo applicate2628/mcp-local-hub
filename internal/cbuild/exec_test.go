@@ -43,6 +43,34 @@ func TestBoundedBufferCaps(t *testing.T) {
 	}
 }
 
+func TestBoundedBufferWrapKeepsOwnedByteTail(t *testing.T) {
+	b := newBoundedBuffer(8)
+	for _, step := range []struct {
+		input, full string
+		truncated   bool
+	}{
+		{"12", "12", false},
+		{"345678", "12345678", false},
+		{"ab", "345678ab", true},
+		{"cdefghi", "bcdefghi", true},
+		{"ABCDEFGHIJKLMNOP", "IJKLMNOP", true},
+		{"Z", "JKLMNOPZ", true},
+		{"", "JKLMNOPZ", true},
+	} {
+		p := []byte(step.input)
+		n, err := b.Write(p)
+		clear(p)
+		if n != len(p) || err != nil || b.String() != step.full || b.Truncated() != step.truncated {
+			t.Fatalf("Write(%q) = %d, %v, tail %q, truncated %t", step.input, n, err, b.String(), b.Truncated())
+		}
+	}
+	snapshot := b.String()
+	b.Write([]byte("01234567"))
+	if snapshot != "JKLMNOPZ" || b.String() != "01234567" {
+		t.Fatal("snapshot and subsequent write did not retain independent bytes")
+	}
+}
+
 // TestPurgeBuildDirWithinSourceSymlinkEscape proves the purge guard resolves
 // symlinks and refuses a build dir whose real target escapes the source tree.
 // Skips on hosts without symlink support (e.g. Windows without the create-symlink
