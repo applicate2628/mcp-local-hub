@@ -1,5 +1,7 @@
 # Владельцы операций Task Scheduler в #660
 
+**Актуальная композиция опубликована в #664.** Source `e66f5c6fab7da2a2eff16ff1f0891991ca1a839c`, tree `4df69e99dca3f808b26e6a5bf7721bdd0ba3a91c`, прошёл адресные проверки, build и vet; полные стандартный/тегированный наборы остаются NOT_RUN. [Результат и воспроизведение](https://github.com/applicate2628/mcp-local-hub/blob/10a68908390128a7df9e61193c89bac106661506/docs/modernization/verification/composed-functional-source-20261126/README.md). Таблица 1 ниже описывает самостоятельную ветку #660. Объединённый Source сохраняет существующий #659 путь остановки через захваченного исходного владельца после reconcile; его условия и dry-run проверены отдельно.
+
 Исходный срез — правка на 22 пути от `8d4f2606c9af7e20181e4ad290b29be0e0a2dd0f`:
 legacy cleanup, weekly refresh, setup, Windows autostart, восстановление
 StrictMode и прямой останов удалённых целей при install. Текущий контракт
@@ -95,39 +97,13 @@ API-финализатор получает наблюдаемые байты; �
 становится нулём. Проверка композиции — `TestSupervisorIntentLockOwnershipProductionInventory`.
 [Строка перечня](/internal/api/supervisor_intent_lock_ownership_test.go#L42) · [Проверка вызовов](/internal/api/supervisor_intent_lock_ownership_test.go#L234) · [Условие композиции](/docs/qualification/scheduler-generation-error-origins-20261123/README.md#6-dependencies-and-readiness)
 
-В Product B `3ebe335a` и Test Source B `001648f4` уже применены
-`lockLeafLedgered` и `ReleaseAndJoin`, а исходная строка Secrets Recovery
-уже отсутствует. Из #669 остаются объединение двух причин в `Unwrap` и
-тестовый файл. Для композиции с B сперва нужна кодовая база #660, включая
-транзакционный weekly refresh и две соответствующие записи описи
-классификаторов. После неё применяются локальная правка на 22 пути,
-последующая autostart-правка `c0b0cc22` на девять путей, native-коррекция
-`36651526` на четыре пути и остаток #669.
-В том же составе сохраняются актуальные #637
-`123858ef8292aceb86d8ca7ef71d4e4dea1fec91`, #659
-`6f59746beae329d9f3f6e4f5af4d503d822d2e4f` и #671
-`ff8128a5f717fae75b263de55c382933a0bc9121`. Перенос выполняется по
-недостающим блокам с сохранением соседних изменений, без замены целых
-owner-файлов. Существующие replay и stage-38 fixtures #664 используются
-один раз. [Матрица путей и текущий рецепт](scheduler-source-composition-20261126.md#4-порядок-композиции).
+В выполненной композиции использована точная P02-основа, уже содержащая текущие #637/#659/#669/#671. После переноса #660 удалена только устаревшая recovery raw-lock строка; файл регрессии #669 совпал с опубликованным владельцем. WeeklyRefreshSet и две его applied-release записи сохранены. Новые observed-lock владельцы P02 дополнительно сверены по исходникам, и общий census на итоговом Source прошёл. Это отдельная опись P02, без переноса её дополнительных строк в самостоятельный #660.
 
-Тринадцать blob B в исторической таблице сохраняют исходный тестовый слой,
-но не фиксируют байты будущей композиции. Его требования нужно совместить
-с текущими правками `internal/api/main_test.go` из #659 и
-`internal/api/adopt_lease_namespace_windows_test.go`,
-`internal/cli/adopt_test.go` из stage 38 #664; для принятых пересечений
-записать новые конечные хеши. Отдельный API-overlay P02 из описанного Source
-`b6f82b3f531bb3eec197049167cdc5971b44e2b0` не входит в vendor-delta #671.
-Найден сохранённый локальный донор того же coherent Source; фиксированные
-метаданные full4 подтверждают закрытие исходных владельцев при итоговом FAIL.
-Для отдельной копии можно переиспользовать его неизменяемые Git-объекты,
-затем сверить дерево и переносимый остаток; это получение ещё не выполнено
-данной сверкой. Исходные runtime, кэши, восстановление и старые UNKNOWN
-сохраняются. Подробные pins, метаданные и границы приведены в текущем рецепте.
+Из 55 исходных B-hunks применены 49 отсутствовавших в 12 файлах; шесть уже существовавших или эквивалентных оставлены. Сохранены #659 TestMain save/seal/restore, namespace/Serena-отказы и более сильные stage-38 fixtures. Итоговая цепочка P02 → v1 → v2 → v3 содержит точные postimages, три патча и исходные commit bytes; восстановление реально проверено. Повторение 38 replay-этапов и замена пересекающихся owner-файлов не требуются. [Выполненная композиция](https://github.com/applicate2628/mcp-local-hub/blob/10a68908390128a7df9e61193c89bac106661506/docs/modernization/verification/composed-functional-source-20261126/README.md).
 
 ## 6. Открытая квалификация
 
-Единственный общий маршрут A–D находится в [§3 плана #664](https://github.com/applicate2628/mcp-local-hub/blob/0c255490461fed0a3ee3d43acdd5216e2e064a53/.plans/2026-11/open-pr-integration-20261117.md#3-порядок-выполнения).
+Единственный общий маршрут A–D находится в [§3 плана #664](https://github.com/applicate2628/mcp-local-hub/blob/10a68908390128a7df9e61193c89bac106661506/.plans/2026-11/open-pr-integration-20261117.md#3-порядок-выполнения).
 Здесь сохраняются ограничения владельца #660, без второго общего списка работ.
 
 Адресные результаты текущей правки получены и перечислены в §7. Реальный цикл
@@ -135,9 +111,11 @@ Task Scheduler `Create → ExportXML → Enable` и cleanup получены PAS
 [новом native-свидетельстве](autostart-native-roundtrip-20261126.md). Сквозные
 установка, обновление, отмена и восстановление, одновременный писатель,
 неизвестный эффект создания и работающий владелец остаются открытой квалификацией.
-Полные build/vet/default/tagged для текущего состава — NOT_RUN; его композиция
-с #669/B и текущими #637/#659/#671, отдельные роли Product/Serena и новые
-postimages тестовых пересечений не квалифицированы. Снимки XML и прежние
+На точной композиции Source v3 build/vet и адресные проверки прошли: census —
+3 корня/14 подслучаев, tagged API/CLI — 28/29, пакет CMake — 46/28,
+без FAIL/SKIP. Весь tracked source после выполнения совпал с commit.
+Полные default/tagged остаются NOT_RUN; выдача и приёмка отдельных ролей
+Product/Serena и полный lifecycle остаются открытыми. Снимки XML и прежние
 результаты применимы только к закреплённым в их отчётах входам.
 [Пределы install](/docs/qualification/install-scheduler-generation-20261123/README.md#7-ограничения-и-остаточный-план) ·
 [Пределы Scheduler](/docs/qualification/scheduler-generation-error-origins-20261123/README.md#6-dependencies-and-readiness) ·
@@ -215,3 +193,14 @@ tagged-границы — 4 корня и 7 подтестов PASS.
 30 readers четырёх кампаний получены закрытыми; первые v1/v2 остаются FAIL.
 [Отчёт](autostart-native-roundtrip-20261126.md) ·
 [Точные результаты](autostart-native-roundtrip-20261126.json).
+
+### Выполненная композиция Source v3
+
+[Публикация #664 `10a68908`](https://github.com/applicate2628/mcp-local-hub/blob/10a68908390128a7df9e61193c89bac106661506/docs/modernization/verification/composed-functional-source-20261126/README.md) сохраняет точный Source,
+разрешённые конфликты и исходные квитанции. V1 дал 27 функциональных default PASS
+и отдельный census FAIL; V2 сохранил собственный census FAIL. Итоговая v3
+прошла перечисленные выше адресные проверки, build/vet, с шестью закрытыми
+исходными командами и двенадцатью readers; родитель отдельно подтвердил
+завершение controller и закрытие captures. Прежние FAIL/UNKNOWN и native
+autostart v1/v2 остаются неизменными. Полный остаток принадлежит
+[общему маршруту #664](https://github.com/applicate2628/mcp-local-hub/blob/10a68908390128a7df9e61193c89bac106661506/.plans/2026-11/open-pr-integration-20261117.md#3-порядок-выполнения).
