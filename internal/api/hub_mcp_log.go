@@ -241,16 +241,17 @@ func RecentHubMcpEvents(n int) ([]map[string]any, error) {
 		}
 		return nil, err
 	}
-	lines := bytes.Split(data, []byte{'\n'})
-	// Trim trailing empty (file ends with \n).
-	if len(lines) > 0 && len(lines[len(lines)-1]) == 0 {
-		lines = lines[:len(lines)-1]
+	// Skip exactly one trailing newline, then find the start of the last n
+	// physical lines. Blank and malformed lines still count toward the limit.
+	data = bytes.TrimSuffix(data, []byte{'\n'})
+	start := len(data)
+	count := 0
+	for count < n && start >= 0 {
+		start = bytes.LastIndexByte(data[:start], '\n')
+		count++
 	}
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	out := make([]map[string]any, 0, len(lines))
-	for _, ln := range lines {
+	out := make([]map[string]any, 0, count)
+	for ln := range bytes.SplitSeq(data[start+1:], []byte{'\n'}) {
 		var rec map[string]any
 		if err := json.Unmarshal(ln, &rec); err != nil {
 			continue // skip malformed line
