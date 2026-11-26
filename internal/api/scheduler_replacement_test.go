@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"mcp-local-hub/internal/autostart"
 	"mcp-local-hub/internal/scheduler"
 )
 
@@ -104,5 +105,30 @@ func TestSchedulerReplacementRefusalRetainsStorageFailure(t *testing.T) {
 	}
 	if paths, globErr := filepath.Glob(filepath.Join(root, "scheduler-recovery-*.json")); globErr != nil || len(paths) != 0 {
 		t.Fatalf("oversized snapshot created unexpected files=%v err=%v", paths, globErr)
+	}
+}
+
+func TestRetainAutostartTaskReplacementRefusal(t *testing.T) {
+	root := hardenedTempDir(t)
+	t.Cleanup(SetDaemonStateRootForTest(root))
+	observed := scheduler.EncodeXMLUTF16LEBOM("<Task>autostart-definition-canary</Task>")
+	createErr := scheduler.ErrMutationOutcomeUnknown
+	input := autostart.NewObservedTaskReplacementRefusal(autostart.WindowsTaskName, observed, createErr)
+
+	err := RetainAutostartTaskReplacementRefusal(input)
+	var refusal *SchedulerReplacementRefusedError
+	if !errors.Is(err, createErr) || !errors.Is(err, scheduler.ErrTaskReplacementUnowned) || !errors.As(err, &refusal) {
+		t.Fatalf("autostart refusal lost the typed causes: %v", err)
+	}
+	if path := readInstallRecoverySnapshot(t, root, autostart.WindowsTaskName, observed); refusal.SnapshotPath != path {
+		t.Fatalf("snapshot path = %q, want %q", refusal.SnapshotPath, path)
+	}
+	if strings.Contains(err.Error(), "autostart-definition-canary") {
+		t.Fatal("refusal exposed the observed definition in diagnostics")
+	}
+
+	ordinary := errors.New("ordinary enable failure")
+	if RetainAutostartTaskReplacementRefusal(ordinary) != ordinary || RetainAutostartTaskReplacementRefusal(nil) != nil {
+		t.Fatal("refusal processing changed the normal Enable result")
 	}
 }

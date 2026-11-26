@@ -21,6 +21,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -599,21 +600,40 @@ func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_StartFailurePrintsHint(
 	}
 }
 
-// TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_StartsAutostartOwnerNow
-// locks the first-install contract: when the descriptor write succeeds but the
-// post-install reconcile sees no running supervisor, install should start the
-// already-enabled autostart owner immediately instead of leaving the daemon
-// pending until a manual supervise or next logon.
-//
-// Negative-control: pre-fix nudgeSupervisorReconcileAfterGlobalInstall only
-// prints the old next-supervise/logon note, so the positive started-owner line
-// is absent and the stale pending-daemon note remains.
-func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_StartsAutostartOwnerNow(t *testing.T) {
+func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_AutostartDispatch(t *testing.T) {
+	t.Run("enabled", func(t *testing.T) {
+		testInstallColdAutostartDispatch(t, false, nil)
+	})
+	if runtime.GOOS == "windows" {
+		t.Run("refused", func(t *testing.T) {
+			prior := []byte("<Task>available observation</Task>")
+			refusal := autostart.NewObservedTaskReplacementRefusal(autostart.WindowsTaskName, prior, nil)
+			testInstallColdAutostartDispatch(t, false, refusal)
+		})
+		t.Run("saved_off_projection_failed", func(t *testing.T) {
+			testInstallColdAutostartDispatch(t, true, nil)
+		})
+	}
+}
+
+func testInstallColdAutostartDispatch(t *testing.T, autorunOff bool, enableErr error) {
+	t.Helper()
 	phaseFStateDir(t)
 	preparePreflightBinaryChecks(t)
 	f := newInstallFakeScheduler()
 	installFakeScheduler(t, f)
-	installFakeAutostartBackend(t, &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped})
+	fb := &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped, enableErr: enableErr}
+	installFakeAutostartBackend(t, fb)
+	if autorunOff {
+		path := SettingsPath()
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("gui.autorun_enabled: \"false\"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		fb.disableErr = scheduler.ErrPermissionDenied
+	}
 
 	probeCalls := 0
 	origProbe := installSupervisorRunningProbeFn
@@ -651,10 +671,23 @@ func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_StartsAutostartOwnerNow
 	if probeCalls != 1 {
 		t.Fatalf("supervisor running probe calls = %d, want 1", probeCalls)
 	}
+	out := buf.String()
+	if runtime.GOOS == "windows" {
+		if startCalls != 0 || !strings.Contains(out, "skips starting the Windows autostart task by name") ||
+			strings.Contains(out, "supervisor autostart owner started") {
+			t.Fatalf("Windows install dispatched a task by name: starts=%d output=%q", startCalls, out)
+		}
+		if autorunOff && (fb.disableCalls != 1 || fb.enableCalls != 0 || !strings.Contains(out, fb.disableErr.Error())) {
+			t.Fatalf("OFF projection not exercised: enable=%d disable=%d output=%q", fb.enableCalls, fb.disableCalls, out)
+		}
+		if enableErr != nil && (fb.enableCalls != 1 || !strings.Contains(out, ErrSchedulerReplacementUnowned.Error())) {
+			t.Fatalf("refusal not exercised: enable=%d output=%q", fb.enableCalls, out)
+		}
+		return
+	}
 	if startCalls != 1 {
 		t.Fatalf("autostart owner start calls = %d, want 1", startCalls)
 	}
-	out := buf.String()
 	if !strings.Contains(out, "supervisor autostart owner started") {
 		t.Fatalf("install output missing started-owner confirmation; got:\n%s", out)
 	}

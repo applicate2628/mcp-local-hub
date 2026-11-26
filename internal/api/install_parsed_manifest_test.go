@@ -2063,7 +2063,7 @@ func TestInstallPlanCore_GlobalDryRunPrintsSupervisorMutationPlan(t *testing.T) 
 		"Maintenance timers to ensure",
 		"mcp-local-hub-demo-weekly-refresh",
 		"Autostart owner to ensure",
-		"Legacy scheduler tasks to clean",
+		"Legacy scheduler tasks retained",
 		"Removed supervisor targets to kill",
 	} {
 		if !strings.Contains(out, want) {
@@ -2342,18 +2342,16 @@ func TestInstallPlanCore_GlobalInstall_AutostartEnableUsesCanonicalMcphubPath(t 
 	}
 }
 
-// TestInstallPlanCore_GlobalInstall_AutostartAlreadyEnabledNoops proves install
-// does not rewrite an existing logon owner merely because daemon scheduler tasks
-// are suppressed.
-//
-// Negative-control: unconditionally call Enable after the supervisor-path
-// install and the fake Enable count becomes 1, so this test fails.
-func TestInstallPlanCore_GlobalInstall_AutostartAlreadyEnabledNoops(t *testing.T) {
-	daemonIntentTestHelper(t)
+func TestInstallPlanCore_GlobalInstall_AutostartExistingTask(t *testing.T) {
+	root := daemonIntentTestHelper(t)
 	preparePreflightBinaryChecks(t)
 	f := newInstallFakeScheduler()
 	installFakeScheduler(t, f)
-	fb := &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped}
+	prior := scheduler.EncodeXMLUTF16LEBOM("<Task>existing autostart</Task>")
+	fb := &fakeInstallAutostartBackend{
+		statusReturn: autostart.StateEnabledStopped,
+		enableErr:    autostart.NewObservedTaskReplacementRefusal(autostart.WindowsTaskName, prior, nil),
+	}
 	installFakeAutostartBackend(t, fb)
 	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
 		return ReconcileResponse{}, nil
@@ -2364,24 +2362,25 @@ func TestInstallPlanCore_GlobalInstall_AutostartAlreadyEnabledNoops(t *testing.T
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
-	if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", false, io.Discard); err != nil {
+	var out bytes.Buffer
+	if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", false, &out); err != nil {
 		t.Fatalf("installPlanCore(global install): %v", err)
 	}
 
-	if fb.enableCalls != 0 {
+	if runtime.GOOS == "windows" {
+		if fb.enableCalls != 1 || len(fb.statusOpts) != 0 || fb.disableCalls != 0 {
+			t.Fatalf("Windows existing-task projection: enable=%d status=%d disable=%d", fb.enableCalls, len(fb.statusOpts), fb.disableCalls)
+		}
+		readInstallRecoverySnapshot(t, root, autostart.WindowsTaskName, prior)
+		if !strings.Contains(out.String(), ErrSchedulerReplacementUnowned.Error()) || !strings.Contains(out.String(), "snapshot retained at") {
+			t.Fatalf("install did not report preserved task: %q", out.String())
+		}
+	} else if fb.enableCalls != 0 {
 		t.Fatalf("autostart Enable calls = %d, want 0 when owner is already enabled", fb.enableCalls)
 	}
 }
 
-// TestEnsureGlobalInstallAutostartOwner_RecreatesDriftedShimWithCanonicalPath
-// pins the install-time owner handoff for a drifted existing shim. StateDrifted
-// means the stored command line or binary path disagrees with the canonical
-// Enable(opts) body, so install must rewrite it before relying on that owner.
-//
-// Negative-control: pre-fix ensureGlobalInstallAutostartOwner only warned for
-// StateDrifted, so the fake Enable count stayed 0 and the canonical path was
-// never applied.
-func TestEnsureGlobalInstallAutostartOwner_RecreatesDriftedShimWithCanonicalPath(t *testing.T) {
+func TestEnsureGlobalInstallAutostartOwner_UsesCanonicalPath(t *testing.T) {
 	canonical := filepath.Join(t.TempDir(), MCPHubBinaryName())
 	if err := os.WriteFile(canonical, []byte("fixture"), 0o600); err != nil {
 		t.Fatal(err)
@@ -2405,6 +2404,14 @@ func TestEnsureGlobalInstallAutostartOwner_RecreatesDriftedShimWithCanonicalPath
 }
 
 func TestEnsureGlobalInstallAutostartOwner_EnabledStatesDoNotRewriteShim(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows Enable performs its own create-only admission")
+	}
+	canonical := filepath.Join(t.TempDir(), MCPHubBinaryName())
+	if err := os.WriteFile(canonical, []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(SetTestCanonicalMcphubPath(canonical))
 	for _, state := range []autostart.State{autostart.StateEnabledRunning, autostart.StateEnabledStopped} {
 		t.Run(state.String(), func(t *testing.T) {
 			fb := &fakeInstallAutostartBackend{statusReturn: state}
@@ -2412,71 +2419,10 @@ func TestEnsureGlobalInstallAutostartOwner_EnabledStatesDoNotRewriteShim(t *test
 
 			ensureGlobalInstallAutostartOwner(io.Discard, false, OwnerModeGUI)
 
-			if fb.enableCalls != 0 {
-				t.Fatalf("autostart Enable calls = %d, want 0 for %s", fb.enableCalls, state)
+			if fb.enableCalls != 0 || len(fb.statusOpts) != 1 {
+				t.Fatalf("projection for %s: enable=%d status=%d", state, fb.enableCalls, len(fb.statusOpts))
 			}
 		})
-	}
-}
-
-func TestKillLegacySchedulerTaskDaemonByPortBestEffort_ForeignOwnerNotKilled(t *testing.T) {
-	origKill := killByPortFn
-	origForceKill := forceKillByPortFn
-	origLookup := lookupProcess
-	t.Cleanup(func() {
-		killByPortFn = origKill
-		forceKillByPortFn = origForceKill
-		lookupProcess = origLookup
-	})
-	lookupProcess = nil
-
-	legacyKillCalled := false
-	killByPortFn = func(port int, timeout time.Duration) error {
-		legacyKillCalled = true
-		return nil
-	}
-	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
-		if port != 33031 {
-			t.Fatalf("forceKillByPortFn port = %d, want 33031", port)
-		}
-		return portKillIdentityMismatch, errors.New("port owned by foreign process")
-	}
-
-	var buf bytes.Buffer
-	killLegacySchedulerTaskDaemonByPortBestEffort("mcp-local-hub-demo-alpha", 33031, &buf)
-	if legacyKillCalled {
-		t.Fatal("legacy handoff used killByPortFn on a foreign owner; want identity-mismatch warning without kill")
-	}
-	out := buf.String()
-	if !strings.Contains(out, "port owned by foreign process") || !strings.Contains(out, "not killing") {
-		t.Fatalf("warning = %q, want foreign-owner not-killing warning", out)
-	}
-}
-
-func TestKillLegacySchedulerTaskDaemonByPortBestEffort_McphubOwnerKilled(t *testing.T) {
-	origKill := killByPortFn
-	origForceKill := forceKillByPortFn
-	origLookup := lookupProcess
-	t.Cleanup(func() {
-		killByPortFn = origKill
-		forceKillByPortFn = origForceKill
-		lookupProcess = origLookup
-	})
-	lookupProcess = nil
-
-	killByPortFn = func(port int, timeout time.Duration) error {
-		t.Fatalf("legacy handoff must use outcome-aware kill path, got killByPortFn(%d)", port)
-		return nil
-	}
-	var killedPorts []int
-	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
-		killedPorts = append(killedPorts, port)
-		return portKillKilled, nil
-	}
-
-	killLegacySchedulerTaskDaemonByPortBestEffort("mcp-local-hub-demo-alpha", 33032, io.Discard)
-	if !reflect.DeepEqual(killedPorts, []int{33032}) {
-		t.Fatalf("killed ports = %v, want [33032]", killedPorts)
 	}
 }
 
@@ -2846,207 +2792,6 @@ func TestInstallPlanCore_GlobalFreshInstall_NoPerDaemonSchedulerTaskCreated(t *t
 	if got.Enabled != nil {
 		t.Errorf("materialized weekly-refresh timer Enabled = %v, want nil (default-on on a fresh install)", *got.Enabled)
 	}
-}
-
-func TestCleanupLegacySchedulerTasksForSupervisorInstall_DeletesTaskAndKillsPort(t *testing.T) {
-	t.Run("legacy daemon task is deleted before its manifest port is killed", func(t *testing.T) {
-		daemonIntentTestHelper(t)
-		f := newInstallFakeScheduler()
-		f.listSeed = []scheduler.TaskStatus{{Name: `\mcp-local-hub-demo-alpha`}}
-		installFakeScheduler(t, f)
-
-		origLookup := lookupProcess
-		lookupProcess = nil
-		t.Cleanup(func() { lookupProcess = origLookup })
-
-		var killed []int
-		origKill := forceKillByPortFn
-		forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
-			if len(f.deleteNames) == 0 {
-				t.Errorf("forceKillByPortFn called before deleting the legacy scheduler task")
-			}
-			if timeout != 5*time.Second {
-				t.Errorf("kill timeout = %s, want 5s", timeout)
-			}
-			killed = append(killed, port)
-			return portKillKilled, nil
-		}
-		t.Cleanup(func() { forceKillByPortFn = origKill })
-
-		m := &config.ServerManifest{
-			Name:      "demo",
-			Kind:      config.KindGlobal,
-			Transport: config.TransportStdioBridge,
-			Command:   "go",
-			Daemons: []config.DaemonSpec{
-				{Name: "alpha", Port: 9313},
-				{Name: "beta", Port: 33013},
-			},
-		}
-		var buf bytes.Buffer
-		cleanupLegacySchedulerTasksForSupervisorInstall(m, "", &buf)
-
-		if len(f.deleteNames) != 1 || f.deleteNames[0] != "mcp-local-hub-demo-alpha" {
-			t.Fatalf("deleted legacy tasks = %v, want [mcp-local-hub-demo-alpha]", f.deleteNames)
-		}
-		if len(killed) != 1 || killed[0] != 9313 {
-			t.Fatalf("forceKillByPortFn ports = %v, want only the listed legacy task port [9313]", killed)
-		}
-	})
-
-	t.Run("hyphenated daemon name uses exact manifest match for port kill", func(t *testing.T) {
-		daemonIntentTestHelper(t)
-		f := newInstallFakeScheduler()
-		f.listSeed = []scheduler.TaskStatus{{Name: `\mcp-local-hub-demo-vscode-css`}}
-		installFakeScheduler(t, f)
-
-		origLookup := lookupProcess
-		lookupProcess = nil
-		t.Cleanup(func() { lookupProcess = origLookup })
-
-		var killed []int
-		origKill := forceKillByPortFn
-		forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
-			if len(f.deleteNames) == 0 {
-				t.Errorf("forceKillByPortFn called before deleting the legacy scheduler task")
-			}
-			killed = append(killed, port)
-			return portKillKilled, nil
-		}
-		t.Cleanup(func() { forceKillByPortFn = origKill })
-
-		m := &config.ServerManifest{
-			Name:      "demo",
-			Kind:      config.KindGlobal,
-			Transport: config.TransportStdioBridge,
-			Command:   "go",
-			Daemons: []config.DaemonSpec{
-				{Name: "vscode-css", Port: 33017},
-			},
-		}
-		var buf bytes.Buffer
-		cleanupLegacySchedulerTasksForSupervisorInstall(m, "", &buf)
-
-		if len(f.deleteNames) != 1 || f.deleteNames[0] != "mcp-local-hub-demo-vscode-css" {
-			t.Fatalf("deleted legacy tasks = %v, want [mcp-local-hub-demo-vscode-css]", f.deleteNames)
-		}
-		if len(killed) != 1 || killed[0] != 33017 {
-			t.Fatalf("forceKillByPortFn ports = %v, want hyphenated daemon port [33017]", killed)
-		}
-	})
-
-	t.Run("zero port deletes task but skips kill with warning", func(t *testing.T) {
-		daemonIntentTestHelper(t)
-		f := newInstallFakeScheduler()
-		f.listSeed = []scheduler.TaskStatus{{Name: `\mcp-local-hub-demo-alpha`}}
-		installFakeScheduler(t, f)
-
-		origLookup := lookupProcess
-		lookupProcess = nil
-		t.Cleanup(func() { lookupProcess = origLookup })
-
-		var killed []int
-		origKill := forceKillByPortFn
-		forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
-			killed = append(killed, port)
-			return portKillKilled, nil
-		}
-		t.Cleanup(func() { forceKillByPortFn = origKill })
-
-		m := &config.ServerManifest{
-			Name:      "demo",
-			Kind:      config.KindGlobal,
-			Transport: config.TransportStdioBridge,
-			Command:   "go",
-			Daemons:   []config.DaemonSpec{{Name: "alpha", Port: 0}},
-		}
-		var buf bytes.Buffer
-		cleanupLegacySchedulerTasksForSupervisorInstall(m, "", &buf)
-
-		if len(f.deleteNames) != 1 || f.deleteNames[0] != "mcp-local-hub-demo-alpha" {
-			t.Fatalf("deleted legacy tasks = %v, want [mcp-local-hub-demo-alpha]", f.deleteNames)
-		}
-		if len(killed) != 0 {
-			t.Fatalf("forceKillByPortFn ports = %v, want none for port 0", killed)
-		}
-		if !strings.Contains(buf.String(), "daemon port unknown") {
-			t.Fatalf("cleanup warning = %q, want daemon port unknown warning", buf.String())
-		}
-	})
-
-	t.Run("filtered install skips absent legacy task without delete or kill", func(t *testing.T) {
-		daemonIntentTestHelper(t)
-		f := newInstallFakeScheduler()
-		installFakeScheduler(t, f)
-
-		origLookup := lookupProcess
-		lookupProcess = nil
-		t.Cleanup(func() { lookupProcess = origLookup })
-
-		var killed []int
-		origKill := forceKillByPortFn
-		forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
-			killed = append(killed, port)
-			return portKillKilled, nil
-		}
-		t.Cleanup(func() { forceKillByPortFn = origKill })
-
-		m := &config.ServerManifest{
-			Name:      "demo",
-			Kind:      config.KindGlobal,
-			Transport: config.TransportStdioBridge,
-			Command:   "go",
-			Daemons:   []config.DaemonSpec{{Name: "alpha", Port: 33031}},
-		}
-		var buf bytes.Buffer
-		cleanupLegacySchedulerTasksForSupervisorInstall(m, "alpha", &buf)
-
-		if len(f.deleteNames) != 0 {
-			t.Fatalf("deleted legacy tasks = %v, want none when filtered task is absent", f.deleteNames)
-		}
-		if len(killed) != 0 {
-			t.Fatalf("forceKillByPortFn ports = %v, want none when filtered task is absent", killed)
-		}
-	})
-
-	t.Run("filtered install deletes and kills when legacy task exists", func(t *testing.T) {
-		daemonIntentTestHelper(t)
-		f := newInstallFakeScheduler()
-		f.listSeed = []scheduler.TaskStatus{{Name: `\mcp-local-hub-demo-alpha`}}
-		installFakeScheduler(t, f)
-
-		origLookup := lookupProcess
-		lookupProcess = nil
-		t.Cleanup(func() { lookupProcess = origLookup })
-
-		var killed []int
-		origKill := forceKillByPortFn
-		forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
-			if len(f.deleteNames) == 0 {
-				t.Errorf("forceKillByPortFn called before deleting the filtered legacy scheduler task")
-			}
-			killed = append(killed, port)
-			return portKillKilled, nil
-		}
-		t.Cleanup(func() { forceKillByPortFn = origKill })
-
-		m := &config.ServerManifest{
-			Name:      "demo",
-			Kind:      config.KindGlobal,
-			Transport: config.TransportStdioBridge,
-			Command:   "go",
-			Daemons:   []config.DaemonSpec{{Name: "alpha", Port: 33032}},
-		}
-		var buf bytes.Buffer
-		cleanupLegacySchedulerTasksForSupervisorInstall(m, "alpha", &buf)
-
-		if len(f.deleteNames) != 1 || f.deleteNames[0] != "mcp-local-hub-demo-alpha" {
-			t.Fatalf("deleted legacy tasks = %v, want [mcp-local-hub-demo-alpha]", f.deleteNames)
-		}
-		if len(killed) != 1 || killed[0] != 33032 {
-			t.Fatalf("forceKillByPortFn ports = %v, want [33032]", killed)
-		}
-	})
 }
 
 // TestBuildMergedSupervisorIntent_PreservesStopsSubBlock locks in the

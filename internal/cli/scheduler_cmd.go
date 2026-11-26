@@ -77,7 +77,8 @@ func newSchedulerWeeklyRefreshCmd() *cobra.Command {
 		Use:   "weekly-refresh",
 		Short: "Configure the hub-wide weekly-refresh task",
 		Long: `Manages a single scheduler task that runs 'mcphub restart --all' weekly.
-Pass --set "SUN 03:00" to enable, --disable to remove.`,
+Pass --set "SUN 03:00" to create an absent task. Existing tasks are retained.
+Pass --disable to explicitly remove the current task.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a := api.NewAPI()
 			if disableFlag {

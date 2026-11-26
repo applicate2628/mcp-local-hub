@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"unicode/utf16"
@@ -668,5 +669,60 @@ func TestUninstallLivenessTask_DeletesByName(t *testing.T) {
 	dels := f.calls()
 	if len(dels) != 1 || dels[0] != LivenessTaskName {
 		t.Errorf("Delete calls = %v, want exactly [%q]", dels, LivenessTaskName)
+	}
+}
+
+func TestRetainLegacyWatchdogTaskForSetup(t *testing.T) {
+	name := LegacyWatchdogTaskName
+	prior := scheduler.EncodeXMLUTF16LEBOM("<Task>legacy watchdog</Task>")
+	for _, tc := range []struct {
+		name      string
+		xml       []byte
+		exportErr error
+		wantErr   error
+		retained  bool
+	}{
+		{name: "absent", exportErr: scheduler.ErrTaskNotFound},
+		{name: "observed", xml: prior, wantErr: ErrSchedulerReplacementUnowned, retained: true},
+		{name: "conflicting_absence", xml: prior, exportErr: scheduler.ErrTaskNotFound, wantErr: scheduler.ErrTaskNotFound},
+		{name: "partial_read", xml: prior, exportErr: scheduler.ErrPermissionDenied, wantErr: scheduler.ErrPermissionDenied},
+		{name: "empty_success", wantErr: scheduler.ErrTaskCorrupt},
+		{name: "retention_failed", xml: bytes.Repeat([]byte{'x'}, maxStateFileBytes+1), wantErr: ErrSchedulerReplacementUnowned},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := hardenedTempDir(t)
+			t.Cleanup(SetDaemonStateRootForTest(root))
+			f := newInstallFakeScheduler()
+			if len(tc.xml) > 0 {
+				f.tasks[name], f.xml[name] = true, bytes.Clone(tc.xml)
+			}
+			installTestScheduler(t, &installSnapshotScheduler{fakeScheduler: f, name: name, snapshot: tc.xml, exportErr: tc.exportErr})
+
+			err := NewAPI().RetainLegacyWatchdogTaskForSetup()
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("retention error = %v, want %v", err, tc.wantErr)
+			}
+			if f.tasks[name] != (len(tc.xml) > 0) || !bytes.Equal(f.xml[name], tc.xml) || len(f.deleteNames) != 0 || f.createCount != 0 || len(f.importNames) != 0 {
+				t.Fatalf("observation mutated scheduler: deletes=%v creates=%d imports=%v", f.deleteNames, f.createCount, f.importNames)
+			}
+			var refusal *SchedulerReplacementRefusedError
+			if tc.wantErr == ErrSchedulerReplacementUnowned {
+				if !errors.As(err, &refusal) || refusal.TaskName != name || (refusal.Cause == nil) != tc.retained {
+					t.Fatalf("invalid retention receipt: %v", err)
+				}
+				if tc.retained {
+					if path := readInstallRecoverySnapshot(t, root, name, prior); refusal.SnapshotPath != path {
+						t.Fatalf("snapshot path = %q, want %q", refusal.SnapshotPath, path)
+					}
+					return
+				}
+				if refusal.SnapshotPath != "" {
+					t.Fatalf("failed retention reported a snapshot path: %q", refusal.SnapshotPath)
+				}
+			}
+			if paths, err := filepath.Glob(filepath.Join(root, "scheduler-recovery-*.json")); err != nil || len(paths) != 0 {
+				t.Fatalf("unexpected snapshots: %v, error %v", paths, err)
+			}
+		})
 	}
 }

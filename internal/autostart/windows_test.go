@@ -7,6 +7,7 @@
 package autostart
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"strings"
@@ -25,6 +26,8 @@ import (
 type fakeScheduler struct {
 	createCalls     []scheduler.TaskSpec
 	deleteCalls     []string
+	exportCalls     []string
+	exportReplies   []testTaskExport
 	statusReturn    scheduler.TaskStatus
 	statusErr       error
 	xmlReturn       []byte
@@ -35,6 +38,11 @@ type fakeScheduler struct {
 	xmlByName       map[string][]byte               // optional override
 	statusErrByName map[string]error
 	xmlErrByName    map[string]error
+}
+
+type testTaskExport struct {
+	xml []byte
+	err error
 }
 
 func (f *fakeScheduler) Create(spec scheduler.TaskSpec) error {
@@ -58,6 +66,12 @@ func (f *fakeScheduler) Status(name string) (scheduler.TaskStatus, error) {
 }
 
 func (f *fakeScheduler) ExportXML(name string) ([]byte, error) {
+	f.exportCalls = append(f.exportCalls, name)
+	if len(f.exportReplies) != 0 {
+		reply := f.exportReplies[0]
+		f.exportReplies = f.exportReplies[1:]
+		return reply.xml, reply.err
+	}
 	if err, ok := f.xmlErrByName[name]; ok {
 		return nil, err
 	}
@@ -87,7 +101,11 @@ func withFakeScheduler(t *testing.T, f *fakeScheduler) {
 }
 
 func TestWindowsBackend_EnableCreatesTask(t *testing.T) {
-	f := &fakeScheduler{}
+	const legacyWatchdog = `\mcp-local-hub-watchdog`
+	f := &fakeScheduler{
+		xmlErr:    scheduler.ErrTaskNotFound,
+		xmlByName: map[string][]byte{legacyWatchdog: []byte("<Task/>")},
+	}
 	withFakeScheduler(t, f)
 
 	b, err := New()
@@ -99,6 +117,9 @@ func TestWindowsBackend_EnableCreatesTask(t *testing.T) {
 	}
 	if len(f.createCalls) != 1 {
 		t.Fatalf("Create called %d times, want 1: %+v", len(f.createCalls), f.createCalls)
+	}
+	if len(f.deleteCalls) != 0 || len(f.exportCalls) != 1 || f.exportCalls[0] != WindowsTaskName {
+		t.Fatalf("creation touched another task or attempted deletion: export=%v delete=%v", f.exportCalls, f.deleteCalls)
 	}
 	spec := f.createCalls[0]
 	if spec.Name != WindowsTaskName {
@@ -122,7 +143,7 @@ func TestWindowsBackend_DefaultExecutableRoutesOwnedLogonThroughCanonicalProduct
 	prev := osExecutableFn
 	osExecutableFn = func() (string, error) { return `C:\bin\mcphub.exe`, nil }
 	t.Cleanup(func() { osExecutableFn = prev })
-	f := &fakeScheduler{}
+	f := &fakeScheduler{xmlErr: scheduler.ErrTaskNotFound}
 	withFakeScheduler(t, f)
 	b, err := New()
 	if err != nil {
@@ -137,7 +158,7 @@ func TestWindowsBackend_DefaultExecutableRoutesOwnedLogonThroughCanonicalProduct
 }
 
 func TestWindowsBackend_EnableStrictModeAddsFlag(t *testing.T) {
-	f := &fakeScheduler{}
+	f := &fakeScheduler{xmlErr: scheduler.ErrTaskNotFound}
 	withFakeScheduler(t, f)
 
 	b, err := New()
@@ -177,7 +198,7 @@ func TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand(t *testing.
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			f := &fakeScheduler{}
+			f := &fakeScheduler{xmlErr: scheduler.ErrTaskNotFound}
 			withFakeScheduler(t, f)
 			b, err := New()
 			if err != nil {
@@ -213,42 +234,104 @@ func TestWindowsBackend_EnableRejectsInvalidOwnerBeforeMutatingTask(t *testing.T
 	if err == nil {
 		t.Fatal("Enable returned nil for invalid owner mode")
 	}
-	if len(f.deleteCalls) != 0 || len(f.createCalls) != 0 {
-		t.Fatalf("invalid mode mutated canonical task: deletes=%v creates=%+v", f.deleteCalls, f.createCalls)
+	if len(f.deleteCalls) != 0 || len(f.createCalls) != 0 || len(f.exportCalls) != 0 {
+		t.Fatalf("invalid mode reached scheduler: export=%v delete=%v create=%+v", f.exportCalls, f.deleteCalls, f.createCalls)
 	}
 }
 
-func TestWindowsBackend_EnableReplacesExistingTask(t *testing.T) {
-	// Pre-existing task → Enable must Delete-then-Create to keep the
-	// replacement atomic vs scheduler.Create's "already exists" error.
-	f := &fakeScheduler{
-		statusReturn: scheduler.TaskStatus{Name: WindowsTaskName, State: "Ready"},
+func TestWindowsBackend_EnableRefusesExistingTask(t *testing.T) {
+	opts := Options{MCPHubPath: `fixture-mcphub.exe`}
+	for _, tc := range []struct {
+		name string
+		xml  []byte
+	}{
+		{name: "matching_visible_argv", xml: buildMatchingXML(opts.MCPHubPath, false)},
+		{name: "different_definition", xml: scheduler.EncodeXMLUTF16LEBOM("<Task>observed-canary</Task>")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeScheduler{xmlReturn: bytes.Clone(tc.xml)}
+			withFakeScheduler(t, f)
+			b, err := New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = b.Enable(opts)
+			var refusal *ObservedTaskReplacementRefusal
+			if !errors.Is(err, scheduler.ErrTaskReplacementUnowned) || !errors.As(err, &refusal) || refusal.TaskName != WindowsTaskName {
+				t.Fatalf("Enable error = %v, want a named generation refusal", err)
+			}
+			refusal.ObservedXML()[0] ^= 0xff
+			f.xmlReturn[0] ^= 0xff
+			if !bytes.Equal(refusal.ObservedXML(), tc.xml) || strings.Contains(err.Error(), string(tc.xml)) ||
+				fmt.Sprintf("%#v", err) != err.Error() {
+				t.Fatal("refusal changed or exposed the captured definition")
+			}
+			if len(f.createCalls) != 0 || len(f.deleteCalls) != 0 || len(f.exportCalls) != 1 {
+				t.Fatalf("occupied task was mutated: export=%v create=%v delete=%v", f.exportCalls, f.createCalls, f.deleteCalls)
+			}
+		})
 	}
-	withFakeScheduler(t, f)
+}
 
-	b, err := New()
-	if err != nil {
-		t.Fatalf("New: %v", err)
+func TestWindowsBackend_EnableRequiresConfirmedAbsence(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		testTaskExport
+		want error
+	}{
+		{name: "conflicting_absence", testTaskExport: testTaskExport{[]byte("<Task/>"), scheduler.ErrTaskNotFound}, want: scheduler.ErrTaskNotFound},
+		{name: "partial_read", testTaskExport: testTaskExport{[]byte("<Task>"), scheduler.ErrPermissionDenied}, want: scheduler.ErrPermissionDenied},
+		{name: "unavailable", testTaskExport: testTaskExport{nil, scheduler.ErrUnavailable}, want: scheduler.ErrUnavailable},
+		{name: "empty_success", want: scheduler.ErrTaskCorrupt},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeScheduler{xmlReturn: tc.xml, xmlErr: tc.err}
+			withFakeScheduler(t, f)
+			err := (&windowsBackend{}).Enable(Options{MCPHubPath: `fixture-mcphub.exe`})
+			if !errors.Is(err, tc.want) || len(f.createCalls) != 0 || len(f.deleteCalls) != 0 {
+				t.Fatalf("unsafe absence: err=%v create=%v delete=%v", err, f.createCalls, f.deleteCalls)
+			}
+		})
 	}
-	if err := b.Enable(Options{MCPHubPath: `fixture-mcphub.exe`}); err != nil {
-		t.Fatalf("Enable: %v", err)
-	}
-	// As of 2026-05-18, Enable also deletes the legacy v0.4.x watchdog
-	// task as part of the v0.5.0 cleanup. Expect both Delete calls in
-	// the recorded order: supervisor first (pre-Create idempotence),
-	// watchdog second (post-Create cleanup).
-	const legacyWatchdogTaskName = `\mcp-local-hub-watchdog`
-	wantDeletes := []string{WindowsTaskName, legacyWatchdogTaskName}
-	if len(f.deleteCalls) != len(wantDeletes) {
-		t.Fatalf("Delete calls = %v, want %v", f.deleteCalls, wantDeletes)
-	}
-	for i, want := range wantDeletes {
-		if f.deleteCalls[i] != want {
-			t.Errorf("Delete[%d] = %q, want %q", i, f.deleteCalls[i], want)
-		}
-	}
-	if len(f.createCalls) != 1 {
-		t.Errorf("Create calls = %d, want 1", len(f.createCalls))
+}
+
+func TestWindowsBackend_EnableAfterCreateFailureOnlyObserves(t *testing.T) {
+	prior := []byte("<Task>external occupant</Task>")
+	for _, tc := range []struct {
+		name      string
+		createErr error
+		after     testTaskExport
+	}{
+		{name: "conflict", createErr: scheduler.ErrTaskAlreadyExists, after: testTaskExport{xml: prior}},
+		{name: "lost_acknowledgment", createErr: scheduler.ErrMutationOutcomeUnknown, after: testTaskExport{xml: prior}},
+		{name: "absent", createErr: scheduler.ErrPermissionDenied, after: testTaskExport{err: scheduler.ErrTaskNotFound}},
+		{name: "read_unavailable", createErr: scheduler.ErrMutationOutcomeUnknown, after: testTaskExport{err: scheduler.ErrUnavailable}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeScheduler{
+				createErr: tc.createErr,
+				exportReplies: []testTaskExport{
+					{err: scheduler.ErrTaskNotFound},
+					tc.after,
+				},
+			}
+			withFakeScheduler(t, f)
+			err := (&windowsBackend{}).Enable(Options{MCPHubPath: `fixture-mcphub.exe`})
+			if !errors.Is(err, tc.createErr) || len(f.createCalls) != 1 || len(f.deleteCalls) != 0 || len(f.exportCalls) != 2 {
+				t.Fatalf("failed creation was retried or compensated: err=%v create=%v delete=%v export=%v", err, f.createCalls, f.deleteCalls, f.exportCalls)
+			}
+			var refusal *ObservedTaskReplacementRefusal
+			if len(tc.after.xml) != 0 {
+				if !errors.As(err, &refusal) || !bytes.Equal(refusal.ObservedXML(), tc.after.xml) {
+					t.Fatalf("post-create observation missing from %v", err)
+				}
+			} else if errors.As(err, &refusal) {
+				t.Fatalf("unexpected retention receipt: %v", err)
+			}
+			if errors.Is(tc.after.err, scheduler.ErrUnavailable) && !errors.Is(err, scheduler.ErrUnavailable) {
+				t.Fatalf("post-create observation cause lost: %v", err)
+			}
+		})
 	}
 }
 
@@ -580,6 +663,8 @@ func TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed(t *testing.T) {
 	}{
 		{name: "export-error", xmlErr: errors.New("schtasks export failed")},
 		{name: "empty-xml", xml: nil},
+		{name: "malformed-xml", xml: []byte("<Task>")},
+		{name: "disappeared-after-status", xmlErr: scheduler.ErrTaskNotFound},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -605,10 +690,42 @@ func TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed(t *testing.T) {
 	}
 }
 
-func TestWindowsBackend_StatusSnapshotSpecFingerprintTracksShimSpecOnly(t *testing.T) {
+func TestWindowsBackend_StatusRequiresTypedAbsence(t *testing.T) {
+	statusErr := errors.New("cannot find scheduler bridge")
+	withFakeScheduler(t, &fakeScheduler{statusErr: statusErr})
+	b := &windowsBackend{}
+	opts := Options{MCPHubPath: `fixture-mcphub.exe`}
+	if _, err := b.Status(opts); !errors.Is(err, statusErr) {
+		t.Fatalf("Status counted an untyped lookup failure as absence: %v", err)
+	}
+	if _, err := b.StatusSnapshot(opts); !errors.Is(err, statusErr) {
+		t.Fatalf("StatusSnapshot counted an untyped lookup failure as absence: %v", err)
+	}
+}
+
+func TestWindowsBackend_ProjectAutorunDisabledRequiresTypedAbsence(t *testing.T) {
+	readbackErr := errors.New("scheduler bridge executable does not exist")
+	f := &fakeScheduler{statusErr: readbackErr}
+	withFakeScheduler(t, f)
+	b := &windowsBackend{}
+	opts := Options{MCPHubPath: `fixture-mcphub.exe`}
+	off := false
+	if err := ProjectAutorunDisabled(&off, b, opts); !errors.Is(err, readbackErr) {
+		t.Fatalf("OFF reported success without an absence readback: %v", err)
+	}
+	f.statusErr = scheduler.ErrTaskNotFound
+	if err := ProjectAutorunDisabled(&off, b, opts); err != nil {
+		t.Fatalf("confirmed absence did not settle OFF: %v", err)
+	}
+	if len(f.deleteCalls) != 2 || f.deleteCalls[0] != WindowsTaskName || f.deleteCalls[1] != WindowsTaskName {
+		t.Fatalf("OFF did not request explicit removal of the canonical task: %v", f.deleteCalls)
+	}
+}
+
+func TestWindowsBackend_StatusSnapshotFingerprintsCompleteDefinition(t *testing.T) {
 	baseXML := buildWindowsStatusSnapshotXML(
 		`fixture-mcphub.exe`,
-		"gui",
+		"gui --no-browser",
 		"true",
 		"<Triggers><LogonTrigger><Enabled>true</Enabled></LogonTrigger></Triggers>"+
 			"<Principals><Principal id=\"Author\"><UserId>fixture-user-a</UserId></Principal></Principals>",
@@ -639,29 +756,27 @@ func TestWindowsBackend_StatusSnapshotSpecFingerprintTracksShimSpecOnly(t *testi
 		t.Fatalf("SpecFingerprint unstable across identical re-probes: first=%q second=%q", first.SpecFingerprint, second.SpecFingerprint)
 	}
 
-	argsXML := buildWindowsStatusSnapshotXML(`fixture-mcphub.exe`, "gui --strict-mode", "true", "")
-	argsFingerprint := mustWindowsStatusSnapshotFingerprint(t, argsXML, "Running", opts)
-	if argsFingerprint == first.SpecFingerprint {
-		t.Fatal("SpecFingerprint did not change when only <Arguments> changed")
+	if ready := mustWindowsStatusSnapshotFingerprint(t, baseXML, "Ready", opts); ready != first.SpecFingerprint {
+		t.Fatal("ordinary runtime liveness changed the definition fingerprint")
 	}
-
-	disabledXML := buildWindowsStatusSnapshotXML(`fixture-mcphub.exe`, "gui", "false", "")
-	disabledFingerprint := mustWindowsStatusSnapshotFingerprint(t, disabledXML, "Running", opts)
-	if disabledFingerprint == first.SpecFingerprint {
-		t.Fatal("SpecFingerprint did not change when only <Settings><Enabled> changed")
+	if disabled := mustWindowsStatusSnapshotFingerprint(t, baseXML, "Disabled", opts); disabled == first.SpecFingerprint {
+		t.Fatal("runtime disabled state did not change the fingerprint")
 	}
-
-	volatileXML := buildWindowsStatusSnapshotXML(
-		`fixture-mcphub.exe`,
-		"gui",
-		"true",
-		"<Triggers><CalendarTrigger><Enabled>false</Enabled></CalendarTrigger></Triggers>"+
-			"<Principals><Principal id=\"Other\"><UserId>fixture-user-b</UserId></Principal></Principals>"+
-			"<RegistrationInfo><URI>\\changed-liveness-metadata</URI></RegistrationInfo>",
-	)
-	volatileFingerprint := mustWindowsStatusSnapshotFingerprint(t, volatileXML, "Ready", opts)
-	if volatileFingerprint != first.SpecFingerprint {
-		t.Fatalf("SpecFingerprint changed for trigger/principal/liveness-only differences: base=%q volatile=%q", first.SpecFingerprint, volatileFingerprint)
+	for _, tc := range []struct {
+		name, old, new string
+	}{
+		{name: "arguments", old: "gui --no-browser", new: "supervise"},
+		{name: "enabled", old: "<Settings><Enabled>true", new: "<Settings><Enabled>false"},
+		{name: "trigger", old: "<LogonTrigger>", new: "<LogonTrigger><Delay>PT1M</Delay>"},
+		{name: "principal", old: "fixture-user-a", new: "fixture-user-b"},
+		{name: "other_action", old: "</Actions>", new: "<Exec><Command>another.exe</Command></Exec></Actions>"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			changed := []byte(strings.Replace(string(baseXML), tc.old, tc.new, 1))
+			if got := mustWindowsStatusSnapshotFingerprint(t, changed, "Running", opts); got == first.SpecFingerprint {
+				t.Fatalf("fingerprint omitted the %s change", tc.name)
+			}
+		})
 	}
 }
 

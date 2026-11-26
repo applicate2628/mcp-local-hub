@@ -301,8 +301,9 @@ func upgradeLazyProxyTask(sch scheduler.Scheduler, taskName, normalizedName, can
 	return &SchedulerUpgradeResult{TaskName: taskName, NewCmd: canonicalPath}
 }
 
-// WeeklyRefreshSet creates or replaces the hub-wide weekly-refresh
-// scheduler task. schedule format is "<DAY> <HH:MM>" where DAY is a
+// WeeklyRefreshSet creates an absent hub-wide weekly-refresh scheduler task.
+// An existing registration is retained because replacement cannot be bound to
+// its observed generation. Schedule format is "<DAY> <HH:MM>" where DAY is a
 // 3-letter abbreviation (SUN|MON|...|SAT, case-insensitive).
 func (a *API) WeeklyRefreshSet(schedule string) error {
 	day, hr, min, err := parseWeeklyRefreshSchedule(schedule)
@@ -313,22 +314,23 @@ func (a *API) WeeklyRefreshSet(schedule string) error {
 	if err != nil {
 		return err
 	}
-	sch, err := scheduler.New()
+	sch, err := newScheduler()
 	if err != nil {
 		return err
 	}
 	const taskName = "mcp-local-hub-weekly-refresh"
-	if err := sch.Delete(taskName); err != nil && !errors.Is(err, scheduler.ErrTaskNotFound) {
-		return fmt.Errorf("delete prior weekly refresh task: %w", err)
+	priorXML, err := snapshotTaskForSchedulerUpgrade(sch, taskName)
+	if err != nil {
+		return fmt.Errorf("observe prior weekly refresh task: %w", err)
 	}
-	return sch.Create(scheduler.TaskSpec{
+	return replaceTaskForSchedulerUpgrade(sch, scheduler.TaskSpec{
 		Name:             taskName,
 		Description:      "mcp-local-hub: weekly refresh (restart --all)",
 		Command:          canonicalPath,
 		Args:             []string{"restart", "--all"},
 		WeeklyTrigger:    &scheduler.WeeklyTrigger{DayOfWeek: day, HourLocal: hr, MinuteLocal: min},
 		RestartOnFailure: false,
-	})
+	}, priorXML)
 }
 
 // WeeklyRefreshDisable removes the hub-wide weekly-refresh task.

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -44,19 +45,9 @@ func seedInstalledServerManifestsWithDaemons(t *testing.T, byServer map[string][
 }
 
 // ---------------------------------------------------------------------------
-// FIX 1 (bot r35-2) — cleanupLegacySchedulerTasksForSupervisorInstall's
-// full-server arm must NOT delete a hyphen-sibling's legacy scheduler task.
-// ---------------------------------------------------------------------------
-
-// TestCleanupLegacySchedulerTasksForSupervisorInstall_SparesHyphenSibling locks
-// FIX 1. sch.List("mcp-local-hub-demo-") over-matches the sibling task
-// \mcp-local-hub-demo-alpha-beta (server demo-alpha's daemon beta); the pre-fix
-// loop deleted it unconditionally on every demo install. With the
-// longest-installed-prefix gate, installing demo deletes only demo's own task
-// and leaves the demo-alpha sibling's task intact.
-//
-// Negative-control (pre-fix): the unconditional delete loop removes
-// \mcp-local-hub-demo-alpha-beta too → the survival assertion fails.
+// Legacy handoff classification must preserve hyphen siblings. Automatic
+// deletion is refused for every generation; only this server's observed tasks
+// should receive retention warnings and recovery snapshots.
 func TestCleanupLegacySchedulerTasksForSupervisorInstall_SparesHyphenSibling(t *testing.T) {
 	daemonIntentTestHelper(t)
 	// demo AND demo-alpha installed: demo-alpha is the longer prefix that owns
@@ -67,6 +58,9 @@ func TestCleanupLegacySchedulerTasksForSupervisorInstall_SparesHyphenSibling(t *
 	f.listSeed = []scheduler.TaskStatus{
 		{Name: `\mcp-local-hub-demo-alpha`},      // demo's own daemon task
 		{Name: `\mcp-local-hub-demo-alpha-beta`}, // sibling demo-alpha's daemon beta
+	}
+	for _, task := range f.listSeed {
+		f.xml[strings.TrimPrefix(task.Name, `\`)] = []byte("<Task>observed</Task>")
 	}
 	installFakeScheduler(t, f)
 
@@ -90,19 +84,16 @@ func TestCleanupLegacySchedulerTasksForSupervisorInstall_SparesHyphenSibling(t *
 	var buf bytes.Buffer
 	cleanupLegacySchedulerTasksForSupervisorInstall(m, "", &buf)
 
-	deleted := make(map[string]struct{}, len(f.deleteNames))
-	for _, n := range f.deleteNames {
-		deleted[n] = struct{}{}
+	if len(f.deleteNames) != 0 {
+		t.Fatalf("cleanup deleted unowned generations: %v", f.deleteNames)
 	}
-	if _, ok := deleted["mcp-local-hub-demo-alpha-beta"]; ok {
-		t.Fatalf("installing demo deleted sibling demo-alpha's task \\mcp-local-hub-demo-alpha-beta; deleteNames=%v", f.deleteNames)
-	}
-	if _, ok := deleted["mcp-local-hub-demo-alpha"]; !ok {
-		t.Fatalf("installing demo did not delete its own obsolete task \\mcp-local-hub-demo-alpha; deleteNames=%v", f.deleteNames)
+	if strings.Contains(buf.String(), "task mcp-local-hub-demo-alpha-beta retained") ||
+		!strings.Contains(buf.String(), "task mcp-local-hub-demo-alpha retained") {
+		t.Fatalf("retention warnings crossed server ownership: %s", buf.String())
 	}
 }
 
-func TestCleanupLegacySchedulerTasksForSupervisorInstall_ReclaimsOwnHyphenatedDaemonDespiteAvailableLongerManifest(t *testing.T) {
+func TestCleanupLegacySchedulerTasksForSupervisorInstall_ReportsOwnHyphenatedDaemonDespiteAvailableLongerManifest(t *testing.T) {
 	daemonIntentTestHelper(t)
 	// demo-alpha is merely available in the manifest catalog. The task below is
 	// declared by demo itself (daemon alpha-beta), so the catalog entry must not
@@ -112,6 +103,9 @@ func TestCleanupLegacySchedulerTasksForSupervisorInstall_ReclaimsOwnHyphenatedDa
 	f := newInstallFakeScheduler()
 	f.listSeed = []scheduler.TaskStatus{
 		{Name: `\mcp-local-hub-demo-alpha-beta`},
+	}
+	for _, task := range f.listSeed {
+		f.xml[strings.TrimPrefix(task.Name, `\`)] = []byte("<Task>observed</Task>")
 	}
 	installFakeScheduler(t, f)
 
@@ -135,8 +129,8 @@ func TestCleanupLegacySchedulerTasksForSupervisorInstall_ReclaimsOwnHyphenatedDa
 	var buf bytes.Buffer
 	cleanupLegacySchedulerTasksForSupervisorInstall(m, "", &buf)
 
-	if !sliceContainsBare(f.deleteNames, "mcp-local-hub-demo-alpha-beta") {
-		t.Fatalf("cleanup preserved demo's own hyphenated-daemon task because demo-alpha was available; deleteNames=%v", f.deleteNames)
+	if len(f.deleteNames) != 0 || !strings.Contains(buf.String(), "task mcp-local-hub-demo-alpha-beta retained") {
+		t.Fatalf("own hyphenated task was not retained/reported: deletes=%v output=%s", f.deleteNames, buf.String())
 	}
 }
 
@@ -147,8 +141,7 @@ func TestCleanupLegacySchedulerTasksForSupervisorInstall_ReclaimsOwnHyphenatedDa
 
 // TestLegacySchedulerTasksDryRun_SparesHyphenSibling locks FIX 2. The dry-run
 // preview of install demo (with sibling demo-alpha installed) must NOT list
-// \mcp-local-hub-demo-alpha-beta for deletion — otherwise the dry-run LIES
-// about what the real cleanup (FIX 1) does.
+// \mcp-local-hub-demo-alpha-beta as a retained task belonging to demo.
 //
 // Negative-control (pre-fix): the preview lists every prefix-matched task →
 // the absence assertion fails.

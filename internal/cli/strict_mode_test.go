@@ -655,6 +655,63 @@ func TestStrictModeEnable_RevertOnShimFailure(t *testing.T) {
 	}
 }
 
+func TestStrictModeWindowsExistingTaskRefusalPreservesRecovery(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("existing Scheduler registrations are refused only on Windows")
+	}
+	for _, tc := range []struct {
+		name     string
+		drifted  bool
+		recovery bool
+	}{
+		{name: "baseline_matches"},
+		{name: "definition_changed", drifted: true},
+		{name: "recovery", recovery: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := setupSupervisorFixture(t)
+			t.Cleanup(api.SetDaemonStateRootForTest(tmp.stateDir))
+			tmp.SeedInitialStrict(false)
+			tmp.MakeShimWriteFail()
+			prior := []byte("<Task>observed definition</Task>")
+			tmp.backend.shimErr = autostart.NewObservedTaskReplacementRefusal(autostart.WindowsTaskName, prior, nil)
+			if tc.drifted {
+				tmp.backend.statusSpecFn = tornShimSpecFn("before", "after")
+			}
+			deps := tmp.Deps()
+			var err error
+			if tc.recovery {
+				if err := writeStrictModeBreadcrumb(deps.BreadcrumbPath, &strictModeBreadcrumb{Intended: true}); err != nil {
+					t.Fatal(err)
+				}
+				err = RunStrictModeRecover(deps)
+			} else {
+				err = RunStrictMode([]string{"enable"}, deps)
+			}
+
+			var refusal *api.SchedulerReplacementRefusedError
+			if !errors.Is(err, api.ErrSchedulerReplacementUnowned) || !errors.As(err, &refusal) || refusal.SnapshotPath == "" {
+				t.Fatalf("strict-mode lost the typed refusal or its snapshot: %v", err)
+			}
+			keep := tc.drifted || tc.recovery
+			_, statErr := os.Stat(deps.BreadcrumbPath)
+			if keep && (statErr != nil || exitCodeFromError(err) != ExitStrictModeRevertFailed) {
+				t.Fatalf("unfinished settlement lost recovery: exit=%d stat=%v", exitCodeFromError(err), statErr)
+			}
+			if !keep && !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("matching baseline left a recovery marker: %v", statErr)
+			}
+			intent, readErr := api.ReadSupervisorIntent(deps.IntentPath)
+			if readErr != nil || intent.StrictMode != tc.recovery {
+				t.Fatalf("intent did not reflect the settled step: intent=%+v err=%v", intent, readErr)
+			}
+			if tmp.backend.disableCalls != 0 {
+				t.Fatal("strict-mode tried to remove the refused task")
+			}
+		})
+	}
+}
+
 // ============================================================================
 // Plan §2584 — revert-of-revert failure writes the breadcrumb + exits 10.
 // ============================================================================

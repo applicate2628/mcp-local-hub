@@ -16,7 +16,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"mcp-local-hub/internal/scheduler"
@@ -55,8 +54,7 @@ func newPlatformBackend() (Backend, error) {
 // supervisor spawn inherits the right intent flag. Drift detection
 // relies on the exact-element diff between the two modes.
 //
-// The task identity remains unchanged across owner modes; Enable always
-// replaces its argv in place so no second task/process family is introduced.
+// Both owner modes use the same canonical task name.
 func superviseArgs(opts Options) ([]string, error) {
 	// --no-browser: the autostart/logon/liveness-recovery GUI is a headless
 	// server + tray indicator, NOT an interactive `mcphub gui`. Without it,
@@ -86,17 +84,9 @@ func superviseArgs(opts Options) ([]string, error) {
 	return args, nil
 }
 
-// Enable installs (or replaces) the autostart Task Scheduler entry.
-//
-// Replacement strategy: scheduler.Create rejects "task already exists"
-// with an error, so we Delete first (idempotent) and then Create. This
-// keeps the operation atomic-from-the-user-perspective even when the
-// shim was previously installed with different args.
+// Enable creates the autostart task after confirmed absence. An existing
+// registration is retained, including one whose visible arguments match.
 func (w *windowsBackend) Enable(opts Options) error {
-	// Validate the exact owner argv before touching the existing canonical
-	// task. Delete-before-create is the scheduler replacement protocol, but an
-	// invalid requested mode is a caller error, not a reason to remove a
-	// working owner.
 	args, err := superviseArgs(opts)
 	if err != nil {
 		return err
@@ -109,10 +99,12 @@ func (w *windowsBackend) Enable(opts Options) error {
 	if err != nil {
 		return err
 	}
-	// Always Delete first — idempotent at the scheduler layer and
-	// guarantees Create won't trip on a stale entry.
-	if err := sched.Delete(WindowsTaskName); err != nil {
-		return fmt.Errorf("delete prior task: %w", err)
+	prior, err := observeWindowsAutostartDefinition(sched)
+	if err != nil {
+		return err
+	}
+	if len(prior) != 0 {
+		return NewObservedTaskReplacementRefusal(WindowsTaskName, prior, nil)
 	}
 	spec := scheduler.TaskSpec{
 		Name:         WindowsTaskName,
@@ -130,30 +122,31 @@ func (w *windowsBackend) Enable(opts Options) error {
 		RestartOnFailure: false,
 	}
 	if err := sched.Create(spec); err != nil {
-		return fmt.Errorf("create task: %w", err)
-	}
-	// Best-effort: remove the legacy v0.4.x watchdog Task Scheduler
-	// entry. In v0.5.0 the supervisor owns daemon revival via Job
-	// Object + reconcile loop, so the 5-min-cadence watchdog task is
-	// a no-op vestige that writes "suspicious-xml" warnings to
-	// watchdog.log every cycle (its v0.4.x validator doesn't
-	// understand the v0.5.0 supervisor task XML format and rejects it).
-	// Deleting it here makes `mcphub autostart enable` the canonical
-	// transition point — operators don't have to remember to delete
-	// the watchdog task manually after migration.
-	//
-	// scheduler.Delete is idempotent (returns nil for absent tasks),
-	// so this is safe to call unconditionally. Non-Absent errors
-	// (e.g. permissions, scheduler-access transient) are surfaced to
-	// stderr — best-effort but visible, so an operator running into
-	// the failure doesn't silently retain the legacy watchdog task
-	// spamming "suspicious-xml" warnings every 5 min.
-	const legacyWatchdogTaskName = `\mcp-local-hub-watchdog`
-	if err := sched.Delete(legacyWatchdogTaskName); err != nil && !isAbsentErrorMsg(err) {
-		fmt.Fprintf(os.Stderr, "autostart: legacy watchdog task cleanup failed: %v (manual: schtasks /Delete /TN %q /F)\n",
-			err, legacyWatchdogTaskName)
+		createErr := fmt.Errorf("create autostart task %s: %w", WindowsTaskName, err)
+		observed, readErr := observeWindowsAutostartDefinition(sched)
+		if readErr != nil {
+			return errors.Join(createErr, readErr)
+		}
+		if len(observed) != 0 {
+			return NewObservedTaskReplacementRefusal(WindowsTaskName, observed, createErr)
+		}
+		return createErr
 	}
 	return nil
+}
+
+func observeWindowsAutostartDefinition(sched scheduler.Scheduler) ([]byte, error) {
+	raw, err := sched.ExportXML(WindowsTaskName)
+	if errors.Is(err, scheduler.ErrTaskNotFound) && len(raw) == 0 {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("observe autostart task %s: %w", WindowsTaskName, err)
+	}
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("observe autostart task %s: %w: empty XML", WindowsTaskName, scheduler.ErrTaskCorrupt)
+	}
+	return raw, nil
 }
 
 func resolveWindowsOwnedEntrypoint(opts Options) (string, error) {
@@ -211,10 +204,9 @@ func (w *windowsBackend) Status(opts Options) (State, error) {
 	return snapshot.State, err
 }
 
-// StatusSnapshot reports State plus a spec fingerprint derived from the Task
-// Scheduler XML's non-liveness shim fields. The live Status() state is used
-// only for running-vs-stopped classification and is deliberately excluded from
-// the fingerprint.
+// StatusSnapshot fingerprints the complete observed Task Scheduler XML and the
+// runtime disabled bit. Running-vs-stopped transitions do not change it.
+// Equality describes the observation and grants no generation ownership.
 func (w *windowsBackend) StatusSnapshot(opts Options) (StatusSnapshot, error) {
 	return w.statusSnapshot(opts, true)
 }
@@ -229,16 +221,6 @@ func (w *windowsBackend) statusSnapshot(opts Options, failClosedXML bool) (Statu
 		if errors.Is(err, scheduler.ErrTaskNotFound) {
 			return StatusSnapshot{State: StateAbsent}, nil
 		}
-		// Windows schtasks /Query reports "cannot find the file
-		// specified" via exit-non-zero rather than mapping to
-		// ErrTaskNotFound (only ExportXML does that mapping). So
-		// fall back to the string-match the scheduler package
-		// already uses for Delete idempotence — any error whose
-		// message contains "cannot find" or "does not exist" is
-		// the absent-task signal in disguise.
-		if isAbsentErrorMsg(err) {
-			return StatusSnapshot{State: StateAbsent}, nil
-		}
 		return StatusSnapshot{State: StateAbsent}, fmt.Errorf("scheduler status: %w", err)
 	}
 
@@ -250,10 +232,13 @@ func (w *windowsBackend) statusSnapshot(opts Options, failClosedXML bool) (Statu
 			return StatusSnapshot{State: windowsTaskStatusState(st)}, fmt.Errorf("scheduler task XML snapshot: %w", xmlErr)
 		}
 	} else if taskSpec, ok := parseWindowsTaskSpec(xmlBlob); ok {
-		spec = windowsShimSpecFingerprint(taskSpec)
+		if failClosedXML {
+			disabled := st.RuntimeState == scheduler.TaskRuntimeDisabled || strings.EqualFold(st.State, "Disabled")
+			spec = shimSpecFingerprint("windows", fmt.Sprint(disabled), string(xmlBlob))
+		}
 		drift = windowsTaskSpecDrifted(taskSpec, opts)
 	} else if failClosedXML {
-		return StatusSnapshot{State: windowsTaskStatusState(st)}, fmt.Errorf("scheduler task XML snapshot unavailable")
+		return StatusSnapshot{State: windowsTaskStatusState(st)}, fmt.Errorf("scheduler task XML snapshot: %w", scheduler.ErrTaskCorrupt)
 	}
 
 	if drift {
@@ -267,18 +252,6 @@ func windowsTaskStatusState(st scheduler.TaskStatus) State {
 		return StateEnabledRunning
 	}
 	return StateEnabledStopped
-}
-
-// isAbsentErrorMsg matches the schtasks "task not found" failure mode
-// for callers that didn't go through ExportXML (which maps to the
-// typed ErrTaskNotFound sentinel). Keeps Status absent-detection
-// resilient to the Status call path which doesn't pre-translate.
-func isAbsentErrorMsg(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "cannot find") || strings.Contains(msg, "does not exist")
 }
 
 // detectDrift parses the on-disk Task Scheduler XML and returns true
@@ -314,7 +287,6 @@ func detectDrift(xmlBlob []byte, opts Options) bool {
 type windowsTaskSpec struct {
 	Command   string
 	Arguments string
-	Enabled   string
 }
 
 func parseWindowsTaskSpec(xmlBlob []byte) (windowsTaskSpec, bool) {
@@ -325,12 +297,9 @@ func parseWindowsTaskSpec(xmlBlob []byte) (windowsTaskSpec, bool) {
 	type actionsNode struct {
 		Exec execNode `xml:"Exec"`
 	}
-	type settingsNode struct {
-		Enabled string `xml:"Enabled"`
-	}
 	type taskRoot struct {
-		Actions  actionsNode  `xml:"Actions"`
-		Settings settingsNode `xml:"Settings"`
+		XMLName xml.Name    `xml:"Task"`
+		Actions actionsNode `xml:"Actions"`
 	}
 	dec := xml.NewDecoder(bytes.NewReader(xmlBlob))
 	dec.CharsetReader = func(_ string, r io.Reader) (io.Reader, error) {
@@ -349,7 +318,6 @@ func parseWindowsTaskSpec(xmlBlob []byte) (windowsTaskSpec, bool) {
 	return windowsTaskSpec{
 		Command:   t.Actions.Exec.Command,
 		Arguments: t.Actions.Exec.Arguments,
-		Enabled:   t.Settings.Enabled,
 	}, true
 }
 
@@ -385,18 +353,4 @@ func windowsTaskSpecDrifted(spec windowsTaskSpec, opts Options) bool {
 		}
 	}
 	return false
-}
-
-func windowsShimSpecFingerprint(spec windowsTaskSpec) string {
-	enabled := strings.ToLower(strings.TrimSpace(spec.Enabled))
-	if enabled == "" {
-		enabled = "unknown"
-	}
-	return shimSpecFingerprint(
-		"windows",
-		"installed=true",
-		"enabled="+enabled,
-		"command="+strings.ToLower(strings.TrimSpace(spec.Command)),
-		"args="+strings.Join(strings.Fields(spec.Arguments), " "),
-	)
 }

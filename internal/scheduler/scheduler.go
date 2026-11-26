@@ -82,6 +82,10 @@ var ErrPermissionDenied = errors.New("scheduler: permission denied")
 var ErrTaskCorrupt = errors.New("scheduler: task corrupt")
 var ErrUnavailable = errors.New("scheduler: unavailable")
 
+// ErrTaskReplacementUnowned means the caller refused to replace or remove an
+// observed task because it could not exclusively own that task generation.
+var ErrTaskReplacementUnowned = errors.New("exclusive ownership of the existing scheduler task generation is unavailable")
+
 // ErrMutationOutcomeUnknown means the executor could not establish whether a
 // dispatched mutation took effect. It is never evidence of absence and must not
 // cause replay, deletion, or XML replacement as automatic compensation.

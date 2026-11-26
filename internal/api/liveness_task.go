@@ -10,8 +10,7 @@
 // (spec §5 Phase C/D) then DELETED the watchdog engine, leaving the liveness
 // task as the sole maintenance-task install surface. This file therefore also
 // hosts the canonical-exe / current-user resolvers migrated out of the deleted
-// watchdog-side files (it is their surviving consumer) plus the
-// RemoveLegacyWatchdogTask cleanup for existing hosts.
+// watchdog-side files plus the legacy watchdog observation and uninstall paths.
 package api
 
 import (
@@ -527,26 +526,30 @@ func (a *API) UninstallLivenessTask() error {
 	return sch.Delete(LivenessTaskName)
 }
 
-// LegacyWatchdogTaskName is the canonical name of the v0.4.x watchdog
-// scheduled task. The watchdog ENGINE was deleted in the v0.6 redesign
-// (spec §5 Phase D); this literal survives ONLY so existing hosts can
-// have the leftover task removed by `mcphub setup` / `mcphub uninstall`.
-// Kept here (not in a deleted watchdog-side file) so the one place that
-// still needs the literal owns it.
-const LegacyWatchdogTaskName = "\\mcp-local-hub-watchdog"
+// LegacyWatchdogTaskName identifies the v0.4.x scheduled task that may remain
+// after the watchdog engine was removed in v0.6 (spec §5 Phase D).
+const LegacyWatchdogTaskName = `\mcp-local-hub-watchdog`
 
-// RemoveLegacyWatchdogTask deletes the leftover v0.4.x
-// `\mcp-local-hub-watchdog` scheduled task on existing hosts. The v0.6
-// supervisor owns daemon revival via its Job-Object reaper + reconcile
-// loop, and owner-death recovery is the liveness task — so the legacy
-// watchdog is a no-op vestige that actively fights the supervisor every
-// 5 min (it writes "suspicious-xml" warnings against the v0.5.0 task XML
-// its v0.4.x validator can no longer parse).
-//
-// Idempotent + best-effort by contract: scheduler.Delete returns nil for
-// an absent task (clean hosts), so callers treat this as non-fatal. Routes
-// through the same newScheduler() factory seam as UninstallLivenessTask so
-// tests can drive it with a recording fake.
+// RetainLegacyWatchdogTaskForSetup reports whether setup had to leave a legacy
+// watchdog registration in place. A confirmed absence is a no-op. A successful
+// observation yields a refusal and a protected snapshot of the definition.
+func (a *API) RetainLegacyWatchdogTaskForSetup() error {
+	sch, err := newScheduler()
+	if err != nil {
+		return fmt.Errorf("resolve scheduler: %w", err)
+	}
+	priorXML, err := snapshotTaskForSchedulerUpgrade(sch, LegacyWatchdogTaskName)
+	if err != nil {
+		return fmt.Errorf("observe legacy watchdog definition: %w", err)
+	}
+	if len(priorXML) == 0 {
+		return nil
+	}
+	return refuseSchedulerTaskReplacement(LegacyWatchdogTaskName, priorXML)
+}
+
+// RemoveLegacyWatchdogTask deletes the canonical legacy watchdog task on an
+// explicit last-server uninstall. The removal is idempotent when it is absent.
 func (a *API) RemoveLegacyWatchdogTask() error {
 	sch, err := newScheduler()
 	if err != nil {

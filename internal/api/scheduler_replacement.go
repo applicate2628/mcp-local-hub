@@ -3,12 +3,15 @@ package api
 import (
 	"errors"
 	"fmt"
+
+	"mcp-local-hub/internal/autostart"
+	"mcp-local-hub/internal/scheduler"
 )
 
 // ErrSchedulerReplacementUnowned means a destructive replacement or deletion
 // was refused. The backend does not provide exclusive authority over the
 // observed registration; an XML snapshot or a cooperating lock cannot grant it.
-var ErrSchedulerReplacementUnowned = errors.New("exclusive ownership of the existing scheduler task generation is unavailable")
+var ErrSchedulerReplacementUnowned = scheduler.ErrTaskReplacementUnowned
 
 // SchedulerReplacementRefusedError retains the observed definition without
 // claiming that it owns the current registration. SnapshotPath is populated only
@@ -47,4 +50,19 @@ func refuseSchedulerTaskReplacement(name string, priorXML []byte) error {
 	}
 	refusal.SnapshotPath = path
 	return refusal
+}
+
+// RetainAutostartTaskReplacementRefusal finalizes a direct Enable result.
+// Snapshot the exact observation carried by the refusal, preserving any
+// original create error. Other Enable results pass through.
+func RetainAutostartTaskReplacementRefusal(err error) error {
+	refusal, ok := err.(*autostart.ObservedTaskReplacementRefusal)
+	if !ok {
+		return err
+	}
+	retained := refuseSchedulerTaskReplacement(refusal.TaskName, refusal.ObservedXML())
+	if refusal.CreateErr != nil {
+		return errors.Join(refusal.CreateErr, retained)
+	}
+	return retained
 }
