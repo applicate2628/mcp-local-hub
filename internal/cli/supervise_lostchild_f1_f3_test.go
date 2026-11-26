@@ -49,7 +49,6 @@ func setSelfPIDForTest(t *testing.T, pid int) {
 func f1Controller(t *testing.T, portOwnerFn func(int) (int, bool, error), spawn func(api.SupervisorDaemon) error, daemons ...api.SupervisorDaemon) (*supervisorController, *api.EventLoop, string) {
 	t.Helper()
 	tmpHome := apitest.HardenedTempDir(t)
-	statePath := filepath.Join(tmpHome, "supervisor-state.json")
 	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
 	events, err := api.OpenSupervisorEventLog(eventsPath)
 	if err != nil {
@@ -59,7 +58,9 @@ func f1Controller(t *testing.T, portOwnerFn func(int) (int, bool, error), spawn 
 
 	loop := api.NewEventLoop(16)
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
+	// These cases assert gate scheduling and in-memory state, not persistence.
+	// Leave statePath empty so unrelated tracker writes cannot consume their
+	// three-second behavior deadlines; keep the real event log for assertions.
 	ctrl := &supervisorController{
 		intentCache:         newIntentCache(),
 		eventLoop:           loop,
@@ -69,7 +70,6 @@ func f1Controller(t *testing.T, portOwnerFn func(int) (int, bool, error), spawn 
 		daemonIntent:        newDaemonIntentCache(),
 		spawn:               spawn,
 		terminate:           func(api.SupervisorDaemon) error { return nil },
-		statePath:           statePath,
 		ctx:                 ctx,
 		failureWindow:       respawnFailureWindow,
 		quarantineThreshold: respawnQuarantineThreshold,
@@ -82,9 +82,24 @@ func f1Controller(t *testing.T, portOwnerFn func(int) (int, bool, error), spawn 
 	// Deterministic selfPID so the classifier's gate-1 self-check is stable.
 	setSelfPIDForTest(t, 1)
 
+	loopDone := make(chan struct{})
+	workerDone := make(chan struct{})
+	t.Cleanup(func() {
+		cancel()
+		// Join the original writers before restoring seams, closing the log,
+		// or allowing TempDir cleanup to remove the controller's state.
+		<-workerDone
+		<-loopDone
+	})
 	loop.RegisterHandler(ctrl.handleLoopEvent)
-	go loop.Run(ctx)
-	go ctrl.runPortGateWorker(ctx)
+	go func() {
+		defer close(loopDone)
+		loop.Run(ctx)
+	}()
+	go func() {
+		defer close(workerDone)
+		ctrl.runPortGateWorker(ctx)
+	}()
 	return ctrl, loop, eventsPath
 }
 
@@ -646,6 +661,15 @@ func TestF1_LoopNotBlockedByWorkerClassify(t *testing.T) {
 		return nil
 	}
 	ctrl, loop, _ := f1Controller(t, portOwnerFn, spawn, a, b)
+	t.Cleanup(func() {
+		// An earlier assertion must release this test-owned block before
+		// f1Controller joins the original worker during cleanup.
+		select {
+		case <-block:
+		default:
+			close(block)
+		}
+	})
 
 	seedFailures(ctrl, a.TaskName, 3)
 	seedFailures(ctrl, b.TaskName, 3)
