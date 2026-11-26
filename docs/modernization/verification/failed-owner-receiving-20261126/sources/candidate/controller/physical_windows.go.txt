@@ -1,0 +1,259 @@
+//go:build windows && amd64
+
+package main
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"time"
+
+	owner "mcp-local-hub/.scratch/__CANONICAL_EXTERNAL_STAGE__/canonicalcaseowner"
+	fixture "mcp-local-hub/internal/canonicalnativefixture"
+	"mcp-local-hub/internal/process"
+)
+
+type failedPhysicalImage struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+}
+
+type failedPhysicalCase struct {
+	Test                   string        `json:"test"`
+	Slot                   string        `json:"slot"`
+	Attempted              bool          `json:"attempted"`
+	OriginalReturnReceived bool          `json:"original_return_received"`
+	OriginalOwnerMatched   bool          `json:"original_owner_matched"`
+	PhysicalComplete       bool          `json:"physical_complete"`
+	StdinClosed            bool          `json:"stdin_closed"`
+	NativeNoCreateReceived bool          `json:"native_no_create_received"`
+	Native                 *owner.Result `json:"native"`
+	done                   bool
+	cause                  error
+}
+
+type failedPhysicalResult struct {
+	Schema                         string                           `json:"schema"`
+	CanonicalPlan                  string                           `json:"canonical_plan"`
+	CanonicalPlanSHA256            string                           `json:"canonical_plan_sha256"`
+	Profile                        string                           `json:"profile"`
+	FocusedCase                    string                           `json:"focused_case"`
+	RunRoot                        string                           `json:"run_root"`
+	Binary                         string                           `json:"binary"`
+	BinarySHA256                   string                           `json:"binary_sha256"`
+	SourceDir                      string                           `json:"source_dir"`
+	Args                           []string                         `json:"args"`
+	Images                         map[string]*failedPhysicalImage  `json:"images"`
+	WorkDeadline                   string                           `json:"work_deadline"`
+	CleanupDeadline                string                           `json:"cleanup_deadline"`
+	ControllerPID                  int                              `json:"controller_pid"`
+	OriginalExitCode               int                              `json:"original_exit_code"`
+	OriginalFailure                string                           `json:"original_failure"`
+	OriginalResultPath             string                           `json:"original_result_path"`
+	OriginalResultPreserved        bool                             `json:"original_result_preserved"`
+	ReceivedUTC                    string                           `json:"received_utc"`
+	PhysicalComplete               bool                             `json:"physical_complete"`
+	OuterReturnReceived            bool                             `json:"outer_return_received"`
+	OuterResourcesFinalized        bool                             `json:"outer_resources_finalized"`
+	OuterStartAttempted            bool                             `json:"outer_start_attempted"`
+	OuterRootIdentity              process.ContainedRootIdentity    `json:"outer_root_identity"`
+	RootWaitKnown                  bool                             `json:"root_wait_known"`
+	RootExitCode                   int                              `json:"root_exit_code"`
+	OuterNativeSnapshot            *process.ContainedNativeSnapshot `json:"outer_native_snapshot"`
+	OuterIOSettlement              process.ContainedIOSettlement    `json:"outer_io_settlement"`
+	ControlJoined                  bool                             `json:"control_joined"`
+	ControlStopped                 bool                             `json:"control_stopped"`
+	StdoutSinkClosed               bool                             `json:"stdout_sink_closed"`
+	StderrSinkClosed               bool                             `json:"stderr_sink_closed"`
+	Cases                          []failedPhysicalCase             `json:"cases"`
+	QualificationPassed            bool                             `json:"qualification_passed"`
+	CaptureAccessIssued            bool                             `json:"capture_access_issued"`
+	NewCommandsPermitted           bool                             `json:"new_commands_permitted"`
+	SourceOrCacheAccessIssued      bool                             `json:"source_or_cache_access_issued"`
+	QualificationDeadlinesExtended bool                             `json:"qualification_deadlines_extended"`
+	outerDone                      bool
+	outerCause                     error
+}
+
+// This barrier runs after the original failed result was published. It neither
+// re-enters receiveCase/receiveComposite nor changes their frozen result.json.
+// Pending original completions keep this controller alive. Irrecoverable proof
+// gaps keep the same controller in HOLD; process exit is never a cleanup action.
+func (s *session) receiveFailedPhysical(code int, originalCause error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			holdFailedPhysical(recovered)
+		}
+	}()
+	if code == 0 || !s.unknown || !s.outerStarted || !s.resultPublished {
+		holdFailedPhysical(errors.Join(originalCause, errors.New("failed physical receive lacks the original published failed invocation")))
+	}
+	r := &failedPhysicalResult{
+		Schema:        "canonical-external-failed-physical-closure-v1",
+		CanonicalPlan: s.record.CanonicalPlan, CanonicalPlanSHA256: s.record.CanonicalPlanSHA256,
+		Profile: s.record.Profile, FocusedCase: s.record.FocusedCase, RunRoot: s.record.RunRoot,
+		Binary: s.record.Binary, BinarySHA256: s.record.BinarySHA256, SourceDir: s.record.SourceDir,
+		Args:         append([]string(nil), s.record.Args...),
+		WorkDeadline: s.record.WorkDeadline, CleanupDeadline: s.record.CleanupDeadline,
+		ControllerPID: os.Getpid(), OriginalExitCode: code, OriginalFailure: s.record.Failure,
+		OriginalResultPath: filepath.Join(s.root, "result.json"), OriginalResultPreserved: true,
+		ControlJoined: s.record.Channel.Joined, ControlStopped: s.record.Channel.Stopped,
+		Images: map[string]*failedPhysicalImage{
+			"actor":      {s.plan.Binary.Path, s.plan.Binary.SHA256},
+			"product":    {s.plan.Product.Path, s.plan.Product.SHA256},
+			"fixture":    {s.plan.Fixture.Path, s.plan.Fixture.SHA256},
+			"powershell": {s.plan.Tools.PowerShell.Path, s.plan.Tools.PowerShell.SHA256},
+			"netstat":    {s.plan.Tools.Netstat.Path, s.plan.Tools.Netstat.SHA256},
+			"netsh":      {s.plan.Tools.Netsh.Path, s.plan.Tools.Netsh.SHA256},
+			"conhost":    {s.plan.Tools.Conhost.Path, s.plan.Tools.Conhost.SHA256},
+			"wmic":       nil,
+		},
+		Cases: make([]failedPhysicalCase, len(s.cases)),
+	}
+	if s.plan.Tools.WMIC != nil {
+		r.Images["wmic"] = &failedPhysicalImage{s.plan.Tools.WMIC.Path, s.plan.Tools.WMIC.SHA256}
+	}
+	for i, c := range s.cases {
+		r.Cases[i] = failedPhysicalCase{Test: c.Record.Test, Slot: c.Record.Slot, Attempted: c.Record.Attempted}
+	}
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		pending, err := s.pollFailedPhysical(r)
+		if !pending {
+			if err != nil {
+				holdFailedPhysical(err)
+			}
+			r.PhysicalComplete = true
+			r.ReceivedUTC = time.Now().UTC().Format(time.RFC3339Nano)
+			if err := publishResult(filepath.Join(s.root, "failed-physical-closure.json"), r); err != nil {
+				holdFailedPhysical(err)
+			}
+			return
+		}
+		<-ticker.C
+	}
+}
+
+func (s *session) pollFailedPhysical(r *failedPhysicalResult) (bool, error) {
+	pending := false
+	var cause error
+	if !r.ControlJoined || !r.ControlStopped || fixture.HasRetainedFile(s.cause) {
+		cause = errors.Join(s.cause, errors.New("failed physical receive holds original control or file custody"))
+	}
+	for i, c := range s.cases {
+		row := &r.Cases[i]
+		if !row.done {
+			row.done, row.cause = receiveFailedCase(c, row)
+		}
+		pending = pending || !row.done
+		cause = errors.Join(cause, row.cause)
+	}
+	if !r.outerDone {
+		if !s.collectOuter() {
+			pending = true
+		} else {
+			r.outerDone = true
+			if !s.outer.Returned {
+				r.outerCause = errors.Join(s.outer.Cause, errors.New("original outer owner did not return normally"))
+			} else {
+				observed := s.outer.Observed
+				r.OuterReturnReceived = true
+				r.OuterStartAttempted = observed.StartAttempted
+				r.OuterRootIdentity, r.RootWaitKnown, r.RootExitCode = observed.RootIdentity, observed.RootWaitKnown, observed.RootExitCode
+				r.OuterIOSettlement = observed.IOSettlement
+				if observed.NativeSettlement != nil {
+					snapshot := observed.NativeSettlement.Snapshot()
+					r.OuterNativeSnapshot = &snapshot
+				}
+				// Required source dependency: #671 ff8128a5f717fae75b263de55c382933a0bc9121.
+				// This source-owned predicate allows failed-but-returned IO. It is
+				// frozen: false cannot be repaired by rereading this same receipt.
+				r.OuterResourcesFinalized = observed.ResourcesFinalized()
+				if !r.OuterResourcesFinalized {
+					r.outerCause = errors.New("frozen original outer completion remains incomplete; HOLD")
+				} else {
+					var stdoutErr, stderrErr error
+					r.StdoutSinkClosed, stdoutErr = closeFailedBorrowedSink(s.stdout, s.record.Outer.StdoutSink)
+					r.StderrSinkClosed, stderrErr = closeFailedBorrowedSink(s.stderr, s.record.Outer.StderrSink)
+					r.outerCause = errors.Join(stdoutErr, stderrErr)
+				}
+			}
+		}
+	}
+	return pending, errors.Join(cause, r.outerCause)
+}
+
+func receiveFailedCase(c *caseCustody, row *failedPhysicalCase) (bool, error) {
+	if !row.Attempted {
+		if c.Original.Load() != nil {
+			return true, errors.New("unattempted case unexpectedly retains an original native owner")
+		}
+		row.PhysicalComplete, row.StdinClosed = true, true
+		return true, nil
+	}
+	if c.returned == nil {
+		if c.Done == nil {
+			return true, errors.New("attempted case lacks its original return channel")
+		}
+		select {
+		case received := <-c.Done:
+			c.returned = &received
+		default:
+			return false, nil
+		}
+	}
+	if !c.returned.Returned {
+		return true, errors.Join(c.returned.Cause, errors.New("original case owner did not return normally"))
+	}
+	row.OriginalReturnReceived = true
+	original := c.Original.Load()
+	if original == nil || c.returned.Value.Original != original {
+		return true, errors.New("failed physical receive lost the original case owner binding")
+	}
+	row.OriginalOwnerMatched = true
+	physical, complete, err := original.ReceiveFailedPhysical(c.returned.Value)
+	if err != nil {
+		return true, err
+	}
+	if !complete {
+		return false, nil
+	}
+	row.Native = &physical
+	row.NativeNoCreateReceived = physical.NoCreateAttempted
+	row.StdinClosed = true
+	if fixture.HasRetainedFile(c.Cause) {
+		return true, errors.Join(c.Cause, errors.New("failed physical receive holds the original case file"))
+	}
+	row.PhysicalComplete = true
+	return true, nil
+}
+
+func closeFailedBorrowedSink(file *os.File, original sinkResult) (bool, error) {
+	if file == nil {
+		return false, errors.New("failed physical receive lacks the original borrowed sink")
+	}
+	if original.CloseAttempted {
+		if original.Closed {
+			return true, nil
+		}
+		return false, errors.New("failed physical receive must not retry an original borrowed sink close")
+	}
+	if err := file.Close(); err != nil {
+		return false, &fixture.FileCustodyError{File: file, Cause: err}
+	}
+	return true, nil
+}
+
+func holdFailedPhysical(cause any) {
+	fmt.Fprintln(os.Stderr, "original failed physical receiving remains HOLD:", cause)
+	for {
+		time.Sleep(time.Second)
+		// Retain the actual failure, including a possible FileCustodyError, and
+		// every original controller resource. The timer avoids a Go deadlock exit.
+		runtime.KeepAlive(cause)
+		runtime.KeepAlive(retainedController)
+	}
+}

@@ -1,0 +1,177 @@
+//go:build windows && amd64
+
+package canonicalcaseowner
+
+import (
+	"errors"
+
+	"golang.org/x/sys/windows"
+)
+
+// ReceiveFailedPhysical polls only this retained owner's original completions.
+// The controller must first receive the one Run return on its original channel;
+// retaining the Owner pointer alone does not publish Run's mutable state.
+// A false result without error means an original completion is still pending.
+// An error is a permanent HOLD; no failed close or native operation is retried.
+// This method never extends the qualification deadline or returns capture bytes.
+func (o *Owner) ReceiveFailedPhysical(original Result) (Result, bool, error) {
+	if o == nil || original.Original != o {
+		return Result{}, false, errors.New("failed physical receive requires the same original owner")
+	}
+	if original.NoCreateAttempted && !original.Unknown {
+		return o.receiveNoCreatePhysical(original)
+	}
+	select {
+	case <-o.nativeReturned:
+	default:
+		return Result{}, false, nil
+	}
+	// The debug thread must already have received the complete original chain.
+	// Its deadline, missing events, pending Continue or failed adoption cannot be
+	// repaired by polling known handles after the debugger has returned.
+	if !o.startSucceeded || !o.hostNoJobChecked || !o.killOnExitArmed ||
+		!o.drained || !o.allReceivedAndSignaled() || !o.eventLedgerComplete() {
+		return Result{}, false, errors.New("failed physical receive holds incomplete original debug proof")
+	}
+	// Run's unknown also includes a missing EOF after joined, closed readers and
+	// a deadline checked after the final close. Keep that original qualification
+	// history. The proof above, matching root wait and every one-shot close below
+	// separately reject the incomplete native/IO causes of unknown.
+	if o.creatingThreadCloseAttempted && !o.creatingThreadClosed {
+		return Result{}, false, errors.New("failed physical receive holds original creating-thread close")
+	}
+	if !o.creatingThreadSignaled {
+		if o.creatingThread == 0 || o.creatingThreadClosed {
+			return Result{}, false, errors.New("failed physical receive lacks original creating-thread authority")
+		}
+		signaled, err := pollSignal(o.creatingThread)
+		if err != nil {
+			return Result{}, false, err
+		}
+		if !signaled {
+			return Result{}, false, nil
+		}
+		o.creatingThreadSignaled = true
+	}
+	if !o.rootWait.Returned {
+		if !o.waitStarted {
+			return Result{}, false, errors.New("failed physical receive lacks the single original root wait")
+		}
+		select {
+		case received := <-o.rootWaitReturned:
+			o.rootWait = received.result
+			if !o.rootWait.Returned || !o.rootWait.Known {
+				return Result{}, false, errors.Join(received.err, errors.New("original root wait returned without physical proof"))
+			}
+		default:
+			return Result{}, false, nil
+		}
+	}
+	root := o.byPID[o.rootPID]
+	if !o.rootWait.Known || root == nil || o.rootWait.ExitCode < 0 || uint32(o.rootWait.ExitCode) != root.result.ExitCode {
+		return Result{}, false, errors.New("failed physical receive holds mismatched original root wait")
+	}
+	for _, stream := range []*capture{o.stdout, o.stderr} {
+		ready, err := capturePhysicalClosed(stream)
+		if err != nil || !ready {
+			return Result{}, false, err
+		}
+	}
+	if o.stdin == nil || !o.stdinCloseAttempted || o.stdinCloseErr != nil {
+		return Result{}, false, errors.New("failed physical receive holds original stdin close")
+	}
+	for _, process := range o.processes {
+		if process.result.DuplicateClosed {
+			continue
+		}
+		if process.result.DuplicateCloseAttempted {
+			return Result{}, false, errors.New("failed physical receive must not retry an original process close")
+		}
+		if err := closeProcessDuplicate(process); err != nil {
+			o.markUnknown(err)
+			return Result{}, false, err
+		}
+	}
+	if !o.creatingThreadClosed {
+		o.creatingThreadCloseAttempted = true
+		if err := windows.CloseHandle(o.creatingThread); err != nil {
+			o.markUnknown(err)
+			return Result{}, false, err
+		}
+		o.creatingThreadClosed = true
+	}
+	// imagePin.close remembers its first result and never retries CloseHandle.
+	if err := o.closeImages(); err != nil {
+		o.markUnknown(err)
+		return Result{}, false, err
+	}
+	if !o.nativePhysicalComplete() {
+		return Result{}, false, errors.New("failed physical receive holds incomplete original native closures")
+	}
+	return preserveFailedQualification(o.snapshotWithIO(), original), true, nil
+}
+
+// The only pre-create successes accepted here are original Run returns that
+// already confirmed closeBeforeStart/finishNoCreate. No new close is issued.
+func (o *Owner) receiveNoCreatePhysical(original Result) (Result, bool, error) {
+	if (o.stdout != nil && o.stdout.started) || (o.stderr != nil && o.stderr.started) {
+		select {
+		case <-o.nativeReturned:
+		default:
+			return Result{}, false, nil
+		}
+	}
+	if o.createAttempted || o.unknown || (o.stdin != nil && (!o.stdinCloseAttempted || o.stdinCloseErr != nil)) ||
+		(o.creatingThread != 0 && (!o.creatingThreadSignaled || !o.creatingThreadCloseAttempted || !o.creatingThreadClosed)) {
+		return Result{}, false, errors.New("failed physical receive holds incomplete original no-create result")
+	}
+	for _, row := range o.pins {
+		if row.pin != nil && row.pin.handle != 0 && (!row.pin.closeAttempted || row.pin.closeErr != nil) {
+			return Result{}, false, errors.New("failed physical receive holds original no-create image pin")
+		}
+	}
+	result := o.snapshot()
+	for _, item := range []struct {
+		stream *capture
+		out    *CaptureResult
+	}{{o.stdout, &result.Stdout}, {o.stderr, &result.Stderr}} {
+		if item.stream == nil {
+			continue
+		}
+		if item.stream.started {
+			ready, err := capturePhysicalClosed(item.stream)
+			if err != nil || !ready {
+				return Result{}, false, err
+			}
+		} else if (item.stream.writer != nil && (!item.stream.writerCloseAttempted || !item.stream.writerClosed || item.stream.writerCloseErr != nil)) ||
+			item.stream.readerCloseErr != nil {
+			return Result{}, false, errors.New("failed physical receive holds original no-create pipe close")
+		}
+		*item.out = item.stream.closedResult()
+		item.out.WorkerReturned = item.stream.started
+	}
+	return preserveFailedQualification(result, original), true, nil
+}
+
+func capturePhysicalClosed(stream *capture) (bool, error) {
+	if stream == nil || !stream.started {
+		return false, errors.New("failed physical receive lacks the original capture worker")
+	}
+	select {
+	case <-stream.done:
+	default:
+		return false, nil
+	}
+	if !stream.writerCloseAttempted || !stream.writerClosed || stream.writerCloseErr != nil || stream.readerCloseErr != nil {
+		return false, errors.Join(errors.New("failed physical receive holds original pipe close"), stream.writerCloseErr, stream.readerCloseErr)
+	}
+	return true, nil
+}
+
+func preserveFailedQualification(physical, original Result) Result {
+	physical.NativeComplete, physical.IOComplete = original.NativeComplete, original.IOComplete
+	physical.Complete, physical.Unknown = original.Complete, original.Unknown
+	physical.CompleteReceivedAt, physical.Failure = original.CompleteReceivedAt, original.Failure
+	physical.StdoutBytes, physical.StderrBytes = nil, nil
+	return physical
+}

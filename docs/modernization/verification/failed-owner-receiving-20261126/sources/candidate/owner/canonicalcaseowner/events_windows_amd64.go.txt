@@ -1,0 +1,763 @@
+//go:build windows && amd64
+
+package canonicalcaseowner
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os/exec"
+	"runtime"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"golang.org/x/sys/windows"
+)
+
+// This goroutine deliberately does NOT UnlockOSThread. Go documents actual
+// OS-thread termination when such a locked goroutine exits. Run separately waits
+// the retained native thread handle; nativeReturned alone is never that proof.
+func (o *Owner) runNative(ctx context.Context) {
+	runtime.LockOSThread()
+	defer close(o.nativeReturned)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			o.markUnknown(fmt.Errorf("native owner panic: %v", recovered))
+		}
+		if err := errors.Join(o.closeStdin(), o.stdout.closeWriter(), o.stderr.closeWriter()); err != nil {
+			if o.createAttempted {
+				o.markUnknown(err)
+			} else {
+				o.primary = errors.Join(o.primary, err)
+			}
+		}
+	}()
+	o.creatingThreadID = windows.GetCurrentThreadId()
+	var err error
+	o.creatingThread, err = duplicateThread(windows.CurrentThread())
+	if err != nil || o.creatingThread == 0 {
+		o.primary = errors.Join(errors.New("original creating-thread handle unavailable before Start"), err)
+		return
+	}
+	member, err := inAnyJob(windows.CurrentProcess())
+	if err != nil || member {
+		o.primary = errors.Join(errors.New("creating host must actually be outside every Job"), err)
+		return
+	}
+	o.hostNoJobChecked = true
+	if err := ctx.Err(); err != nil {
+		o.primary = err
+		return
+	}
+	if !time.Now().Before(o.spec.WorkDeadline) {
+		o.primary = context.DeadlineExceeded
+		return
+	}
+	o.command.Stdin, o.command.Stdout, o.command.Stderr = o.stdin, o.stdout.writer, o.stderr.writer
+	o.command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: debugProcessFlag | 0x08000000}
+	o.createAttempted = true
+	startErr := o.command.Start()
+	if o.command.Process != nil {
+		o.rootPID = uint32(o.command.Process.Pid)
+		o.waitStarted = true
+		go o.waitOriginal()
+	}
+	if startErr != nil || o.rootPID == 0 {
+		o.markUnknown(errors.Join(errors.New("original Cmd.Start did not establish root authority"), startErr))
+		return
+	}
+	o.startSucceeded = true
+	if err := armKillOnExit(); err != nil {
+		o.markUnknown(fmt.Errorf("DebugSetProcessKillOnExit(TRUE) after create: %w", err))
+		return
+	}
+	o.killOnExitArmed = true
+	if err := errors.Join(o.closeStdin(), o.stdout.closeWriter(), o.stderr.closeWriter()); err != nil {
+		o.requestAbort(fmt.Errorf("parent original stdio close: %w", err))
+	}
+	for {
+		if !time.Now().Before(o.spec.CleanupDeadline) {
+			o.markUnknown(errors.New("debug chain did not settle by original cleanup deadline"))
+			return
+		}
+		if err := ctx.Err(); err != nil {
+			o.requestAbort(err)
+		} else if !time.Now().Before(o.spec.WorkDeadline) {
+			o.requestAbort(context.DeadlineExceeded)
+		}
+		if o.stdout.overflow.Load() || o.stderr.overflow.Load() {
+			o.requestAbort(errors.New("bounded original output limit exceeded"))
+		}
+		if o.aborting {
+			if err := o.terminateKnown(); err != nil {
+				o.markUnknown(err)
+				return
+			}
+		}
+		if err := o.pollOriginals(); err != nil {
+			o.markUnknown(err)
+			return
+		}
+		// This is a nonempty original-root/CREATE/EXIT ledger condition, not
+		// a timeout or empty active-map proof. It relies on the explicitly
+		// bounded fixed-source/no-new-debug-chain profile recorded in Result.
+		if o.allReceivedAndSignaled() {
+			o.drained = true
+			return
+		}
+		var event debugEvent
+		received, err := nextDebugEvent(&event, 20)
+		if err != nil {
+			o.markUnknown(fmt.Errorf("WaitForDebugEventEx: %w", err))
+			return
+		}
+		if !received {
+			continue
+		}
+		// Retain the exact raw original event before any admission can fail.
+		o.pending = &event
+		o.pendingRecord = EventResult{Code: event.code, PID: event.pid, TID: event.tid, ReceivedAt: time.Now().UTC()}
+		if o.observedEventCount == ^uint64(0) {
+			o.markUnknown(errors.New("original debug event ordinal overflow"))
+			return
+		}
+		o.observedEventCount++
+		o.pendingRecord.Sequence = o.observedEventCount
+		if !time.Now().Before(o.spec.CleanupDeadline) {
+			o.markUnknown(errors.New("original debug event arrived after cleanup deadline"))
+			return
+		}
+		lifecycle := event.code == createProcessEvent || event.code == createThreadEvent ||
+			event.code == exitThreadEvent || event.code == exitProcessEvent
+		// Every process CREATE also acquires its initial thread. Successful
+		// lifecycle records are bounded by 2*T+P <= 8448 under the unchanged
+		// cumulative handle limits, below the original 16384-record capacity.
+		if lifecycle && len(o.events) == maximumEvents {
+			o.markUnknown(errors.New("fixed lifecycle event capacity exhausted"))
+			return
+		}
+		status, err := o.receiveEvent(context.WithoutCancel(ctx), &event)
+		o.pendingRecord.ContinueStatus = status
+		if err != nil {
+			o.markUnknown(err)
+			return
+		}
+		var auxiliary *AuxiliaryEventResult
+		if !lifecycle {
+			auxiliary, err = o.auxiliaryForContinue()
+			if err != nil {
+				o.markUnknown(err)
+				return
+			}
+		}
+		// Cancellation during image admission does not grant new user work:
+		// acquire the original cleanup capability, terminate it, then continue
+		// its exact event solely so the kernel can complete original shutdown.
+		if err := ctx.Err(); err != nil {
+			o.requestAbort(err)
+		} else if !time.Now().Before(o.spec.WorkDeadline) {
+			o.requestAbort(context.DeadlineExceeded)
+		}
+		if !time.Now().Before(o.spec.CleanupDeadline) {
+			o.markUnknown(errors.New("original cleanup deadline expired with a held debug event"))
+			return
+		}
+		if o.aborting {
+			if err := o.terminateKnown(); err != nil {
+				o.markUnknown(err)
+				return
+			}
+		}
+		if event.code == createProcessEvent {
+			process := o.byPID[event.pid]
+			if process != nil && process.result.ImageDisposition == ImageRejected {
+				if !process.result.TerminateAttempted ||
+					(!process.result.TerminateAccepted && !process.result.TerminateExitStatusObserved) {
+					o.markUnknown(errors.New("rejected original image has no accepted pre-user stop"))
+					return
+				}
+				process.result.ImageRejectStopBeforeContinue = true
+			}
+		}
+		if err := continueEvent(&event, status); err != nil {
+			o.markUnknown(fmt.Errorf("original ContinueDebugEvent failed: %w", err))
+			return
+		}
+		o.pendingRecord.Continued = true
+		if lifecycle {
+			o.events = append(o.events, o.pendingRecord)
+		} else {
+			// The only publication into a fixed auxiliary bin is after both
+			// original receiveEvent (including hFile close) and Continue.
+			if auxiliary.Count == 0 {
+				*auxiliary = AuxiliaryEventResult{PID: event.pid, Code: event.code, ContinueStatus: status,
+					FirstSequence: o.pendingRecord.Sequence, FirstReceivedAt: o.pendingRecord.ReceivedAt}
+			}
+			auxiliary.Count++
+			auxiliary.LastSequence, auxiliary.LastReceivedAt = o.pendingRecord.Sequence, o.pendingRecord.ReceivedAt
+			if o.pendingRecord.ImageFilePresent {
+				auxiliary.ImageFilePresentCount++
+				auxiliary.ImageFileCloseAttemptedCount++
+				auxiliary.ImageFileClosedCount++
+			}
+		}
+		o.receiveContinuation(&event)
+		o.pending = nil
+		o.pendingRecord = EventResult{}
+		if event.code == createProcessEvent && event.pid == o.rootPID && !o.aborting {
+			if err := o.publishInitialRoot(); err != nil {
+				o.requestAbort(err)
+			}
+		}
+	}
+}
+
+// This checks counter/close invariants before Continue, without publishing a
+// count. The fixed original process already passed receiveEvent's live-PID guard.
+func (o *Owner) auxiliaryForContinue() (*AuxiliaryEventResult, error) {
+	record := o.pendingRecord
+	process := o.byPID[record.PID]
+	if o.pending == nil || process == nil || process.result.ExitContinued {
+		return nil, errors.New("auxiliary event has no live original process")
+	}
+	var index int
+	switch {
+	case record.Code == exceptionEvent && record.ContinueStatus == debugContinue:
+		index = 0
+	case record.Code == exceptionEvent && record.ContinueStatus == exceptionNotHandled:
+		index = 1
+	case record.Code == loadDLLEvent && record.ContinueStatus == debugContinue:
+		index = 2
+	case record.Code == unloadDLLEvent && record.ContinueStatus == debugContinue:
+		index = 3
+	case record.Code == outputStringEvent && record.ContinueStatus == debugContinue:
+		index = 4
+	default:
+		return nil, errors.New("unsupported original auxiliary event disposition")
+	}
+	if record.ImageFilePresent {
+		if record.Code != loadDLLEvent || !record.ImageFileCloseAttempted || !record.ImageFileClosed {
+			return nil, errors.New("original auxiliary image file close is unreceived")
+		}
+	} else if record.ImageFileCloseAttempted || record.ImageFileClosed {
+		return nil, errors.New("absent auxiliary image file has close claims")
+	}
+	row := &process.auxiliary[index]
+	if row.Count == ^uint64(0) || row.ImageFilePresentCount > row.Count ||
+		row.ImageFileCloseAttemptedCount != row.ImageFilePresentCount ||
+		row.ImageFileClosedCount != row.ImageFilePresentCount {
+		return nil, errors.New("original auxiliary event counter overflow or inconsistent close accounting")
+	}
+	return row, nil
+}
+
+func (o *Owner) waitOriginal() {
+	received := waitReturn{}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			received.err = fmt.Errorf("single original Cmd.Wait panic: %v", recovered)
+			received.result.Error = received.err.Error()
+		}
+		o.rootWaitReturned <- received
+	}()
+	received.err = o.command.Wait()
+	received.result.Returned = true
+	received.result.Error = errorText(received.err)
+	var exited *exec.ExitError
+	if o.command.ProcessState != nil && (received.err == nil || errors.As(received.err, &exited)) {
+		received.result.Known = true
+		received.result.ExitCode = o.command.ProcessState.ExitCode()
+	}
+}
+
+func (o *Owner) requestAbort(err error) {
+	if !o.aborting {
+		o.aborting = true
+		if o.primary == nil {
+			o.primary = err
+		}
+	}
+}
+
+func (o *Owner) terminateKnown() error {
+	for _, process := range o.processes {
+		if process.handle == 0 || process.result.DuplicateClosed ||
+			process.result.ExitEventReceived || process.result.TerminateAttempted {
+			continue
+		}
+		process.result.TerminateAttempted = true
+		err := windows.TerminateProcess(process.handle, abortExitCode)
+		process.result.TerminateAccepted = err == nil
+		if err != nil {
+			process.result.TerminateError = err.Error()
+			if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+				// Microsoft documents this error for an already-terminated
+				// process. The error alone proves nothing. Require observations
+				// from this exact original duplicate before continuing cleanup.
+				var code uint32
+				queryErr := windows.GetExitCodeProcess(process.handle, &code)
+				signaled, waitErr := pollSignal(process.handle)
+				if queryErr == nil && waitErr == nil && (signaled || code != 259) {
+					process.result.TerminateExitStatusObserved = true
+					process.result.TerminateObservedExitCode = code
+					process.result.TerminateWaitSignaled = signaled
+					process.terminationRace = fmt.Errorf("terminate original PID %d raced exit: %w", process.result.PID, err)
+					continue
+				}
+				return errors.Join(fmt.Errorf("terminate original PID %d is unreceived: %w", process.result.PID, err), queryErr, waitErr)
+			}
+			// A genuine/unresolved failed stop must never be followed by a
+			// permissive Continue. Thread exit keeps KillOnExit armed.
+			return fmt.Errorf("terminate original PID %d: %w", process.result.PID, err)
+		}
+	}
+	return nil
+}
+
+func (o *Owner) receiveEvent(ctx context.Context, event *debugEvent) (uint32, error) {
+	if event.pid == 0 || event.tid == 0 {
+		return 0, errors.New("native event has zero original identity")
+	}
+	if event.code == createProcessEvent {
+		return debugContinue, o.adoptProcess(ctx, event)
+	}
+	process := o.byPID[event.pid]
+	if process == nil || process.result.ExitContinued {
+		return 0, errors.New("native event has no live admitted original process")
+	}
+	switch event.code {
+	case createThreadEvent:
+		return debugContinue, o.adoptThread(event.pid, event.tid, windows.Handle(event.data[0]))
+	case exitThreadEvent:
+		thread := o.activeThreads[[2]uint32{event.pid, event.tid}]
+		if thread == nil || thread.result.ExitContinued {
+			return 0, errors.New("thread exit does not match an active original thread")
+		}
+		return debugContinue, nil
+	case exitProcessEvent:
+		if process.result.ExitEventReceived {
+			return 0, errors.New("duplicate original process exit event")
+		}
+		process.result.ExitEventReceived = true
+		process.result.ExitCode = uint32(event.data[0])
+		return debugContinue, nil
+	case loadDLLEvent:
+		file := windows.Handle(event.data[0])
+		if file != 0 {
+			o.pendingFile = file
+			observed := &o.pendingRecord
+			observed.ImageFilePresent = true
+			observed.ImageFileCloseAttempted = true
+			if err := windows.CloseHandle(file); err != nil {
+				return 0, fmt.Errorf("original LOAD_DLL image handle close: %w", err)
+			}
+			observed.ImageFileClosed = true
+			o.pendingFile = 0
+		}
+		return debugContinue, nil
+	case unloadDLLEvent, outputStringEvent:
+		return debugContinue, nil
+	case exceptionEvent:
+		code := uint32(event.data[0])
+		firstChance := uint32(event.data[19])
+		if code == breakpointException && firstChance != 0 && !process.firstBreakpointHandled {
+			process.firstBreakpointHandled = true
+			return debugContinue, nil
+		}
+		// Preserve actual exception behavior. Arbitrary exceptions are not
+		// swallowed or converted to a successful fixture result.
+		return exceptionNotHandled, nil
+	case ripEvent:
+		return 0, errors.New("RIP debug event leaves original receiving uncertain")
+	default:
+		return 0, fmt.Errorf("unsupported original debug event %d", event.code)
+	}
+}
+
+func (o *Owner) adoptProcess(ctx context.Context, event *debugEvent) error {
+	if o.byPID[event.pid] != nil || len(o.processes) >= maximumProcessHandles {
+		return errors.New("canonical debug process capacity exhausted or original PID repeated")
+	}
+	file := windows.Handle(event.data[0])
+	process := &processOwner{rawProcess: windows.Handle(event.data[1]), rawInitialThread: windows.Handle(event.data[2])}
+	process.result.PID = event.pid
+	process.result.ImageFileAbsent = file == 0
+	o.processes = append(o.processes, process)
+	o.pendingFile = file
+	o.pendingRecord.ImageFilePresent = file != 0
+	if process.rawProcess == 0 || process.rawInitialThread == 0 {
+		return errors.New("creation event did not provide original process/thread handles")
+	}
+	var err error
+	process.handle, err = duplicateProcess(process.rawProcess)
+	if err != nil || process.handle == 0 {
+		return errors.Join(errors.New("explicit process duplicate rights were not obtained before Continue"), err)
+	}
+	pid, birth, err := processIdentity(process.handle)
+	if err != nil || pid != event.pid {
+		return errors.Join(errors.New("actual original process identity differs from event"), err)
+	}
+	process.result.NativeBirthFILETIME = strconv.FormatUint(birth, 10)
+	process.result.InitialRoot = event.pid == o.rootPID
+	process.result.InAnyJob, err = inAnyJob(process.handle)
+	if err != nil {
+		return err
+	}
+	if err := o.adoptThread(event.pid, event.tid, process.rawInitialThread); err != nil {
+		return err
+	}
+	o.byPID[event.pid] = process
+	// Actual process/thread custody precedes every image-policy decision.
+	// A rejected CREATE remains stopped until its original termination has
+	// been received; this applies to descendants as well as the initial root.
+	var admissionErr error
+	if file == 0 {
+		admissionErr = errors.New("original CREATE image file is absent")
+	} else {
+		process.result.Image, admissionErr = observeImage(ctx, o.spec.CleanupDeadline, file)
+		if admissionErr == nil {
+			process.result.Role, admissionErr = o.admitImage(process)
+		}
+	}
+	if admissionErr == nil {
+		process.result.ImageDisposition = ImageAdmitted
+	} else {
+		process.result.ImageDisposition = ImageRejected
+		refusal := errors.Join(ErrCreateImageAdmission, admissionErr)
+		process.result.ImageAdmissionError = refusal.Error()
+		if o.aborting {
+			o.cleanupErrors = append(o.cleanupErrors, refusal)
+		} else {
+			o.requestAbort(refusal)
+		}
+	}
+	if file != 0 {
+		process.result.ImageFileCloseAttempted = true
+		o.pendingRecord.ImageFileCloseAttempted = true
+		if err := windows.CloseHandle(file); err != nil {
+			return fmt.Errorf("original CREATE image handle close: %w", err)
+		}
+		process.result.ImageFileClosed = true
+		o.pendingRecord.ImageFileClosed = true
+		o.pendingFile = 0
+	}
+	return nil
+}
+
+func sameImage(actual, pinned ImageEvidence) bool {
+	return actual.FileID == pinned.FileID && actual.SHA256 == pinned.SHA256 &&
+		actual.Bytes == pinned.Bytes && actual.Machine == pinned.Machine &&
+		actual.Subsystem == pinned.Subsystem && strings.EqualFold(actual.Path, pinned.Path)
+}
+
+func (o *Owner) admitImage(process *processOwner) (ImageRole, error) {
+	actual := process.result.Image
+	if len(o.processes) == 1 && !process.result.InitialRoot {
+		return "", errors.New("first native CREATE is not the original Cmd root")
+	}
+	if process.result.InitialRoot {
+		if o.image == nil || !sameImage(actual, o.image.evidence) || process.result.InAnyJob {
+			return ActorImage, errors.New("initial canonical actor image or original no-Job observation differs")
+		}
+		return ActorImage, nil
+	}
+	for _, row := range o.pins {
+		switch row.role {
+		case PowerShellImage, NetstatImage, NetshImage, WMICImage:
+			if sameImage(actual, row.pin.evidence) {
+				// Tools can inherit the actor's explicitly created inner Job.
+				// This records actual membership; it does not certify that Job.
+				return row.role, nil
+			}
+		case ConhostImage:
+			if sameImage(actual, row.pin.evidence) {
+				// Only the pinned system image in this observed CREATE is admitted.
+				// Image identity establishes no parent or console association.
+				return row.role, nil
+			}
+		case ProductImage:
+			pinned := row.pin.evidence
+			if actual.SHA256 == pinned.SHA256 && actual.Bytes == pinned.Bytes &&
+				actual.Machine == pinned.Machine && actual.Subsystem == 2 &&
+				canonicalProductCopyPath(o.spec.CaseTempRoot, actual.Path) {
+				o.productCreations++
+				maximum := 3
+				if o.spec.Case == CaseGUIReplay {
+					maximum = 2
+				}
+				if o.productCreations > maximum || process.result.InAnyJob {
+					return ProductImage, errors.New("Product creation count or original no-Job observation differs")
+				}
+				// This new copy owns its own FileID. No source FileID is copied
+				// onto it and no extra target pin survives the CREATE event.
+				return ProductImage, nil
+			}
+		}
+	}
+	return "", errors.New("actual CREATE image is outside the fixed canonical input closure")
+}
+
+func (o *Owner) publishInitialRoot() error {
+	root := o.byPID[o.rootPID]
+	if o.initialPublished || root == nil || !root.result.InitialRoot ||
+		root.result.Role != ActorImage || root.result.ImageDisposition != ImageAdmitted ||
+		root.result.InAnyJob || !root.result.ImageFileClosed || root.result.ExitEventReceived {
+		return errors.New("initial canonical admission cannot be published from these original facts")
+	}
+	value := InitialRootAdmission{Original: o, PID: root.result.PID,
+		NativeBirthFILETIME: root.result.NativeBirthFILETIME, Image: root.result.Image,
+		InAnyJob: root.result.InAnyJob, CreateContinued: true,
+		CreateReceivedAt: o.events[len(o.events)-1].ReceivedAt, PublishedAt: time.Now().UTC()}
+	// The only producer owns a fresh buffer of one. It never waits for READY.
+	select {
+	case o.initialRoot <- value:
+		o.initialPublished = true
+		return nil
+	default:
+		return errors.New("one-shot initial canonical admission channel is unexpectedly full")
+	}
+}
+
+func (o *Owner) adoptThread(pid, tid uint32, raw windows.Handle) error {
+	key := [2]uint32{pid, tid}
+	if raw == 0 || o.activeThreads[key] != nil || len(o.threads) == maximumThreadHandles {
+		return errors.New("original thread adoption or fixed capacity refused")
+	}
+	thread := &threadOwner{raw: raw, result: ThreadResult{PID: pid, TID: tid}}
+	o.threads = append(o.threads, thread)
+	var err error
+	thread.handle, err = duplicateThread(raw)
+	if err != nil || thread.handle == 0 {
+		return errors.Join(errors.New("explicit original thread duplicate unavailable"), err)
+	}
+	o.activeThreads[key] = thread
+	return nil
+}
+
+func (o *Owner) receiveContinuation(event *debugEvent) {
+	switch event.code {
+	case exitThreadEvent:
+		key := [2]uint32{event.pid, event.tid}
+		o.activeThreads[key].result.ExitContinued = true
+		delete(o.activeThreads, key)
+	case exitProcessEvent:
+		o.byPID[event.pid].result.ExitContinued = true
+		// Last-thread exit has no separate EXIT_THREAD event. The original
+		// process kernel signal also proves termination of its owned threads.
+		for key := range o.activeThreads {
+			if key[0] == event.pid {
+				delete(o.activeThreads, key)
+			}
+		}
+	}
+}
+
+func (o *Owner) pollOriginals() error {
+	for _, process := range o.processes {
+		if !process.result.ExitContinued || process.result.KernelSignaled {
+			continue
+		}
+		signaled, err := pollSignal(process.handle)
+		if err != nil {
+			return err
+		}
+		if signaled {
+			process.result.KernelSignaled = true
+			if err := o.receiveProcessExit(process); err != nil {
+				return err
+			}
+		}
+	}
+	for _, thread := range o.threads {
+		if thread.result.DuplicateClosed {
+			continue
+		}
+		process := o.byPID[thread.result.PID]
+		if !thread.result.ExitContinued && (process == nil || !process.result.KernelSignaled) {
+			continue
+		}
+		signaled, err := pollSignal(thread.handle)
+		if err != nil {
+			return err
+		}
+		if signaled {
+			thread.result.KernelSignaled = true
+			if err := closeThread(thread); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (o *Owner) receiveProcessExit(process *processOwner) error {
+	var actual uint32
+	if err := windows.GetExitCodeProcess(process.handle, &actual); err != nil {
+		return err
+	}
+	if process.result.ExitEventReceived && actual != process.result.ExitCode {
+		return errors.New("original exit event differs from original process exit code")
+	}
+	process.result.ExitCode = actual
+	if process.terminationRace != nil {
+		if !process.result.TerminateExitStatusObserved || !process.result.ExitEventReceived ||
+			!process.result.ExitContinued || !process.result.KernelSignaled ||
+			actual != process.result.TerminateObservedExitCode {
+			return errors.New("raced termination lacks matching original exit/event/kernel proof")
+		}
+		process.result.TerminateAlreadyExited = true
+	}
+	// Keep this original process object alive while a later child can still
+	// start. That keeps each observed original PID stable until this fixed-profile
+	// debug chain has fully settled.
+	return nil
+}
+
+func closeProcessDuplicate(process *processOwner) error {
+	if !process.result.KernelSignaled {
+		return errors.New("original process duplicate cannot close before kernel exit")
+	}
+	if process.result.DuplicateCloseAttempted {
+		return errors.New("original process duplicate close must never be retried")
+	}
+	process.result.DuplicateCloseAttempted = true
+	if err := windows.CloseHandle(process.handle); err != nil {
+		return err
+	}
+	process.result.DuplicateClosed = true
+	return nil
+}
+
+func closeThread(thread *threadOwner) error {
+	if thread.result.DuplicateCloseAttempted {
+		return errors.New("original thread duplicate close must never be retried")
+	}
+	thread.result.DuplicateCloseAttempted = true
+	if err := windows.CloseHandle(thread.handle); err != nil {
+		return err
+	}
+	thread.result.DuplicateClosed = true
+	return nil
+}
+
+func (o *Owner) allReceivedAndSignaled() bool {
+	root := o.byPID[o.rootPID]
+	if root == nil || !root.result.InitialRoot || !root.result.ExitEventReceived ||
+		!root.result.ExitContinued || !root.result.KernelSignaled ||
+		len(o.processes) == 0 || len(o.byPID) != len(o.processes) ||
+		o.pending != nil || o.pendingFile != 0 {
+		return false
+	}
+	for _, process := range o.processes {
+		if !process.result.ExitEventReceived || !process.result.ExitContinued || !process.result.KernelSignaled {
+			return false
+		}
+	}
+	for _, thread := range o.threads {
+		if !thread.result.KernelSignaled || !thread.result.DuplicateClosed {
+			return false
+		}
+	}
+	return true
+}
+
+func (o *Owner) nativeComplete() bool {
+	return !o.unknown && o.nativePhysicalComplete()
+}
+
+// The original native facts also describe already closed failed ownership.
+// Qualification still additionally requires !unknown in nativeComplete.
+func (o *Owner) nativePhysicalComplete() bool {
+	if !o.startSucceeded || !o.hostNoJobChecked || !o.killOnExitArmed ||
+		!o.creatingThreadSignaled || !o.creatingThreadClosed ||
+		!o.rootWait.Known || !o.imagePinsClosed() || !o.drained ||
+		!o.allReceivedAndSignaled() {
+		return false
+	}
+	for _, process := range o.processes {
+		result := process.result
+		if !result.DuplicateClosed {
+			return false
+		}
+		if result.ImageFileAbsent {
+			if result.ImageFileCloseAttempted || result.ImageFileClosed || result.ImageDisposition != ImageRejected {
+				return false
+			}
+		} else if !result.ImageFileCloseAttempted || !result.ImageFileClosed {
+			return false
+		}
+		switch result.ImageDisposition {
+		case ImageAdmitted:
+			if result.ImageAdmissionError != "" || result.ImageRejectStopBeforeContinue {
+				return false
+			}
+			if (result.Role == ActorImage || result.Role == ProductImage) && result.InAnyJob {
+				return false
+			}
+		case ImageRejected:
+			if result.ImageAdmissionError == "" || !result.ImageRejectStopBeforeContinue ||
+				!result.TerminateAttempted || (!result.TerminateAccepted && !result.TerminateAlreadyExited) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return o.eventLedgerComplete()
+}
+
+// The counters account for received originals; they never replace process,
+// thread, file, root-Wait or I/O settlement. Detailed lifecycle order remains
+// exact. Auxiliary min/max ranges do not reconstruct every omitted ordinal.
+func (o *Owner) eventLedgerComplete() bool {
+	if o.pending != nil || o.pendingFile != 0 || o.observedEventCount == 0 ||
+		len(o.events) == 0 || len(o.events) > maximumEvents ||
+		uint64(len(o.events)) > o.observedEventCount {
+		return false
+	}
+	first, last := o.events[0], o.events[len(o.events)-1]
+	if first.Code != createProcessEvent || first.PID != o.rootPID || first.Sequence != 1 ||
+		last.Code != exitProcessEvent || last.Sequence != o.observedEventCount {
+		return false
+	}
+	previous := uint64(0)
+	for _, event := range o.events {
+		if event.Code != createProcessEvent && event.Code != createThreadEvent &&
+			event.Code != exitThreadEvent && event.Code != exitProcessEvent {
+			return false
+		}
+		if event.Sequence <= previous || event.Sequence > o.observedEventCount ||
+			event.PID == 0 || event.TID == 0 || !event.Continued || event.ContinueStatus != debugContinue ||
+			(event.ImageFilePresent && (!event.ImageFileCloseAttempted || !event.ImageFileClosed)) ||
+			(!event.ImageFilePresent && (event.ImageFileCloseAttempted || event.ImageFileClosed)) {
+			return false
+		}
+		previous = event.Sequence
+	}
+	remaining := o.observedEventCount - uint64(len(o.events))
+	codes := [5]uint32{exceptionEvent, exceptionEvent, loadDLLEvent, unloadDLLEvent, outputStringEvent}
+	statuses := [5]uint32{debugContinue, exceptionNotHandled, debugContinue, debugContinue, debugContinue}
+	for _, process := range o.processes {
+		for index, row := range process.auxiliary {
+			if row.Count == 0 {
+				continue
+			}
+			if row.PID != process.result.PID || row.Code != codes[index] || row.ContinueStatus != statuses[index] ||
+				row.FirstSequence == 0 || row.LastSequence < row.FirstSequence || row.LastSequence >= o.observedEventCount ||
+				row.Count > row.LastSequence-row.FirstSequence+1 ||
+				(row.Count == 1 && row.FirstSequence != row.LastSequence) ||
+				row.FirstReceivedAt.IsZero() || row.LastReceivedAt.Before(row.FirstReceivedAt) ||
+				row.ImageFilePresentCount > row.Count ||
+				row.ImageFileCloseAttemptedCount != row.ImageFilePresentCount ||
+				row.ImageFileClosedCount != row.ImageFilePresentCount ||
+				(row.Code != loadDLLEvent && row.ImageFilePresentCount != 0) ||
+				row.Count > remaining {
+				return false
+			}
+			remaining -= row.Count
+		}
+	}
+	return remaining == 0
+}

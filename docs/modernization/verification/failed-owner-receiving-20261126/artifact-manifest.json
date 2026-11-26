@@ -1,0 +1,179 @@
+{
+  "schema": "failed-owner-publication-artifacts-v1",
+  "owner_pr": 664,
+  "owner_head_at_preparation": "0c255490461fed0a3ee3d43acdd5216e2e064a53",
+  "prefix": "docs/modernization/verification/failed-owner-receiving-20261126",
+  "manifest_excludes_self": true,
+  "candidate_sources": 13,
+  "active_model_test_sources": 2,
+  "runtime_enabled": false,
+  "full_core_duplicated": false,
+  "unrelated_core_delta_included": false,
+  "native_late_receiving_qualified": false,
+  "files": {
+    ".gitattributes": {
+      "bytes": 84,
+      "sha256": "865d04908a1e60936529855f6c455b83764700adb0570420872419d0cd3332ed"
+    },
+    "README.md": {
+      "bytes": 20250,
+      "sha256": "dc75cc53131cf870bc0d759413e09d8dd47e1ac86edd74fa7e25e3fddb769759"
+    },
+    "REPRODUCE.md": {
+      "bytes": 9251,
+      "sha256": "1b8ac661b871cb524b4b84f98e30d650402c3aa4bb9f1eda3cfa63e96ddcd776"
+    },
+    "candidate-manifest.json": {
+      "bytes": 13003,
+      "sha256": "b0016b6396172fe50ff73c88195d898d1bcf02da406bcc589fd7ac12df5acec6"
+    },
+    "checks/final-python-tests.log": {
+      "bytes": 1662,
+      "sha256": "cba581b50ec2649a18cf75e7320843507939ef53f7527c6044dc2f5847fc3453"
+    },
+    "checks/named-v2-baseline/probe.json": {
+      "bytes": 2762,
+      "sha256": "6a3124dc17d81a3211aed640bda367286167a3279a14574a2afd97b33cefcd6c"
+    },
+    "checks/named-v2-late-candidate/probe.json": {
+      "bytes": 2658,
+      "sha256": "0452f4d23399e0df447c9bd7e58e634a4429090413fb219bfdddf7dc1b3265e9"
+    },
+    "checks/public-core-python-tests.log": {
+      "bytes": 1500,
+      "sha256": "26222b9ec6e1aef6758ffa6109b50bd5b78389ae1e3566e01a63b6896ce98795"
+    },
+    "native-go-v1/failed-owner-controller-test.stderr.txt": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "native-go-v1/failed-owner-controller-test.stdout.txt": {
+      "bytes": 3991,
+      "sha256": "2547d0eb7cc0e701cff003e04280594d85a5ca3181176aefb2fb0157449032ee"
+    },
+    "native-go-v1/format-failed-owner.stderr.txt": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "native-go-v1/format-failed-owner.stdout.txt": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "native-go-v1/head.stderr.txt": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "native-go-v1/head.stdout.txt": {
+      "bytes": 41,
+      "sha256": "a7834ae454abe29733d4a15f2751f2dc0c5917f7dde06b3667ebaff7071e78f9"
+    },
+    "native-go-v1/receipt.json": {
+      "bytes": 36604,
+      "sha256": "8b8c8a5172331b8b258c7765ef4d52f8c9cbfb8ad68512e8ee474c74ea480216"
+    },
+    "native-go-v1/receiving-review.json": {
+      "bytes": 4709,
+      "sha256": "4446fdb1e866f73b4e535adb29d7f35bbc2cf1f3da45033b7c6f76a3e2ad5e9b"
+    },
+    "native-go-v1/root-receiving.json": {
+      "bytes": 235,
+      "sha256": "e8a49a6ce65a1369794bbe1b66cd02c550711c06f1d0861d2775a63e1c15eb40"
+    },
+    "native-go-v1/source-binding.json": {
+      "bytes": 5681,
+      "sha256": "480f3d4ad9d87625daac7ede47b197cd4b751f3c28f25c515224056b82af0a8f"
+    },
+    "native-go-v1/tracked-source-diff-check.stderr.txt": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "native-go-v1/tracked-source-diff-check.stdout.txt": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "reviews/core-method-provenance.json": {
+      "bytes": 1471,
+      "sha256": "1c5817f7b350943fd39e3b93ecd80ed310b4fca2f894a768142882e8f812cc0b"
+    },
+    "reviews/independent-review.json": {
+      "bytes": 2158,
+      "sha256": "d4cabec54204f859fa8ef62d1b02234a5627203a0c2686f31ad23f7deeb47e8e"
+    },
+    "reviews/pre-native-go-v1/candidate-manifest.json": {
+      "bytes": 10121,
+      "sha256": "2d8410f4208e2d733f957b4939b9986d47caef4e00628107f7c4d168881fed2f"
+    },
+    "reviews/pre-shared-reader-fix/candidate-manifest.json": {
+      "bytes": 9862,
+      "sha256": "62d270d5b67044a718bc7553e86bd9c71404c3854fd0aa4431463ce304c612e1"
+    },
+    "reviews/public-core-fixture-change.patch": {
+      "bytes": 1573,
+      "sha256": "1766eb6706429acfa807ce923b88e843f5badfb08b3f8d55b69c33125d005276"
+    },
+    "sources/candidate/canonical_receiving_v4.py.txt": {
+      "bytes": 48228,
+      "sha256": "6ad13e7c57e604111552fd553f10a66a174c9ba9b96dc37484dfba071a9bf2a0"
+    },
+    "sources/candidate/controller/cases_windows.go.txt": {
+      "bytes": 19128,
+      "sha256": "a9565d3140accddc8601c2a5132afaf109c86a6e2c3f582de3d272b900cf6d87"
+    },
+    "sources/candidate/controller/inputs_windows.go.txt": {
+      "bytes": 11040,
+      "sha256": "345197b965bd59a97c43e846ab35a37393852cbac7dfe5cabc0f0a109576e6cc"
+    },
+    "sources/candidate/controller/main_windows.go.txt": {
+      "bytes": 23392,
+      "sha256": "44072cc697d8087d28653880533589442635deb94bbe81588a96af9bb22f1135"
+    },
+    "sources/candidate/controller/physical_windows.go.txt": {
+      "bytes": 11633,
+      "sha256": "2b36397be3d45ebf0bb378eb89ba8a8086ff8d17b4c76d58b474f78fb5d63429"
+    },
+    "sources/candidate/controller/physical_windows_test.go.txt": {
+      "bytes": 4118,
+      "sha256": "69562a90ae6be02fa43f2bd5b84d7d5ed4c70bb900443869e60099c40f901925"
+    },
+    "sources/candidate/guard-custody.py.txt": {
+      "bytes": 46220,
+      "sha256": "b24d813efbc133cff650b46f94cb088b9343a686b3bb4f2870322addd4836d1a"
+    },
+    "sources/candidate/literal_go_exec_adapter_ready_v1.py.txt": {
+      "bytes": 63215,
+      "sha256": "2248b54f038c07df0780e399446b6ad1c309e6da290b091486c7bc0041aec284"
+    },
+    "sources/candidate/owner/canonicalcaseowner/capture_windows_amd64.go.txt": {
+      "bytes": 3395,
+      "sha256": "e734df342f5b863ffe9916fa71d9c7712b5c305346662419bccc7716517e0053"
+    },
+    "sources/candidate/owner/canonicalcaseowner/events_windows_amd64.go.txt": {
+      "bytes": 27810,
+      "sha256": "f1f077b17d1a7f6dba774bd0c637c7cc20edcfaadd4fff77c82df46709d2e811"
+    },
+    "sources/candidate/owner/canonicalcaseowner/native_windows_amd64.go.txt": {
+      "bytes": 11982,
+      "sha256": "8729ac9c525e664c5d7f279b277a93b9e06841e6757a14de508719d026335f87"
+    },
+    "sources/candidate/owner/canonicalcaseowner/owner_windows_amd64.go.txt": {
+      "bytes": 29509,
+      "sha256": "7276febe485aea1791fc6757ad1c710a108e3c60e7aa263e656ad985dfe22294"
+    },
+    "sources/candidate/owner/canonicalcaseowner/physical_windows_amd64.go.txt": {
+      "bytes": 7094,
+      "sha256": "6749335513771a7daf8be423809262f57039f25a940114e5ba46b5a76802216a"
+    },
+    "sources/named-v2-guard-custody.py.txt": {
+      "bytes": 43433,
+      "sha256": "5246b97e6cfcc60c39284fab6941509c1e770ec4738aec0a4b218cccb9d1e5a8"
+    },
+    "sources/probe_external_timeout.py.txt": {
+      "bytes": 6897,
+      "sha256": "074dd42d12549a3d0a560190b3d8295e383a5f0efef6b52e2d304672ad356887"
+    },
+    "sources/test_failed_receiving.py.txt": {
+      "bytes": 26294,
+      "sha256": "4f57ed751014f2fdafd11cb4304be12077c702603602089708a4c22d0112be31"
+    }
+  }
+}

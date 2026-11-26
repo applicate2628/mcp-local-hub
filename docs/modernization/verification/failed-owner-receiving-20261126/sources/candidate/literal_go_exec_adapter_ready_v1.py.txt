@@ -1,0 +1,1056 @@
+"""Literal Go -exec consumer; the root issuer owns every original Invocation."""
+import time
+ADAPTER_STARTED_NS = time.monotonic_ns()
+import sys
+sys.dont_write_bytecode = True
+import argparse, hashlib, importlib.util, json, os, re, stat, subprocess, threading, uuid
+from pathlib import Path
+from types import SimpleNamespace
+
+# This candidate must receive fresh reviewed composition paths and exact pins.
+REVIEW_COMPLETE = False
+WORK = Path('D:\\dev\\ChatGPT\\cache-continuation-20261123-8e223f22')
+HELPERS = WORK / 'final-gates-v8'
+PART = Path('D:\\dev\\ChatGPT\\cache-continuation-20261123-8e223f22\\final-gates-v14-root\\run_partitioned_go_gate_full_v1.py')
+PART_SHA = 'e1a33737b18332cf428ac0f1cf7f37cf4215a9358bf9c2e6d120638f8c53c727'
+GUARDED = Path(r'D:\dev\ChatGPT\cache-continuation-20261124-owner-v3\guard-custody.py')
+GUARDED_SHA = '56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2'
+PREP_SECONDS, OWNER_SECONDS, FINAL_SECONDS, TOTAL_SECONDS = 30, 320, 10, 355
+FOCUSED_SCHEMA = "private-serena-native-focused-plan-v1"
+FOCUSED_CASE = "TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite"
+CANONICAL_RECEIVING = HELPERS / "canonical_external_receiving_v4/canonical_receiving_v4.py"
+CANONICAL_RECEIVING_SHA = 'f6445f4060310d0d545853fdc0233ff4576359eabf6c61dd9e31bb91bc4bf91e'
+METADATA_WORK_SECONDS = 5
+METADATA_CAPTURE_LIMIT = 1 << 20
+ISSUER_SCHEMA = "literal-original-owner-issuer-v1"
+REQUEST_SCHEMA = "literal-original-owner-request-v1"
+RESPONSE_SCHEMA = "literal-original-owner-response-v1"
+ACK_SCHEMA = "literal-original-owner-replay-v1"
+FORBIDDEN_AMBIENT = ("MCPHUB_PRIVATE_SERENA_MIGRATION_INPUT",
+                     "MCPHUB_PRIVATE_SERENA_MIGRATION_INPUT_SHA256",
+                     "MCPHUB_PRIVATE_SERENA_MIGRATION_CASE_CONFIG")
+
+def sha(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as source:
+        while block := source.read(1 << 20):
+            digest.update(block)
+    return digest.hexdigest()
+
+def load_owner_runtime():
+    """Only the root issuer imports native owners and mutable cache-admission state."""
+    global part, core, guarded, canonical, Invocation
+    if "Invocation" in globals():
+        return
+    if REVIEW_COMPLETE is not True:
+        raise RuntimeError("owner composition is disabled pending review and exact pins")
+    modules = []
+    for name, path, expected in (("literal_coverage_primitives", PART, PART_SHA),
+                                 ("literal_guarded_commands", GUARDED, GUARDED_SHA),
+                                 ("fixed_canonical_receiving", CANONICAL_RECEIVING, CANONICAL_RECEIVING_SHA)):
+        raw = path.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != expected:
+            raise RuntimeError("reviewed owner runtime changed: " + str(path))
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        exec(compile(raw, str(path), "exec"), module.__dict__)
+        modules.append(module)
+    part, guarded, canonical = modules
+    core = part.core
+    base = guarded.make_guarded_run_class(SimpleNamespace(
+        Run=core.OriginalRun, REPO=core.REPO, sha=core.sha, subprocess=core.subprocess))
+
+    class RootInvocation(base):
+        def __init__(self, root, env, validator, started, cancelled):
+            self.validator_binary = validator
+            self.started = started
+            self.cancelled = cancelled
+            self.final_receipt_published = False
+            super().__init__(root, env)
+
+        def command(self, argv, name, cwd=None, timeout=600, check=True, stdin_path=None, **kwargs):
+            remaining = self.started + TOTAL_SECONDS - time.monotonic()
+            if remaining <= 0 or self.cancelled():
+                raise RuntimeError("original consumer deadline or admission ended; no new command")
+            return super().command(argv, name, cwd=cwd, timeout=min(timeout, remaining),
+                                   check=check, stdin_path=stdin_path, **kwargs)
+
+        def validator(self, flags, name):
+            return json.loads(self.command([self.validator_binary, *flags], name, timeout=10))
+
+    Invocation = RootInvocation
+
+def incoming_build_info(run, incoming):
+    """Use the same original owner/worker contract; cap storage, continue to EOF."""
+    if not run.commands_quiescent() or run.receipt.get("native_custody_settled") is not True:
+        raise RuntimeError("metadata probe requires settled original custody")
+    if time.monotonic() - run.started >= PREP_SECONDS:
+        raise RuntimeError("metadata preparation budget expired")
+    run.receipt["native_custody_settled"] = False
+    try:
+        output = run.command([core.GO, "version", "-m", "-json", incoming],
+                             "incoming-build-info", timeout=METADATA_WORK_SECONDS,
+                             capture_limit=METADATA_CAPTURE_LIMIT)
+    finally:
+        # A failed join stays UNKNOWN in the shared original custody registry.
+        run.receipt["native_custody_settled"] = run.commands_quiescent()
+        run.save()
+    return json.loads(output)
+
+def pinned(files):
+    for path, digest in files.items():
+        if sha(core.ordinary(path, False)) != digest:
+            raise RuntimeError("pinned input changed: "+path)
+
+def flags_are_literal(args):
+    if len(args) != 4 or args.count("-test.paniconexit0") != 1:
+        return False
+    values = {}
+    for arg in args:
+        key, sep, value = arg.partition("=")
+        if key in values:
+            return False
+        values[key] = value
+    return (set(values)=={"-test.paniconexit0","-test.v","-test.count","-test.timeout"}
+            and values["-test.v"]=="test2json" and values["-test.count"]=="1"
+            and values["-test.timeout"] in ("5m","5m0s"))
+
+def flags_are_focused(args):
+    return (len(args) == 5 and args[-1] == "-test.run=^" + FOCUSED_CASE + "$"
+            and flags_are_literal(args[:-1]))
+
+def raw_command(run, argv, name, cwd, timeout, *, physical_receiver=None):
+    # A direct owner exit does not permit capture access. The original native
+    # and IO receipt must be received before hashes, decoding, or replay.
+    run.command(argv,name,cwd=cwd,timeout=timeout,check=False,defer_output=True,
+                physical_receiver=physical_receiver)
+    return run.receipt["commands"][-1]
+
+def canonical_failed_receiver(argv, cwd, proof_path, binding):
+    """Bind failed-only receiving before launch, without granting capture access.
+
+    The guard calls this only after waiting on the same original Popen. These
+    two original control records are metadata, never captures or replay input.
+    Any read/close failure retains the actual file and refuses later retries.
+    """
+    expected_argv, expected_cwd = [str(value) for value in argv], str(cwd)
+    bound = json.loads(json.dumps(binding))
+    proof_path = Path(proof_path)
+    physical_path = proof_path.parent / "failed-physical-closure.json"
+    metadata_files, failure, received = [], None, None
+    unread = object()
+    original_result, original_bytes = unread, None
+    if not canonical.same_path(str(proof_path),
+                               canonical.ntpath.join(bound["run_root"], "result.json")):
+        raise ValueError("failed canonical receiving requires the original result path")
+
+    def read_control(path):
+        handle = path.open("rb")
+        metadata_files.append(handle)
+        try:
+            raw = handle.read((16 << 20) + 1)
+        finally:
+            handle.close()
+        if not handle.closed or len(raw) > 16 << 20:
+            raise ValueError("original canonical control read/close is incomplete")
+        return json.loads(raw), raw
+
+    def read_original_result():
+        nonlocal failure, original_result, original_bytes
+        if failure is not None:
+            raise RuntimeError("original canonical reader retains its first error") from failure
+        if original_result is not unread:
+            return original_result
+        try:
+            original_result, original_bytes = read_control(proof_path)
+            return original_result
+        except BaseException as error:
+            failure = error
+            raise
+
+    def original_result_sha256():
+        read_original_result()
+        return hashlib.sha256(original_bytes).hexdigest()
+
+    def receive(row, direct_exit_code):
+        nonlocal failure, received
+        if failure is not None:
+            raise RuntimeError("original failed receiving retains its first error") from failure
+        if received is not None:
+            return received
+        try:
+            if (row.get("argv") != expected_argv or row.get("cwd") != expected_cwd
+                    or type(row.get("original_pid")) is not int or row["original_pid"] <= 0
+                    or type(direct_exit_code) is not int):
+                raise ValueError("late receiving differs from the prebound original invocation")
+            original = read_original_result()
+            try:
+                facts = canonical.receive(original, bound)
+                mode = "normal-original-result-after-parent-failure"
+            except ValueError:
+                physical, _ = read_control(physical_path)
+                facts = canonical.receive_failed(physical, bound, original,
+                                                 row["original_pid"], direct_exit_code)
+                mode = "original-failed-physical-closure"
+            if facts.get("physical_complete") is not True or not all(f.closed for f in metadata_files):
+                raise ValueError("original canonical physical receiving remains incomplete")
+            received = {"physical_complete": True, "receiving_mode": mode,
+                "original_result": str(proof_path), "original_controller_pid": row["original_pid"],
+                "original_direct_exit_code": direct_exit_code, "metadata_handles_closed": True,
+                "qualification_passed": False, "capture_access_issued": False,
+                "source_or_cache_access_issued": False, "new_commands_permitted": False,
+                "qualification_deadlines_extended": False, "physical_receiving": facts}
+            return received
+        except BaseException as error:
+            failure = error
+            raise
+
+    # Normal and failed receiving share the same prebound one-shot reader.
+    receive.read_original_result = read_original_result
+    receive.original_result_sha256 = original_result_sha256
+    return receive
+
+def owner_proof(kind, proof, binary, digest, cwd, args, tagged, binding=None):
+    if kind == "canonical":
+        return canonical.receive(proof, binding)["qualification_passed"]
+    if kind == "namespace":
+        mandatory = proof.get("mandatory_tests",{})
+        required = (*part.NAMESPACE_TESTS,*part.PEER_TESTS)
+        return (proof.get("schema")=="api-namespace-full-suite-v1"
+                and proof.get("mode")=="prebuilt-full-suite"
+                and proof.get("binary")==str(binary) and proof.get("expected_sha256")==digest
+                and proof.get("binary_sha256")==digest and proof.get("source_dir")==str(cwd)
+                and proof.get("args")==args
+                and proof.get("compiled_tags")==(["test_state_path_env"] if tagged else [])
+                and proof.get("root_wait_known") is True and proof.get("root_exit_code")==0
+                and proof.get("settlement_complete") is True and proof.get("custody_retained") is False
+                and proof.get("native_complete") is True and proof.get("io_complete") is True
+                and proof.get("observations_verified") is True and proof.get("mandatory_tests_passed") is True
+                and proof.get("binary_unchanged") is True
+                and set(mandatory)==set(required)
+                and all(mandatory[n]=={"Runs":1,"Passes":1,"Fails":0,"Skips":0} for n in required)
+                and not proof.get("failure") and not proof.get("cleanup_error") and not proof.get("native_error"))
+    if kind == "job":
+        required = {*part.JOB_TESTS, part.JOB_TESTS[1]+"/real-native-typed-gc-and-creator"}
+        return (proof.get("fullSuite") is True and proof.get("success") is True
+                and proof.get("originalWaitKnown") is True and proof.get("originalExitCode")==0
+                and proof.get("settlementComplete") is True and not proof.get("custodyRetained")
+                and proof.get("streamsJoined") is True and proof.get("controlWriterJoined") is True
+                and proof.get("stdoutEOF") is True and proof.get("stderrEOF") is True
+                and proof.get("binaryUnchanged") is True and set(proof.get("passed",[]))==required)
+    return (proof.get("schema")=="literal-contained-test-run-v1" and proof.get("binary")==str(binary)
+            and proof.get("binary_sha256")==digest and proof.get("source_dir")==str(cwd)
+            and proof.get("args")==args and proof.get("root_wait_known") is True
+            and proof.get("root_exit_code")==0 and proof.get("settlement_complete") is True
+            and proof.get("custody_retained") is False and proof.get("binary_unchanged") is True
+            and proof.get("binary_after_measured") is True and not proof.get("failure"))
+
+def native_settled(kind, proof):
+    if kind == "job":
+        return (proof.get("originalWaitKnown") is True and proof.get("settlementComplete") is True
+                and proof.get("streamsJoined") is True and proof.get("controlWriterJoined") is True
+                and proof.get("stdoutEOF") is True and proof.get("stderrEOF") is True
+                and proof.get("custodyRetained",False) is False)
+    return (proof.get("root_wait_known") is True and proof.get("settlement_complete") is True
+            and proof.get("custody_retained") is False
+            and (kind!="namespace" or (proof.get("native_complete") is True and proof.get("io_complete") is True)))
+
+def finalize_owner_capture(run, command, kind, proof_path, receipt_key, binary, digest, cwd, args, tagged, binding=None, *, canonical_receiver=None):
+    def receive_completion(_row):
+        if kind == "canonical":
+            if canonical_receiver is None:
+                raise RuntimeError("canonical receiving requires its prebound original reader")
+            proof=canonical_receiver.read_original_result()
+        else:
+            proof=json.loads(proof_path.read_text(encoding="utf-8"))
+        record={"receipt":str(proof_path),"proof":proof}
+        if receipt_key=="owner":
+            record["kind"]=kind
+        run.receipt[receipt_key]=record
+        if kind == "canonical":
+            facts = canonical.receive(proof, binding)
+            run.receipt["canonical_receiving"] = facts
+            bound = facts["physical_complete"] is True
+        elif not native_settled(kind,proof):
+            raise RuntimeError("original native or IO settlement is unverified; captures retained unmeasured")
+        if kind=="canonical":
+            pass  # The exact original composite, invocation and plan were received above.
+        elif kind=="job":
+            packet_path=proof_path.parent/"packet.json"
+            packet=json.loads(packet_path.read_text(encoding="utf-8"))
+            bound=(proof.get("schema")=="job-fixture-controller-result-v1" and proof.get("fullSuite") is True
+                and packet.get("schema")=="job-fixture-controller-packet-v1" and packet.get("fullSuite") is True
+                and packet.get("args")==args and packet.get("binary")==str(binary)
+                and packet.get("sourceDir")==str(cwd) and packet.get("binarySha256")==digest
+                and sha(packet_path)==proof.get("bind",{}).get("packet"))
+        elif kind in ("namespace","contained"):
+            namespace=kind=="namespace"
+            bound=(proof.get("schema")==("api-namespace-full-suite-v1" if namespace else "literal-contained-test-run-v1")
+                and proof.get("binary")==str(binary) and proof.get("binary_sha256")==digest
+                and proof.get("source_dir")==str(cwd) and proof.get("args")==args)
+            if namespace:
+                bound=(bound and proof.get("mode")=="prebuilt-full-suite" and proof.get("expected_sha256")==digest
+                    and proof.get("compiled_tags")==(["test_state_path_env"] if tagged else []))
+            else:
+                bound=bound and proof.get("inventory") is (receipt_key=="inventory_owner")
+        else:
+            raise RuntimeError("unknown original owner kind")
+        if not bound:
+            raise RuntimeError("original owner receipt does not bind this exact invocation; captures retained unmeasured")
+        run.receipt["native_custody_settled"]=True
+        return proof
+    run.finalize_deferred(command,receive_completion,decode=False)
+    run.receipt[receipt_key]["sha256"]=(canonical_receiver.original_result_sha256()
+                                        if kind == "canonical" else sha(proof_path))
+    return command["completion_receiving"]
+
+def mandatory(package, tagged):
+    if package==part.PROCESS:
+        return [(package,t) for t in part.JOB_TESTS]+[(package,part.JOB_TESTS[1]+"/real-native-typed-gc-and-creator")]
+    if package==part.API:
+        names=[*part.NAMESPACE_TESTS,*part.PEER_TESTS]
+        if tagged:
+            names.append("TestAttachExisting_PublicCLIReceiving")
+        return [(package,t) for t in names]
+    if package==part.CLI:
+        return [(package,t) for t in (
+            "TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade","TestWindowsProductPreflightOriginalEntrySet",
+            "TestCanonicalGUIRuntimeRecoveryNativeIndependentReplay","TestCanonicalSuccessorNativeControlRetainsOriginalFiles")]
+    return []
+
+def qualify(run, incoming, built):
+    actual = Path(built["actual_product"]["path"])
+    bundle = run.root/"bundle"
+    bundle.mkdir()
+    for rel in core.BUNDLE_FILES:
+        if rel not in ("mcphub-product/mcphub.exe","windows-product-identity.json"):
+            core.copy_file(actual/rel,bundle/rel)
+    binary = bundle/"mcphub-product/mcphub.exe"
+    core.copy_file(incoming,binary)
+    plan=built["build_plan"]
+    identity=run.validator(["--candidate",str(binary),"--expected-version",plan["version"],
+                            "--expected-commit",plan["commit"],"--expected-build-date",plan["buildDate"]],"incoming-product")
+    core.new_json(bundle/"windows-product-identity.json",identity)
+    record=core.bundle_admission(run,bundle,plan,"incoming",built["native_input_sha256"])
+    return binary,record
+
+def canonical_plan(run, parent_plan, binary, digest, cwd, args):
+    inputs = parent_plan["canonical_inputs"]
+    if (set(inputs) != {"source_commit", "fixture", "product", "tools"}
+            or inputs["source_commit"] != parent_plan["commit"]
+            or inputs["fixture"]["path"] != parent_plan["native_actor_fixture"]
+            or not {"powershell", "netstat", "netsh", "conhost"}.issubset(inputs["tools"])
+            or not set(inputs["tools"]).issubset({"powershell", "netstat", "netsh", "conhost", "wmic"})):
+        raise RuntimeError("fixed original canonical operands differ")
+    for value in (inputs["fixture"], inputs["product"], *inputs["tools"].values()):
+        if (set(value) != {"path", "sha256"} or not re.fullmatch(r"[0-9a-f]{64}", value["sha256"])
+                or parent_plan["input_files"].get(value["path"]) != value["sha256"]):
+            raise RuntimeError("canonical operand is not pinned by the original driver")
+    value = {"schema": canonical.PLAN_SCHEMA, "source_commit": parent_plan["commit"],
+        "profile": "full", "focused_case": "", "binary": {"path": str(binary), "sha256": digest},
+        "source_dir": str(cwd), "fixture": inputs["fixture"], "product": inputs["product"],
+        "tools": inputs["tools"], "original_args": list(args), "expected_root_names": list(canonical.ROOTS)}
+    path = run.root / "canonical-plan.json"
+    core.new_json(path, value)
+    binding = {"plan": value, "canonical_plan": str(path), "canonical_plan_sha256": sha(path),
+               "run_root": str(run.root / "suite")}
+    run.receipt["canonical_binding"] = binding
+    run.save()
+    return binding
+
+def execute(options, retain, cancelled):
+    started=options.started_ns / 1_000_000_000
+    plan_path=core.ordinary(options.plan,False)
+    if not plan_path.is_relative_to(core.RUNS) or sha(plan_path)!=options.plan_sha256:
+        raise RuntimeError("original pinned private plan required")
+    plan=json.loads(plan_path.read_text(encoding="utf-8"))
+    focused=plan.get("schema")==FOCUSED_SCHEMA
+    if focused:
+        if (plan.get("phase")!="default" or plan.get("focused_case")!=FOCUSED_CASE
+                or set(plan.get("packages",{}))!={part.CLI}
+                or plan.get("private_serena_migration") is None):
+            raise RuntimeError("only the one original default CLI native consumer may be selected")
+    elif (plan.get("schema")!="literal-go-test-plan-v1" or plan["phase"] not in ("default","state")
+            or "focused_case" in plan):
+        raise RuntimeError("unexpected literal plan schema")
+    driver=core.ordinary(plan["driver_root"],True)
+    expected_driver=core.FOCUSED_RUN if focused else core.FULL_RUN
+    if driver!=expected_driver or plan_path.parent!=driver:
+        raise RuntimeError("literal plan is outside its original driver scope")
+    snapshot=core.ordinary(plan["source_snapshot"],False)
+    if snapshot!=driver/"source-before.json" or sha(snapshot)!=plan["source_snapshot_sha256"]:
+        raise RuntimeError("original source snapshot changed")
+    if json.loads(snapshot.read_text(encoding="utf-8")).get("head")!=plan["commit"]:
+        raise RuntimeError("source snapshot commit differs from the literal plan")
+    if (plan.get("test_source_commit") != plan["commit"] or plan["commit"] != core.CACHE_COMMIT
+            or plan.get("product_source_commit") != core.PRODUCT_SOURCE_COMMIT):
+        raise RuntimeError("separate TestSource and retained Product identities differ")
+    stop=driver/"unsafe-stop.json"
+    if stop.exists():
+        raise RuntimeError("an earlier original owner remains unverified; no later receiver may start")
+    pinned(plan["input_files"])
+    cwd=core.ordinary(options.cwd,True)
+    packages=[p for p,row in plan["packages"].items() if os.path.normcase(row["directory"])==os.path.normcase(str(cwd))]
+    exact_flags=flags_are_focused(options.test_args) if focused else flags_are_literal(options.test_args)
+    if len(packages)!=1 or not exact_flags:
+        raise RuntimeError("original Go cwd or literal arguments differ from the frozen manifest")
+    package=packages[0]
+    incoming=core.ordinary(options.binary,False)
+    if not incoming.is_relative_to(Path(plan["temporary_directory"])):
+        raise RuntimeError("incoming executable is outside this Go invocation's fresh D GOTMPDIR")
+    original_hash=sha(incoming)
+    if original_hash != options.binary_sha256:
+        raise RuntimeError("incoming image differs from its original consumer request")
+    key=hashlib.sha256(package.encode()).hexdigest()
+    registry=core.ordinary(plan["invocations"],True)
+    if registry!=driver/("invocations-"+plan["phase"]):
+        raise RuntimeError("invocation registry is outside the original phase")
+    case=core.private_run("x"+uuid.uuid4().hex[:12])
+    core.new_json(registry/(key+".started.json"),{"package":package,"run":str(case),"input":str(incoming),
+                  "input_sha256":original_hash,"args":options.test_args,"cwd":str(cwd),
+                  "request_sha256":options.request_sha256,"request_nonce":options.request_nonce})
+    env=core.clean_environment(case,cache_owner=driver,cache_bootstrap=plan.get("cache_bootstrap"))
+    env.pop("MCPHUB_STATE_DIR_OVERRIDE",None)
+    env.update(plan["receiver_overrides"])
+    run=Invocation(case,env,plan["tools"]["validator"],started,cancelled)
+    retain(run)  # Before the first native process or stream worker exists.
+    run.receipt.update({"schema":"literal-go-exec-invocation-v1","phase":plan["phase"],"package":package,
+        "plan":str(plan_path),"plan_sha256":options.plan_sha256,"incoming":str(incoming),"incoming_sha256":original_hash,
+        "original_argv":options.test_args,"original_cwd":str(cwd),"input_files":dict(plan["input_files"]),
+        "test_source_commit":plan["test_source_commit"],"product_source_commit":plan["product_source_commit"],
+        "custody_owner":"original root issuer", "request_sha256":options.request_sha256,
+        "request_nonce":options.request_nonce, "client_started_monotonic_ns":options.started_ns,
+        "command_guard_helper":{"path":str(GUARDED),"sha256":GUARDED_SHA},
+        "native_custody_settled":True,"replay":"owner output once; child bytes only after original native/IO settlement; no cross-stream ordering claim",
+        "budgets_seconds":{"adapter_preparation":PREP_SECONDS,"owner_logical":315,"owner_host_watchdog":OWNER_SECONDS,
+                           "final_measurement_conversion_replay":FINAL_SECONDS,"adapter_total_checked":TOTAL_SECONDS,"cmd_go_hard_kill":360},
+        "receiver_environment_overrides":plan["receiver_overrides"]})
+    if focused:
+        run.receipt["focused_case"]=FOCUSED_CASE
+    replay=None
+    owner_finished=None
+    migration=None
+    canonical_binding=None
+    code=1
+    try:
+        core.copy_file(incoming,case/"incoming-original.exe")
+        info=incoming_build_info(run,incoming)
+        # runtime/debug.BuildSetting omits an empty Value from JSON.
+        # Keep Key mandatory; only the documented empty value is defaulted.
+        settings={row["Key"]:row.get("Value","") for row in info.get("Settings",[])}
+        tagged=plan["phase"]=="state"
+        tags=[t for t in settings.get("-tags","").split(",") if t]
+        if info.get("Path")!=package+".test" or tags!=(["test_state_path_env"] if tagged else []):
+            raise RuntimeError("incoming Go package or actual compiled tags differ")
+        if any(mark in settings.get("-ldflags","") for mark in ("rustOwnerSHA256","publisherSourceEpoch")):
+            raise RuntimeError("the ordinary literal suite must remain unmarked")
+        # Go records the last raw per-package flag, not the selected flags.
+        # This binds the invocation record; actual PE admission remains separate.
+        if settings.get("-ldflags")!=plan["recorded_linker_flags"]:
+            raise RuntimeError("incoming recorded linker flags differ from the original Go command")
+        binary,record=incoming,None
+        built=json.loads(Path(plan["build_receipt"]).read_text(encoding="utf-8"))
+        if built.get("build_plan",{}).get("commit") != plan["product_source_commit"]:
+            raise RuntimeError("retained Product marker must bind its original source")
+        if package in (part.API,part.CLI):
+            binary,record=qualify(run,incoming,built)
+            run.env.update(part.canonical_environment(record))
+            run.env["MCPHUB_E2E_SCHEDULER"]="none"
+            if package==part.CLI:
+                run.env["MCPHUB_CANONICAL_NATIVE_ACTOR_FIXTURE"]=plan["native_actor_fixture"]
+                migration=plan.get("private_serena_migration")
+                if migration is not None:
+                    names=("MCPHUB_PRIVATE_SERENA_MIGRATION_INPUT","MCPHUB_PRIVATE_SERENA_MIGRATION_INPUT_SHA256")
+                    if (set(migration)!={"input","input_files"} or set(migration["input"])!={"path","sha256"}
+                            or migration["input_files"].get(migration["input"]["path"])!=migration["input"]["sha256"]
+                            or not re.fullmatch("[0-9a-f]{64}",migration["input"]["sha256"])
+                            or any(k in options.ambient_present or k in run.env for k in (*names,"MCPHUB_PRIVATE_SERENA_MIGRATION_CASE_CONFIG"))):
+                        raise RuntimeError("explicit pinned CLI migration input differs or ambient dispatch is present")
+                    pinned(migration["input_files"])
+                    run.env.update(dict(zip(names,(migration["input"]["path"],migration["input"]["sha256"]))))
+                    run.receipt["private_serena_migration_input"]=migration["input"]
+            if package==part.API and tagged:
+                run.env.update(plan["attach_environment"])
+        run.receipt.update({"executed_binary":str(binary),"executed_sha256":sha(binary),"build_info":info,
+                            "qualified_bundle":record,
+                            "receiver_environment":{k:v for k,v in run.env.items() if k.startswith(("GO","CGO","MCPHUB_")) or k in ("PATH","TEMP","TMP","USERPROFILE","APPDATA","LOCALAPPDATA","SERENA_HOME")}})
+        if sha(binary)!=original_hash:
+            raise RuntimeError("admitted executing Product differs from current Go input bytes")
+        inv_root=case/"inventory"
+        inv_args=[plan["tools"]["contained"],"--test-binary",binary,"--expected-sha256",original_hash,
+                  "--source-dir",cwd,"--run-root",inv_root,"--inventory","--timeout","90s","--","-test.list=."]
+        run.receipt["native_custody_settled"]=False
+        inv_command=raw_command(run,inv_args,"inventory-owner",cwd,110)
+        inv_proof=finalize_owner_capture(run,inv_command,"contained",inv_root/"result.json","inventory_owner",
+                                         binary,original_hash,cwd,["-test.list=."],tagged)
+        if inv_command["exit_code"] or not owner_proof("contained",inv_proof,binary,original_hash,cwd,["-test.list=."],tagged):
+            raise RuntimeError("same-image original inventory failed")
+        names=[line.strip() for line in Path(inv_command["stdout"]).read_text(encoding="utf-8").splitlines() if part.NAME.fullmatch(line.strip())]
+        if len(set(names))!=len(names):
+            raise RuntimeError("same-image inventory has duplicate names")
+        tests=sorted(n for n in names if not n.startswith("Benchmark"))
+        run.receipt["inventory"]={"tests":{package:tests},"benchmarks":{package:sorted(n for n in names if n.startswith("Benchmark"))}}
+        required=[(part.CLI,FOCUSED_CASE)] if focused else mandatory(package,tagged)
+        selected=[FOCUSED_CASE] if focused else tests
+        if not {t.split("/",1)[0] for _,t in required}.issubset(tests):
+            raise RuntimeError("mandatory original owner tests are missing from this input image")
+        run.receipt["preparation_seconds"]=time.monotonic()-started
+        if run.receipt["preparation_seconds"]>PREP_SECONDS:
+            raise RuntimeError("adapter preparation exceeded its fixed budget; full suite was not started")
+        if package==part.PROCESS:
+            kind="job"; owner_root=case/"job"
+            argv=[plan["tools"]["job"],"--go-test-suite","--test-binary",binary,"--source-dir",cwd,
+                  "--run-root",owner_root,"--timeout","5m","--",*options.test_args]
+            proof_path=owner_root/"result.json"
+        elif package==part.API:
+            kind="namespace"; namespace=core.private_run("n"+uuid.uuid4().hex[:12]); parent=namespace/"n"; parent.mkdir()
+            argv=[plan["tools"]["namespace"],"--test-binary",binary,"--expected-sha256",original_hash,
+                  "--source-dir",cwd,"--repo",core.REPO,"--go",core.GO,"--pwsh",core.PWSH,
+                  "--parent",parent,"--test-timeout","5m"]
+            if tagged:
+                argv.append("--test-state-path-env")
+            argv += ["--",*options.test_args]
+            proof_path=parent/"namespace-suite-receipt.json"
+            run.receipt["namespace_private_scope"]={"path":str(namespace),"parent":str(parent),"parent_characters":len(str(parent))}
+        elif package==part.CLI and not focused:
+            kind="canonical"; owner_root=case/"suite"
+            canonical_binding=canonical_plan(run,plan,binary,original_hash,cwd,options.test_args)
+            argv=[plan["tools"]["canonical"],"--test-binary",binary,"--expected-sha256",original_hash,
+                  "--source-dir",cwd,"--run-root",owner_root,"--timeout","5m",
+                  "--canonical-plan",canonical_binding["canonical_plan"],
+                  "--canonical-plan-sha256",canonical_binding["canonical_plan_sha256"],
+                  "--profile","full","--",*options.test_args]
+            proof_path=owner_root/"result.json"
+        else:
+            kind="contained"; owner_root=case/"suite"
+            argv=[plan["tools"]["contained"],"--test-binary",binary,"--expected-sha256",original_hash,
+                  "--source-dir",cwd,"--run-root",owner_root,"--timeout","5m","--",*options.test_args]
+            proof_path=owner_root/"result.json"
+        if not focused:
+            run.receipt["headless_configuration"]=core.receive_headless_before(case,run.env)
+        run.receipt["preparation_seconds"]=time.monotonic()-started
+        if run.receipt["preparation_seconds"]>PREP_SECONDS:
+            raise RuntimeError("adapter preparation expired before original full-suite creation")
+        run.receipt["native_custody_settled"]=False
+        run.save()
+        failed_receiver = (canonical_failed_receiver(argv, cwd, proof_path, canonical_binding)
+                           if kind == "canonical" else None)
+        replay=raw_command(run,argv,"suite-owner",cwd,OWNER_SECONDS,
+                           physical_receiver=failed_receiver)
+        owner_finished=time.monotonic()
+        code=replay["exit_code"]
+        proof=finalize_owner_capture(run,replay,kind,proof_path,"owner",binary,original_hash,cwd,options.test_args,tagged,canonical_binding,
+                                     canonical_receiver=failed_receiver)
+        settled=run.receipt["native_custody_settled"]
+        proof_ok=owner_proof(kind,proof,binary,original_hash,cwd,options.test_args,tagged,canonical_binding) and code==0
+        if settled:
+            raw_stdout=Path(proof["stdout_path"]) if kind=="namespace" else proof_path.parent/("stdout.log" if kind=="job" else "stdout.raw")
+            raw_stderr=Path(proof["stderr_path"]) if kind=="namespace" else proof_path.parent/("stderr.log" if kind=="job" else "stderr.txt")
+            core.ordinary(raw_stdout,False); core.ordinary(raw_stderr,False)
+            if not raw_stdout.is_relative_to(core.RUNS) or not raw_stderr.is_relative_to(core.RUNS):
+                raise RuntimeError("owner raw evidence is outside its private D scope")
+            run.receipt["raw_output_binding"]={"stdout":str(raw_stdout),"stderr":str(raw_stderr),
+                "stdout_sha256":sha(raw_stdout),"stderr_sha256":sha(raw_stderr),
+                "stdout_forwarded_identical":sha(raw_stdout)==sha(replay["stdout"]),
+                "stderr_forwarded_identical":sha(raw_stderr)==sha(replay["stderr"])}
+            if not run.receipt["raw_output_binding"]["stdout_forwarded_identical"]:
+                raise RuntimeError("owner stdout differs from the actual original test stream")
+            if code==0:
+                actual_stderr=Path(replay["stderr"]).read_bytes()
+                child_stderr=raw_stderr.read_bytes()
+                expected_stderr=(child_stderr,)
+                if kind=="namespace":
+                    # The original owner emits these diagnostics before its
+                    # single raw stderr replay. They are not receiver bytes.
+                    prefix=("Private evidence root: "+proof["evidence_root"]+"\n").encode("utf-8")
+                    notes=(
+                        b"Wrong-owner rejection exercised after one successful private owner assignment.\n",
+                        b"UNVERIFIED actual wrong-owner receiving: ordinary-token assignment was refused; see private proof.\n")
+                    expected_stderr=tuple(prefix+note+child_stderr for note in notes)
+                if actual_stderr not in expected_stderr:
+                    raise RuntimeError("successful owner stderr is not its exact diagnostics plus the original stream")
+                run.receipt["raw_output_binding"]["stderr_forwarding_verified"]=True
+            if kind=="namespace" and (sha(raw_stdout)!=proof.get("stdout_sha256") or sha(raw_stderr)!=proof.get("stderr_sha256")):
+                raise RuntimeError("namespace raw hashes disagree with original owner receipt")
+            converted=run.command([plan["tools"]["test2json"],"-p",package],"suite-events",cwd=cwd,
+                                  timeout=5,stdin_path=Path(replay["stdout"]))
+            part.ledger(run,"literal-"+plan["phase"],{package:selected},part.events(converted),code if proof_ok else code or 1,required)
+            run.receipt["image_unchanged"]=sha(incoming)==original_hash and sha(binary)==original_hash
+            run.receipt["bundle_unchanged"]=record is None or core.tree(Path(record["path"]))==record["files"]
+            pinned(plan["input_files"])
+            if canonical_binding is not None:
+                if sha(canonical_binding["canonical_plan"]) != canonical_binding["canonical_plan_sha256"]:
+                    raise RuntimeError("original canonical plan changed after composite completion")
+            if migration is not None:
+                pinned(migration["input_files"])
+                run.receipt["private_migration_inputs_unchanged"]=True
+            if not focused:
+                run.receipt["headless_configuration"]["after"]=core.receive_headless_after(case,run.env,run.receipt["headless_configuration"])
+                run.receipt["headless_configuration_received"]=True
+            run.receipt["original_inputs_unchanged"]=True
+            if time.monotonic()-owner_finished>FINAL_SECONDS or time.monotonic()-started>TOTAL_SECONDS:
+                raise RuntimeError("late post-owner verification; infrastructure failure, no retry")
+        if not settled or not proof_ok or not run.receipt.get("coverage") or not run.receipt["coverage"][-1]["passed"] or not run.receipt.get("image_unchanged") or not run.receipt.get("bundle_unchanged"):
+            raise RuntimeError("original suite, inventory ledger, image, or custody proof failed")
+        code=0
+        run.receipt["status"]="PASS"
+    except BaseException as exc:
+        run.receipt["status"]="FAIL"
+        run.receipt["error"]=type(exc).__name__+": "+str(exc)
+        if not code:
+            code=1
+    finally:
+        run.receipt["commands_quiescent"]=run.commands_quiescent()
+        run.receipt["command_quiescence"]=run.quiescence_snapshot()
+        safe=(run.receipt.get("native_custody_settled") is True and run.receipt["commands_quiescent"])
+        replay_allowed=(replay is not None and safe and replay.get("captures_measured") is True)
+        try:
+            if not safe:
+                run.receipt["status"]="FAIL"
+                code=code or 1
+                if not stop.exists():
+                    core.new_json(stop,{"schema":"literal-unsafe-stop-v1","run":str(case),"package":package,
+                        "reason":"original native/IO or command completion is unverified; retain all evidence and stop later receivers"})
+            if replay is not None and not replay_allowed:
+                run.receipt["replay_suppressed"]="original native/IO or command completion, or capture measurement, is unverified"
+            if replay_allowed:
+                # Data-only offer; the consumer writes the original bytes after this
+                # root has received native/EOF closure and measured the captures.
+                run.receipt["raw_replay"] = {side: {
+                    "path": replay[side], "sha256": replay[side + "_sha256"]}
+                    for side in ("stdout", "stderr")}
+                run.receipt["replay_deadline_monotonic_ns"] = min(
+                    options.started_ns + TOTAL_SECONDS * 1_000_000_000,
+                    int((owner_finished + FINAL_SECONDS) * 1_000_000_000))
+            if time.monotonic()-started>TOTAL_SECONDS:
+                raise RuntimeError("late original completion; no qualification deadline extension")
+        except BaseException as exc:
+            run.receipt["status"]="FAIL"
+            run.receipt["replay_error"]=type(exc).__name__+": "+str(exc)
+            code=code or 1
+        run.receipt["seconds"]=time.monotonic()-started
+        run.receipt["adapter_exit_code"]=code
+        run.save()
+        run.final_receipt_published = True
+        core.new_json(registry/(key+".completed.json"),{
+            "package":package, "run":str(case), "receipt_sha256":sha(case/"receipt.json"),
+            "exit_code":code, "native_custody_settled":run.receipt.get("native_custody_settled"),
+            "commands_quiescent":run.receipt["commands_quiescent"],
+            "request_sha256":options.request_sha256, "request_nonce":options.request_nonce})
+    return run, code
+
+
+
+def ordinary_channel_path(path, directory=None):
+    path = Path(os.path.abspath(path))
+    for parent in (*reversed(path.parents), path):
+        facts = parent.lstat()
+        if stat.S_ISLNK(facts.st_mode) or getattr(facts, "st_file_attributes", 0) & 0x400:
+            raise RuntimeError("reparse path refused in original issuer channel")
+    if directory is True and not path.is_dir() or directory is False and not path.is_file():
+        raise RuntimeError("original issuer channel path has the wrong kind")
+    return path
+
+def read_channel_json(path, limit=8 << 20):
+    path = ordinary_channel_path(path, False)
+    with path.open("rb") as source:
+        raw = source.read(limit + 1)
+    if len(raw) > limit:
+        raise RuntimeError("original issuer metadata exceeds its bound")
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        raise RuntimeError("original issuer metadata must be an object")
+    return value, hashlib.sha256(raw).hexdigest()
+
+def publish_channel_json(path, value):
+    """One private writer per slot; pending bytes are closed before publication."""
+    path = Path(path)
+    ordinary_channel_path(path.parent, True)
+    pending = path.with_name(path.name + ".pending")
+    if path.exists():
+        raise RuntimeError("original issuer slot already published")
+    with pending.open("x", encoding="utf-8", newline="\n") as output:
+        json.dump(value, output, indent=2, sort_keys=True)
+        output.write("\n")
+        output.flush()
+        os.fsync(output.fileno())
+    if path.exists():
+        raise RuntimeError("original issuer slot collided")
+    # Windows rename refuses replacement. Exclusive pending ownership also
+    # prevents two cooperating producers racing on this slot on the fixture host.
+    pending.rename(path)
+
+def issuer_plan(registry):
+    registry = ordinary_channel_path(registry, True)
+    requests = registry / "requests"
+    requests.mkdir()
+    return {"schema": ISSUER_SCHEMA, "nonce": uuid.uuid4().hex,
+            "started_monotonic_ns": time.monotonic_ns(), "requests": str(requests)}
+
+def request_slot(plan, package):
+    return Path(plan["original_issuer"]["requests"]) / (hashlib.sha256(package.encode()).hexdigest() + ".request.json")
+
+def response_slot(request_path):
+    return request_path.with_name(request_path.name.replace(".request.json", ".response.json"))
+
+def ack_slot(request_path):
+    return request_path.with_name(request_path.name.replace(".request.json", ".replayed.json"))
+
+def abandoned_slot(request_path):
+    return request_path.with_name(request_path.name.replace(".request.json", ".abandoned.json"))
+
+def validate_request(plan, request, request_path, now_ns):
+    expected_keys = {"schema", "issuer_nonce", "nonce", "plan", "plan_sha256", "phase",
+                     "commit", "source_snapshot_sha256", "package", "binary",
+                     "binary_sha256", "argv", "cwd", "started_ns", "deadline_ns", "ambient_present"}
+    issuer = plan["original_issuer"]
+    if (set(request) != expected_keys or request["schema"] != REQUEST_SCHEMA
+            or request["issuer_nonce"] != issuer["nonce"]
+            or not re.fullmatch("[0-9a-f]{32}", request["nonce"])
+            or request["phase"] != plan["phase"] or request["commit"] != plan["commit"]
+            or request["plan"] != str(Path(plan["driver_root"]) / ("plan-" + plan["phase"] + ".json"))
+            or request["plan_sha256"] != plan["plan_sha256"]
+            or request["source_snapshot_sha256"] != plan["source_snapshot_sha256"]
+            or request["package"] not in plan["packages"]
+            or request_path != request_slot(plan, request["package"])):
+        raise RuntimeError("stale or unbound original issuer request")
+    if (type(request["started_ns"]) is not int or type(request["deadline_ns"]) is not int
+            or not issuer["started_monotonic_ns"] <= request["started_ns"] <= now_ns
+            or request["deadline_ns"] != request["started_ns"] + TOTAL_SECONDS * 1_000_000_000
+            or now_ns >= request["deadline_ns"]):
+        raise RuntimeError("original consumer time budget is invalid or expired")
+    if (request["cwd"] != plan["packages"][request["package"]]["directory"]
+            or not flags_are_literal(request["argv"])
+            or not re.fullmatch("[0-9a-f]{64}", request["binary_sha256"])
+            or not isinstance(request["ambient_present"], list)
+            or request["ambient_present"] != sorted(set(request["ambient_present"]))
+            or not set(request["ambient_present"]).issubset(FORBIDDEN_AMBIENT)):
+        raise RuntimeError("original consumer cwd, argv, image digest or environment differs")
+    incoming = ordinary_channel_path(request["binary"], False)
+    temporary = ordinary_channel_path(plan["temporary_directory"], True)
+    if str(incoming) != request["binary"] or not incoming.is_relative_to(temporary):
+        raise RuntimeError("original consumer image is outside its fresh temporary directory")
+    if sha(incoming) != request["binary_sha256"]:
+        raise RuntimeError("original consumer image changed before root admission")
+
+def response_binding(request, request_sha256):
+    return {"schema": RESPONSE_SCHEMA, "issuer_nonce": request["issuer_nonce"],
+            "request_nonce": request["nonce"], "request_sha256": request_sha256,
+            "plan_sha256": request["plan_sha256"], "package": request["package"],
+            "phase": request["phase"]}
+
+def validate_replay_ack(request, response, response_sha256, ack):
+    expected = {"schema": ACK_SCHEMA, "request_nonce": request["nonce"],
+                "request_sha256": response["request_sha256"], "response_sha256": response_sha256,
+                "run": response["run"], "receipt_sha256": response["receipt_sha256"],
+                "exit_code": response["exit_code"], "streams": response["replay"],
+                "replayed_identical": True}
+    finished = ack.get("finished_monotonic_ns")
+    if (set(ack) != set(expected) | {"finished_monotonic_ns"}
+            or any(ack[key] != value for key, value in expected.items())
+            or type(finished) is not int
+            or not request["started_ns"] <= finished <= response["replay_deadline_monotonic_ns"]):
+        raise RuntimeError("original raw replay acknowledgment is missing, late or unbound")
+
+class OriginalInvocationIssuer:
+    """One root-owned serial worker; filesystem records carry data, never owners."""
+    def __init__(self, root, plans):
+        load_owner_runtime()
+        self.root = Path(root)
+        self.plans = json.loads(json.dumps(plans))
+        self.invocations = []
+        self.records = {}
+        self.seen = set()
+        self.stop = threading.Event()
+        self.worker = None
+        self.failure = None
+        self.publication_errors = []
+        self.lock = threading.Lock()
+        for plan in self.plans.values():
+            issuer = plan["original_issuer"]
+            expected = Path(plan["invocations"]) / "requests"
+            if (issuer.get("schema") != ISSUER_SCHEMA or not re.fullmatch("[0-9a-f]{32}", issuer["nonce"])
+                    or issuer["requests"] != str(expected)
+                    or ordinary_channel_path(expected, True).parent.parent != self.root):
+                raise RuntimeError("original issuer plan scope differs")
+
+    def start_phase(self, phase):
+        if self.failure or self.worker is not None or (self.root / "unsafe-stop.json").exists():
+            raise RuntimeError("original issuer is not available for new admission")
+        self.stop.clear()
+        self.worker = threading.Thread(target=self._serve, args=(phase,),
+                                       name="literal-original-issuer-" + phase, daemon=False)
+        try:
+            self.worker.start()
+        except BaseException as error:
+            self._fail(error)
+            # A late-entering target sees stop before admission. If start created
+            # the original thread, keep it and join it through stop_phase.
+            if self.worker.ident is None:
+                self.worker = None
+            else:
+                self.stop_phase()
+            raise
+
+    def _fail(self, error):
+        with self.lock:
+            if self.failure is None:
+                self.failure = type(error).__name__ + ": " + str(error)
+        self.stop.set()
+        marker = self.root / "unsafe-stop.json"
+        try:
+            if not marker.exists():
+                core.new_json(marker, {"schema": "literal-unsafe-stop-v1",
+                                      "reason": self.failure, "owner": "original root issuer"})
+        except BaseException as publication_error:
+            # Losing a diagnostic must never release the actual original owner.
+            self.publication_errors.append(type(publication_error).__name__ + ": " + str(publication_error))
+
+    def _serve(self, phase):
+        plan = self.plans[phase]
+        try:
+            while not self.stop.is_set():
+                paths = sorted(Path(plan["original_issuer"]["requests"]).glob("*.request.json"))
+                pending = [path for path in paths if path not in self.seen]
+                if len(pending) > 1:
+                    raise RuntimeError("literal -p=1 issuer received concurrent requests")
+                if not pending:
+                    self.stop.wait(0.02)
+                    continue
+                path = pending[0]
+                self.seen.add(path)
+                self._handle(plan, path)
+        except BaseException as error:
+            self._fail(error)
+
+    def _handle(self, plan, path):
+        request, request_sha256 = read_channel_json(path)
+        validate_request(plan, request, path, time.monotonic_ns())
+        if self.stop.is_set() or abandoned_slot(path).exists():
+            raise RuntimeError("consumer ended before original owner admission")
+        key = (plan["phase"], request["package"])
+        record = {"request": request, "request_sha256": request_sha256, "path": path, "run": None}
+        with self.lock:
+            if key in self.records:
+                raise RuntimeError("one original invocation per package is required")
+            self.records[key] = record
+
+        def retain(run):
+            with self.lock:
+                if record["run"] is not None:
+                    raise RuntimeError("original invocation was already retained")
+                record["run"] = run
+                self.invocations.append(run)
+
+        def cancelled():
+            return (self.stop.is_set() or abandoned_slot(path).exists()
+                    or time.monotonic_ns() >= request["deadline_ns"])
+
+        options = SimpleNamespace(plan=request["plan"], plan_sha256=request["plan_sha256"],
+            binary=request["binary"], binary_sha256=request["binary_sha256"],
+            test_args=request["argv"], cwd=request["cwd"], started_ns=request["started_ns"],
+            ambient_present=request["ambient_present"], request_sha256=request_sha256,
+            request_nonce=request["nonce"])
+        run, code = execute(options, retain, cancelled)
+        if record["run"] is not run:
+            raise RuntimeError("original invocation identity changed")
+        safe = run.commands_quiescent() and run.receipt.get("native_custody_settled") is True
+        response = dict(response_binding(request, request_sha256),
+            run=str(run.root), receipt_sha256=sha(run.root / "receipt.json"),
+            exit_code=code, status=run.receipt["status"], original_custody_complete=safe,
+            replay=run.receipt.get("raw_replay") if safe else None,
+            replay_deadline_monotonic_ns=min(request["deadline_ns"],
+                run.receipt.get("replay_deadline_monotonic_ns", request["deadline_ns"])),
+            error=run.receipt.get("error"), qualification_deadlines_extended=False)
+        # Store the actual owner and immutable metadata before publishing to the client.
+        with self.lock:
+            record["response"] = response
+        target = response_slot(path)
+        publish_channel_json(target, response)
+        response_sha256 = sha(target)
+        with self.lock:
+            record["response_sha256"] = response_sha256
+        if not safe:
+            raise RuntimeError("original invocation UNKNOWN; root retains its actual owners")
+        while True:
+            if ack_slot(path).exists():
+                ack, _ = read_channel_json(ack_slot(path))
+                validate_replay_ack(request, response, response_sha256, ack)
+                with self.lock:
+                    record["ack"] = ack
+                return
+            if (abandoned_slot(path).exists() or self.stop.is_set()
+                    or time.monotonic_ns() >= response["replay_deadline_monotonic_ns"]):
+                raise RuntimeError("consumer ended without timely exact raw replay; no new admission")
+            self.stop.wait(0.01)
+
+    def receive_replay(self, phase, package, terminal):
+        """Root's same Invocation, plus the client's bound data-only replay acknowledgment."""
+        with self.lock:
+            record = self.records.get((phase, package))
+            if record is None or record.get("response") is None or record["run"] is None:
+                raise RuntimeError("actual root Invocation is missing")
+            run, request, response = record["run"], record["request"], record["response"]
+        if (terminal["run"] != str(run.root) or terminal.get("request_sha256") != record["request_sha256"]
+                or terminal.get("request_nonce") != request["nonce"]
+                or terminal["receipt_sha256"] != response["receipt_sha256"]
+                or not run.commands_quiescent() or run.receipt.get("native_custody_settled") is not True):
+            raise RuntimeError("terminal data does not name this settled original Invocation")
+        response_sha256 = sha(response_slot(record["path"]))
+        actual_response, _ = read_channel_json(response_slot(record["path"]))
+        if actual_response != response:
+            raise RuntimeError("original response changed")
+        ack, _ = read_channel_json(ack_slot(record["path"]))
+        validate_replay_ack(request, response, response_sha256, ack)
+        return ack
+
+    def stop_phase(self):
+        self.stop.set()
+        worker = self.worker
+        if worker is None:
+            return
+        # This joins the original issuer, not a thread reconstructed from an ID.
+        # An in-flight command keeps its original cleanup; no qualification time is added.
+        while True:
+            try:
+                worker.join(0)
+                if not worker.is_alive():
+                    break
+            except BaseException as error:
+                self._fail(error)
+            try:
+                time.sleep(0.01)
+            except BaseException as error:
+                self._fail(error)
+        self.worker = None
+
+    def retain_failed_invocations(self):
+        self.stop_phase()
+        for run in self.invocations:
+            if not run.commands_quiescent():
+                # The unchanged original FAIL stays immutable. This method admits
+                # physical closure only, using the same native objects and threads.
+                run.retain_failed_full_workers(getattr(run, "final_receipt_published", False))
+
+def consume(options, *, started_ns=ADAPTER_STARTED_NS, stdout=None, stderr=None):
+    if sys.version_info < (3, 10):
+        raise RuntimeError("one system-wide Windows monotonic clock requires Python 3.10+")
+    stdout = sys.stdout.buffer if stdout is None else stdout
+    stderr = sys.stderr.buffer if stderr is None else stderr
+    plan_path = ordinary_channel_path(options.plan, False)
+    plan, plan_sha256 = read_channel_json(plan_path)
+    if plan_sha256 != options.plan_sha256 or plan.get("schema") != "literal-go-test-plan-v1":
+        raise RuntimeError("original pinned full plan required by thin consumer")
+    plan["plan_sha256"] = plan_sha256
+    issuer = plan.get("original_issuer", {})
+    registry = ordinary_channel_path(plan["invocations"], True)
+    if (issuer.get("schema") != ISSUER_SCHEMA
+            or issuer.get("requests") != str(registry / "requests")
+            or registry.parent != Path(plan["driver_root"]) or plan_path.parent != registry.parent):
+        raise RuntimeError("original issuer channel is not bound to the full plan")
+    cwd = ordinary_channel_path(os.getcwd(), True)
+    packages = [package for package, row in plan["packages"].items() if row["directory"] == str(cwd)]
+    if len(packages) != 1:
+        raise RuntimeError("consumer cwd does not select exactly one original package")
+    binary = ordinary_channel_path(options.binary, False)
+    request = {"schema": REQUEST_SCHEMA, "issuer_nonce": issuer["nonce"], "nonce": uuid.uuid4().hex,
+        "plan": str(plan_path), "plan_sha256": plan_sha256, "phase": plan["phase"],
+        "commit": plan["commit"], "source_snapshot_sha256": plan["source_snapshot_sha256"],
+        "package": packages[0], "binary": str(binary), "binary_sha256": sha(binary),
+        "argv": options.test_args, "cwd": str(cwd), "started_ns": started_ns,
+        "deadline_ns": started_ns + TOTAL_SECONDS * 1_000_000_000,
+        "ambient_present": sorted(name for name in FORBIDDEN_AMBIENT if name in os.environ)}
+    path = request_slot(plan, packages[0])
+    validate_request(plan, request, path, time.monotonic_ns())
+    request_sha256 = None
+    try:
+        publish_channel_json(path, request)
+        request_sha256 = sha(path)
+        target = response_slot(path)
+        while not target.exists():
+            if (Path(plan["driver_root"]) / "unsafe-stop.json").exists():
+                raise RuntimeError("original issuer closed admission; raw capture access refused")
+            remaining = (request["deadline_ns"] - time.monotonic_ns()) / 1_000_000_000
+            if remaining <= 0:
+                raise TimeoutError("original consumer deadline expired")
+            time.sleep(min(0.02, remaining))
+        response, response_sha256 = read_channel_json(target)
+        binding = response_binding(request, request_sha256)
+        if (any(response.get(key) != value for key, value in binding.items())
+                or response.get("qualification_deadlines_extended") is not False
+                or type(response.get("exit_code")) is not int
+                or type(response.get("replay_deadline_monotonic_ns")) is not int
+                or response["replay_deadline_monotonic_ns"] > request["deadline_ns"]):
+            raise RuntimeError("original root response is stale or unbound")
+        if not response.get("original_custody_complete"):
+            raise RuntimeError("original root retained UNKNOWN custody; raw capture access refused")
+        receipt, receipt_sha256 = read_channel_json(Path(response["run"]) / "receipt.json", 32 << 20)
+        if (receipt_sha256 != response["receipt_sha256"]
+                or receipt.get("request_sha256") != request_sha256
+                or receipt.get("request_nonce") != request["nonce"]
+                or receipt.get("native_custody_settled") is not True
+                or receipt.get("commands_quiescent") is not True
+                or receipt.get("raw_replay") != response["replay"]):
+            raise RuntimeError("original closed receipt does not bind this response")
+        if response.get("error"):
+            stderr.write(("literal Go adapter: " + response["error"] + "\n").encode("utf-8"))
+        replay = response["replay"]
+        if replay is not None:
+            commands = [row for row in receipt["commands"] if Path(row["stdout"]).name == "suite-owner.stdout.txt"]
+            if len(commands) != 1 or commands[0].get("captures_measured") is not True:
+                raise RuntimeError("raw replay lacks original suite capture measurement")
+            for side, output in (("stdout", stdout), ("stderr", stderr)):
+                stream = replay[side]
+                capture = ordinary_channel_path(stream["path"], False)
+                if (str(capture) != commands[0][side] or stream["sha256"] != commands[0][side + "_sha256"]
+                        or not capture.is_relative_to(Path(response["run"])) or sha(capture) != stream["sha256"]):
+                    raise RuntimeError("original measured raw stream changed")
+                digest = hashlib.sha256()
+                with capture.open("rb") as source:
+                    while block := source.read(1 << 20):
+                        if time.monotonic_ns() >= response["replay_deadline_monotonic_ns"]:
+                            raise TimeoutError("original raw replay deadline expired")
+                        digest.update(block)
+                        offset = 0
+                        while offset < len(block):
+                            count = output.write(block[offset:])
+                            if count is None or count <= 0:
+                                raise OSError("short original raw replay")
+                            offset += count
+                output.flush()
+                if digest.hexdigest() != stream["sha256"]:
+                    raise RuntimeError("original raw stream changed during replay")
+        stdout.flush()
+        stderr.flush()
+        ack = {"schema": ACK_SCHEMA, "request_nonce": request["nonce"],
+            "request_sha256": request_sha256, "response_sha256": response_sha256,
+            "run": response["run"], "receipt_sha256": receipt_sha256,
+            "exit_code": response["exit_code"], "streams": replay, "replayed_identical": True,
+            "finished_monotonic_ns": time.monotonic_ns()}
+        validate_replay_ack(request, response, response_sha256, ack)
+        publish_channel_json(ack_slot(path), ack)
+        return response["exit_code"]
+    except BaseException as error:
+        if request_sha256 is not None and not abandoned_slot(path).exists():
+            publish_channel_json(abandoned_slot(path), {"request_sha256": request_sha256,
+                "request_nonce": request["nonce"], "error": type(error).__name__ + ": " + str(error)})
+        raise
+
+
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--plan",required=True)
+    parser.add_argument("--plan-sha256",required=True)
+    parser.add_argument("binary")
+    parser.add_argument("test_args",nargs=argparse.REMAINDER)
+    options=parser.parse_args()
+    try:
+        if REVIEW_COMPLETE is not True:
+            raise RuntimeError("owner composition is disabled pending review and exact pins")
+        return consume(options)
+    except BaseException as exc:
+        print("literal Go adapter refused: "+type(exc).__name__+": "+str(exc),file=sys.stderr,flush=True)
+        return 1
+
+if __name__=="__main__":
+    raise SystemExit(main())

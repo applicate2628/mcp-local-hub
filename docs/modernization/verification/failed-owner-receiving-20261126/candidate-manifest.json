@@ -1,0 +1,281 @@
+{
+  "schema": "external-owner-future-candidate-review-v1",
+  "created_utc": "2026-11-26T10:57:40.081160+00:00",
+  "owner_pr": 664,
+  "owner_head": "0c255490461fed0a3ee3d43acdd5216e2e064a53",
+  "status": "MODEL_PASS_AND_WINDOWS_CONTROLLER_UNIT_PASS_NATIVE_LATE_RECEIVING_NOT_RUN",
+  "reused_named_v2_sha256": "5246b97e6cfcc60c39284fab6941509c1e770ec4738aec0a4b218cccb9d1e5a8",
+  "actual_adapter_source_sha256": "ef393445772f2efbf977d76719528af6706b1e1e394bfd3e0c2e3f1dd60ba450",
+  "actual_core_source_sha256": "b679aadd8455cb70c8a445e3abf99484edaf76208fffc0f8347100d12c5976c8",
+  "product_dependency": {
+    "pr": 671,
+    "head": "ff8128a5f717fae75b263de55c382933a0bc9121",
+    "existing_method": "ContainedStreamReceiptV1.ResourcesFinalized"
+  },
+  "candidate_files": {
+    "canonical_receiving_v4.py": {
+      "sha256": "6ad13e7c57e604111552fd553f10a66a174c9ba9b96dc37484dfba071a9bf2a0",
+      "bytes": 48228
+    },
+    "controller/cases_windows.go": {
+      "sha256": "a9565d3140accddc8601c2a5132afaf109c86a6e2c3f582de3d272b900cf6d87",
+      "bytes": 19128
+    },
+    "controller/inputs_windows.go": {
+      "sha256": "345197b965bd59a97c43e846ab35a37393852cbac7dfe5cabc0f0a109576e6cc",
+      "bytes": 11040
+    },
+    "controller/main_windows.go": {
+      "sha256": "44072cc697d8087d28653880533589442635deb94bbe81588a96af9bb22f1135",
+      "bytes": 23392
+    },
+    "controller/physical_windows.go": {
+      "sha256": "2b36397be3d45ebf0bb378eb89ba8a8086ff8d17b4c76d58b474f78fb5d63429",
+      "bytes": 11633
+    },
+    "controller/physical_windows_test.go": {
+      "sha256": "69562a90ae6be02fa43f2bd5b84d7d5ed4c70bb900443869e60099c40f901925",
+      "bytes": 4118
+    },
+    "guard-custody.py": {
+      "sha256": "b24d813efbc133cff650b46f94cb088b9343a686b3bb4f2870322addd4836d1a",
+      "bytes": 46220
+    },
+    "literal_go_exec_adapter_ready_v1.py": {
+      "sha256": "2248b54f038c07df0780e399446b6ad1c309e6da290b091486c7bc0041aec284",
+      "bytes": 63215
+    },
+    "owner/canonicalcaseowner/capture_windows_amd64.go": {
+      "sha256": "e734df342f5b863ffe9916fa71d9c7712b5c305346662419bccc7716517e0053",
+      "bytes": 3395
+    },
+    "owner/canonicalcaseowner/events_windows_amd64.go": {
+      "sha256": "f1f077b17d1a7f6dba774bd0c637c7cc20edcfaadd4fff77c82df46709d2e811",
+      "bytes": 27810
+    },
+    "owner/canonicalcaseowner/native_windows_amd64.go": {
+      "sha256": "8729ac9c525e664c5d7f279b277a93b9e06841e6757a14de508719d026335f87",
+      "bytes": 11982
+    },
+    "owner/canonicalcaseowner/owner_windows_amd64.go": {
+      "sha256": "7276febe485aea1791fc6757ad1c710a108e3c60e7aa263e656ad985dfe22294",
+      "bytes": 29509
+    },
+    "owner/canonicalcaseowner/physical_windows_amd64.go": {
+      "sha256": "6749335513771a7daf8be423809262f57039f25a940114e5ba46b5a76802216a",
+      "bytes": 7094
+    }
+  },
+  "input_files_unchanged": {
+    "owner/canonicalcaseowner/capture_windows_amd64.go": true,
+    "owner/canonicalcaseowner/events_windows_amd64.go": true,
+    "owner/canonicalcaseowner/native_windows_amd64.go": true,
+    "owner/canonicalcaseowner/owner_windows_amd64.go": true,
+    "controller/cases_windows.go": true,
+    "controller/inputs_windows.go": true,
+    "controller/main_windows.go": true,
+    "source-manifest.json": true,
+    "receiving/canonical_receiving_v4.py": true
+  },
+  "unchanged_normal_paths": {
+    "_ordinary_command": true,
+    "_close_named_files": true,
+    "_finalize_captures": true,
+    "finalize_deferred": true,
+    "commands_quiescent": true,
+    "quiescence_snapshot": true,
+    "receiver_exact_prefix": true
+  },
+  "python_ast_parse": "PASS",
+  "guard_model": {
+    "baseline_status": "EXPECTED_FAIL_LATE_RECEIVING_ABSENT",
+    "baseline_path": "checks/named-v2-baseline/probe.json",
+    "candidate_status": "PASS",
+    "candidate_path": "checks/named-v2-late-candidate/probe.json",
+    "candidate_invariants": 15,
+    "candidate_invariants_passed": 15,
+    "model_process_only": true
+  },
+  "python_tests": {
+    "status": "PASS",
+    "tests": 9,
+    "refusal_subtests": 23,
+    "subtests": [
+      {
+        "name": "test_distinguishing_refusals (shared_reader_verification.FailedPhysicalDataTests.test_distinguishing_refusals) (name='foreign plan')",
+        "passed": true
+      },
+      {
+        "name": "test_distinguishing_refusals (shared_reader_verification.FailedPhysicalDataTests.test_distinguishing_refusals) (name='foreign controller')",
+        "passed": true
+      },
+      {
+        "name": "test_distinguishing_refusals (shared_reader_verification.FailedPhysicalDataTests.test_distinguishing_refusals) (name='changed failure')",
+        "passed": true
+      },
+      {
+        "name": "test_distinguishing_refusals (shared_reader_verification.FailedPhysicalDataTests.test_distinguishing_refusals) (name='changed deadline')",
+        "passed": true
+      },
+      {
+        "name": "test_distinguishing_refusals (shared_reader_verification.FailedPhysicalDataTests.test_distinguishing_refusals) (name='new qualification')",
+        "passed": true
+      },
+      {
+        "name": "test_distinguishing_refusals (shared_reader_verification.FailedPhysicalDataTests.test_distinguishing_refusals) (name='capture grant')",
+        "passed": true
+      },
+      {
+        "name": "test_distinguishing_refusals (shared_reader_verification.FailedPhysicalDataTests.test_distinguishing_refusals) (name='source grant')",
+        "passed": true
+      },
+      {
+        "name": "test_distinguishing_refusals (shared_reader_verification.FailedPhysicalDataTests.test_distinguishing_refusals) (name='new command grant')",
+        "passed": true
+      },
+      {
+        "name": "test_distinguishing_refusals (shared_reader_verification.FailedPhysicalDataTests.test_distinguishing_refusals) (name='frozen outer incomplete')",
+        "passed": true
+      },
+      {
+        "name": "test_distinguishing_refusals (shared_reader_verification.FailedPhysicalDataTests.test_distinguishing_refusals) (name='outer worker pending')",
+        "passed": true
+      },
+      {
+        "name": "test_distinguishing_refusals (shared_reader_verification.FailedPhysicalDataTests.test_distinguishing_refusals) (name='outer close failed')",
+        "passed": true
+      },
+      {
+        "name": "test_distinguishing_refusals (shared_reader_verification.FailedPhysicalDataTests.test_distinguishing_refusals) (name='live outer member')",
+        "passed": true
+      },
+      {
+        "name": "test_distinguishing_refusals (shared_reader_verification.FailedPhysicalDataTests.test_distinguishing_refusals) (name='new attempted case')",
+        "passed": true
+      },
+      {
+        "name": "test_distinguishing_refusals (shared_reader_verification.FailedPhysicalDataTests.test_distinguishing_refusals) (name='foreign original owner')",
+        "passed": true
+      },
+      {
+        "name": "test_distinguishing_refusals (shared_reader_verification.FailedPhysicalDataTests.test_distinguishing_refusals) (name='case worker pending')",
+        "passed": true
+      },
+      {
+        "name": "test_distinguishing_refusals (shared_reader_verification.FailedPhysicalDataTests.test_distinguishing_refusals) (name='case reader close failed')",
+        "passed": true
+      },
+      {
+        "name": "test_distinguishing_refusals (shared_reader_verification.FailedPhysicalDataTests.test_distinguishing_refusals) (name='unclosed process')",
+        "passed": true
+      },
+      {
+        "name": "test_distinguishing_refusals (shared_reader_verification.FailedPhysicalDataTests.test_distinguishing_refusals) (name='unclosed thread')",
+        "passed": true
+      },
+      {
+        "name": "test_distinguishing_refusals (shared_reader_verification.FailedPhysicalDataTests.test_distinguishing_refusals) (name='unclosed image')",
+        "passed": true
+      },
+      {
+        "name": "test_distinguishing_refusals (shared_reader_verification.FailedPhysicalDataTests.test_distinguishing_refusals) (name='pending event')",
+        "passed": true
+      },
+      {
+        "name": "test_distinguishing_refusals (shared_reader_verification.FailedPhysicalDataTests.test_distinguishing_refusals) (name='uncontinued event')",
+        "passed": true
+      },
+      {
+        "name": "test_distinguishing_refusals (shared_reader_verification.FailedPhysicalDataTests.test_distinguishing_refusals) (name='missing original event')",
+        "passed": true
+      },
+      {
+        "name": "test_distinguishing_refusals (shared_reader_verification.FailedPhysicalDataTests.test_distinguishing_refusals) (name='changed qualification history')",
+        "passed": true
+      }
+    ],
+    "log": "checks/public-core-python-tests.log",
+    "test_source_sha256": "4f57ed751014f2fdafd11cb4304be12077c702603602089708a4c22d0112be31",
+    "existing_core_finalizer_executed_as_exact_ast_method": true,
+    "actual_issuer_method_executed": true,
+    "core_module_imported": false,
+    "normal_to_late_reader_close_failure_regression": "PASS_ONE_OPEN_ONE_CLOSE_HOLD",
+    "normal_metadata_sha_uses_same_cached_bytes": true,
+    "fixture_source": "existing public #664 v13 core",
+    "fixture_core_sha256": "e11118b22a6d805fd9984c885fb646e29638777b46b2227c788864c8d6d7953d",
+    "core_method_ast_sha256": "1d32f9a1b4488234e6eff022998334aecf407b0e5a3acbf333fe98f95a2aa8cc",
+    "after_fixture_change_executions": 1,
+    "core_provenance": "reviews/core-method-provenance.json",
+    "historical_actual_core": {
+      "status": "PASS",
+      "tests": 9,
+      "log": "checks/final-python-tests.log",
+      "core_sha256": "b679aadd8455cb70c8a445e3abf99484edaf76208fffc0f8347100d12c5976c8",
+      "test_sha256": "a470ef3d93f4b90b6b93d9b8c61ba862481c7f9f2342f5d72cc7fa18706ba156"
+    }
+  },
+  "go_build": "PASS_COMPILATION_AS_PART_OF_TARGET_GO_TEST_NO_SEPARATE_BUILD",
+  "go_test": "PASS_WINDOWS_CONTROLLER_OS_PIPE_UNIT_1_ROOT_2_SUBTESTS_1_PACKAGE",
+  "gofmt": "PASS_NATIVE_TEN_FILES_ONE_FORMAT_ONLY_DELTA",
+  "native_execution": true,
+  "new_candidate_native_qualified": false,
+  "root_review_completed": false,
+  "adapter_runtime_enabled": false,
+  "old_full11_touched": false,
+  "old_failure_reclassified": false,
+  "production_api_changed": false,
+  "remaining_unsupported": [
+    "Frozen outer ResourcesFinalized false remains HOLD; caller has no original internal late completion channels.",
+    "Only the source-verified canonical suite-owner receives the new callback; other named/deferred owners retain custody but remain HOLD after failure without their own prebound physical receiver."
+  ],
+  "next": "Fresh actual native debug-owner late-receiving qualification on admitted exact inputs, then root acceptance and explicit exact runtime paths/pins; old full11 remains unchanged.",
+  "readme_sha256": "dc75cc53131cf870bc0d759413e09d8dd47e1ac86edd74fa7e25e3fddb769759",
+  "prior_review_manifest": "reviews/pre-shared-reader-fix/candidate-manifest.json",
+  "prior_review_manifest_sha256": "62d270d5b67044a718bc7553e86bd9c71404c3854fd0aa4431463ce304c612e1",
+  "updated_utc": "2026-11-26T11:19:13.447980+00:00",
+  "native_execution_scope": "Windows gofmt/go test with real OS pipes and deterministic controller receipt fixtures; actual debug-owner late receiving not executed.",
+  "actual_native_late_receiving": "NOT_RUN",
+  "runtime_enabled": false,
+  "independent_review_completed": true,
+  "independent_review": {
+    "path": "reviews/independent-review.json",
+    "sha256": "d4cabec54204f859fa8ef62d1b02234a5627203a0c2686f31ad23f7deeb47e8e"
+  },
+  "native_go": {
+    "source_commit": "b6f82b3f531bb3eec197049167cdc5971b44e2b0",
+    "receipt": "native-go-v1/receipt.json",
+    "receipt_sha256": "8b8c8a5172331b8b258c7765ef4d52f8c9cbfb8ad68512e8ee474c74ea480216",
+    "receipt_bytes": 36604,
+    "receipt_line_endings": "CRLF",
+    "parent_receiving": "native-go-v1/root-receiving.json",
+    "parent_sha256": "e8a49a6ce65a1369794bbe1b66cd02c550711c06f1d0861d2775a63e1c15eb40",
+    "receiving_review": "native-go-v1/receiving-review.json",
+    "source_binding": "native-go-v1/source-binding.json",
+    "commands_closed": 4,
+    "original_readers_joined": 8,
+    "go_input_files": 10,
+    "root_pass": 1,
+    "subtest_pass": 2,
+    "package_pass": 1,
+    "fail_events": 0,
+    "skip_events": 0,
+    "race_detector_run": false,
+    "actual_debug_owner_started": false,
+    "target_selector": "^TestFailedPhysicalOuterOriginalReturnAndFrozenIO$"
+  },
+  "prior_model_only_manifest": {
+    "path": "reviews/pre-native-go-v1/candidate-manifest.json",
+    "sha256": "2d8410f4208e2d733f957b4939b9986d47caef4e00628107f7c4d168881fed2f"
+  },
+  "reproduce_sha256": "1b8ac661b871cb524b4b84f98e30d650402c3aa4bb9f1eda3cfa63e96ddcd776",
+  "publication": {
+    "prefix": "docs/modernization/verification/failed-owner-receiving-20261126",
+    "candidate_source_files": 13,
+    "candidate_suffix": ".txt",
+    "active_model_test_files": 2,
+    "unchanged_runtime_candidate_except_native_gofmt": true,
+    "new_framework": false,
+    "full_core_duplicated": false,
+    "unrelated_core_diff_included": false
+  }
+}

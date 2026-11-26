@@ -1,0 +1,84 @@
+{
+  "schema": "external-python-timeout-model-v1",
+  "status": "PASS",
+  "guard_sha256": "b24d813efbc133cff650b46f94cb088b9343a686b3bb4f2870322addd4836d1a",
+  "facts": {
+    "same_timeout_exception": true,
+    "no_controller_kill": true,
+    "same_original_process_retained": true,
+    "original_capture_handles_retained_open": true,
+    "original_failure_unchanged": true,
+    "no_false_external_closure": true,
+    "no_capture_hashes": true,
+    "successor_refused": true,
+    "incomplete_nested_proof_refused": true,
+    "receiver_bound_before_launch": true,
+    "same_original_row_received": true,
+    "late_physical_closure_received": true,
+    "original_failure_unchanged_after_closure": true,
+    "capture_handles_closed_after_proof": true,
+    "late_closure_grants_nothing": true
+  },
+  "model_calls": {
+    "kill": 0,
+    "wait_timeouts": [
+      320,
+      0,
+      0,
+      0
+    ],
+    "communicate_timeouts": []
+  },
+  "physical_receiving_before_exit": {
+    "schema": "failed-original-worker-physical-closure-v1",
+    "status": "UNKNOWN",
+    "commands": [
+      {
+        "name": "suite-owner",
+        "state": "UNKNOWN",
+        "original_state": "unknown",
+        "workers": [],
+        "capture_access_issued": false,
+        "reason": "original named process exit remains unreceived"
+      }
+    ],
+    "seconds": 1.1348000043653883e-05,
+    "receiving_error": null,
+    "deadline_exceeded": true,
+    "original_command_states_unchanged": true,
+    "qualification_passed": false,
+    "capture_access_issued": false,
+    "new_commands_permitted": false
+  },
+  "physical_receiving_after_exit": {
+    "schema": "failed-original-worker-physical-closure-v1",
+    "status": "CLOSED",
+    "commands": [
+      {
+        "name": "suite-owner",
+        "state": "CLOSED",
+        "original_state": "unknown",
+        "workers": [],
+        "capture_access_issued": false,
+        "original_external_process_retained": true,
+        "original_direct_exit_code": 1,
+        "parent_file_handles_closed": true,
+        "external_physical_receiving": {
+          "physical_complete": true,
+          "source": "model original nested completion"
+        }
+      }
+    ],
+    "seconds": 3.524800013110507e-05,
+    "receiving_error": null,
+    "deadline_exceeded": false,
+    "original_command_states_unchanged": true,
+    "qualification_passed": false,
+    "capture_access_issued": false,
+    "new_commands_permitted": false
+  },
+  "native_execution": false,
+  "external_receiving_qualified": false,
+  "go_controller_qualified": false,
+  "scope": "Actual guard and stdlib run; process identity, waits, kill and timeout are deterministic model events."
+}

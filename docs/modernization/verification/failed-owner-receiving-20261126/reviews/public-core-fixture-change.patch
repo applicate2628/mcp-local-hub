@@ -1,0 +1,20 @@
+--- a/test_failed_receiving.py
++++ b/test_failed_receiving.py
+@@ -335,13 +335,15 @@
+     def test_actual_issuer_and_existing_core_finalizer_receive_same_custody(self):
+         # Compile only the exact existing method. Importing its large module
+         # would activate unrelated native/cache environment setup.
+-        source_path = ROOT.parent / "external-owner-inputs/v14-qualified_windows_products_consumer_v1.py"
++        source_path = ROOT.parent / "external-owner-inputs/public-v13-qualified_windows_products_consumer_v1.py"
+         source = source_path.read_bytes()
+         self.assertEqual(hashlib.sha256(source).hexdigest(),
+-                         "b679aadd8455cb70c8a445e3abf99484edaf76208fffc0f8347100d12c5976c8")
++                         "e11118b22a6d805fd9984c885fb646e29638777b46b2227c788864c8d6d7953d")
+         run_class = next(node for node in ast.parse(source).body if isinstance(node, ast.ClassDef) and node.name == "Run")
+         method = next(node for node in run_class.body if isinstance(node, ast.FunctionDef)
+                       and node.name == "retain_failed_full_workers")
++        self.assertEqual(hashlib.sha256(ast.dump(method, include_attributes=False).encode("utf-8")).hexdigest(),
++                         "1d32f9a1b4488234e6eff022998334aecf407b0e5a3acbf333fe98f95a2aa8cc")
+         loop_line = next(node.lineno for node in ast.walk(method) if isinstance(node, ast.While))
+         namespace = {"sys": sys, "time": time}
+         exec(compile(ast.Module(body=[method], type_ignores=[]), str(source_path), "exec"), namespace)
