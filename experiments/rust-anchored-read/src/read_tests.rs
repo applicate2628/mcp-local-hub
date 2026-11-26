@@ -7,6 +7,7 @@ use std::{
     path::PathBuf,
     sync::atomic::AtomicU64,
 };
+use windows_sys::Win32::Storage::FileSystem::{LockFile, UnlockFile};
 static NEXT: AtomicU64 = AtomicU64::new(1);
 struct Fixture {
     root: PathBuf,
@@ -297,38 +298,48 @@ fn injected_native_phase_error_preserves_category_and_closes_handles() {
     assert_eq!(err.native, Some(NativeCode::Win32(123)));
     assert!(err.cleanup_failures.is_empty())
 }
+
+// This guard owns only the fixture's independent handle and one byte lock.
+// File closes the handle on every path, including a panic during the hook.
+struct LockedByte {
+    file: fs::File,
+    locked: bool,
+}
+impl LockedByte {
+    fn lock(&mut self) -> std::io::Result<()> {
+        assert!(!self.locked, "fixture already owns the byte lock");
+        // SAFETY: this independent fixture handle owns the fixed second-chunk
+        // byte range. It never changes the reader's original handle or offset.
+        let ok = unsafe { LockFile(self.file.as_raw_handle(), 4096, 0, 1, 0) };
+        self.locked = ok != 0;
+        if self.locked {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
+    }
+    fn unlock(&mut self) -> std::io::Result<()> {
+        if self.locked {
+            // SAFETY: the same live fixture handle and exact locked range.
+            if unsafe { UnlockFile(self.file.as_raw_handle(), 4096, 0, 1, 0) } == 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            self.locked = false;
+        }
+        Ok(())
+    }
+}
+impl Drop for LockedByte {
+    fn drop(&mut self) {
+        // Never replace the reader's result or a panic with a cleanup panic.
+        // Closing the owned File also releases any remaining byte-range lock.
+        let _ = self.unlock();
+    }
+}
+
 #[test]
 fn native_read_failure_after_partial_read_preserves_error_and_releases_lock() {
-    use windows_sys::Win32::{
-        Foundation::ERROR_LOCK_VIOLATION,
-        Storage::FileSystem::{LockFile, UnlockFile},
-    };
-
-    // This guard owns only the fixture's independent handle and one byte lock.
-    // File closes the handle on every path, including a panic during the hook.
-    struct LockedByte {
-        file: fs::File,
-        locked: bool,
-    }
-    impl LockedByte {
-        fn unlock(&mut self) -> std::io::Result<()> {
-            if self.locked {
-                // SAFETY: the same live fixture handle and exact locked range.
-                if unsafe { UnlockFile(self.file.as_raw_handle(), 4096, 0, 1, 0) } == 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                self.locked = false;
-            }
-            Ok(())
-        }
-    }
-    impl Drop for LockedByte {
-        fn drop(&mut self) {
-            // Never replace the reader's result or a panic with a cleanup panic.
-            // Closing the owned File also releases any remaining byte-range lock.
-            let _ = self.unlock();
-        }
-    }
+    use windows_sys::Win32::Foundation::ERROR_LOCK_VIOLATION;
 
     let f = Fixture::new();
     let payload = vec![b'x'; 4097];
@@ -351,15 +362,7 @@ fn native_read_failure_after_partial_read_preserves_error_and_releases_lock() {
                     // LockFile is nonblocking. Its exclusive byte lock denies
                     // the reader's separate handle even in this same process.
                     // https://learn.microsoft.com/windows/win32/api/fileapi/nf-fileapi-lockfile
-                    // SAFETY: live read-capable fixture handle, fixed valid range.
-                    let ok = unsafe { LockFile(locked.file.as_raw_handle(), 4096, 0, 1, 0) };
-                    locked.locked = ok != 0;
-                    assert_ne!(
-                        ok,
-                        0,
-                        "lock fixture byte: {}",
-                        std::io::Error::last_os_error()
-                    );
+                    locked.lock().expect("lock fixture byte");
                 }
             }
             Ok(())

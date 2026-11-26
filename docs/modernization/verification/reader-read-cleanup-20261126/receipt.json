@@ -1,0 +1,1578 @@
+{
+  "commands": [
+    {
+      "argv": [
+        "C:\\Program Files\\Git\\cmd\\git.exe",
+        "rev-parse",
+        "HEAD"
+      ],
+      "cwd": "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02",
+      "stdout": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\reader627-native-v1\\head.stdout.txt",
+      "stderr": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\reader627-native-v1\\head.stderr.txt",
+      "captures_measured": true,
+      "command_success": true,
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 41,
+          "bytes_stored": 41,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 405608.5176307
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 405608.5175925
+        }
+      },
+      "work_seconds": 30,
+      "cleanup_seconds": 10,
+      "native_owner": {
+        "path": "C:\\Users\\.orche\\releases\\dad4875f\\app\\scripts\\process_supervision\\windows_job.py",
+        "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+      },
+      "console": {
+        "attached": true,
+        "visible": false
+      },
+      "stdin_mode": "null",
+      "before_resume_entered": true,
+      "before_resume_returned": true,
+      "before_resume_deadline_exceeded": false,
+      "phases_elapsed_seconds": {
+        "initial_save_started": 2.7800037059932947e-05,
+        "initial_save_finished": 1.1470475000096485,
+        "launch_entered": 1.1470502000302076,
+        "before_resume_entered": 1.1522885000449605,
+        "before_resume_returned": 1.1522915000095963,
+        "launch_returned": 1.1523163000238128,
+        "launch_exception": null,
+        "external_settle_end": 1.2186653999960981
+      },
+      "quiescence_state": "complete",
+      "original_pid": 324920,
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "work_elapsed_seconds": 1.2184767000144348,
+      "cleanup_interval_seconds": 10.0,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "exit_code": 0,
+      "worker_join_observations": [
+        {
+          "name": "head-stdout",
+          "ident": 518564,
+          "native_id": 518564,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 1.218709500040859,
+          "remaining_seconds": 9.999767199973576,
+          "last_entered_seconds": 1.218709500040859,
+          "last_remaining_seconds": 9.999767199973576,
+          "returned_seconds": 1.2187175000435673,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 1.2179754000389948
+        },
+        {
+          "name": "head-stderr",
+          "ident": 344736,
+          "native_id": 344736,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 1.2187211000127718,
+          "remaining_seconds": 9.999755600001663,
+          "last_entered_seconds": 1.2187211000127718,
+          "last_remaining_seconds": 9.999755600001663,
+          "returned_seconds": 1.2187260999926366,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 1.2179372000391595
+        }
+      ],
+      "seconds": 1.218739900039509,
+      "cleanup_deadline_exceeded": false,
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "original_input_writers_retained": true,
+      "original_input_writer_joined": false,
+      "completion_receiving": {
+        "schema": "ordinary-original-native-io-completion-v1",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "io": {
+          "stdout": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 41,
+            "bytes_stored": 41,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 405608.5176307
+          },
+          "stderr": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 0,
+            "bytes_stored": 0,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 405608.5175925
+          }
+        },
+        "stdin_mode": "null",
+        "stdin": {},
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "original_input_writer_joined": false,
+        "lifecycle_state": "CLOSED"
+      },
+      "stdout_sha256": "a7834ae454abe29733d4a15f2751f2dc0c5917f7dde06b3667ebaff7071e78f9",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "C:\\Users\\dima_\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+        "-I",
+        "-S",
+        "-B",
+        "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02\\.scratch\\reader627-review-v1\\native_snapshot.py",
+        "prepare"
+      ],
+      "cwd": "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02",
+      "stdout": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\reader627-native-v1\\reader627-admission.stdout.txt",
+      "stderr": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\reader627-native-v1\\reader627-admission.stderr.txt",
+      "captures_measured": true,
+      "command_success": true,
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 26,
+          "bytes_stored": 26,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 405612.4577695
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 405612.4577275
+        }
+      },
+      "work_seconds": 120,
+      "cleanup_seconds": 10,
+      "native_owner": {
+        "path": "C:\\Users\\.orche\\releases\\dad4875f\\app\\scripts\\process_supervision\\windows_job.py",
+        "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+      },
+      "console": {
+        "attached": true,
+        "visible": false
+      },
+      "stdin_mode": "null",
+      "before_resume_entered": true,
+      "before_resume_returned": true,
+      "before_resume_deadline_exceeded": false,
+      "phases_elapsed_seconds": {
+        "initial_save_started": 2.6500027161091566e-05,
+        "initial_save_finished": 0.0004000000189989805,
+        "launch_entered": 0.0004018000327050686,
+        "before_resume_entered": 0.0075264000333845615,
+        "before_resume_returned": 0.007529099995736033,
+        "launch_returned": 0.0075520999962463975,
+        "launch_exception": null,
+        "external_settle_end": 3.933967799996026
+      },
+      "quiescence_state": "complete",
+      "original_pid": 496076,
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "work_elapsed_seconds": 3.9339153000037186,
+      "cleanup_interval_seconds": 10.0,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "exit_code": 0,
+      "worker_join_observations": [
+        {
+          "name": "reader627-admission-stdout",
+          "ident": 490588,
+          "native_id": 490588,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 3.933999100001529,
+          "remaining_seconds": 9.99991620000219,
+          "last_entered_seconds": 3.933999100001529,
+          "last_remaining_seconds": 9.99991620000219,
+          "returned_seconds": 3.9340055999928154,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 3.932987399981357
+        },
+        {
+          "name": "reader627-admission-stderr",
+          "ident": 381052,
+          "native_id": 381052,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 3.934008800017182,
+          "remaining_seconds": 9.999906499986537,
+          "last_entered_seconds": 3.934008800017182,
+          "last_remaining_seconds": 9.999906499986537,
+          "returned_seconds": 3.934010000026319,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 3.9329454000107944
+        }
+      ],
+      "seconds": 3.934023800014984,
+      "cleanup_deadline_exceeded": false,
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "original_input_writers_retained": true,
+      "original_input_writer_joined": false,
+      "completion_receiving": {
+        "schema": "ordinary-original-native-io-completion-v1",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "io": {
+          "stdout": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 26,
+            "bytes_stored": 26,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 405612.4577695
+          },
+          "stderr": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 0,
+            "bytes_stored": 0,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 405612.4577275
+          }
+        },
+        "stdin_mode": "null",
+        "stdin": {},
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "original_input_writer_joined": false,
+        "lifecycle_state": "CLOSED"
+      },
+      "stdout_sha256": "a6e4741fea78b7c1e97d5bd966d4e4186052083764b507c98fbaf72180b7a2e3",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "C:\\Users\\dima_\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\rustfmt.exe",
+        "--edition",
+        "2021",
+        "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02\\.scratch\\reader627-review-v1\\src\\lib.rs",
+        "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02\\.scratch\\reader627-review-v1\\src\\windows.rs",
+        "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02\\.scratch\\reader627-review-v1\\src\\read_tests.rs",
+        "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02\\.scratch\\reader627-review-v1\\src\\failure_tests.rs"
+      ],
+      "cwd": "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02",
+      "stdout": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\reader627-native-v1\\reader627-rust-format.stdout.txt",
+      "stderr": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\reader627-native-v1\\reader627-rust-format.stderr.txt",
+      "captures_measured": true,
+      "command_success": true,
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 405612.5529763
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 405612.5530079
+        }
+      },
+      "work_seconds": 30,
+      "cleanup_seconds": 10,
+      "native_owner": {
+        "path": "C:\\Users\\.orche\\releases\\dad4875f\\app\\scripts\\process_supervision\\windows_job.py",
+        "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+      },
+      "console": {
+        "attached": true,
+        "visible": false
+      },
+      "stdin_mode": "null",
+      "before_resume_entered": true,
+      "before_resume_returned": true,
+      "before_resume_deadline_exceeded": false,
+      "phases_elapsed_seconds": {
+        "initial_save_started": 2.2899999748915434e-05,
+        "initial_save_finished": 0.0004209000035189092,
+        "launch_entered": 0.00042230001417919993,
+        "before_resume_entered": 0.00547610002104193,
+        "before_resume_returned": 0.005477999977301806,
+        "launch_returned": 0.005502799991518259,
+        "launch_exception": null,
+        "external_settle_end": 0.09377049998147413
+      },
+      "quiescence_state": "complete",
+      "original_pid": 328192,
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "work_elapsed_seconds": 0.09372539998730645,
+      "cleanup_interval_seconds": 10.0,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "exit_code": 0,
+      "worker_join_observations": [
+        {
+          "name": "reader627-rust-format-stdout",
+          "ident": 317048,
+          "native_id": 317048,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.09379950002767146,
+          "remaining_seconds": 9.999925899959635,
+          "last_entered_seconds": 0.09379950002767146,
+          "last_remaining_seconds": 9.999925899959635,
+          "returned_seconds": 0.09380690002581105,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.09083880000980571
+        },
+        {
+          "name": "reader627-rust-format-stderr",
+          "ident": 338384,
+          "native_id": 338384,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.09381019999273121,
+          "remaining_seconds": 9.999915199994575,
+          "last_entered_seconds": 0.09381019999273121,
+          "last_remaining_seconds": 9.999915199994575,
+          "returned_seconds": 0.09381120000034571,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.09087040001759306
+        }
+      ],
+      "seconds": 0.09382329997606575,
+      "cleanup_deadline_exceeded": false,
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "original_input_writers_retained": true,
+      "original_input_writer_joined": false,
+      "completion_receiving": {
+        "schema": "ordinary-original-native-io-completion-v1",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "io": {
+          "stdout": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 0,
+            "bytes_stored": 0,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 405612.5529763
+          },
+          "stderr": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 0,
+            "bytes_stored": 0,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 405612.5530079
+          }
+        },
+        "stdin_mode": "null",
+        "stdin": {},
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "original_input_writer_joined": false,
+        "lifecycle_state": "CLOSED"
+      },
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "C:\\Users\\dima_\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\rustfmt.exe",
+        "--check",
+        "--edition",
+        "2021",
+        "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02\\.scratch\\reader627-review-v1\\src\\lib.rs",
+        "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02\\.scratch\\reader627-review-v1\\src\\windows.rs",
+        "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02\\.scratch\\reader627-review-v1\\src\\read_tests.rs",
+        "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02\\.scratch\\reader627-review-v1\\src\\failure_tests.rs"
+      ],
+      "cwd": "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02",
+      "stdout": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\reader627-native-v1\\reader627-rust-format-check.stdout.txt",
+      "stderr": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\reader627-native-v1\\reader627-rust-format-check.stderr.txt",
+      "captures_measured": true,
+      "command_success": true,
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 405612.6366056
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 405612.6365646
+        }
+      },
+      "work_seconds": 30,
+      "cleanup_seconds": 10,
+      "native_owner": {
+        "path": "C:\\Users\\.orche\\releases\\dad4875f\\app\\scripts\\process_supervision\\windows_job.py",
+        "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+      },
+      "console": {
+        "attached": true,
+        "visible": false
+      },
+      "stdin_mode": "null",
+      "before_resume_entered": true,
+      "before_resume_returned": true,
+      "before_resume_deadline_exceeded": false,
+      "phases_elapsed_seconds": {
+        "initial_save_started": 2.1400046534836292e-05,
+        "initial_save_finished": 0.0005006000283174217,
+        "launch_entered": 0.0005021000397391617,
+        "before_resume_entered": 0.0049508000374771655,
+        "before_resume_returned": 0.0049529000534676015,
+        "launch_returned": 0.00497530004940927,
+        "launch_exception": null,
+        "external_settle_end": 0.08163600001716986
+      },
+      "quiescence_state": "complete",
+      "original_pid": 309180,
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "work_elapsed_seconds": 0.08150530001148582,
+      "cleanup_interval_seconds": 10.0,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "exit_code": 0,
+      "worker_join_observations": [
+        {
+          "name": "reader627-rust-format-check-stdout",
+          "ident": 530284,
+          "native_id": 530284,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.08168150001438335,
+          "remaining_seconds": 9.999823799997102,
+          "last_entered_seconds": 0.08168150001438335,
+          "last_remaining_seconds": 9.999823799997102,
+          "returned_seconds": 0.08169290004298091,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.07780880003701895
+        },
+        {
+          "name": "reader627-rust-format-check-stderr",
+          "ident": 504476,
+          "native_id": 504476,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.08169880002969876,
+          "remaining_seconds": 9.999806499981787,
+          "last_entered_seconds": 0.08169880002969876,
+          "last_remaining_seconds": 9.999806499981787,
+          "returned_seconds": 0.0817009000456892,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.07776780001586303
+        }
+      ],
+      "seconds": 0.08171700005186722,
+      "cleanup_deadline_exceeded": false,
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "original_input_writers_retained": true,
+      "original_input_writer_joined": false,
+      "completion_receiving": {
+        "schema": "ordinary-original-native-io-completion-v1",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "io": {
+          "stdout": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 0,
+            "bytes_stored": 0,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 405612.6366056
+          },
+          "stderr": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 0,
+            "bytes_stored": 0,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 405612.6365646
+          }
+        },
+        "stdin_mode": "null",
+        "stdin": {},
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "original_input_writer_joined": false,
+        "lifecycle_state": "CLOSED"
+      },
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "C:\\Users\\dima_\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "check",
+        "--offline",
+        "--locked",
+        "--manifest-path",
+        "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02\\.scratch\\reader627-review-v1\\Cargo.toml",
+        "--target",
+        "x86_64-pc-windows-msvc",
+        "--all-targets"
+      ],
+      "cwd": "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02",
+      "stdout": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\reader627-native-v1\\reader627-rust-check.stdout.txt",
+      "stderr": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\reader627-native-v1\\reader627-rust-check.stderr.txt",
+      "captures_measured": true,
+      "command_success": true,
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 405630.2521311
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 582,
+          "bytes_stored": 582,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 405630.2521891
+        }
+      },
+      "work_seconds": 300,
+      "cleanup_seconds": 10,
+      "native_owner": {
+        "path": "C:\\Users\\.orche\\releases\\dad4875f\\app\\scripts\\process_supervision\\windows_job.py",
+        "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+      },
+      "console": {
+        "attached": true,
+        "visible": false
+      },
+      "stdin_mode": "null",
+      "before_resume_entered": true,
+      "before_resume_returned": true,
+      "before_resume_deadline_exceeded": false,
+      "phases_elapsed_seconds": {
+        "initial_save_started": 2.95999925583601e-05,
+        "initial_save_finished": 0.0005670000100508332,
+        "launch_entered": 0.000568399962503463,
+        "before_resume_entered": 0.010970999952405691,
+        "before_resume_returned": 0.010973699972964823,
+        "launch_returned": 0.01099799998337403,
+        "launch_exception": null,
+        "external_settle_end": 17.609962599992286
+      },
+      "quiescence_state": "complete",
+      "original_pid": 353464,
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "work_elapsed_seconds": 17.609835999959614,
+      "cleanup_interval_seconds": 10.0,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "exit_code": 0,
+      "worker_join_observations": [
+        {
+          "name": "reader627-rust-check-stdout",
+          "ident": 331608,
+          "native_id": 331608,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 17.609993399993982,
+          "remaining_seconds": 9.999842599965632,
+          "last_entered_seconds": 17.609993399993982,
+          "last_remaining_seconds": 9.999842599965632,
+          "returned_seconds": 17.610000899992883,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 17.608010199968703
+        },
+        {
+          "name": "reader627-rust-check-stderr",
+          "ident": 431308,
+          "native_id": 431308,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 17.610004999965895,
+          "remaining_seconds": 9.99983099999372,
+          "last_entered_seconds": 17.610004999965895,
+          "last_remaining_seconds": 9.99983099999372,
+          "returned_seconds": 17.61000609997427,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 17.60806820000289
+        }
+      ],
+      "seconds": 17.610017400002107,
+      "cleanup_deadline_exceeded": false,
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "original_input_writers_retained": true,
+      "original_input_writer_joined": false,
+      "completion_receiving": {
+        "schema": "ordinary-original-native-io-completion-v1",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "io": {
+          "stdout": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 0,
+            "bytes_stored": 0,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 405630.2521311
+          },
+          "stderr": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 582,
+            "bytes_stored": 582,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 405630.2521891
+          }
+        },
+        "stdin_mode": "null",
+        "stdin": {},
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "original_input_writer_joined": false,
+        "lifecycle_state": "CLOSED"
+      },
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "947fc56b6c082cddc8eb8c34d111c59fd3891ddabf977d334684931d7f894489"
+    },
+    {
+      "argv": [
+        "C:\\Users\\dima_\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "test",
+        "--offline",
+        "--locked",
+        "--manifest-path",
+        "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02\\.scratch\\reader627-review-v1\\Cargo.toml",
+        "--target",
+        "x86_64-pc-windows-msvc",
+        "--lib",
+        "--",
+        "--test-threads=1"
+      ],
+      "cwd": "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02",
+      "stdout": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\reader627-native-v1\\reader627-rust-test.stdout.txt",
+      "stderr": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\reader627-native-v1\\reader627-rust-test.stderr.txt",
+      "captures_measured": true,
+      "command_success": true,
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 1902,
+          "bytes_stored": 1902,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 405668.2823531
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 797,
+          "bytes_stored": 797,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 405668.2823797
+        }
+      },
+      "work_seconds": 300,
+      "cleanup_seconds": 10,
+      "native_owner": {
+        "path": "C:\\Users\\.orche\\releases\\dad4875f\\app\\scripts\\process_supervision\\windows_job.py",
+        "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+      },
+      "console": {
+        "attached": true,
+        "visible": false
+      },
+      "stdin_mode": "null",
+      "before_resume_entered": true,
+      "before_resume_returned": true,
+      "before_resume_deadline_exceeded": false,
+      "phases_elapsed_seconds": {
+        "initial_save_started": 4.600000102072954e-05,
+        "initial_save_finished": 0.0008687999797984958,
+        "launch_entered": 0.0008704999927431345,
+        "before_resume_entered": 0.008282899972982705,
+        "before_resume_returned": 0.008286099997349083,
+        "launch_returned": 0.008313599973917007,
+        "launch_exception": null,
+        "external_settle_end": 38.02389799995581
+      },
+      "quiescence_state": "complete",
+      "original_pid": 464188,
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "work_elapsed_seconds": 38.023756699985825,
+      "cleanup_interval_seconds": 10.0,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "exit_code": 0,
+      "worker_join_observations": [
+        {
+          "name": "reader627-rust-test-stdout",
+          "ident": 323012,
+          "native_id": 323012,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 38.02392589999363,
+          "remaining_seconds": 9.999830799992196,
+          "last_entered_seconds": 38.02392589999363,
+          "last_remaining_seconds": 9.999830799992196,
+          "returned_seconds": 38.023931799980346,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 38.021517499990296
+        },
+        {
+          "name": "reader627-rust-test-stderr",
+          "ident": 279644,
+          "native_id": 279644,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 38.023935099947266,
+          "remaining_seconds": 9.999821600038558,
+          "last_entered_seconds": 38.023935099947266,
+          "last_remaining_seconds": 9.999821600038558,
+          "returned_seconds": 38.02393609995488,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 38.02154409996001
+        }
+      ],
+      "seconds": 38.023946499975864,
+      "cleanup_deadline_exceeded": false,
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "original_input_writers_retained": true,
+      "original_input_writer_joined": false,
+      "completion_receiving": {
+        "schema": "ordinary-original-native-io-completion-v1",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "io": {
+          "stdout": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 1902,
+            "bytes_stored": 1902,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 405668.2823531
+          },
+          "stderr": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 797,
+            "bytes_stored": 797,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 405668.2823797
+          }
+        },
+        "stdin_mode": "null",
+        "stdin": {},
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "original_input_writer_joined": false,
+        "lifecycle_state": "CLOSED"
+      },
+      "stdout_sha256": "ea48cd595c513084689131fedd3f4eaeb6649d51a1299bc147faa20ca6db9a8c",
+      "stderr_sha256": "cfbe44933e4b6300fea286e9f61982a4870155e341d2fdf893357b7b29384102"
+    },
+    {
+      "argv": [
+        "C:\\Users\\dima_\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+        "-I",
+        "-S",
+        "-B",
+        "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02\\.scratch\\reader627-review-v1\\native_snapshot.py",
+        "after"
+      ],
+      "cwd": "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02",
+      "stdout": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\reader627-native-v1\\reader627-source-after.stdout.txt",
+      "stderr": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\reader627-native-v1\\reader627-source-after.stderr.txt",
+      "captures_measured": true,
+      "command_success": true,
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 29,
+          "bytes_stored": 29,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 405668.3463107
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 405668.3462442
+        }
+      },
+      "work_seconds": 30,
+      "cleanup_seconds": 10,
+      "native_owner": {
+        "path": "C:\\Users\\.orche\\releases\\dad4875f\\app\\scripts\\process_supervision\\windows_job.py",
+        "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+      },
+      "console": {
+        "attached": true,
+        "visible": false
+      },
+      "stdin_mode": "null",
+      "before_resume_entered": true,
+      "before_resume_returned": true,
+      "before_resume_deadline_exceeded": false,
+      "phases_elapsed_seconds": {
+        "initial_save_started": 2.2799998987466097e-05,
+        "initial_save_finished": 0.0007064000237733126,
+        "launch_entered": 0.0007074999739415944,
+        "before_resume_entered": 0.007422199996653944,
+        "before_resume_returned": 0.007424200011882931,
+        "launch_returned": 0.007442499976605177,
+        "launch_exception": null,
+        "external_settle_end": 0.05966019997140393
+      },
+      "quiescence_state": "complete",
+      "original_pid": 330456,
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "work_elapsed_seconds": 0.05704019998665899,
+      "cleanup_interval_seconds": 10.0,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "exit_code": 0,
+      "worker_join_observations": [
+        {
+          "name": "reader627-source-after-stdout",
+          "ident": 454248,
+          "native_id": 454248,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.05969259998528287,
+          "remaining_seconds": 9.997347600001376,
+          "last_entered_seconds": 0.05969259998528287,
+          "last_remaining_seconds": 9.997347600001376,
+          "returned_seconds": 0.059700699988752604,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.0562385999946855
+        },
+        {
+          "name": "reader627-source-after-stderr",
+          "ident": 327284,
+          "native_id": 327284,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.05970410001464188,
+          "remaining_seconds": 9.997336099972017,
+          "last_entered_seconds": 0.05970410001464188,
+          "last_remaining_seconds": 9.997336099972017,
+          "returned_seconds": 0.059705200023017824,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.05617210001219064
+        }
+      ],
+      "seconds": 0.05971649999264628,
+      "cleanup_deadline_exceeded": false,
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "original_input_writers_retained": true,
+      "original_input_writer_joined": false,
+      "completion_receiving": {
+        "schema": "ordinary-original-native-io-completion-v1",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "io": {
+          "stdout": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 29,
+            "bytes_stored": 29,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 405668.3463107
+          },
+          "stderr": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 0,
+            "bytes_stored": 0,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 405668.3462442
+          }
+        },
+        "stdin_mode": "null",
+        "stdin": {},
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "original_input_writer_joined": false,
+        "lifecycle_state": "CLOSED"
+      },
+      "stdout_sha256": "5b4f1395fe872033147ec9b7cc7c2dd35d591062760755c4e1fdd019d6913300",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "guard_sha256": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2",
+  "config_sha256": "30b85b71c13e5ae510ddb23721ef623e2680fdf4a3d5814a51ce14eb2b97ce07",
+  "expected_head": "b6f82b3f531bb3eec197049167cdc5971b44e2b0",
+  "source": "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02",
+  "status": "PASS",
+  "command_quiescence": {
+    "complete": true,
+    "commands": [
+      {
+        "name": "head",
+        "state": "complete",
+        "reason": "",
+        "direct_exit_known": true
+      },
+      {
+        "name": "reader627-admission",
+        "state": "complete",
+        "reason": "",
+        "direct_exit_known": true
+      },
+      {
+        "name": "reader627-rust-format",
+        "state": "complete",
+        "reason": "",
+        "direct_exit_known": true
+      },
+      {
+        "name": "reader627-rust-format-check",
+        "state": "complete",
+        "reason": "",
+        "direct_exit_known": true
+      },
+      {
+        "name": "reader627-rust-check",
+        "state": "complete",
+        "reason": "",
+        "direct_exit_known": true
+      },
+      {
+        "name": "reader627-rust-test",
+        "state": "complete",
+        "reason": "",
+        "direct_exit_known": true
+      },
+      {
+        "name": "reader627-source-after",
+        "state": "complete",
+        "reason": "",
+        "direct_exit_known": true
+      }
+    ]
+  },
+  "step_inputs": [
+    {
+      "name": "reader627-admission",
+      "files": {
+        ".scratch/reader627-review-v1/.gitignore": "306fd52e74fca6746e12acc750f232de15e71da917756a1270d74c91f5eb7368",
+        ".scratch/reader627-review-v1/Cargo.lock": "6cd7b98899c6afe742b1ca177e947b360e78b2662c4b6b7778eb1e32e619e026",
+        ".scratch/reader627-review-v1/Cargo.toml": "37b8d9e94146f8a889838b5e06bd6a9474549660331ccc475ebaabcccb85302c",
+        ".scratch/reader627-review-v1/README.md": "15e9ffd3adcf2564633284ff0ea81e59e58d356fb8d1defcc30678e83c91ffb4",
+        ".scratch/reader627-review-v1/src/failure_tests.rs": "11784cec6b346c35bfe06283aa2cbc6191e329e0aa02a9c7189b229e61099006",
+        ".scratch/reader627-review-v1/src/lib.rs": "7ab79fa5526e760c04f7326747f3fb09a1b713ce2b13a03925909f780b3a6672",
+        ".scratch/reader627-review-v1/src/read_tests.rs": "7aa4a0344bc136c6f66e1e4eff0ff05361c98c5263f939cf72b7343a22dd7f21",
+        ".scratch/reader627-review-v1/src/windows.rs": "d736e2e0723247d96cb7dc6c02b423adc5fd6761cf3179e9629859b902b8f33f",
+        ".scratch/reader627-review-v1/native_snapshot.py": "11a9faf4fb287fd84faf6fc5000dbfd72f9366be131462e79adaf6983edcf43a",
+        ".scratch/reader627-review-v1/native-source-pins.json": "66d07bff6ab1c3ac49f3277705ecb21332b1baa8497c978b81620969a889231f"
+      }
+    },
+    {
+      "name": "reader627-rust-format",
+      "files": {
+        ".scratch/reader627-review-v1/.gitignore": "306fd52e74fca6746e12acc750f232de15e71da917756a1270d74c91f5eb7368",
+        ".scratch/reader627-review-v1/Cargo.lock": "6cd7b98899c6afe742b1ca177e947b360e78b2662c4b6b7778eb1e32e619e026",
+        ".scratch/reader627-review-v1/Cargo.toml": "37b8d9e94146f8a889838b5e06bd6a9474549660331ccc475ebaabcccb85302c",
+        ".scratch/reader627-review-v1/README.md": "15e9ffd3adcf2564633284ff0ea81e59e58d356fb8d1defcc30678e83c91ffb4",
+        ".scratch/reader627-review-v1/src/failure_tests.rs": "11784cec6b346c35bfe06283aa2cbc6191e329e0aa02a9c7189b229e61099006",
+        ".scratch/reader627-review-v1/src/lib.rs": "7ab79fa5526e760c04f7326747f3fb09a1b713ce2b13a03925909f780b3a6672",
+        ".scratch/reader627-review-v1/src/read_tests.rs": "7aa4a0344bc136c6f66e1e4eff0ff05361c98c5263f939cf72b7343a22dd7f21",
+        ".scratch/reader627-review-v1/src/windows.rs": "d736e2e0723247d96cb7dc6c02b423adc5fd6761cf3179e9629859b902b8f33f",
+        ".scratch/reader627-review-v1/native_snapshot.py": "11a9faf4fb287fd84faf6fc5000dbfd72f9366be131462e79adaf6983edcf43a",
+        ".scratch/reader627-review-v1/native-source-pins.json": "66d07bff6ab1c3ac49f3277705ecb21332b1baa8497c978b81620969a889231f"
+      }
+    },
+    {
+      "name": "reader627-rust-format-check",
+      "files": {
+        ".scratch/reader627-review-v1/.gitignore": "306fd52e74fca6746e12acc750f232de15e71da917756a1270d74c91f5eb7368",
+        ".scratch/reader627-review-v1/Cargo.lock": "6cd7b98899c6afe742b1ca177e947b360e78b2662c4b6b7778eb1e32e619e026",
+        ".scratch/reader627-review-v1/Cargo.toml": "37b8d9e94146f8a889838b5e06bd6a9474549660331ccc475ebaabcccb85302c",
+        ".scratch/reader627-review-v1/README.md": "15e9ffd3adcf2564633284ff0ea81e59e58d356fb8d1defcc30678e83c91ffb4",
+        ".scratch/reader627-review-v1/src/failure_tests.rs": "11784cec6b346c35bfe06283aa2cbc6191e329e0aa02a9c7189b229e61099006",
+        ".scratch/reader627-review-v1/src/lib.rs": "7ab79fa5526e760c04f7326747f3fb09a1b713ce2b13a03925909f780b3a6672",
+        ".scratch/reader627-review-v1/src/read_tests.rs": "7aa4a0344bc136c6f66e1e4eff0ff05361c98c5263f939cf72b7343a22dd7f21",
+        ".scratch/reader627-review-v1/src/windows.rs": "d736e2e0723247d96cb7dc6c02b423adc5fd6761cf3179e9629859b902b8f33f",
+        ".scratch/reader627-review-v1/native_snapshot.py": "11a9faf4fb287fd84faf6fc5000dbfd72f9366be131462e79adaf6983edcf43a",
+        ".scratch/reader627-review-v1/native-source-pins.json": "66d07bff6ab1c3ac49f3277705ecb21332b1baa8497c978b81620969a889231f"
+      }
+    },
+    {
+      "name": "reader627-rust-check",
+      "files": {
+        ".scratch/reader627-review-v1/.gitignore": "306fd52e74fca6746e12acc750f232de15e71da917756a1270d74c91f5eb7368",
+        ".scratch/reader627-review-v1/Cargo.lock": "6cd7b98899c6afe742b1ca177e947b360e78b2662c4b6b7778eb1e32e619e026",
+        ".scratch/reader627-review-v1/Cargo.toml": "37b8d9e94146f8a889838b5e06bd6a9474549660331ccc475ebaabcccb85302c",
+        ".scratch/reader627-review-v1/README.md": "15e9ffd3adcf2564633284ff0ea81e59e58d356fb8d1defcc30678e83c91ffb4",
+        ".scratch/reader627-review-v1/src/failure_tests.rs": "11784cec6b346c35bfe06283aa2cbc6191e329e0aa02a9c7189b229e61099006",
+        ".scratch/reader627-review-v1/src/lib.rs": "7ab79fa5526e760c04f7326747f3fb09a1b713ce2b13a03925909f780b3a6672",
+        ".scratch/reader627-review-v1/src/read_tests.rs": "7aa4a0344bc136c6f66e1e4eff0ff05361c98c5263f939cf72b7343a22dd7f21",
+        ".scratch/reader627-review-v1/src/windows.rs": "d736e2e0723247d96cb7dc6c02b423adc5fd6761cf3179e9629859b902b8f33f",
+        ".scratch/reader627-review-v1/native_snapshot.py": "11a9faf4fb287fd84faf6fc5000dbfd72f9366be131462e79adaf6983edcf43a",
+        ".scratch/reader627-review-v1/native-source-pins.json": "66d07bff6ab1c3ac49f3277705ecb21332b1baa8497c978b81620969a889231f"
+      }
+    },
+    {
+      "name": "reader627-rust-test",
+      "files": {
+        ".scratch/reader627-review-v1/.gitignore": "306fd52e74fca6746e12acc750f232de15e71da917756a1270d74c91f5eb7368",
+        ".scratch/reader627-review-v1/Cargo.lock": "6cd7b98899c6afe742b1ca177e947b360e78b2662c4b6b7778eb1e32e619e026",
+        ".scratch/reader627-review-v1/Cargo.toml": "37b8d9e94146f8a889838b5e06bd6a9474549660331ccc475ebaabcccb85302c",
+        ".scratch/reader627-review-v1/README.md": "15e9ffd3adcf2564633284ff0ea81e59e58d356fb8d1defcc30678e83c91ffb4",
+        ".scratch/reader627-review-v1/src/failure_tests.rs": "11784cec6b346c35bfe06283aa2cbc6191e329e0aa02a9c7189b229e61099006",
+        ".scratch/reader627-review-v1/src/lib.rs": "7ab79fa5526e760c04f7326747f3fb09a1b713ce2b13a03925909f780b3a6672",
+        ".scratch/reader627-review-v1/src/read_tests.rs": "7aa4a0344bc136c6f66e1e4eff0ff05361c98c5263f939cf72b7343a22dd7f21",
+        ".scratch/reader627-review-v1/src/windows.rs": "d736e2e0723247d96cb7dc6c02b423adc5fd6761cf3179e9629859b902b8f33f",
+        ".scratch/reader627-review-v1/native_snapshot.py": "11a9faf4fb287fd84faf6fc5000dbfd72f9366be131462e79adaf6983edcf43a",
+        ".scratch/reader627-review-v1/native-source-pins.json": "66d07bff6ab1c3ac49f3277705ecb21332b1baa8497c978b81620969a889231f"
+      }
+    },
+    {
+      "name": "reader627-source-after",
+      "files": {
+        ".scratch/reader627-review-v1/.gitignore": "306fd52e74fca6746e12acc750f232de15e71da917756a1270d74c91f5eb7368",
+        ".scratch/reader627-review-v1/Cargo.lock": "6cd7b98899c6afe742b1ca177e947b360e78b2662c4b6b7778eb1e32e619e026",
+        ".scratch/reader627-review-v1/Cargo.toml": "37b8d9e94146f8a889838b5e06bd6a9474549660331ccc475ebaabcccb85302c",
+        ".scratch/reader627-review-v1/README.md": "15e9ffd3adcf2564633284ff0ea81e59e58d356fb8d1defcc30678e83c91ffb4",
+        ".scratch/reader627-review-v1/src/failure_tests.rs": "11784cec6b346c35bfe06283aa2cbc6191e329e0aa02a9c7189b229e61099006",
+        ".scratch/reader627-review-v1/src/lib.rs": "7ab79fa5526e760c04f7326747f3fb09a1b713ce2b13a03925909f780b3a6672",
+        ".scratch/reader627-review-v1/src/read_tests.rs": "7aa4a0344bc136c6f66e1e4eff0ff05361c98c5263f939cf72b7343a22dd7f21",
+        ".scratch/reader627-review-v1/src/windows.rs": "d736e2e0723247d96cb7dc6c02b423adc5fd6761cf3179e9629859b902b8f33f",
+        ".scratch/reader627-review-v1/native_snapshot.py": "11a9faf4fb287fd84faf6fc5000dbfd72f9366be131462e79adaf6983edcf43a",
+        ".scratch/reader627-review-v1/native-source-pins.json": "66d07bff6ab1c3ac49f3277705ecb21332b1baa8497c978b81620969a889231f"
+      }
+    }
+  ],
+  "steps_received": [
+    "reader627-admission",
+    "reader627-rust-format",
+    "reader627-rust-format-check",
+    "reader627-rust-check",
+    "reader627-rust-test",
+    "reader627-source-after"
+  ]
+}

@@ -21,6 +21,7 @@ enum Input {
     WrongDigest,
     CancelAfterMetadata,
     TooSmall,
+    NativeReadFailure,
 }
 
 #[derive(Default)]
@@ -31,6 +32,7 @@ struct OperationsLog {
     max_live: usize,
     native_metadata_succeeded: Vec<Role>,
     native_close_succeeded: Vec<Role>,
+    read_requests: Vec<usize>,
 }
 
 const PAYLOAD: &[u8] = b"known verified bytes";
@@ -43,18 +45,28 @@ fn exercise(
     let fixture = Fixture::new();
     fs::create_dir(fixture.root.join("first")).unwrap();
     fs::create_dir(fixture.root.join("first/parent")).unwrap();
-    fs::write(fixture.root.join("first/parent/data"), PAYLOAD).unwrap();
+    let payload = if input == Input::NativeReadFailure {
+        vec![b'x'; 4097]
+    } else {
+        PAYLOAD.to_vec()
+    };
+    let data = fixture.root.join("first/parent/data");
+    fs::write(&data, &payload).unwrap();
+    let mut locked = (input == Input::NativeReadFailure).then(|| LockedByte {
+        file: fs::File::open(&data).unwrap(),
+        locked: false,
+    });
     let canceled = AtomicBool::new(false);
     let log = RefCell::new(OperationsLog::default());
     let expected = if input == Input::WrongDigest {
         digest(b"different bytes")
     } else {
-        digest(PAYLOAD)
+        digest(&payload)
     };
     let cap = if input == Input::TooSmall {
-        PAYLOAD.len() - 1
+        payload.len() - 1
     } else {
-        PAYLOAD.len()
+        payload.len()
     };
 
     let result = read_with_operations(
@@ -65,6 +77,14 @@ fn exercise(
         &canceled,
         ReadOperations {
             step: |step| {
+                if let Step::BeforeRead { requested } = step {
+                    log.borrow_mut().read_requests.push(requested);
+                    if log.borrow().read_requests.len() == 2 {
+                        if let Some(locked) = locked.as_mut() {
+                            locked.lock().expect("lock original fixture byte");
+                        }
+                    }
+                }
                 if input == Input::CancelAfterMetadata && matches!(step, Step::BeforeRead { .. }) {
                     canceled.store(true, Ordering::Release);
                 }
@@ -125,6 +145,11 @@ fn exercise(
             },
         },
     );
+    let unlock_result = locked.as_mut().map(LockedByte::unlock);
+    drop(locked);
+    if let Some(result) = unlock_result {
+        result.expect("unlock original fixture byte");
+    }
     (result, log.into_inner())
 }
 
@@ -342,5 +367,34 @@ fn non_io_primary_failures_survive_both_cleanup_failures() {
             &[Role::Root, Role::First, Role::File, Role::Parent],
         );
         assert_error(&result.unwrap_err(), category, operation, None, failures);
+    }
+}
+
+#[test]
+fn native_partial_read_failure_survives_each_cleanup_failure_combination() {
+    use windows_sys::Win32::Foundation::ERROR_LOCK_VIOLATION;
+
+    // The zero-cleanup-error control already has its own native test. Only the
+    // three missing combinations are exercised here. ReadFile really fails;
+    // the close statuses still follow successful native closes of the originals.
+    for failures in [
+        &[Role::File][..],
+        &[Role::Parent][..],
+        &[Role::File, Role::Parent][..],
+    ] {
+        let (result, log) = exercise(Input::NativeReadFailure, None, failures);
+        assert_eq!(log.read_requests, vec![4096, 2]);
+        assert_operations(
+            &log,
+            &[Role::Root, Role::First, Role::Parent, Role::File],
+            &[Role::Root, Role::First, Role::File, Role::Parent],
+        );
+        assert_error(
+            &result.unwrap_err(),
+            Category::UnsafeObjectOrIo,
+            "read-final",
+            Some(NativeCode::Win32(ERROR_LOCK_VIOLATION as i32)),
+            failures,
+        );
     }
 }

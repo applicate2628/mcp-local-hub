@@ -1,0 +1,14 @@
+   Compiling version_check v0.9.5
+    Checking typenum v1.20.1
+    Checking cpufeatures v0.2.17
+    Checking windows-link v0.2.1
+    Checking cfg-if v1.0.4
+    Checking windows-sys v0.61.2
+    Checking zeroize v1.9.0
+   Compiling generic-array v0.14.7
+    Checking block-buffer v0.10.4
+    Checking crypto-common v0.1.7
+    Checking digest v0.10.7
+    Checking sha2 v0.10.9
+    Checking mcphub-anchored-read-spike v0.0.0 (D:\dev\ChatGPT\functional-route-20261126\composition-p02\.scratch\reader627-review-v1)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 17.53s

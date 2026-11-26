@@ -1,0 +1,26 @@
+
+running 21 tests
+test windows::tests::canceled_before_open_has_typed_result ... ok
+test windows::tests::checksum_mismatch_and_initial_size_limit_return_no_data ... ok
+test windows::tests::component_swapped_to_link_before_open_is_rejected ... ok
+test windows::tests::exact_cap_still_checks_eof_and_returns_complete_payload ... ok
+test windows::tests::failures::close_failure_never_returns_bytes_and_retains_later_cleanup_errors ... ok
+test windows::tests::failures::metadata_failure_keeps_primary_and_each_cleanup_combination ... ok
+test windows::tests::failures::native_partial_read_failure_survives_each_cleanup_failure_combination ... ok
+test windows::tests::failures::native_success_keeps_original_handles_and_verified_bytes ... ok
+test windows::tests::failures::non_io_primary_failures_survive_both_cleanup_failures ... ok
+test windows::tests::final_directory_and_missing_file_preserve_native_failure ... ok
+test windows::tests::growth_after_stat_hits_one_byte_sentinel_without_returning_data ... ok
+test windows::tests::injected_native_phase_error_preserves_category_and_closes_handles ... ok
+test windows::tests::mid_read_cancellation_returns_no_partial_result ... ok
+test windows::tests::native_read_failure_after_partial_read_preserves_error_and_releases_lock ... ok
+test windows::tests::reads_exact_verified_bytes_empty_and_unicode ... ok
+test windows::tests::rejects_invalid_input_before_open ... ok
+test windows::tests::repeated_success_and_failure_do_not_leak_handles ... ok
+test windows::tests::retained_final_handle_reads_original_after_path_replacement ... ok
+test windows::tests::retained_parent_does_not_reopen_changed_path ... ok
+test windows::tests::root_ancestor_reparse_is_not_silently_followed ... ok
+test windows::tests::root_and_intermediate_and_final_reparse_are_rejected ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s
+
