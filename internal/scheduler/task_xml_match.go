@@ -61,10 +61,17 @@ type taskDefinitionXML struct {
 	Children []taskDefinitionXML `xml:",any"`
 }
 
+type taskDefinitionMatchContext struct {
+	currentSID             string
+	currentAccount         string
+	schedulerSelectsEngine bool
+}
+
 // taskDefinitionsEquivalent compares the complete definition produced by the
-// existing task writer, allowing only known metadata and schema defaults to
-// differ. It is a read-only comparison, never proof of registration ownership.
-func taskDefinitionsEquivalent(observed, expected []byte) (bool, error) {
+// existing task writer, allowing known metadata, schema defaults, and the
+// scheduler's engine selection when the writer leaves that field unspecified.
+// It is a read-only comparison, never proof of registration ownership.
+func taskDefinitionsEquivalent(observed, expected []byte, match taskDefinitionMatchContext) (bool, error) {
 	actual, err := decodeTaskDefinitionXML(observed)
 	if err != nil {
 		return false, err
@@ -73,8 +80,24 @@ func taskDefinitionsEquivalent(observed, expected []byte) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	normalizeTaskDefinitionXML(&actual, "Task", false)
-	normalizeTaskDefinitionXML(&want, "Task", false)
+	// Native Windows registration can materialize UseUnifiedSchedulingEngine=true
+	// even though the writer omits it and the XSD default is false. Permit that
+	// observed engine choice only when the expected definition makes no explicit
+	// choice. Do not erase a future writer's explicit true/false requirement.
+	schedulerSelectsEngine := true
+	for _, settings := range want.Children {
+		if settings.XMLName != (xml.Name{Space: taskXMLNamespace, Local: "Settings"}) {
+			continue
+		}
+		for _, setting := range settings.Children {
+			if setting.XMLName == (xml.Name{Space: taskXMLNamespace, Local: "UseUnifiedSchedulingEngine"}) {
+				schedulerSelectsEngine = false
+			}
+		}
+	}
+	match.schedulerSelectsEngine = schedulerSelectsEngine
+	normalizeTaskDefinitionXML(&actual, "Task", false, match)
+	normalizeTaskDefinitionXML(&want, "Task", false, taskDefinitionMatchContext{schedulerSelectsEngine: schedulerSelectsEngine})
 	return reflect.DeepEqual(actual, want), nil
 }
 
@@ -111,7 +134,7 @@ func decodeTaskDefinitionXML(raw []byte) (taskDefinitionXML, error) {
 	}
 }
 
-func normalizeTaskDefinitionXML(node *taskDefinitionXML, path string, mayOmit bool) bool {
+func normalizeTaskDefinitionXML(node *taskDefinitionXML, path string, mayOmit bool, match taskDefinitionMatchContext) bool {
 	attrs := node.Attrs[:0]
 	for _, attr := range node.Attrs {
 		if attr.Name.Space != "xmlns" && attr.Name != (xml.Name{Local: "xmlns"}) {
@@ -136,7 +159,7 @@ func normalizeTaskDefinitionXML(node *taskDefinitionXML, path string, mayOmit bo
 	children := node.Children[:0]
 	for _, child := range node.Children {
 		// Duplicated defaults/metadata must not disappear during normalization.
-		if normalizeTaskDefinitionXML(&child, path+"/"+child.XMLName.Local, counts[child.XMLName] == 1) {
+		if normalizeTaskDefinitionXML(&child, path+"/"+child.XMLName.Local, counts[child.XMLName] == 1, match) {
 			children = append(children, child)
 		}
 	}
@@ -178,9 +201,18 @@ func normalizeTaskDefinitionXML(node *taskDefinitionXML, path string, mayOmit bo
 			return false
 		}
 	}
+	if mayOmit && match.schedulerSelectsEngine && path == "Task/Settings/UseUnifiedSchedulingEngine" && node.Text == "true" {
+		return false
+	}
 	switch path {
-	case "Task/Actions/Exec/Command", "Task/Actions/Exec/WorkingDirectory",
-		"Task/Principals/Principal/UserId", "Task/Triggers/LogonTrigger/UserId":
+	case "Task/Actions/Exec/Command", "Task/Actions/Exec/WorkingDirectory":
+		node.Text = strings.ToLower(node.Text)
+	case "Task/Principals/Principal/UserId", "Task/Triggers/LogonTrigger/UserId":
+		// The trusted current-user snapshot supplies both spellings. Never
+		// resolve an account from the observed XML or accept a short-name match.
+		if match.currentSID != "" && match.currentAccount != "" && strings.EqualFold(node.Text, match.currentAccount) {
+			node.Text = match.currentSID
+		}
 		node.Text = strings.ToLower(node.Text)
 	case "Task/RegistrationInfo/Date", "Task/RegistrationInfo/Author", "Task/RegistrationInfo/Description",
 		"Task/RegistrationInfo/URI", "Task/RegistrationInfo/Source", "Task/RegistrationInfo/Version", "Task/RegistrationInfo/Documentation":

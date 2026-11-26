@@ -53,7 +53,7 @@ func TestTaskDefinitionsEquivalentAllowsNativeNormalization(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, pair := range [][2]string{{tc.xml, taskDefinitionFixture}, {taskDefinitionFixture, tc.xml}} {
-				match, err := taskDefinitionsEquivalent([]byte(pair[0]), []byte(pair[1]))
+				match, err := taskDefinitionsEquivalent([]byte(pair[0]), []byte(pair[1]), taskDefinitionMatchContext{})
 				if err != nil || !match {
 					t.Fatalf("equivalent readback rejected: match=%v err=%v", match, err)
 				}
@@ -94,7 +94,7 @@ func TestTaskDefinitionsEquivalentPreservesBehaviorDifferences(t *testing.T) {
 			if observed == taskDefinitionFixture {
 				t.Fatal("fixture transformation did not change the definition")
 			}
-			match, err := taskDefinitionsEquivalent([]byte(observed), []byte(taskDefinitionFixture))
+			match, err := taskDefinitionsEquivalent([]byte(observed), []byte(taskDefinitionFixture), taskDefinitionMatchContext{})
 			if err != nil || match {
 				t.Fatalf("different definition accepted: match=%v err=%v", match, err)
 			}
@@ -109,9 +109,73 @@ func TestTaskDefinitionsEquivalentRejectsUnreadableXML(t *testing.T) {
 		strings.Replace(taskDefinitionFixture, taskXMLNamespace, "urn:another-schema", 1),
 		taskDefinitionFixture + "<Task/>",
 	} {
-		match, err := taskDefinitionsEquivalent([]byte(raw), []byte(taskDefinitionFixture))
+		match, err := taskDefinitionsEquivalent([]byte(raw), []byte(taskDefinitionFixture), taskDefinitionMatchContext{})
 		if match || !errors.Is(err, ErrTaskCorrupt) || strings.Contains(err.Error(), "private-canary") {
 			t.Fatalf("invalid XML outcome: match=%v err=%v", match, err)
 		}
+	}
+}
+
+func TestTaskDefinitionsEquivalentSchedulerSelectedEngine(t *testing.T) {
+	withEngine := func(field string) string {
+		return strings.Replace(taskDefinitionFixture, "</Settings>", field+"</Settings>", 1)
+	}
+	for _, tc := range []struct {
+		name, observed, expected string
+		match                    bool
+	}{
+		{name: "native_true", observed: `<UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>`, match: true},
+		{name: "native_one", observed: `<UseUnifiedSchedulingEngine>1</UseUnifiedSchedulingEngine>`, match: true},
+		{name: "native_false", observed: `<UseUnifiedSchedulingEngine>false</UseUnifiedSchedulingEngine>`, match: true},
+		{name: "native_zero", observed: `<UseUnifiedSchedulingEngine>0</UseUnifiedSchedulingEngine>`, match: true},
+		{name: "explicit_false", observed: `<UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>`, expected: `<UseUnifiedSchedulingEngine>false</UseUnifiedSchedulingEngine>`},
+		{name: "explicit_true", observed: `<UseUnifiedSchedulingEngine>false</UseUnifiedSchedulingEngine>`, expected: `<UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>`},
+		{name: "missing_explicit_true", expected: `<UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>`},
+		{name: "matching_explicit_true", observed: `<UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>`, expected: `<UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>`, match: true},
+		{name: "duplicate", observed: `<UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine><UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>`},
+		{name: "attribute", observed: `<UseUnifiedSchedulingEngine future="1">true</UseUnifiedSchedulingEngine>`},
+		{name: "child", observed: `<UseUnifiedSchedulingEngine><Future/>true</UseUnifiedSchedulingEngine>`},
+		{name: "namespace", observed: `<UseUnifiedSchedulingEngine xmlns="urn:other">true</UseUnifiedSchedulingEngine>`},
+		{name: "invalid_boolean", observed: `<UseUnifiedSchedulingEngine>yes</UseUnifiedSchedulingEngine>`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			match, err := taskDefinitionsEquivalent([]byte(withEngine(tc.observed)), []byte(withEngine(tc.expected)), taskDefinitionMatchContext{})
+			if err != nil || match != tc.match {
+				t.Fatalf("engine selection match=%v err=%v, want %v", match, err, tc.match)
+			}
+		})
+	}
+}
+
+func TestTaskDefinitionsEquivalentCurrentUserSpelling(t *testing.T) {
+	identity := taskDefinitionMatchContext{currentSID: "S-1-5-21-1", currentAccount: `DOMAIN\alice`}
+	for _, tc := range []struct {
+		name, before, after string
+		match               bool
+	}{
+		{name: "native_trigger_account", before: "<LogonTrigger><UserId>S-1-5-21-1", after: `<LogonTrigger><UserId>DOMAIN\alice`, match: true},
+		{name: "principal_account_case", before: `<Principal id="Author"><UserId>S-1-5-21-1`, after: `<Principal id="Author"><UserId>domain\ALICE`, match: true},
+		{name: "foreign_domain", before: "<LogonTrigger><UserId>S-1-5-21-1", after: `<LogonTrigger><UserId>OTHER\alice`},
+		{name: "foreign_account", before: "<LogonTrigger><UserId>S-1-5-21-1", after: `<LogonTrigger><UserId>DOMAIN\bob`},
+		{name: "short_name", before: "<LogonTrigger><UserId>S-1-5-21-1", after: `<LogonTrigger><UserId>alice`},
+		{name: "foreign_sid", before: "<LogonTrigger><UserId>S-1-5-21-1", after: `<LogonTrigger><UserId>S-1-5-21-2`},
+		{name: "duplicate", before: "<LogonTrigger><UserId>S-1-5-21-1", after: `<LogonTrigger><UserId>DOMAIN\alice</UserId><UserId>DOMAIN\alice`},
+		{name: "attribute", before: "<LogonTrigger><UserId>S-1-5-21-1", after: `<LogonTrigger><UserId future="1">DOMAIN\alice`},
+		{name: "child", before: "<LogonTrigger><UserId>S-1-5-21-1", after: `<LogonTrigger><UserId><Future/>DOMAIN\alice`},
+		{name: "namespace", before: "<LogonTrigger><UserId>S-1-5-21-1", after: `<LogonTrigger><UserId xmlns="urn:other">DOMAIN\alice`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			observed := strings.Replace(taskDefinitionFixture, tc.before, tc.after, 1)
+			match, err := taskDefinitionsEquivalent([]byte(observed), []byte(taskDefinitionFixture), identity)
+			if err != nil || match != tc.match {
+				t.Fatalf("current-user spelling match=%v err=%v, want %v", match, err, tc.match)
+			}
+			if tc.match {
+				match, err = taskDefinitionsEquivalent([]byte(observed), []byte(taskDefinitionFixture), taskDefinitionMatchContext{})
+				if err != nil || match {
+					t.Fatalf("account alias accepted without trusted identity: match=%v err=%v", match, err)
+				}
+			}
+		})
 	}
 }
