@@ -5,14 +5,14 @@
     {
       "id": "filesystem",
       "name": "Filesystem MCP server",
-      "summary": "Read and write files in a sandboxed directory.",
+      "summary": "Read and write files in the configured workspace. Requires Node.js 24+. On Windows, use only a trusted workspace.",
       "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
       "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/filesystem/README.md",
       "transport": "stdio",
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-filesystem@2026.1.14",
+        "@modelcontextprotocol/server-filesystem@2.4.1",
         "${workspaceFolder}"
       ],
       "env": {},
