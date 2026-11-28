@@ -1,0 +1,154 @@
+{
+    "schema":  "installed-liveness-readonly-observation-v1",
+    "status":  "OBSERVED_INSTALLED",
+    "task_name":  "\\mcp-local-hub-liveness",
+    "started_utc":  "2026-11-28T13:13:48.5927899Z",
+    "scheduler_mutation_attempted":  false,
+    "product_launch_attempted":  false,
+    "raw_xml_persisted":  false,
+    "reads":  [
+                  {
+                      "started_utc":  "2026-11-28T13:13:48.6432063Z",
+                      "registered_enabled":  true,
+                      "registered_state":  3,
+                      "xml_com_utf8_sha256":  "6798dfd6f369cd4e29ef8ab76b8169ba46c26c287e74a8edb7ff922813162c66",
+                      "xml_com_utf8_bytes":  1695,
+                      "task_count":  1,
+                      "trigger_types":  [
+                                            "CalendarTrigger",
+                                            "LogonTrigger"
+                                        ],
+                      "calendar":  [
+                                       {
+                                           "start_boundary":  {
+                                                                  "count":  1,
+                                                                  "value":  "2026-06-10T00:00:00"
+                                                              },
+                                           "enabled":  {
+                                                           "count":  0,
+                                                           "value":  null,
+                                                           "effective":  true
+                                                       },
+                                           "interval":  {
+                                                            "count":  1,
+                                                            "value":  "PT1M"
+                                                        },
+                                           "stop_at_duration_end":  {
+                                                                        "count":  0,
+                                                                        "value":  null
+                                                                    },
+                                           "days_interval":  {
+                                                                 "count":  1,
+                                                                 "value":  "1"
+                                                             }
+                                       }
+                                   ],
+                      "logon":  [
+                                    {
+                                        "enabled":  {
+                                                        "count":  0,
+                                                        "value":  null,
+                                                        "effective":  true
+                                                    }
+                                    }
+                                ],
+                      "settings_enabled":  {
+                                               "count":  0,
+                                               "value":  null,
+                                               "effective":  true
+                                           },
+                      "execution_time_limit":  {
+                                                   "count":  1,
+                                                   "value":  "PT1M"
+                                               },
+                      "multiple_instances_policy":  {
+                                                        "count":  1,
+                                                        "value":  "IgnoreNew"
+                                                    },
+                      "action_count":  1,
+                      "completed_utc":  "2026-11-28T13:13:48.7005068Z"
+                  },
+                  {
+                      "started_utc":  "2026-11-28T13:13:48.7025060Z",
+                      "registered_enabled":  true,
+                      "registered_state":  3,
+                      "xml_com_utf8_sha256":  "6798dfd6f369cd4e29ef8ab76b8169ba46c26c287e74a8edb7ff922813162c66",
+                      "xml_com_utf8_bytes":  1695,
+                      "task_count":  1,
+                      "trigger_types":  [
+                                            "CalendarTrigger",
+                                            "LogonTrigger"
+                                        ],
+                      "calendar":  [
+                                       {
+                                           "start_boundary":  {
+                                                                  "count":  1,
+                                                                  "value":  "2026-06-10T00:00:00"
+                                                              },
+                                           "enabled":  {
+                                                           "count":  0,
+                                                           "value":  null,
+                                                           "effective":  true
+                                                       },
+                                           "interval":  {
+                                                            "count":  1,
+                                                            "value":  "PT1M"
+                                                        },
+                                           "stop_at_duration_end":  {
+                                                                        "count":  0,
+                                                                        "value":  null
+                                                                    },
+                                           "days_interval":  {
+                                                                 "count":  1,
+                                                                 "value":  "1"
+                                                             }
+                                       }
+                                   ],
+                      "logon":  [
+                                    {
+                                        "enabled":  {
+                                                        "count":  0,
+                                                        "value":  null,
+                                                        "effective":  true
+                                                    }
+                                    }
+                                ],
+                      "settings_enabled":  {
+                                               "count":  0,
+                                               "value":  null,
+                                               "effective":  true
+                                           },
+                      "execution_time_limit":  {
+                                                   "count":  1,
+                                                   "value":  "PT1M"
+                                               },
+                      "multiple_instances_policy":  {
+                                                        "count":  1,
+                                                        "value":  "IgnoreNew"
+                                                    },
+                      "action_count":  1,
+                      "completed_utc":  "2026-11-28T13:13:48.7035067Z"
+                  }
+              ],
+    "com_release":  [
+                        {
+                            "reverse_index":  2,
+                            "released":  true,
+                            "remaining":  0
+                        },
+                        {
+                            "reverse_index":  1,
+                            "released":  true,
+                            "remaining":  0
+                        },
+                        {
+                            "reverse_index":  0,
+                            "released":  true,
+                            "remaining":  0
+                        }
+                    ],
+    "two_read_xml_equal":  true,
+    "two_read_enabled_equal":  true,
+    "completed_utc":  "2026-11-28T13:13:48.7111044Z",
+    "exit_code":  0
+}

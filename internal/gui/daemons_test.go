@@ -346,10 +346,10 @@ func TestWeeklyScheduleHandler_ExportXMLFails_Preflight500(t *testing.T) {
 	}
 }
 
-func TestWeeklyScheduleHandler_SwapFails_RollbackOK(t *testing.T) {
+func TestWeeklyScheduleHandler_ExistingTaskRefusal(t *testing.T) {
 	srv := newDaemonsTestServer(t)
 	setWeeklyScheduleApplyForRoute(t, func(spec *api.ScheduleSpec) (string, error) {
-		return "ok", errors.New("create boom")
+		return "n/a", &api.SchedulerReplacementRefusedError{TaskName: api.WeeklyRefreshTaskName, SnapshotPath: "private-snapshot-path"}
 	})
 	body := `{"schedule": "weekly Sun 03:00"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/daemons/weekly-schedule", strings.NewReader(body))
@@ -361,11 +361,14 @@ func TestWeeklyScheduleHandler_SwapFails_RollbackOK(t *testing.T) {
 	}
 	var resp map[string]any
 	json.Unmarshal(rec.Body.Bytes(), &resp)
-	if resp["restore_status"] != "ok" {
-		t.Errorf("restore_status = %v, want ok", resp["restore_status"])
+	if resp["restore_status"] != "n/a" || resp["updated"] != false || resp["error"] != "scheduler_swap_failed" {
+		t.Errorf("refusal response = %#v, want unapplied result with no claimed task restoration", resp)
 	}
 	if _, has := resp["manual_recovery"]; has {
-		t.Error("manual_recovery must NOT be present when restore_status==ok")
+		t.Error("preserved-task refusal must not claim destructive recovery is needed")
+	}
+	if strings.Contains(rec.Body.String(), "private-snapshot-path") {
+		t.Fatal("refusal response disclosed the retained snapshot path")
 	}
 }
 

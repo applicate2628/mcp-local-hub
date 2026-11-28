@@ -1,0 +1,282 @@
+{
+  "schema": 1,
+  "owner_pr": 660,
+  "parent_commit": "58d7c948e410fdb5969abb9a8a4febfea8f14150",
+  "parent_tree": "6da0563e56d6b11db92e72dbdccea295314cd289",
+  "qualification_source": {
+    "files": 3272,
+    "bytes": 59562182,
+    "inventory_sha256": "473c8254a98adc56fab1735999411df7f6b00e61c7d1cd54c7ac8f2a7c5351fc"
+  },
+  "source_before_after_equal": true,
+  "inputs_before_after_equal": true,
+  "qualified_code_files": [
+    {
+      "path": "internal/api/install.go",
+      "bytes": 214477,
+      "sha256": "6403653566726354e082389976d6a4825721a423a4fc61fa10fe67ff04b9559f",
+      "git_blob": "2f9b85907e06bc8b3d2c1bf9fb64529da29f60b0"
+    },
+    {
+      "path": "internal/api/install_task_rollback.go",
+      "bytes": 3440,
+      "sha256": "580e61902e15c20ae76836c02abf73dc57a408c7305fbba87376cfcc3acb3dfe",
+      "git_blob": "224ddbf028ec7304276c0679a485309e7aa784c5"
+    },
+    {
+      "path": "internal/api/scheduler_replacement.go",
+      "bytes": 1768,
+      "sha256": "0e6daf33a60ca7f1cdb5c51aa63b4d50cb78e74d39982cee8b69938d12c566b2",
+      "git_blob": "ab3b2b1ca3cac917915511ebdc3ee07ae09fb6f6"
+    },
+    {
+      "path": "internal/api/install_task_rollback_test.go",
+      "bytes": 20286,
+      "sha256": "4349f397610e1162317ee29f748e55ced39fbf5d2d804d753b7fd41cb9985c96",
+      "git_blob": "efd77caecfe7191063960f18c9362bc142b15454"
+    },
+    {
+      "path": "internal/api/install_task_recovery_test.go",
+      "bytes": 8156,
+      "sha256": "0d7705145a6066b99661b35cad62804d8bb39b978ef1b88052612a7dff5d90a6",
+      "git_blob": "532eccd5366310f17f2a944308f64e6f857af285"
+    },
+    {
+      "path": "internal/api/install_task_mutation_failure_test.go",
+      "bytes": 11710,
+      "sha256": "d44d7669b69056963c535330d58225fac022e52f3f253968508d8031bbf62506",
+      "git_blob": "2605d2a4b611a776a9c23bd7f25e00f296f2f502"
+    },
+    {
+      "path": "internal/api/install_scheduler_snapshot_test.go",
+      "bytes": 7721,
+      "sha256": "689b7c5234b8db1ebd7ea2d5a17a43741e6b4ee0ce20386db8236320e34bdc12",
+      "git_blob": "c1b7ac9d862d4677910d1dd9f1aa3025dc7d1032"
+    },
+    {
+      "path": "internal/api/install_prune_recovery_test.go",
+      "bytes": 8882,
+      "sha256": "fc2a8bb5f055ccc0b3d76ffeec9a3f6de04a8da2affd4063f1cd466dc6bf1495",
+      "git_blob": "23dd868ac73aa1f11a3646427a4eb6cfc5d54f99"
+    },
+    {
+      "path": "internal/api/prune_tasks_test.go",
+      "bytes": 7802,
+      "sha256": "ae6558f81acf05c4c690609f9ae7f9b61da9af6e9859258364c84fe7ce66ba1e",
+      "git_blob": "764599f31295949aa35af6b28863be683dc6d7b8"
+    },
+    {
+      "path": "internal/api/install_hyphen_family_ownership_test.go",
+      "bytes": 22988,
+      "sha256": "a3fff47497b556ab8c9052eb9e51f26129dcc5dd10167b525c86b958c037659d",
+      "git_blob": "ca5a91ddc6a54e630b235e6cdd0bedbea4d46e44"
+    },
+    {
+      "path": "internal/scheduler/scheduler.go",
+      "bytes": 7500,
+      "sha256": "a05fc7dd5b89d83b500f23ff323e1295ad8f96eb543edbfdc39693c4ef79cd69",
+      "git_blob": "8c0ebbdafecba8ecd40a879fd2b0cba6b28bf7ea"
+    }
+  ],
+  "archive": {
+    "archive": "exports/install-generation-20261123-57604a3a.zip",
+    "bytes": 1254756,
+    "sha256": "e7e8e190650319780d6adc7396238e8c1d0fef9f4c583a2b175faf8374fd8d77",
+    "phases": [
+      {
+        "phase": "install-generation-v1-20261123-57604a3a",
+        "completed": false,
+        "source": {
+          "files": 3272,
+          "bytes": 59561907,
+          "inventory_sha256": "a9f7db78d17e74e60b8d30cbcfb6dd150931bf23304f8cfbf237b36a343bdab4"
+        },
+        "commands": [
+          {
+            "label": "install-generation-focused",
+            "exit": 1,
+            "oracle": false,
+            "seconds": 102.01366760022938,
+            "pass": 121,
+            "fail": [
+              "TestExecuteInstallToPruneRetainsObservedDefinition/install_succeeds",
+              "TestExecuteInstallToPruneRetainsObservedDefinition/later_failure",
+              "TestExecuteInstallToPruneRetainsObservedDefinition/external_absence_before_later_failure",
+              "TestExecuteInstallToPruneRetainsObservedDefinition",
+              "PACKAGE:mcp-local-hub/internal/api"
+            ],
+            "skip": [
+              "TestExecuteInstallToRollbackBackendCompatibility/unsupported_platform"
+            ]
+          }
+        ]
+      },
+      {
+        "phase": "install-generation-v2-20261123-57604a3a",
+        "completed": true,
+        "source": {
+          "files": 3272,
+          "bytes": 59562182,
+          "inventory_sha256": "473c8254a98adc56fab1735999411df7f6b00e61c7d1cd54c7ac8f2a7c5351fc"
+        },
+        "commands": [
+          {
+            "label": "install-generation-focused",
+            "exit": 0,
+            "oracle": true,
+            "seconds": 78.29553680005483,
+            "pass": 126,
+            "fail": [],
+            "skip": [
+              "TestExecuteInstallToRollbackBackendCompatibility/unsupported_platform"
+            ]
+          },
+          {
+            "label": "install-generation-old-owner-control",
+            "exit": 1,
+            "oracle": true,
+            "seconds": 49.86673779995181,
+            "pass": 6,
+            "fail": [
+              "TestInstallTaskMutationFailureDoesNotAcceptSameXMLAsGeneration/same_xml",
+              "TestInstallTaskMutationFailureDoesNotAcceptSameXMLAsGeneration",
+              "TestExecuteInstallToEarlierTaskRollback/unchanged",
+              "TestExecuteInstallToEarlierTaskRollback/external_same_xml",
+              "TestExecuteInstallToEarlierTaskRollback/external_changed_xml",
+              "TestExecuteInstallToEarlierTaskRollback/read_error",
+              "TestExecuteInstallToEarlierTaskRollback/partial_read_error",
+              "TestExecuteInstallToEarlierTaskRollback/empty_read",
+              "TestExecuteInstallToEarlierTaskRollback/partial_absence",
+              "TestExecuteInstallToEarlierTaskRollback",
+              "TestExecuteInstallToGenerationOwnershipRefusal/replacement_unchanged",
+              "TestExecuteInstallToGenerationOwnershipRefusal/replacement_external_same_xml",
+              "TestExecuteInstallToGenerationOwnershipRefusal/replacement_external_changed_xml",
+              "TestExecuteInstallToGenerationOwnershipRefusal/replacement_external_absence",
+              "TestExecuteInstallToGenerationOwnershipRefusal/prune_unchanged",
+              "TestExecuteInstallToGenerationOwnershipRefusal/prune_external_same_xml",
+              "TestExecuteInstallToGenerationOwnershipRefusal",
+              "PACKAGE:mcp-local-hub/internal/api"
+            ],
+            "skip": []
+          },
+          {
+            "label": "install-generation-standard-callers",
+            "exit": 0,
+            "oracle": true,
+            "seconds": 56.35508259991184,
+            "pass": 87,
+            "fail": [],
+            "skip": [
+              "TestExecuteInstallToRollbackBackendCompatibility/unsupported_platform"
+            ]
+          },
+          {
+            "label": "production-lock-order",
+            "exit": 0,
+            "oracle": true,
+            "seconds": 68.86725859995931,
+            "pass": 2,
+            "fail": [],
+            "skip": []
+          },
+          {
+            "label": "a4-api-contract",
+            "exit": 0,
+            "oracle": true,
+            "seconds": 14.086238200077787,
+            "pass": 92,
+            "fail": [],
+            "skip": []
+          },
+          {
+            "label": "install-generation-build",
+            "exit": 0,
+            "oracle": true,
+            "seconds": 26.39626449998468,
+            "pass": 0,
+            "fail": [],
+            "skip": []
+          },
+          {
+            "label": "install-generation-vet",
+            "exit": 0,
+            "oracle": true,
+            "seconds": 19.734265299979597,
+            "pass": 0,
+            "fail": [],
+            "skip": []
+          }
+        ]
+      }
+    ]
+  },
+  "fail_and_skip_inventory": {
+    "install-generation-v1-20261123-57604a3a": [
+      {
+        "command": "install-generation-focused",
+        "fail": [
+          "TestExecuteInstallToPruneRetainsObservedDefinition/install_succeeds",
+          "TestExecuteInstallToPruneRetainsObservedDefinition/later_failure",
+          "TestExecuteInstallToPruneRetainsObservedDefinition/external_absence_before_later_failure",
+          "TestExecuteInstallToPruneRetainsObservedDefinition",
+          "PACKAGE:mcp-local-hub/internal/api"
+        ],
+        "skip": [
+          "TestExecuteInstallToRollbackBackendCompatibility/unsupported_platform"
+        ]
+      }
+    ],
+    "install-generation-v2-20261123-57604a3a": [
+      {
+        "command": "install-generation-focused",
+        "fail": [],
+        "skip": [
+          "TestExecuteInstallToRollbackBackendCompatibility/unsupported_platform"
+        ]
+      },
+      {
+        "command": "install-generation-old-owner-control",
+        "fail": [
+          "TestInstallTaskMutationFailureDoesNotAcceptSameXMLAsGeneration/same_xml",
+          "TestInstallTaskMutationFailureDoesNotAcceptSameXMLAsGeneration",
+          "TestExecuteInstallToEarlierTaskRollback/unchanged",
+          "TestExecuteInstallToEarlierTaskRollback/external_same_xml",
+          "TestExecuteInstallToEarlierTaskRollback/external_changed_xml",
+          "TestExecuteInstallToEarlierTaskRollback/read_error",
+          "TestExecuteInstallToEarlierTaskRollback/partial_read_error",
+          "TestExecuteInstallToEarlierTaskRollback/empty_read",
+          "TestExecuteInstallToEarlierTaskRollback/partial_absence",
+          "TestExecuteInstallToEarlierTaskRollback",
+          "TestExecuteInstallToGenerationOwnershipRefusal/replacement_unchanged",
+          "TestExecuteInstallToGenerationOwnershipRefusal/replacement_external_same_xml",
+          "TestExecuteInstallToGenerationOwnershipRefusal/replacement_external_changed_xml",
+          "TestExecuteInstallToGenerationOwnershipRefusal/replacement_external_absence",
+          "TestExecuteInstallToGenerationOwnershipRefusal/prune_unchanged",
+          "TestExecuteInstallToGenerationOwnershipRefusal/prune_external_same_xml",
+          "TestExecuteInstallToGenerationOwnershipRefusal",
+          "PACKAGE:mcp-local-hub/internal/api"
+        ],
+        "skip": []
+      },
+      {
+        "command": "install-generation-standard-callers",
+        "fail": [],
+        "skip": [
+          "TestExecuteInstallToRollbackBackendCompatibility/unsupported_platform"
+        ]
+      }
+    ]
+  },
+  "full_standard_go_tests": "NOT_RUN: full native fixture admission and current composed Source/Product prerequisites remain open",
+  "full_tagged_api_cli_go_tests": "NOT_RUN: same admission prerequisites",
+  "native_scheduler_operations": false,
+  "installations": false,
+  "dependency_downloads": false,
+  "policy_or_acl_changes": false,
+  "external_review_current_commit": false,
+  "own_review": "requirements, generation authority, original/observation/storage errors, reverse compensation order, adopt provenance, exact owned-task classification, no forced restoration, unchanged analysis limits; no open finding in the changed scope",
+  "tree_timeout_settlement_proven": false,
+  "posix_execution": false,
+  "arm64_unix_execution": false,
+  "publishing_scope": "11 tested Go files plus this report, audit and raw evidence; no branch merge"
+}

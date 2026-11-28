@@ -1,0 +1,110 @@
+{
+  "schema": "liveness-native-roundtrip-authorized-next-step-v1",
+  "state": "PREPARED_NOT_RUN_AWAITING_EXACT_SCHEDULER_AUTHORIZATION",
+  "source_base": "8204d3400cbfde401850d3acd3479fb8b1450fd3",
+  "source_branch": "fix/scheduler-hidden-task-lookup-20261119",
+  "source_file": "internal/api/liveness_task_native_windows_test.go",
+  "source_file_sha256": "867eed75fb4c6fa0f4d94d9c6a096da0a15395752a92b9143b2d6486fe8e6d3b",
+  "activation": "fresh exact public head and unchanged fixture/production input pins received before execution; bind the approved native checkout to that head",
+  "work_area": "existing authorized Windows work area, existing native owner; no new persistent environment",
+  "environment": {
+    "MCPHUB_TARGET_LIVENESS_QA": "1",
+    "MCPHUB_E2E_SCHEDULER": "",
+    "GOENV": "off",
+    "GOWORK": "off",
+    "GOTOOLCHAIN": "local",
+    "GOPROXY": "off",
+    "GOSUMDB": "off",
+    "GOFLAGS": "-mod=readonly",
+    "GOMODCACHE": "@@MODULE_CACHE@@",
+    "TEMP": "@@OWN_RUN_ROOT@@/tmp",
+    "TMP": "@@OWN_RUN_ROOT@@/tmp",
+    "GOTMPDIR": "@@OWN_RUN_ROOT@@/tmp",
+    "GOCACHE": "@@FUNCTIONAL_RUN_ROOT@@/go-build",
+    "CGO_ENABLED": "0",
+    "TMPDIR": "@@OWN_RUN_ROOT@@/tmp"
+  },
+  "toolchain": {
+    "observed_during_preparation": "go1.27.4 windows/amd64",
+    "tool_bytes_before_native_execution": "MUST_PIN_CURRENT_INPUT",
+    "source52_historical_toolchain": "not reassigned"
+  },
+  "commands": [
+    {
+      "mode": "default",
+      "argv": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "-p=1",
+        "-parallel=1",
+        "-timeout",
+        "5m",
+        "-run",
+        "^TestEnsureLivenessTaskResolved_NativeXMLRoundTrip$",
+        "./internal/api"
+      ],
+      "work_seconds": 360,
+      "cleanup_seconds": 10
+    },
+    {
+      "mode": "tagged",
+      "argv": [
+        "go",
+        "test",
+        "-tags=test_state_path_env",
+        "-json",
+        "-count=1",
+        "-p=1",
+        "-parallel=1",
+        "-timeout",
+        "5m",
+        "-run",
+        "^TestEnsureLivenessTaskResolved_NativeXMLRoundTrip$",
+        "./internal/api"
+      ],
+      "work_seconds": 360,
+      "cleanup_seconds": 10
+    }
+  ],
+  "operations": {
+    "max_registrations_per_command": 1,
+    "max_registrations_total": 2,
+    "qa_name_prefix": "\\mcp-local-hub-qa-scheduler-liveness-",
+    "create": "native CreateXMLIfAbsent with unchanged production XML",
+    "observation": "native ExportXML and Status",
+    "cleanup": "explicitly authorized Delete of own confirmed QA registration followed by typed absence",
+    "run": 0,
+    "stop": 0,
+    "import_xml": 0,
+    "installed_task_mutations": 0,
+    "product_launches": 0,
+    "uncertain_create": "retain; first failed command stops the sequence",
+    "unconfirmed_or_changed_cleanup_readback": "retain and report exact QA name; do not infer generation ownership"
+  },
+  "oracle": {
+    "per_mode_root_events": [
+      "run",
+      "pass"
+    ],
+    "skip_accepted": false,
+    "result_first": "created-from-absent",
+    "result_second": "unchanged",
+    "create_count": 1,
+    "ensure_export_count": 3,
+    "readback_bytes_unchanged": true,
+    "ready_snapshot": true,
+    "cleanup_typed_absence": true,
+    "original_process_tree_and_readers": "CLOSED",
+    "failure_preserved": true
+  },
+  "limits": [
+    "resolved transaction only; fixture executable deliberately absent",
+    "enabled Calendar/Logon triggers may attempt the absent action",
+    "not public Ensure installed-name acceptance",
+    "not installed Product admission or runtime recovery",
+    "not final Source52 composition acceptance",
+    "not full repository gates"
+  ]
+}

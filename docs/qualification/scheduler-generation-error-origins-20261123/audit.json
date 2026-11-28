@@ -1,0 +1,1164 @@
+{
+  "schema": "scheduler-origin-generation-evidence-audit-v1",
+  "base_commit": "026928c31977788444f6b3e3504324ae21106446",
+  "base_tree": "42069a9870ac9585e425711a84f950d92b353d87",
+  "source_files": [
+    {
+      "path": "internal/api/r36_lane_a2_fixes_test.go",
+      "bytes": 19088,
+      "sha256": "cbeb928a838797b61cb786515eec8cb086ae9c59fc9ae0f62bfdaa174a4ed4f4"
+    },
+    {
+      "path": "internal/api/scheduler_mgmt.go",
+      "bytes": 14735,
+      "sha256": "731b05af3f95bb45c3f58a8b5596586a9b8896eff954816043d4a951dd276140"
+    },
+    {
+      "path": "internal/api/scheduler_mgmt_validation_test.go",
+      "bytes": 3831,
+      "sha256": "65962c3322b1217834075747d3c8294da6e6885ab445db5bf21bd96c139b31ff"
+    },
+    {
+      "path": "internal/api/scheduler_replacement.go",
+      "bytes": 1774,
+      "sha256": "0da69a0c17351565a29ae55ea007125e29faa32decb51fe6cac605b2a61a2e8c"
+    },
+    {
+      "path": "internal/api/scheduler_replacement_test.go",
+      "bytes": 4715,
+      "sha256": "b1ce524d53e06938cef58e7a2e313c0d289378c23ebc6776bf565346bac940d1"
+    },
+    {
+      "path": "internal/api/scheduler_swap.go",
+      "bytes": 2539,
+      "sha256": "a8a231c673e92e5f4633b50e8b0f19c59877efc06756c146907f9a6919585054"
+    },
+    {
+      "path": "internal/api/scheduler_swap_test.go",
+      "bytes": 4697,
+      "sha256": "1658a3e5ea450179ff264c1d906489d0bd8c9efe42075d239072892f760a8676"
+    },
+    {
+      "path": "internal/api/scheduler_upgrade_recovery_test.go",
+      "bytes": 7305,
+      "sha256": "6d319f5eb73218f63dedb51cd51bb5463c0f7fdd1f1b925236c2aca863a718a6"
+    },
+    {
+      "path": "internal/api/scheduler_upgrade_snapshot_test.go",
+      "bytes": 10033,
+      "sha256": "c6b52397a79995b4356ad986f19d276d253d5b9419999a0bf67e6ec35679c62a"
+    },
+    {
+      "path": "internal/api/weekly_refresh.go",
+      "bytes": 21832,
+      "sha256": "e238384360d2439b49381427d967c411bcfc0b7fb98044cd48222df14ca49905"
+    },
+    {
+      "path": "internal/api/weekly_refresh_applied_result_test.go",
+      "bytes": 8122,
+      "sha256": "92e1bbc89dade551e240b3ebbbf000aaa9e98343cffa6d9b5c2bc0570b9ab674"
+    },
+    {
+      "path": "internal/api/weekly_refresh_atomic_test.go",
+      "bytes": 143645,
+      "sha256": "9321508bf631b4b324b787488181be2b98a1fb715c95a423e7bbbc360ee4d3cb"
+    },
+    {
+      "path": "internal/api/weekly_refresh_call_graph_origins_test.go",
+      "bytes": 79307,
+      "sha256": "9ac71e383e2c9f79b4586fc1b6ab31820f97ebe36bc0cca3d874b544805dadcb"
+    },
+    {
+      "path": "internal/api/weekly_refresh_recovery_test.go",
+      "bytes": 9065,
+      "sha256": "446dd8d1b6b24aba80c0e257b26e13c13a21d01149942c4a4fe69ef19c7df4e7"
+    },
+    {
+      "path": "internal/api/weekly_refresh_test.go",
+      "bytes": 9602,
+      "sha256": "1092bdb31251c3d610feb122d8f4bdd2cc154936f46f31e6b5f64f325464a945"
+    },
+    {
+      "path": "internal/gui/daemons_test.go",
+      "bytes": 21244,
+      "sha256": "9bab4f59622a869ce8ff8ae1c980caa04ef2b973db523169a2c39fb8bc2aac27"
+    },
+    {
+      "path": "internal/gui/weekly_schedule_applied_result_test.go",
+      "bytes": 9340,
+      "sha256": "25bfcb08adbeeef923676b4427712d988d308ccbf860736f08754e2a3769e552"
+    }
+  ],
+  "archives": [
+    {
+      "file": "scheduler-error-origins-20261123-57604a3a.zip",
+      "bytes": 1315359,
+      "sha256": "26501be50a4ba36c136963fd4e68f42984d1df12af49233b079fdee6540b9102",
+      "blob_sha": "345f81be499fb7c98e9edc1fcf8166ea6479580b",
+      "members": [
+        {
+          "path": "error-origin-inputs-20261123-v3/installed-error-sources.zip",
+          "bytes": 120518,
+          "sha256": "29c9151fe7d375137887ecb6e76162828a83fa12399b437a575a47c02735c861"
+        },
+        {
+          "path": "error-origin-inputs-20261123-v3/receipt.json",
+          "bytes": 395,
+          "sha256": "e91b3c35b4e2e1059ae8ef8503e50323e314d5e4bd0a0094a57a60f3abf36141"
+        },
+        {
+          "path": "error-origin-inputs-20261123-v4/installed-error-sources.zip",
+          "bytes": 10398,
+          "sha256": "b9a70b78a244ee19ff8c00e8d19c0d21922b67485553271272a608649771030f"
+        },
+        {
+          "path": "error-origin-inputs-20261123-v4/receipt.json",
+          "bytes": 391,
+          "sha256": "458800fe9c9f03227be78ee68cd119ef8b2eaae31dd0b95ffa1b1d53f9b7b636"
+        },
+        {
+          "path": "error-origin-inputs-20261123/installed-error-sources.zip",
+          "bytes": 71094,
+          "sha256": "98c04d00b489f7c9339d5982046945144ff27c74974c35a819073f2579fe2cda"
+        },
+        {
+          "path": "error-origin-inputs-20261123/receipt.json",
+          "bytes": 389,
+          "sha256": "1a04b64aea5086ad314db27c631df28b46cc234216bf902b768499894ac50090"
+        },
+        {
+          "path": "evidence/a1-continuation-20261123-57604a3a/error-and-context-origins.launched.json",
+          "bytes": 826,
+          "sha256": "739a1f0daed9447344cdd897d58c694af29d4ef4bc0a68abc758eaa276ba005c"
+        },
+        {
+          "path": "evidence/a1-continuation-20261123-57604a3a/error-and-context-origins.receipt.json",
+          "bytes": 12028,
+          "sha256": "7ceb2c71ef2464b39b43578320adcc49ddd611f7265962c344e279ed2f7f8da7"
+        },
+        {
+          "path": "evidence/a1-continuation-20261123-57604a3a/error-and-context-origins.started.json",
+          "bytes": 811,
+          "sha256": "2292c7b5d6a56dcf709c56a82c278704f4335190b9cb4c95e1072be6f1a457c0"
+        },
+        {
+          "path": "evidence/a1-continuation-20261123-57604a3a/error-and-context-origins.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/a1-continuation-20261123-57604a3a/error-and-context-origins.stdout.log",
+          "bytes": 126956,
+          "sha256": "0be18f3e4b259062553c10aa38f749e3fc362a2da839ffa0734fe69453928eef"
+        },
+        {
+          "path": "evidence/a1-continuation-20261123-57604a3a/production-lock-order.launched.json",
+          "bytes": 587,
+          "sha256": "f6235b14ca8dadd2b0367f08ce4eca38a97ec6bd4426ee6abf4624df1faf49b4"
+        },
+        {
+          "path": "evidence/a1-continuation-20261123-57604a3a/production-lock-order.receipt.json",
+          "bytes": 1106,
+          "sha256": "a112278dacfbba8fd5b7be82697dddee60d1cbc9edbed4349934d5b12f11c2df"
+        },
+        {
+          "path": "evidence/a1-continuation-20261123-57604a3a/production-lock-order.started.json",
+          "bytes": 571,
+          "sha256": "aaba2c43c62d3711e9b27567caae35ebea00fa1d1881ea6dc66be34e27e10306"
+        },
+        {
+          "path": "evidence/a1-continuation-20261123-57604a3a/production-lock-order.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/a1-continuation-20261123-57604a3a/production-lock-order.stdout.log",
+          "bytes": 1284,
+          "sha256": "34278ade727ea4940385be9033709aede224d0dfa3d83b4f35dfd4532bfc8019"
+        },
+        {
+          "path": "evidence/a1-continuation-20261123-57604a3a/receipt-initial.json",
+          "bytes": 497,
+          "sha256": "b3735c1e4e31e47e690d335e891f9d5f90677092e29429a5a1870a3ae0f834d4"
+        },
+        {
+          "path": "evidence/a1-continuation-20261123-57604a3a/receipt.json",
+          "bytes": 17575,
+          "sha256": "8720cc803688e3637eabacf0062ca10014a71577fffad8e5cbac16d063229d81"
+        },
+        {
+          "path": "evidence/a1-error-proof-20261123-v1/a1-error-fixtures.launched.json",
+          "bytes": 813,
+          "sha256": "7ee6de509c191fe15940754fa3ec1e9d054d70aa37e10a38c4aaaab50d04378c"
+        },
+        {
+          "path": "evidence/a1-error-proof-20261123-v1/a1-error-fixtures.receipt.json",
+          "bytes": 11731,
+          "sha256": "b9886406980b6818fc3e64ed4b63864f83d8c3abad4b2229c473fa53d89dc8b6"
+        },
+        {
+          "path": "evidence/a1-error-proof-20261123-v1/a1-error-fixtures.started.json",
+          "bytes": 797,
+          "sha256": "82e9ae881ef1e712963ea47c57aaf46e732d8241ec42ed35a02482220af940b9"
+        },
+        {
+          "path": "evidence/a1-error-proof-20261123-v1/a1-error-fixtures.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/a1-error-proof-20261123-v1/a1-error-fixtures.stdout.log",
+          "bytes": 123769,
+          "sha256": "b7808b34e62f07e930bc5473f7fcfcea384bb1ce7c2a879978d1a8e9aeac30a8"
+        },
+        {
+          "path": "evidence/a1-error-proof-20261123-v1/a1-production-lock-order.launched.json",
+          "bytes": 586,
+          "sha256": "f7a6f04d1b4d07eb815af8c4c52cfa49b8b17a5c4276408e89fa7945f239f366"
+        },
+        {
+          "path": "evidence/a1-error-proof-20261123-v1/a1-production-lock-order.receipt.json",
+          "bytes": 1107,
+          "sha256": "0e93793f53c3af29ee295c58a84c164eb830d4e2c4987d725a54d4be065dfc53"
+        },
+        {
+          "path": "evidence/a1-error-proof-20261123-v1/a1-production-lock-order.started.json",
+          "bytes": 570,
+          "sha256": "e0773e55ddedc7c079e03cfa0a03143e7889def98ccdbecc01babbb44032101e"
+        },
+        {
+          "path": "evidence/a1-error-proof-20261123-v1/a1-production-lock-order.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/a1-error-proof-20261123-v1/a1-production-lock-order.stdout.log",
+          "bytes": 1952,
+          "sha256": "1aa1542afa7b11a1b7fb99720d583b26d88b146341ee91691d904db930644c07"
+        },
+        {
+          "path": "evidence/a1-error-proof-20261123-v1/receipt-initial.json",
+          "bytes": 490,
+          "sha256": "8c73b762d767c5dafb7bf03ea053b223d44fe03dba757cfb0f281d93e23a7ef9"
+        },
+        {
+          "path": "evidence/a1-error-proof-20261123-v1/receipt.json",
+          "bytes": 17293,
+          "sha256": "aaf0322236fce84666e4077505803946d5eff6334868dbec267c4051a7471a3b"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/a4-api-contract.launched.json",
+          "bytes": 1816,
+          "sha256": "4dfdff1b5b8ea319394b4a2fa42ba7d72618b24f24597145a14ffb6af2be26d6"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/a4-api-contract.receipt.json",
+          "bytes": 8760,
+          "sha256": "e4002f5882be3172df3d79d2f3a0fde439dd8626599d9cd6cdd47ce4d97129ac"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/a4-api-contract.started.json",
+          "bytes": 1801,
+          "sha256": "ca26c457d442e214168bb9264f47536252d6531fcfbd87c6f7bd11879673deba"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/a4-api-contract.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/a4-api-contract.stdout.log",
+          "bytes": 84324,
+          "sha256": "0133ba7fe6591affc8a9153f1eb293ff7b1cf6145241fcb6e25c834f46137e62"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/a4-atomic-and-owners.launched.json",
+          "bytes": 1244,
+          "sha256": "a43012fafbccd88804a423ebc268b2124ac0ac0eb423ca81990216c54dd0da5d"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/a4-atomic-and-owners.receipt.json",
+          "bytes": 6346,
+          "sha256": "aac03d08e73c3e08710d3709d2cd4ee7f8d8e8fa6c7265dfb60068d0390b817f"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/a4-atomic-and-owners.started.json",
+          "bytes": 1228,
+          "sha256": "67adf0617a7ba31f829410a2a9c8fed59a7c61de85a10878821a83f21fb04962"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/a4-atomic-and-owners.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/a4-atomic-and-owners.stdout.log",
+          "bytes": 51949,
+          "sha256": "596a26482949cca1c07c3dd07b7bfd5263455fe1d944aa846d6bde0944bedb5e"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/a4-gui-contract.launched.json",
+          "bytes": 640,
+          "sha256": "a88c87f9e2e388e928bf7ae3a5fca9b0c506da7776382f1828a031ac4f562389"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/a4-gui-contract.receipt.json",
+          "bytes": 1783,
+          "sha256": "3c5762882c246f9efb8d9974819738049a353867b0591a4a307b0c39d96d75f6"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/a4-gui-contract.started.json",
+          "bytes": 624,
+          "sha256": "0319d2c6bc104cc4340ee3658a0ef86251f89878d45bf092f82081bad708a26a"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/a4-gui-contract.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/a4-gui-contract.stdout.log",
+          "bytes": 16745,
+          "sha256": "84b3141f8286472db98aa64402a211ce77880ba98cb3654da82cde64ca975d68"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/a4-register-callers.launched.json",
+          "bytes": 688,
+          "sha256": "2514cf68d9e47f65973e8c7f329d03f60401acd5fe4d4d0de9da3f92bc0c9c5a"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/a4-register-callers.receipt.json",
+          "bytes": 1332,
+          "sha256": "0deafb0333f6af6b860aca18f7c1d1561fcdddf6cdee907efdc6ee4c1c859d0f"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/a4-register-callers.started.json",
+          "bytes": 672,
+          "sha256": "91871b50b9ad0c2588d959cf595366be2d9f20130cf75df6c25d93a926355100"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/a4-register-callers.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/a4-register-callers.stdout.log",
+          "bytes": 3022,
+          "sha256": "ba2dbe63444d8f025914c8e678d271af0e181c8dd50ad488cd0a36e6f2d5e7cc"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/composition-build.launched.json",
+          "bytes": 449,
+          "sha256": "8e1f1bb31c004fce61c2901f6469fa1fec116aadca542494d91d1305a4eaf00d"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/composition-build.receipt.json",
+          "bytes": 807,
+          "sha256": "52d79342f21b98e13c77fb1bc8ed69522cf3b4ece56d0d592f78208e55dabe73"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/composition-build.started.json",
+          "bytes": 433,
+          "sha256": "8f205390f4e559c1a477ac53883a96cbfee83ae725aeef03d634a289115a20cc"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/composition-build.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/composition-build.stdout.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/composition-vet.launched.json",
+          "bytes": 445,
+          "sha256": "047cf39bd8abe20600c8d7910b01aeb3970af02c1012f14c68338cf653b84bae"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/composition-vet.receipt.json",
+          "bytes": 803,
+          "sha256": "7fb3f7042b864e679968eb3eca0cceeb454eff93dbedf838ce11a89623892c2b"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/composition-vet.started.json",
+          "bytes": 429,
+          "sha256": "6bafed3022345a57e744b1cf9bfe689cfb653ef9da5bd31c7b5874fb67fd23b3"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/composition-vet.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/composition-vet.stdout.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/receipt-initial.json",
+          "bytes": 493,
+          "sha256": "02731457a16aae70b10a03a61776cbf88324e1fce1131b39a125b06128d9fed5"
+        },
+        {
+          "path": "evidence/a4-contract-proof-20261123-v1/receipt.json",
+          "bytes": 24874,
+          "sha256": "d14e05be98294bb6eaa150786e21bee8fa17ccb63e1ce915264ef962dac9780d"
+        },
+        {
+          "path": "evidence/a4-generation-control-20261123-v2/a4-old-generation-control-v2.launched.json",
+          "bytes": 793,
+          "sha256": "05ed540688dcb4e07732a93931207fa4a60b3ea3078d10976ee04465db55f2e5"
+        },
+        {
+          "path": "evidence/a4-generation-control-20261123-v2/a4-old-generation-control-v2.receipt.json",
+          "bytes": 1499,
+          "sha256": "032394950c4d3ae76e44a3f1797ded70c9a544b6898fd5c1a7410cfe740fd509"
+        },
+        {
+          "path": "evidence/a4-generation-control-20261123-v2/a4-old-generation-control-v2.started.json",
+          "bytes": 777,
+          "sha256": "d2069f539836f61bfc491935f3734445cfeb8ed5e3e95e95add067f2b2d19bcf"
+        },
+        {
+          "path": "evidence/a4-generation-control-20261123-v2/a4-old-generation-control-v2.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/a4-generation-control-20261123-v2/a4-old-generation-control-v2.stdout.log",
+          "bytes": 9687,
+          "sha256": "ef0af35db57141cb5ef95660696c50b1d4e5be3cc8e83298c38076b79b999440"
+        },
+        {
+          "path": "evidence/a4-generation-control-20261123-v2/receipt-initial.json",
+          "bytes": 497,
+          "sha256": "1aa9f82ecada213569038d95591649579a73a40be6914c9cef073fcb04ead85f"
+        },
+        {
+          "path": "evidence/a4-generation-control-20261123-v2/receipt.json",
+          "bytes": 5289,
+          "sha256": "29919b3dedd2226eb2385d2dae82f8809f26047bcb841def1e3d67be0f8c2487"
+        },
+        {
+          "path": "evidence/build-continuation-20261123-57604a3a/composition-build.launched.json",
+          "bytes": 422,
+          "sha256": "c1e3e2e0750264692add6394558749ac9cf35327253b02fd5ac55849b4732b02"
+        },
+        {
+          "path": "evidence/build-continuation-20261123-57604a3a/composition-build.receipt.json",
+          "bytes": 780,
+          "sha256": "91abd2e8fee3778df293789f44ee25646c084ecc74635a358f0cd8bd2d780046"
+        },
+        {
+          "path": "evidence/build-continuation-20261123-57604a3a/composition-build.started.json",
+          "bytes": 406,
+          "sha256": "7b5f1e11385397b01ccc683f42d415041d1c7e85487484d72f7c35493f4480a3"
+        },
+        {
+          "path": "evidence/build-continuation-20261123-57604a3a/composition-build.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/build-continuation-20261123-57604a3a/composition-build.stdout.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/build-continuation-20261123-57604a3a/composition-vet.launched.json",
+          "bytes": 418,
+          "sha256": "7b1366564c8f16bc16cc0745252f70d8199925d9a0b18e9ad060c03379cd64a9"
+        },
+        {
+          "path": "evidence/build-continuation-20261123-57604a3a/composition-vet.receipt.json",
+          "bytes": 777,
+          "sha256": "d884255f61aa8ef94194997623d0dbcbebcd50239df00bb4ebc5753767ef94d7"
+        },
+        {
+          "path": "evidence/build-continuation-20261123-57604a3a/composition-vet.started.json",
+          "bytes": 402,
+          "sha256": "17974e940c5075cb36f17bc4a6c1308f38bff48499bb0ce85b28b700fb5cfe6c"
+        },
+        {
+          "path": "evidence/build-continuation-20261123-57604a3a/composition-vet.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/build-continuation-20261123-57604a3a/composition-vet.stdout.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/build-continuation-20261123-57604a3a/receipt-initial.json",
+          "bytes": 500,
+          "sha256": "f4ec269ffaff7ad38988217064423cf4278441d31da55247242be04abc304b91"
+        },
+        {
+          "path": "evidence/build-continuation-20261123-57604a3a/receipt.json",
+          "bytes": 5414,
+          "sha256": "fcfb6c85fe269d07c9bae66059965356909886bf5a376280f886271600da0e87"
+        },
+        {
+          "path": "evidence/materialize-continuation-20261123-57604a3a/receipt.json",
+          "bytes": 3916,
+          "sha256": "485e19641c539ebfd0f7ee033267e71e13b87659ea4b1b782f6d974949359606"
+        },
+        {
+          "path": "inputs/a1-a4-20261123-v1/internal/api/r36_lane_a2_fixes_test.go",
+          "bytes": 19088,
+          "sha256": "cbeb928a838797b61cb786515eec8cb086ae9c59fc9ae0f62bfdaa174a4ed4f4"
+        },
+        {
+          "path": "inputs/a1-a4-20261123-v1/internal/api/scheduler_mgmt.go",
+          "bytes": 14735,
+          "sha256": "731b05af3f95bb45c3f58a8b5596586a9b8896eff954816043d4a951dd276140"
+        },
+        {
+          "path": "inputs/a1-a4-20261123-v1/internal/api/scheduler_mgmt_validation_test.go",
+          "bytes": 3831,
+          "sha256": "65962c3322b1217834075747d3c8294da6e6885ab445db5bf21bd96c139b31ff"
+        },
+        {
+          "path": "inputs/a1-a4-20261123-v1/internal/api/scheduler_replacement.go",
+          "bytes": 1774,
+          "sha256": "0da69a0c17351565a29ae55ea007125e29faa32decb51fe6cac605b2a61a2e8c"
+        },
+        {
+          "path": "inputs/a1-a4-20261123-v1/internal/api/scheduler_replacement_test.go",
+          "bytes": 4715,
+          "sha256": "b1ce524d53e06938cef58e7a2e313c0d289378c23ebc6776bf565346bac940d1"
+        },
+        {
+          "path": "inputs/a1-a4-20261123-v1/internal/api/scheduler_swap.go",
+          "bytes": 2539,
+          "sha256": "a8a231c673e92e5f4633b50e8b0f19c59877efc06756c146907f9a6919585054"
+        },
+        {
+          "path": "inputs/a1-a4-20261123-v1/internal/api/scheduler_swap_test.go",
+          "bytes": 4697,
+          "sha256": "1658a3e5ea450179ff264c1d906489d0bd8c9efe42075d239072892f760a8676"
+        },
+        {
+          "path": "inputs/a1-a4-20261123-v1/internal/api/scheduler_upgrade_recovery_test.go",
+          "bytes": 7305,
+          "sha256": "6d319f5eb73218f63dedb51cd51bb5463c0f7fdd1f1b925236c2aca863a718a6"
+        },
+        {
+          "path": "inputs/a1-a4-20261123-v1/internal/api/scheduler_upgrade_snapshot_test.go",
+          "bytes": 10033,
+          "sha256": "c6b52397a79995b4356ad986f19d276d253d5b9419999a0bf67e6ec35679c62a"
+        },
+        {
+          "path": "inputs/a1-a4-20261123-v1/internal/api/weekly_refresh.go",
+          "bytes": 21832,
+          "sha256": "e238384360d2439b49381427d967c411bcfc0b7fb98044cd48222df14ca49905"
+        },
+        {
+          "path": "inputs/a1-a4-20261123-v1/internal/api/weekly_refresh_applied_result_test.go",
+          "bytes": 8122,
+          "sha256": "92e1bbc89dade551e240b3ebbbf000aaa9e98343cffa6d9b5c2bc0570b9ab674"
+        },
+        {
+          "path": "inputs/a1-a4-20261123-v1/internal/api/weekly_refresh_atomic_test.go",
+          "bytes": 143645,
+          "sha256": "9321508bf631b4b324b787488181be2b98a1fb715c95a423e7bbbc360ee4d3cb"
+        },
+        {
+          "path": "inputs/a1-a4-20261123-v1/internal/api/weekly_refresh_call_graph_origins_test.go",
+          "bytes": 74036,
+          "sha256": "ccd9a99a040361cda1e32819d47723446e46dc08c032fa8de553a9ebb85c8208"
+        },
+        {
+          "path": "inputs/a1-a4-20261123-v1/internal/api/weekly_refresh_recovery_test.go",
+          "bytes": 9065,
+          "sha256": "446dd8d1b6b24aba80c0e257b26e13c13a21d01149942c4a4fe69ef19c7df4e7"
+        },
+        {
+          "path": "inputs/a1-a4-20261123-v1/internal/api/weekly_refresh_test.go",
+          "bytes": 9602,
+          "sha256": "1092bdb31251c3d610feb122d8f4bdd2cc154936f46f31e6b5f64f325464a945"
+        },
+        {
+          "path": "inputs/a1-a4-20261123-v1/internal/gui/daemons_test.go",
+          "bytes": 21244,
+          "sha256": "9bab4f59622a869ce8ff8ae1c980caa04ef2b973db523169a2c39fb8bc2aac27"
+        },
+        {
+          "path": "inputs/a1-a4-20261123-v1/internal/gui/weekly_schedule_applied_result_test.go",
+          "bytes": 9340,
+          "sha256": "25bfcb08adbeeef923676b4427712d988d308ccbf860736f08754e2a3769e552"
+        },
+        {
+          "path": "inputs/continuation-20261123-57604a3a/internal/api/weekly_refresh_call_graph_origins_test.go",
+          "bytes": 79307,
+          "sha256": "9ac71e383e2c9f79b4586fc1b6ab31820f97ebe36bc0cca3d874b544805dadcb"
+        },
+        {
+          "path": "plans/a1-continuation-20261123-57604a3a.json",
+          "bytes": 595596,
+          "sha256": "258f368ce98cd71d97e90246d76570fdb2a08c22bb2b448efceba3d9e9e9d6ae"
+        },
+        {
+          "path": "plans/a1-error-proof-20261123-v1.json",
+          "bytes": 610692,
+          "sha256": "e2f3a3bc91937d2804039d89f95c7225727a496e2b8af12b2849b16423bd8562"
+        },
+        {
+          "path": "plans/a4-contract-proof-20261123-v1.json",
+          "bytes": 615692,
+          "sha256": "d2428b27d5475516e074ebdd27c89e0e0174d017e0b7b4deeed63a44bbab52db"
+        },
+        {
+          "path": "plans/a4-generation-control-20261123-v2.json",
+          "bytes": 600019,
+          "sha256": "3dd9fa8fceab311cc27ac8c596a5791e9a6955d6e67104a6b5ce68fb943edeea"
+        },
+        {
+          "path": "plans/build-continuation-20261123-57604a3a.json",
+          "bytes": 594468,
+          "sha256": "ccc73b9acae8a71ac523e99cda043af55e9cc50f3e61918a127ebbb8adfb55e5"
+        },
+        {
+          "path": "prepare_continuation_20261123_57604a3a.py",
+          "bytes": 9021,
+          "sha256": "926e2b670db115cec49ad1405af49333c919a7dcea554b5c4e57ce0fbf86142f"
+        },
+        {
+          "path": "qualify_go.py",
+          "bytes": 13912,
+          "sha256": "a483536d689df8c5713fddbdfd221b85953cf0ce4f9d578a31c4cdbfc6b9a26e"
+        }
+      ]
+    },
+    {
+      "file": "scheduler-standalone-20261123-57604a3a.zip",
+      "bytes": 371249,
+      "sha256": "52c8ac806a5153927bd7f5c0f583cc7cb91b5ad1942a36097254b6bc398b2de3",
+      "blob_sha": "1aa7c63418be3459bf37333a48e8cff323f81689",
+      "members": [
+        {
+          "path": "evidence/materialize-scheduler-standalone-20261123-57604a3a/receipt-initial.json",
+          "bytes": 514,
+          "sha256": "d2e22c0dfbd28d4780d9fcd83046062a85207c5a56db19774823cf6e5996b7fb"
+        },
+        {
+          "path": "evidence/materialize-scheduler-standalone-20261123-57604a3a/receipt.json",
+          "bytes": 1376,
+          "sha256": "b48ffbe34167499ed922aa65c1578b7e5fcfdfbb1184744ef3a3db9b2849f2fb"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/a4-api-contract.launched.json",
+          "bytes": 1826,
+          "sha256": "b0bbf7418ec66e8346357e44a41b6bee819ab30e3714a15b3050584d3bd1e863"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/a4-api-contract.receipt.json",
+          "bytes": 8771,
+          "sha256": "97f394f3c98e965934714b50f9c3d7011bbe0a3a8a8c2c628d840b036641d13a"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/a4-api-contract.started.json",
+          "bytes": 1810,
+          "sha256": "c847863d9c76ffd9cc33be1f993fd5eb317f9063cf76c7c2c5df7c86f8d1fea8"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/a4-api-contract.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/a4-api-contract.stdout.log",
+          "bytes": 84329,
+          "sha256": "ad61e453a08d63de810cdf1a67f2544fe033911dda54d9c9a033f90e0693ed01"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/a4-atomic-and-owners.launched.json",
+          "bytes": 1253,
+          "sha256": "481af8ece923833c2cc134c440418dfb629511e7b8cc10db2296362098122150"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/a4-atomic-and-owners.receipt.json",
+          "bytes": 6355,
+          "sha256": "20076d026bb4253456d73665a2d93d6f88c842aee2681ce76712598542e58675"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/a4-atomic-and-owners.started.json",
+          "bytes": 1237,
+          "sha256": "c4e0bb3aebf74681d3ac7664e22494b03a8ead44b6fc737e3032f725e30f3d40"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/a4-atomic-and-owners.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/a4-atomic-and-owners.stdout.log",
+          "bytes": 51979,
+          "sha256": "df5b07f125a0aa3562e301b2fd5e24ec4eb7f43d78f80c204e054ebd76a4bb9d"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/a4-gui-contract.launched.json",
+          "bytes": 649,
+          "sha256": "592053eea53fc82c7a7cea17153d140e91042dfa14879a1d49cd018745194559"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/a4-gui-contract.receipt.json",
+          "bytes": 1791,
+          "sha256": "a7480b98b47d8dbbf4ba1e7a7454cda60b775f3f65efe72b23d1bfe2110c6524"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/a4-gui-contract.started.json",
+          "bytes": 633,
+          "sha256": "afe1595cab78df66932db7919f7685861e9bf401c7e0b55ad92598f9c94a1db7"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/a4-gui-contract.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/a4-gui-contract.stdout.log",
+          "bytes": 16860,
+          "sha256": "5b1275ef9ed7b5b4fb590b3e4f4b5d99647f3d1743d5bc9e4dde5ba677810ccc"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/a4-register-callers.launched.json",
+          "bytes": 697,
+          "sha256": "83606edc526b70727ec08b7fa780870107d4b63b4f03cc5fd646125af215ba18"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/a4-register-callers.receipt.json",
+          "bytes": 1341,
+          "sha256": "d4728d230c4ea5ee9d1c90227965b30d755c7d5e4c24ddf2a4913076c54d89f0"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/a4-register-callers.started.json",
+          "bytes": 681,
+          "sha256": "69f2aec66e1b980c3ea6ae8a3f42b23ed8dbafe9608b43de3915895245649c3e"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/a4-register-callers.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/a4-register-callers.stdout.log",
+          "bytes": 3021,
+          "sha256": "8af8d9aedc58faf82bed245b150205bc4ff539a9fce28166a64963e5cd73652a"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/error-and-context-origins.launched.json",
+          "bytes": 830,
+          "sha256": "e9f8a4f266541339b23d4a7daf7d9221cc8da089722a5e11ea8c150096fd17f4"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/error-and-context-origins.receipt.json",
+          "bytes": 12030,
+          "sha256": "de7cd1d6b0b02e955f9d29091c0e828ffc1ef899590e7a7c7f63e1fe077a7efe"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/error-and-context-origins.started.json",
+          "bytes": 814,
+          "sha256": "d898058501ecde411d1256d996e3652fde9cb39a0464ebd617dabcd51cb70f19"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/error-and-context-origins.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/error-and-context-origins.stdout.log",
+          "bytes": 126933,
+          "sha256": "20344261e9b2949690e5ecefb6c81be6ff2cf0e39a71ba168e19d2ea503b07e8"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/production-lock-order.launched.json",
+          "bytes": 590,
+          "sha256": "5db3c876cddd0a7e3aab29294c655c5dbf09b588e83570381f423baca7723ad4"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/production-lock-order.receipt.json",
+          "bytes": 1109,
+          "sha256": "4da72d924986a751dc1f9412e3d86c70eebfe5883a39ed958a5e65b499b3b18c"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/production-lock-order.started.json",
+          "bytes": 574,
+          "sha256": "92ca5d01f20a9721087dfa0873c41f83008bb45f6c6ed2e2e249c2a6e38dac20"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/production-lock-order.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/production-lock-order.stdout.log",
+          "bytes": 1284,
+          "sha256": "f53c9c51d748d24ba90b7629692ec5e4b7f6fd0939e6646e36d2e5b5cc6504e1"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/receipt-initial.json",
+          "bytes": 464,
+          "sha256": "28cb8d437a9aeda45db379c8309b6f10dac37cfe2c9c8177e09ae92192d0f78d"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/receipt.json",
+          "bytes": 38902,
+          "sha256": "4a15057f7faf2c0851ce6f7d6c2da03a337476f3365b43e3d60aaa0dfb25e71a"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/standalone-build.launched.json",
+          "bytes": 424,
+          "sha256": "494ec5cd1bac0274ae6dc5ab7ff1891f611c62f34022dd369c4dbdb0a0663359"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/standalone-build.receipt.json",
+          "bytes": 783,
+          "sha256": "99c11ce0bc81d36f84a1aad51d032b1f7ca6d561af84f2b584a92f65c0bed736"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/standalone-build.started.json",
+          "bytes": 408,
+          "sha256": "b6f2f3835b67258d4c743d9713edeb00181d25ba4f0555c740011833b7dc2c5e"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/standalone-build.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/standalone-build.stdout.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/standalone-vet.launched.json",
+          "bytes": 420,
+          "sha256": "7d4e186a0c11840cfc2c2139cdc044b73d26863919be67dc2f637d4a974f1403"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/standalone-vet.receipt.json",
+          "bytes": 779,
+          "sha256": "d9943f2c9fdb34e5c1045c713a9f5c357617f8e6bfeb9a3e932effc2e702ea34"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/standalone-vet.started.json",
+          "bytes": 404,
+          "sha256": "9562804a6df9ae090757ed8b46e7512a7f4a41e293fa74cb19f3cd81194c948e"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/standalone-vet.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/scheduler-standalone-20261123-57604a3a/standalone-vet.stdout.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "export_scheduler_standalone_20261123_57604a3a.py",
+          "bytes": 3284,
+          "sha256": "ae053c3a489c04593d46946ee165be70d901bc687570c0c6dffabae256925d4f"
+        },
+        {
+          "path": "inputs/660-source-tree-20261123-57604a3a.json",
+          "bytes": 441861,
+          "sha256": "db558e3b968c8fbb1358086d90545cf08bd797e999dc974f7ff7aa4d65cc2845"
+        },
+        {
+          "path": "plans/scheduler-standalone-20261123-57604a3a.json",
+          "bytes": 608123,
+          "sha256": "aadbc5abed841d7db38bc94a0e10c6a240eb1a0fadf77bca3774cd2cc40b1af0"
+        },
+        {
+          "path": "prepare_scheduler_standalone_20261123_57604a3a.py",
+          "bytes": 7202,
+          "sha256": "a06c3b6b4ee227b3acad8736b7cb6d2161d93bf7f0389515fa98ac9a856b6cc7"
+        },
+        {
+          "path": "qualify_go.py",
+          "bytes": 13912,
+          "sha256": "a483536d689df8c5713fddbdfd221b85953cf0ce4f9d578a31c4cdbfc6b9a26e"
+        }
+      ]
+    }
+  ],
+  "event_audit": [
+    {
+      "archive": "scheduler-error-origins-20261123-57604a3a.zip",
+      "receipt": "evidence/a1-continuation-20261123-57604a3a/error-and-context-origins.receipt.json",
+      "exit_code": 0,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {
+        "pass": 127
+      },
+      "nonpass": []
+    },
+    {
+      "archive": "scheduler-error-origins-20261123-57604a3a.zip",
+      "receipt": "evidence/a1-continuation-20261123-57604a3a/production-lock-order.receipt.json",
+      "exit_code": 0,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {
+        "pass": 2
+      },
+      "nonpass": []
+    },
+    {
+      "archive": "scheduler-error-origins-20261123-57604a3a.zip",
+      "receipt": "evidence/a1-error-proof-20261123-v1/a1-error-fixtures.receipt.json",
+      "exit_code": 0,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {
+        "pass": 124
+      },
+      "nonpass": []
+    },
+    {
+      "archive": "scheduler-error-origins-20261123-57604a3a.zip",
+      "receipt": "evidence/a1-error-proof-20261123-v1/a1-production-lock-order.receipt.json",
+      "exit_code": 1,
+      "oracle_pass": false,
+      "settled": true,
+      "timed_out": false,
+      "counts": {
+        "fail": 2
+      },
+      "nonpass": [
+        {
+          "action": "fail",
+          "test": "TestWeeklyRefreshLockOrderInventory",
+          "package": "mcp-local-hub/internal/api"
+        },
+        {
+          "action": "fail",
+          "test": null,
+          "package": "mcp-local-hub/internal/api"
+        }
+      ]
+    },
+    {
+      "archive": "scheduler-error-origins-20261123-57604a3a.zip",
+      "receipt": "evidence/a4-contract-proof-20261123-v1/a4-api-contract.receipt.json",
+      "exit_code": 0,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {
+        "pass": 92
+      },
+      "nonpass": []
+    },
+    {
+      "archive": "scheduler-error-origins-20261123-57604a3a.zip",
+      "receipt": "evidence/a4-contract-proof-20261123-v1/a4-atomic-and-owners.receipt.json",
+      "exit_code": 0,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {
+        "pass": 49
+      },
+      "nonpass": []
+    },
+    {
+      "archive": "scheduler-error-origins-20261123-57604a3a.zip",
+      "receipt": "evidence/a4-contract-proof-20261123-v1/a4-gui-contract.receipt.json",
+      "exit_code": 0,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {
+        "pass": 9
+      },
+      "nonpass": []
+    },
+    {
+      "archive": "scheduler-error-origins-20261123-57604a3a.zip",
+      "receipt": "evidence/a4-contract-proof-20261123-v1/a4-register-callers.receipt.json",
+      "exit_code": 0,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {
+        "pass": 4
+      },
+      "nonpass": []
+    },
+    {
+      "archive": "scheduler-error-origins-20261123-57604a3a.zip",
+      "receipt": "evidence/a4-contract-proof-20261123-v1/composition-build.receipt.json",
+      "exit_code": 0,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {},
+      "nonpass": []
+    },
+    {
+      "archive": "scheduler-error-origins-20261123-57604a3a.zip",
+      "receipt": "evidence/a4-contract-proof-20261123-v1/composition-vet.receipt.json",
+      "exit_code": 0,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {},
+      "nonpass": []
+    },
+    {
+      "archive": "scheduler-error-origins-20261123-57604a3a.zip",
+      "receipt": "evidence/a4-generation-control-20261123-v2/a4-old-generation-control-v2.receipt.json",
+      "exit_code": 1,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {
+        "fail": 4
+      },
+      "nonpass": [
+        {
+          "action": "fail",
+          "test": "TestSchedulerReplacementRefusalPreservesNewGeneration/weekly/identical-xml",
+          "package": "mcp-local-hub/internal/api"
+        },
+        {
+          "action": "fail",
+          "test": "TestSchedulerReplacementRefusalPreservesNewGeneration/upgrade/identical-xml",
+          "package": "mcp-local-hub/internal/api"
+        },
+        {
+          "action": "fail",
+          "test": "TestSchedulerReplacementRefusalPreservesNewGeneration",
+          "package": "mcp-local-hub/internal/api"
+        },
+        {
+          "action": "fail",
+          "test": null,
+          "package": "mcp-local-hub/internal/api"
+        }
+      ]
+    },
+    {
+      "archive": "scheduler-error-origins-20261123-57604a3a.zip",
+      "receipt": "evidence/build-continuation-20261123-57604a3a/composition-build.receipt.json",
+      "exit_code": 0,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {},
+      "nonpass": []
+    },
+    {
+      "archive": "scheduler-error-origins-20261123-57604a3a.zip",
+      "receipt": "evidence/build-continuation-20261123-57604a3a/composition-vet.receipt.json",
+      "exit_code": 0,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {},
+      "nonpass": []
+    },
+    {
+      "archive": "scheduler-standalone-20261123-57604a3a.zip",
+      "receipt": "evidence/scheduler-standalone-20261123-57604a3a/a4-api-contract.receipt.json",
+      "exit_code": 0,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {
+        "pass": 92
+      },
+      "nonpass": []
+    },
+    {
+      "archive": "scheduler-standalone-20261123-57604a3a.zip",
+      "receipt": "evidence/scheduler-standalone-20261123-57604a3a/a4-atomic-and-owners.receipt.json",
+      "exit_code": 0,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {
+        "pass": 49
+      },
+      "nonpass": []
+    },
+    {
+      "archive": "scheduler-standalone-20261123-57604a3a.zip",
+      "receipt": "evidence/scheduler-standalone-20261123-57604a3a/a4-gui-contract.receipt.json",
+      "exit_code": 0,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {
+        "pass": 9
+      },
+      "nonpass": []
+    },
+    {
+      "archive": "scheduler-standalone-20261123-57604a3a.zip",
+      "receipt": "evidence/scheduler-standalone-20261123-57604a3a/a4-register-callers.receipt.json",
+      "exit_code": 0,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {
+        "pass": 4
+      },
+      "nonpass": []
+    },
+    {
+      "archive": "scheduler-standalone-20261123-57604a3a.zip",
+      "receipt": "evidence/scheduler-standalone-20261123-57604a3a/error-and-context-origins.receipt.json",
+      "exit_code": 0,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {
+        "pass": 127
+      },
+      "nonpass": []
+    },
+    {
+      "archive": "scheduler-standalone-20261123-57604a3a.zip",
+      "receipt": "evidence/scheduler-standalone-20261123-57604a3a/production-lock-order.receipt.json",
+      "exit_code": 0,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {
+        "pass": 2
+      },
+      "nonpass": []
+    },
+    {
+      "archive": "scheduler-standalone-20261123-57604a3a.zip",
+      "receipt": "evidence/scheduler-standalone-20261123-57604a3a/standalone-build.receipt.json",
+      "exit_code": 0,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {},
+      "nonpass": []
+    },
+    {
+      "archive": "scheduler-standalone-20261123-57604a3a.zip",
+      "receipt": "evidence/scheduler-standalone-20261123-57604a3a/standalone-vet.receipt.json",
+      "exit_code": 0,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {},
+      "nonpass": []
+    }
+  ]
+}

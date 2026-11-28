@@ -1,0 +1,41 @@
+{
+  "schema": "published-duplicate-trash-v1",
+  "items": [
+    {
+      "duplicate": "reader-matrix-pr627",
+      "local_head": "836f17d57a337db806183acd7df5e91c6a84c5de",
+      "published_head": "d910767902f7e1385b97e12afdc675b0c9d27b99",
+      "verification": "clean local tracked tree; published tree contains every local file with equal bytes and adds only prior PR description",
+      "destination": "trash/published-duplicates-20261126/reader-matrix-pr627",
+      "moved": true
+    },
+    {
+      "duplicate": "rust-consumer-pr631",
+      "local_head": "cbcb2ec055f51faace5d0a2bb91a772f62d20602",
+      "published_head": "62c853e8a9e9b2817f5fcaf15018450b76798690",
+      "verification": "clean local tracked tree; published tree contains every local file with equal bytes and adds only prior PR description",
+      "destination": "trash/published-duplicates-20261126/rust-consumer-pr631",
+      "moved": true
+    }
+  ],
+  "trash_emptied": false,
+  "unpublished_native_evidence_moved": false,
+  "static_probe_copies": [
+    {
+      "trash_path": "/workspace/scratch/fae3015269c1/trash/coordinator-static-probe-20261126",
+      "purpose": "Cloud-only patch application and Python AST check; no native execution",
+      "retained_source": "docs/qualification/install-scheduler-generation-20261123/run_wave_commands.py",
+      "retained_patch": "docs/qualification/install-scheduler-generation-20261123/retained-owner-coordinator-20261126.patch",
+      "applied_source_sha256": "4834ef39bf5c341dce56dacf2f9099ddf5ec43b6ca9e62ff7b2e2011dfa3b365",
+      "disposition": "moved_to_trash_after_exact_output_comparison"
+    },
+    {
+      "trash_path": "/workspace/scratch/fae3015269c1/trash/coordinator-prior-probe-20261126",
+      "purpose": "Cloud-only patch application and Python AST check; no native execution",
+      "retained_source": "docs/qualification/install-scheduler-generation-20261123/run_wave_commands.py",
+      "retained_patch": "docs/qualification/install-scheduler-generation-20261123/retained-owner-coordinator-20261126.patch",
+      "applied_source_sha256": "4834ef39bf5c341dce56dacf2f9099ddf5ec43b6ca9e62ff7b2e2011dfa3b365",
+      "disposition": "moved_to_trash_after_exact_output_comparison"
+    }
+  ]
+}

@@ -1,0 +1,226 @@
+{
+  "schema": "native-a-coordinator-late-reader-publication-v1",
+  "date": "2026-11-26",
+  "status": "PASS_BOUNDED_NATIVE_PROBE",
+  "report": "retained-owner-coordinator-20261126.md",
+  "input_pins": {
+    "probe": {
+      "sha256": "aa60840fa89aa73ff889bfbfac8d4613812915a80fefe3622fd9887bbe4a186e",
+      "role": "Executed native probe source"
+    },
+    "tested_coordinator": {
+      "sha256": "4834ef39bf5c341dce56dacf2f9099ddf5ec43b6ca9e62ff7b2e2011dfa3b365",
+      "role": "Exact AST-extracted child BaseException handler; whole original coordinator was not executed"
+    },
+    "guard": {
+      "sha256": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2",
+      "role": "Original qualified GuardedRun with recorded worker-delay injection"
+    },
+    "windows_job": {
+      "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788",
+      "role": "Unchanged original native owner"
+    },
+    "python": {
+      "sha256": "d4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd",
+      "role": "Pinned executable; isolated -I -S -B"
+    }
+  },
+  "scenario": {
+    "native_commands": 1,
+    "injected_delay": "The same original stdout worker is held after its real EOF/close through the original cleanup deadline; entry into the exact late receiver releases that worker.",
+    "original_cleanup_seconds": 10,
+    "separate_physical_receiving_seconds": 30,
+    "receiver_calls": 1,
+    "receiver_window_remaining_seconds": 29.99999859998934,
+    "same_Run_row_and_native_worker_objects_checked": true,
+    "identifiers_omitted_from_public_projection": true,
+    "original_A_stdout_delay_cause_reproduced": false
+  },
+  "checks": {
+    "one_original_command": true,
+    "expected_failure": true,
+    "work_succeeded_cleanup_failed": true,
+    "original_native_closed": true,
+    "same_originals": true,
+    "one_late_receiver": true,
+    "physical_closed": true,
+    "failure_preserved": true,
+    "no_success_or_access": true,
+    "original_workers_joined_late": true
+  },
+  "original_command": {
+    "exit_code": 0,
+    "seconds": 10.034596899989992,
+    "work_seconds": 30,
+    "cleanup_seconds": 10,
+    "timed_out": false,
+    "work_deadline_exceeded": false,
+    "cleanup_deadline_exceeded": true,
+    "original_owner_retained": true,
+    "original_readers_retained": true,
+    "original_readers_joined": false,
+    "command_success": false,
+    "captures_measured": false,
+    "quiescence_state": "unknown"
+  },
+  "failure_preservation": {
+    "status": "FAIL",
+    "state": "unknown",
+    "before_receiver_sha256": "e833d04269f7fb734429e6743d22a4aeeebfefdbb2413fe8194ab388b4b0597e",
+    "after_parent_sha256": "e833d04269f7fb734429e6743d22a4aeeebfefdbb2413fe8194ab388b4b0597e",
+    "original_failure_bytes_unchanged": true,
+    "original_command_states_unchanged": true
+  },
+  "late_physical_receiving": {
+    "status": "CLOSED",
+    "seconds": 0.005543200008105487,
+    "receiving_error": null,
+    "deadline_exceeded": false,
+    "qualification_passed": false,
+    "capture_access_issued": false,
+    "new_commands_permitted": false
+  },
+  "native_closure": {
+    "direct_exit_code": 0,
+    "direct_reaped": true,
+    "active_zero": true,
+    "job_terminated": false,
+    "handles_closed": true,
+    "issues": []
+  },
+  "original_workers": [
+    {
+      "name": "late-reader-stdout",
+      "join_calls": 2,
+      "joined": true,
+      "alive_after": false,
+      "join_error_count": 0,
+      "first_join_error": null
+    },
+    {
+      "name": "late-reader-stderr",
+      "join_calls": 1,
+      "joined": true,
+      "alive_after": false,
+      "join_error_count": 0,
+      "first_join_error": null
+    }
+  ],
+  "original_IO": {
+    "stdout": {
+      "acquired": true,
+      "worker_started": true,
+      "worker_complete": true,
+      "eof": true,
+      "pipe_close_returned": true,
+      "capture_close_returned": true,
+      "error": null
+    },
+    "stderr": {
+      "acquired": true,
+      "worker_started": true,
+      "worker_complete": true,
+      "eof": true,
+      "pipe_close_returned": true,
+      "capture_close_returned": true,
+      "error": null
+    }
+  },
+  "parent": {
+    "controller_exit_code": 1,
+    "original_controller_reaped": true,
+    "controller_capture_handles_closed": true,
+    "seconds": 11.205867299984675,
+    "diagnostic": null,
+    "receipt_sha256": "e833d04269f7fb734429e6743d22a4aeeebfefdbb2413fe8194ab388b4b0597e",
+    "physical_closure_receipt_sha256": "83572bf3dd608f8518c07cb9c6060d367602c5788ac7f47c8e7b1e6eb8c1a94a"
+  },
+  "parent_scope": {
+    "implementation": "Probe parent reuses the previously accepted retained-Popen/finally pattern; it is not an exact execution of the archived coordinator parent.",
+    "parent_exception_fault_probe": "NOT_RUN"
+  },
+  "subsequent_coordinator": {
+    "sha256": "0997ef9baef811f0748fe764488a23ff556f75cc36ca43dae3523ceb8aa91bbd",
+    "patch_sha256": "a0f63edf4b5889283e2354f4df73e97d68f24d45e6a8ab3d00d25d7e2381ae5d",
+    "patch_file": "retained-owner-coordinator-20261126.patch",
+    "changes": [
+      "Canonical read-only tool paths",
+      "Original parent wait retained in finally"
+    ],
+    "child_failure_handler_AST_identical_to_tested_coordinator": true,
+    "AST_comparison_basis": "Root compared ast.dump without source location attributes.",
+    "source_materialization": {
+      "status": "PASS",
+      "commands": 6,
+      "readers": 12,
+      "evidence_basis": "Separate completed root-owned run; its controls are outside this probe package."
+    },
+    "later_campaigns": "Root reports original physical closure and parent receiving for the separate subsequent campaigns; their functional outcomes, including the binary-output decoding failure, remain separate.",
+    "new_parent_exception_fault_probe": "NOT_RUN",
+    "exact_probe_source_pin_reassigned": false
+  },
+  "control_pins": {
+    "receipt.json": {
+      "native_sha256": "e833d04269f7fb734429e6743d22a4aeeebfefdbb2413fe8194ab388b4b0597e",
+      "native_bytes": 6349,
+      "native_hash_basis": "Root metadata-only SHA-256 read after original process completion",
+      "received_lf_sha256": "7e416b09af37a395675e0ed38c49cd9b20f62c56082d8130ad3f70e9fa8c85de",
+      "received_lf_bytes": 6175,
+      "LF_to_CRLF_only_reconstructs_verified_native_bytes": true
+    },
+    "failed-worker-physical-closure.json": {
+      "native_sha256": "83572bf3dd608f8518c07cb9c6060d367602c5788ac7f47c8e7b1e6eb8c1a94a",
+      "native_bytes": 2287,
+      "native_hash_basis": "Root metadata-only SHA-256 read after original process completion",
+      "received_lf_sha256": "01a980d388bd625f838cace9d9da3128741067a8feff6745186fe64c71d1196b",
+      "received_lf_bytes": 2206,
+      "LF_to_CRLF_only_reconstructs_verified_native_bytes": true
+    },
+    "root-receiving.json": {
+      "native_sha256": "1376f8321571b3d92c042ed9b4356d37f9e1cc0c6a82f619b1493b8566efedd2",
+      "native_bytes": 372,
+      "native_hash_basis": "Root metadata-only SHA-256 read after original process completion",
+      "received_lf_sha256": "5fc1c6ea3be057d4f79ff47bca4e90c19252e3f885434c2376c3151fc0dc44e3",
+      "received_lf_bytes": 363,
+      "LF_to_CRLF_only_reconstructs_verified_native_bytes": true
+    },
+    "probe-child.json": {
+      "native_sha256": "368f268a0daa727145c302580eec778ce9905bfb251879526e2dde3a0f4d047c",
+      "native_bytes": 1927,
+      "native_hash_basis": "Root metadata-only SHA-256 read after original process completion",
+      "received_lf_sha256": "19ed546b5d5ace7a924e96de83749e0192cca70af32949cac910e53412e81483",
+      "received_lf_bytes": 1860,
+      "LF_to_CRLF_only_reconstructs_verified_native_bytes": true
+    },
+    "probe-result.json": {
+      "native_sha256": "54621016f1f849cc9e5b8e60867c032ccd4be9dbd1e9b9c705a1b0626c97e523",
+      "native_bytes": 479,
+      "native_hash_basis": "Root metadata-only SHA-256 read after original process completion",
+      "received_lf_sha256": "a0a2208732e257c72606213a531c5ec4b8ccd8a508ed41f3e71936ab6489e191",
+      "received_lf_bytes": 469,
+      "LF_to_CRLF_only_reconstructs_verified_native_bytes": true
+    }
+  },
+  "source_projection": {
+    "file": "qualify_coordinator_late_reader.py.txt",
+    "original_sha256": "aa60840fa89aa73ff889bfbfac8d4613812915a80fefe3622fd9887bbe4a186e",
+    "projection_sha256": "c9263700ea5a29414f92252eecbd89d3c8811680a3f449dd998be3f5a36126fa",
+    "projection_bytes": 15409,
+    "path_literal_replacements": 2,
+    "alias": "<PROBE_ROOT> means the original fresh qualification directory; actual host location is omitted.",
+    "scope": "Only two host-path literals were aliased. Runtime identifier values and captures are not included. The projection is not the byte-identical executed input."
+  },
+  "publication_scope": {
+    "old_A_api_final_v2": "HELD_UNCHANGED",
+    "old_B_full11": "HELD_UNCHANGED",
+    "B_external_deferred_timeout": "NOT_QUALIFIED",
+    "full_regression": "NOT_RUN_BY_THIS_PROBE",
+    "native_runs_for_this_publication": 0,
+    "raw_capture_content_included": false,
+    "host_paths_usernames_PIDs_thread_ids_object_ids_in_evidence_projection": false
+  },
+  "provenance": {
+    "native_execution_and_original_file_hash_observation": "Root",
+    "publication_preparation": "Read-only received controls and pinned local source; original copies left unchanged."
+  }
+}

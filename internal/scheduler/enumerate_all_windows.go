@@ -4,6 +4,7 @@ package scheduler
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -11,8 +12,6 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
-
-	"mcp-local-hub/internal/process"
 )
 
 var tasksWrapperRe = regexp.MustCompile(`(?m)<Tasks[\s>]`)
@@ -52,6 +51,15 @@ var tasksWrapperRe = regexp.MustCompile(`(?m)<Tasks[\s>]`)
 // stays untouched (kosyak avoidance per repo
 // CLAUDE.md/feedback_kosyak_full_test_sweep_affects_real_scheduler.md).
 func EnumerateAllMcphubTasks() ([]TaskStatus, error) {
+	return EnumerateAllMcphubTasksContext(context.Background())
+}
+
+func EnumerateAllMcphubTasksContext(ctx context.Context) ([]TaskStatus, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("%w: nil enumeration context", ErrUnavailable)
+	}
+	ctx, cancel := context.WithTimeout(ctx, schedulerCOMDeadline)
+	defer cancel()
 	schtasksPath, err := resolveSchtasksPath()
 	if err != nil {
 		return nil, fmt.Errorf("enumerate mcphub tasks: %w", err)
@@ -62,12 +70,11 @@ func EnumerateAllMcphubTasks() ([]TaskStatus, error) {
 	// option cannot be combined with /FO, /V or /NH" on Windows 11 24H2
 	// (smoke-tested 2026-05-17).
 	cmd := exec.Command(schtasksPath, "/Query", "/XML", "ONE")
-	process.NoConsole(cmd)
-	out, err := cmd.CombinedOutput()
+	result, err := runSchedulerCommand(ctx, cmd, nil)
 	if err != nil {
-		return nil, fmt.Errorf("schtasks /Query /XML ONE: %w: %s", err, strings.TrimSpace(string(out)))
+		return nil, fmt.Errorf("schtasks /Query /XML ONE: %w", err)
 	}
-	return parseEnumerateXML(string(out))
+	return parseEnumerateXML(string(result.Stdout.Prefix))
 }
 
 // parseEnumerateXML is the pure function form of

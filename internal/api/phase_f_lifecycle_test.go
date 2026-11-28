@@ -21,6 +21,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -599,21 +600,40 @@ func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_StartFailurePrintsHint(
 	}
 }
 
-// TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_StartsAutostartOwnerNow
-// locks the first-install contract: when the descriptor write succeeds but the
-// post-install reconcile sees no running supervisor, install should start the
-// already-enabled autostart owner immediately instead of leaving the daemon
-// pending until a manual supervise or next logon.
-//
-// Negative-control: pre-fix nudgeSupervisorReconcileAfterGlobalInstall only
-// prints the old next-supervise/logon note, so the positive started-owner line
-// is absent and the stale pending-daemon note remains.
-func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_StartsAutostartOwnerNow(t *testing.T) {
+func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_AutostartDispatch(t *testing.T) {
+	t.Run("enabled", func(t *testing.T) {
+		testInstallColdAutostartDispatch(t, false, nil)
+	})
+	if runtime.GOOS == "windows" {
+		t.Run("refused", func(t *testing.T) {
+			prior := []byte("<Task>available observation</Task>")
+			refusal := autostart.NewObservedTaskReplacementRefusal(autostart.WindowsTaskName, prior, nil)
+			testInstallColdAutostartDispatch(t, false, refusal)
+		})
+		t.Run("saved_off_projection_failed", func(t *testing.T) {
+			testInstallColdAutostartDispatch(t, true, nil)
+		})
+	}
+}
+
+func testInstallColdAutostartDispatch(t *testing.T, autorunOff bool, enableErr error) {
+	t.Helper()
 	phaseFStateDir(t)
 	preparePreflightBinaryChecks(t)
 	f := newInstallFakeScheduler()
 	installFakeScheduler(t, f)
-	installFakeAutostartBackend(t, &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped})
+	fb := &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped, enableErr: enableErr}
+	installFakeAutostartBackend(t, fb)
+	if autorunOff {
+		path := SettingsPath()
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("gui.autorun_enabled: \"false\"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		fb.disableErr = scheduler.ErrPermissionDenied
+	}
 
 	probeCalls := 0
 	origProbe := installSupervisorRunningProbeFn
@@ -651,10 +671,29 @@ func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_StartsAutostartOwnerNow
 	if probeCalls != 1 {
 		t.Fatalf("supervisor running probe calls = %d, want 1", probeCalls)
 	}
+	out := buf.String()
+	if runtime.GOOS == "windows" {
+		if startCalls != 0 || !strings.Contains(out, "skips starting the Windows autostart task by name") ||
+			strings.Contains(out, "supervisor autostart owner started") {
+			t.Fatalf("Windows install dispatched a task by name: starts=%d output=%q", startCalls, out)
+		}
+		if autorunOff && (fb.disableCalls != 1 || fb.enableCalls != 0 || !strings.Contains(out, fb.disableErr.Error())) {
+			t.Fatalf("OFF projection not exercised: enable=%d disable=%d output=%q", fb.enableCalls, fb.disableCalls, out)
+		}
+		if autorunOff && (strings.Contains(out, "mcphub autostart enable") || !strings.Contains(out, "mcphub autostart status --details")) {
+			t.Fatalf("failed OFF projection must recommend inspecting the saved policy without enabling autorun; output=%q", out)
+		}
+		if !autorunOff && (fb.enableCalls != 1 || fb.disableCalls != 0) {
+			t.Fatalf("ON projection not exercised: enable=%d disable=%d output=%q", fb.enableCalls, fb.disableCalls, out)
+		}
+		if enableErr != nil && !strings.Contains(out, ErrSchedulerReplacementUnowned.Error()) {
+			t.Fatalf("refusal not exercised: enable=%d output=%q", fb.enableCalls, out)
+		}
+		return
+	}
 	if startCalls != 1 {
 		t.Fatalf("autostart owner start calls = %d, want 1", startCalls)
 	}
-	out := buf.String()
 	if !strings.Contains(out, "supervisor autostart owner started") {
 		t.Fatalf("install output missing started-owner confirmation; got:\n%s", out)
 	}
@@ -713,28 +752,48 @@ func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_RunningProbeSkipsStart(
 	}
 }
 
-// TestInstallPlanCore_GlobalInstallDeletesThisServersLegacyTasks
-// asserts the Phase-F handoff cleanup: supervisor-path installs must remove
-// stale pre-v0.6 per-daemon scheduler tasks for this server so those legacy
-// tasks cannot spawn daemons outside the supervisor after logon.
-//
-// Negative-control: remove the legacy scheduler cleanup from the supervise
-// global branch and deleteNames stays empty, so this test fails.
-func TestInstallPlanCore_GlobalInstallDeletesThisServersLegacyTasks(t *testing.T) {
-	phaseFStateDir(t)
+func TestInstallPlanCore_GlobalInstallRetainsObservedLegacyTasks(t *testing.T) {
+	stateDir := phaseFStateDir(t)
 	preparePreflightBinaryChecks(t)
+	seedInstalledServerManifests(t, "demo", "demo-alpha")
+	ownNames := []string{"mcp-local-hub-demo-alpha", "mcp-local-hub-demo-beta", "mcp-local-hub-demo-weekly-refresh"}
+	listedNames := append(append([]string{}, ownNames...), "mcp-local-hub-demo-alpha-beta", "mcp-local-hub-other-alpha", "mcp-local-hub-supervisor")
+	definitions := make(map[string][]byte, len(listedNames))
 	f := newInstallFakeScheduler()
-	f.listSeed = []scheduler.TaskStatus{
-		{Name: `\mcp-local-hub-demo-alpha`},
-		{Name: `\mcp-local-hub-demo-beta`},
-		{Name: `\mcp-local-hub-demo-weekly-refresh`},
-		{Name: `\mcp-local-hub-other-alpha`},
-		{Name: `\mcp-local-hub-supervisor`},
+	for _, name := range listedNames {
+		definitions[name] = []byte(`<Task name="` + name + `"/>`)
+		f.listSeed = append(f.listSeed, scheduler.TaskStatus{Name: `\` + name})
+		f.tasks[name], f.xml[name] = true, bytes.Clone(definitions[name])
 	}
 	installFakeScheduler(t, f)
 	installFakeAutostartBackend(t, &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped})
 
-	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+	origStatus, origLookup := supervisorIPCStatusFn, lookupProcess
+	origPIDKill, origStart := stopForceKillPIDFn, installAutostartOwnerStartFn
+	t.Cleanup(func() {
+		supervisorIPCStatusFn, lookupProcess = origStatus, origLookup
+		stopForceKillPIDFn, installAutostartOwnerStartFn = origPIDKill, origStart
+	})
+	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) { return nil, nil }
+	lookupProcess = nil
+	stopForceKillPIDFn = func(pid int) error {
+		t.Errorf("automatic install attempted to kill PID %d", pid)
+		return nil
+	}
+	t.Cleanup(swapKillByPort(func(port int, _ time.Duration) error {
+		t.Errorf("automatic install attempted to kill the listener on port %d", port)
+		return nil
+	}))
+	installAutostartOwnerStartFn = func() error {
+		t.Error("automatic install attempted to start the autostart owner after reconcile")
+		return nil
+	}
+	var nudges int
+	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(_ context.Context, apply bool) (ReconcileResponse, error) {
+		if !apply {
+			t.Error("install did not request reconcile apply")
+		}
+		nudges++
 		return ReconcileResponse{}, nil
 	}))
 
@@ -745,22 +804,33 @@ func TestInstallPlanCore_GlobalInstallDeletesThisServersLegacyTasks(t *testing.T
 		t.Fatalf("BuildPlan: %v", err)
 	}
 
-	if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", false, io.Discard); err != nil {
+	var out bytes.Buffer
+	if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", false, &out); err != nil {
 		t.Fatalf("installPlanCore(global install): %v", err)
 	}
-
-	deleted := map[string]bool{}
-	for _, name := range f.deleteNames {
-		deleted[strings.TrimPrefix(name, `\`)] = true
+	if len(f.deleteNames) != 0 || len(f.importNames) != 0 || f.createCount != 0 || f.runCount != 0 {
+		t.Fatalf("install mutated legacy scheduler: deletes=%v imports=%v creates=%d runs=%d", f.deleteNames, f.importNames, f.createCount, f.runCount)
 	}
-	for _, want := range []string{"mcp-local-hub-demo-alpha", "mcp-local-hub-demo-beta", "mcp-local-hub-demo-weekly-refresh"} {
-		if !deleted[want] {
-			t.Fatalf("legacy scheduler task %q was not deleted; deleteNames=%v", want, f.deleteNames)
+	for _, name := range listedNames {
+		if !f.tasks[name] || !bytes.Equal(f.xml[name], definitions[name]) {
+			t.Errorf("legacy scheduler task %q changed: exists=%v XML=%q", name, f.tasks[name], f.xml[name])
 		}
 	}
-	for _, forbidden := range []string{"mcp-local-hub-other-alpha", "mcp-local-hub-supervisor"} {
-		if deleted[forbidden] {
-			t.Fatalf("deleted non-owned/control-plane task %q; deleteNames=%v", forbidden, f.deleteNames)
+	if nudges != 1 {
+		t.Errorf("reconcile nudge calls = %d, want 1", nudges)
+	}
+	snapshots, err := filepath.Glob(filepath.Join(stateDir, "scheduler-recovery-*.json"))
+	if err != nil || len(snapshots) != len(ownNames) {
+		t.Fatalf("recovery snapshots = %v, want %d, err=%v", snapshots, len(ownNames), err)
+	}
+	const warningPrefix = "Legacy scheduler task "
+	if count := strings.Count(out.String(), warningPrefix); count != len(ownNames) {
+		t.Fatalf("retention warnings = %d, want %d; output:\n%s", count, len(ownNames), out.String())
+	}
+	for _, name := range ownNames {
+		assertUpgradeRecoverySnapshot(t, name, definitions[name])
+		if !strings.Contains(out.String(), warningPrefix+name+" retained; daemon stop skipped") {
+			t.Errorf("missing retention warning for %q; output:\n%s", name, out.String())
 		}
 	}
 }

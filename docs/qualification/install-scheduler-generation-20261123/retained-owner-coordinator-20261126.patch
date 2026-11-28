@@ -1,0 +1,60 @@
+--- a/run_wave_commands.py
++++ b/run_wave_commands.py
+@@ -10,4 +10,4 @@
+ GUARD_SHA = "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2"
+-GO = r"C:\msys64\ucrt64\lib\go\bin\go.exe"
+-GOFMT = r"C:\msys64\ucrt64\lib\go\bin\gofmt.exe"
++GO = r"Q:\msys64\ucrt64\lib\go\bin\go.exe"
++GOFMT = r"Q:\msys64\ucrt64\lib\go\bin\gofmt.exe"
+ GIT = r"C:\Program Files\Git\cmd\git.exe"
+@@ -92,7 +92,21 @@
+         if not run.commands_quiescent():
+-            # Keep the original in-memory owners alive; no new command or capture access.
++            # Physical receiving has its own window. The failed command and gate stay failed.
++            physical_receiving_seconds = 30.0
++            try:
++                physical = run.receive_failed_worker_closure(
++                    time.monotonic() + physical_receiving_seconds)
++                write_json(out / "failed-worker-physical-closure.json", physical)
++            except BaseException as receiving_error:
++                run.receipt["physical_receiving_error"] = (
++                    type(receiving_error).__name__ + ": " + str(receiving_error))
++            else:
++                if physical["status"] == "CLOSED" and physical["deadline_exceeded"] is False:
++                    return 1
++            # Keep the same owners alive if original physical receiving remains unresolved.
+             run.receipt["retained_owner_wait"] = True
+-            run.save()
+-            while True:
+-                time.sleep(1)
++            try:
++                run.save()
++            finally:
++                while True:
++                    time.sleep(1)
+         return 1
+@@ -112,4 +126,16 @@
+                                 startupinfo=startup,creationflags=subprocess.CREATE_NEW_CONSOLE)
+-        write_json(out/"launch.json", {"pid":proc.pid, "original_controller_retained":True})
+-        code = proc.wait()
++        try:
++            write_json(out/"launch.json", {"pid":proc.pid, "original_controller_retained":True})
++            code = proc.wait()
++        finally:
++            # Retain the original controller and captures even if publication or
++            # waiting is interrupted. Its child keeps the original native owners.
++            while True:
++                try:
++                    if proc.wait(timeout=1) is not None:
++                        break
++                except subprocess.TimeoutExpired:
++                    continue
++                except BaseException:
++                    continue
+     result={"controller_exit_code":code,"original_controller_reaped":True,
+@@ -117,2 +143,5 @@
+             "seconds":time.monotonic()-started,"receipt_sha256":sha(out/"receipt.json")}
++    physical = out/"failed-worker-physical-closure.json"
++    if physical.is_file():
++        result["physical_closure_receipt_sha256"] = sha(physical)
+     write_json(out/"root-receiving.json",result)

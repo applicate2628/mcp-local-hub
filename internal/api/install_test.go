@@ -212,7 +212,7 @@ func TestBuildPlanWithOpts_CodexCrossLayerCollisionFreezesAlias(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	if err := executeInstallToWithSymlinkConsents(&output, m, plan, 0, false, nil, true, true, nil); err != nil {
+	if err := executeInstallToWithSymlinkConsents(context.Background(), &output, m, plan, 0, false, nil, true, true, nil); err != nil {
 		t.Fatalf("execute frozen Codex plan: %v", err)
 	}
 	globalAfter, err := os.ReadFile(globalPath)
@@ -245,7 +245,7 @@ func TestBuildPlanWithOpts_CodexCrossLayerCollisionFreezesAlias(t *testing.T) {
 		t.Fatalf("repeat plan did not retain frozen target: %+v", repeatPlan.ClientUpdates)
 	}
 	var repeatOutput bytes.Buffer
-	if err := executeInstallToWithSymlinkConsents(&repeatOutput, m, repeatPlan, 0, false, nil, true, true, nil); err != nil {
+	if err := executeInstallToWithSymlinkConsents(context.Background(), &repeatOutput, m, repeatPlan, 0, false, nil, true, true, nil); err != nil {
 		t.Fatalf("repeat execute frozen Codex plan: %v", err)
 	}
 	globalAfterRepeat, err := os.ReadFile(globalPath)

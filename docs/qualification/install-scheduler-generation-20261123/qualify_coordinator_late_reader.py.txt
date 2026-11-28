@@ -1,0 +1,271 @@
+"""One native A probe: exact coordinator failure branch, one delayed original reader.
+
+Run only after review, from <PROBE_ROOT>,
+with the pinned patched run_wave_commands.py beside this file. The actual guard
+and installed Windows owner are read at their existing pinned paths. No full
+fixture matrix, Product, Go command, held run, capture read, or PID discovery runs.
+"""
+import sys
+sys.dont_write_bytecode = True
+
+import argparse
+import ast
+import hashlib
+import importlib.util
+import json
+import os
+from pathlib import Path
+import subprocess
+import threading
+import time
+from types import SimpleNamespace
+
+ROOT = Path(__file__).resolve().parent
+ALLOWED_ROOT = Path(r"<PROBE_ROOT>")
+OUT = ROOT / "native-late-reader-probe"
+COORDINATOR_SHA256 = "4834ef39bf5c341dce56dacf2f9099ddf5ec43b6ca9e62ff7b2e2011dfa3b365"
+GUARD_SHA256 = "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2"
+JOB_SHA256 = "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+PYTHON_SHA256 = "d4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd"
+
+
+def require(condition, message):
+    if not condition:
+        raise RuntimeError(message)
+
+
+def sha(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def load_coordinator(expected_self_sha256):
+    require(os.name == "nt" and ROOT == ALLOWED_ROOT, "exact fresh D probe directory required")
+    require(Path.cwd() == ROOT and sys.flags.isolated and sys.flags.no_site
+            and sys.flags.dont_write_bytecode, "exact cwd and -I -S -B required")
+    require(sha(__file__) == expected_self_sha256, "reviewed probe changed")
+    require(sha(sys.executable) == PYTHON_SHA256, "qualified Python changed")
+    path = ROOT / "run_wave_commands.py"
+    raw = path.read_bytes()
+    require(hashlib.sha256(raw).hexdigest() == COORDINATOR_SHA256, "patched coordinator changed")
+    tree = ast.parse(raw, str(path))
+    child = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "child")
+    failure = next(node for node in child.body if isinstance(node, ast.Try)).handlers[0]
+    require(isinstance(failure.type, ast.Name) and failure.type.id == "BaseException"
+            and failure.name == "error", "exact coordinator failure handler required")
+    # Transplant the complete, unchanged handler body; do not reimplement its policy.
+    function = ast.parse("def receive_failure(run, error, out):\n    pass\n").body[0]
+    function.body = failure.body
+    selected = [node for node in tree.body if
+                isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node.name in ("write_json", "CoreRun")
+                or isinstance(node, ast.Assign) and any(isinstance(target, ast.Name)
+                   and target.id in ("GUARD", "GUARD_SHA") for target in node.targets)]
+    namespace = {"Path": Path, "hashlib": hashlib, "json": json, "time": time}
+    exec(compile(ast.fix_missing_locations(ast.Module(body=selected + [function], type_ignores=[])),
+                 str(path), "exec"), namespace)
+    require(namespace["GUARD_SHA"] == GUARD_SHA256
+            and sha(namespace["GUARD"]) == GUARD_SHA256, "qualified guard changed")
+    return namespace
+
+
+def child(namespace, probe_sha256):
+    write_json = namespace["write_json"]
+    release, held = threading.Event(), threading.Event()
+    run, branch_returned = None, False
+    observation, hash_attempts = {}, []
+    try:
+        path = namespace["GUARD"]
+        raw = path.read_bytes()
+        require(hashlib.sha256(raw).hexdigest() == GUARD_SHA256, "qualified guard changed before load")
+        spec = importlib.util.spec_from_file_location("native_a_coordinator_probe_guard", path)
+        guard = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = guard
+        exec(compile(raw, str(path), "exec"), guard.__dict__)
+        require(guard.JOB_MODULE_SHA256 == JOB_SHA256 and sha(guard.JOB_MODULE) == JOB_SHA256,
+                "qualified Windows owner changed")
+        require(guard.CLEANUP_SECONDS == 10, "original cleanup interval changed")
+        original_drain = guard.drain
+
+        def delayed_drain(fd, path, state, custody):
+            original_drain(fd, path, state, custody)
+            if path.name == "late-reader.stdout.txt":
+                # Existing native fixture technique: retain this same real worker
+                # after its actual EOF/close, without changing native ownership.
+                held.set()
+                release.wait()
+
+        def forbid_capture_hash(path):
+            hash_attempts.append(str(path))
+            raise RuntimeError("probe forbids capture hashing")
+
+        guard.drain = delayed_drain
+        env = {key: value for key, value in os.environ.items() if not key.startswith("MCPHUB_")}
+        temp = OUT / "tmp"
+        temp.mkdir()
+        env.update(TEMP=str(temp), TMP=str(temp), TMPDIR=str(temp), PYTHONDONTWRITEBYTECODE="1")
+        core = SimpleNamespace(Run=namespace["CoreRun"], REPO=OUT,
+                               sha=forbid_capture_hash, subprocess=subprocess)
+        run = guard.make_guarded_run_class(core)(OUT, env)
+        run.receipt.update(status="RUNNING", probe_sha256=probe_sha256,
+                           coordinator_sha256=COORDINATOR_SHA256)
+        run.save()
+        original_receive = run.receive_failed_worker_closure
+
+        def observe_receive(deadline):
+            try:
+                entered = time.monotonic()
+                observation["receiver_calls"] = observation.get("receiver_calls", 0) + 1
+                observation["window_remaining_seconds"] = deadline - entered
+                observation["failure_receipt_sha256"] = sha(OUT / "receipt.json")
+                observation["state_before"] = run.quiescence_snapshot()
+                custody = guard.RETAINED_COMMANDS[0]
+                originals = (custody["original"], *custody["readers"])
+                stdout = next(worker for worker in custody["readers"] if worker.name.endswith("-stdout"))
+                observation["held_original_stdout_alive"] = held.is_set() and stdout.is_alive()
+                observation["original_object_ids"] = [id(value) for value in originals]
+                observation["original_worker_identities"] = [{"name": worker.name, "ident": worker.ident,
+                    "native_id": worker.native_id} for worker in custody["readers"]]
+                observation["same_run_and_row"] = (custody["run"] is run
+                    and custody["row"] is run.receipt["commands"][0])
+            finally:
+                # Only entry through the tested branch releases the deliberately
+                # held worker on the normal path; instrumentation failure releases
+                # its own barrier too, while the exact branch retains ownership.
+                release.set()
+            physical = original_receive(deadline)
+            observation["same_objects_after"] = all(before is after for before, after in
+                zip(originals, (custody["original"], *custody["readers"])))
+            observation["state_after"] = run.quiescence_snapshot()
+            return physical
+
+        run.receive_failed_worker_closure = observe_receive
+        try:
+            run.command([sys.executable, "-I", "-S", "-B", "-c",
+                         "import sys; sys.stdout.write('native stdout\\n'); sys.stderr.write('native stderr\\n')"],
+                        "late-reader", timeout=30, check=False)
+        except BaseException as error:
+            code = namespace["receive_failure"](run, error, OUT)
+        else:
+            code = namespace["receive_failure"](run, RuntimeError("expected late-reader failure was absent"), OUT)
+        branch_returned = True
+        row = run.receipt["commands"][0]
+        physical = json.loads((OUT / "failed-worker-physical-closure.json").read_text(encoding="utf-8"))
+        native = row.get("native", {})
+        checks = {
+            "one_original_command": len(run.receipt["commands"]) == len(guard.RETAINED_COMMANDS) == 1,
+            "expected_failure": code == 1 and run.receipt["status"] == "FAIL"
+                and row["quiescence_state"] == "unknown" and not run.commands_quiescent(),
+            "work_succeeded_cleanup_failed": row.get("exit_code") == 0 and row.get("timed_out") is False
+                and row.get("work_deadline_exceeded") is False and row.get("cleanup_deadline_exceeded") is True
+                and row.get("original_readers_joined") is False and row["cleanup_seconds"] == 10,
+            "original_native_closed": native.get("direct_reaped") is True and native.get("active_zero") is True
+                and native.get("handles_closed") is True and native.get("issues") == [],
+            "same_originals": observation.get("same_run_and_row") is True
+                and observation.get("same_objects_after") is True and observation.get("held_original_stdout_alive") is True,
+            "one_late_receiver": observation.get("receiver_calls") == 1
+                and 0 < observation.get("window_remaining_seconds", 0) <= 30,
+            "physical_closed": physical.get("status") == "CLOSED" and physical.get("deadline_exceeded") is False,
+            "failure_preserved": observation.get("failure_receipt_sha256") == sha(OUT / "receipt.json")
+                and observation.get("state_before") == observation.get("state_after")
+                and physical.get("original_command_states_unchanged") is True,
+            "no_success_or_access": physical.get("qualification_passed") is False
+                and physical.get("capture_access_issued") is False and physical.get("new_commands_permitted") is False
+                and row.get("command_success") is False and row.get("captures_measured") is False and not hash_attempts,
+            "original_workers_joined_late": len(physical.get("commands", [])) == 1
+                and len(physical["commands"][0].get("workers", [])) == 2
+                and all(worker.get("joined") is True for worker in physical["commands"][0]["workers"])
+                and [{key: worker[key] for key in ("name", "ident", "native_id")}
+                     for worker in physical["commands"][0]["workers"]] == observation["original_worker_identities"],
+        }
+        write_json(OUT / "probe-child.json", {"schema": "native-a-coordinator-late-reader-probe-v1",
+            "status": "PASS" if all(checks.values()) else "FAIL", "checks": checks,
+            "observation": observation, "controller_exit_code": code,
+            "injection": "hold original stdout worker after real drain; release only on late receiver entry",
+            "timely_command_qualification_passed": False, "full_regression_executed": False})
+        return code
+    except BaseException as error:
+        write_json(OUT / "probe-child-error.json", {"status": "FAIL", "error": type(error).__name__ + ": " + str(error)})
+        return 1
+    finally:
+        release.set()
+        if run is not None and not run.commands_quiescent() and not branch_returned:
+            # An unexpected probe/publication failure cannot discard actual
+            # native objects. No inferred closure, PID reopen, or cleanup kill.
+            while True:
+                try:
+                    time.sleep(1)
+                except BaseException:
+                    continue
+
+
+def parent(namespace, probe_sha256):
+    write_json = namespace["write_json"]
+    OUT.mkdir()
+    temp = OUT / "parent-tmp"
+    temp.mkdir()
+    env = dict(os.environ)
+    env.update(PYTHONDONTWRITEBYTECODE="1", TEMP=str(temp), TMP=str(temp), TMPDIR=str(temp))
+    startup = subprocess.STARTUPINFO()
+    startup.dwFlags = subprocess.STARTF_USESHOWWINDOW
+    startup.wShowWindow = subprocess.SW_HIDE
+    started, diagnostic = time.monotonic(), None
+    with (OUT / "controller.stdout").open("xb") as stdout, (OUT / "controller.stderr").open("xb") as stderr:
+        proc = subprocess.Popen([sys.executable, "-I", "-S", "-B", str(Path(__file__).resolve()),
+            "--expected-self-sha256", probe_sha256, "--child"], cwd=ROOT, env=env,
+            stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,
+            startupinfo=startup, creationflags=subprocess.CREATE_NEW_CONSOLE)
+        try:
+            write_json(OUT / "launch.json", {"original_pid": proc.pid, "original_controller_retained": True,
+                "probe_sha256": probe_sha256, "coordinator_sha256": COORDINATOR_SHA256,
+                "guard_sha256": GUARD_SHA256, "native_owner_sha256": JOB_SHA256, "watchdog_seconds": 60})
+            try:
+                proc.wait(timeout=60)
+            except BaseException as error:
+                diagnostic = type(error).__name__ + ": " + str(error)
+                write_json(OUT / "watchdog.json", {"status": "FAIL", "error": diagnostic,
+                    "original_controller_retained": True, "qualification_deadline_extended": False})
+        finally:
+            # Existing qualified native-parent pattern: keep the original Popen
+            # and both open capture handles until its original wait completes.
+            while True:
+                try:
+                    if proc.wait(timeout=1) is not None:
+                        break
+                except subprocess.TimeoutExpired:
+                    continue
+                except BaseException as error:
+                    diagnostic = diagnostic or type(error).__name__ + ": " + str(error)
+        code = proc.returncode
+    result = {"controller_exit_code": code, "original_controller_reaped": True,
+              "controller_capture_handles_closed": stdout.closed and stderr.closed,
+              "seconds": time.monotonic() - started, "diagnostic": diagnostic}
+    for key, filename in (("receipt_sha256", "receipt.json"),
+                          ("physical_closure_receipt_sha256", "failed-worker-physical-closure.json")):
+        if (OUT / filename).is_file():
+            result[key] = sha(OUT / filename)
+    write_json(OUT / "root-receiving.json", result)
+    child_path = OUT / "probe-child.json"
+    child_result = json.loads(child_path.read_text(encoding="utf-8")) if child_path.is_file() else {}
+    passed = (code == 1 and diagnostic is None and result["seconds"] <= 60
+              and result["controller_capture_handles_closed"] and "physical_closure_receipt_sha256" in result
+              and child_result.get("status") == "PASS" and bool(child_result.get("checks"))
+              and all(value is True for value in child_result["checks"].values()))
+    verdict = {"schema": "native-a-coordinator-probe-root-v1", "status": "PASS" if passed else "FAIL",
+               "root_receiving_sha256": sha(OUT / "root-receiving.json"), "probe_sha256": probe_sha256,
+               "coordinator_sha256": COORDINATOR_SHA256, "expected_controller_exit_code": 1,
+               "timely_command_qualification_passed": False, "full_regression_executed": False}
+    write_json(OUT / "probe-result.json", verdict)
+    print(json.dumps(verdict), flush=True)
+    return 0 if passed else 1
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--expected-self-sha256", required=True)
+    parser.add_argument("--child", action="store_true")
+    args = parser.parse_args()
+    namespace = load_coordinator(args.expected_self_sha256)
+    return child(namespace, args.expected_self_sha256) if args.child else parent(namespace, args.expected_self_sha256)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,1770 @@
+{
+  "schema": 1,
+  "status": "OBSERVED_SCOPED_WINDOWS_RED_GREEN_PASS",
+  "date_utc": "2026-11-22",
+  "scope": "Stop/StopAll/Restart/RestartAll scheduler error propagation; composed Windows qualification with memory scheduler and fake process boundaries.",
+  "candidate": {
+    "pr": 660,
+    "baseline_head": "368e8b6cb8e95d9e5ebbf9305f75aa740991b1ab",
+    "production_paths": [
+      "internal/api/install.go"
+    ],
+    "test_paths": [
+      "internal/api/install_scheduler_stop_failure_test.go"
+    ],
+    "production_change": "Four checked Scheduler.Stop calls; per-task error continues peer processing and blocks Run and targeted restart intent release.",
+    "preformat": [
+      {
+        "path": "internal/api/install.go",
+        "bytes": 218988,
+        "sha256": "59d2903380dff8b5c5d024d63dad3642a9f817d3f705cf596d13ad13acc73d8f"
+      },
+      {
+        "path": "internal/api/install_scheduler_stop_failure_test.go",
+        "bytes": 7877,
+        "sha256": "dd6b4a9454ebfd0230d7645743899890f9eb74aa8e6ac7f5a33ed10cf662c917"
+      }
+    ],
+    "formatted": [
+      {
+        "path": "internal/api/install.go",
+        "bytes": 218988,
+        "sha256": "59d2903380dff8b5c5d024d63dad3642a9f817d3f705cf596d13ad13acc73d8f"
+      },
+      {
+        "path": "internal/api/install_scheduler_stop_failure_test.go",
+        "bytes": 7877,
+        "sha256": "dd6b4a9454ebfd0230d7645743899890f9eb74aa8e6ac7f5a33ed10cf662c917"
+      }
+    ],
+    "formatting_changed_bytes": false
+  },
+  "composition": {
+    "physical_source_head": "858812988833a84368c60fba1540ae601155fa71",
+    "physical_source_tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+    "master_context": "75dbc6406123e22468f168b861d5e0622c9d5769",
+    "standalone_published_pr_head_tested": false,
+    "prior_composition": {
+      "source_head": "858812988833a84368c60fba1540ae601155fa71",
+      "source_tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+      "source_inventory": {
+        "files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+      },
+      "base_pr660": "0bdb725ed261c532eba07d645c2a14880d12b9fd",
+      "master": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "go_overlay_count": 39,
+      "overlay_map": {
+        "path": "qualification/inputs/scheduler-predelete/overlay.json",
+        "bytes": 8805,
+        "sha256": "c2c99a136e3acee7d6b7ab15103cac38170dbb27fe393357fffce1ef0967c610"
+      },
+      "overlay_files": [
+        {
+          "path": "scheduler/internal/api/adopt.go",
+          "bytes": 88753,
+          "sha256": "cb1e1711e848ec718b868b51e8194ea13a7f9adbee21c6584a2fa005fab692a9",
+          "source_path": "internal/api/adopt.go",
+          "source_baseline_sha256": "b430d70d502543371cc0fac3ec35816270a7bdc8c3cc5db94ddc7736dffcc4ea"
+        },
+        {
+          "path": "scheduler/internal/api/adopt_provenance_events.go",
+          "bytes": 10948,
+          "sha256": "7ac2132fdf4211c0884d9f877d01c9afcdda8c5757edf5746592943959abb6f3",
+          "source_path": "internal/api/adopt_provenance_events.go",
+          "source_baseline_sha256": "bb5ab40b3d1fd60c5557c9b444371edd1adb8e84667122cb54d8dab78dfd8cda"
+        },
+        {
+          "path": "scheduler/internal/api/adopt_scheduler_recovery_test.go",
+          "bytes": 10083,
+          "sha256": "5200d67c4c92da2d224320feff39e41a67e467aafd955f62727e7ce12b365b71",
+          "source_path": "internal/api/adopt_scheduler_recovery_test.go",
+          "source_baseline_sha256": null
+        },
+        {
+          "path": "scheduler-predelete/internal/api/install.go",
+          "bytes": 218267,
+          "sha256": "9e6a81aa7a8936789698c3ddc4bd6304f719bbce20a62ec7b7ad47338abbccd7",
+          "source_path": "internal/api/install.go",
+          "source_baseline_sha256": "be0f52f06c24a93a30d008b18a6c44b5eee76a73da09d8731902b48874ebe46c"
+        },
+        {
+          "path": "scheduler/internal/api/install_backend_hold_composition_windows_test.go",
+          "bytes": 3170,
+          "sha256": "d558384b41b8840f021aeba7d71eb643ad766e17bc3a6c94ecbdd1a199c9b553",
+          "source_path": "internal/api/install_backend_hold_composition_windows_test.go",
+          "source_baseline_sha256": null
+        },
+        {
+          "path": "scheduler/internal/api/install_hyphen_family_ownership_test.go",
+          "bytes": 22696,
+          "sha256": "4edc4ccded09b44639a5e74d379462df4733e570a004e5188cb042df902a7b26",
+          "source_path": "internal/api/install_hyphen_family_ownership_test.go",
+          "source_baseline_sha256": "490bc4b5b6dea92b93d1180835d057b18cc8b91ba8d3f878a9636ea94dd8e1b1"
+        },
+        {
+          "path": "scheduler/internal/api/install_own_port_test.go",
+          "bytes": 30491,
+          "sha256": "edbffbc3f81db30589e9ccb625ef9245afa6faa48971e57d409269a3d46e1630",
+          "source_path": "internal/api/install_own_port_test.go",
+          "source_baseline_sha256": "6a471135e158843b623c5f3014353bc1e8bfc2809e6a88bc214e6e39ae201ce2"
+        },
+        {
+          "path": "scheduler/internal/api/install_parsed_manifest.go",
+          "bytes": 143465,
+          "sha256": "e3b66f71a690d2be7006f5cd65e6ef38365fee01aa297ee332cdfe93de05b561",
+          "source_path": "internal/api/install_parsed_manifest.go",
+          "source_baseline_sha256": "1cca59a45b0d4eb7ddb37c5e9e98598790e29fc2e927e0d6aa3317bb0a5e605a"
+        },
+        {
+          "path": "scheduler/internal/api/install_prune_recovery_test.go",
+          "bytes": 18576,
+          "sha256": "79292de007701d7e1cb9a271e6458e0f16d83e5cd54271317374bbb40a611fc5",
+          "source_path": "internal/api/install_prune_recovery_test.go",
+          "source_baseline_sha256": null
+        },
+        {
+          "path": "scheduler/internal/api/install_scheduler_snapshot_test.go",
+          "bytes": 7703,
+          "sha256": "554b66722410d4d7c837d374a471b0384d1fff08290c4b18cd70d8017b05fab1",
+          "source_path": "internal/api/install_scheduler_snapshot_test.go",
+          "source_baseline_sha256": null
+        },
+        {
+          "path": "scheduler/internal/api/install_task_mutation_failure_test.go",
+          "bytes": 11556,
+          "sha256": "7496583080e79d2f531ab85c5c4b4a9b50884f82bd729493df59edfc873a2ed5",
+          "source_path": "internal/api/install_task_mutation_failure_test.go",
+          "source_baseline_sha256": null
+        },
+        {
+          "path": "scheduler/internal/api/install_task_recovery.go",
+          "bytes": 3539,
+          "sha256": "edfd3bf0428534f931019a0b75b101b60ccce2ac257c8ab11e0947ebba444510",
+          "source_path": "internal/api/install_task_recovery.go",
+          "source_baseline_sha256": null
+        },
+        {
+          "path": "scheduler/internal/api/install_task_recovery_storage_test.go",
+          "bytes": 1862,
+          "sha256": "8899bf5ccb5eacef5c66bebdeeaf091aa26b91fffe0ab9b49aa3edb8cfecd78f",
+          "source_path": "internal/api/install_task_recovery_storage_test.go",
+          "source_baseline_sha256": null
+        },
+        {
+          "path": "scheduler/internal/api/install_task_recovery_test.go",
+          "bytes": 11323,
+          "sha256": "7f7afc5ff0f497d2384a9378f287e9930f65468650cb6d91f933664d41ad3b37",
+          "source_path": "internal/api/install_task_recovery_test.go",
+          "source_baseline_sha256": null
+        },
+        {
+          "path": "scheduler-predelete/internal/api/install_task_rollback.go",
+          "bytes": 7521,
+          "sha256": "4986cf2770250ae34dd6458ee97f113e7ba8c46ca4e1d1c22535ba7cd70b1a06",
+          "source_path": "internal/api/install_task_rollback.go",
+          "source_baseline_sha256": null
+        },
+        {
+          "path": "scheduler-predelete/internal/api/install_task_rollback_test.go",
+          "bytes": 27426,
+          "sha256": "8a59365cba82ce7996e01f9c30108a7a49ec2f53d3b754c7807b253e42f5b3c8",
+          "source_path": "internal/api/install_task_rollback_test.go",
+          "source_baseline_sha256": null
+        },
+        {
+          "path": "scheduler/internal/api/intent_audit_caller_oracle_test.go",
+          "bytes": 5807,
+          "sha256": "266da232a605029cb2eb65cf57dcf80ca0d629a4259d6a021b48958d786fe365",
+          "source_path": "internal/api/intent_audit_caller_oracle_test.go",
+          "source_baseline_sha256": "af54e4ba30d9fcff4093d2820e9a8b630189cd976fcee83ed9391d663e20882b"
+        },
+        {
+          "path": "scheduler/internal/api/main_helper_dispatch_test.go",
+          "bytes": 4137,
+          "sha256": "3f9e37d635d2942fd0f967a11d107fe7657c35fab976d524176d15006299fd95",
+          "source_path": "internal/api/main_helper_dispatch_test.go",
+          "source_baseline_sha256": null
+        },
+        {
+          "path": "scheduler/internal/api/main_helper_dispatch_validation_test.go",
+          "bytes": 6651,
+          "sha256": "bcc4636ea0a3c260015e155ed1d8ad2dc287dea93dc2d29b33c3d45bc56d09fd",
+          "source_path": "internal/api/main_helper_dispatch_validation_test.go",
+          "source_baseline_sha256": null
+        },
+        {
+          "path": "scheduler/internal/api/main_test.go",
+          "bytes": 16576,
+          "sha256": "2c93ff894595a54b13f4409492a807aae3dba3dda5145af22b191b2bbd8b4cd1",
+          "source_path": "internal/api/main_test.go",
+          "source_baseline_sha256": "a34d3b8e14f610945662a7aeee122068641b931af19ffd9535ba6e24b186d869"
+        },
+        {
+          "path": "scheduler/internal/api/prune_tasks_test.go",
+          "bytes": 13981,
+          "sha256": "e22ef041f80ece55f3dd5e2b29dab684e8d274be6b96ff19cd389d993534deca",
+          "source_path": "internal/api/prune_tasks_test.go",
+          "source_baseline_sha256": "17cda6c55481885434e9f599ca03a0c3082940d78d61b4e30df9d7f0ebb3c5f9"
+        },
+        {
+          "path": "scheduler/internal/api/scheduler_owner_sid_windows_test.go",
+          "bytes": 2203,
+          "sha256": "463ad2f82026260e28702e1a481f15a635bc3c7a6aa7f2c850e83188c7f5ec1e",
+          "source_path": "internal/api/scheduler_owner_sid_windows_test.go",
+          "source_baseline_sha256": null
+        },
+        {
+          "path": "scheduler/internal/api/secrets_test.go",
+          "bytes": 48066,
+          "sha256": "ad1f93d38e8c4ff3d369779223a7bf4f7686947135a76706bf45494bbc771e79",
+          "source_path": "internal/api/secrets_test.go",
+          "source_baseline_sha256": "3f07678c5875a81d84037cc00a21b0aab27532cfa0387afce0d2f98e6d23c8ff"
+        },
+        {
+          "path": "scheduler/internal/autostart/linux.go",
+          "bytes": 14296,
+          "sha256": "d0f04d5baf045674b7264090e90cc0274312426c3291847956a77397a8e35e9c",
+          "source_path": "internal/autostart/linux.go",
+          "source_baseline_sha256": "ebd8c716576656f9458b64d37762fa9cae77e5adc1e7b9657ca08ec89f6701f1"
+        },
+        {
+          "path": "scheduler/internal/autostart/linux_exec_percent_test.go",
+          "bytes": 2809,
+          "sha256": "34db04e7f452df8df0f5ed41683c4aa67da6386196702237ec46e753c4cc5e60",
+          "source_path": "internal/autostart/linux_exec_percent_test.go",
+          "source_baseline_sha256": null
+        },
+        {
+          "path": "scheduler/internal/scheduler/entrypoint_migration_windows.go",
+          "bytes": 45496,
+          "sha256": "6f8f8bc0d73d40279a927fe8cae25ebeebb4e769e01f67566b0dcfe254ce49c2",
+          "source_path": "internal/scheduler/entrypoint_migration_windows.go",
+          "source_baseline_sha256": "63b1c4f52706231405717997cdce11b930954d797d300ffa67e290780c8b8aee"
+        },
+        {
+          "path": "scheduler/internal/scheduler/entrypoint_migration_windows_test.go",
+          "bytes": 43046,
+          "sha256": "9184ed38764ac3d9823fe10399e883b48519eddc485a7da0bf34c92876ced174",
+          "source_path": "internal/scheduler/entrypoint_migration_windows_test.go",
+          "source_baseline_sha256": "324f4c3ee02e743a86a862d8f0ceb08caf8db571e70b87867399781d7da33de3"
+        },
+        {
+          "path": "scheduler/internal/scheduler/scheduler.go",
+          "bytes": 7371,
+          "sha256": "907449ab2be563539dd29179a00a7b68fa5cead9f89376169e521bd9df9123c5",
+          "source_path": "internal/scheduler/scheduler.go",
+          "source_baseline_sha256": "f13244c94d13ab424e55a8fee74669c17790a83ef93e7f10e0b954813001a825"
+        },
+        {
+          "path": "scheduler/internal/scheduler/scheduler_com_windows.go",
+          "bytes": 12974,
+          "sha256": "5ca8d9cae441d54c1d403732d07e65a6526119339b619febf564e3c9350d6aa4",
+          "source_path": "internal/scheduler/scheduler_com_windows.go",
+          "source_baseline_sha256": "e59ad7303248918880d871dbdf256ff73dadc0ac917aca3863c04cadf6e25a34"
+        },
+        {
+          "path": "scheduler/internal/scheduler/scheduler_com_windows_test.go",
+          "bytes": 6957,
+          "sha256": "5352797d1adb396ff006683b64ec63fe8490883e52c3967b30c243fa4accc2d6",
+          "source_path": "internal/scheduler/scheduler_com_windows_test.go",
+          "source_baseline_sha256": "0d4abb1eb300b75e5be411df355c948f1adb0d00e82f15f4fb73bdc21c1e6372"
+        },
+        {
+          "path": "scheduler/internal/scheduler/scheduler_create_conflict_windows_test.go",
+          "bytes": 3783,
+          "sha256": "3e5d9d1d77ffcf36ba1b4335854b16d2120a2c73f26c67a5400bf768e0af2621",
+          "source_path": "internal/scheduler/scheduler_create_conflict_windows_test.go",
+          "source_baseline_sha256": null
+        },
+        {
+          "path": "scheduler/internal/scheduler/scheduler_hidden_task_windows_test.go",
+          "bytes": 6146,
+          "sha256": "33a50b53f006374dd8aa79f00f099d17696164e70487b1d75b737ea8125fe689",
+          "source_path": "internal/scheduler/scheduler_hidden_task_windows_test.go",
+          "source_baseline_sha256": null
+        },
+        {
+          "path": "scheduler/internal/scheduler/scheduler_last_result_windows_test.go",
+          "bytes": 12482,
+          "sha256": "690595eb86c182c92ebc592d8fd85ecd3d30ebe4401a8241cd3e1bad4f85a0e6",
+          "source_path": "internal/scheduler/scheduler_last_result_windows_test.go",
+          "source_baseline_sha256": null
+        },
+        {
+          "path": "scheduler/internal/scheduler/scheduler_owned_run_windows_test.go",
+          "bytes": 9293,
+          "sha256": "a30c2944ea1b7bcf95fecb1a33b165cec76e3a832300cb422660c951b00e0f8e",
+          "source_path": "internal/scheduler/scheduler_owned_run_windows_test.go",
+          "source_baseline_sha256": "eca095b629a0fa6b4836d069d1489ca92bb3e91e49cde17e66b1e5028aeffc03"
+        },
+        {
+          "path": "scheduler/internal/scheduler/scheduler_owner_sid_windows_test.go",
+          "bytes": 11255,
+          "sha256": "06717dab4bab825649cc7be9b98eaa9f7c64a9ad3de13746a84d7d1d17a8c715",
+          "source_path": "internal/scheduler/scheduler_owner_sid_windows_test.go",
+          "source_baseline_sha256": null
+        },
+        {
+          "path": "scheduler/internal/scheduler/scheduler_windows.go",
+          "bytes": 14487,
+          "sha256": "fe9290acff37e50f841bdbf3db713402ea93ed96dd442b09b28dddbb79377db0",
+          "source_path": "internal/scheduler/scheduler_windows.go",
+          "source_baseline_sha256": "d2d286ea3c43ea1337dbf1ec7125557d58539f7868410ad1edf38fdcde35588c"
+        },
+        {
+          "path": "scheduler/internal/scheduler/scheduler_windows_test.go",
+          "bytes": 9130,
+          "sha256": "37ae4c5c0ef6bc79b1a5c8b75b0c7f96921836555475d106fa88d9fe5c36978d",
+          "source_path": "internal/scheduler/scheduler_windows_test.go",
+          "source_baseline_sha256": "1498f646acbb7e65977b5511cb9ab79829300b603f2fedf1973c58a2c3db9947"
+        },
+        {
+          "path": "scheduler/internal/scheduler/scheduler_xml_create_windows.go",
+          "bytes": 2023,
+          "sha256": "eafbae884b9516385206004c2255fd63b23a0a7e07f0179c93a66218817f1ba1",
+          "source_path": "internal/scheduler/scheduler_xml_create_windows.go",
+          "source_baseline_sha256": null
+        },
+        {
+          "path": "scheduler/internal/scheduler/scheduler_xml_create_windows_test.go",
+          "bytes": 8883,
+          "sha256": "062b4671cd846bc4d06ec684f6d6b7bc3f4b05a8265840f4950dba20f14704ed",
+          "source_path": "internal/scheduler/scheduler_xml_create_windows_test.go",
+          "source_baseline_sha256": null
+        }
+      ],
+      "api_testmain_donor": "b5cd530969b7089e7d7cbaf5308543be8c443f8c",
+      "standalone_pr_head_tested": false,
+      "explanation": "Preserved source858/master75 plus 39 Go overlays. The 45 pinned phase inputs also include maps and alternative control files; 45 is not the active Go overlay count."
+    },
+    "previous_overlay_count": 39,
+    "previous_overlay_package_counts": {
+      "internal/api": 23,
+      "internal/autostart": 2,
+      "internal/scheduler": 14
+    },
+    "tested_overlay_count": 40,
+    "added_path": "internal/api/install_scheduler_stop_failure_test.go",
+    "only_difference_between_red_and_green": "internal/api/install.go",
+    "backend_run_hold": "Previous composed install_parsed_manifest.go retained byte-for-byte; both BackendRunHold tests passed.",
+    "source_inventory_before_copy": {
+      "files": 3281,
+      "bytes": 50583217,
+      "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+    },
+    "source_inventory_copied": {
+      "files": 3281,
+      "bytes": 50583217,
+      "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+    },
+    "source_inventory_after_copy": {
+      "files": 3281,
+      "bytes": 50583217,
+      "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+    },
+    "source_before_after_qualification": {
+      "files": 3281,
+      "bytes": 50583217,
+      "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+    },
+    "input_inventory_before_after_qualification": {
+      "files": 45,
+      "bytes": 1399069,
+      "inventory_sha256": "2f10c812917b98d3cd652f079e01daf1e4ca8ecce610121f9e4ca29162e68a5f"
+    },
+    "input_files": [
+      {
+        "path": "candidate/internal/api/install.go",
+        "bytes": 218988,
+        "sha256": "59d2903380dff8b5c5d024d63dad3642a9f817d3f705cf596d13ad13acc73d8f"
+      },
+      {
+        "path": "candidate/internal/api/install_scheduler_stop_failure_test.go",
+        "bytes": 7877,
+        "sha256": "dd6b4a9454ebfd0230d7645743899890f9eb74aa8e6ac7f5a33ed10cf662c917"
+      },
+      {
+        "path": "preformat/internal/api/install.go",
+        "bytes": 218988,
+        "sha256": "59d2903380dff8b5c5d024d63dad3642a9f817d3f705cf596d13ad13acc73d8f"
+      },
+      {
+        "path": "preformat/internal/api/install_scheduler_stop_failure_test.go",
+        "bytes": 7877,
+        "sha256": "dd6b4a9454ebfd0230d7645743899890f9eb74aa8e6ac7f5a33ed10cf662c917"
+      },
+      {
+        "path": "scheduler/internal/api/adopt.go",
+        "bytes": 88753,
+        "sha256": "cb1e1711e848ec718b868b51e8194ea13a7f9adbee21c6584a2fa005fab692a9"
+      },
+      {
+        "path": "scheduler/internal/api/adopt_provenance_events.go",
+        "bytes": 10948,
+        "sha256": "7ac2132fdf4211c0884d9f877d01c9afcdda8c5757edf5746592943959abb6f3"
+      },
+      {
+        "path": "scheduler/internal/api/adopt_scheduler_recovery_test.go",
+        "bytes": 10083,
+        "sha256": "5200d67c4c92da2d224320feff39e41a67e467aafd955f62727e7ce12b365b71"
+      },
+      {
+        "path": "scheduler/internal/api/install.go",
+        "bytes": 218267,
+        "sha256": "9e6a81aa7a8936789698c3ddc4bd6304f719bbce20a62ec7b7ad47338abbccd7"
+      },
+      {
+        "path": "scheduler/internal/api/install_backend_hold_composition_windows_test.go",
+        "bytes": 3170,
+        "sha256": "d558384b41b8840f021aeba7d71eb643ad766e17bc3a6c94ecbdd1a199c9b553"
+      },
+      {
+        "path": "scheduler/internal/api/install_hyphen_family_ownership_test.go",
+        "bytes": 22696,
+        "sha256": "4edc4ccded09b44639a5e74d379462df4733e570a004e5188cb042df902a7b26"
+      },
+      {
+        "path": "scheduler/internal/api/install_own_port_test.go",
+        "bytes": 30491,
+        "sha256": "edbffbc3f81db30589e9ccb625ef9245afa6faa48971e57d409269a3d46e1630"
+      },
+      {
+        "path": "scheduler/internal/api/install_parsed_manifest.go",
+        "bytes": 143465,
+        "sha256": "e3b66f71a690d2be7006f5cd65e6ef38365fee01aa297ee332cdfe93de05b561"
+      },
+      {
+        "path": "scheduler/internal/api/install_prune_recovery_test.go",
+        "bytes": 18576,
+        "sha256": "79292de007701d7e1cb9a271e6458e0f16d83e5cd54271317374bbb40a611fc5"
+      },
+      {
+        "path": "scheduler/internal/api/install_scheduler_snapshot_test.go",
+        "bytes": 7703,
+        "sha256": "554b66722410d4d7c837d374a471b0384d1fff08290c4b18cd70d8017b05fab1"
+      },
+      {
+        "path": "scheduler/internal/api/install_task_mutation_failure_test.go",
+        "bytes": 11556,
+        "sha256": "7496583080e79d2f531ab85c5c4b4a9b50884f82bd729493df59edfc873a2ed5"
+      },
+      {
+        "path": "scheduler/internal/api/install_task_recovery.go",
+        "bytes": 3539,
+        "sha256": "edfd3bf0428534f931019a0b75b101b60ccce2ac257c8ab11e0947ebba444510"
+      },
+      {
+        "path": "scheduler/internal/api/install_task_recovery_storage_test.go",
+        "bytes": 1862,
+        "sha256": "8899bf5ccb5eacef5c66bebdeeaf091aa26b91fffe0ab9b49aa3edb8cfecd78f"
+      },
+      {
+        "path": "scheduler/internal/api/install_task_recovery_test.go",
+        "bytes": 11323,
+        "sha256": "7f7afc5ff0f497d2384a9378f287e9930f65468650cb6d91f933664d41ad3b37"
+      },
+      {
+        "path": "scheduler/internal/api/install_task_rollback.go",
+        "bytes": 7521,
+        "sha256": "4986cf2770250ae34dd6458ee97f113e7ba8c46ca4e1d1c22535ba7cd70b1a06"
+      },
+      {
+        "path": "scheduler/internal/api/install_task_rollback_test.go",
+        "bytes": 27426,
+        "sha256": "8a59365cba82ce7996e01f9c30108a7a49ec2f53d3b754c7807b253e42f5b3c8"
+      },
+      {
+        "path": "scheduler/internal/api/intent_audit_caller_oracle_test.go",
+        "bytes": 5807,
+        "sha256": "266da232a605029cb2eb65cf57dcf80ca0d629a4259d6a021b48958d786fe365"
+      },
+      {
+        "path": "scheduler/internal/api/main_helper_dispatch_test.go",
+        "bytes": 4137,
+        "sha256": "3f9e37d635d2942fd0f967a11d107fe7657c35fab976d524176d15006299fd95"
+      },
+      {
+        "path": "scheduler/internal/api/main_helper_dispatch_validation_test.go",
+        "bytes": 6651,
+        "sha256": "bcc4636ea0a3c260015e155ed1d8ad2dc287dea93dc2d29b33c3d45bc56d09fd"
+      },
+      {
+        "path": "scheduler/internal/api/main_test.go",
+        "bytes": 16576,
+        "sha256": "2c93ff894595a54b13f4409492a807aae3dba3dda5145af22b191b2bbd8b4cd1"
+      },
+      {
+        "path": "scheduler/internal/api/prune_tasks_test.go",
+        "bytes": 13981,
+        "sha256": "e22ef041f80ece55f3dd5e2b29dab684e8d274be6b96ff19cd389d993534deca"
+      },
+      {
+        "path": "scheduler/internal/api/scheduler_owner_sid_windows_test.go",
+        "bytes": 2203,
+        "sha256": "463ad2f82026260e28702e1a481f15a635bc3c7a6aa7f2c850e83188c7f5ec1e"
+      },
+      {
+        "path": "scheduler/internal/api/secrets_test.go",
+        "bytes": 48066,
+        "sha256": "ad1f93d38e8c4ff3d369779223a7bf4f7686947135a76706bf45494bbc771e79"
+      },
+      {
+        "path": "scheduler/internal/autostart/linux.go",
+        "bytes": 14296,
+        "sha256": "d0f04d5baf045674b7264090e90cc0274312426c3291847956a77397a8e35e9c"
+      },
+      {
+        "path": "scheduler/internal/autostart/linux_exec_percent_test.go",
+        "bytes": 2809,
+        "sha256": "34db04e7f452df8df0f5ed41683c4aa67da6386196702237ec46e753c4cc5e60"
+      },
+      {
+        "path": "scheduler/internal/scheduler/entrypoint_migration_windows.go",
+        "bytes": 45496,
+        "sha256": "6f8f8bc0d73d40279a927fe8cae25ebeebb4e769e01f67566b0dcfe254ce49c2"
+      },
+      {
+        "path": "scheduler/internal/scheduler/entrypoint_migration_windows_test.go",
+        "bytes": 43046,
+        "sha256": "9184ed38764ac3d9823fe10399e883b48519eddc485a7da0bf34c92876ced174"
+      },
+      {
+        "path": "scheduler/internal/scheduler/scheduler.go",
+        "bytes": 7371,
+        "sha256": "907449ab2be563539dd29179a00a7b68fa5cead9f89376169e521bd9df9123c5"
+      },
+      {
+        "path": "scheduler/internal/scheduler/scheduler_com_windows.go",
+        "bytes": 12974,
+        "sha256": "5ca8d9cae441d54c1d403732d07e65a6526119339b619febf564e3c9350d6aa4"
+      },
+      {
+        "path": "scheduler/internal/scheduler/scheduler_com_windows_test.go",
+        "bytes": 6957,
+        "sha256": "5352797d1adb396ff006683b64ec63fe8490883e52c3967b30c243fa4accc2d6"
+      },
+      {
+        "path": "scheduler/internal/scheduler/scheduler_create_conflict_windows_test.go",
+        "bytes": 3783,
+        "sha256": "3e5d9d1d77ffcf36ba1b4335854b16d2120a2c73f26c67a5400bf768e0af2621"
+      },
+      {
+        "path": "scheduler/internal/scheduler/scheduler_hidden_task_windows_test.go",
+        "bytes": 6146,
+        "sha256": "33a50b53f006374dd8aa79f00f099d17696164e70487b1d75b737ea8125fe689"
+      },
+      {
+        "path": "scheduler/internal/scheduler/scheduler_last_result_windows_test.go",
+        "bytes": 12482,
+        "sha256": "690595eb86c182c92ebc592d8fd85ecd3d30ebe4401a8241cd3e1bad4f85a0e6"
+      },
+      {
+        "path": "scheduler/internal/scheduler/scheduler_owned_run_windows_test.go",
+        "bytes": 9293,
+        "sha256": "a30c2944ea1b7bcf95fecb1a33b165cec76e3a832300cb422660c951b00e0f8e"
+      },
+      {
+        "path": "scheduler/internal/scheduler/scheduler_owner_sid_windows_test.go",
+        "bytes": 11255,
+        "sha256": "06717dab4bab825649cc7be9b98eaa9f7c64a9ad3de13746a84d7d1d17a8c715"
+      },
+      {
+        "path": "scheduler/internal/scheduler/scheduler_windows.go",
+        "bytes": 14487,
+        "sha256": "fe9290acff37e50f841bdbf3db713402ea93ed96dd442b09b28dddbb79377db0"
+      },
+      {
+        "path": "scheduler/internal/scheduler/scheduler_windows_test.go",
+        "bytes": 9130,
+        "sha256": "37ae4c5c0ef6bc79b1a5c8b75b0c7f96921836555475d106fa88d9fe5c36978d"
+      },
+      {
+        "path": "scheduler/internal/scheduler/scheduler_xml_create_windows.go",
+        "bytes": 2023,
+        "sha256": "eafbae884b9516385206004c2255fd63b23a0a7e07f0179c93a66218817f1ba1"
+      },
+      {
+        "path": "scheduler/internal/scheduler/scheduler_xml_create_windows_test.go",
+        "bytes": 8883,
+        "sha256": "062b4671cd846bc4d06ec684f6d6b7bc3f4b05a8265840f4950dba20f14704ed"
+      },
+      {
+        "path": "stop-green-overlay.json",
+        "bytes": 10054,
+        "sha256": "a49113cd203eeab6eb3d72b3fe0b8f96f5c1c410fcd9fc1ff5374f43f04b3c43"
+      },
+      {
+        "path": "stop-red-overlay.json",
+        "bytes": 10054,
+        "sha256": "6b4911baeb7eaee4b8135cd85362becb429f10f2948709a221c2abbaae4f317f"
+      }
+    ],
+    "overlay_maps": [
+      {
+        "path": "stop-red-overlay.json",
+        "bytes": 10054,
+        "sha256": "6b4911baeb7eaee4b8135cd85362becb429f10f2948709a221c2abbaae4f317f"
+      },
+      {
+        "path": "stop-green-overlay.json",
+        "bytes": 10054,
+        "sha256": "a49113cd203eeab6eb3d72b3fe0b8f96f5c1c410fcd9fc1ff5374f43f04b3c43"
+      }
+    ]
+  },
+  "runtime": {
+    "go_version": "go version go1.27.4 windows/amd64",
+    "tools_sha256": {
+      "C:\\msys64\\ucrt64\\bin\\go.exe": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113",
+      "C:\\msys64\\ucrt64\\bin\\gofmt.exe": "95368e4aafefa20f962a345ab02f53ffc035ed69349612abbf385b52f4fb25c5",
+      "C:\\msys64\\ucrt64\\bin\\gcc.exe": "f6ff9378c1edb591131304518eac6456708d28720284105930d0d687136bcdd3"
+    },
+    "owned_root": "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f",
+    "offline_and_readonly_modules": true,
+    "shared_cache_exception": "Existing D:\\dev\\ChatGPT\\mcp-pr616-qualification-20261114 Go caches explicitly authorized; no cleanup or move of shared cache.",
+    "environment": {
+      "APPDATA": "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f\\runtime\\lifecycle-red-green\\appdata",
+      "CC": "C:\\msys64\\ucrt64\\bin\\gcc.exe",
+      "GOARCH": "amd64",
+      "GOAUTH": "off",
+      "GOCACHE": "D:\\dev\\ChatGPT\\mcp-pr616-qualification-20261114\\gocache",
+      "GOENV": "off",
+      "GOFLAGS": "-mod=readonly",
+      "GOGC": "100",
+      "GOMAXPROCS": "4",
+      "GOMODCACHE": "D:\\dev\\ChatGPT\\mcp-pr616-qualification-20261114\\gomodcache",
+      "GOOS": "windows",
+      "GOPATH": "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f\\runtime\\lifecycle-red-green\\gopath",
+      "GOPROXY": "off",
+      "GOROOT": "C:\\msys64\\ucrt64\\lib\\go",
+      "GOSUMDB": "off",
+      "GOTELEMETRY": "off",
+      "GOTMPDIR": "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f\\runtime\\lifecycle-red-green\\tmp",
+      "GOTOOLCHAIN": "local",
+      "GOVCS": "*:off",
+      "GOWORK": "off",
+      "LOCALAPPDATA": "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f\\runtime\\lifecycle-red-green\\localappdata",
+      "MCPHUB_E2E_SCHEDULER": "none",
+      "MCPHUB_NO_AUTO_GUI": "1",
+      "PSModuleAnalysisCachePath": "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f\\runtime\\lifecycle-red-green\\localappdata\\module-cache",
+      "TEMP": "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f\\runtime\\lifecycle-red-green\\tmp",
+      "TMP": "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f\\runtime\\lifecycle-red-green\\tmp",
+      "USERPROFILE": "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f\\runtime\\lifecycle-red-green\\profile",
+      "XDG_CACHE_HOME": "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f\\runtime\\lifecycle-red-green\\xdg-cache",
+      "XDG_CONFIG_HOME": "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f\\runtime\\lifecycle-red-green\\xdg-config",
+      "XDG_DATA_HOME": "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f\\runtime\\lifecycle-red-green\\xdg-data"
+    },
+    "dependency_downloads": false,
+    "installations": false,
+    "native_scheduler_operations": false,
+    "installed_product_operations": false
+  },
+  "counts": {
+    "red": {
+      "leaf_pass": 8,
+      "leaf_fail": 16,
+      "group_fail": 4,
+      "root_fail": 1,
+      "test_pass": 8,
+      "test_fail": 21,
+      "package_fail": 1,
+      "total_terminal_pass": 8,
+      "total_terminal_fail": 22,
+      "skip": 0
+    },
+    "green": {
+      "leaf_pass": 24,
+      "group_pass": 4,
+      "root_pass": 1,
+      "test_pass": 29,
+      "package_pass": 1,
+      "total_terminal_pass": 30,
+      "fail": 0,
+      "skip": 0
+    },
+    "adjacent": {
+      "selected_roots": 9,
+      "nested_subtests": 16,
+      "test_pass": 25,
+      "package_pass": 1,
+      "total_terminal_pass": 26,
+      "fail": 0,
+      "skip": 0
+    }
+  },
+  "strict_oracles": {
+    "terminal_multisets_equal_exactly": true,
+    "each_terminal_once": true,
+    "selected_root_multisets_equal_exactly": true,
+    "stream_hashes_match_raw_export": true,
+    "command_argv_equal_frozen_plans": true,
+    "all_five_qualification_direct_children_settled": true,
+    "all_five_preparation_direct_children_settled": true,
+    "timeouts": 0,
+    "candidate_tests_no_failure_or_skip": true,
+    "negative_control_defect_assertions": {
+      "false_success": 16,
+      "unsafe_run": 8,
+      "lost_stop_intent": 4
+    }
+  },
+  "phases": [
+    {
+      "phase": "prepare",
+      "started_utc": "2026-11-22T14:33:02.722405+00:00",
+      "finished_utc": "2026-11-22T14:33:16.616569+00:00",
+      "completed": true,
+      "source_before": {
+        "files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+      },
+      "source_after": {
+        "files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+      },
+      "inputs_before": null,
+      "inputs_after": null,
+      "commands": [
+        {
+          "label": "go-version",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "version"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f",
+          "started_utc": "2026-11-22T14:33:02.825036+00:00",
+          "timeout_seconds": 30,
+          "settled": true,
+          "timed_out": false,
+          "pid": 53604,
+          "exit_code": 0,
+          "seconds": 0.024,
+          "finished_utc": "2026-11-22T14:33:02.848596+00:00",
+          "stdout": {
+            "bytes": 34,
+            "sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "source-head",
+          "argv": [
+            "C:\\Program Files\\Git\\cmd\\git.exe",
+            "rev-parse",
+            "--verify",
+            "HEAD"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\preserved-input\\source-preserved",
+          "started_utc": "2026-11-22T14:33:02.849524+00:00",
+          "timeout_seconds": 30,
+          "settled": true,
+          "timed_out": false,
+          "pid": 54572,
+          "exit_code": 0,
+          "seconds": 0.072,
+          "finished_utc": "2026-11-22T14:33:02.921402+00:00",
+          "stdout": {
+            "bytes": 41,
+            "sha256": "4da74caaa4ab362691f3348aa1662dbef8635e0ed2f64fb96a8d76563d9b4035"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "source-tree",
+          "argv": [
+            "C:\\Program Files\\Git\\cmd\\git.exe",
+            "rev-parse",
+            "--verify",
+            "HEAD^{tree}"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\preserved-input\\source-preserved",
+          "started_utc": "2026-11-22T14:33:02.922183+00:00",
+          "timeout_seconds": 30,
+          "settled": true,
+          "timed_out": false,
+          "pid": 33872,
+          "exit_code": 0,
+          "seconds": 0.058,
+          "finished_utc": "2026-11-22T14:33:02.980601+00:00",
+          "stdout": {
+            "bytes": 41,
+            "sha256": "463926cd1162988b47e5c0b0d76d429b0ddbcc173d9550e930afe804ad8e399f"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "gofmt-write",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+            "-w",
+            "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f\\inputs\\candidate\\internal\\api\\install.go",
+            "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f\\inputs\\candidate\\internal\\api\\install_scheduler_stop_failure_test.go"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f",
+          "started_utc": "2026-11-22T14:33:16.523623+00:00",
+          "timeout_seconds": 30,
+          "settled": true,
+          "timed_out": false,
+          "pid": 21288,
+          "exit_code": 0,
+          "seconds": 0.026,
+          "finished_utc": "2026-11-22T14:33:16.549689+00:00",
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "gofmt-check",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f\\inputs\\candidate\\internal\\api\\install.go",
+            "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f\\inputs\\candidate\\internal\\api\\install_scheduler_stop_failure_test.go"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f",
+          "started_utc": "2026-11-22T14:33:16.550472+00:00",
+          "timeout_seconds": 30,
+          "settled": true,
+          "timed_out": false,
+          "pid": 41604,
+          "exit_code": 0,
+          "seconds": 0.026,
+          "finished_utc": "2026-11-22T14:33:16.576125+00:00",
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      ]
+    },
+    {
+      "phase": "lifecycle-red-green",
+      "started_utc": "2026-11-22T14:36:25.035506+00:00",
+      "finished_utc": "2026-11-22T14:38:33.361125+00:00",
+      "completed": true,
+      "source_before": {
+        "files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+      },
+      "source_after": {
+        "files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+      },
+      "inputs_before": {
+        "files": 45,
+        "bytes": 1399069,
+        "inventory_sha256": "2f10c812917b98d3cd652f079e01daf1e4ca8ecce610121f9e4ca29162e68a5f"
+      },
+      "inputs_after": {
+        "files": 45,
+        "bytes": 1399069,
+        "inventory_sha256": "2f10c812917b98d3cd652f079e01daf1e4ca8ecce610121f9e4ca29162e68a5f"
+      },
+      "commands": [
+        {
+          "label": "stop-red",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-buildvcs=false",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f\\inputs\\stop-red-overlay.json",
+            "-p=2",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-run",
+            "^TestLegacySchedulerStopFailuresReachLifecycleResults$",
+            "./internal/api"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f\\source",
+          "started_utc": "2026-11-22T14:36:29.075102+00:00",
+          "direct_timeout_seconds": 360,
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "pid": 17904,
+          "exit_code": 1,
+          "seconds": 57.18357339990325,
+          "finished_utc": "2026-11-22T14:37:26.258760+00:00",
+          "stdout": {
+            "bytes": 43450,
+            "sha256": "92f6eb82d17e6f466fd3fa09982decd2b59ab7883cedce9879a08ac04c5f9f6c"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "tests": {
+            "pass": [
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Stop/completed_action_no_listener",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Stop/killed_then_stopped",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/StopAll/completed_action_no_listener",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/StopAll/killed_then_stopped",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Restart/completed_action_no_listener",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Restart/killed_then_stopped",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/RestartAll/completed_action_no_listener",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/RestartAll/killed_then_stopped"
+            ],
+            "fail": [
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Stop/denied_after_kill",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Stop/denied_without_listener",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Stop/unavailable_lookup_and_stop",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Stop/portless_canceled_stop",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Stop",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/StopAll/denied_after_kill",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/StopAll/denied_without_listener",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/StopAll/unavailable_lookup_and_stop",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/StopAll/portless_canceled_stop",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/StopAll",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Restart/denied_after_kill",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Restart/denied_without_listener",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Restart/unavailable_lookup_and_stop",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Restart/portless_canceled_stop",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Restart",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/RestartAll/denied_after_kill",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/RestartAll/denied_without_listener",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/RestartAll/unavailable_lookup_and_stop",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/RestartAll/portless_canceled_stop",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/RestartAll",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults",
+              "PACKAGE:mcp-local-hub/internal/api"
+            ],
+            "skip": []
+          },
+          "oracle_pass": true
+        },
+        {
+          "label": "stop-green",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-buildvcs=false",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f\\inputs\\stop-green-overlay.json",
+            "-p=2",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-run",
+            "^TestLegacySchedulerStopFailuresReachLifecycleResults$",
+            "./internal/api"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f\\source",
+          "started_utc": "2026-11-22T14:37:26.262044+00:00",
+          "direct_timeout_seconds": 360,
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "pid": 55224,
+          "exit_code": 0,
+          "seconds": 55.71480119996704,
+          "finished_utc": "2026-11-22T14:38:21.976986+00:00",
+          "stdout": {
+            "bytes": 30422,
+            "sha256": "317765b1d4296326b75f6fc5c7940504c8b739f1674af2ee610feb7bbb61c9d2"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "tests": {
+            "pass": [
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Stop/completed_action_no_listener",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Stop/killed_then_stopped",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Stop/denied_after_kill",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Stop/denied_without_listener",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Stop/unavailable_lookup_and_stop",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Stop/portless_canceled_stop",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Stop",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/StopAll/completed_action_no_listener",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/StopAll/killed_then_stopped",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/StopAll/denied_after_kill",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/StopAll/denied_without_listener",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/StopAll/unavailable_lookup_and_stop",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/StopAll/portless_canceled_stop",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/StopAll",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Restart/completed_action_no_listener",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Restart/killed_then_stopped",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Restart/denied_after_kill",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Restart/denied_without_listener",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Restart/unavailable_lookup_and_stop",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Restart/portless_canceled_stop",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/Restart",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/RestartAll/completed_action_no_listener",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/RestartAll/killed_then_stopped",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/RestartAll/denied_after_kill",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/RestartAll/denied_without_listener",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/RestartAll/unavailable_lookup_and_stop",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/RestartAll/portless_canceled_stop",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults/RestartAll",
+              "TestLegacySchedulerStopFailuresReachLifecycleResults",
+              "PACKAGE:mcp-local-hub/internal/api"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "oracle_pass": true
+        },
+        {
+          "label": "lifecycle-adjacent",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-buildvcs=false",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f\\inputs\\stop-green-overlay.json",
+            "-p=2",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-run",
+            "^(TestRestartAllFallsThroughToLegacySchedulerAndSkipsSupervisorHandledTasks|TestRestartFallsBackWhenNoSupervisorIntentMatches|TestStopSupervisorHandledToleratesTypedSchedulerUnavailable|TestStopSchedulerUnavailableRemainsFatalWithoutTypedSupervisorFallback|TestRestartSupervisorHandledToleratesTypedSchedulerUnavailable|TestRestartSchedulerUnavailableRemainsFatalWithoutTypedSupervisorFallback|TestStopAllRecordsIntentThenReconciles|TestInstallMergePreservesBackendRunHold|TestInstallPreflightPreservesBackendRunHold)$",
+            "./internal/api"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f\\source",
+          "started_utc": "2026-11-22T14:38:21.978802+00:00",
+          "direct_timeout_seconds": 360,
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "pid": 21168,
+          "exit_code": 0,
+          "seconds": 7.571209000074305,
+          "finished_utc": "2026-11-22T14:38:29.550269+00:00",
+          "stdout": {
+            "bytes": 25616,
+            "sha256": "63bc9b9f27b05f341f0163e811446e92ec2fef2cb4be3dfe49aa00e07f3e354d"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "tests": {
+            "pass": [
+              "TestInstallMergePreservesBackendRunHold",
+              "TestInstallPreflightPreservesBackendRunHold",
+              "TestRestartAllFallsThroughToLegacySchedulerAndSkipsSupervisorHandledTasks",
+              "TestRestartFallsBackWhenNoSupervisorIntentMatches",
+              "TestRestartSupervisorHandledToleratesTypedSchedulerUnavailable/targeted_factory",
+              "TestRestartSupervisorHandledToleratesTypedSchedulerUnavailable/targeted_list",
+              "TestRestartSupervisorHandledToleratesTypedSchedulerUnavailable/all_factory",
+              "TestRestartSupervisorHandledToleratesTypedSchedulerUnavailable/all_list",
+              "TestRestartSupervisorHandledToleratesTypedSchedulerUnavailable",
+              "TestRestartSchedulerUnavailableRemainsFatalWithoutTypedSupervisorFallback/targeted_untyped_same_text",
+              "TestRestartSchedulerUnavailableRemainsFatalWithoutTypedSupervisorFallback/all_untyped_same_text",
+              "TestRestartSchedulerUnavailableRemainsFatalWithoutTypedSupervisorFallback/targeted_no_supervisor_result",
+              "TestRestartSchedulerUnavailableRemainsFatalWithoutTypedSupervisorFallback/all_no_supervisor_result",
+              "TestRestartSchedulerUnavailableRemainsFatalWithoutTypedSupervisorFallback",
+              "TestStopAllRecordsIntentThenReconciles",
+              "TestStopSupervisorHandledToleratesTypedSchedulerUnavailable/targeted_factory",
+              "TestStopSupervisorHandledToleratesTypedSchedulerUnavailable/targeted_list",
+              "TestStopSupervisorHandledToleratesTypedSchedulerUnavailable/all_factory",
+              "TestStopSupervisorHandledToleratesTypedSchedulerUnavailable/all_list",
+              "TestStopSupervisorHandledToleratesTypedSchedulerUnavailable",
+              "TestStopSchedulerUnavailableRemainsFatalWithoutTypedSupervisorFallback/targeted_untyped_same_text",
+              "TestStopSchedulerUnavailableRemainsFatalWithoutTypedSupervisorFallback/all_untyped_same_text",
+              "TestStopSchedulerUnavailableRemainsFatalWithoutTypedSupervisorFallback/targeted_no_supervisor_result",
+              "TestStopSchedulerUnavailableRemainsFatalWithoutTypedSupervisorFallback/all_no_supervisor_result",
+              "TestStopSchedulerUnavailableRemainsFatalWithoutTypedSupervisorFallback",
+              "PACKAGE:mcp-local-hub/internal/api"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "oracle_pass": true
+        }
+      ]
+    },
+    {
+      "phase": "build-vet",
+      "started_utc": "2026-11-22T14:39:31.752771+00:00",
+      "finished_utc": "2026-11-22T14:40:25.309654+00:00",
+      "completed": true,
+      "source_before": {
+        "files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+      },
+      "source_after": {
+        "files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+      },
+      "inputs_before": {
+        "files": 45,
+        "bytes": 1399069,
+        "inventory_sha256": "2f10c812917b98d3cd652f079e01daf1e4ca8ecce610121f9e4ca29162e68a5f"
+      },
+      "inputs_after": {
+        "files": 45,
+        "bytes": 1399069,
+        "inventory_sha256": "2f10c812917b98d3cd652f079e01daf1e4ca8ecce610121f9e4ca29162e68a5f"
+      },
+      "commands": [
+        {
+          "label": "build",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "build",
+            "-buildvcs=false",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f\\inputs\\stop-green-overlay.json",
+            "-p=2",
+            "./..."
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f\\source",
+          "started_utc": "2026-11-22T14:39:35.661745+00:00",
+          "direct_timeout_seconds": 360,
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "pid": 54056,
+          "exit_code": 0,
+          "seconds": 20.235985800041817,
+          "finished_utc": "2026-11-22T14:39:55.897952+00:00",
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "oracle_pass": true
+        },
+        {
+          "label": "vet",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "vet",
+            "-buildvcs=false",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f\\inputs\\stop-green-overlay.json",
+            "-p=2",
+            "./..."
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f\\source",
+          "started_utc": "2026-11-22T14:39:55.899920+00:00",
+          "direct_timeout_seconds": 360,
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "pid": 32012,
+          "exit_code": 0,
+          "seconds": 25.695515299914405,
+          "finished_utc": "2026-11-22T14:40:21.595580+00:00",
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "oracle_pass": true
+        }
+      ]
+    }
+  ],
+  "transport_observations": {
+    "path_in_archive": "transport-observations.json",
+    "initial_powershell_profile_warnings": "The outer PowerShell attempted existing profile scripts and emitted execution-policy warnings. No policy was changed. Python preparation completed successfully and its five commands exited zero.",
+    "session_reporting": "Some Desktop Commander session polls reported no session. The runner was not restarted; final phase receipts and direct-child records establish the recorded outcomes.",
+    "later_shell": "Direct Python runs used cmd.exe; no PowerShell policy override."
+  },
+  "evidence": {
+    "remote_raw_export": {
+      "schema": 1,
+      "files": 46,
+      "bytes": 152635,
+      "export_bytes": 34345,
+      "export_sha256": "a0dda7438d4f31fcd77ced589fc07484ba37c9d315367386feafd4d3496d86e7",
+      "exporter_sha256": "c5c606e2426b38490a9687ed7b3af6b0e02441d049bc53ca5f2987d307005716",
+      "phases": [
+        "prepare",
+        "lifecycle-red-green",
+        "build-vet"
+      ]
+    },
+    "archive": {
+      "path": "raw-evidence.zip",
+      "bytes": 845603,
+      "sha256": "e83f6bf65a3610a5867d4f4995acedeca5af3c614b4ac519e1a5996e2c24c122",
+      "files": 106,
+      "inventory": [
+        {
+          "path": "build-vet.json",
+          "bytes": 596573,
+          "sha256": "089b8d971b6755d11d3f184a91c6375f8d0cb19ff00b16de3bbfab4acd6a877f"
+        },
+        {
+          "path": "evidence-export-manifest.json",
+          "bytes": 330,
+          "sha256": "bfff4825ad14c448d1ffdb606adcc94af4982f1ab076d5d95a16c80c1315c7b2"
+        },
+        {
+          "path": "evidence-export.json.zlib.b64",
+          "bytes": 34345,
+          "sha256": "a0dda7438d4f31fcd77ced589fc07484ba37c9d315367386feafd4d3496d86e7"
+        },
+        {
+          "path": "evidence/build-vet/build.launched.json",
+          "bytes": 526,
+          "sha256": "9950856b42301833e5621eeaaf7469d58bad64243378273be4b3adc7cad59598"
+        },
+        {
+          "path": "evidence/build-vet/build.receipt.json",
+          "bytes": 885,
+          "sha256": "9a8bc3d4d28ca663729ed11f5173b751a56033b8fa04c435787962209be57e54"
+        },
+        {
+          "path": "evidence/build-vet/build.started.json",
+          "bytes": 510,
+          "sha256": "dfd076c249cb9a8b970cb7e523424db0ed4908bd562a0402c67349b5937c1d3e"
+        },
+        {
+          "path": "evidence/build-vet/build.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/build-vet/build.stdout.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/build-vet/receipt-initial.json",
+          "bytes": 473,
+          "sha256": "1b1fc7c47c435546fc9421d0d38426f42b4e14ca4afd0401ac08fc2c5e0eadc7"
+        },
+        {
+          "path": "evidence/build-vet/receipt.json",
+          "bytes": 5390,
+          "sha256": "a733094941d1be6f1de8f2af4ce5d35a0d7f165d5e2ee86b1c5745fdf6859744"
+        },
+        {
+          "path": "evidence/build-vet/vet.launched.json",
+          "bytes": 522,
+          "sha256": "065744c668f588f98ce8215c16ab509e5e815eed237e48d7388f6b092c20cc0a"
+        },
+        {
+          "path": "evidence/build-vet/vet.receipt.json",
+          "bytes": 881,
+          "sha256": "3a878c6d4e3b82ce31d680341376fd9a426f104d2aae0182082631d4e7555f4f"
+        },
+        {
+          "path": "evidence/build-vet/vet.started.json",
+          "bytes": 506,
+          "sha256": "4a446192333f6f4d1f156c33368e8c01c216a80a067e4a545148f485578ead9b"
+        },
+        {
+          "path": "evidence/build-vet/vet.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/build-vet/vet.stdout.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/lifecycle-red-green/lifecycle-adjacent.launched.json",
+          "bytes": 1148,
+          "sha256": "0ddfb7ea0f2075325fcea17a1845feeee8faebb4343a651b326293c14ce0f391"
+        },
+        {
+          "path": "evidence/lifecycle-red-green/lifecycle-adjacent.receipt.json",
+          "bytes": 3747,
+          "sha256": "b7de1629df72daa39009058c528cf7f4dd86fc16bb66834db55afc21b0a3fcff"
+        },
+        {
+          "path": "evidence/lifecycle-red-green/lifecycle-adjacent.started.json",
+          "bytes": 1132,
+          "sha256": "0bcc56c48ad85986d1b008352d6327fcbf9142af2ec5f7b3ada3f5cd18db4e2a"
+        },
+        {
+          "path": "evidence/lifecycle-red-green/lifecycle-adjacent.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/lifecycle-red-green/lifecycle-adjacent.stdout.log",
+          "bytes": 25616,
+          "sha256": "63bc9b9f27b05f341f0163e811446e92ec2fef2cb4be3dfe49aa00e07f3e354d"
+        },
+        {
+          "path": "evidence/lifecycle-red-green/receipt-initial.json",
+          "bytes": 483,
+          "sha256": "a8829ce047bd8d67670276d858519689a46f9d89929d8724922b53a7dd731530"
+        },
+        {
+          "path": "evidence/lifecycle-red-green/receipt.json",
+          "bytes": 15590,
+          "sha256": "62eca3043437654fe22729db5c7de96cd6b77a2eed2489492f760c6da0304f7d"
+        },
+        {
+          "path": "evidence/lifecycle-red-green/stop-green.launched.json",
+          "bytes": 676,
+          "sha256": "248411ef367701c6cfcbcdaf18c71c75ea9c3f909f178d1c08bc329b5e2c7a0b"
+        },
+        {
+          "path": "evidence/lifecycle-red-green/stop-green.receipt.json",
+          "bytes": 3741,
+          "sha256": "39e7938e8e34f07ba531c05cdd0d9ed94fcc4d2d31a63d6432fb75a4eecd262f"
+        },
+        {
+          "path": "evidence/lifecycle-red-green/stop-green.started.json",
+          "bytes": 660,
+          "sha256": "9bb97740e7ae4717b9208f448b8799e098231090441b4a9731b6b2ad8b36c278"
+        },
+        {
+          "path": "evidence/lifecycle-red-green/stop-green.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/lifecycle-red-green/stop-green.stdout.log",
+          "bytes": 30422,
+          "sha256": "317765b1d4296326b75f6fc5c7940504c8b739f1674af2ee610feb7bbb61c9d2"
+        },
+        {
+          "path": "evidence/lifecycle-red-green/stop-red.launched.json",
+          "bytes": 672,
+          "sha256": "a7f9724ecc62f077460e59370d4d4264d4d05a582f159ee09fb43ab0bb4a36af"
+        },
+        {
+          "path": "evidence/lifecycle-red-green/stop-red.receipt.json",
+          "bytes": 3741,
+          "sha256": "ddc809b981f67c15fc1b7b90e8231b42227b54eb61661a4a7a1f375a0559d239"
+        },
+        {
+          "path": "evidence/lifecycle-red-green/stop-red.started.json",
+          "bytes": 656,
+          "sha256": "badf5697dd0b0b48abcd8e865fb449d01162f18fca28157c539f3c2ce093fbf0"
+        },
+        {
+          "path": "evidence/lifecycle-red-green/stop-red.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/lifecycle-red-green/stop-red.stdout.log",
+          "bytes": 43450,
+          "sha256": "92f6eb82d17e6f466fd3fa09982decd2b59ab7883cedce9879a08ac04c5f9f6c"
+        },
+        {
+          "path": "evidence/prepare/go-version.receipt.json",
+          "bytes": 629,
+          "sha256": "cff0605b9ee014e7223b3bfeb6e8109d95747119ffb4a8b040690a4116b6cbf1"
+        },
+        {
+          "path": "evidence/prepare/go-version.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/prepare/go-version.stdout.log",
+          "bytes": 34,
+          "sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14"
+        },
+        {
+          "path": "evidence/prepare/gofmt-check.receipt.json",
+          "bytes": 879,
+          "sha256": "89f4ce6bc9656e046e4c85f3a04d8997318c089893e6badb43cd8ba43cc3d38c"
+        },
+        {
+          "path": "evidence/prepare/gofmt-check.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/prepare/gofmt-check.stdout.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/prepare/gofmt-write.receipt.json",
+          "bytes": 879,
+          "sha256": "bdad1784f4792b2531aa76b239dd8da6c338ba18a3f3ca1d82807475a562ae6c"
+        },
+        {
+          "path": "evidence/prepare/gofmt-write.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/prepare/gofmt-write.stdout.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/prepare/receipt-initial.json",
+          "bytes": 616,
+          "sha256": "6908d1a543fdcb29a539c2d9ad000ad4c0cfc6c08652087a456f1b0850a9e77e"
+        },
+        {
+          "path": "evidence/prepare/receipt.json",
+          "bytes": 6702,
+          "sha256": "ae252b11321b0fb72641ebcd0350e049663550e1f16f76e7e7100cde7d782155"
+        },
+        {
+          "path": "evidence/prepare/source-head.receipt.json",
+          "bytes": 690,
+          "sha256": "e0077ba2536363347be41dcee790688d28454b8aff6748e6b17e9e8ae91b3351"
+        },
+        {
+          "path": "evidence/prepare/source-head.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/prepare/source-head.stdout.log",
+          "bytes": 41,
+          "sha256": "4da74caaa4ab362691f3348aa1662dbef8635e0ed2f64fb96a8d76563d9b4035"
+        },
+        {
+          "path": "evidence/prepare/source-tree.receipt.json",
+          "bytes": 697,
+          "sha256": "28baddb43280da003bdae7905ebb5a6cb6442ceb7962f8bcc661087d30b6b98d"
+        },
+        {
+          "path": "evidence/prepare/source-tree.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "evidence/prepare/source-tree.stdout.log",
+          "bytes": 41,
+          "sha256": "463926cd1162988b47e5c0b0d76d429b0ddbcc173d9550e930afe804ad8e399f"
+        },
+        {
+          "path": "export_evidence.py",
+          "bytes": 2279,
+          "sha256": "c5c606e2426b38490a9687ed7b3af6b0e02441d049bc53ca5f2987d307005716"
+        },
+        {
+          "path": "inputs/candidate/internal/api/install.go",
+          "bytes": 218988,
+          "sha256": "59d2903380dff8b5c5d024d63dad3642a9f817d3f705cf596d13ad13acc73d8f"
+        },
+        {
+          "path": "inputs/candidate/internal/api/install_scheduler_stop_failure_test.go",
+          "bytes": 7877,
+          "sha256": "dd6b4a9454ebfd0230d7645743899890f9eb74aa8e6ac7f5a33ed10cf662c917"
+        },
+        {
+          "path": "inputs/preformat/internal/api/install.go",
+          "bytes": 218988,
+          "sha256": "59d2903380dff8b5c5d024d63dad3642a9f817d3f705cf596d13ad13acc73d8f"
+        },
+        {
+          "path": "inputs/preformat/internal/api/install_scheduler_stop_failure_test.go",
+          "bytes": 7877,
+          "sha256": "dd6b4a9454ebfd0230d7645743899890f9eb74aa8e6ac7f5a33ed10cf662c917"
+        },
+        {
+          "path": "inputs/scheduler/internal/api/adopt.go",
+          "bytes": 88753,
+          "sha256": "cb1e1711e848ec718b868b51e8194ea13a7f9adbee21c6584a2fa005fab692a9"
+        },
+        {
+          "path": "inputs/scheduler/internal/api/adopt_provenance_events.go",
+          "bytes": 10948,
+          "sha256": "7ac2132fdf4211c0884d9f877d01c9afcdda8c5757edf5746592943959abb6f3"
+        },
+        {
+          "path": "inputs/scheduler/internal/api/adopt_scheduler_recovery_test.go",
+          "bytes": 10083,
+          "sha256": "5200d67c4c92da2d224320feff39e41a67e467aafd955f62727e7ce12b365b71"
+        },
+        {
+          "path": "inputs/scheduler/internal/api/install.go",
+          "bytes": 218267,
+          "sha256": "9e6a81aa7a8936789698c3ddc4bd6304f719bbce20a62ec7b7ad47338abbccd7"
+        },
+        {
+          "path": "inputs/scheduler/internal/api/install_backend_hold_composition_windows_test.go",
+          "bytes": 3170,
+          "sha256": "d558384b41b8840f021aeba7d71eb643ad766e17bc3a6c94ecbdd1a199c9b553"
+        },
+        {
+          "path": "inputs/scheduler/internal/api/install_hyphen_family_ownership_test.go",
+          "bytes": 22696,
+          "sha256": "4edc4ccded09b44639a5e74d379462df4733e570a004e5188cb042df902a7b26"
+        },
+        {
+          "path": "inputs/scheduler/internal/api/install_own_port_test.go",
+          "bytes": 30491,
+          "sha256": "edbffbc3f81db30589e9ccb625ef9245afa6faa48971e57d409269a3d46e1630"
+        },
+        {
+          "path": "inputs/scheduler/internal/api/install_parsed_manifest.go",
+          "bytes": 143465,
+          "sha256": "e3b66f71a690d2be7006f5cd65e6ef38365fee01aa297ee332cdfe93de05b561"
+        },
+        {
+          "path": "inputs/scheduler/internal/api/install_prune_recovery_test.go",
+          "bytes": 18576,
+          "sha256": "79292de007701d7e1cb9a271e6458e0f16d83e5cd54271317374bbb40a611fc5"
+        },
+        {
+          "path": "inputs/scheduler/internal/api/install_scheduler_snapshot_test.go",
+          "bytes": 7703,
+          "sha256": "554b66722410d4d7c837d374a471b0384d1fff08290c4b18cd70d8017b05fab1"
+        },
+        {
+          "path": "inputs/scheduler/internal/api/install_task_mutation_failure_test.go",
+          "bytes": 11556,
+          "sha256": "7496583080e79d2f531ab85c5c4b4a9b50884f82bd729493df59edfc873a2ed5"
+        },
+        {
+          "path": "inputs/scheduler/internal/api/install_task_recovery.go",
+          "bytes": 3539,
+          "sha256": "edfd3bf0428534f931019a0b75b101b60ccce2ac257c8ab11e0947ebba444510"
+        },
+        {
+          "path": "inputs/scheduler/internal/api/install_task_recovery_storage_test.go",
+          "bytes": 1862,
+          "sha256": "8899bf5ccb5eacef5c66bebdeeaf091aa26b91fffe0ab9b49aa3edb8cfecd78f"
+        },
+        {
+          "path": "inputs/scheduler/internal/api/install_task_recovery_test.go",
+          "bytes": 11323,
+          "sha256": "7f7afc5ff0f497d2384a9378f287e9930f65468650cb6d91f933664d41ad3b37"
+        },
+        {
+          "path": "inputs/scheduler/internal/api/install_task_rollback.go",
+          "bytes": 7521,
+          "sha256": "4986cf2770250ae34dd6458ee97f113e7ba8c46ca4e1d1c22535ba7cd70b1a06"
+        },
+        {
+          "path": "inputs/scheduler/internal/api/install_task_rollback_test.go",
+          "bytes": 27426,
+          "sha256": "8a59365cba82ce7996e01f9c30108a7a49ec2f53d3b754c7807b253e42f5b3c8"
+        },
+        {
+          "path": "inputs/scheduler/internal/api/intent_audit_caller_oracle_test.go",
+          "bytes": 5807,
+          "sha256": "266da232a605029cb2eb65cf57dcf80ca0d629a4259d6a021b48958d786fe365"
+        },
+        {
+          "path": "inputs/scheduler/internal/api/main_helper_dispatch_test.go",
+          "bytes": 4137,
+          "sha256": "3f9e37d635d2942fd0f967a11d107fe7657c35fab976d524176d15006299fd95"
+        },
+        {
+          "path": "inputs/scheduler/internal/api/main_helper_dispatch_validation_test.go",
+          "bytes": 6651,
+          "sha256": "bcc4636ea0a3c260015e155ed1d8ad2dc287dea93dc2d29b33c3d45bc56d09fd"
+        },
+        {
+          "path": "inputs/scheduler/internal/api/main_test.go",
+          "bytes": 16576,
+          "sha256": "2c93ff894595a54b13f4409492a807aae3dba3dda5145af22b191b2bbd8b4cd1"
+        },
+        {
+          "path": "inputs/scheduler/internal/api/prune_tasks_test.go",
+          "bytes": 13981,
+          "sha256": "e22ef041f80ece55f3dd5e2b29dab684e8d274be6b96ff19cd389d993534deca"
+        },
+        {
+          "path": "inputs/scheduler/internal/api/scheduler_owner_sid_windows_test.go",
+          "bytes": 2203,
+          "sha256": "463ad2f82026260e28702e1a481f15a635bc3c7a6aa7f2c850e83188c7f5ec1e"
+        },
+        {
+          "path": "inputs/scheduler/internal/api/secrets_test.go",
+          "bytes": 48066,
+          "sha256": "ad1f93d38e8c4ff3d369779223a7bf4f7686947135a76706bf45494bbc771e79"
+        },
+        {
+          "path": "inputs/scheduler/internal/autostart/linux.go",
+          "bytes": 14296,
+          "sha256": "d0f04d5baf045674b7264090e90cc0274312426c3291847956a77397a8e35e9c"
+        },
+        {
+          "path": "inputs/scheduler/internal/autostart/linux_exec_percent_test.go",
+          "bytes": 2809,
+          "sha256": "34db04e7f452df8df0f5ed41683c4aa67da6386196702237ec46e753c4cc5e60"
+        },
+        {
+          "path": "inputs/scheduler/internal/scheduler/entrypoint_migration_windows.go",
+          "bytes": 45496,
+          "sha256": "6f8f8bc0d73d40279a927fe8cae25ebeebb4e769e01f67566b0dcfe254ce49c2"
+        },
+        {
+          "path": "inputs/scheduler/internal/scheduler/entrypoint_migration_windows_test.go",
+          "bytes": 43046,
+          "sha256": "9184ed38764ac3d9823fe10399e883b48519eddc485a7da0bf34c92876ced174"
+        },
+        {
+          "path": "inputs/scheduler/internal/scheduler/scheduler.go",
+          "bytes": 7371,
+          "sha256": "907449ab2be563539dd29179a00a7b68fa5cead9f89376169e521bd9df9123c5"
+        },
+        {
+          "path": "inputs/scheduler/internal/scheduler/scheduler_com_windows.go",
+          "bytes": 12974,
+          "sha256": "5ca8d9cae441d54c1d403732d07e65a6526119339b619febf564e3c9350d6aa4"
+        },
+        {
+          "path": "inputs/scheduler/internal/scheduler/scheduler_com_windows_test.go",
+          "bytes": 6957,
+          "sha256": "5352797d1adb396ff006683b64ec63fe8490883e52c3967b30c243fa4accc2d6"
+        },
+        {
+          "path": "inputs/scheduler/internal/scheduler/scheduler_create_conflict_windows_test.go",
+          "bytes": 3783,
+          "sha256": "3e5d9d1d77ffcf36ba1b4335854b16d2120a2c73f26c67a5400bf768e0af2621"
+        },
+        {
+          "path": "inputs/scheduler/internal/scheduler/scheduler_hidden_task_windows_test.go",
+          "bytes": 6146,
+          "sha256": "33a50b53f006374dd8aa79f00f099d17696164e70487b1d75b737ea8125fe689"
+        },
+        {
+          "path": "inputs/scheduler/internal/scheduler/scheduler_last_result_windows_test.go",
+          "bytes": 12482,
+          "sha256": "690595eb86c182c92ebc592d8fd85ecd3d30ebe4401a8241cd3e1bad4f85a0e6"
+        },
+        {
+          "path": "inputs/scheduler/internal/scheduler/scheduler_owned_run_windows_test.go",
+          "bytes": 9293,
+          "sha256": "a30c2944ea1b7bcf95fecb1a33b165cec76e3a832300cb422660c951b00e0f8e"
+        },
+        {
+          "path": "inputs/scheduler/internal/scheduler/scheduler_owner_sid_windows_test.go",
+          "bytes": 11255,
+          "sha256": "06717dab4bab825649cc7be9b98eaa9f7c64a9ad3de13746a84d7d1d17a8c715"
+        },
+        {
+          "path": "inputs/scheduler/internal/scheduler/scheduler_windows.go",
+          "bytes": 14487,
+          "sha256": "fe9290acff37e50f841bdbf3db713402ea93ed96dd442b09b28dddbb79377db0"
+        },
+        {
+          "path": "inputs/scheduler/internal/scheduler/scheduler_windows_test.go",
+          "bytes": 9130,
+          "sha256": "37ae4c5c0ef6bc79b1a5c8b75b0c7f96921836555475d106fa88d9fe5c36978d"
+        },
+        {
+          "path": "inputs/scheduler/internal/scheduler/scheduler_xml_create_windows.go",
+          "bytes": 2023,
+          "sha256": "eafbae884b9516385206004c2255fd63b23a0a7e07f0179c93a66218817f1ba1"
+        },
+        {
+          "path": "inputs/scheduler/internal/scheduler/scheduler_xml_create_windows_test.go",
+          "bytes": 8883,
+          "sha256": "062b4671cd846bc4d06ec684f6d6b7bc3f4b05a8265840f4950dba20f14704ed"
+        },
+        {
+          "path": "inputs/stop-green-overlay.json",
+          "bytes": 10054,
+          "sha256": "a49113cd203eeab6eb3d72b3fe0b8f96f5c1c410fcd9fc1ff5374f43f04b3c43"
+        },
+        {
+          "path": "inputs/stop-red-overlay.json",
+          "bytes": 10054,
+          "sha256": "6b4911baeb7eaee4b8135cd85362becb429f10f2948709a221c2abbaae4f317f"
+        },
+        {
+          "path": "lifecycle-red-green.json",
+          "bytes": 606012,
+          "sha256": "023be99d200ceb51fbaaf574320e2189092ecbd897ac872e55959cab43c3b336"
+        },
+        {
+          "path": "preparation-inputs.json",
+          "bytes": 596,
+          "sha256": "28ebe55a84ae8e33f491357f139a0428be3ebfcedc4398194ed44b94f522a49f"
+        },
+        {
+          "path": "prepare.receipt.json",
+          "bytes": 6702,
+          "sha256": "ae252b11321b0fb72641ebcd0350e049663550e1f16f76e7e7100cde7d782155"
+        },
+        {
+          "path": "prepare_scheduler.py",
+          "bytes": 10597,
+          "sha256": "0920f5286b407b81786793539cdad8a70ced10bc741c5bc4dd2c4009f6212ad7"
+        },
+        {
+          "path": "prior-composition-results.json",
+          "bytes": 58219,
+          "sha256": "6c59ab1a3ef73f87580485ee808f3507e750d67d39df6d4f0279f7ed8d783912"
+        },
+        {
+          "path": "prior-qualify_go.py",
+          "bytes": 13854,
+          "sha256": "893c3281026e988c200f61fb2b4459b3385d427b7b39e0eec38d27b9c03949e5"
+        },
+        {
+          "path": "qualification-index.json",
+          "bytes": 20210,
+          "sha256": "c7e454201e39f1b27103d1dfabc63f937f4ce3ddac357d6338c2bdbb7a73aee0"
+        },
+        {
+          "path": "qualify_go.py",
+          "bytes": 13867,
+          "sha256": "b55705f864c52ae4e23e144ecfda4470c4e97a07cddd75fc53df780d2166c8d5"
+        },
+        {
+          "path": "transport-observations.json",
+          "bytes": 5383,
+          "sha256": "3fd0bd15ef3fbd569cb7e1b4791a2e0c774d8bc210ea662802e596e8d738765b"
+        },
+        {
+          "path": "verification-summary.json",
+          "bytes": 11755,
+          "sha256": "1c5b959867627167b188d7a67423048b51d45a9a51d7835f0c19fcfd1c22cefc"
+        },
+        {
+          "path": "verify_results.py",
+          "bytes": 10804,
+          "sha256": "c123ead40e908f2a4c48a1ffa98ac5768c53ea471a5dfd7b897f7ec1892aee49"
+        }
+      ]
+    },
+    "local_verifier": {
+      "path_in_archive": "verify_results.py",
+      "sha256": "c123ead40e908f2a4c48a1ffa98ac5768c53ea471a5dfd7b897f7ec1892aee49",
+      "observed_exit": 0
+    }
+  },
+  "limits": [
+    "Composition qualification; not an isolated published PR head.",
+    "No native Scheduler or installed Product operation.",
+    "Cancellation scenario checks returned-error propagation, not cancellation of a running COM call.",
+    "Go runner waits original direct-child handles; it does not enforce a whole-tree deadline. No timeout occurred.",
+    "The whole API test suite was not run. Adjacent selectors cover the reviewed fake-only lifecycle and BackendRunHold cases.",
+    "Task cancellation error propagation is checked; real COM cancellation, process containment, task rights and native Run/RunOwned/Stop/Delete remain separate qualification topics.",
+    "No merge, commit or push was performed by the qualification worker."
+  ]
+}

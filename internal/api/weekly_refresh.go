@@ -9,7 +9,7 @@
 //
 // Shape:
 //   - ONE shared scheduler task named WeeklyRefreshTaskName, created by
-//     EnsureWeeklyRefreshTask (idempotent). Fires Sunday 03:00 local and
+//     EnsureWeeklyRefreshTask when the name is absent. Fires Sunday 03:00 local and
 //     invokes `mcphub workspace-weekly-refresh` (the CLI subcommand M5
 //     Task 17 will wire). Until M5 wires that subcommand, a manual trigger
 //     of the scheduler task will error cleanly — acceptable because the
@@ -39,10 +39,11 @@ import (
 // the plan's M4 section.
 const WeeklyRefreshTaskName = "mcp-local-hub-workspace-weekly-refresh"
 
-// ErrWeeklyRefreshConflict classifies a failed weekly-task replacement that
-// observed a foreign current generation and therefore preserved it.
+// ErrWeeklyRefreshConflict classifies a stale expected definition or an
+// unverified current definition that must be preserved. XML equality does not
+// establish ownership of a native task generation.
 var (
-	ErrWeeklyRefreshConflict            = errors.New("weekly refresh task changed concurrently; foreign task preserved")
+	ErrWeeklyRefreshConflict            = errors.New("weekly refresh task definition could not be reconciled; current task preserved")
 	ErrWeeklyRefreshSnapshotUnavailable = errors.New("weekly refresh task snapshot is unavailable")
 	ErrWeeklyScheduleSettingsWrite      = errors.New("weekly schedule settings update failed")
 )
@@ -51,9 +52,7 @@ const weeklyRefreshLockSuffix = ".scheduler.lock"
 
 type weeklyRefreshTaskScheduler interface {
 	ExportXML(name string) ([]byte, error)
-	Delete(name string) error
 	Create(spec scheduler.TaskSpec) error
-	ImportXML(name string, xml []byte) error
 }
 
 type weeklyRefreshTransactionState string
@@ -61,7 +60,6 @@ type weeklyRefreshTransactionState string
 const (
 	weeklyRefreshTaskCommitted                 weeklyRefreshTransactionState = "weekly-task-committed"
 	weeklyRefreshTaskAppliedReleaseUnconfirmed weeklyRefreshTransactionState = "weekly-task-applied-release-unconfirmed"
-	weeklyRefreshTaskRestored                  weeklyRefreshTransactionState = "weekly-task-restored"
 )
 
 type weeklyRefreshMutation struct {
@@ -86,8 +84,9 @@ type WeeklyRefreshReport struct {
 }
 
 // EnsureWeeklyRefreshTask creates the shared weekly refresh task if it does
-// not already exist. Idempotent — replaces any prior task with the same
-// name. Fires Sunday 03:00 local time and invokes
+// not already exist. An existing task is preserved with a typed refusal because
+// the scheduler cannot condition a replacement on the observed generation.
+// Fires Sunday 03:00 local time and invokes
 // `mcphub workspace-weekly-refresh`, the CLI counterpart of
 // WeeklyRefreshAll. The CLI subcommand itself is wired in M5 Task 17; until
 // then a manual run of this task will error cleanly, which is acceptable
@@ -119,6 +118,10 @@ func (a *API) EnsureWeeklyRefreshTask() error {
 // ApplyWeeklyRefreshSchedule updates the persisted weekly schedule and its
 // singleton scheduler task as one settings-then-scheduler transaction. Its
 // restore status is intentionally the existing GUI route vocabulary.
+// IsAppliedLockReleaseUnconfirmed distinguishes a verified committed pair
+// whose lock release failed from an unapplied or rolled-back change.
+// An existing scheduler task is never replaced: the provisional settings write
+// is rolled back, and the original task definition is retained for inspection.
 func (a *API) ApplyWeeklyRefreshSchedule(schedule *ScheduleSpec) (restoreStatus string, err error) {
 	if schedule == nil || schedule.Kind != ScheduleWeekly {
 		return "n/a", errors.New("weekly schedule is required")
@@ -133,6 +136,7 @@ func (a *API) ApplyWeeklyRefreshSchedule(schedule *ScheduleSpec) (restoreStatus 
 	}
 	restoreStatus = "n/a"
 	callbackEntered := false
+	applied := false
 	err = a.withWeeklyScheduleSettings(weeklyScheduleSettingsUpdate, schedule.Canonical(), func(_ string, rollback func() error) error {
 		callbackEntered = true
 		result, transactionErr := runWeeklyRefreshTaskTransaction(sch, weeklyRefreshMutation{
@@ -143,9 +147,11 @@ func (a *API) ApplyWeeklyRefreshSchedule(schedule *ScheduleSpec) (restoreStatus 
 		})
 		restoreStatus = result.restoreStatus
 		if result.state == weeklyRefreshTaskCommitted && transactionErr == nil {
+			applied = true
 			return nil
 		}
 		if result.state == weeklyRefreshTaskAppliedReleaseUnconfirmed {
+			applied = true
 			return transactionErr
 		}
 		if rollbackErr := rollback(); rollbackErr != nil {
@@ -154,6 +160,12 @@ func (a *API) ApplyWeeklyRefreshSchedule(schedule *ScheduleSpec) (restoreStatus 
 		}
 		return transactionErr
 	})
+	// Only the confirmed combined result can classify a settings-lock release
+	// failure as applied. A successful provisional settings write is insufficient:
+	// failed or unverified task changes must still restore the prior schedule.
+	if applied && !IsAppliedLockReleaseUnconfirmed(err) {
+		err = markAppliedLockReleaseUnconfirmed(err)
+	}
 	if err != nil && !callbackEntered {
 		err = fmt.Errorf("%w: %w", ErrWeeklyScheduleSettingsWrite, err)
 	}
@@ -179,54 +191,31 @@ func weeklyRefreshTaskSpec(canonicalPath string, schedule *ScheduleSpec) schedul
 	}
 }
 
-// restoreWeeklyRefreshTaskAfterPostCreateFailure returns the scheduler to the
-// exact generation observed before a successful Create could be verified.  A
-// missing prior task is restored by removing the provisional replacement.
-func restoreWeeklyRefreshTaskAfterPostCreateFailure(
+// observeWeeklyRefreshTaskAfterFailure preserves an unverified occupant after
+// a fresh creation attempt. Observing matching XML cannot turn an uncertain
+// creation result into success or authorize destructive compensation.
+func observeWeeklyRefreshTaskAfterFailure(
 	sch weeklyRefreshTaskScheduler,
 	taskName string,
-	priorXML []byte,
-	exists bool,
 	cause error,
 ) (result weeklyRefreshTransactionResult, err error) {
 	result.restoreStatus = "n/a"
-	if exists {
-		if restoreErr := sch.ImportXML(taskName, priorXML); restoreErr != nil {
-			result.restoreStatus = "degraded"
-			return result, errors.Join(cause, fmt.Errorf("restore prior %s: %w", taskName, restoreErr))
-		}
-		restoredXML, verifyErr := sch.ExportXML(taskName)
-		if verifyErr != nil || !bytes.Equal(restoredXML, priorXML) {
-			result.restoreStatus = "degraded"
-			return result, errors.Join(
-				cause,
-				fmt.Errorf("%w: restored prior %s did not verify: %v", ErrWeeklyRefreshConflict, taskName, verifyErr),
-			)
-		}
-		result.state = weeklyRefreshTaskRestored
-		result.restoreStatus = "ok"
+	currentXML, readErr := sch.ExportXML(taskName)
+	if errors.Is(readErr, scheduler.ErrTaskNotFound) && len(currentXML) == 0 {
 		return result, cause
 	}
-
-	if deleteErr := sch.Delete(taskName); deleteErr != nil {
-		result.restoreStatus = "degraded"
-		return result, errors.Join(cause, fmt.Errorf("remove newly created %s: %w", taskName, deleteErr))
+	result.restoreStatus = "degraded"
+	if readErr != nil {
+		return result, errors.Join(cause, fmt.Errorf("observe %s after failed creation: %w", taskName, readErr))
 	}
-	if _, verifyErr := sch.ExportXML(taskName); verifyErr == nil || !errors.Is(verifyErr, scheduler.ErrTaskNotFound) {
-		result.restoreStatus = "degraded"
-		return result, errors.Join(
-			cause,
-			fmt.Errorf("%w: removed newly created %s did not verify: %v", ErrWeeklyRefreshConflict, taskName, verifyErr),
-		)
-	}
-	result.state = weeklyRefreshTaskRestored
-	result.restoreStatus = "ok"
-	return result, cause
+	return result, errors.Join(cause, fmt.Errorf("%w: %s has an unverified occupant after creation", ErrWeeklyRefreshConflict, taskName))
 }
 
 // runWeeklyRefreshTaskTransaction is the sole owner of the weekly task's
-// export/delete/create/import lifecycle. Every production writer uses its
-// existing singleton lock and returns only after the final XML is verified.
+// snapshot/create/observation lifecycle. Its singleton lock orders cooperating
+// writers but grants no exclusive authority over native task registrations.
+// Existing tasks are therefore retained and refused before any scheduler
+// mutation, even when their observed XML matches the requested definition.
 func runWeeklyRefreshTaskTransaction(sch weeklyRefreshTaskScheduler, mutation weeklyRefreshMutation) (result weeklyRefreshTransactionResult, err error) {
 	result.restoreStatus = "n/a"
 	if sch == nil || mutation.desired == nil {
@@ -250,96 +239,54 @@ func runWeeklyRefreshTaskTransaction(sch weeklyRefreshTaskScheduler, mutation we
 	}
 	candidate, candidateErr := func() (weeklyRefreshTransactionResult, error) {
 		result := weeklyRefreshTransactionResult{restoreStatus: "n/a"}
-		priorXML, exportErr := sch.ExportXML(taskName)
-		exists := exportErr == nil
-		if exportErr != nil && !errors.Is(exportErr, scheduler.ErrTaskNotFound) {
+		priorXML, exportErr := snapshotTaskForSchedulerUpgrade(sch, taskName)
+		exists := len(priorXML) > 0
+		if exportErr != nil {
 			return result, fmt.Errorf("%w: export prior %s: %w", ErrWeeklyRefreshSnapshotUnavailable, taskName, exportErr)
 		}
+		var expectedErr error
 		if mutation.expectedSet {
 			if exists != (mutation.expectedXML != nil) || (exists && !bytes.Equal(priorXML, mutation.expectedXML)) {
-				return result, fmt.Errorf("%w: expected weekly task generation is stale", ErrWeeklyRefreshConflict)
+				expectedErr = fmt.Errorf("%w: expected weekly task definition is stale", ErrWeeklyRefreshConflict)
 			}
+		}
+		if exists {
+			return result, errors.Join(refuseSchedulerTaskReplacement(taskName, priorXML), expectedErr)
+		}
+		if expectedErr != nil {
+			return result, expectedErr
 		}
 		spec, desiredErr := mutation.desired(priorXML, exists)
 		if desiredErr != nil {
 			return result, desiredErr
 		}
 		spec.Name = taskName
-		if deleteErr := sch.Delete(taskName); deleteErr != nil {
-			return result, fmt.Errorf("delete prior %s: %w", taskName, deleteErr)
-		}
 		if createErr := sch.Create(spec); createErr != nil {
-			currentXML, currentErr := sch.ExportXML(taskName)
-			switch {
-			case currentErr == nil:
-				matches, classifyErr := weeklyTaskXMLMatchesSpec(currentXML, spec)
-				if classifyErr == nil && matches {
-					result.state = weeklyRefreshTaskCommitted
-					result.finalXML = append([]byte(nil), currentXML...)
-					return result, nil
-				}
-				if exists && bytes.Equal(currentXML, priorXML) {
-					result.state = weeklyRefreshTaskRestored
-					result.restoreStatus = "ok"
-					return result, fmt.Errorf("create %s: %w", taskName, createErr)
-				}
-				return result, errors.Join(
-					fmt.Errorf("create %s: %w", taskName, createErr),
-					fmt.Errorf("%w: classify current task after create failure: %v", ErrWeeklyRefreshConflict, classifyErr),
-				)
-			case errors.Is(currentErr, scheduler.ErrTaskNotFound):
-				if !exists {
-					return result, fmt.Errorf("create %s: %w", taskName, createErr)
-				}
-				if restoreErr := sch.ImportXML(taskName, priorXML); restoreErr != nil {
-					result.restoreStatus = "degraded"
-					return result, errors.Join(
-						fmt.Errorf("create %s: %w", taskName, createErr),
-						fmt.Errorf("restore prior %s: %w", taskName, restoreErr),
-					)
-				}
-				restoredXML, verifyErr := sch.ExportXML(taskName)
-				if verifyErr != nil || !bytes.Equal(restoredXML, priorXML) {
-					result.restoreStatus = "degraded"
-					return result, errors.Join(
-						fmt.Errorf("create %s: %w", taskName, createErr),
-						fmt.Errorf("%w: restored prior task did not verify: %v", ErrWeeklyRefreshConflict, verifyErr),
-					)
-				}
-				result.state = weeklyRefreshTaskRestored
-				result.restoreStatus = "ok"
-				return result, fmt.Errorf("create %s: %w", taskName, createErr)
-			default:
-				return result, errors.Join(
-					fmt.Errorf("create %s: %w", taskName, createErr),
-					fmt.Errorf("classify current %s: %w", taskName, currentErr),
-				)
-			}
+			return observeWeeklyRefreshTaskAfterFailure(sch, taskName, fmt.Errorf("create %s: %w", taskName, createErr))
 		}
 		settledXML, verifyErr := sch.ExportXML(taskName)
 		if verifyErr != nil {
-			return restoreWeeklyRefreshTaskAfterPostCreateFailure(sch, taskName, priorXML, exists, fmt.Errorf("verify created %s: %w", taskName, verifyErr))
+			return observeWeeklyRefreshTaskAfterFailure(sch, taskName, fmt.Errorf("verify created %s: %w", taskName, verifyErr))
 		}
 		matches, classifyErr := weeklyTaskXMLMatchesSpec(settledXML, spec)
 		if classifyErr != nil {
-			return restoreWeeklyRefreshTaskAfterPostCreateFailure(sch, taskName, priorXML, exists, fmt.Errorf("%w: verify created %s: %v", ErrWeeklyRefreshConflict, taskName, classifyErr))
+			return observeWeeklyRefreshTaskAfterFailure(sch, taskName, fmt.Errorf("%w: verify created %s: %w", ErrWeeklyRefreshConflict, taskName, classifyErr))
 		}
 		if !matches {
-			return restoreWeeklyRefreshTaskAfterPostCreateFailure(sch, taskName, priorXML, exists, fmt.Errorf("%w: created %s does not match the requested generation", ErrWeeklyRefreshConflict, taskName))
+			return observeWeeklyRefreshTaskAfterFailure(sch, taskName, fmt.Errorf("%w: created %s does not match the requested definition", ErrWeeklyRefreshConflict, taskName))
 		}
 		result.state = weeklyRefreshTaskCommitted
 		result.finalXML = append([]byte(nil), settledXML...)
 		return result, nil
 	}()
 	if releaseErr := release(); releaseErr != nil {
-		switch candidate.state {
-		case weeklyRefreshTaskCommitted:
+		candidateErr = errors.Join(candidateErr, fmt.Errorf("release weekly refresh singleton lock: %w", releaseErr))
+		if candidate.state == weeklyRefreshTaskCommitted {
 			candidate.state = weeklyRefreshTaskAppliedReleaseUnconfirmed
 			candidate.restoreStatus = "n/a"
-		case weeklyRefreshTaskRestored:
-			candidate.state = ""
+			candidateErr = markAppliedLockReleaseUnconfirmed(candidateErr)
 		}
-		return candidate, errors.Join(candidateErr, fmt.Errorf("release weekly refresh singleton lock: %w", releaseErr))
+		return candidate, candidateErr
 	}
 	return candidate, candidateErr
 }

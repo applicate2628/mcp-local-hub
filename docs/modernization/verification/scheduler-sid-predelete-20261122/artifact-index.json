@@ -1,0 +1,117 @@
+{
+  "schema": 1,
+  "scope": "scheduler",
+  "pr": 660,
+  "base": "0bdb725ed261c532eba07d645c2a14880d12b9fd",
+  "source": {
+    "internal/api/install.go": {
+      "bytes": 218267,
+      "sha256": "9e6a81aa7a8936789698c3ddc4bd6304f719bbce20a62ec7b7ad47338abbccd7",
+      "git_blob": "8438f8bc54ccf84018741084ec440bb94af538f1"
+    },
+    "internal/api/install_own_port_test.go": {
+      "bytes": 30491,
+      "sha256": "edbffbc3f81db30589e9ccb625ef9245afa6faa48971e57d409269a3d46e1630",
+      "git_blob": "28a15ca8f9e683c1102913a90fae1cf1d1cedc3a"
+    },
+    "internal/api/install_task_rollback.go": {
+      "bytes": 7521,
+      "sha256": "4986cf2770250ae34dd6458ee97f113e7ba8c46ca4e1d1c22535ba7cd70b1a06",
+      "git_blob": "f950108ceed8a4b4d1f6f7887d357a95b4f9553d"
+    },
+    "internal/api/install_task_rollback_test.go": {
+      "bytes": 27426,
+      "sha256": "8a59365cba82ce7996e01f9c30108a7a49ec2f53d3b754c7807b253e42f5b3c8",
+      "git_blob": "6b05a1a151bb4accc0c7fe5ea557f86f40e3ca83"
+    },
+    "internal/api/scheduler_owner_sid_windows_test.go": {
+      "bytes": 2203,
+      "sha256": "463ad2f82026260e28702e1a481f15a635bc3c7a6aa7f2c850e83188c7f5ec1e",
+      "git_blob": "90956ad44477ef6730be65d77c2c57d0d165f2ac"
+    },
+    "internal/scheduler/entrypoint_migration_windows.go": {
+      "bytes": 45496,
+      "sha256": "6f8f8bc0d73d40279a927fe8cae25ebeebb4e769e01f67566b0dcfe254ce49c2",
+      "git_blob": "3d203ac6c5fbbf41bb2d3dab737dc9f49aa5920c"
+    },
+    "internal/scheduler/entrypoint_migration_windows_test.go": {
+      "bytes": 43046,
+      "sha256": "9184ed38764ac3d9823fe10399e883b48519eddc485a7da0bf34c92876ced174",
+      "git_blob": "56b80919c75bf51a4c69afaf86c1194a96e8a1d6"
+    },
+    "internal/scheduler/scheduler_com_windows.go": {
+      "bytes": 12974,
+      "sha256": "5ca8d9cae441d54c1d403732d07e65a6526119339b619febf564e3c9350d6aa4",
+      "git_blob": "7166f62ec6c0baef46b5e5a4ef8cbc1775f09fbd"
+    },
+    "internal/scheduler/scheduler_last_result_windows_test.go": {
+      "bytes": 12482,
+      "sha256": "690595eb86c182c92ebc592d8fd85ecd3d30ebe4401a8241cd3e1bad4f85a0e6",
+      "git_blob": "260bbec890b2e2d6176bc929aef8e172a89110dd"
+    },
+    "internal/scheduler/scheduler_owner_sid_windows_test.go": {
+      "bytes": 11255,
+      "sha256": "06717dab4bab825649cc7be9b98eaa9f7c64a9ad3de13746a84d7d1d17a8c715",
+      "git_blob": "fe14de90459b2af11546badbcc753d392b0b5d24"
+    },
+    "internal/scheduler/scheduler_windows.go": {
+      "bytes": 14487,
+      "sha256": "fe9290acff37e50f841bdbf3db713402ea93ed96dd442b09b28dddbb79377db0",
+      "git_blob": "eeb2f60bc7714f73e8b7a42708103e89568601e4"
+    },
+    "internal/scheduler/scheduler_windows_test.go": {
+      "bytes": 9130,
+      "sha256": "37ae4c5c0ef6bc79b1a5c8b75b0c7f96921836555475d106fa88d9fe5c36978d",
+      "git_blob": "708f20da97a7ba1bfc579309a338460a2367e14b"
+    }
+  },
+  "artifacts": {
+    "README.md": {
+      "bytes": 26901,
+      "sha256": "e2af336cce181d8f2ba218612bd02c823808bc2631406ee6b9816f5809d57576",
+      "git_blob": "3b7f371d321ae3d2bd83bfde60a52f30469f9e61"
+    },
+    "raw-evidence.tar.gz": {
+      "bytes": 1146574,
+      "sha256": "3183efb75ffcd4b6786d131faccc233fc9b728939a27edfe198330a65cf3dacc",
+      "git_blob": "be9e85d676bda78f2ae17465301ecb0c021c616a"
+    },
+    "root-review.json": {
+      "bytes": 1445,
+      "sha256": "43504d7c75f133f398115c9fe7d1307e05573e17c24910fcd998d1dc38b36fe8",
+      "git_blob": "a29d40d1d28e9bbb116503262e79de1c1ad5927b"
+    },
+    "scheduler-composition-independent-review.json": {
+      "bytes": 20056,
+      "sha256": "9c7d2260d34a10c4c4cf677e731f651dbe758e4b9cf5a2997d347d922604d93f",
+      "git_blob": "6c63d201fdf4fc80a9091f87a247d69374c21d51"
+    },
+    "scheduler-predelete-independent-review.json": {
+      "bytes": 6531,
+      "sha256": "00af81b700225455af2143ba5076d36b2da4df12c522388bfb4f6afbff64181b",
+      "git_blob": "5eb0d32c49e2676e7d359e69f2d5b79830ee3463"
+    },
+    "scheduler-predelete-root-review.json": {
+      "bytes": 3049,
+      "sha256": "fb6eca29ae74f195e4b5c7bf679f7e0a809ac762d8ada2dfb8f28cab72bdde81",
+      "git_blob": "2628c5ff5139674f4c35cc8ee135d6cd556667c0"
+    },
+    "scheduler-predelete-source-review.json": {
+      "bytes": 8647,
+      "sha256": "d5fec70ddf0892c5a05d80a498191899b5071e302209dc9273bda7ff513c604c",
+      "git_blob": "63350aa18dff6c6d806fe01f5a715dac875fbbea"
+    },
+    "scheduler-sid-predelete-results-review.json": {
+      "bytes": 2300,
+      "sha256": "4c7bd11a3ecf4de3db931f1d4876f5c8f968a2bacd31e7de6f4cb530e1771347",
+      "git_blob": "37d54ff1f6f6bd5a2280d7735a56edf7d2a12857"
+    },
+    "scheduler-sid-predelete-results.json": {
+      "bytes": 58219,
+      "sha256": "6c59ab1a3ef73f87580485ee808f3507e750d67d39df6d4f0279f7ed8d783912",
+      "git_blob": "08248f6446fb63664a89d97f3618f70f61321337"
+    }
+  },
+  "archive_members": 123,
+  "archive_bytes_uncompressed": 4078747
+}

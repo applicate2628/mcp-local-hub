@@ -1,0 +1,377 @@
+{
+  "schema": 1,
+  "status": "INDEPENDENT_COMPOSITION_SOURCE_REVIEWED_NOT_RUN",
+  "reviewer": "relay_residual",
+  "scope": "Preservation of prior 33 scheduler composition overlays and BackendRunHold while applying the 10-file minimal SID candidate; actual producer→Go consumer chain. No source changes by reviewer.",
+  "source_binding": {
+    "published_archive_commit": "0bdb725ed261c532eba07d645c2a14880d12b9fd",
+    "archive_path": "docs/modernization/verification/scheduler-hold-composition-20261122/qualification-evidence.zip",
+    "archive_sha256": "52c1c863b1438c380d0c8c808a18a0f136c37765127bd48de6cc43f84a240728",
+    "archive_matches_local_exact_git_object": true,
+    "previous_manifest_sha256": "7c014dba3137707dfc8b13a1f911b8f019fa1ce9ab14bc5333ebaaa81769b016",
+    "previous_source_head": "75dbc6406123e22468f168b861d5e0622c9d5769",
+    "previous_source_tree": "cb3eec77c23f9400be962d91c9f23834b84f7643",
+    "previous_pr660": "1cffaab021686a7ae27a5ffc038f280160f96a60",
+    "previous_api_testmain": "b5cd530969b7089e7d7cbaf5308543be8c443f8c",
+    "sid_manifest_path": "evidence/scheduler-sid-files.json",
+    "sid_manifest_sha256": "ed0c20ca5d33d2d94ab50e19ae908505a55a624392891c322e65807bac44d8ae",
+    "sid_patch_sha256": "1782617ddf3621f6affb88a1cf40df9606c63ba805384be2cfe4cad2cf72c1df",
+    "all10_sid_candidate_file_pins_match": true
+  },
+  "comparison": {
+    "previous_files": 33,
+    "byte_identical_previous_files": 29,
+    "changed_previous_files": 4,
+    "added_files": 6,
+    "current_files": 39,
+    "previous_file_inventory": [
+      {
+        "path": "internal/api/adopt.go",
+        "previous_sha256": "cb1e1711e848ec718b868b51e8194ea13a7f9adbee21c6584a2fa005fab692a9",
+        "current_sha256": "cb1e1711e848ec718b868b51e8194ea13a7f9adbee21c6584a2fa005fab692a9",
+        "current_bytes": 88753,
+        "unchanged": true
+      },
+      {
+        "path": "internal/api/adopt_provenance_events.go",
+        "previous_sha256": "7ac2132fdf4211c0884d9f877d01c9afcdda8c5757edf5746592943959abb6f3",
+        "current_sha256": "7ac2132fdf4211c0884d9f877d01c9afcdda8c5757edf5746592943959abb6f3",
+        "current_bytes": 10948,
+        "unchanged": true
+      },
+      {
+        "path": "internal/api/adopt_scheduler_recovery_test.go",
+        "previous_sha256": "5200d67c4c92da2d224320feff39e41a67e467aafd955f62727e7ce12b365b71",
+        "current_sha256": "5200d67c4c92da2d224320feff39e41a67e467aafd955f62727e7ce12b365b71",
+        "current_bytes": 10083,
+        "unchanged": true
+      },
+      {
+        "path": "internal/api/install.go",
+        "previous_sha256": "7a39b43e58d3acf97f756c5e445acae4d0d198c76df0cee2b75e3a04f4272321",
+        "current_sha256": "87b13d863c346063563d2ec599c6adf7af447b78902a2c692870645afbcd831d",
+        "current_bytes": 217750,
+        "unchanged": false
+      },
+      {
+        "path": "internal/api/install_hyphen_family_ownership_test.go",
+        "previous_sha256": "4edc4ccded09b44639a5e74d379462df4733e570a004e5188cb042df902a7b26",
+        "current_sha256": "4edc4ccded09b44639a5e74d379462df4733e570a004e5188cb042df902a7b26",
+        "current_bytes": 22696,
+        "unchanged": true
+      },
+      {
+        "path": "internal/api/install_parsed_manifest.go",
+        "previous_sha256": "e3b66f71a690d2be7006f5cd65e6ef38365fee01aa297ee332cdfe93de05b561",
+        "current_sha256": "e3b66f71a690d2be7006f5cd65e6ef38365fee01aa297ee332cdfe93de05b561",
+        "current_bytes": 143465,
+        "unchanged": true
+      },
+      {
+        "path": "internal/api/install_prune_recovery_test.go",
+        "previous_sha256": "79292de007701d7e1cb9a271e6458e0f16d83e5cd54271317374bbb40a611fc5",
+        "current_sha256": "79292de007701d7e1cb9a271e6458e0f16d83e5cd54271317374bbb40a611fc5",
+        "current_bytes": 18576,
+        "unchanged": true
+      },
+      {
+        "path": "internal/api/install_scheduler_snapshot_test.go",
+        "previous_sha256": "554b66722410d4d7c837d374a471b0384d1fff08290c4b18cd70d8017b05fab1",
+        "current_sha256": "554b66722410d4d7c837d374a471b0384d1fff08290c4b18cd70d8017b05fab1",
+        "current_bytes": 7703,
+        "unchanged": true
+      },
+      {
+        "path": "internal/api/install_task_mutation_failure_test.go",
+        "previous_sha256": "7496583080e79d2f531ab85c5c4b4a9b50884f82bd729493df59edfc873a2ed5",
+        "current_sha256": "7496583080e79d2f531ab85c5c4b4a9b50884f82bd729493df59edfc873a2ed5",
+        "current_bytes": 11556,
+        "unchanged": true
+      },
+      {
+        "path": "internal/api/install_task_recovery.go",
+        "previous_sha256": "edfd3bf0428534f931019a0b75b101b60ccce2ac257c8ab11e0947ebba444510",
+        "current_sha256": "edfd3bf0428534f931019a0b75b101b60ccce2ac257c8ab11e0947ebba444510",
+        "current_bytes": 3539,
+        "unchanged": true
+      },
+      {
+        "path": "internal/api/install_task_recovery_storage_test.go",
+        "previous_sha256": "8899bf5ccb5eacef5c66bebdeeaf091aa26b91fffe0ab9b49aa3edb8cfecd78f",
+        "current_sha256": "8899bf5ccb5eacef5c66bebdeeaf091aa26b91fffe0ab9b49aa3edb8cfecd78f",
+        "current_bytes": 1862,
+        "unchanged": true
+      },
+      {
+        "path": "internal/api/install_task_recovery_test.go",
+        "previous_sha256": "7f7afc5ff0f497d2384a9378f287e9930f65468650cb6d91f933664d41ad3b37",
+        "current_sha256": "7f7afc5ff0f497d2384a9378f287e9930f65468650cb6d91f933664d41ad3b37",
+        "current_bytes": 11323,
+        "unchanged": true
+      },
+      {
+        "path": "internal/api/install_task_rollback.go",
+        "previous_sha256": "2c5f2da96a1b6926949713fc81de8d5b096cc7a74c1f0bc221529ae2eb7ad0d4",
+        "current_sha256": "2c5f2da96a1b6926949713fc81de8d5b096cc7a74c1f0bc221529ae2eb7ad0d4",
+        "current_bytes": 6746,
+        "unchanged": true
+      },
+      {
+        "path": "internal/api/install_task_rollback_test.go",
+        "previous_sha256": "09cd564df73d0721bf2b56c83c63923110dea14840d8ce754edae063faae5030",
+        "current_sha256": "09cd564df73d0721bf2b56c83c63923110dea14840d8ce754edae063faae5030",
+        "current_bytes": 18507,
+        "unchanged": true
+      },
+      {
+        "path": "internal/api/prune_tasks_test.go",
+        "previous_sha256": "e22ef041f80ece55f3dd5e2b29dab684e8d274be6b96ff19cd389d993534deca",
+        "current_sha256": "e22ef041f80ece55f3dd5e2b29dab684e8d274be6b96ff19cd389d993534deca",
+        "current_bytes": 13981,
+        "unchanged": true
+      },
+      {
+        "path": "internal/autostart/linux.go",
+        "previous_sha256": "d0f04d5baf045674b7264090e90cc0274312426c3291847956a77397a8e35e9c",
+        "current_sha256": "d0f04d5baf045674b7264090e90cc0274312426c3291847956a77397a8e35e9c",
+        "current_bytes": 14296,
+        "unchanged": true
+      },
+      {
+        "path": "internal/autostart/linux_exec_percent_test.go",
+        "previous_sha256": "34db04e7f452df8df0f5ed41683c4aa67da6386196702237ec46e753c4cc5e60",
+        "current_sha256": "34db04e7f452df8df0f5ed41683c4aa67da6386196702237ec46e753c4cc5e60",
+        "current_bytes": 2809,
+        "unchanged": true
+      },
+      {
+        "path": "internal/scheduler/scheduler.go",
+        "previous_sha256": "907449ab2be563539dd29179a00a7b68fa5cead9f89376169e521bd9df9123c5",
+        "current_sha256": "907449ab2be563539dd29179a00a7b68fa5cead9f89376169e521bd9df9123c5",
+        "current_bytes": 7371,
+        "unchanged": true
+      },
+      {
+        "path": "internal/scheduler/scheduler_com_windows.go",
+        "previous_sha256": "bd3cc13ea5fd4152597e8e69963bfcc58553820245f31113b51d731954532efd",
+        "current_sha256": "5ca8d9cae441d54c1d403732d07e65a6526119339b619febf564e3c9350d6aa4",
+        "current_bytes": 12974,
+        "unchanged": false
+      },
+      {
+        "path": "internal/scheduler/scheduler_com_windows_test.go",
+        "previous_sha256": "5352797d1adb396ff006683b64ec63fe8490883e52c3967b30c243fa4accc2d6",
+        "current_sha256": "5352797d1adb396ff006683b64ec63fe8490883e52c3967b30c243fa4accc2d6",
+        "current_bytes": 6957,
+        "unchanged": true
+      },
+      {
+        "path": "internal/scheduler/scheduler_create_conflict_windows_test.go",
+        "previous_sha256": "3e5d9d1d77ffcf36ba1b4335854b16d2120a2c73f26c67a5400bf768e0af2621",
+        "current_sha256": "3e5d9d1d77ffcf36ba1b4335854b16d2120a2c73f26c67a5400bf768e0af2621",
+        "current_bytes": 3783,
+        "unchanged": true
+      },
+      {
+        "path": "internal/scheduler/scheduler_hidden_task_windows_test.go",
+        "previous_sha256": "33a50b53f006374dd8aa79f00f099d17696164e70487b1d75b737ea8125fe689",
+        "current_sha256": "33a50b53f006374dd8aa79f00f099d17696164e70487b1d75b737ea8125fe689",
+        "current_bytes": 6146,
+        "unchanged": true
+      },
+      {
+        "path": "internal/scheduler/scheduler_last_result_windows_test.go",
+        "previous_sha256": "87667feb08f6403b18c05db068f532233091a909738ca0299de510c0d8fd7b4b",
+        "current_sha256": "690595eb86c182c92ebc592d8fd85ecd3d30ebe4401a8241cd3e1bad4f85a0e6",
+        "current_bytes": 12482,
+        "unchanged": false
+      },
+      {
+        "path": "internal/scheduler/scheduler_owned_run_windows_test.go",
+        "previous_sha256": "a30c2944ea1b7bcf95fecb1a33b165cec76e3a832300cb422660c951b00e0f8e",
+        "current_sha256": "a30c2944ea1b7bcf95fecb1a33b165cec76e3a832300cb422660c951b00e0f8e",
+        "current_bytes": 9293,
+        "unchanged": true
+      },
+      {
+        "path": "internal/scheduler/scheduler_windows.go",
+        "previous_sha256": "c812e1b25e1b2f80c1d95f94bcae36cb6752a6e3320d0e856f8193036d1f2409",
+        "current_sha256": "fe9290acff37e50f841bdbf3db713402ea93ed96dd442b09b28dddbb79377db0",
+        "current_bytes": 14487,
+        "unchanged": false
+      },
+      {
+        "path": "internal/scheduler/scheduler_xml_create_windows.go",
+        "previous_sha256": "eafbae884b9516385206004c2255fd63b23a0a7e07f0179c93a66218817f1ba1",
+        "current_sha256": "eafbae884b9516385206004c2255fd63b23a0a7e07f0179c93a66218817f1ba1",
+        "current_bytes": 2023,
+        "unchanged": true
+      },
+      {
+        "path": "internal/scheduler/scheduler_xml_create_windows_test.go",
+        "previous_sha256": "062b4671cd846bc4d06ec684f6d6b7bc3f4b05a8265840f4950dba20f14704ed",
+        "current_sha256": "062b4671cd846bc4d06ec684f6d6b7bc3f4b05a8265840f4950dba20f14704ed",
+        "current_bytes": 8883,
+        "unchanged": true
+      },
+      {
+        "path": "internal/api/intent_audit_caller_oracle_test.go",
+        "previous_sha256": "266da232a605029cb2eb65cf57dcf80ca0d629a4259d6a021b48958d786fe365",
+        "current_sha256": "266da232a605029cb2eb65cf57dcf80ca0d629a4259d6a021b48958d786fe365",
+        "current_bytes": 5807,
+        "unchanged": true
+      },
+      {
+        "path": "internal/api/main_helper_dispatch_test.go",
+        "previous_sha256": "3f9e37d635d2942fd0f967a11d107fe7657c35fab976d524176d15006299fd95",
+        "current_sha256": "3f9e37d635d2942fd0f967a11d107fe7657c35fab976d524176d15006299fd95",
+        "current_bytes": 4137,
+        "unchanged": true
+      },
+      {
+        "path": "internal/api/main_helper_dispatch_validation_test.go",
+        "previous_sha256": "bcc4636ea0a3c260015e155ed1d8ad2dc287dea93dc2d29b33c3d45bc56d09fd",
+        "current_sha256": "bcc4636ea0a3c260015e155ed1d8ad2dc287dea93dc2d29b33c3d45bc56d09fd",
+        "current_bytes": 6651,
+        "unchanged": true
+      },
+      {
+        "path": "internal/api/main_test.go",
+        "previous_sha256": "2c93ff894595a54b13f4409492a807aae3dba3dda5145af22b191b2bbd8b4cd1",
+        "current_sha256": "2c93ff894595a54b13f4409492a807aae3dba3dda5145af22b191b2bbd8b4cd1",
+        "current_bytes": 16576,
+        "unchanged": true
+      },
+      {
+        "path": "internal/api/secrets_test.go",
+        "previous_sha256": "ad1f93d38e8c4ff3d369779223a7bf4f7686947135a76706bf45494bbc771e79",
+        "current_sha256": "ad1f93d38e8c4ff3d369779223a7bf4f7686947135a76706bf45494bbc771e79",
+        "current_bytes": 48066,
+        "unchanged": true
+      },
+      {
+        "path": "internal/api/install_backend_hold_composition_windows_test.go",
+        "previous_sha256": "d558384b41b8840f021aeba7d71eb643ad766e17bc3a6c94ecbdd1a199c9b553",
+        "current_sha256": "d558384b41b8840f021aeba7d71eb643ad766e17bc3a6c94ecbdd1a199c9b553",
+        "current_bytes": 3170,
+        "unchanged": true
+      }
+    ],
+    "added_file_inventory": [
+      {
+        "path": "internal/api/install_own_port_test.go",
+        "bytes": 30491,
+        "sha256": "edbffbc3f81db30589e9ccb625ef9245afa6faa48971e57d409269a3d46e1630",
+        "sid_manifest_candidate_match": true,
+        "base_equals_master": true
+      },
+      {
+        "path": "internal/api/scheduler_owner_sid_windows_test.go",
+        "bytes": 2203,
+        "sha256": "463ad2f82026260e28702e1a481f15a635bc3c7a6aa7f2c850e83188c7f5ec1e",
+        "sid_manifest_candidate_match": true,
+        "base_equals_master": true
+      },
+      {
+        "path": "internal/scheduler/entrypoint_migration_windows.go",
+        "bytes": 45496,
+        "sha256": "6f8f8bc0d73d40279a927fe8cae25ebeebb4e769e01f67566b0dcfe254ce49c2",
+        "sid_manifest_candidate_match": true,
+        "base_equals_master": true
+      },
+      {
+        "path": "internal/scheduler/entrypoint_migration_windows_test.go",
+        "bytes": 43046,
+        "sha256": "9184ed38764ac3d9823fe10399e883b48519eddc485a7da0bf34c92876ced174",
+        "sid_manifest_candidate_match": true,
+        "base_equals_master": true
+      },
+      {
+        "path": "internal/scheduler/scheduler_owner_sid_windows_test.go",
+        "bytes": 11255,
+        "sha256": "06717dab4bab825649cc7be9b98eaa9f7c64a9ad3de13746a84d7d1d17a8c715",
+        "sid_manifest_candidate_match": true,
+        "base_equals_master": true
+      },
+      {
+        "path": "internal/scheduler/scheduler_windows_test.go",
+        "bytes": 9130,
+        "sha256": "37ae4c5c0ef6bc79b1a5c8b75b0c7f96921836555475d106fa88d9fe5c36978d",
+        "sid_manifest_candidate_match": true,
+        "base_equals_master": true
+      }
+    ]
+  },
+  "mandatory_findings": [],
+  "reviewed_contracts": [
+    {
+      "contract": "BackendRunHold merge preservation",
+      "location": "internal/api/install_parsed_manifest.go:buildMergedSupervisorIntentFromPriorWithProjection",
+      "observation": "The entire file is byte-identical to the published composition. New merged intent sets BackendRunHold to prior.BackendRunHold.clone(); other desired daemon/timer projection remains as before. The master hold.clone copies Work, so mutating the merged work item cannot mutate the prior observation.",
+      "test": "TestInstallMergePreservesBackendRunHold is byte-identical, checks held error, desired descriptor and both original equality/deep alias exclusion."
+    },
+    {
+      "contract": "Preflight write probe has no authority to carry a real hold",
+      "location": "internal/api/install_parsed_manifest.go:preflightSupervisorIntentWrite",
+      "observation": "With a nonzero hold the helper clones the desired whole intent, clears hold only on that private probe, and passes the probe to WriteSupervisorIntent at the temporary path. The desired intent remains held for real commit; existing master write owner preserves current on-disk hold.",
+      "test": "TestInstallPreflightPreservesBackendRunHold is byte-identical, checks desired equality/held error, original file bytes and probe/lock absence."
+    },
+    {
+      "contract": "Real call sites and callbacks retained",
+      "location": "internal/api/install_parsed_manifest.go and internal/api/install.go",
+      "observation": "Observed prior read and regular read paths still converge on the same merge owner. Projected-row callback is unchanged. Legacy install preflight and observed invocation-preflight remain distinct as before; SID patch does not alter merge/commit/rollback callbacks. API schedulerStatusForOwnPort remains defaultSchedulerStatusForOwnPort→scheduler.New().Status."
+    },
+    {
+      "contract": "Native principal projection reaches the Go port owner gate",
+      "location": "scheduler_com_windows.go:Get-OwnerSID/list/status → scheduler_windows.go:Status/ListContext → api/install.go:statusOwnedByCurrentUser",
+      "observation": "Status/List resolve a principal to canonical SID before TaskStatus; unknown/empty projection fails closed without a partial public result. Platform scheduler/current migration owner now retains user.Current().Uid. Windows API compares the resolved Owner with current.Uid, retaining former non-Windows account projection. There is no short-name/domain-stripping fallback on this Windows chain."
+    },
+    {
+      "contract": "Migration inventory and RunOwned use the same owner identity",
+      "location": "entrypoint_migration_windows.go and scheduler_com_windows.go:Test-OwnedDefinition",
+      "observation": "Migration comparisons consume TaskStatus.Owner from List, which is now SID-based; XML export remains raw XML and does not substitute its raw owner string into the comparison. RunOwned still resolves both XML and native principal via the same resolver; resolver failure remains guarded mismatch, without Run effect."
+    },
+    {
+      "contract": "Test boundary honesty",
+      "location": "scheduler_owner_sid_windows_test.go and api/scheduler_owner_sid_windows_test.go",
+      "observation": "PowerShell fixture replaces exactly the COM service constructor and account-name lookup; controlled ScriptMethod Run records only a marker, never a native task run. Literal SecurityIdentifier parsing/production validation/error projection stay real. API test fixes private empty state, PID/image/Status callbacks and asserts exactly one actual port-decision Status query. Native account/domain resolution and Scheduler rights/effects are not thereby qualified."
+    },
+    {
+      "contract": "Existing last-result semantics preserved",
+      "location": "scheduler_last_result_windows_test.go",
+      "observation": "Only fixture owner strings/expected platform owner change to SID literals. Missing/null/malformed LastTaskResult classifications, numeric runtime state and hidden-task/recovery overlays remain unchanged."
+    }
+  ],
+  "master_dependency_refs": [
+    {
+      "commit": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "path": "internal/api/supervisor_backend_run_hold.go",
+      "bytes": 5521,
+      "sha256": "d5a402d37a189c9408b747e63680facbf049e7c9b461f2ac4e76dac6738150a5"
+    },
+    {
+      "commit": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "path": "internal/api/supervisor_intent.go",
+      "bytes": 35764,
+      "sha256": "25541a4477d197a272ad315f6a60383b5622297994489c13f7ea14338834dbee"
+    },
+    {
+      "commit": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "path": "internal/api/supervisor_backend_hold_passive_windows_test.go",
+      "bytes": 7086,
+      "sha256": "3b7c2b714234ff672324901f7a02cad4c35e04da329615bb824c0b5180971522"
+    }
+  ],
+  "local_checks": [
+    "Direct archive-byte equality with Git object 0bdb725e; all 33 prior overlay hashes verified before comparison.",
+    "All 10 SID source hashes exactly match declared candidate manifest.",
+    "Read the complete delta from old composition, new SID fixture tests, real port owner callback and relevant merge/preflight/migration/hold owners."
+  ],
+  "limits": [
+    "This is composition evidence on master 75dbc640 with previous 33 plus 6 additional paths, not acceptance of standalone #660 branch.",
+    "No Go parser/compiler/gofmt/test or Windows/PowerShell runtime executed by reviewer; no prior PASS transferred to changed bytes.",
+    "Real Run/RunOwned/Stop/Delete, account/domain translation, Task Scheduler privileges/credentials, external replacement, cancellation/tree ownership, durable recovery and snapshot storage remain outside this source review.",
+    "Observed preflight/runtime controller paths outside the unchanged merge/preflight region are not newly requalified here.",
+    "No native Scheduler, installed product, process mutation, publication, CI, merge or external paid agent use."
+  ]
+}

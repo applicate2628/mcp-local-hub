@@ -53,9 +53,12 @@ type TaskStatus struct {
 	Name         string
 	State        string // display-only compatibility projection
 	RuntimeState TaskRuntimeState
-	LastResult   int    // exit code of last run, or -1 if never run
-	NextRun      string // human-readable, backend-specific
-	Owner        string // backend-specific task owner/account, if available
+	// LastResult is the backend's observed task result, not proof of readiness.
+	// Windows preserves the signed 32-bit native code without normalization.
+	// Sources without runtime data may use -1; it can also be a native code.
+	LastResult int
+	NextRun    string // observed local calendar time; empty means observed none for runtime snapshots
+	Owner      string // backend-specific task owner/account, if available
 }
 
 type TaskRuntimeState uint8
@@ -73,10 +76,20 @@ const (
 // distinguish absent-but-expected tasks from schtasks communication
 // failures.
 var ErrTaskNotFound = errors.New("scheduler: task not found")
+var ErrTaskAlreadyExists = errors.New("scheduler: task already exists")
 var ErrTaskNotRunning = errors.New("scheduler: task not running")
 var ErrPermissionDenied = errors.New("scheduler: permission denied")
 var ErrTaskCorrupt = errors.New("scheduler: task corrupt")
 var ErrUnavailable = errors.New("scheduler: unavailable")
+
+// ErrTaskReplacementUnowned means the caller refused to replace or remove an
+// observed task because it could not exclusively own that task generation.
+var ErrTaskReplacementUnowned = errors.New("exclusive ownership of the existing scheduler task generation is unavailable")
+
+// ErrMutationOutcomeUnknown means the executor could not establish whether a
+// dispatched mutation took effect. It is never evidence of absence and must not
+// cause replay, deletion, or XML replacement as automatic compensation.
+var ErrMutationOutcomeUnknown = errors.New("scheduler: mutation outcome unknown")
 
 // WindowsUsersEquivalent compares a Task Scheduler Run As User value against
 // the current user's short username. Task Scheduler may qualify the stored
@@ -108,10 +121,13 @@ var ErrNotImplemented = errors.New("scheduler: not implemented")
 // Implementations live in scheduler_<os>.go files selected by build tags.
 type Scheduler interface {
 	// Create registers a new task. If a task with the same name already exists,
-	// Create returns an error — callers must Delete first for idempotence.
+	// Create returns an error. A preceding absence check is not atomic; callers
+	// must preserve a conflicting occupant and must not retry by deleting it.
 	Create(spec TaskSpec) error
 
-	// Delete removes a task by name. Returns nil if the task does not exist.
+	// Delete removes the current occupant of a name, not a previously observed
+	// generation. Returns nil if the name does not exist. XML comparison and
+	// cooperating local locks do not authorize automatic replacement or rollback.
 	Delete(name string) error
 
 	// Run triggers an immediate one-off execution of a task.
@@ -127,11 +143,9 @@ type Scheduler interface {
 	List(prefix string) ([]TaskStatus, error)
 
 	// ExportXML returns the raw Task Scheduler XML for a task by name.
-	// Used by install's rollback path to snapshot an existing task before
-	// replacing it, so a failed mid-sequence install can restore the
-	// prior task instead of leaving nothing. Platforms without native
-	// equivalents (Linux, macOS) return an error; callers guard on that
-	// and treat the case as "no prior spec to preserve".
+	// This is a definition observation, not a generation token or exclusive
+	// namespace authority. Unsupported/error results do not establish absence;
+	// only ErrTaskNotFound with no bytes identifies an absent registration.
 	ExportXML(name string) ([]byte, error)
 
 	// ImportXML re-creates a task from raw Task Scheduler XML. Counterpart
@@ -143,6 +157,15 @@ type Scheduler interface {
 // underlying list operation when the caller's context is done.
 type ContextLister interface {
 	ListContext(ctx context.Context, prefix string) ([]TaskStatus, error)
+}
+
+// XMLCreator optionally supports registering native XML without replacing an
+// occupied task name. A conflict returns ErrTaskAlreadyExists. XML alone does
+// not restore stored passwords or independently captured task permissions.
+// Registration is not proof of execution or readiness; ErrUnavailable leaves
+// the mutation outcome uncertain and must not prompt destructive compensation.
+type XMLCreator interface {
+	CreateXMLIfAbsent(name string, rawXML []byte) error
 }
 
 // e2eSchedulerEnv, when set to "none", swaps scheduler.New()'s return

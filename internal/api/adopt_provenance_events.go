@@ -174,6 +174,16 @@ func emitAdoptProvenancePreserved(manifestName string, clientNames []string) {
 	})
 }
 
+// Scheduler task names are a separate recovery domain from client names. Keep
+// this event limited to names/counts; private XML, paths and causes stay out.
+func emitAdoptSchedulerRecoveryPreserved(manifestName string, taskNames []string) {
+	emitAdoptProvenanceEvent(SupervisorEventSeverityWarn, "adopt-scheduler-recovery-preserved", map[string]any{
+		"manifest":   manifestName,
+		"tasks":      append([]string(nil), taskNames...),
+		"task_count": len(taskNames),
+	})
+}
+
 // emitAdoptProvenanceCommitFailed records that Install committed but the flip
 // write failed; the row is left `adopting` (recoverable). Body: manifest. Called
 // by the Phase C seam.

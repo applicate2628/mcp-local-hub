@@ -1,0 +1,752 @@
+{
+  "schema": "autostart-native-registration-roundtrip-v1",
+  "status": "SCOPED_PASS_NOT_FULLY_QUALIFIED",
+  "code_commit": "3665152676c0720bc164d9b7bdff82ff8459df7b",
+  "code_tree": "27ee4a94b706ed7d56fb3e36d842c3ae2a258ee2",
+  "parent": "dbe335ff2d44565b27893be3908028b281bd1bd0",
+  "prior_code": "c0b0cc224b12260aad1268c50305b7c8cc265b5e",
+  "code_blobs": [
+    {
+      "path": "internal/scheduler/task_xml_match.go",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "26daf3782d99ffc82b535b89f757eb90746b08f9"
+    },
+    {
+      "path": "internal/scheduler/task_xml_match_test.go",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "1cb009e129e45242301111638a91e428b43c97d2"
+    },
+    {
+      "path": "internal/scheduler/task_xml_match_windows.go",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "5cb781c97f5d7e607aa4730e469d383205fc1122"
+    },
+    {
+      "path": "internal/autostart/windows_native_roundtrip_test.go",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "241a6cebc04f821d7529f5e75d98423f689b9efa"
+    }
+  ],
+  "tested_files_sha256": {
+    "internal/api/scheduler_replacement.go": "257f6840bc7bb6279ea9753dfaae494bc486f55e142578820eb6e7d8497eb731",
+    "internal/autostart/autostart.go": "4cbcda2e6fa67fa64e1a4f49f59706662b036c7607b8d9b6269d0480c8657649",
+    "internal/autostart/windows.go": "1332a7bceee2259f0db8c501f854431f5d7f9d8874076d13e15b3e6405ed9e3e",
+    "internal/autostart/windows_test.go": "ded4e1af9ac6b8fd11e36b0748b57e7048460144403422d8b1b5c2fd87093d18",
+    "internal/cli/autostart.go": "0bfb9347472de56e671b69d9df5fe03aba7d49ce7beaae092326958450d30cf0",
+    "internal/scheduler/task_xml_match.go": "61bff24e2abe59f100920fa3bd9c3303928c0e2d813e1bfdc51db788776c7b1e",
+    "internal/scheduler/task_xml_match_test.go": "fc40e670b6f1a2e5fe0b97cdb42cfd1457884031104ab24450a6f7c7ae8d0de3",
+    "internal/scheduler/task_xml_match_windows.go": "a6d238f6e8e1cae48f79a4aa06290162fb5b062456ce0624421ba12b2275f9de",
+    "internal/scheduler/task_xml_match_windows_test.go": "7be3d01fecef08c2e196256c21a1c42b000722974449c1e5efd5c71824a06fac",
+    "internal/autostart/windows_native_roundtrip_test.go": "9c9a4db59573d74f6ec8f7933352f7b1907d0b511c033b8752a994af882deb18"
+  },
+  "native_coordinator_sha256": "0997ef9baef811f0748fe764488a23ff556f75cc36ca43dae3523ceb8aa91bbd",
+  "campaigns": [
+    {
+      "id": "v1",
+      "status": "FAIL",
+      "controller_exit_code": 1,
+      "controller_seconds": 8.476611800026149,
+      "original_controller_reaped": true,
+      "controller_capture_handles_closed": true,
+      "receipt_received_lf_sha256": "4821f83073e3ac50a08706854c0b4159c0f6bfa5620e9c4496fca999e1369e16",
+      "receipt_native_crlf_sha256": "3d07c06a44c01c4740eb80cf7055a89766840d792fc635694b2c43944b0eac09",
+      "receipt_transport": "CRLF to LF; original hash reproduced only in memory",
+      "config_sha256": "e34d88d4f14fe6c63cb4a24c075421d64e8995699c8cc1144f13830821907633",
+      "native_checkout_head": "b14cdeba95b2a69815d1677ee3f0dc236e8f1c79",
+      "guard_sha256": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2",
+      "step_inputs": [
+        {
+          "name": "format-native-roundtrip",
+          "source_input_set": "4d2bb4edd0b1a70b41bde3c86d58d4f2862a68209b8cd786260fcc707b12e498"
+        },
+        {
+          "name": "native-roundtrip",
+          "source_input_set": "4d2bb4edd0b1a70b41bde3c86d58d4f2862a68209b8cd786260fcc707b12e498"
+        }
+      ],
+      "commands": [
+        {
+          "name": "head",
+          "exit_code": 0,
+          "seconds": 0.14466109999921173,
+          "work_seconds": 30,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures_measured": true,
+          "stdout_sha256": "c1745520354404a95086c149ce60b0627263ac9b7040956218e54410a0632f0e",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "original_closure": "CLOSED",
+          "original_readers_joined": 2
+        },
+        {
+          "name": "format-native-roundtrip",
+          "exit_code": 0,
+          "seconds": 0.1124652000144124,
+          "work_seconds": 30,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures_measured": true,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "original_closure": "CLOSED",
+          "original_readers_joined": 2
+        },
+        {
+          "name": "native-roundtrip",
+          "exit_code": 1,
+          "seconds": 7.938066200003959,
+          "work_seconds": 360,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures_measured": true,
+          "stdout_sha256": "c93740beb0f3009774509a8385ac7996dd0eafbf34b74e8799770181754c17f8",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "original_closure": "CLOSED",
+          "original_readers_joined": 2,
+          "received_raw_stdout_hash_verified_before_parse": true,
+          "test_counts": {
+            "roots": {
+              "pass": 0,
+              "fail": 1,
+              "skip": 0
+            },
+            "subtests": {
+              "pass": 0,
+              "fail": 0,
+              "skip": 0
+            },
+            "packages": {
+              "pass": 0,
+              "fail": 1,
+              "skip": 0
+            }
+          },
+          "terminal_roots": [
+            {
+              "name": "TestWindowsBackend_EnableNativeRegistrationRoundTrip",
+              "result": "fail",
+              "seconds": 4.03
+            }
+          ],
+          "test_filter": "^TestWindowsBackend_EnableNativeRegistrationRoundTrip$",
+          "tagged": false
+        }
+      ]
+    },
+    {
+      "id": "v2",
+      "status": "FAIL",
+      "controller_exit_code": 1,
+      "controller_seconds": 10.151911099965218,
+      "original_controller_reaped": true,
+      "controller_capture_handles_closed": true,
+      "receipt_received_lf_sha256": "1db9db14c4643be42bc3e0791b1907a8cd8996b174d92dad2f34e78a1ebc808a",
+      "receipt_native_crlf_sha256": "33cb07b05c442fa134d06cd167da94f969c89bd756efb5260c3b138a044fd148",
+      "receipt_transport": "CRLF to LF; original hash reproduced only in memory",
+      "config_sha256": "220dfc206bc06cc70a5faf2542bd52658691f649e7e16e67ffbac057168f9a30",
+      "native_checkout_head": "b14cdeba95b2a69815d1677ee3f0dc236e8f1c79",
+      "guard_sha256": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2",
+      "step_inputs": [
+        {
+          "name": "format-native-roundtrip",
+          "source_input_set": "381581dcc2434fbc6c7cbd8b9f9d16f8c010706ce9e1a30085d055d1519ada58"
+        },
+        {
+          "name": "native-roundtrip",
+          "source_input_set": "381581dcc2434fbc6c7cbd8b9f9d16f8c010706ce9e1a30085d055d1519ada58"
+        }
+      ],
+      "commands": [
+        {
+          "name": "head",
+          "exit_code": 0,
+          "seconds": 0.11347510002087802,
+          "work_seconds": 30,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures_measured": true,
+          "stdout_sha256": "c1745520354404a95086c149ce60b0627263ac9b7040956218e54410a0632f0e",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "original_closure": "CLOSED",
+          "original_readers_joined": 2
+        },
+        {
+          "name": "format-native-roundtrip",
+          "exit_code": 0,
+          "seconds": 0.12436850002268329,
+          "work_seconds": 30,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures_measured": true,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "original_closure": "CLOSED",
+          "original_readers_joined": 2
+        },
+        {
+          "name": "native-roundtrip",
+          "exit_code": 1,
+          "seconds": 9.707337600004394,
+          "work_seconds": 360,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures_measured": true,
+          "stdout_sha256": "6e01305643ee8f3eba6cc0007464aaea0d7181767f1c7eae5395611bea02ea52",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "original_closure": "CLOSED",
+          "original_readers_joined": 2,
+          "received_raw_stdout_hash_verified_before_parse": true,
+          "test_counts": {
+            "roots": {
+              "pass": 0,
+              "fail": 1,
+              "skip": 0
+            },
+            "subtests": {
+              "pass": 0,
+              "fail": 0,
+              "skip": 0
+            },
+            "packages": {
+              "pass": 0,
+              "fail": 1,
+              "skip": 0
+            }
+          },
+          "terminal_roots": [
+            {
+              "name": "TestWindowsBackend_EnableNativeRegistrationRoundTrip",
+              "result": "fail",
+              "seconds": 2.88
+            }
+          ],
+          "test_filter": "^TestWindowsBackend_EnableNativeRegistrationRoundTrip$",
+          "tagged": false
+        }
+      ]
+    },
+    {
+      "id": "v3",
+      "status": "PASS",
+      "controller_exit_code": 0,
+      "controller_seconds": 49.79560539999511,
+      "original_controller_reaped": true,
+      "controller_capture_handles_closed": true,
+      "receipt_received_lf_sha256": "b638e67a1b2bf8883630b237f828661e92570d18cd844e54742e2cfc1f953f3b",
+      "receipt_native_crlf_sha256": "4abb4216a6b579a8ebfb247fc81aa36c919a8bbeb66ddac5a65653c5224befb8",
+      "receipt_transport": "CRLF to LF; original hash reproduced only in memory",
+      "config_sha256": "37cc35ac99b1c600f327e700d176f2eb2814ca464ec05ca897dec20433f72ccb",
+      "native_checkout_head": "b14cdeba95b2a69815d1677ee3f0dc236e8f1c79",
+      "guard_sha256": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2",
+      "step_inputs": [
+        {
+          "name": "format-native-fix",
+          "source_input_set": "26438b0bb6096979ae5530485e5b14d841039fabf9bcbafda94c370b8c2e3701"
+        },
+        {
+          "name": "matcher-default",
+          "source_input_set": "26438b0bb6096979ae5530485e5b14d841039fabf9bcbafda94c370b8c2e3701"
+        },
+        {
+          "name": "matcher-tagged",
+          "source_input_set": "26438b0bb6096979ae5530485e5b14d841039fabf9bcbafda94c370b8c2e3701"
+        },
+        {
+          "name": "native-roundtrip",
+          "source_input_set": "26438b0bb6096979ae5530485e5b14d841039fabf9bcbafda94c370b8c2e3701"
+        },
+        {
+          "name": "source-diff-check",
+          "source_input_set": "26438b0bb6096979ae5530485e5b14d841039fabf9bcbafda94c370b8c2e3701"
+        }
+      ],
+      "commands": [
+        {
+          "name": "head",
+          "exit_code": 0,
+          "seconds": 1.970531500002835,
+          "work_seconds": 30,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures_measured": true,
+          "stdout_sha256": "c1745520354404a95086c149ce60b0627263ac9b7040956218e54410a0632f0e",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "original_closure": "CLOSED",
+          "original_readers_joined": 2
+        },
+        {
+          "name": "format-native-fix",
+          "exit_code": 0,
+          "seconds": 0.24663710000459105,
+          "work_seconds": 30,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures_measured": true,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "original_closure": "CLOSED",
+          "original_readers_joined": 2
+        },
+        {
+          "name": "matcher-default",
+          "exit_code": 0,
+          "seconds": 30.853610699996352,
+          "work_seconds": 360,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures_measured": true,
+          "stdout_sha256": "da450eec7b87e50b76f43e7180b6a13d58a09978b441865b3b79b3dfc668ef1a",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "original_closure": "CLOSED",
+          "original_readers_joined": 2,
+          "received_raw_stdout_hash_verified_before_parse": true,
+          "test_counts": {
+            "roots": {
+              "pass": 7,
+              "fail": 0,
+              "skip": 0
+            },
+            "subtests": {
+              "pass": 59,
+              "fail": 0,
+              "skip": 0
+            },
+            "packages": {
+              "pass": 2,
+              "fail": 0,
+              "skip": 0
+            }
+          },
+          "terminal_roots": [
+            {
+              "name": "TestTaskDefinitionsEquivalentAllowsNativeNormalization",
+              "result": "pass",
+              "seconds": 0
+            },
+            {
+              "name": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences",
+              "result": "pass",
+              "seconds": 1.26
+            },
+            {
+              "name": "TestTaskDefinitionsEquivalentRejectsUnreadableXML",
+              "result": "pass",
+              "seconds": 0
+            },
+            {
+              "name": "TestTaskDefinitionsEquivalentSchedulerSelectedEngine",
+              "result": "pass",
+              "seconds": 0
+            },
+            {
+              "name": "TestTaskDefinitionsEquivalentCurrentUserSpelling",
+              "result": "pass",
+              "seconds": 0
+            },
+            {
+              "name": "TestWindowsTaskSpecMatchesXMLUsesCurrentUserAndExistingWriter",
+              "result": "pass",
+              "seconds": 0.01
+            },
+            {
+              "name": "TestWindowsBackend_EnableRequiresObservedEnabledRuntime",
+              "result": "pass",
+              "seconds": 0.01
+            }
+          ],
+          "test_filter": "^(TestTaskDefinitionsEquivalent.*|TestWindowsTaskSpecMatchesXML.*|TestWindowsBackend_Enable_.*|TestWindowsBackend_EnableRequiresObservedEnabledRuntime)$",
+          "tagged": false
+        },
+        {
+          "name": "matcher-tagged",
+          "exit_code": 0,
+          "seconds": 6.254640300001483,
+          "work_seconds": 360,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures_measured": true,
+          "stdout_sha256": "74958c26b6ab6989df99d5f574c7b2c18d0f0c8aeb379ee6a6b6d5f79d67a0a7",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "original_closure": "CLOSED",
+          "original_readers_joined": 2,
+          "received_raw_stdout_hash_verified_before_parse": true,
+          "test_counts": {
+            "roots": {
+              "pass": 7,
+              "fail": 0,
+              "skip": 0
+            },
+            "subtests": {
+              "pass": 59,
+              "fail": 0,
+              "skip": 0
+            },
+            "packages": {
+              "pass": 2,
+              "fail": 0,
+              "skip": 0
+            }
+          },
+          "terminal_roots": [
+            {
+              "name": "TestWindowsBackend_EnableRequiresObservedEnabledRuntime",
+              "result": "pass",
+              "seconds": 0.02
+            },
+            {
+              "name": "TestTaskDefinitionsEquivalentAllowsNativeNormalization",
+              "result": "pass",
+              "seconds": 0
+            },
+            {
+              "name": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences",
+              "result": "pass",
+              "seconds": 0
+            },
+            {
+              "name": "TestTaskDefinitionsEquivalentRejectsUnreadableXML",
+              "result": "pass",
+              "seconds": 0
+            },
+            {
+              "name": "TestTaskDefinitionsEquivalentSchedulerSelectedEngine",
+              "result": "pass",
+              "seconds": 0
+            },
+            {
+              "name": "TestTaskDefinitionsEquivalentCurrentUserSpelling",
+              "result": "pass",
+              "seconds": 0
+            },
+            {
+              "name": "TestWindowsTaskSpecMatchesXMLUsesCurrentUserAndExistingWriter",
+              "result": "pass",
+              "seconds": 0.01
+            }
+          ],
+          "test_filter": "^(TestTaskDefinitionsEquivalent.*|TestWindowsTaskSpecMatchesXML.*|TestWindowsBackend_Enable_.*|TestWindowsBackend_EnableRequiresObservedEnabledRuntime)$",
+          "tagged": true
+        },
+        {
+          "name": "native-roundtrip",
+          "exit_code": 0,
+          "seconds": 9.997971999982838,
+          "work_seconds": 360,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures_measured": true,
+          "stdout_sha256": "89ceae05bc618c324f7d8ee3cfb4e65960550a4173a588a9a8d4bf1f0a277357",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "original_closure": "CLOSED",
+          "original_readers_joined": 2,
+          "received_raw_stdout_hash_verified_before_parse": true,
+          "test_counts": {
+            "roots": {
+              "pass": 1,
+              "fail": 0,
+              "skip": 0
+            },
+            "subtests": {
+              "pass": 0,
+              "fail": 0,
+              "skip": 0
+            },
+            "packages": {
+              "pass": 1,
+              "fail": 0,
+              "skip": 0
+            }
+          },
+          "terminal_roots": [
+            {
+              "name": "TestWindowsBackend_EnableNativeRegistrationRoundTrip",
+              "result": "pass",
+              "seconds": 3.69
+            }
+          ],
+          "test_filter": "^TestWindowsBackend_EnableNativeRegistrationRoundTrip$",
+          "tagged": false,
+          "native_registration": {
+            "export_bytes": 1541,
+            "export_sha256": "6a15d7d86e6a1149daaa926aefe499c0b8a989228afa3e7ddaafef6fa7c391e1",
+            "initial_runtime_state": "Ready",
+            "repeat_enable_count": 2,
+            "repeat_definition_unchanged": true,
+            "create_count": 1,
+            "repeat_delete_count": 0,
+            "cleanup_typed_absence": true,
+            "application_executed": false
+          }
+        },
+        {
+          "name": "source-diff-check",
+          "exit_code": 0,
+          "seconds": 0.07561920001171529,
+          "work_seconds": 30,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures_measured": true,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "original_closure": "CLOSED",
+          "original_readers_joined": 2
+        }
+      ]
+    },
+    {
+      "id": "unit-remainder",
+      "status": "PASS",
+      "controller_exit_code": 0,
+      "controller_seconds": 4.941451399994548,
+      "original_controller_reaped": true,
+      "controller_capture_handles_closed": true,
+      "receipt_received_lf_sha256": "62c26a19573fe73d1d560befe19f29dc30169b16029d20f9f8d3f12a09e40aba",
+      "receipt_native_crlf_sha256": "bf4fac69a148e41530d0b8619fd9fedfa04e4f1ca080967c05dca9b41a7bc82e",
+      "receipt_transport": "CRLF to LF; original hash reproduced only in memory",
+      "config_sha256": "680381c8be51f9bc5b122665ee27bbb9d960c5f7918d1665214c208090949ceb",
+      "native_checkout_head": "b14cdeba95b2a69815d1677ee3f0dc236e8f1c79",
+      "guard_sha256": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2",
+      "step_inputs": [
+        {
+          "name": "enable-default",
+          "source_input_set": "26438b0bb6096979ae5530485e5b14d841039fabf9bcbafda94c370b8c2e3701"
+        },
+        {
+          "name": "enable-tagged",
+          "source_input_set": "26438b0bb6096979ae5530485e5b14d841039fabf9bcbafda94c370b8c2e3701"
+        }
+      ],
+      "commands": [
+        {
+          "name": "head",
+          "exit_code": 0,
+          "seconds": 0.3379587000235915,
+          "work_seconds": 30,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures_measured": true,
+          "stdout_sha256": "c1745520354404a95086c149ce60b0627263ac9b7040956218e54410a0632f0e",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "original_closure": "CLOSED",
+          "original_readers_joined": 2
+        },
+        {
+          "name": "enable-default",
+          "exit_code": 0,
+          "seconds": 2.1342299999669194,
+          "work_seconds": 360,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures_measured": true,
+          "stdout_sha256": "70b0514fbf3d078896bd623d4645ad3b5ab3dc15e0901d2fceaee6ee0acfd155",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "original_closure": "CLOSED",
+          "original_readers_joined": 2,
+          "received_raw_stdout_hash_verified_before_parse": true,
+          "test_counts": {
+            "roots": {
+              "pass": 9,
+              "fail": 0,
+              "skip": 0
+            },
+            "subtests": {
+              "pass": 21,
+              "fail": 0,
+              "skip": 0
+            },
+            "packages": {
+              "pass": 1,
+              "fail": 0,
+              "skip": 0
+            }
+          },
+          "terminal_roots": [
+            {
+              "name": "TestWindowsBackend_EnableCreatesTask",
+              "result": "pass",
+              "seconds": 0
+            },
+            {
+              "name": "TestWindowsBackend_EnableStrictModeAddsFlag",
+              "result": "pass",
+              "seconds": 0
+            },
+            {
+              "name": "TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand",
+              "result": "pass",
+              "seconds": 0
+            },
+            {
+              "name": "TestWindowsBackend_EnableRejectsInvalidOwnerBeforeMutatingTask",
+              "result": "pass",
+              "seconds": 0
+            },
+            {
+              "name": "TestWindowsBackend_EnableExistingTaskIsReadOnly",
+              "result": "pass",
+              "seconds": 0.02
+            },
+            {
+              "name": "TestWindowsBackend_EnableRetainsDifferentOrDisabledDefinition",
+              "result": "pass",
+              "seconds": 0
+            },
+            {
+              "name": "TestWindowsBackend_EnableRefusesExistingIncompleteTask",
+              "result": "pass",
+              "seconds": 0
+            },
+            {
+              "name": "TestWindowsBackend_EnableRequiresConfirmedAbsence",
+              "result": "pass",
+              "seconds": 0
+            },
+            {
+              "name": "TestWindowsBackend_EnableAfterCreateFailureOnlyObserves",
+              "result": "pass",
+              "seconds": 0
+            }
+          ],
+          "test_filter": "^(TestWindowsBackend_EnableCreatesTask|TestWindowsBackend_EnableStrictModeAddsFlag|TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand|TestWindowsBackend_EnableRejectsInvalidOwnerBeforeMutatingTask|TestWindowsBackend_EnableExistingTaskIsReadOnly|TestWindowsBackend_EnableRetainsDifferentOrDisabledDefinition|TestWindowsBackend_EnableRefusesExistingIncompleteTask|TestWindowsBackend_EnableRequiresConfirmedAbsence|TestWindowsBackend_EnableAfterCreateFailureOnlyObserves)$",
+          "tagged": false
+        },
+        {
+          "name": "enable-tagged",
+          "exit_code": 0,
+          "seconds": 2.3164308999548666,
+          "work_seconds": 360,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures_measured": true,
+          "stdout_sha256": "c2f2c6808ce4b3053ab4226ec5f33aa577114a158be0cae46694a521c040b1a4",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "original_closure": "CLOSED",
+          "original_readers_joined": 2,
+          "received_raw_stdout_hash_verified_before_parse": true,
+          "test_counts": {
+            "roots": {
+              "pass": 9,
+              "fail": 0,
+              "skip": 0
+            },
+            "subtests": {
+              "pass": 21,
+              "fail": 0,
+              "skip": 0
+            },
+            "packages": {
+              "pass": 1,
+              "fail": 0,
+              "skip": 0
+            }
+          },
+          "terminal_roots": [
+            {
+              "name": "TestWindowsBackend_EnableCreatesTask",
+              "result": "pass",
+              "seconds": 0
+            },
+            {
+              "name": "TestWindowsBackend_EnableStrictModeAddsFlag",
+              "result": "pass",
+              "seconds": 0
+            },
+            {
+              "name": "TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand",
+              "result": "pass",
+              "seconds": 0
+            },
+            {
+              "name": "TestWindowsBackend_EnableRejectsInvalidOwnerBeforeMutatingTask",
+              "result": "pass",
+              "seconds": 0
+            },
+            {
+              "name": "TestWindowsBackend_EnableExistingTaskIsReadOnly",
+              "result": "pass",
+              "seconds": 0.02
+            },
+            {
+              "name": "TestWindowsBackend_EnableRetainsDifferentOrDisabledDefinition",
+              "result": "pass",
+              "seconds": 0
+            },
+            {
+              "name": "TestWindowsBackend_EnableRefusesExistingIncompleteTask",
+              "result": "pass",
+              "seconds": 0
+            },
+            {
+              "name": "TestWindowsBackend_EnableRequiresConfirmedAbsence",
+              "result": "pass",
+              "seconds": 0
+            },
+            {
+              "name": "TestWindowsBackend_EnableAfterCreateFailureOnlyObserves",
+              "result": "pass",
+              "seconds": 0
+            }
+          ],
+          "test_filter": "^(TestWindowsBackend_EnableCreatesTask|TestWindowsBackend_EnableStrictModeAddsFlag|TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand|TestWindowsBackend_EnableRejectsInvalidOwnerBeforeMutatingTask|TestWindowsBackend_EnableExistingTaskIsReadOnly|TestWindowsBackend_EnableRetainsDifferentOrDisabledDefinition|TestWindowsBackend_EnableRefusesExistingIncompleteTask|TestWindowsBackend_EnableRequiresConfirmedAbsence|TestWindowsBackend_EnableAfterCreateFailureOnlyObserves)$",
+          "tagged": true
+        }
+      ]
+    }
+  ],
+  "total_original_commands_closed": 15,
+  "total_original_readers_joined": 30,
+  "historical_results_reclassified": false,
+  "root_findings": [
+    "Native export materializes UseUnifiedSchedulingEngine=true despite omitted writer input.",
+    "Native LogonTrigger.UserId uses the current full account name while Principal.UserId remains SID."
+  ],
+  "claim_limits": [
+    "Real registration/export/Ready/repeat Enable/cleanup qualified only for this source and host.",
+    "Running and Queued are covered only by the existing scheduler-double tests.",
+    "No application/logon run, installation, upgrade, cancellation, recovery, concurrent writer or generation ownership qualification.",
+    "Full build/vet/default/tagged and external exact-head review remain open.",
+    "V1/V2 remain FAIL/CLOSED; prior A api-final-v2 and B full11 UNKNOWN are unchanged."
+  ],
+  "source_input_sets": {
+    "4d2bb4edd0b1a70b41bde3c86d58d4f2862a68209b8cd786260fcc707b12e498": {
+      "internal/api/scheduler_replacement.go": "257f6840bc7bb6279ea9753dfaae494bc486f55e142578820eb6e7d8497eb731",
+      "internal/autostart/autostart.go": "4cbcda2e6fa67fa64e1a4f49f59706662b036c7607b8d9b6269d0480c8657649",
+      "internal/autostart/windows.go": "1332a7bceee2259f0db8c501f854431f5d7f9d8874076d13e15b3e6405ed9e3e",
+      "internal/autostart/windows_test.go": "ded4e1af9ac6b8fd11e36b0748b57e7048460144403422d8b1b5c2fd87093d18",
+      "internal/cli/autostart.go": "0bfb9347472de56e671b69d9df5fe03aba7d49ce7beaae092326958450d30cf0",
+      "internal/scheduler/task_xml_match.go": "1ae2bce75f354fb75c3c04021a31e8853da65507d83b6d42bb0496b4724a851d",
+      "internal/scheduler/task_xml_match_test.go": "30464d1dc9d53792a8f166a1acd26750ef7eb55e1acd61bba4d6df31933ce12d",
+      "internal/scheduler/task_xml_match_windows.go": "03e0a1329036795ee64d6bb179c85c28975d12e91ebdcbfb2b38ddddb01886b4",
+      "internal/scheduler/task_xml_match_windows_test.go": "7be3d01fecef08c2e196256c21a1c42b000722974449c1e5efd5c71824a06fac",
+      "internal/autostart/windows_native_roundtrip_test.go": "3f316120acb0db32fe73075905fadbca72d3e1e96ad97578747631ef51951dfe"
+    },
+    "381581dcc2434fbc6c7cbd8b9f9d16f8c010706ce9e1a30085d055d1519ada58": {
+      "internal/api/scheduler_replacement.go": "257f6840bc7bb6279ea9753dfaae494bc486f55e142578820eb6e7d8497eb731",
+      "internal/autostart/autostart.go": "4cbcda2e6fa67fa64e1a4f49f59706662b036c7607b8d9b6269d0480c8657649",
+      "internal/autostart/windows.go": "1332a7bceee2259f0db8c501f854431f5d7f9d8874076d13e15b3e6405ed9e3e",
+      "internal/autostart/windows_test.go": "ded4e1af9ac6b8fd11e36b0748b57e7048460144403422d8b1b5c2fd87093d18",
+      "internal/cli/autostart.go": "0bfb9347472de56e671b69d9df5fe03aba7d49ce7beaae092326958450d30cf0",
+      "internal/scheduler/task_xml_match.go": "1ae2bce75f354fb75c3c04021a31e8853da65507d83b6d42bb0496b4724a851d",
+      "internal/scheduler/task_xml_match_test.go": "30464d1dc9d53792a8f166a1acd26750ef7eb55e1acd61bba4d6df31933ce12d",
+      "internal/scheduler/task_xml_match_windows.go": "03e0a1329036795ee64d6bb179c85c28975d12e91ebdcbfb2b38ddddb01886b4",
+      "internal/scheduler/task_xml_match_windows_test.go": "7be3d01fecef08c2e196256c21a1c42b000722974449c1e5efd5c71824a06fac",
+      "internal/autostart/windows_native_roundtrip_test.go": "a6ee5f39efed25b34556141ad49ca4ec118fec36e6cf0abdfcda17222d23b9c7"
+    },
+    "26438b0bb6096979ae5530485e5b14d841039fabf9bcbafda94c370b8c2e3701": {
+      "internal/api/scheduler_replacement.go": "257f6840bc7bb6279ea9753dfaae494bc486f55e142578820eb6e7d8497eb731",
+      "internal/autostart/autostart.go": "4cbcda2e6fa67fa64e1a4f49f59706662b036c7607b8d9b6269d0480c8657649",
+      "internal/autostart/windows.go": "1332a7bceee2259f0db8c501f854431f5d7f9d8874076d13e15b3e6405ed9e3e",
+      "internal/autostart/windows_test.go": "ded4e1af9ac6b8fd11e36b0748b57e7048460144403422d8b1b5c2fd87093d18",
+      "internal/cli/autostart.go": "0bfb9347472de56e671b69d9df5fe03aba7d49ce7beaae092326958450d30cf0",
+      "internal/scheduler/task_xml_match.go": "61bff24e2abe59f100920fa3bd9c3303928c0e2d813e1bfdc51db788776c7b1e",
+      "internal/scheduler/task_xml_match_test.go": "fc40e670b6f1a2e5fe0b97cdb42cfd1457884031104ab24450a6f7c7ae8d0de3",
+      "internal/scheduler/task_xml_match_windows.go": "a6d238f6e8e1cae48f79a4aa06290162fb5b062456ce0624421ba12b2275f9de",
+      "internal/scheduler/task_xml_match_windows_test.go": "7be3d01fecef08c2e196256c21a1c42b000722974449c1e5efd5c71824a06fac",
+      "internal/autostart/windows_native_roundtrip_test.go": "9c9a4db59573d74f6ec8f7933352f7b1907d0b511c033b8752a994af882deb18"
+    }
+  }
+}

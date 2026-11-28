@@ -1,0 +1,33 @@
+{"ImportPath":"github.com/Microsoft/go-winio","Action":"build-output","Output":"# mcp-local-hub/internal/api\n"}
+{"ImportPath":"github.com/Microsoft/go-winio","Action":"build-output","Output":"internal\\api\\hub_enrollment_client_windows.go:14:2: module lookup disabled by GOPROXY=off\n"}
+{"ImportPath":"github.com/Microsoft/go-winio","Action":"build-fail"}
+{"ImportPath":"golang.org/x/sys/windows","Action":"build-output","Output":"# mcp-local-hub/internal/api\n"}
+{"ImportPath":"golang.org/x/sys/windows","Action":"build-output","Output":"third_party\\gofrs-flock\\flock_windows.go:13:2: module lookup disabled by GOPROXY=off\n"}
+{"ImportPath":"golang.org/x/sys/windows","Action":"build-fail"}
+{"ImportPath":"github.com/pelletier/go-toml/v2","Action":"build-output","Output":"# mcp-local-hub/internal/api\n"}
+{"ImportPath":"github.com/pelletier/go-toml/v2","Action":"build-output","Output":"internal\\api\\legacy_detect.go:21:2: module lookup disabled by GOPROXY=off\n"}
+{"ImportPath":"github.com/pelletier/go-toml/v2","Action":"build-fail"}
+{"ImportPath":"golang.org/x/net/idna","Action":"build-output","Output":"# mcp-local-hub/internal/api\n"}
+{"ImportPath":"golang.org/x/net/idna","Action":"build-output","Output":"internal\\api\\marketplace_safety.go:10:2: module lookup disabled by GOPROXY=off\n"}
+{"ImportPath":"golang.org/x/net/idna","Action":"build-fail"}
+{"ImportPath":"golang.org/x/sync/singleflight","Action":"build-output","Output":"# mcp-local-hub/internal/api\n"}
+{"ImportPath":"golang.org/x/sync/singleflight","Action":"build-output","Output":"internal\\api\\api.go:18:2: module lookup disabled by GOPROXY=off\n"}
+{"ImportPath":"golang.org/x/sync/singleflight","Action":"build-fail"}
+{"ImportPath":"gopkg.in/yaml.v3","Action":"build-output","Output":"# mcp-local-hub/internal/api\n"}
+{"ImportPath":"gopkg.in/yaml.v3","Action":"build-output","Output":"internal\\api\\adopt_profile_update.go:14:2: module lookup disabled by GOPROXY=off\n"}
+{"ImportPath":"gopkg.in/yaml.v3","Action":"build-fail"}
+{"ImportPath":"github.com/pelletier/go-toml/v2/unstable","Action":"build-output","Output":"# mcp-local-hub/internal/api\n"}
+{"ImportPath":"github.com/pelletier/go-toml/v2/unstable","Action":"build-output","Output":"internal\\clients\\entry_bytes.go:13:2: module lookup disabled by GOPROXY=off\n"}
+{"ImportPath":"github.com/pelletier/go-toml/v2/unstable","Action":"build-fail"}
+{"ImportPath":"github.com/tailscale/hujson","Action":"build-output","Output":"# mcp-local-hub/internal/api\n"}
+{"ImportPath":"github.com/tailscale/hujson","Action":"build-output","Output":"internal\\clients\\claude_local_toggle.go:41:2: module lookup disabled by GOPROXY=off\n"}
+{"ImportPath":"github.com/tailscale/hujson","Action":"build-fail"}
+{"ImportPath":"filippo.io/age","Action":"build-output","Output":"# mcp-local-hub/internal/api\n"}
+{"ImportPath":"filippo.io/age","Action":"build-output","Output":"internal\\secrets\\vault.go:15:2: module lookup disabled by GOPROXY=off\n"}
+{"ImportPath":"filippo.io/age","Action":"build-fail"}
+{"ImportPath":"github.com/spf13/cobra","Action":"build-output","Output":"# mcp-local-hub/internal/api\n"}
+{"ImportPath":"github.com/spf13/cobra","Action":"build-output","Output":"internal\\lldb\\cmd.go:4:2: module lookup disabled by GOPROXY=off\n"}
+{"ImportPath":"github.com/spf13/cobra","Action":"build-fail"}
+{"Time":"2026-11-28T21:18:24.8451656+03:00","Action":"start","Package":"mcp-local-hub/internal/api"}
+{"Time":"2026-11-28T21:18:24.8456881+03:00","Action":"output","Package":"mcp-local-hub/internal/api","Output":"FAIL\tmcp-local-hub/internal/api [setup failed]\n","OutputType":"frame"}
+{"Time":"2026-11-28T21:18:24.8456881+03:00","Action":"fail","Package":"mcp-local-hub/internal/api","Elapsed":0.001,"FailedBuild":"github.com/Microsoft/go-winio"}

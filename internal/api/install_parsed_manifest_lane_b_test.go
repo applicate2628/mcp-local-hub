@@ -7,6 +7,7 @@ import (
 	"io"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -121,21 +122,32 @@ func TestRemoveServerFromSupervisorIntentBestEffort_KillsRemovedDaemonsAfterNudg
 	}
 }
 
-func TestInstallParsedManifest_KillsDroppedWorkspaceRowAfterNudgeOnly(t *testing.T) {
+func TestInstallParsedManifest_RemovedWorkspaceTargetForceStopAfterNudge(t *testing.T) {
 	fakeMcphubIdentityForTest(t)
 	stateDir := daemonIntentTestHelper(t)
 	preparePreflightBinaryChecks(t)
 	installFakeScheduler(t, newInstallFakeScheduler())
 
+	// Exercise the shared parsed workspace install with a generic template.
+	m := &config.ServerManifest{
+		Name:      "workspace-fixture",
+		Kind:      config.KindWorkspaceScoped,
+		Transport: config.TransportNativeHTTP,
+		Command:   "go",
+		DaemonTemplate: &config.DaemonTemplate{
+			Context:           "ide-assistant",
+			PortPool:          &config.PortPool{Start: 9400, End: 9499},
+			ExtraArgsTemplate: []string{"--project", "${workspace.path}"},
+		},
+	}
 	wsDrop := t.TempDir()
 	wsKeep := t.TempDir()
-	dropEntry := WorkspaceEntry{WorkspaceKey: WorkspaceKey(wsDrop), WorkspacePath: wsDrop, Language: SerenaLanguageSentinel, Backend: "serena", Port: 9401}
-	keepEntry := WorkspaceEntry{WorkspaceKey: WorkspaceKey(wsKeep), WorkspacePath: wsKeep, Language: SerenaLanguageSentinel, Backend: "serena", Port: 9402}
-	m := serenaTemplateManifest()
+	dropEntry := WorkspaceEntry{WorkspaceKey: WorkspaceKey(wsDrop), WorkspacePath: wsDrop, Language: SerenaLanguageSentinel, Backend: m.Name, Port: 9401}
+	keepEntry := WorkspaceEntry{WorkspaceKey: WorkspaceKey(wsKeep), WorkspacePath: wsKeep, Language: SerenaLanguageSentinel, Backend: m.Name, Port: 9402}
 
-	priorRows := BuildSupervisorDaemonsForSerena(m, []WorkspaceEntry{dropEntry, keepEntry}, "seed", "mcphub")
+	priorRows := BuildSupervisorDaemonsForSerena(m, []WorkspaceEntry{dropEntry, keepEntry}, testExactManifestHash, "mcphub")
 	if len(priorRows) != 2 {
-		t.Fatalf("prior serena rows = %d, want 2", len(priorRows))
+		t.Fatalf("prior workspace rows = %d, want 2", len(priorRows))
 	}
 	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
 	if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{Version: 1, Daemons: priorRows}); err != nil {
@@ -171,10 +183,8 @@ func TestInstallParsedManifest_KillsDroppedWorkspaceRowAfterNudgeOnly(t *testing
 		lookupProcess = origLookup
 	})
 
-	// Lane A inverted the kill preference: a captured supervisor-reported PID
-	// is killed FIRST (identity-gated, best-effort), and the port kill is only
-	// the no-PID-snapshot fallback. The IPC fake above reports PID 5101 for
-	// the dropped row, so the kill must arrive via stopForceKillPIDFn.
+	// The IPC fake reports a PID for the dropped row, so an admitted force
+	// stop uses the PID seam.
 	var killedPIDs []int
 	origPIDKill := stopForceKillPIDFn
 	stopForceKillPIDFn = func(pid int) error {
@@ -196,27 +206,40 @@ func TestInstallParsedManifest_KillsDroppedWorkspaceRowAfterNudgeOnly(t *testing
 	}); err != nil {
 		t.Fatalf("InstallParsedManifest: %v", err)
 	}
+	written, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	if len(written.Daemons) != 1 || written.Daemons[0].TaskName != priorRows[1].TaskName || written.Daemons[0].Workspace != wsKeep {
+		t.Fatalf("committed workspace rows = %+v, want only %s", written.Daemons, priorRows[1].TaskName)
+	}
 
-	if !reflect.DeepEqual(killedPIDs, []int{5101}) {
-		t.Fatalf("killed PIDs = %v, want [5101] for the dropped workspace row only", killedPIDs)
+	wantPIDs := []int{5101}
+	wantOrder := []string{"ipc-status", "nudge", "kill-pid"}
+	if runtime.GOOS == "windows" {
+		wantPIDs = nil
+		wantOrder = []string{"ipc-status", "nudge"}
+	}
+	if !reflect.DeepEqual(killedPIDs, wantPIDs) {
+		t.Fatalf("killed PIDs = %v, want %v", killedPIDs, wantPIDs)
 	}
 	if len(killedPorts) != 0 {
-		t.Fatalf("killed ports = %v, want none (PID-first kill must not fall through to the port path)", killedPorts)
+		t.Fatalf("killed ports = %v, want none", killedPorts)
 	}
-	if !reflect.DeepEqual(order, []string{"ipc-status", "nudge", "kill-pid"}) {
-		t.Fatalf("ipc/nudge/kill order = %v, want [ipc-status nudge kill-pid]", order)
+	if !reflect.DeepEqual(order, wantOrder) {
+		t.Fatalf("IPC / nudge / force-stop order = %v, want %v", order, wantOrder)
 	}
 }
 
-func TestInstallPlanCore_RemovedTargetKillDependsOnNudgeOutcome(t *testing.T) {
+func TestInstallPlanCore_RemovedTargetForceStopAfterNudge(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		nudgeErr error
 		wantKill []int
 		wantWarn bool
 	}{
-		{name: "success kills removed target", wantKill: []int{6201}},
-		{name: "hard nudge failure skips kill", nudgeErr: errors.New("synthetic reconcile scheduler-list timeout"), wantWarn: true},
+		{name: "reconcile succeeded", wantKill: []int{6201}},
+		{name: "reconcile failed", nudgeErr: errors.New("synthetic reconcile scheduler-list timeout"), wantWarn: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fakeMcphubIdentityForTest(t)
@@ -271,10 +294,19 @@ func TestInstallPlanCore_RemovedTargetKillDependsOnNudgeOutcome(t *testing.T) {
 				t.Fatalf("installPlanCore: %v", err)
 			}
 
+			out := buf.String()
+			if runtime.GOOS == "windows" {
+				if len(killedPIDs) != 0 || !strings.Contains(out, "force kill removed supervisor targets skipped on Windows") || strings.Contains(out, "re-run install") {
+					t.Fatalf("Windows force-stop refusal: killed PIDs %v; output:\n%s", killedPIDs, out)
+				}
+				if tc.nudgeErr != nil && !strings.Contains(out, tc.nudgeErr.Error()) {
+					t.Fatalf("Windows reconcile failure missing from output:\n%s", out)
+				}
+				return
+			}
 			if !reflect.DeepEqual(killedPIDs, tc.wantKill) {
 				t.Fatalf("killed PIDs = %v, want %v", killedPIDs, tc.wantKill)
 			}
-			out := buf.String()
 			hasWarn := strings.Contains(out, "warning:") &&
 				strings.Contains(out, "reconcile") &&
 				strings.Contains(out, "re-run install") &&

@@ -184,10 +184,12 @@ func renderLinuxUnit(mcphubPath string, strictMode bool) string {
 // double-escape the backslash it introduces), then double-quotes. A path
 // containing a literal double-quote is pathological on POSIX but handled for
 // safety. Quoting a space-free path is harmless — systemd unquotes it back to
-// the identical token.
+// the identical token. Percent signs must also be doubled: systemd expands
+// percent specifiers even inside quoted arguments, and %% encodes one literal %.
 func quoteSystemdExecArg(path string) string {
 	escaped := strings.ReplaceAll(path, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+	escaped = strings.ReplaceAll(escaped, "%", "%%")
 	return `"` + escaped + `"`
 }
 

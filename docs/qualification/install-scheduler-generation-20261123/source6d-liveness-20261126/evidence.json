@@ -1,0 +1,199 @@
+{
+  "schema_version": 1,
+  "record_kind": "source6d-functional-progress",
+  "repository": "applicate2628/mcp-local-hub",
+  "source": {
+    "commit": "6d4fa7b8f9b86079020af125b030a26350cb5bb0",
+    "tree": "277dad42f9e9080d66955fa7469fbc68bc8618e4",
+    "parent": "5ed87ff759405efa739229b7307b5c2f9579c8fc",
+    "clean_native_commit_received_by": "root",
+    "commit_receipt_sha256": "f75c328af2d5d072fc538619d41593d63a8b62e8480ba2660481ae8f1eaa99ea",
+    "capsule": {
+      "repository_path": "docs/modernization/verification/composed-functional-source-20261126/source6d-363b/README.md",
+      "export_status": "PASS",
+      "export_receipt_sha256": "72936aae5ebac8ba7ef5f6d6cbc4a6235956202a23d464ed2aa3f6b75df91864",
+      "commands_received_closed": 11,
+      "readers_received_closed": 22,
+      "bundle_bytes": 12115,
+      "bundle_sha256": "71b3a9d700ca47f2005bcd36d340b420fb6f261f1aca8b3255cdeeec25b86d28",
+      "raw_parent_and_current_commit_object_ids_verified_by_root": true,
+      "publication_assembly": "separate root-owned capsule export"
+    }
+  },
+  "source6d_focused_batch": {
+    "source_commit": "6d4fa7b8f9b86079020af125b030a26350cb5bb0",
+    "status": "FAIL",
+    "physical": "CLOSED",
+    "new_hold": false,
+    "receipt_sha256": "fc4e69767c640a4584e914213fbea35731d992e67975ca05c5a8bcfd076a700a",
+    "root_received_original_commands": 3,
+    "root_received_original_output_readers": 6,
+    "all_original_command_and_reader_resources_closed": true,
+    "parent_seconds": 309.6139396,
+    "steps": [
+      {
+        "exit": 0,
+        "seconds": 152.53037440002663,
+        "counts": {
+          "pass": 88,
+          "top_pass": 40
+        },
+        "packages": [
+          {
+            "package": "mcp-local-hub/internal/cli",
+            "action": "pass",
+            "elapsed": 72.958
+          }
+        ],
+        "stdout_sha256": "17e0e52974199c7fa919923e2197023c26e9c15ee31a33b226a0954a1a8e3f44",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "logical_stdout_name": "status-focused-default.stdout.txt",
+        "failures": []
+      },
+      {
+        "exit": 1,
+        "seconds": 156.57040990004316,
+        "counts": {
+          "pass": 315,
+          "top_pass": 151,
+          "skip": 1,
+          "top_skip": 1,
+          "fail": 1,
+          "top_fail": 1
+        },
+        "packages": [
+          {
+            "package": "mcp-local-hub/internal/api",
+            "action": "pass",
+            "elapsed": 64.524
+          },
+          {
+            "package": "mcp-local-hub/internal/cli",
+            "action": "fail",
+            "elapsed": 89.696
+          }
+        ],
+        "stdout_sha256": "6a0ffb37142a07bced601de73e3978d1be93f88376289f359a0fdf3768bb3567",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "logical_stdout_name": "liveness-abort-status-focused-tagged.stdout.txt",
+        "failures": [
+          {
+            "package": "mcp-local-hub/internal/cli",
+            "test": "TestSupervisorController_StaleLivenessDisownDroppedByGeneration",
+            "diagnostic": "TempDir RemoveAll cleanup failed: directory not empty",
+            "actual_path_omitted": true
+          }
+        ]
+      }
+    ],
+    "provenance": {
+      "receiver": "root",
+      "reviewer_input": "root parsed closed-capture metadata",
+      "reviewer_input_sha256": "d50b440430c818267db8fbdf9c125b9f61882df6a22e578af8f261a174ffafbe",
+      "reviewer_input_bytes": 2139,
+      "reviewer_read_native_captures": false,
+      "failed_held_capture_access": false
+    },
+    "root_cause_status": "cleanup diagnostic observed; further diagnosis/correction outside this Source6d snapshot"
+  },
+  "remaining": {
+    "dedicated_orphan_regression": "NOT_RUN",
+    "go_build_all": "NOT_RUN",
+    "go_vet_all": "NOT_RUN",
+    "native_happy_qualification": "NOT_RUN",
+    "full_default_go_test": "NOT_RUN",
+    "full_tagged_api_cli_go_test": "NOT_RUN",
+    "native_calendar_start_boundary_normalization": "NOT_QUALIFIED",
+    "initial_orphan_handler_timeout_cause": "UNDETERMINED",
+    "overall_functional_acceptance": "NOT_ESTABLISHED"
+  },
+  "older_negative_batch_hold": {
+    "source_commit": "5ed87ff759405efa739229b7307b5c2f9579c8fc",
+    "status": "FAIL_HOLD",
+    "physical_receiving": "UNKNOWN",
+    "preceding_expected_negative_checks_received": 3,
+    "preceding_restoration_steps_received": true,
+    "final_command_role": "read-only verification",
+    "final_command_exit_code": 120,
+    "original_direct_process_reaped": true,
+    "original_native_active_zero": true,
+    "original_native_handles_closed": true,
+    "original_output_workers_joined": true,
+    "original_pipe_close_returned": true,
+    "output_eof": false,
+    "capture_close_returned": false,
+    "error_class": "FileExistsError",
+    "captures_measured": false,
+    "new_commands_permitted": false,
+    "supported_post_hold_release_path": "NONE_IN_INSPECTED_RUNNING_COORDINATOR",
+    "receipt": {
+      "logical_name": "receipt.json",
+      "bytes": 99694,
+      "sha256": "ad50e0a1a66cbf53a051518920f9f4db8574447f95e7c66d979dd566b60b4d84"
+    },
+    "physical_receipt": {
+      "logical_name": "failed-worker-physical-closure.json",
+      "bytes": 2707,
+      "sha256": "5b95d83b0feaa8276e587242036e1051d1058c03d2d8bc07eb4784c549ad1f7a"
+    },
+    "provenance": "root read safe original metadata only; author did not read held captures",
+    "historical_verdict_changed": false,
+    "held_owner_changed": false
+  },
+  "publication_performed_by_packet_author": false,
+  "pull_request": 660,
+  "public_preimage_head": "25508f8bfe5950daca3df1b0faf338d77913640a",
+  "public_source_files": [
+    {
+      "path": "internal/api/liveness_task.go",
+      "before": {
+        "bytes": 23560,
+        "sha256": "f17872de8e8390c650f59c364ea43ad45653fc9a2bde0054a58b7589a28c36fe",
+        "git_blob": "dfb417d4f0f51eee221f0f42cd115cb066ddf4db"
+      },
+      "after": {
+        "bytes": 23493,
+        "sha256": "7423c2a7fa8e20b117a5db72349e7840fa7adcbdc396ee26adf9caa5c0d09d61",
+        "git_blob": "6c852d6eb172b51708f2d5618163b8ebc4138ff2"
+      }
+    },
+    {
+      "path": "internal/api/liveness_task_test.go",
+      "before": {
+        "bytes": 29974,
+        "sha256": "748280d678dfd1d3f092e10bad91bec97ecf55d2f7c790d0e9a31bccd5d4d963",
+        "git_blob": "d1452e90aea536762e0589632f8a86b196e81ccf"
+      },
+      "after": {
+        "bytes": 34055,
+        "sha256": "f4ee80c59c92fa87b81671d8063682322fb1c6cf665acb7161122c43131d0039",
+        "git_blob": "c9ac7dbd7f3f561cb192177cfa9158c13126a38d"
+      }
+    },
+    {
+      "path": "internal/cli/setup_watchdog_test.go",
+      "before": {
+        "bytes": 34357,
+        "sha256": "0663f6a8773e336c1f2c5af8508439d30b01101deefca2468050284fbc45e8a4",
+        "git_blob": "c735b55bf72873ce26ae288ea42ae4476594e227"
+      },
+      "after": {
+        "bytes": 34980,
+        "sha256": "1205eaa4edf0f779acfd595be22ca8c1abf90d12cc78932dc7501918fafc51c2",
+        "git_blob": "1801bb7925ea115839ac72b1d8d8807ac5e59045"
+      }
+    }
+  ],
+  "public_branch_tests_run": false,
+  "review": {
+    "author": "functional_review",
+    "public_preimages": "fresh GitHub fetch at exact head; Git blobs match preserved local preimages",
+    "scope": "reviewed exact code deltas and publication projection; no target execution by packet author",
+    "own_diff_review": true,
+    "independent_review": "root and functional_review checks retained for their respective authored deltas",
+    "source_receipt_is_not_test_pass": true
+  },
+  "code_scope": "three exact formatted liveness/setup postimages",
+  "separate_uninstall_owner_unchanged": true,
+  "new_parser_or_dependency": false
+}

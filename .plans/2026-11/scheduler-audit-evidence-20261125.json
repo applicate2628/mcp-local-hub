@@ -1,0 +1,79 @@
+{
+  "schema": "mcphub-scoped-audit-evidence-v1",
+  "pr": 660,
+  "base_head": "892fa82e0e1aa5746d97365f96a9b69ef7934168",
+  "toolchain": "go1.27.4 windows/amd64",
+  "source_files_sha256": {
+    "internal/api/api_surfaces.go": "20742539d070de545193fd073fe6a0f2d476f5c8f93af5cef27a8bb8016867f2",
+    "internal/api/install.go": "f943587e54c40015274e4fd4411b32a0e1d19ce3488f25d6bf63de37c8dbe15e",
+    "internal/api/install_test.go": "1fa9242f341729c172ae207441627e8ea1447f22d2ceeb8118167caecdfee842",
+    "internal/api/lsp_auto_register.go": "714c8afa908b4d00c65f95baa0aed14e7cc0e1bebfa7e5a5186174022ec26682",
+    "internal/api/register.go": "f2b9b3948dea8c1b65677aa74fb4c266d415dcd5d19526740d8d5f75ccf53caf",
+    "internal/api/register_supervisor.go": "4799df9e7b58990b9d84ddd219436ecd1350a433c792bfa8c2dc71fb8688cce3",
+    "internal/api/scheduler_mgmt.go": "a9bc2a40e7bf831b743d50691b65fbaea8ada84b8ef0b921182e0f07fbcb220f",
+    "internal/api/scheduler_operation_context_test.go": "82ea914e7f71611e8f94d19163fbc464599200dd264d60f8985ad7e9d5e2646f",
+    "internal/api/status_enrich.go": "419d02e55ec30a1e11de282d7fa1ba49bfc731084d2b09f5dfcc4ef9a5c3c7bb",
+    "internal/api/types.go": "d26691d1c6cb7091c1c4628d58b278fc5a4f85b68b570527c30f9000660df3d7",
+    "internal/cli/install_migration_wiring_windows.go": "cf186cb0e5d2488780fc6c71a076bb6351e7b1d2a6060db2cbf9a3ad650a1d57",
+    "internal/cli/windows_product_pair.go": "e4e206d14756dac3ea5528dab2016c51b14a0cdb295a76902cd60f28680e994b",
+    "internal/cli/windows_product_pair_test.go": "5eeb240c806a2a9cb5c4fb828dd8ab5e0ee84e5cd4ec665cc17f25b0c9ebadce",
+    "internal/scheduler/entrypoint_migration_windows.go": "38114e11105983df761e6890b3755d0a0e328126c102f0f7bcef35a32f8c6dbf",
+    "internal/scheduler/entrypoint_migration_windows_test.go": "2e4afed065680cf5690c0a3505c466ae9a41f90991aaa0004e7a600fe4840229",
+    "internal/scheduler/enumerate_all_windows.go": "76d6707a8715a20f91fe3aef410e07a27b27e5134a060cf9b35e6c260ff19eaa",
+    "internal/scheduler/scheduler.go": "97e09723d8e6f608aee7d24bf3d4e78a386f4ba094bb3c2e2ae9603c36f9312d",
+    "internal/scheduler/scheduler_com_windows.go": "1f0d1c0b14c2e18bac89d03397b978ad9e45b7d37c3722ae40f5508e2fcdd5d3",
+    "internal/scheduler/scheduler_com_windows_test.go": "adde081da6df556f3c812164d9f0cce13948912e4b8a37318317056dd8877c6f",
+    "internal/scheduler/scheduler_command_windows.go": "9bc6351bf60960c1d7c96b1156c1a1a237dac16263b4ae86713973543673bed8",
+    "internal/scheduler/scheduler_context.go": "a6ba80ca67990c82dd1b3363618d0ed592105ecfcb8d0fffb49d3ed3cf6d7eb8",
+    "internal/scheduler/scheduler_hidden_task_windows_test.go": "b1120b6b35d68cff82450c8ec258850613209eb0366d83fc9d1a9f882f000c73",
+    "internal/scheduler/scheduler_last_result_windows_test.go": "be4e1d97d9c08abe448639be8945746db0e6ae4fed53941b7fa884ef48662c35",
+    "internal/scheduler/scheduler_next_run_windows_test.go": "a82dcab574d64bd63cc1e4f447b563bbd08e1ab3bac8613101d042403f97493a",
+    "internal/scheduler/scheduler_noop.go": "9ce51fe6b253395db76f1844e84762461b3f7513169ac1ac59a07c742b9b6358",
+    "internal/scheduler/scheduler_operation_context_windows_test.go": "63be377ab9b9d6612a0e2a74c560009c06cd0174bd028970ea748900e1c23e23",
+    "internal/scheduler/scheduler_owner_sid_windows_test.go": "2f32b57002fb750f9d23f5eb6822ad14c0814f18b232e1235c8a7dc2d8f05265",
+    "internal/scheduler/scheduler_windows.go": "859a7c1519a4c0877683ebc04230cdb94705b1dbbd5bcfbf17c35a38f5fee8da",
+    "internal/scheduler/scheduler_xml_create_windows.go": "8189d20e687b3d25bed74d81471a884b5b1137bb739b8a7f201772c13c912cc3"
+  },
+  "checks": [
+    {
+      "command": "go test -count=1 -timeout 5m ./internal/scheduler",
+      "status": "PASS",
+      "seconds_reported_by_go": 37.948,
+      "run": "scheduler-fix-2",
+      "source_relation": "All production files and Scheduler test files identical to final source. Only unrelated API fixture assertion corrected after this run."
+    },
+    {
+      "command": "go test -count=1 -timeout 5m ./internal/api -run <four context/rollback regressions>",
+      "status": "PASS",
+      "seconds_reported_by_go": 8.228,
+      "run": "scheduler-fix-3"
+    },
+    {
+      "command": "go test -count=1 -timeout 5m ./internal/cli -run <two V3 recovery regressions>",
+      "status": "PASS",
+      "seconds_reported_by_go": 0.597,
+      "run": "scheduler-fix-3"
+    }
+  ],
+  "failed_attempts": [
+    {
+      "run": "scheduler-fix-2",
+      "status": "FAIL",
+      "scope": "API fixture asserted total Create count zero; legacy path creates WeeklyRefreshTaskName before attempted LSP deletion. Corrected fixture admits exactly that preceding task and rejects all LSP Create calls. No production adjustment for this failure."
+    }
+  ],
+  "original_command_completion": {
+    "all_commands_reaped": true,
+    "all_jobs_active_zero": true,
+    "all_native_handles_closed": true,
+    "all_capture_readers_joined": true,
+    "forced_job_termination": false,
+    "unknown_outcomes": false
+  },
+  "independent_review": "Scoped static PASS after 3 caller fixes and direct current-invocation dispatch marker correction.",
+  "not_run": [
+    "full build/vet/default/tagged gates for final composition",
+    "installed Task Scheduler mutation",
+    "qualified Product end-to-end update"
+  ]
+}

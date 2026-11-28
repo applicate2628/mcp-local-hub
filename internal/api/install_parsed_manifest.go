@@ -1048,6 +1048,7 @@ func (a *API) installPlanCoreWithSymlinkConsents(ctx context.Context, m *config.
 					var forward *InstallForwardCommittedError
 					if invocation == nil && freshProviderInstall && !intentWriteAttempted &&
 						!errors.As(err, &incomplete) && !errors.As(err, &forward) &&
+						len(installSchedulerRecoveryTasks(err)) == 0 &&
 						!errors.Is(err, ErrClientConfigSettlementEventFailed) &&
 						!errors.Is(err, ErrClientConfigSettlementInvalid) &&
 						!errors.Is(err, clients.ErrConfigLockReleaseUnconfirmed) {
@@ -1243,21 +1244,30 @@ func (a *API) printSupervisorGlobalInstallDryRun(m *config.ServerManifest, plan 
 	autostartAction := "no-op"
 	if len(plan.SupervisorIntent) > 0 {
 		autostartAction = "ensure supervisor owner autostart is enabled"
+		if runtime.GOOS == "windows" {
+			autostartAction = "honor saved autorun OFF or create the supervisor task if absent"
+		}
 	}
 	fmt.Fprintf(w, "\n  Autostart owner to ensure: %s\n", autostartAction)
 
-	fmt.Fprintf(w, "\n  Legacy scheduler tasks to clean (%d):\n", len(legacyTasks))
 	if legacyErr != nil {
+		fmt.Fprintln(w, "\n  Legacy scheduler tasks retained (unknown):")
 		fmt.Fprintf(w, "    \u2022 unable to preview legacy cleanup: %v\n", legacyErr)
 	} else {
+		fmt.Fprintf(w, "\n  Legacy scheduler tasks retained (observed: %d):\n", len(legacyTasks))
+		fmt.Fprintln(w, "    Scope: visible tasks for the current user; hidden registrations are not enumerated.")
 		for _, name := range legacyTasks {
-			fmt.Fprintf(w, "    \u2022 %s\n", strings.TrimPrefix(name, `\`))
+			fmt.Fprintf(w, "    \u2022 %s: automatic removal and daemon stop refused; exclusive task generation ownership unavailable\n", strings.TrimPrefix(name, `\`))
 		}
 	}
 
-	fmt.Fprintf(w, "\n  Removed supervisor targets to kill (%d):\n", len(removed))
+	if runtime.GOOS == "windows" {
+		fmt.Fprintf(w, "\n  Removed supervisor intent targets (%d; automatic force-stop refused on Windows):\n", len(removed))
+	} else {
+		fmt.Fprintf(w, "\n  Removed supervisor targets to kill (%d):\n", len(removed))
+	}
 	if priorDiffUnavailable != "" {
-		fmt.Fprintf(w, "    \u2022 Prior supervisor-intent diff unavailable: %s; removed-targets / legacy cleanup preview omitted.\n", priorDiffUnavailable)
+		fmt.Fprintf(w, "    \u2022 Prior supervisor-intent diff unavailable: %s; removed-target preview omitted.\n", priorDiffUnavailable)
 	}
 	for _, d := range removed {
 		fmt.Fprintf(w, "    \u2022 %s  [port %d]\n", strings.TrimPrefix(d.TaskName, `\`), d.Port)
@@ -1272,9 +1282,6 @@ func legacySchedulerTasksForSupervisorInstallDryRun(m *config.ServerManifest, da
 	if m == nil || m.Name == "" {
 		return nil, nil
 	}
-	if daemonFilter != "" {
-		return []string{"mcp-local-hub-" + m.Name + "-" + daemonFilter}, nil
-	}
 	sch, err := newScheduler()
 	if err != nil {
 		if schedulerUnavailableError(err) {
@@ -1282,25 +1289,29 @@ func legacySchedulerTasksForSupervisorInstallDryRun(m *config.ServerManifest, da
 		}
 		return nil, err
 	}
+	return legacySchedulerTasksForSupervisorInstall(sch, m, daemonFilter)
+}
+
+// legacySchedulerTasksForSupervisorInstall identifies observed legacy tasks for
+// both execution and preview. A name classifies a task; it grants no authority
+// to delete its generation. Both paths preserve List's current-user and visible
+// task scope; an empty result does not prove that a hidden registration is absent.
+func legacySchedulerTasksForSupervisorInstall(sch schedulerLister, m *config.ServerManifest, daemonFilter string) ([]string, error) {
 	prefix := "mcp-local-hub-" + m.Name + "-"
-	tasks, err := sch.List(prefix)
+	tasks, err := sch.List(prefix + daemonFilter)
 	if err != nil {
 		if schedulerUnavailableError(err) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	// r36-2: this dry-run preview MIRRORS cleanupLegacySchedulerTasksForSupervisorInstall's
-	// full-server arm; it must apply the SAME longest-installed-prefix filter so
-	// the preview never claims it will delete a hyphen-sibling's task the real
-	// cleanup now spares (otherwise the dry-run LIES). Read the installed catalog
-	// once; an empty set (read failure) claims any prefix-matching task, matching
-	// the real cleanup's fallback.
 	var installed map[string]struct{}
-	if names, lerr := listManifestNamesEmbedFirst(); lerr == nil {
-		installed = make(map[string]struct{}, len(names))
-		for _, n := range names {
-			installed[n] = struct{}{}
+	if daemonFilter == "" {
+		if names, err := listManifestNamesEmbedFirst(); err == nil {
+			installed = make(map[string]struct{}, len(names))
+			for _, n := range names {
+				installed[n] = struct{}{}
+			}
 		}
 	}
 	out := make([]string, 0, len(tasks))
@@ -1309,14 +1320,16 @@ func legacySchedulerTasksForSupervisorInstallDryRun(m *config.ServerManifest, da
 		if !strings.HasPrefix(name, prefix) {
 			continue
 		}
-		if manifestDeclaresSchedulerTask(m, task.Name) {
+		if daemonFilter != "" {
+			if name == prefix+daemonFilter {
+				out = append(out, name)
+			}
+			continue
+		}
+		if manifestDeclaresSchedulerTask(m, task.Name) ||
+			blankServerRowOwnedByLongestInstalledPrefix(task.Name, m.Name, installed) {
 			out = append(out, name)
-			continue
 		}
-		if !blankServerRowOwnedByLongestInstalledPrefix(task.Name, m.Name, installed) {
-			continue
-		}
-		out = append(out, name)
 	}
 	return out, nil
 }
@@ -1337,6 +1350,12 @@ func ensureGlobalInstallAutostartOwner(w io.Writer, strictMode bool, ownerMode O
 	err = withInstallAutostartGUIControl(func(allow bool) error {
 		if !allow {
 			return autostart.ProjectAutorunDisabled(&allow, backend, opts)
+		}
+		if runtime.GOOS == "windows" {
+			if err := RetainAutostartTaskReplacementRefusal(backend.Enable(opts)); err != nil {
+				return fmt.Errorf("enable: %w", err)
+			}
+			return nil
 		}
 		state, err := backend.Status(opts)
 		if err != nil {
@@ -1377,7 +1396,11 @@ func warnAutostartOwner(w io.Writer, action string, err error) {
 	if w == nil {
 		return
 	}
-	fmt.Fprintf(w, "  warning: supervisor autostart owner %s failed: %v (manual: mcphub autostart enable)\n", action, err)
+	if errors.Is(err, ErrSchedulerReplacementUnowned) {
+		fmt.Fprintf(w, "  warning: supervisor autostart owner %s failed: %v (inspect the existing task before changing autostart)\n", action, err)
+		return
+	}
+	fmt.Fprintf(w, "  warning: supervisor autostart owner %s failed: %v (inspect `mcphub autostart status --details` and the saved autorun policy before retrying)\n", action, err)
 }
 
 type supervisorReconcileNudgeStatus int
@@ -1411,8 +1434,8 @@ func nudgeSupervisorReconcileApply(ctx context.Context) supervisorReconcileNudge
 // reconcile so a freshly-installed global daemon spawns immediately instead of
 // waiting up to 60s for the IntentWatcher poll (which only feeds stops, not new
 // descriptors — see installPlanCore F2 note). Best-effort: when no supervisor
-// is running (ErrSupervisorIPCUnavailable) it tries to start the autostart owner
-// now, falling back to the operator hint if that best-effort start fails. Any
+// is running (ErrSupervisorIPCUnavailable) POSIX attempts to start the
+// autostart owner. Windows has no generation-bound task start. Any
 // other reconcile error is non-fatal — the descriptor is durably on disk, so the
 // next supervisor start spawns it via the startup-path reconcile. The returned
 // outcome lets removed-target cleanup avoid killing a child while the
@@ -1420,7 +1443,11 @@ func nudgeSupervisorReconcileApply(ctx context.Context) supervisorReconcileNudge
 func nudgeSupervisorReconcileAfterGlobalInstall(ctx context.Context, w io.Writer) supervisorReconcileNudgeResult {
 	result := nudgeSupervisorReconcileApply(ctx)
 	if result.status == supervisorReconcileNudgeIPCUnavailable {
-		recovery := startAutostartOwnerAfterUnavailableSupervisor(w, result.err)
+		startOwner := installAutostartOwnerStartFn
+		if runtime.GOOS == "windows" {
+			startOwner = nil
+		}
+		recovery := startAutostartOwnerAfterUnavailableSupervisor(w, result.err, startOwner)
 		if recovery.status == supervisorReconcileNudgeFailed {
 			return recovery
 		}
@@ -1487,7 +1514,7 @@ func demoteIPCUnavailableWhenOwnerAlive(result supervisorReconcileNudgeResult) s
 	return result
 }
 
-func startAutostartOwnerAfterUnavailableSupervisor(w io.Writer, ipcErr error) supervisorReconcileNudgeResult {
+func startAutostartOwnerAfterUnavailableSupervisor(w io.Writer, ipcErr error, startOwner func() error) supervisorReconcileNudgeResult {
 	stateDir, err := DaemonStateDir()
 	if err != nil {
 		warnAutostartOwner(w, "resolve state dir before start", err)
@@ -1507,7 +1534,11 @@ func startAutostartOwnerAfterUnavailableSupervisor(w io.Writer, ipcErr error) su
 		err := fmt.Errorf("supervisor lock is held by pid=%d but IPC is unreachable: %w", pid, ipcErr)
 		return supervisorReconcileNudgeResult{status: supervisorReconcileNudgeFailed, err: err}
 	}
-	if err := installAutostartOwnerStartFn(); err != nil {
+	if startOwner == nil {
+		warnNoRunningSupervisor(w)
+		return supervisorReconcileNudgeResult{status: supervisorReconcileNudgeIPCUnavailable, err: ipcErr}
+	}
+	if err := startOwner(); err != nil {
 		warnAutostartOwner(w, "start", err)
 		warnNoRunningSupervisor(w)
 		return supervisorReconcileNudgeResult{status: supervisorReconcileNudgeIPCUnavailable, err: ipcErr}
@@ -1519,9 +1550,14 @@ func startAutostartOwnerAfterUnavailableSupervisor(w io.Writer, ipcErr error) su
 }
 
 func warnNoRunningSupervisor(w io.Writer) {
-	if w != nil {
-		fmt.Fprintln(w, "Note: no running supervisor — the installed daemon will start on the next `mcphub supervise` (or via the autostart task on next logon).")
+	if w == nil {
+		return
 	}
+	if runtime.GOOS == "windows" {
+		fmt.Fprintln(w, "Note: no running supervisor was confirmed. Install skips starting the Windows autostart task by name. Start the owner with `mcphub gui` or `mcphub supervise`.")
+		return
+	}
+	fmt.Fprintln(w, "Note: no running supervisor — the installed daemon will start on the next `mcphub supervise` (or via the autostart task on next logon).")
 }
 
 func supervisorIntentHasServerDaemonRowsScope(intent *SupervisorIntentFile, server string, scope *supervisorIntentOwnershipScope) bool {
@@ -1646,6 +1682,22 @@ func supervisorOwnedLivePIDsForTargets(ctx context.Context, targets []Supervisor
 }
 
 func killRemovedSupervisorTargetsAfterGlobalInstall(targets []SupervisorDaemon, pidByTask map[string]int, nudgeResult supervisorReconcileNudgeResult, retryPath string, w io.Writer) {
+	// Install may retain a legacy registration with the same name or port. On
+	// Windows, neither a supervisor PID snapshot nor a port lookup proves the
+	// current process belongs to the removed descriptor's original generation.
+	if runtime.GOOS == "windows" && len(targets) > 0 {
+		if w != nil {
+			names := make([]string, 0, len(targets))
+			for _, target := range targets {
+				names = append(names, strings.TrimPrefix(target.TaskName, `\`))
+			}
+			fmt.Fprintf(w, "  warning: force kill removed supervisor targets skipped on Windows (%s). The original process generation could not be verified. Inspect the task registrations and running processes before stopping them manually.\n", strings.Join(names, ", "))
+			if !nudgeResult.allowsRemovedTargetKill() && nudgeResult.err != nil {
+				fmt.Fprintf(w, "  warning: supervisor reconcile nudge failed (%v)\n", nudgeResult.err)
+			}
+		}
+		return
+	}
 	killRemovedSupervisorTargetsAfterNudge(targets, pidByTask, nudgeResult, retryPath, func(format string, args ...any) {
 		if w != nil {
 			fmt.Fprintf(w, "  warning: "+format+"\n", args...)
@@ -1675,104 +1727,39 @@ func killRemovedSupervisorTargetsAfterNudge(targets []SupervisorDaemon, pidByTas
 	}
 }
 
+// cleanupLegacySchedulerTasksForSupervisorInstall retains observed definitions
+// and reports the refused handoff. The Scheduler has no generation-conditional
+// delete, so neither task removal nor its dependent port kill is admitted here.
 func cleanupLegacySchedulerTasksForSupervisorInstall(m *config.ServerManifest, daemonFilter string, w io.Writer) {
 	if m == nil || m.Name == "" {
 		return
 	}
+	if w == nil {
+		w = io.Discard
+	}
 	sch, err := newScheduler()
 	if err != nil {
-		if schedulerUnavailableError(err) {
-			return
-		}
-		if w != nil {
+		if !schedulerUnavailableError(err) {
 			fmt.Fprintf(w, "⚠ Legacy scheduler cleanup skipped: %v\n", err)
 		}
 		return
 	}
-	if daemonFilter != "" {
-		name := "mcp-local-hub-" + m.Name + "-" + daemonFilter
-		tasks, err := sch.List(name)
-		if err != nil {
-			if schedulerUnavailableError(err) {
-				return
-			}
-			if w != nil {
-				fmt.Fprintf(w, "⚠ Legacy scheduler cleanup skipped: list task %s: %v\n", name, err)
-			}
-			return
-		}
-		exists := false
-		for _, task := range tasks {
-			if strings.TrimPrefix(task.Name, "\\") == name {
-				exists = true
-				break
-			}
-		}
-		if !exists {
-			return
-		}
-		if deleteLegacySchedulerTaskBestEffort(sch, name, w) {
-			killLegacySchedulerTaskDaemonByPortBestEffort(name, daemonPortForLegacySchedulerTask(m, name), w)
-		}
-		return
-	}
-	prefix := "mcp-local-hub-" + m.Name + "-"
-	tasks, err := sch.List(prefix)
+	tasks, err := legacySchedulerTasksForSupervisorInstall(sch, m, daemonFilter)
 	if err != nil {
-		if schedulerUnavailableError(err) {
-			return
-		}
-		if w != nil {
-			fmt.Fprintf(w, "⚠ Legacy scheduler cleanup skipped: list tasks for %s: %v\n", m.Name, err)
-		}
+		fmt.Fprintf(w, "⚠ Legacy scheduler cleanup skipped: list tasks for %s: %v\n", m.Name, err)
 		return
 	}
-	// r36-2: List(prefix) returns every task whose name STARTS WITH
-	// "mcp-local-hub-<m.Name>-", which over-matches a hyphen-sibling server:
-	// installing `demo` lists `mcp-local-hub-demo-alpha-beta`, which is server
-	// demo-alpha's daemon `beta`, not a demo task. The pre-fix loop deleted it
-	// unconditionally — wiping a sibling's scheduler task on every demo install.
-	// (The KILL half was already exact-name port-guarded via
-	// daemonPortForLegacySchedulerTask returning 0 for a foreign name; only the
-	// DELETE was unguarded.) Gate each task through the longest-installed-prefix
-	// disambiguator so demo only deletes tasks it actually owns. The installed
-	// catalog is read once; on a read failure the set is empty, which makes the
-	// disambiguator claim any prefix-matching task (no sibling proof available) —
-	// the same outcome as the pre-fix unconditional delete, but only when the
-	// catalog is genuinely unreadable.
-	var installed map[string]struct{}
-	if names, lerr := listManifestNamesEmbedFirst(); lerr == nil {
-		installed = make(map[string]struct{}, len(names))
-		for _, n := range names {
-			installed[n] = struct{}{}
-		}
-	}
-	for _, task := range tasks {
-		name := strings.TrimPrefix(task.Name, "\\")
-		if !strings.HasPrefix(name, prefix) {
+	for _, name := range tasks {
+		priorXML, err := snapshotTaskForSchedulerUpgrade(sch, name)
+		if err != nil {
+			fmt.Fprintf(w, "⚠ Legacy scheduler task %s retained; daemon stop skipped: cannot observe definition: %v\n", name, err)
 			continue
 		}
-		// Exact manifest task ownership beats the longest-prefix fallback. The
-		// fallback's sibling protection is for ambiguous legacy rows; it must not
-		// preserve a stale task for this manifest just because a longer-prefix
-		// manifest is available in the catalog.
-		if manifestDeclaresSchedulerTask(m, task.Name) {
-			if deleteLegacySchedulerTaskBestEffort(sch, name, w) {
-				killLegacySchedulerTaskDaemonByPortBestEffort(name, daemonPortForLegacySchedulerTask(m, name), w)
-			}
+		if len(priorXML) == 0 {
+			// Absence is not a successful deletion and does not admit a port kill.
 			continue
 		}
-		// Skip a hyphen-sibling's task: only delete tasks this server is the
-		// longest installed prefix of (mirrors the supervisor-intent ownership
-		// arm at supervisorIntentRowOwnedByScope's Arm 2).
-		if !blankServerRowOwnedByLongestInstalledPrefix(task.Name, m.Name, installed) {
-			continue
-		}
-		// Full installs only delete/kill tasks returned by List(prefix), so
-		// existence is proven before Delete's idempotent missing-task success.
-		if deleteLegacySchedulerTaskBestEffort(sch, name, w) {
-			killLegacySchedulerTaskDaemonByPortBestEffort(name, daemonPortForLegacySchedulerTask(m, name), w)
-		}
+		fmt.Fprintf(w, "⚠ Legacy scheduler task %s retained; daemon stop skipped: %v\n", name, refuseSchedulerTaskReplacement(name, priorXML))
 	}
 }
 
@@ -1790,84 +1777,6 @@ func manifestDeclaresSchedulerTask(m *config.ServerManifest, taskName string) bo
 		}
 	}
 	return false
-}
-
-func deleteLegacySchedulerTaskBestEffort(sch interface{ Delete(string) error }, name string, w io.Writer) bool {
-	if strings.TrimSpace(name) == "" {
-		return false
-	}
-	if err := sch.Delete(name); err != nil {
-		if schedulerUnavailableError(err) {
-			return false
-		}
-		if w != nil {
-			fmt.Fprintf(w, "⚠ Failed to remove legacy scheduler task %s: %v\n", name, err)
-		}
-		return false
-	}
-	if w != nil {
-		fmt.Fprintf(w, "✓ Scheduler task removed (legacy supervisor handoff): %s\n", name)
-	}
-	return true
-}
-
-func daemonPortForLegacySchedulerTask(m *config.ServerManifest, taskName string) int {
-	if m == nil {
-		return 0
-	}
-	name := strings.TrimPrefix(taskName, "\\")
-	if name == "" {
-		return 0
-	}
-	const prefix = "mcp-local-hub-"
-	for _, d := range m.Daemons {
-		if name == prefix+m.Name+"-"+d.Name {
-			return d.Port
-		}
-	}
-	return 0
-}
-
-func killLegacySchedulerTaskDaemonByPortBestEffort(taskName string, port int, w io.Writer) {
-	if port == 0 {
-		if w != nil {
-			fmt.Fprintf(w, "⚠ Legacy scheduler cleanup skipped daemon kill for %s: daemon port unknown\n", taskName)
-		}
-		return
-	}
-	if legacySchedulerTaskPortOwnedBySupervisor(taskName, port) {
-		return
-	}
-	outcome, err := forceKillByPortFn(port, 5*time.Second)
-	if outcome == portKillIdentityMismatch {
-		if w != nil {
-			fmt.Fprintf(w, "⚠ Legacy scheduler cleanup skipped daemon kill for %s on port %d: port owned by foreign process, not killing: %v\n", taskName, port, err)
-		}
-		return
-	}
-	if err != nil {
-		if w != nil {
-			fmt.Fprintf(w, "⚠ Failed to stop legacy daemon after removing scheduler task %s on port %d: %v\n", taskName, port, err)
-		}
-	}
-}
-
-func legacySchedulerTaskPortOwnedBySupervisor(taskName string, port int) bool {
-	portPID, havePortPID := supervisorOwnedPortPID(port)
-	if !havePortPID {
-		return false
-	}
-	livePIDs, reachable := supervisorOwnedLivePIDsWithReachability(context.Background())
-	if !reachable {
-		// Without both PID proof surfaces we cannot distinguish a legacy orphan
-		// from a supervised child. Keep the handoff progressing: delete prevents
-		// relaunch, and a bounded port kill is safe on a rerun because the
-		// supervisor's restart policy respawns its desired child after an external
-		// kill during upgrade.
-		return false
-	}
-	taskKey := strings.TrimPrefix(canonicalIntentTaskKey(taskName), `\`)
-	return livePIDs[taskKey] == portPID
 }
 
 // supervisorIntentFileLeaf is the canonical basename of the supervisor

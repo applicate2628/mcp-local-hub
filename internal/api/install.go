@@ -3161,8 +3161,13 @@ func statusOwnedByCurrentUser(owner string) bool {
 	if err != nil || cur == nil {
 		return false
 	}
-	// Task Scheduler often reports owner as DOMAIN\user, while Go may
-	// return either `user` or `DOMAIN\user` depending on environment.
+	// The Windows scheduler's Status result carries a resolved principal SID.
+	// A display account, including a matching short name in another domain,
+	// cannot establish ownership of the running task.
+	if runtime.GOOS == "windows" {
+		return cur.Uid != "" && owner == cur.Uid
+	}
+	// Preserve the existing account-name projection on non-Windows backends.
 	u := strings.ToLower(strings.TrimSpace(cur.Username))
 	o := strings.ToLower(owner)
 	if u == o {
@@ -3551,11 +3556,15 @@ func (s *selectedInstallExecutionPhase) admitPrepared(m *config.ServerManifest, 
 // for the parsed-manifest path), or any rollback ownership — those stay
 // caller-specific because they diverge between the two entrypoints.
 //
-// ctx is accepted for symmetry with the exported InstallParsedManifest
-// seam (and to give future cancellation a home); the underlying audit +
-// scheduler steps are synchronous and do not yet observe it.
+// ctx binds scheduler admission and execution to the same install lifetime.
+// It does not turn already committed client or task effects into non-effects.
 func (a *API) installPlan(ctx context.Context, m *config.ServerManifest, plan *Plan, opts installPlanOpts) error {
-	_ = ctx
+	if ctx == nil {
+		return errors.New("install operation requires context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if plan.serenaPreparedInvocation != nil {
 		if err := plan.selectedExecutionPhase.admitPrepared(m, plan, opts, true); err != nil {
 			return err
@@ -3579,7 +3588,7 @@ func (a *API) installPlan(ctx context.Context, m *config.ServerManifest, plan *P
 	if err := a.recordInstallAuditForTasks(installAuditTaskNamesOrOverride(m, opts.DaemonFilter, opts.AuditTaskNames)); err != nil {
 		return err
 	}
-	return executeInstallToWithSymlinkConsents(w, m, plan, a.effectiveBackupKeepN(), opts.StartTasks, opts.Intermediate, opts.SkipSchedulerPrune, opts.SkipSchedulerTasks, opts.SymlinkConsents)
+	return executeInstallToWithSymlinkConsents(ctx, w, m, plan, a.effectiveBackupKeepN(), opts.StartTasks, opts.Intermediate, opts.SkipSchedulerPrune, opts.SkipSchedulerTasks, opts.SymlinkConsents)
 }
 
 // createdTask pairs a scheduler.TaskSpec created in Pass A with the
@@ -3621,9 +3630,10 @@ type intentWriteStep func() (rollback func(), err error)
 // — intent write is step 6 of the inner rollback). It returns a compensating
 // undo that is pushed onto the same rollback stack as the scheduler-task and
 // client-config undos; if it returns an error, the whole stack runs and
-// executeInstallTo returns that error with every side effect undone. Legacy
-// api.Install callers pass nil and observe bit-for-bit identical behavior
-// (they record intent via recordInstallIntentPostSuccess AFTER this returns).
+// executeInstallTo returns that error together with unconfirmed scheduler or
+// client compensations. Legacy api.Install callers pass nil and add no
+// intermediate step; they record intent via recordInstallIntentPostSuccess
+// after this function succeeds.
 //
 // skipPrune suppresses the full-install obsolete-task reconcile (step 1b). It
 // is true only for workspace-scoped (DaemonTemplate) installs through
@@ -3632,7 +3642,7 @@ type intentWriteStep func() (rollback func(), err error)
 // mcp-local-hub-<server>-* scheduler task for that server. Legacy callers pass
 // false and keep the reconcile.
 func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int, startTasks bool, intermediate intentWriteStep, skipPrune bool, skipTasks bool) error {
-	return executeInstallToWithSymlinkConsents(w, m, p, keepN, startTasks, intermediate, skipPrune, skipTasks, nil)
+	return executeInstallToWithSymlinkConsents(context.Background(), w, m, p, keepN, startTasks, intermediate, skipPrune, skipTasks, nil)
 }
 
 // InstallClientRollbackIncompleteError is returned (via failAfterRollback) when a
@@ -3682,7 +3692,7 @@ func (e *InstallForwardCommittedError) Error() string {
 
 func (e *InstallForwardCommittedError) Unwrap() error { return e.cause }
 
-func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, p *Plan, keepN int, startTasks bool, intermediate intentWriteStep, skipPrune bool, skipTasks bool, symlinkConsents []ResolvedSymlinkConsent) error {
+func executeInstallToWithSymlinkConsents(ctx context.Context, w io.Writer, m *config.ServerManifest, p *Plan, keepN int, startTasks bool, intermediate intentWriteStep, skipPrune bool, skipTasks bool, symlinkConsents []ResolvedSymlinkConsent) error {
 	// v0.6 Phase F: when skipTasks is set (GLOBAL manifest install routed to the
 	// supervisor model) NEITHER Pass A scheduler-task creation NOR Pass B start
 	// runs — the daemons live in supervisor-intent.json and the supervisor
@@ -3692,6 +3702,18 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 	// Pass B / needsScheduler conditions keeps the client-config block + the
 	// intermediate supervisor-intent write inside the SAME rollback scope.
 	actions := selectedInstallActions(p, startTasks, skipPrune, skipTasks)
+	if actions.createEligible {
+		// A prior rollback must never refer to the current failed replacement.
+		// Windows root task names are case insensitive and may start with '\'.
+		for i, task := range p.SchedulerTasks {
+			name := strings.TrimPrefix(task.Name, `\`)
+			for _, prior := range p.SchedulerTasks[:i] {
+				if strings.EqualFold(name, strings.TrimPrefix(prior.Name, `\`)) {
+					return fmt.Errorf("duplicate scheduler task name %q in install plan", task.Name)
+				}
+			}
+		}
+	}
 	for _, notice := range p.Notices {
 		fmt.Fprintf(w, "  notice: %s\n", notice)
 	}
@@ -3709,7 +3731,7 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 	// needsScheduler.
 	var sch scheduler.Scheduler
 	if actions.scheduler {
-		s, serr := newScheduler()
+		s, serr := newSchedulerContext(ctx)
 		if serr != nil {
 			return fmt.Errorf("scheduler: %w", serr)
 		}
@@ -3755,6 +3777,10 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 	// reconciled, not rollback-incomplete, but the lifecycle failure must remain
 	// visible at the composition boundary.
 	var rollbackClientLifecycleErrors []error
+	// Scheduler failures have their own error owner. They must not be reported
+	// as client failures or lost inside the shared []func() rollback stack.
+	var rollbackSchedulerErrors []error
+	var rollbackSchedulerTasks []string
 	runRollback := func() {
 		for i := len(rollback) - 1; i >= 0; i-- {
 			rollback[i]()
@@ -3765,15 +3791,26 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 	// wraps the cause in a typed *InstallClientRollbackIncompleteError naming those
 	// clients so ExecuteAdoptWithOpts can PRESERVE the pre-adopt provenance instead
 	// of deleting it (bug 2026-07-12). A restore that applied but could not confirm
-	// lock release contributes only its lifecycle error. With neither class, the
-	// returned error remains the bare cause.
+	// lock release contributes only its lifecycle error. Scheduler compensation
+	// failures retain their own incomplete type. Without added rollback errors,
+	// the returned error remains the bare cause.
 	failAfterRollback := func(cause error) error {
+		currentSchedulerTasks := installSchedulerRecoveryTasks(cause)
 		runRollback()
-		if len(rollbackClientLifecycleErrors) > 0 {
-			joined := make([]error, 0, 1+len(rollbackClientLifecycleErrors))
+		if len(rollbackClientLifecycleErrors)+len(rollbackSchedulerErrors) > 0 {
+			joined := make([]error, 0, 1+len(rollbackClientLifecycleErrors)+len(rollbackSchedulerErrors))
 			joined = append(joined, cause)
 			joined = append(joined, rollbackClientLifecycleErrors...)
+			joined = append(joined, rollbackSchedulerErrors...)
 			cause = errors.Join(joined...)
+		}
+		if len(rollbackSchedulerTasks) > 0 {
+			// Keep a failed current mutation named alongside earlier compensations.
+			rollbackSchedulerTasks = append(rollbackSchedulerTasks, currentSchedulerTasks...)
+			cause = &InstallSchedulerRollbackIncompleteError{
+				Tasks: append([]string(nil), rollbackSchedulerTasks...),
+				cause: cause,
+			}
 		}
 		if len(rollbackClientRestoreFailures) == 0 {
 			return cause
@@ -3812,32 +3849,44 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 		} else if t.Trigger == "Weekly Sun 03:00" {
 			spec.WeeklyTrigger = &scheduler.WeeklyTrigger{DayOfWeek: 0, HourLocal: 3, MinuteLocal: 0}
 		}
-		// Snapshot any existing task before replacing it so rollback can
-		// put it back. Prior to this, Delete-before-Create made install
-		// idempotent but a mid-sequence failure left the user with
-		// NOTHING — the old task was gone and the new one never got
-		// created. ExportXML gives us the full Task Scheduler XML of
-		// whatever was there; rollback feeds it to ImportXML to restore.
-		var priorXML []byte
-		if xml, err := sch.ExportXML(spec.Name); err == nil {
-			priorXML = xml
-		}
-		_ = sch.Delete(spec.Name)
-		if err := sch.Create(spec); err != nil {
-			return failAfterRollback(fmt.Errorf("create task %s: %w", spec.Name, err))
-		}
-		taskName := spec.Name
-		savedXML := priorXML // capture for closure
-		rollback = append(rollback, func() {
-			_ = sch.Delete(taskName)
-			if len(savedXML) > 0 {
-				if err := sch.ImportXML(taskName, savedXML); err == nil {
-					fmt.Fprintf(w, "  rollback: restored prior scheduler task %s\n", taskName)
-					return
-				}
+		// An observed definition is not authority over the registration. The
+		// backend has no generation-conditional deletion, so replacement is
+		// refused even when a later export would return identical XML.
+		priorXML, exportErr := sch.ExportXML(spec.Name)
+		if exportErr != nil {
+			if !errors.Is(exportErr, scheduler.ErrTaskNotFound) || len(priorXML) != 0 {
+				return failAfterRollback(fmt.Errorf("snapshot task %s before replacement: %w", spec.Name, exportErr))
 			}
-			fmt.Fprintf(w, "  rollback: deleted scheduler task %s\n", taskName)
+		} else {
+			if len(priorXML) == 0 {
+				return failAfterRollback(fmt.Errorf("snapshot task %s before replacement: empty XML snapshot", spec.Name))
+			}
+			return failAfterRollback(refuseSchedulerTaskReplacement(spec.Name, bytes.Clone(priorXML)))
+		}
+		// Create itself must reject an occupied name. A failed reply can follow
+		// an applied creation: observe it without retrying or compensating by name.
+		if err := sch.Create(spec); err != nil {
+			cause := fmt.Errorf("create task %s: %w", spec.Name, err)
+			return failAfterRollback(installTaskMutationFailure(sch, spec.Name, nil, cause))
+		}
+		// Arm before the fallible post-create export. A later failure must
+		// retain this task's recovery domain unless absence is observed.
+		rollback = append(rollback, func() {
+			if err := rollbackInstallTaskCreation(sch, spec.Name); err != nil {
+				rollbackSchedulerErrors = append(rollbackSchedulerErrors, err)
+				rollbackSchedulerTasks = append(rollbackSchedulerTasks, spec.Name)
+				fmt.Fprintf(w, "  rollback: scheduler task recovery unconfirmed: %v\n", err)
+				return
+			}
+			fmt.Fprintf(w, "  rollback: scheduler task absence confirmed: %s\n", spec.Name)
 		})
+		createdXML, createdExportErr := sch.ExportXML(spec.Name)
+		if createdExportErr != nil {
+			return failAfterRollback(fmt.Errorf("capture task %s after acknowledged creation: %w", spec.Name, createdExportErr))
+		}
+		if len(createdXML) == 0 {
+			return failAfterRollback(fmt.Errorf("capture task %s after acknowledged creation: empty XML snapshot", spec.Name))
+		}
 		createdTasks = append(createdTasks, createdTask{spec: spec, trigger: t.Trigger})
 		fmt.Fprintf(w, "\u2713 Scheduler task created: %s\n", spec.Name)
 	}
@@ -3857,14 +3906,9 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 		for _, t := range p.SchedulerTasks {
 			planned[t.Name] = struct{}{}
 		}
-		pruneRollbacks, perr := pruneObsoleteServerTasks(sch, m.Name, planned, w)
-		if perr != nil {
-			// Listing failed — fall through with a warning. Reconciliation
-			// is a nice-to-have; a reinstall that can't enumerate prior
-			// tasks is still strictly better than aborting the install.
-			fmt.Fprintf(w, "\u26a0 Task reconciliation skipped: %v\n", perr)
-		} else {
-			rollback = append(rollback, pruneRollbacks...)
+		if err := pruneObsoleteServerTasks(sch, m.Name, planned, w); err != nil {
+			// Enumeration and refused pruning do not mutate registrations.
+			fmt.Fprintf(w, "\u26a0 Task reconciliation skipped: %v\n", err)
 		}
 	}
 	// 2. Backup + update client configs.
@@ -4171,14 +4215,11 @@ func codexInstallSourceTransport(prior *clients.MCPEntry) (clients.CodexTranspor
 }
 
 // schedulerLister is the narrow scheduler subset pruneObsoleteServerTasks
-// needs. scheduler.Scheduler satisfies it via its full method set; keeping
-// the interface narrow lets tests supply a minimal fake without implementing
-// Create / Run / Status / Stop.
+// needs. It deliberately exposes no task mutation: server-name ownership and
+// XML observations cannot authorize generation deletion.
 type schedulerLister interface {
 	List(prefix string) ([]scheduler.TaskStatus, error)
-	Delete(name string) error
 	ExportXML(name string) ([]byte, error)
-	ImportXML(name string, xml []byte) error
 }
 
 // buildPruneSetForReconcile derives the set of "planned" task names from a
@@ -4219,25 +4260,17 @@ func buildPruneSetForReconcile(intent *SupervisorIntentFile) map[string]struct{}
 	return planned
 }
 
-// pruneObsoleteServerTasks deletes scheduler tasks whose Name starts with
-// "mcp-local-hub-<server>-" and are absent from `planned`. Returns one
-// rollback closure per successfully-pruned task that restores the task from
-// its pre-delete XML snapshot. Callers must append these to their own
-// rollback stack so a later install-sequence failure undoes the pruning
-// together with the rest of the install.
-//
-// Only safe to call for full installs. Partial installs (one daemon) would
-// see sibling-daemon tasks as "not in plan" and incorrectly prune them.
-//
-// Failures that are safe to continue past (per-task ExportXML errors,
-// per-task Delete errors) are logged as warnings and skipped; only an
-// initial List error is returned as fatal because we cannot reason about
-// what to prune without an enumeration.
-func pruneObsoleteServerTasks(sch schedulerLister, server string, planned map[string]struct{}, w io.Writer) ([]func(), error) {
+// pruneObsoleteServerTasks reports obsolete tasks, retaining their observed
+// definitions when possible. The backend cannot condition deletion on an owned
+// generation, so it refuses every destructive prune. A matching server prefix,
+// manifest lease, or identical XML does not exclude another scheduler writer.
+// Optional reconciliation continues with named warnings and no compensation.
+// Only full installs may classify siblings as obsolete.
+func pruneObsoleteServerTasks(sch schedulerLister, server string, planned map[string]struct{}, w io.Writer) error {
 	prefix := "mcp-local-hub-" + server + "-"
 	existing, err := sch.List(prefix)
 	if err != nil {
-		return nil, fmt.Errorf("list tasks for %s: %w", server, err)
+		return fmt.Errorf("list tasks for %s: %w", server, err)
 	}
 	// FIX 2 (bot PR #288 hyphen-family): `planned` holds only THIS server's own
 	// tasks, so a sibling's task (e.g. `\mcp-local-hub-demo-alpha-beta`, owned by
@@ -4246,7 +4279,6 @@ func pruneObsoleteServerTasks(sch schedulerLister, server string, planned map[st
 	// and skip any task a LONGER installed server name also prefixes — the
 	// longest-installed-prefix disambiguator owns it.
 	installed := installedServerNameSet()
-	var rollbacks []func()
 	for _, task := range existing {
 		// Windows Task Scheduler prefixes names with a leading backslash
 		// (the task-folder separator). Strip it before prefix/equality
@@ -4263,33 +4295,18 @@ func pruneObsoleteServerTasks(sch schedulerLister, server string, planned map[st
 		if !taskOwnedByServerExactOrLongestPrefix(task.Name, server, installed) {
 			continue
 		}
-		// Snapshot XML for rollback. Best-effort: if the backend can't
-		// export (platform limitation, ACL, etc.), we still delete but
-		// rollback can only log that it cannot recreate.
-		var priorXML []byte
-		if xml, xerr := sch.ExportXML(name); xerr == nil {
-			priorXML = xml
+		priorXML, xerr := sch.ExportXML(name)
+		if xerr == nil && len(priorXML) == 0 {
+			xerr = errors.New("empty XML snapshot")
 		}
-		if derr := sch.Delete(name); derr != nil {
-			fmt.Fprintf(w, "\u26a0 Failed to prune obsolete scheduler task %s: %v\n", name, derr)
+		if xerr != nil {
+			fmt.Fprintf(w, "\u26a0 Skipped pruning obsolete scheduler task %s: cannot retain observed definition: %v\n", name, xerr)
 			continue
 		}
-		fmt.Fprintf(w, "\u2713 Scheduler task removed (obsolete): %s\n", name)
-		taskName := name
-		savedXML := priorXML
-		rollbacks = append(rollbacks, func() {
-			if len(savedXML) == 0 {
-				fmt.Fprintf(w, "  rollback: cannot recreate pruned task %s (no XML snapshot)\n", taskName)
-				return
-			}
-			if ierr := sch.ImportXML(taskName, savedXML); ierr != nil {
-				fmt.Fprintf(w, "  rollback: restore pruned task %s failed: %v\n", taskName, ierr)
-				return
-			}
-			fmt.Fprintf(w, "  rollback: restored obsolete scheduler task %s\n", taskName)
-		})
+		refusal := refuseSchedulerTaskReplacement(name, bytes.Clone(priorXML))
+		fmt.Fprintf(w, "\u26a0 Skipped pruning obsolete scheduler task %s: %v\n", name, refusal)
 	}
-	return rollbacks, nil
+	return nil
 }
 
 // clientConfigPath returns the absolute path to the named client's config.
@@ -4306,6 +4323,9 @@ func clientConfigPath(name string) (string, error) {
 // calls sch.Stop to clean up the scheduler state. Returns a per-task
 // result set so callers can surface partial failures without bailing
 // after the first row.
+// A successful port kill does not settle a failed scheduler stop: the launch
+// action can still be live, and a nil port-kill result may mean no lookup was
+// available. Report the scheduler failure even when the daemon was killed.
 //
 // Task 10 wiring (plan §8 + §11 + §51): Stop is the back-compat entry
 // for the no-force path. It records Desired=stopped intent + a
@@ -4404,7 +4424,10 @@ func (a *API) stopKillCore(server, daemonFilter string, handledTasks map[string]
 				continue
 			}
 		}
-		_ = sch.Stop(t.Name)
+		if err := sch.Stop(t.Name); err != nil {
+			results = append(results, RestartResult{TaskName: t.Name, Err: "stop scheduler task: " + err.Error()})
+			continue
+		}
 		results = append(results, RestartResult{TaskName: t.Name})
 	}
 	return results, nil
@@ -4488,6 +4511,13 @@ func (a *API) restartWithFrozenDispatch(ctx context.Context, server, daemonFilte
 		}
 		return nil, err
 	}
+	// The legacy factory remains a test seam. Production binds the complete
+	// list/stop/run sequence to this operation, not a new Background lifetime.
+	sch, err = scheduler.BindContext(ctx, sch)
+	if err != nil {
+		return results, err
+	}
+
 	tasks, err := listTasksForServer(sch, server)
 	if err != nil {
 		if supervisorHandled && restartSchedulerUnavailableError(err) {
@@ -4499,6 +4529,9 @@ func (a *API) restartWithFrozenDispatch(ctx context.Context, server, daemonFilte
 	wsByTask := workspaceTasksByName()
 	installed := installedServerNameSet()
 	for _, t := range tasks {
+		if err := ctx.Err(); err != nil {
+			return results, err
+		}
 		normalized := strings.TrimPrefix(t.Name, "\\")
 		if !isHubDaemonSchedulerTaskName(normalized) {
 			continue
@@ -4528,7 +4561,10 @@ func (a *API) restartWithFrozenDispatch(ctx context.Context, server, daemonFilte
 				continue
 			}
 		}
-		_ = sch.Stop(t.Name)
+		if err := sch.Stop(t.Name); err != nil {
+			results = append(results, RestartResult{TaskName: t.Name, Err: "stop scheduler task: " + err.Error()})
+			continue
+		}
 		if err := sch.Run(t.Name); err != nil {
 			results = append(results, RestartResult{TaskName: t.Name, Err: err.Error()})
 			continue
@@ -4731,6 +4767,13 @@ func (a *API) restartAllWithFrozenDispatch(ctx context.Context) ([]RestartResult
 		}
 		return nil, err
 	}
+	// The legacy factory remains a test seam. Production binds the complete
+	// list/stop/run sequence to this operation, not a new Background lifetime.
+	sch, err = scheduler.BindContext(ctx, sch)
+	if err != nil {
+		return results, err
+	}
+
 	tasks, err := sch.List("mcp-local-hub-")
 	if err != nil {
 		if supervisorHandled && restartSchedulerUnavailableError(err) {
@@ -4741,6 +4784,9 @@ func (a *API) restartAllWithFrozenDispatch(ctx context.Context) ([]RestartResult
 	ports := manifestPortMap("")
 	wsByTask := workspaceTasksByName()
 	for _, t := range tasks {
+		if err := ctx.Err(); err != nil {
+			return results, err
+		}
 		normalized := strings.TrimPrefix(t.Name, "\\")
 		if !isHubDaemonSchedulerTaskName(normalized) {
 			continue
@@ -4761,7 +4807,10 @@ func (a *API) restartAllWithFrozenDispatch(ctx context.Context) ([]RestartResult
 				continue
 			}
 		}
-		_ = sch.Stop(t.Name) // no-op for completed actions; preserve for the edge case of a mid-launch task
+		if err := sch.Stop(t.Name); err != nil {
+			results = append(results, RestartResult{TaskName: t.Name, Err: "stop scheduler task: " + err.Error()})
+			continue
+		}
 		if err := sch.Run(t.Name); err != nil {
 			results = append(results, RestartResult{TaskName: t.Name, Err: err.Error()})
 			continue
@@ -4869,7 +4918,10 @@ func (a *API) StopAll() ([]RestartResult, error) {
 			results = append(results, RestartResult{TaskName: t.Name, Err: "kill daemon: " + err.Error()})
 			continue
 		}
-		_ = sch.Stop(t.Name)
+		if err := sch.Stop(t.Name); err != nil {
+			results = append(results, RestartResult{TaskName: t.Name, Err: "stop scheduler task: " + err.Error()})
+			continue
+		}
 		results = append(results, RestartResult{TaskName: t.Name})
 	}
 	return results, nil

@@ -1,0 +1,4378 @@
+{
+  "schema": "liveness-native-fixture-preparation-v1",
+  "scope": "compile and verify default opt-out; no task Scheduler mutation or installed matcher execution",
+  "source": {
+    "base": "8204d3400cbfde401850d3acd3479fb8b1450fd3",
+    "new_file": "internal/api/liveness_task_native_windows_test.go",
+    "bytes": 6426,
+    "sha256": "867eed75fb4c6fa0f4d94d9c6a096da0a15395752a92b9143b2d6486fe8e6d3b",
+    "git_blob": "27565a3d7547b1a65e98535a633a866b552e791e"
+  },
+  "native_test": {
+    "name": "TestEnsureLivenessTaskResolved_NativeXMLRoundTrip",
+    "permission": "NOT_YET_GRANTED_FOR_REGISTRATION",
+    "default_mode": "SKIP",
+    "tagged_mode": "SKIP",
+    "executions": 0,
+    "go_version": "go1.27.4 windows/amd64",
+    "full_default_command": "NOT_RUN_FOR_THIS_SOURCE",
+    "full_tagged_command": "NOT_RUN_FOR_THIS_SOURCE",
+    "source52_results_reassigned": false
+  },
+  "closure": {
+    "original_commands": 18,
+    "original_readers": 36,
+    "all_command_trees_and_readers": "CLOSED",
+    "root_receiving_means": "original controller child reaped and its capture handles closed; not an independent receipt for the RDC outer shell",
+    "rdc_no_session_is_not_closure": true
+  },
+  "redaction": {
+    "method": "recursive explicit role substitution in strings and keys; semantic JSON projection; not original byte copies",
+    "roles": [
+      "@@MODULE_CACHE@@",
+      "@@SOURCE_ROOT@@",
+      "@@FUNCTIONAL_RUN_ROOT@@",
+      "@@EXISTING_PUBLICATION_CHECKOUT@@",
+      "@@ORCHE_APP@@",
+      "@@GIT_EXE@@",
+      "@@GOFMT_EXE@@",
+      "@@GO_EXE@@"
+    ],
+    "originals": "retained in approved native work area"
+  },
+  "runs": [
+    {
+      "name": "prepare",
+      "original_receipt_sha256": "ec9abf462fc8cfc10bd3dd94d08bf224d4958a7da8ad0a7b3247290f3952f836",
+      "root_receiving": {
+        "controller_exit_code": 0,
+        "original_controller_reaped": true,
+        "controller_capture_handles_closed": true,
+        "seconds": 5.28050960006658,
+        "receipt_sha256": "ec9abf462fc8cfc10bd3dd94d08bf224d4958a7da8ad0a7b3247290f3952f836"
+      },
+      "configuration": {
+        "source": "@@EXISTING_PUBLICATION_CHECKOUT@@",
+        "head": "747cc17a966b0a0cbcdfbe4607e392c771009ba4",
+        "run": "runs/a660-liveness-prepare-20261128-v1",
+        "environment": {
+          "GIT_OPTIONAL_LOCKS": "0",
+          "GIT_TERMINAL_PROMPT": "0",
+          "GIT_NO_REPLACE_OBJECTS": "1",
+          "GIT_NO_LAZY_FETCH": "1"
+        },
+        "steps": [
+          {
+            "name": "fetch-a660",
+            "argv": [
+              "git",
+              "fetch",
+              "--no-tags",
+              "origin",
+              "fix/scheduler-hidden-task-lookup-20261119"
+            ],
+            "timeout": 120
+          },
+          {
+            "name": "create-isolated-a660",
+            "argv": [
+              "git",
+              "worktree",
+              "add",
+              "-b",
+              "work/a660-liveness-native-20261128-v1",
+              "@@SOURCE_ROOT@@",
+              "8204d3400cbfde401850d3acd3479fb8b1450fd3"
+            ],
+            "timeout": 120
+          },
+          {
+            "name": "isolated-head",
+            "argv": [
+              "git",
+              "-C",
+              "@@SOURCE_ROOT@@",
+              "rev-parse",
+              "HEAD"
+            ],
+            "timeout": 30,
+            "stdout_contains": [
+              "8204d3400cbfde401850d3acd3479fb8b1450fd3"
+            ]
+          },
+          {
+            "name": "isolated-status",
+            "argv": [
+              "git",
+              "-C",
+              "@@SOURCE_ROOT@@",
+              "status",
+              "--porcelain=v1",
+              "--untracked-files=all"
+            ],
+            "timeout": 30
+          }
+        ]
+      },
+      "execution": {
+        "commands": [
+          {
+            "argv": [
+              "@@GIT_EXE@@",
+              "rev-parse",
+              "HEAD"
+            ],
+            "cwd": "@@EXISTING_PUBLICATION_CHECKOUT@@",
+            "stdout": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-prepare-20261128-v1\\head.stdout.txt",
+            "stderr": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-prepare-20261128-v1\\head.stderr.txt",
+            "captures_measured": true,
+            "command_success": true,
+            "io": {
+              "stdout": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 41,
+                "bytes_stored": 41,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603495.2280238
+              },
+              "stderr": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603495.2279883
+              }
+            },
+            "work_seconds": 30,
+            "cleanup_seconds": 10,
+            "native_owner": {
+              "path": "@@ORCHE_APP@@\\scripts\\process_supervision\\windows_job.py",
+              "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+            },
+            "console": {
+              "attached": true,
+              "visible": false
+            },
+            "stdin_mode": "null",
+            "before_resume_entered": true,
+            "before_resume_returned": true,
+            "before_resume_deadline_exceeded": false,
+            "phases_elapsed_seconds": {
+              "initial_save_started": 0.000036400044336915016,
+              "initial_save_finished": 0.0008463000413030386,
+              "launch_entered": 0.000847900053486228,
+              "before_resume_entered": 0.005954400054179132,
+              "before_resume_returned": 0.005957200075499713,
+              "launch_returned": 0.0059785000048577785,
+              "launch_exception": null,
+              "external_settle_end": 0.039394000079482794
+            },
+            "quiescence_state": "complete",
+            "original_pid": 115972,
+            "timed_out": false,
+            "work_deadline_exceeded": false,
+            "work_elapsed_seconds": 0.03911170002538711,
+            "cleanup_interval_seconds": 10,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "exit_code": 0,
+            "worker_join_observations": [
+              {
+                "name": "head-stdout",
+                "ident": 268156,
+                "native_id": 268156,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.03943800006527454,
+                "remaining_seconds": 9.999673699960113,
+                "last_entered_seconds": 0.03943800006527454,
+                "last_remaining_seconds": 9.999673699960113,
+                "returned_seconds": 0.03944640001282096,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.03864919999614358
+              },
+              {
+                "name": "head-stderr",
+                "ident": 404856,
+                "native_id": 404856,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.039450100040994585,
+                "remaining_seconds": 9.999661599984393,
+                "last_entered_seconds": 0.039450100040994585,
+                "last_remaining_seconds": 9.999661599984393,
+                "returned_seconds": 0.03945410007145256,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.03861370007507503
+              }
+            ],
+            "seconds": 0.039468000060878694,
+            "cleanup_deadline_exceeded": false,
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "original_input_writers_retained": true,
+            "original_input_writer_joined": false,
+            "completion_receiving": {
+              "schema": "ordinary-original-native-io-completion-v1",
+              "native": {
+                "direct_exit_code": 0,
+                "direct_reaped": true,
+                "active_zero": true,
+                "job_terminated": false,
+                "handles_closed": true,
+                "issues": []
+              },
+              "io": {
+                "stdout": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 41,
+                  "bytes_stored": 41,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603495.2280238
+                },
+                "stderr": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 0,
+                  "bytes_stored": 0,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603495.2279883
+                }
+              },
+              "stdin_mode": "null",
+              "stdin": {},
+              "original_owner_retained": true,
+              "original_readers_joined": true,
+              "original_input_writer_joined": false,
+              "lifecycle_state": "CLOSED"
+            },
+            "stdout_sha256": "668ed720509b1304a7524cdcd170bf2b08780d649b8d7d7e688e64f242baa97c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "@@GIT_EXE@@",
+              "fetch",
+              "--no-tags",
+              "origin",
+              "fix/scheduler-hidden-task-lookup-20261119"
+            ],
+            "cwd": "@@EXISTING_PUBLICATION_CHECKOUT@@",
+            "stdout": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-prepare-20261128-v1\\fetch-a660.stdout.txt",
+            "stderr": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-prepare-20261128-v1\\fetch-a660.stderr.txt",
+            "captures_measured": true,
+            "command_success": true,
+            "io": {
+              "stdout": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603495.9701333
+              },
+              "stderr": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 131,
+                "bytes_stored": 131,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603495.9702501
+              }
+            },
+            "work_seconds": 120,
+            "cleanup_seconds": 10,
+            "native_owner": {
+              "path": "@@ORCHE_APP@@\\scripts\\process_supervision\\windows_job.py",
+              "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+            },
+            "console": {
+              "attached": true,
+              "visible": false
+            },
+            "stdin_mode": "null",
+            "before_resume_entered": true,
+            "before_resume_returned": true,
+            "before_resume_deadline_exceeded": false,
+            "phases_elapsed_seconds": {
+              "initial_save_started": 0.00008759996853768826,
+              "initial_save_finished": 0.0005410999292507768,
+              "launch_entered": 0.0005425999406725168,
+              "before_resume_entered": 0.00518689991440624,
+              "before_resume_returned": 0.005188999930396676,
+              "launch_returned": 0.005208399961702526,
+              "launch_exception": null,
+              "external_settle_end": 0.7399335999507457
+            },
+            "quiescence_state": "complete",
+            "original_pid": 123092,
+            "timed_out": false,
+            "work_deadline_exceeded": false,
+            "work_elapsed_seconds": 0.7398280999623239,
+            "cleanup_interval_seconds": 10,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "exit_code": 0,
+            "worker_join_observations": [
+              {
+                "name": "fetch-a660-stdout",
+                "ident": 161240,
+                "native_id": 161240,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.7399621999356896,
+                "remaining_seconds": 9.999865900026634,
+                "last_entered_seconds": 0.7399621999356896,
+                "last_remaining_seconds": 9.999865900026634,
+                "returned_seconds": 0.7399683999828994,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.7392241000197828
+              },
+              {
+                "name": "fetch-a660-stderr",
+                "ident": 289032,
+                "native_id": 289032,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.7399709000019357,
+                "remaining_seconds": 9.999857199960388,
+                "last_entered_seconds": 0.7399709000019357,
+                "last_remaining_seconds": 9.999857199960388,
+                "returned_seconds": 0.7399720000103116,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.739340899977833
+              }
+            ],
+            "seconds": 0.7399851999944076,
+            "cleanup_deadline_exceeded": false,
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "original_input_writers_retained": true,
+            "original_input_writer_joined": false,
+            "completion_receiving": {
+              "schema": "ordinary-original-native-io-completion-v1",
+              "native": {
+                "direct_exit_code": 0,
+                "direct_reaped": true,
+                "active_zero": true,
+                "job_terminated": false,
+                "handles_closed": true,
+                "issues": []
+              },
+              "io": {
+                "stdout": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 0,
+                  "bytes_stored": 0,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603495.9701333
+                },
+                "stderr": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 131,
+                  "bytes_stored": 131,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603495.9702501
+                }
+              },
+              "stdin_mode": "null",
+              "stdin": {},
+              "original_owner_retained": true,
+              "original_readers_joined": true,
+              "original_input_writer_joined": false,
+              "lifecycle_state": "CLOSED"
+            },
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "b89d6208934de050c0e1b577c8938b6b3d027c0e6696fd8d51945857bdca6124"
+          },
+          {
+            "argv": [
+              "@@GIT_EXE@@",
+              "worktree",
+              "add",
+              "-b",
+              "work/a660-liveness-native-20261128-v1",
+              "@@SOURCE_ROOT@@",
+              "8204d3400cbfde401850d3acd3479fb8b1450fd3"
+            ],
+            "cwd": "@@EXISTING_PUBLICATION_CHECKOUT@@",
+            "stdout": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-prepare-20261128-v1\\create-isolated-a660.stdout.txt",
+            "stderr": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-prepare-20261128-v1\\create-isolated-a660.stderr.txt",
+            "captures_measured": true,
+            "command_success": true,
+            "io": {
+              "stdout": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 77,
+                "bytes_stored": 77,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603500.2303037
+              },
+              "stderr": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 2680,
+                "bytes_stored": 2680,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603500.230394
+              }
+            },
+            "work_seconds": 120,
+            "cleanup_seconds": 10,
+            "native_owner": {
+              "path": "@@ORCHE_APP@@\\scripts\\process_supervision\\windows_job.py",
+              "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+            },
+            "console": {
+              "attached": true,
+              "visible": false
+            },
+            "stdin_mode": "null",
+            "before_resume_entered": true,
+            "before_resume_returned": true,
+            "before_resume_deadline_exceeded": false,
+            "phases_elapsed_seconds": {
+              "initial_save_started": 0.000028199981898069382,
+              "initial_save_finished": 0.0004284000024199486,
+              "launch_entered": 0.0004296000115573406,
+              "before_resume_entered": 0.00424019992351532,
+              "before_resume_returned": 0.00424169993493706,
+              "launch_returned": 0.004257599939592183,
+              "launch_exception": null,
+              "external_settle_end": 4.258007799973711
+            },
+            "quiescence_state": "complete",
+            "original_pid": 464104,
+            "timed_out": false,
+            "work_deadline_exceeded": false,
+            "work_elapsed_seconds": 4.257828600006178,
+            "cleanup_interval_seconds": 10,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "exit_code": 0,
+            "worker_join_observations": [
+              {
+                "name": "create-isolated-a660-stdout",
+                "ident": 475788,
+                "native_id": 475788,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 4.258035099948756,
+                "remaining_seconds": 9.999793500057422,
+                "last_entered_seconds": 4.258035099948756,
+                "last_remaining_seconds": 9.999793500057422,
+                "returned_seconds": 4.258040399989113,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 4.257270299945958
+              },
+              {
+                "name": "create-isolated-a660-stderr",
+                "ident": 433576,
+                "native_id": 433576,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 4.258043700014241,
+                "remaining_seconds": 9.999784899991937,
+                "last_entered_seconds": 4.258043700014241,
+                "last_remaining_seconds": 9.999784899991937,
+                "returned_seconds": 4.2580447000218555,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 4.257360599935055
+              }
+            ],
+            "seconds": 4.258055599988438,
+            "cleanup_deadline_exceeded": false,
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "original_input_writers_retained": true,
+            "original_input_writer_joined": false,
+            "completion_receiving": {
+              "schema": "ordinary-original-native-io-completion-v1",
+              "native": {
+                "direct_exit_code": 0,
+                "direct_reaped": true,
+                "active_zero": true,
+                "job_terminated": false,
+                "handles_closed": true,
+                "issues": []
+              },
+              "io": {
+                "stdout": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 77,
+                  "bytes_stored": 77,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603500.2303037
+                },
+                "stderr": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 2680,
+                  "bytes_stored": 2680,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603500.230394
+                }
+              },
+              "stdin_mode": "null",
+              "stdin": {},
+              "original_owner_retained": true,
+              "original_readers_joined": true,
+              "original_input_writer_joined": false,
+              "lifecycle_state": "CLOSED"
+            },
+            "stdout_sha256": "0f5662e00f61fdfeb67ab40e456e49c3324f8e126f713ccda8a631ee44f57456",
+            "stderr_sha256": "1af698db61467f59ca730a0c8b424a3b97b548b01a0b6091ee9814440975443c"
+          },
+          {
+            "argv": [
+              "@@GIT_EXE@@",
+              "-C",
+              "@@SOURCE_ROOT@@",
+              "rev-parse",
+              "HEAD"
+            ],
+            "cwd": "@@EXISTING_PUBLICATION_CHECKOUT@@",
+            "stdout": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-prepare-20261128-v1\\isolated-head.stdout.txt",
+            "stderr": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-prepare-20261128-v1\\isolated-head.stderr.txt",
+            "captures_measured": true,
+            "command_success": true,
+            "io": {
+              "stdout": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 41,
+                "bytes_stored": 41,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603500.2713628
+              },
+              "stderr": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603500.2713333
+              }
+            },
+            "work_seconds": 30,
+            "cleanup_seconds": 10,
+            "native_owner": {
+              "path": "@@ORCHE_APP@@\\scripts\\process_supervision\\windows_job.py",
+              "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+            },
+            "console": {
+              "attached": true,
+              "visible": false
+            },
+            "stdin_mode": "null",
+            "before_resume_entered": true,
+            "before_resume_returned": true,
+            "before_resume_deadline_exceeded": false,
+            "phases_elapsed_seconds": {
+              "initial_save_started": 0.00002659996971487999,
+              "initial_save_finished": 0.00046069989912211895,
+              "launch_entered": 0.000461899908259511,
+              "before_resume_entered": 0.004293299978598952,
+              "before_resume_returned": 0.004295399994589388,
+              "launch_returned": 0.004310599993914366,
+              "launch_exception": null,
+              "external_settle_end": 0.037993199890479445
+            },
+            "quiescence_state": "complete",
+            "original_pid": 133732,
+            "timed_out": false,
+            "work_deadline_exceeded": false,
+            "work_elapsed_seconds": 0.03788319998420775,
+            "cleanup_interval_seconds": 10,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "exit_code": 0,
+            "worker_join_observations": [
+              {
+                "name": "isolated-head-stdout",
+                "ident": 126072,
+                "native_id": 126072,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.0380190999712795,
+                "remaining_seconds": 9.999864100012928,
+                "last_entered_seconds": 0.0380190999712795,
+                "last_remaining_seconds": 9.999864100012928,
+                "returned_seconds": 0.038024399895220995,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.037362399976700544
+              },
+              {
+                "name": "isolated-head-stderr",
+                "ident": 394396,
+                "native_id": 394396,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.038027399918064475,
+                "remaining_seconds": 9.999855800066143,
+                "last_entered_seconds": 0.038027399918064475,
+                "last_remaining_seconds": 9.999855800066143,
+                "returned_seconds": 0.03802849992644042,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.037332899984903634
+              }
+            ],
+            "seconds": 0.038038999889977276,
+            "cleanup_deadline_exceeded": false,
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "original_input_writers_retained": true,
+            "original_input_writer_joined": false,
+            "completion_receiving": {
+              "schema": "ordinary-original-native-io-completion-v1",
+              "native": {
+                "direct_exit_code": 0,
+                "direct_reaped": true,
+                "active_zero": true,
+                "job_terminated": false,
+                "handles_closed": true,
+                "issues": []
+              },
+              "io": {
+                "stdout": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 41,
+                  "bytes_stored": 41,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603500.2713628
+                },
+                "stderr": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 0,
+                  "bytes_stored": 0,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603500.2713333
+                }
+              },
+              "stdin_mode": "null",
+              "stdin": {},
+              "original_owner_retained": true,
+              "original_readers_joined": true,
+              "original_input_writer_joined": false,
+              "lifecycle_state": "CLOSED"
+            },
+            "stdout_sha256": "e4dfa45feae96ccc97b391b834371ee8dce13685d2ba10799afb2dcb409c2bb5",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "@@GIT_EXE@@",
+              "-C",
+              "@@SOURCE_ROOT@@",
+              "status",
+              "--porcelain=v1",
+              "--untracked-files=all"
+            ],
+            "cwd": "@@EXISTING_PUBLICATION_CHECKOUT@@",
+            "stdout": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-prepare-20261128-v1\\isolated-status.stdout.txt",
+            "stderr": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-prepare-20261128-v1\\isolated-status.stderr.txt",
+            "captures_measured": true,
+            "command_success": true,
+            "io": {
+              "stdout": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603500.3200383
+              },
+              "stderr": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603500.3200047
+              }
+            },
+            "work_seconds": 30,
+            "cleanup_seconds": 10,
+            "native_owner": {
+              "path": "@@ORCHE_APP@@\\scripts\\process_supervision\\windows_job.py",
+              "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+            },
+            "console": {
+              "attached": true,
+              "visible": false
+            },
+            "stdin_mode": "null",
+            "before_resume_entered": true,
+            "before_resume_returned": true,
+            "before_resume_deadline_exceeded": false,
+            "phases_elapsed_seconds": {
+              "initial_save_started": 0.000019900035113096237,
+              "initial_save_finished": 0.00039840000681579113,
+              "launch_entered": 0.0003996000159531832,
+              "before_resume_entered": 0.004648100002668798,
+              "before_resume_returned": 0.004649900016374886,
+              "launch_returned": 0.0046666000271216035,
+              "launch_exception": null,
+              "external_settle_end": 0.046263700001873076
+            },
+            "quiescence_state": "complete",
+            "original_pid": 395356,
+            "timed_out": false,
+            "work_deadline_exceeded": false,
+            "work_elapsed_seconds": 0.04608670005109161,
+            "cleanup_interval_seconds": 10,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "exit_code": 0,
+            "worker_join_observations": [
+              {
+                "name": "isolated-status-stdout",
+                "ident": 155460,
+                "native_id": 155460,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.04628980008419603,
+                "remaining_seconds": 9.999796899966896,
+                "last_entered_seconds": 0.04628980008419603,
+                "last_remaining_seconds": 9.999796899966896,
+                "returned_seconds": 0.04629610001575202,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.04558020003605634
+              },
+              {
+                "name": "isolated-status-stderr",
+                "ident": 173856,
+                "native_id": 173856,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.0462991000385955,
+                "remaining_seconds": 9.999787600012496,
+                "last_entered_seconds": 0.0462991000385955,
+                "last_remaining_seconds": 9.999787600012496,
+                "returned_seconds": 0.04630020004697144,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.045546600013040006
+              }
+            ],
+            "seconds": 0.04631060000974685,
+            "cleanup_deadline_exceeded": false,
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "original_input_writers_retained": true,
+            "original_input_writer_joined": false,
+            "completion_receiving": {
+              "schema": "ordinary-original-native-io-completion-v1",
+              "native": {
+                "direct_exit_code": 0,
+                "direct_reaped": true,
+                "active_zero": true,
+                "job_terminated": false,
+                "handles_closed": true,
+                "issues": []
+              },
+              "io": {
+                "stdout": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 0,
+                  "bytes_stored": 0,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603500.3200383
+                },
+                "stderr": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 0,
+                  "bytes_stored": 0,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603500.3200047
+                }
+              },
+              "stdin_mode": "null",
+              "stdin": {},
+              "original_owner_retained": true,
+              "original_readers_joined": true,
+              "original_input_writer_joined": false,
+              "lifecycle_state": "CLOSED"
+            },
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        ],
+        "guard_sha256": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2",
+        "config_sha256": "2dfa6649ae4acf14d509ecd85b8cc3293c19c98c87ae7b7c9025ce3473866a76",
+        "expected_head": "747cc17a966b0a0cbcdfbe4607e392c771009ba4",
+        "source": "@@EXISTING_PUBLICATION_CHECKOUT@@",
+        "status": "PASS",
+        "command_quiescence": {
+          "complete": true,
+          "commands": [
+            {
+              "name": "head",
+              "state": "complete",
+              "reason": "",
+              "direct_exit_known": true
+            },
+            {
+              "name": "fetch-a660",
+              "state": "complete",
+              "reason": "",
+              "direct_exit_known": true
+            },
+            {
+              "name": "create-isolated-a660",
+              "state": "complete",
+              "reason": "",
+              "direct_exit_known": true
+            },
+            {
+              "name": "isolated-head",
+              "state": "complete",
+              "reason": "",
+              "direct_exit_known": true
+            },
+            {
+              "name": "isolated-status",
+              "state": "complete",
+              "reason": "",
+              "direct_exit_known": true
+            }
+          ]
+        },
+        "step_inputs": [
+          {
+            "name": "fetch-a660",
+            "files": {}
+          },
+          {
+            "name": "create-isolated-a660",
+            "files": {}
+          },
+          {
+            "name": "isolated-head",
+            "files": {}
+          },
+          {
+            "name": "isolated-status",
+            "files": {}
+          }
+        ],
+        "steps_received": [
+          "fetch-a660",
+          "create-isolated-a660",
+          "isolated-head",
+          "isolated-status"
+        ]
+      }
+    },
+    {
+      "name": "default_off_v1",
+      "original_receipt_sha256": "24f2ad5d4334ebf0ef4f2ed534f4ab42debac18cd6bd30636391241ddf55a42b",
+      "root_receiving": {
+        "controller_exit_code": 1,
+        "original_controller_reaped": true,
+        "controller_capture_handles_closed": true,
+        "seconds": 2.0032349000684917,
+        "receipt_sha256": "24f2ad5d4334ebf0ef4f2ed534f4ab42debac18cd6bd30636391241ddf55a42b"
+      },
+      "configuration": {
+        "source": "@@SOURCE_ROOT@@",
+        "head": "8204d3400cbfde401850d3acd3479fb8b1450fd3",
+        "run": "runs/a660-liveness-default-off-20261128-v1",
+        "environment": {
+          "MCPHUB_E2E_SCHEDULER": "none",
+          "MCPHUB_TARGET_LIVENESS_QA": "",
+          "GIT_OPTIONAL_LOCKS": "0",
+          "GIT_TERMINAL_PROMPT": "0",
+          "GIT_NO_REPLACE_OBJECTS": "1",
+          "GIT_NO_LAZY_FETCH": "1"
+        },
+        "observed_files": [
+          "internal/api/liveness_task_native_windows_test.go",
+          "internal/api/liveness_task.go",
+          "internal/scheduler/scheduler_liveness_xml.go",
+          "internal/scheduler/scheduler_xml_create_windows.go",
+          "internal/api/main_test.go"
+        ],
+        "steps": [
+          {
+            "name": "format-fixture",
+            "argv": [
+              "gofmt",
+              "-w",
+              "internal/api/liveness_task_native_windows_test.go"
+            ],
+            "timeout": 30,
+            "mutates_inputs": true
+          },
+          {
+            "name": "new-test-default-off",
+            "argv": [
+              "go",
+              "test",
+              "-json",
+              "-count=1",
+              "-p=1",
+              "-parallel=1",
+              "-timeout",
+              "5m",
+              "-run",
+              "^TestEnsureLivenessTaskResolved_NativeXMLRoundTrip$",
+              "./internal/api"
+            ],
+            "timeout": 360,
+            "stdout_contains": [
+              "\"Action\":\"skip\"",
+              "TestEnsureLivenessTaskResolved_NativeXMLRoundTrip"
+            ]
+          },
+          {
+            "name": "new-test-tagged-default-off",
+            "argv": [
+              "go",
+              "test",
+              "-tags=test_state_path_env",
+              "-json",
+              "-count=1",
+              "-p=1",
+              "-parallel=1",
+              "-timeout",
+              "5m",
+              "-run",
+              "^TestEnsureLivenessTaskResolved_NativeXMLRoundTrip$",
+              "./internal/api"
+            ],
+            "timeout": 360,
+            "stdout_contains": [
+              "\"Action\":\"skip\"",
+              "TestEnsureLivenessTaskResolved_NativeXMLRoundTrip"
+            ]
+          },
+          {
+            "name": "check-tracked-diff",
+            "argv": [
+              "git",
+              "diff",
+              "--check"
+            ],
+            "timeout": 30
+          },
+          {
+            "name": "final-status",
+            "argv": [
+              "git",
+              "status",
+              "--porcelain=v1",
+              "--untracked-files=all"
+            ],
+            "timeout": 30
+          }
+        ]
+      },
+      "execution": {
+        "commands": [
+          {
+            "argv": [
+              "@@GIT_EXE@@",
+              "rev-parse",
+              "HEAD"
+            ],
+            "cwd": "@@SOURCE_ROOT@@",
+            "stdout": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-default-off-20261128-v1\\head.stdout.txt",
+            "stderr": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-default-off-20261128-v1\\head.stderr.txt",
+            "captures_measured": true,
+            "command_success": true,
+            "io": {
+              "stdout": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 41,
+                "bytes_stored": 41,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603681.5836696
+              },
+              "stderr": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603681.5836393
+              }
+            },
+            "work_seconds": 30,
+            "cleanup_seconds": 10,
+            "native_owner": {
+              "path": "@@ORCHE_APP@@\\scripts\\process_supervision\\windows_job.py",
+              "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+            },
+            "console": {
+              "attached": true,
+              "visible": false
+            },
+            "stdin_mode": "null",
+            "before_resume_entered": true,
+            "before_resume_returned": true,
+            "before_resume_deadline_exceeded": false,
+            "phases_elapsed_seconds": {
+              "initial_save_started": 0.000026799971237778664,
+              "initial_save_finished": 0.0005249000387266278,
+              "launch_entered": 0.0005261000478640199,
+              "before_resume_entered": 0.005254500079900026,
+              "before_resume_returned": 0.0052556999726220965,
+              "launch_returned": 0.005271299974992871,
+              "launch_exception": null,
+              "external_settle_end": 0.03742549999151379
+            },
+            "quiescence_state": "complete",
+            "original_pid": 42056,
+            "timed_out": false,
+            "work_deadline_exceeded": false,
+            "work_elapsed_seconds": 0.03725240007042885,
+            "cleanup_interval_seconds": 10,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "exit_code": 0,
+            "worker_join_observations": [
+              {
+                "name": "head-stdout",
+                "ident": 139928,
+                "native_id": 139928,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.03746600006707013,
+                "remaining_seconds": 9.999786400003359,
+                "last_entered_seconds": 0.03746600006707013,
+                "last_remaining_seconds": 9.999786400003359,
+                "returned_seconds": 0.037473400007002056,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.03659969998989254
+              },
+              {
+                "name": "head-stderr",
+                "ident": 392004,
+                "native_id": 392004,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.03747740003746003,
+                "remaining_seconds": 9.999775000032969,
+                "last_entered_seconds": 0.03747740003746003,
+                "last_remaining_seconds": 9.999775000032969,
+                "returned_seconds": 0.03748170007020235,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.03656939999200404
+              }
+            ],
+            "seconds": 0.03749480005353689,
+            "cleanup_deadline_exceeded": false,
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "original_input_writers_retained": true,
+            "original_input_writer_joined": false,
+            "completion_receiving": {
+              "schema": "ordinary-original-native-io-completion-v1",
+              "native": {
+                "direct_exit_code": 0,
+                "direct_reaped": true,
+                "active_zero": true,
+                "job_terminated": false,
+                "handles_closed": true,
+                "issues": []
+              },
+              "io": {
+                "stdout": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 41,
+                  "bytes_stored": 41,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603681.5836696
+                },
+                "stderr": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 0,
+                  "bytes_stored": 0,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603681.5836393
+                }
+              },
+              "stdin_mode": "null",
+              "stdin": {},
+              "original_owner_retained": true,
+              "original_readers_joined": true,
+              "original_input_writer_joined": false,
+              "lifecycle_state": "CLOSED"
+            },
+            "stdout_sha256": "e4dfa45feae96ccc97b391b834371ee8dce13685d2ba10799afb2dcb409c2bb5",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "@@GOFMT_EXE@@",
+              "-w",
+              "internal/api/liveness_task_native_windows_test.go"
+            ],
+            "cwd": "@@SOURCE_ROOT@@",
+            "stdout": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-default-off-20261128-v1\\format-fixture.stdout.txt",
+            "stderr": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-default-off-20261128-v1\\format-fixture.stderr.txt",
+            "captures_measured": true,
+            "command_success": true,
+            "io": {
+              "stdout": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603681.7179669
+              },
+              "stderr": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603681.7179402
+              }
+            },
+            "work_seconds": 30,
+            "cleanup_seconds": 10,
+            "native_owner": {
+              "path": "@@ORCHE_APP@@\\scripts\\process_supervision\\windows_job.py",
+              "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+            },
+            "console": {
+              "attached": true,
+              "visible": false
+            },
+            "stdin_mode": "null",
+            "before_resume_entered": true,
+            "before_resume_returned": true,
+            "before_resume_deadline_exceeded": false,
+            "phases_elapsed_seconds": {
+              "initial_save_started": 0.0000222999369725585,
+              "initial_save_finished": 0.0003241999074816704,
+              "launch_entered": 0.00032519991509616375,
+              "before_resume_entered": 0.005021399934776127,
+              "before_resume_returned": 0.005023199948482215,
+              "launch_returned": 0.005041499971412122,
+              "launch_exception": null,
+              "external_settle_end": 0.13207629998214543
+            },
+            "quiescence_state": "complete",
+            "original_pid": 342320,
+            "timed_out": false,
+            "work_deadline_exceeded": false,
+            "work_elapsed_seconds": 0.1319310999242589,
+            "cleanup_interval_seconds": 10,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "exit_code": 0,
+            "worker_join_observations": [
+              {
+                "name": "format-fixture-stdout",
+                "ident": 78472,
+                "native_id": 78472,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.13210339995566756,
+                "remaining_seconds": 9.999827699968591,
+                "last_entered_seconds": 0.13210339995566756,
+                "last_remaining_seconds": 9.999827699968591,
+                "returned_seconds": 0.13210869999602437,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.13133619993459433
+              },
+              {
+                "name": "format-fixture-stderr",
+                "ident": 40088,
+                "native_id": 40088,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.1321116000181064,
+                "remaining_seconds": 9.999819499906152,
+                "last_entered_seconds": 0.1321116000181064,
+                "last_remaining_seconds": 9.999819499906152,
+                "returned_seconds": 0.13211259990930557,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.131309499964118
+              }
+            ],
+            "seconds": 0.1321246000006795,
+            "cleanup_deadline_exceeded": false,
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "original_input_writers_retained": true,
+            "original_input_writer_joined": false,
+            "completion_receiving": {
+              "schema": "ordinary-original-native-io-completion-v1",
+              "native": {
+                "direct_exit_code": 0,
+                "direct_reaped": true,
+                "active_zero": true,
+                "job_terminated": false,
+                "handles_closed": true,
+                "issues": []
+              },
+              "io": {
+                "stdout": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 0,
+                  "bytes_stored": 0,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603681.7179669
+                },
+                "stderr": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 0,
+                  "bytes_stored": 0,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603681.7179402
+                }
+              },
+              "stdin_mode": "null",
+              "stdin": {},
+              "original_owner_retained": true,
+              "original_readers_joined": true,
+              "original_input_writer_joined": false,
+              "lifecycle_state": "CLOSED"
+            },
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "@@GO_EXE@@",
+              "test",
+              "-json",
+              "-count=1",
+              "-p=1",
+              "-parallel=1",
+              "-timeout",
+              "5m",
+              "-run",
+              "^TestEnsureLivenessTaskResolved_NativeXMLRoundTrip$",
+              "./internal/api"
+            ],
+            "cwd": "@@SOURCE_ROOT@@",
+            "stdout": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-default-off-20261128-v1\\new-test-default-off.stdout.txt",
+            "stderr": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-default-off-20261128-v1\\new-test-default-off.stderr.txt",
+            "captures_measured": true,
+            "command_success": false,
+            "io": {
+              "stdout": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 3786,
+                "bytes_stored": 3786,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603683.4298305
+              },
+              "stderr": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 436,
+                "bytes_stored": 436,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603683.0906482
+              }
+            },
+            "work_seconds": 360,
+            "cleanup_seconds": 10,
+            "native_owner": {
+              "path": "@@ORCHE_APP@@\\scripts\\process_supervision\\windows_job.py",
+              "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+            },
+            "console": {
+              "attached": true,
+              "visible": false
+            },
+            "stdin_mode": "null",
+            "before_resume_entered": true,
+            "before_resume_returned": true,
+            "before_resume_deadline_exceeded": false,
+            "phases_elapsed_seconds": {
+              "initial_save_started": 0.000020399922505021095,
+              "initial_save_finished": 0.00036890001501888037,
+              "launch_entered": 0.0003700000233948231,
+              "before_resume_entered": 0.005052399937994778,
+              "before_resume_returned": 0.005053799948655069,
+              "launch_returned": 0.005079100024886429,
+              "launch_exception": null,
+              "external_settle_end": 1.3739533999469131
+            },
+            "quiescence_state": "complete",
+            "original_pid": 345912,
+            "timed_out": false,
+            "work_deadline_exceeded": false,
+            "work_elapsed_seconds": 1.3739143999991938,
+            "cleanup_interval_seconds": 10,
+            "native": {
+              "direct_exit_code": 1,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "exit_code": 1,
+            "worker_join_observations": [
+              {
+                "name": "new-test-default-off-stdout",
+                "ident": 364096,
+                "native_id": 364096,
+                "alive_before": true,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": false,
+                  "eof": false,
+                  "pipe_close_returned": false,
+                  "capture_close_returned": false
+                },
+                "join_attempted": true,
+                "join_attempt_count": 62,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 1.3739770000101998,
+                "remaining_seconds": 9.999937399988994,
+                "last_entered_seconds": 1.7090724000008777,
+                "last_remaining_seconds": 9.664841999998316,
+                "returned_seconds": 1.7090806999476627,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 1.708845500019379
+              },
+              {
+                "name": "new-test-default-off-stderr",
+                "ident": 498920,
+                "native_id": 498920,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 1.373998099938035,
+                "remaining_seconds": 9.999916300061159,
+                "last_entered_seconds": 1.373998099938035,
+                "last_remaining_seconds": 9.999916300061159,
+                "returned_seconds": 1.3739992999471724,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 1.369663199991919
+              }
+            ],
+            "seconds": 1.7090998999774456,
+            "cleanup_deadline_exceeded": false,
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "original_input_writers_retained": true,
+            "original_input_writer_joined": false,
+            "completion_receiving": {
+              "schema": "ordinary-original-native-io-completion-v1",
+              "native": {
+                "direct_exit_code": 1,
+                "direct_reaped": true,
+                "active_zero": true,
+                "job_terminated": false,
+                "handles_closed": true,
+                "issues": []
+              },
+              "io": {
+                "stdout": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 3786,
+                  "bytes_stored": 3786,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603683.4298305
+                },
+                "stderr": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 436,
+                  "bytes_stored": 436,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603683.0906482
+                }
+              },
+              "stdin_mode": "null",
+              "stdin": {},
+              "original_owner_retained": true,
+              "original_readers_joined": true,
+              "original_input_writer_joined": false,
+              "lifecycle_state": "CLOSED"
+            },
+            "stdout_sha256": "105941c7a2bbbd44565796780a22cfdd23a8948fc1ffa9dd9ad7289b3ff5521e",
+            "stderr_sha256": "f035e9ea60e324642ab0f8d68399d00112a00da0e204507a9b38d49f08593d69"
+          }
+        ],
+        "guard_sha256": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2",
+        "config_sha256": "d8b900368dc0d5b0acb2b4d9e0c0518cb0fcfd6b6a698e095d2b89cf027b44e4",
+        "expected_head": "8204d3400cbfde401850d3acd3479fb8b1450fd3",
+        "source": "@@SOURCE_ROOT@@",
+        "status": "FAIL",
+        "command_quiescence": {
+          "complete": true,
+          "commands": [
+            {
+              "name": "head",
+              "state": "complete",
+              "reason": "",
+              "direct_exit_known": true
+            },
+            {
+              "name": "format-fixture",
+              "state": "complete",
+              "reason": "",
+              "direct_exit_known": true
+            },
+            {
+              "name": "new-test-default-off",
+              "state": "complete",
+              "reason": "",
+              "direct_exit_known": true
+            }
+          ]
+        },
+        "step_inputs": [
+          {
+            "name": "format-fixture",
+            "files": {
+              "internal/api/liveness_task_native_windows_test.go": "867eed75fb4c6fa0f4d94d9c6a096da0a15395752a92b9143b2d6486fe8e6d3b",
+              "internal/api/liveness_task.go": "7423c2a7fa8e20b117a5db72349e7840fa7adcbdc396ee26adf9caa5c0d09d61",
+              "internal/scheduler/scheduler_liveness_xml.go": "2568c3ff86d57a82058e7b7888d6c616236ec9aad2da9e9612b6b0cd398348e0",
+              "internal/scheduler/scheduler_xml_create_windows.go": "8189d20e687b3d25bed74d81471a884b5b1137bb739b8a7f201772c13c912cc3",
+              "internal/api/main_test.go": "a34d3b8e14f610945662a7aeee122068641b931af19ffd9535ba6e24b186d869"
+            }
+          },
+          {
+            "name": "new-test-default-off",
+            "files": {
+              "internal/api/liveness_task_native_windows_test.go": "867eed75fb4c6fa0f4d94d9c6a096da0a15395752a92b9143b2d6486fe8e6d3b",
+              "internal/api/liveness_task.go": "7423c2a7fa8e20b117a5db72349e7840fa7adcbdc396ee26adf9caa5c0d09d61",
+              "internal/scheduler/scheduler_liveness_xml.go": "2568c3ff86d57a82058e7b7888d6c616236ec9aad2da9e9612b6b0cd398348e0",
+              "internal/scheduler/scheduler_xml_create_windows.go": "8189d20e687b3d25bed74d81471a884b5b1137bb739b8a7f201772c13c912cc3",
+              "internal/api/main_test.go": "a34d3b8e14f610945662a7aeee122068641b931af19ffd9535ba6e24b186d869"
+            }
+          }
+        ],
+        "steps_received": [
+          "format-fixture"
+        ],
+        "error": "RuntimeError: new-test-default-off exit 1 expected 0"
+      }
+    },
+    {
+      "name": "dependencies",
+      "original_receipt_sha256": "44bf1ca2bc08ec60a11df02599b083cfca44fcd47b0bebebbeef9a5a89fe3032",
+      "root_receiving": {
+        "controller_exit_code": 0,
+        "original_controller_reaped": true,
+        "controller_capture_handles_closed": true,
+        "seconds": 16.14016539999284,
+        "receipt_sha256": "44bf1ca2bc08ec60a11df02599b083cfca44fcd47b0bebebbeef9a5a89fe3032"
+      },
+      "configuration": {
+        "source": "@@SOURCE_ROOT@@",
+        "head": "8204d3400cbfde401850d3acd3479fb8b1450fd3",
+        "run": "runs/a660-liveness-deps-20261128-v1",
+        "environment": {
+          "GOMODCACHE": "@@MODULE_CACHE@@",
+          "GOPROXY": "https://proxy.golang.org",
+          "GOSUMDB": "sum.golang.org",
+          "GOENV": "off",
+          "GOWORK": "off",
+          "GIT_OPTIONAL_LOCKS": "0",
+          "GIT_TERMINAL_PROMPT": "0",
+          "GIT_NO_REPLACE_OBJECTS": "1",
+          "GIT_NO_LAZY_FETCH": "1"
+        },
+        "observed_files": [
+          "go.mod",
+          "go.sum",
+          "internal/api/liveness_task_native_windows_test.go"
+        ],
+        "steps": [
+          {
+            "name": "download-pinned-modules",
+            "argv": [
+              "go",
+              "mod",
+              "download"
+            ],
+            "timeout": 180
+          },
+          {
+            "name": "verify-modules",
+            "argv": [
+              "go",
+              "mod",
+              "verify"
+            ],
+            "timeout": 90
+          },
+          {
+            "name": "module-input-diff",
+            "argv": [
+              "git",
+              "diff",
+              "--exit-code",
+              "--",
+              "go.mod",
+              "go.sum"
+            ],
+            "timeout": 30
+          }
+        ]
+      },
+      "execution": {
+        "commands": [
+          {
+            "argv": [
+              "@@GIT_EXE@@",
+              "rev-parse",
+              "HEAD"
+            ],
+            "cwd": "@@SOURCE_ROOT@@",
+            "stdout": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-deps-20261128-v1\\head.stdout.txt",
+            "stderr": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-deps-20261128-v1\\head.stderr.txt",
+            "captures_measured": true,
+            "command_success": true,
+            "io": {
+              "stdout": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 41,
+                "bytes_stored": 41,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603767.3892542
+              },
+              "stderr": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603767.3892241
+              }
+            },
+            "work_seconds": 30,
+            "cleanup_seconds": 10,
+            "native_owner": {
+              "path": "@@ORCHE_APP@@\\scripts\\process_supervision\\windows_job.py",
+              "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+            },
+            "console": {
+              "attached": true,
+              "visible": false
+            },
+            "stdin_mode": "null",
+            "before_resume_entered": true,
+            "before_resume_returned": true,
+            "before_resume_deadline_exceeded": false,
+            "phases_elapsed_seconds": {
+              "initial_save_started": 0.000054900068789720535,
+              "initial_save_finished": 0.0006903000175952911,
+              "launch_entered": 0.0006917000282555819,
+              "before_resume_entered": 0.005075099994428456,
+              "before_resume_returned": 0.005076900008134544,
+              "launch_returned": 0.005095100030303001,
+              "launch_exception": null,
+              "external_settle_end": 0.04289560008328408
+            },
+            "quiescence_state": "complete",
+            "original_pid": 401016,
+            "timed_out": false,
+            "work_deadline_exceeded": false,
+            "work_elapsed_seconds": 0.04268549999687821,
+            "cleanup_interval_seconds": 10,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "exit_code": 0,
+            "worker_join_observations": [
+              {
+                "name": "head-stdout",
+                "ident": 117324,
+                "native_id": 117324,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.042979300022125244,
+                "remaining_seconds": 9.999706199974753,
+                "last_entered_seconds": 0.042979300022125244,
+                "last_remaining_seconds": 9.999706199974753,
+                "returned_seconds": 0.04298700008075684,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.04225290007889271
+              },
+              {
+                "name": "head-stderr",
+                "ident": 469392,
+                "native_id": 469392,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.042990899994038045,
+                "remaining_seconds": 9.99969460000284,
+                "last_entered_seconds": 0.042990899994038045,
+                "last_remaining_seconds": 9.99969460000284,
+                "returned_seconds": 0.042995300027541816,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.0422228000825271
+              }
+            ],
+            "seconds": 0.043008800013922155,
+            "cleanup_deadline_exceeded": false,
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "original_input_writers_retained": true,
+            "original_input_writer_joined": false,
+            "completion_receiving": {
+              "schema": "ordinary-original-native-io-completion-v1",
+              "native": {
+                "direct_exit_code": 0,
+                "direct_reaped": true,
+                "active_zero": true,
+                "job_terminated": false,
+                "handles_closed": true,
+                "issues": []
+              },
+              "io": {
+                "stdout": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 41,
+                  "bytes_stored": 41,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603767.3892542
+                },
+                "stderr": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 0,
+                  "bytes_stored": 0,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603767.3892241
+                }
+              },
+              "stdin_mode": "null",
+              "stdin": {},
+              "original_owner_retained": true,
+              "original_readers_joined": true,
+              "original_input_writer_joined": false,
+              "lifecycle_state": "CLOSED"
+            },
+            "stdout_sha256": "e4dfa45feae96ccc97b391b834371ee8dce13685d2ba10799afb2dcb409c2bb5",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "@@GO_EXE@@",
+              "mod",
+              "download"
+            ],
+            "cwd": "@@SOURCE_ROOT@@",
+            "stdout": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-deps-20261128-v1\\download-pinned-modules.stdout.txt",
+            "stderr": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-deps-20261128-v1\\download-pinned-modules.stderr.txt",
+            "captures_measured": true,
+            "command_success": true,
+            "io": {
+              "stdout": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603782.6560417
+              },
+              "stderr": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603782.6560025
+              }
+            },
+            "work_seconds": 180,
+            "cleanup_seconds": 10,
+            "native_owner": {
+              "path": "@@ORCHE_APP@@\\scripts\\process_supervision\\windows_job.py",
+              "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+            },
+            "console": {
+              "attached": true,
+              "visible": false
+            },
+            "stdin_mode": "null",
+            "before_resume_entered": true,
+            "before_resume_returned": true,
+            "before_resume_deadline_exceeded": false,
+            "phases_elapsed_seconds": {
+              "initial_save_started": 0.00002320006024092436,
+              "initial_save_finished": 0.000327400048263371,
+              "launch_entered": 0.00032870005816221237,
+              "before_resume_entered": 0.005411999998614192,
+              "before_resume_returned": 0.005414200015366077,
+              "launch_returned": 0.005434300052002072,
+              "launch_exception": null,
+              "external_settle_end": 15.267923000035807
+            },
+            "quiescence_state": "complete",
+            "original_pid": 72144,
+            "timed_out": false,
+            "work_deadline_exceeded": false,
+            "work_elapsed_seconds": 15.267781600006856,
+            "cleanup_interval_seconds": 10,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "exit_code": 0,
+            "worker_join_observations": [
+              {
+                "name": "download-pinned-modules-stdout",
+                "ident": 38352,
+                "native_id": 38352,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 15.267951200017706,
+                "remaining_seconds": 9.99983039998915,
+                "last_entered_seconds": 15.267951200017706,
+                "last_remaining_seconds": 9.99983039998915,
+                "returned_seconds": 15.267958000069484,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 15.263983700075187
+              },
+              {
+                "name": "download-pinned-modules-stderr",
+                "ident": 373152,
+                "native_id": 373152,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 15.26796149997972,
+                "remaining_seconds": 9.999820100027137,
+                "last_entered_seconds": 15.26796149997972,
+                "last_remaining_seconds": 9.999820100027137,
+                "returned_seconds": 15.267962599988095,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 15.26394450000953
+              }
+            ],
+            "seconds": 15.267975100083277,
+            "cleanup_deadline_exceeded": false,
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "original_input_writers_retained": true,
+            "original_input_writer_joined": false,
+            "completion_receiving": {
+              "schema": "ordinary-original-native-io-completion-v1",
+              "native": {
+                "direct_exit_code": 0,
+                "direct_reaped": true,
+                "active_zero": true,
+                "job_terminated": false,
+                "handles_closed": true,
+                "issues": []
+              },
+              "io": {
+                "stdout": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 0,
+                  "bytes_stored": 0,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603782.6560417
+                },
+                "stderr": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 0,
+                  "bytes_stored": 0,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603782.6560025
+                }
+              },
+              "stdin_mode": "null",
+              "stdin": {},
+              "original_owner_retained": true,
+              "original_readers_joined": true,
+              "original_input_writer_joined": false,
+              "lifecycle_state": "CLOSED"
+            },
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "@@GO_EXE@@",
+              "mod",
+              "verify"
+            ],
+            "cwd": "@@SOURCE_ROOT@@",
+            "stdout": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-deps-20261128-v1\\verify-modules.stdout.txt",
+            "stderr": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-deps-20261128-v1\\verify-modules.stderr.txt",
+            "captures_measured": true,
+            "command_success": true,
+            "io": {
+              "stdout": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 21,
+                "bytes_stored": 21,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603783.3240488
+              },
+              "stderr": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603783.3240185
+              }
+            },
+            "work_seconds": 90,
+            "cleanup_seconds": 10,
+            "native_owner": {
+              "path": "@@ORCHE_APP@@\\scripts\\process_supervision\\windows_job.py",
+              "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+            },
+            "console": {
+              "attached": true,
+              "visible": false
+            },
+            "stdin_mode": "null",
+            "before_resume_entered": true,
+            "before_resume_returned": true,
+            "before_resume_deadline_exceeded": false,
+            "phases_elapsed_seconds": {
+              "initial_save_started": 0.00002429995220154524,
+              "initial_save_finished": 0.00039770000148564577,
+              "launch_entered": 0.00039870000910013914,
+              "before_resume_entered": 0.005230000009760261,
+              "before_resume_returned": 0.005231000017374754,
+              "launch_returned": 0.005268899956718087,
+              "launch_exception": null,
+              "external_settle_end": 0.6635855999775231
+            },
+            "quiescence_state": "complete",
+            "original_pid": 79700,
+            "timed_out": false,
+            "work_deadline_exceeded": false,
+            "work_elapsed_seconds": 0.6634202999994159,
+            "cleanup_interval_seconds": 10,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "exit_code": 0,
+            "worker_join_observations": [
+              {
+                "name": "verify-modules-stdout",
+                "ident": 25676,
+                "native_id": 25676,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.6636985000222921,
+                "remaining_seconds": 9.999721799977124,
+                "last_entered_seconds": 0.6636985000222921,
+                "last_remaining_seconds": 9.999721799977124,
+                "returned_seconds": 0.6637045999523252,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.6613576000090688
+              },
+              {
+                "name": "verify-modules-stderr",
+                "ident": 260036,
+                "native_id": 260036,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.6637075999751687,
+                "remaining_seconds": 9.999712700024247,
+                "last_entered_seconds": 0.6637075999751687,
+                "last_remaining_seconds": 9.999712700024247,
+                "returned_seconds": 0.6637086999835446,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.6613273000111803
+              }
+            ],
+            "seconds": 0.6637339999433607,
+            "cleanup_deadline_exceeded": false,
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "original_input_writers_retained": true,
+            "original_input_writer_joined": false,
+            "completion_receiving": {
+              "schema": "ordinary-original-native-io-completion-v1",
+              "native": {
+                "direct_exit_code": 0,
+                "direct_reaped": true,
+                "active_zero": true,
+                "job_terminated": false,
+                "handles_closed": true,
+                "issues": []
+              },
+              "io": {
+                "stdout": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 21,
+                  "bytes_stored": 21,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603783.3240488
+                },
+                "stderr": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 0,
+                  "bytes_stored": 0,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603783.3240185
+                }
+              },
+              "stdin_mode": "null",
+              "stdin": {},
+              "original_owner_retained": true,
+              "original_readers_joined": true,
+              "original_input_writer_joined": false,
+              "lifecycle_state": "CLOSED"
+            },
+            "stdout_sha256": "b4537ed75f533f993f371954de47e42a793b8e5b0587577de7e27fb3e50696bd",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "@@GIT_EXE@@",
+              "diff",
+              "--exit-code",
+              "--",
+              "go.mod",
+              "go.sum"
+            ],
+            "cwd": "@@SOURCE_ROOT@@",
+            "stdout": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-deps-20261128-v1\\module-input-diff.stdout.txt",
+            "stderr": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-deps-20261128-v1\\module-input-diff.stderr.txt",
+            "captures_measured": true,
+            "command_success": true,
+            "io": {
+              "stdout": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603783.369243
+              },
+              "stderr": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603783.3692793
+              }
+            },
+            "work_seconds": 30,
+            "cleanup_seconds": 10,
+            "native_owner": {
+              "path": "@@ORCHE_APP@@\\scripts\\process_supervision\\windows_job.py",
+              "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+            },
+            "console": {
+              "attached": true,
+              "visible": false
+            },
+            "stdin_mode": "null",
+            "before_resume_entered": true,
+            "before_resume_returned": true,
+            "before_resume_deadline_exceeded": false,
+            "phases_elapsed_seconds": {
+              "initial_save_started": 0.0000252000754699111,
+              "initial_save_finished": 0.00045220006722956896,
+              "launch_entered": 0.00045330007560551167,
+              "before_resume_entered": 0.004364100052043796,
+              "before_resume_returned": 0.004365700064226985,
+              "launch_returned": 0.004380800062790513,
+              "launch_exception": null,
+              "external_settle_end": 0.040667900000698864
+            },
+            "quiescence_state": "complete",
+            "original_pid": 189612,
+            "timed_out": false,
+            "work_deadline_exceeded": false,
+            "work_elapsed_seconds": 0.040198200033046305,
+            "cleanup_interval_seconds": 10,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "exit_code": 0,
+            "worker_join_observations": [
+              {
+                "name": "module-input-diff-stdout",
+                "ident": 151596,
+                "native_id": 151596,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.040699100005440414,
+                "remaining_seconds": 9.999499100027606,
+                "last_entered_seconds": 0.040699100005440414,
+                "last_remaining_seconds": 9.999499100027606,
+                "returned_seconds": 0.04070540005341172,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.039395200088620186
+              },
+              {
+                "name": "module-input-diff-stderr",
+                "ident": 448908,
+                "native_id": 448908,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.04070870007853955,
+                "remaining_seconds": 9.999489499954507,
+                "last_entered_seconds": 0.04070870007853955,
+                "last_remaining_seconds": 9.999489499954507,
+                "returned_seconds": 0.04070980008691549,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.03943150001578033
+              }
+            ],
+            "seconds": 0.04072070005349815,
+            "cleanup_deadline_exceeded": false,
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "original_input_writers_retained": true,
+            "original_input_writer_joined": false,
+            "completion_receiving": {
+              "schema": "ordinary-original-native-io-completion-v1",
+              "native": {
+                "direct_exit_code": 0,
+                "direct_reaped": true,
+                "active_zero": true,
+                "job_terminated": false,
+                "handles_closed": true,
+                "issues": []
+              },
+              "io": {
+                "stdout": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 0,
+                  "bytes_stored": 0,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603783.369243
+                },
+                "stderr": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 0,
+                  "bytes_stored": 0,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603783.3692793
+                }
+              },
+              "stdin_mode": "null",
+              "stdin": {},
+              "original_owner_retained": true,
+              "original_readers_joined": true,
+              "original_input_writer_joined": false,
+              "lifecycle_state": "CLOSED"
+            },
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        ],
+        "guard_sha256": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2",
+        "config_sha256": "2d0e34e583de5a8eade019138fdec7811a4b257a4495097462bf037bfcf21854",
+        "expected_head": "8204d3400cbfde401850d3acd3479fb8b1450fd3",
+        "source": "@@SOURCE_ROOT@@",
+        "status": "PASS",
+        "command_quiescence": {
+          "complete": true,
+          "commands": [
+            {
+              "name": "head",
+              "state": "complete",
+              "reason": "",
+              "direct_exit_known": true
+            },
+            {
+              "name": "download-pinned-modules",
+              "state": "complete",
+              "reason": "",
+              "direct_exit_known": true
+            },
+            {
+              "name": "verify-modules",
+              "state": "complete",
+              "reason": "",
+              "direct_exit_known": true
+            },
+            {
+              "name": "module-input-diff",
+              "state": "complete",
+              "reason": "",
+              "direct_exit_known": true
+            }
+          ]
+        },
+        "step_inputs": [
+          {
+            "name": "download-pinned-modules",
+            "files": {
+              "go.mod": "805a7dd76431a24ebd6ce346682e7bc321e4dae0e37488448811bfa624122edd",
+              "go.sum": "61f4a30f006f3bc99b1d2500646d9fd381c3c8d72050ca76dce2f9321c3ecae2",
+              "internal/api/liveness_task_native_windows_test.go": "867eed75fb4c6fa0f4d94d9c6a096da0a15395752a92b9143b2d6486fe8e6d3b"
+            }
+          },
+          {
+            "name": "verify-modules",
+            "files": {
+              "go.mod": "805a7dd76431a24ebd6ce346682e7bc321e4dae0e37488448811bfa624122edd",
+              "go.sum": "61f4a30f006f3bc99b1d2500646d9fd381c3c8d72050ca76dce2f9321c3ecae2",
+              "internal/api/liveness_task_native_windows_test.go": "867eed75fb4c6fa0f4d94d9c6a096da0a15395752a92b9143b2d6486fe8e6d3b"
+            }
+          },
+          {
+            "name": "module-input-diff",
+            "files": {
+              "go.mod": "805a7dd76431a24ebd6ce346682e7bc321e4dae0e37488448811bfa624122edd",
+              "go.sum": "61f4a30f006f3bc99b1d2500646d9fd381c3c8d72050ca76dce2f9321c3ecae2",
+              "internal/api/liveness_task_native_windows_test.go": "867eed75fb4c6fa0f4d94d9c6a096da0a15395752a92b9143b2d6486fe8e6d3b"
+            }
+          }
+        ],
+        "steps_received": [
+          "download-pinned-modules",
+          "verify-modules",
+          "module-input-diff"
+        ]
+      }
+    },
+    {
+      "name": "default_off_v2",
+      "original_receipt_sha256": "de2ca98e171c327df53988aa7db530d9e73896f5cedbce1e3c8f169637616691",
+      "root_receiving": {
+        "controller_exit_code": 0,
+        "original_controller_reaped": true,
+        "controller_capture_handles_closed": true,
+        "seconds": 257.34186150005553,
+        "receipt_sha256": "de2ca98e171c327df53988aa7db530d9e73896f5cedbce1e3c8f169637616691"
+      },
+      "configuration": {
+        "source": "@@SOURCE_ROOT@@",
+        "head": "8204d3400cbfde401850d3acd3479fb8b1450fd3",
+        "run": "runs/a660-liveness-default-off-20261128-v2",
+        "environment": {
+          "MCPHUB_E2E_SCHEDULER": "none",
+          "MCPHUB_TARGET_LIVENESS_QA": "",
+          "GIT_OPTIONAL_LOCKS": "0",
+          "GIT_TERMINAL_PROMPT": "0",
+          "GIT_NO_REPLACE_OBJECTS": "1",
+          "GIT_NO_LAZY_FETCH": "1",
+          "GOMODCACHE": "@@MODULE_CACHE@@",
+          "GOENV": "off",
+          "GOWORK": "off"
+        },
+        "observed_files": [
+          "internal/api/liveness_task_native_windows_test.go",
+          "internal/api/liveness_task.go",
+          "internal/scheduler/scheduler_liveness_xml.go",
+          "internal/scheduler/scheduler_xml_create_windows.go",
+          "internal/api/main_test.go",
+          "go.mod",
+          "go.sum"
+        ],
+        "steps": [
+          {
+            "name": "go-version",
+            "argv": [
+              "go",
+              "version"
+            ],
+            "timeout": 30
+          },
+          {
+            "name": "new-test-default-off",
+            "argv": [
+              "go",
+              "test",
+              "-json",
+              "-count=1",
+              "-p=1",
+              "-parallel=1",
+              "-timeout",
+              "5m",
+              "-run",
+              "^TestEnsureLivenessTaskResolved_NativeXMLRoundTrip$",
+              "./internal/api"
+            ],
+            "timeout": 360,
+            "stdout_contains": [
+              "\"Action\":\"skip\"",
+              "TestEnsureLivenessTaskResolved_NativeXMLRoundTrip"
+            ]
+          },
+          {
+            "name": "new-test-tagged-default-off",
+            "argv": [
+              "go",
+              "test",
+              "-tags=test_state_path_env",
+              "-json",
+              "-count=1",
+              "-p=1",
+              "-parallel=1",
+              "-timeout",
+              "5m",
+              "-run",
+              "^TestEnsureLivenessTaskResolved_NativeXMLRoundTrip$",
+              "./internal/api"
+            ],
+            "timeout": 360,
+            "stdout_contains": [
+              "\"Action\":\"skip\"",
+              "TestEnsureLivenessTaskResolved_NativeXMLRoundTrip"
+            ]
+          },
+          {
+            "name": "check-tracked-diff",
+            "argv": [
+              "git",
+              "diff",
+              "--check"
+            ],
+            "timeout": 30
+          },
+          {
+            "name": "final-status",
+            "argv": [
+              "git",
+              "status",
+              "--porcelain=v1",
+              "--untracked-files=all"
+            ],
+            "timeout": 30
+          }
+        ]
+      },
+      "execution": {
+        "commands": [
+          {
+            "argv": [
+              "@@GIT_EXE@@",
+              "rev-parse",
+              "HEAD"
+            ],
+            "cwd": "@@SOURCE_ROOT@@",
+            "stdout": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-default-off-20261128-v2\\head.stdout.txt",
+            "stderr": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-default-off-20261128-v2\\head.stderr.txt",
+            "captures_measured": true,
+            "command_success": true,
+            "io": {
+              "stdout": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 41,
+                "bytes_stored": 41,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603817.2566836
+              },
+              "stderr": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603817.2566585
+              }
+            },
+            "work_seconds": 30,
+            "cleanup_seconds": 10,
+            "native_owner": {
+              "path": "@@ORCHE_APP@@\\scripts\\process_supervision\\windows_job.py",
+              "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+            },
+            "console": {
+              "attached": true,
+              "visible": false
+            },
+            "stdin_mode": "null",
+            "before_resume_entered": true,
+            "before_resume_returned": true,
+            "before_resume_deadline_exceeded": false,
+            "phases_elapsed_seconds": {
+              "initial_save_started": 0.000023000058718025684,
+              "initial_save_finished": 0.0008083999855443835,
+              "launch_entered": 0.0008097999962046742,
+              "before_resume_entered": 0.004958900040946901,
+              "before_resume_returned": 0.004959800047799945,
+              "launch_returned": 0.004973500035703182,
+              "launch_exception": null,
+              "external_settle_end": 0.03437310003209859
+            },
+            "quiescence_state": "complete",
+            "original_pid": 326512,
+            "timed_out": false,
+            "work_deadline_exceeded": false,
+            "work_elapsed_seconds": 0.03432610002346337,
+            "cleanup_interval_seconds": 10,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "exit_code": 0,
+            "worker_join_observations": [
+              {
+                "name": "head-stdout",
+                "ident": 223148,
+                "native_id": 223148,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.03440989996306598,
+                "remaining_seconds": 9.999916200060397,
+                "last_entered_seconds": 0.03440989996306598,
+                "last_remaining_seconds": 9.999916200060397,
+                "returned_seconds": 0.03441660001408309,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.03394560003653169
+              },
+              {
+                "name": "head-stderr",
+                "ident": 503908,
+                "native_id": 503908,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.034420000039972365,
+                "remaining_seconds": 9.999906099983491,
+                "last_entered_seconds": 0.034420000039972365,
+                "last_remaining_seconds": 9.999906099983491,
+                "returned_seconds": 0.03442410007119179,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.033920499961823225
+              }
+            ],
+            "seconds": 0.03443690005224198,
+            "cleanup_deadline_exceeded": false,
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "original_input_writers_retained": true,
+            "original_input_writer_joined": false,
+            "completion_receiving": {
+              "schema": "ordinary-original-native-io-completion-v1",
+              "native": {
+                "direct_exit_code": 0,
+                "direct_reaped": true,
+                "active_zero": true,
+                "job_terminated": false,
+                "handles_closed": true,
+                "issues": []
+              },
+              "io": {
+                "stdout": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 41,
+                  "bytes_stored": 41,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603817.2566836
+                },
+                "stderr": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 0,
+                  "bytes_stored": 0,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603817.2566585
+                }
+              },
+              "stdin_mode": "null",
+              "stdin": {},
+              "original_owner_retained": true,
+              "original_readers_joined": true,
+              "original_input_writer_joined": false,
+              "lifecycle_state": "CLOSED"
+            },
+            "stdout_sha256": "e4dfa45feae96ccc97b391b834371ee8dce13685d2ba10799afb2dcb409c2bb5",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "@@GO_EXE@@",
+              "version"
+            ],
+            "cwd": "@@SOURCE_ROOT@@",
+            "stdout": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-default-off-20261128-v2\\go-version.stdout.txt",
+            "stderr": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-default-off-20261128-v2\\go-version.stderr.txt",
+            "captures_measured": true,
+            "command_success": true,
+            "io": {
+              "stdout": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 34,
+                "bytes_stored": 34,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603817.3979833
+              },
+              "stderr": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 603817.2799974
+              }
+            },
+            "work_seconds": 30,
+            "cleanup_seconds": 10,
+            "native_owner": {
+              "path": "@@ORCHE_APP@@\\scripts\\process_supervision\\windows_job.py",
+              "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+            },
+            "console": {
+              "attached": true,
+              "visible": false
+            },
+            "stdin_mode": "null",
+            "before_resume_entered": true,
+            "before_resume_returned": true,
+            "before_resume_deadline_exceeded": false,
+            "phases_elapsed_seconds": {
+              "initial_save_started": 0.000020399922505021095,
+              "initial_save_finished": 0.00030429998878389597,
+              "launch_entered": 0.000305499997921288,
+              "before_resume_entered": 0.004110499983653426,
+              "before_resume_returned": 0.004111699992790818,
+              "launch_returned": 0.004125799983739853,
+              "launch_exception": null,
+              "external_settle_end": 0.14011009992100298
+            },
+            "quiescence_state": "complete",
+            "original_pid": 244012,
+            "timed_out": false,
+            "work_deadline_exceeded": false,
+            "work_elapsed_seconds": 0.13982069992925972,
+            "cleanup_interval_seconds": 10,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "exit_code": 0,
+            "worker_join_observations": [
+              {
+                "name": "go-version-stdout",
+                "ident": 394480,
+                "native_id": 394480,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.14014139992650598,
+                "remaining_seconds": 9.999679300002754,
+                "last_entered_seconds": 0.14014139992650598,
+                "last_remaining_seconds": 9.999679300002754,
+                "returned_seconds": 0.14014839997980744,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.13879040000028908
+              },
+              {
+                "name": "go-version-stderr",
+                "ident": 405760,
+                "native_id": 405760,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.14015180000569671,
+                "remaining_seconds": 9.999668899923563,
+                "last_entered_seconds": 0.14015180000569671,
+                "last_remaining_seconds": 9.999668899923563,
+                "returned_seconds": 0.1401528000133112,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.02080449997447431
+              }
+            ],
+            "seconds": 0.1401655999943614,
+            "cleanup_deadline_exceeded": false,
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "original_input_writers_retained": true,
+            "original_input_writer_joined": false,
+            "completion_receiving": {
+              "schema": "ordinary-original-native-io-completion-v1",
+              "native": {
+                "direct_exit_code": 0,
+                "direct_reaped": true,
+                "active_zero": true,
+                "job_terminated": false,
+                "handles_closed": true,
+                "issues": []
+              },
+              "io": {
+                "stdout": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 34,
+                  "bytes_stored": 34,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603817.3979833
+                },
+                "stderr": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 0,
+                  "bytes_stored": 0,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 603817.2799974
+                }
+              },
+              "stdin_mode": "null",
+              "stdin": {},
+              "original_owner_retained": true,
+              "original_readers_joined": true,
+              "original_input_writer_joined": false,
+              "lifecycle_state": "CLOSED"
+            },
+            "stdout_sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "@@GO_EXE@@",
+              "test",
+              "-json",
+              "-count=1",
+              "-p=1",
+              "-parallel=1",
+              "-timeout",
+              "5m",
+              "-run",
+              "^TestEnsureLivenessTaskResolved_NativeXMLRoundTrip$",
+              "./internal/api"
+            ],
+            "cwd": "@@SOURCE_ROOT@@",
+            "stdout": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-default-off-20261128-v2\\new-test-default-off.stdout.txt",
+            "stderr": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-default-off-20261128-v2\\new-test-default-off.stderr.txt",
+            "captures_measured": true,
+            "command_success": true,
+            "io": {
+              "stdout": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 1658,
+                "bytes_stored": 1658,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 604045.5129007
+              },
+              "stderr": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 604045.5128451
+              }
+            },
+            "work_seconds": 360,
+            "cleanup_seconds": 10,
+            "native_owner": {
+              "path": "@@ORCHE_APP@@\\scripts\\process_supervision\\windows_job.py",
+              "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+            },
+            "console": {
+              "attached": true,
+              "visible": false
+            },
+            "stdin_mode": "null",
+            "before_resume_entered": true,
+            "before_resume_returned": true,
+            "before_resume_deadline_exceeded": false,
+            "phases_elapsed_seconds": {
+              "initial_save_started": 0.00002319994382560253,
+              "initial_save_finished": 0.0004021999193355441,
+              "launch_entered": 0.0004031999269500375,
+              "before_resume_entered": 0.004329899908043444,
+              "before_resume_returned": 0.004330999916419387,
+              "launch_returned": 0.0043438998982310295,
+              "launch_exception": null,
+              "external_settle_end": 228.1166366999969
+            },
+            "quiescence_state": "complete",
+            "original_pid": 199724,
+            "timed_out": false,
+            "work_deadline_exceeded": false,
+            "work_elapsed_seconds": 228.11656479991507,
+            "cleanup_interval_seconds": 10,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "exit_code": 0,
+            "worker_join_observations": [
+              {
+                "name": "new-test-default-off-stdout",
+                "ident": 424468,
+                "native_id": 424468,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 228.11668479989748,
+                "remaining_seconds": 9.999880000017583,
+                "last_entered_seconds": 228.11668479989748,
+                "last_remaining_seconds": 9.999880000017583,
+                "returned_seconds": 228.11669599998277,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 228.11045029992238
+              },
+              {
+                "name": "new-test-default-off-stderr",
+                "ident": 282172,
+                "native_id": 282172,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 228.11670279991813,
+                "remaining_seconds": 9.999861999996938,
+                "last_entered_seconds": 228.11670279991813,
+                "last_remaining_seconds": 9.999861999996938,
+                "returned_seconds": 228.11670539993793,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 228.11039469996467
+              }
+            ],
+            "seconds": 228.11672369996086,
+            "cleanup_deadline_exceeded": false,
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "original_input_writers_retained": true,
+            "original_input_writer_joined": false,
+            "completion_receiving": {
+              "schema": "ordinary-original-native-io-completion-v1",
+              "native": {
+                "direct_exit_code": 0,
+                "direct_reaped": true,
+                "active_zero": true,
+                "job_terminated": false,
+                "handles_closed": true,
+                "issues": []
+              },
+              "io": {
+                "stdout": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 1658,
+                  "bytes_stored": 1658,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 604045.5129007
+                },
+                "stderr": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 0,
+                  "bytes_stored": 0,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 604045.5128451
+                }
+              },
+              "stdin_mode": "null",
+              "stdin": {},
+              "original_owner_retained": true,
+              "original_readers_joined": true,
+              "original_input_writer_joined": false,
+              "lifecycle_state": "CLOSED"
+            },
+            "stdout_sha256": "56ba839cf2e76fc37844b58b8bc53bbe2daaa070370b9af1416dceed8694e867",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "@@GO_EXE@@",
+              "test",
+              "-tags=test_state_path_env",
+              "-json",
+              "-count=1",
+              "-p=1",
+              "-parallel=1",
+              "-timeout",
+              "5m",
+              "-run",
+              "^TestEnsureLivenessTaskResolved_NativeXMLRoundTrip$",
+              "./internal/api"
+            ],
+            "cwd": "@@SOURCE_ROOT@@",
+            "stdout": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-default-off-20261128-v2\\new-test-tagged-default-off.stdout.txt",
+            "stderr": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-default-off-20261128-v2\\new-test-tagged-default-off.stderr.txt",
+            "captures_measured": true,
+            "command_success": true,
+            "io": {
+              "stdout": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 1658,
+                "bytes_stored": 1658,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 604074.3474694
+              },
+              "stderr": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 604074.3474229
+              }
+            },
+            "work_seconds": 360,
+            "cleanup_seconds": 10,
+            "native_owner": {
+              "path": "@@ORCHE_APP@@\\scripts\\process_supervision\\windows_job.py",
+              "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+            },
+            "console": {
+              "attached": true,
+              "visible": false
+            },
+            "stdin_mode": "null",
+            "before_resume_entered": true,
+            "before_resume_returned": true,
+            "before_resume_deadline_exceeded": false,
+            "phases_elapsed_seconds": {
+              "initial_save_started": 0.00003790005575865507,
+              "initial_save_finished": 0.0007793999975547194,
+              "launch_entered": 0.0007815000135451555,
+              "before_resume_entered": 0.008497399976477027,
+              "before_resume_returned": 0.008500500000081956,
+              "launch_returned": 0.00853099999949336,
+              "launch_exception": null,
+              "external_settle_end": 28.827918000053614
+            },
+            "quiescence_state": "complete",
+            "original_pid": 366768,
+            "timed_out": false,
+            "work_deadline_exceeded": false,
+            "work_elapsed_seconds": 28.827852900023572,
+            "cleanup_interval_seconds": 10,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "exit_code": 0,
+            "worker_join_observations": [
+              {
+                "name": "new-test-tagged-default-off-stdout",
+                "ident": 382288,
+                "native_id": 382288,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 28.827955799992196,
+                "remaining_seconds": 9.999897100031376,
+                "last_entered_seconds": 28.827955799992196,
+                "last_remaining_seconds": 9.999897100031376,
+                "returned_seconds": 28.827964700059965,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 28.822338100057095
+              },
+              {
+                "name": "new-test-tagged-default-off-stderr",
+                "ident": 509300,
+                "native_id": 509300,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 28.82797029998619,
+                "remaining_seconds": 9.999882600037381,
+                "last_entered_seconds": 28.82797029998619,
+                "last_remaining_seconds": 9.999882600037381,
+                "returned_seconds": 28.827972800005227,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 28.822291600052267
+              }
+            ],
+            "seconds": 28.827988800010644,
+            "cleanup_deadline_exceeded": false,
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "original_input_writers_retained": true,
+            "original_input_writer_joined": false,
+            "completion_receiving": {
+              "schema": "ordinary-original-native-io-completion-v1",
+              "native": {
+                "direct_exit_code": 0,
+                "direct_reaped": true,
+                "active_zero": true,
+                "job_terminated": false,
+                "handles_closed": true,
+                "issues": []
+              },
+              "io": {
+                "stdout": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 1658,
+                  "bytes_stored": 1658,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 604074.3474694
+                },
+                "stderr": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 0,
+                  "bytes_stored": 0,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 604074.3474229
+                }
+              },
+              "stdin_mode": "null",
+              "stdin": {},
+              "original_owner_retained": true,
+              "original_readers_joined": true,
+              "original_input_writer_joined": false,
+              "lifecycle_state": "CLOSED"
+            },
+            "stdout_sha256": "2229ae8c7b092a220a02e51ae4c7ed7dffd0d50fa8fd905cf83694ff40189550",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "@@GIT_EXE@@",
+              "diff",
+              "--check"
+            ],
+            "cwd": "@@SOURCE_ROOT@@",
+            "stdout": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-default-off-20261128-v2\\check-tracked-diff.stdout.txt",
+            "stderr": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-default-off-20261128-v2\\check-tracked-diff.stderr.txt",
+            "captures_measured": true,
+            "command_success": true,
+            "io": {
+              "stdout": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 604074.4028725
+              },
+              "stderr": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 604074.4029211
+              }
+            },
+            "work_seconds": 30,
+            "cleanup_seconds": 10,
+            "native_owner": {
+              "path": "@@ORCHE_APP@@\\scripts\\process_supervision\\windows_job.py",
+              "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+            },
+            "console": {
+              "attached": true,
+              "visible": false
+            },
+            "stdin_mode": "null",
+            "before_resume_entered": true,
+            "before_resume_returned": true,
+            "before_resume_deadline_exceeded": false,
+            "phases_elapsed_seconds": {
+              "initial_save_started": 0.00003579992335289717,
+              "initial_save_finished": 0.0006972999544814229,
+              "launch_entered": 0.0006994999712333083,
+              "before_resume_entered": 0.0064764999551698565,
+              "before_resume_returned": 0.006478599971160293,
+              "launch_returned": 0.0064968999940901995,
+              "launch_exception": null,
+              "external_settle_end": 0.04496189998462796
+            },
+            "quiescence_state": "complete",
+            "original_pid": 87748,
+            "timed_out": false,
+            "work_deadline_exceeded": false,
+            "work_elapsed_seconds": 0.04478130000643432,
+            "cleanup_interval_seconds": 10,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "exit_code": 0,
+            "worker_join_observations": [
+              {
+                "name": "check-tracked-diff-stdout",
+                "ident": 8788,
+                "native_id": 8788,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.04499909991864115,
+                "remaining_seconds": 9.999782200087793,
+                "last_entered_seconds": 0.04499909991864115,
+                "last_remaining_seconds": 9.999782200087793,
+                "returned_seconds": 0.04500779998488724,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.044377699960023165
+              },
+              {
+                "name": "check-tracked-diff-stderr",
+                "ident": 467816,
+                "native_id": 467816,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.04501359991263598,
+                "remaining_seconds": 9.999767700093798,
+                "last_entered_seconds": 0.04501359991263598,
+                "last_remaining_seconds": 9.999767700093798,
+                "returned_seconds": 0.045016099931672215,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.04442629998084158
+              }
+            ],
+            "seconds": 0.04503179993480444,
+            "cleanup_deadline_exceeded": false,
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "original_input_writers_retained": true,
+            "original_input_writer_joined": false,
+            "completion_receiving": {
+              "schema": "ordinary-original-native-io-completion-v1",
+              "native": {
+                "direct_exit_code": 0,
+                "direct_reaped": true,
+                "active_zero": true,
+                "job_terminated": false,
+                "handles_closed": true,
+                "issues": []
+              },
+              "io": {
+                "stdout": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 0,
+                  "bytes_stored": 0,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 604074.4028725
+                },
+                "stderr": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 0,
+                  "bytes_stored": 0,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 604074.4029211
+                }
+              },
+              "stdin_mode": "null",
+              "stdin": {},
+              "original_owner_retained": true,
+              "original_readers_joined": true,
+              "original_input_writer_joined": false,
+              "lifecycle_state": "CLOSED"
+            },
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "@@GIT_EXE@@",
+              "status",
+              "--porcelain=v1",
+              "--untracked-files=all"
+            ],
+            "cwd": "@@SOURCE_ROOT@@",
+            "stdout": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-default-off-20261128-v2\\final-status.stdout.txt",
+            "stderr": "@@FUNCTIONAL_RUN_ROOT@@\\runs\\a660-liveness-default-off-20261128-v2\\final-status.stderr.txt",
+            "captures_measured": true,
+            "command_success": true,
+            "io": {
+              "stdout": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 53,
+                "bytes_stored": 53,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 604074.4559262
+              },
+              "stderr": {
+                "acquired": true,
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0,
+                "limit_bytes": null,
+                "limit_exceeded": false,
+                "worker_complete_monotonic": 604074.4558864
+              }
+            },
+            "work_seconds": 30,
+            "cleanup_seconds": 10,
+            "native_owner": {
+              "path": "@@ORCHE_APP@@\\scripts\\process_supervision\\windows_job.py",
+              "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+            },
+            "console": {
+              "attached": true,
+              "visible": false
+            },
+            "stdin_mode": "null",
+            "before_resume_entered": true,
+            "before_resume_returned": true,
+            "before_resume_deadline_exceeded": false,
+            "phases_elapsed_seconds": {
+              "initial_save_started": 0.00004200008697807789,
+              "initial_save_finished": 0.000993699999526143,
+              "launch_entered": 0.0009957000147551298,
+              "before_resume_entered": 0.0066945001017302275,
+              "before_resume_returned": 0.006697500008158386,
+              "launch_returned": 0.006725899991579354,
+              "launch_exception": null,
+              "external_settle_end": 0.04748559999279678
+            },
+            "quiescence_state": "complete",
+            "original_pid": 140460,
+            "timed_out": false,
+            "work_deadline_exceeded": false,
+            "work_elapsed_seconds": 0.04730670002754778,
+            "cleanup_interval_seconds": 10,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "exit_code": 0,
+            "worker_join_observations": [
+              {
+                "name": "final-status-stdout",
+                "ident": 11924,
+                "native_id": 11924,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.04752450005616993,
+                "remaining_seconds": 9.999782199971378,
+                "last_entered_seconds": 0.04752450005616993,
+                "last_remaining_seconds": 9.999782199971378,
+                "returned_seconds": 0.04753330000676215,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.046853800071403384
+              },
+              {
+                "name": "final-status-stderr",
+                "ident": 469488,
+                "native_id": 469488,
+                "alive_before": false,
+                "alive_after": false,
+                "stream_before": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "join_attempted": true,
+                "join_attempt_count": 1,
+                "join_error_count": 0,
+                "join_timeout_seconds": 0,
+                "joined": true,
+                "entered_seconds": 0.047538200044073164,
+                "remaining_seconds": 9.999768499983475,
+                "last_entered_seconds": 0.047538200044073164,
+                "last_remaining_seconds": 9.999768499983475,
+                "returned_seconds": 0.04754040006082505,
+                "stream_after": {
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true
+                },
+                "worker_complete_seconds": 0.04681400000117719
+              }
+            ],
+            "seconds": 0.04755710007157177,
+            "cleanup_deadline_exceeded": false,
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "original_input_writers_retained": true,
+            "original_input_writer_joined": false,
+            "completion_receiving": {
+              "schema": "ordinary-original-native-io-completion-v1",
+              "native": {
+                "direct_exit_code": 0,
+                "direct_reaped": true,
+                "active_zero": true,
+                "job_terminated": false,
+                "handles_closed": true,
+                "issues": []
+              },
+              "io": {
+                "stdout": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 53,
+                  "bytes_stored": 53,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 604074.4559262
+                },
+                "stderr": {
+                  "acquired": true,
+                  "worker_started": true,
+                  "worker_complete": true,
+                  "eof": true,
+                  "pipe_close_returned": true,
+                  "capture_close_returned": true,
+                  "error": null,
+                  "bytes_seen": 0,
+                  "bytes_stored": 0,
+                  "limit_bytes": null,
+                  "limit_exceeded": false,
+                  "worker_complete_monotonic": 604074.4558864
+                }
+              },
+              "stdin_mode": "null",
+              "stdin": {},
+              "original_owner_retained": true,
+              "original_readers_joined": true,
+              "original_input_writer_joined": false,
+              "lifecycle_state": "CLOSED"
+            },
+            "stdout_sha256": "b4fdc14fd5c558c098fc77c420a778437eb68199c3d976c5806fa49d3294c69c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        ],
+        "guard_sha256": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2",
+        "config_sha256": "e00b093c5913cc7c48571a95c5c7f2c86ff927860e50b02869183df3eb7106c0",
+        "expected_head": "8204d3400cbfde401850d3acd3479fb8b1450fd3",
+        "source": "@@SOURCE_ROOT@@",
+        "status": "PASS",
+        "command_quiescence": {
+          "complete": true,
+          "commands": [
+            {
+              "name": "head",
+              "state": "complete",
+              "reason": "",
+              "direct_exit_known": true
+            },
+            {
+              "name": "go-version",
+              "state": "complete",
+              "reason": "",
+              "direct_exit_known": true
+            },
+            {
+              "name": "new-test-default-off",
+              "state": "complete",
+              "reason": "",
+              "direct_exit_known": true
+            },
+            {
+              "name": "new-test-tagged-default-off",
+              "state": "complete",
+              "reason": "",
+              "direct_exit_known": true
+            },
+            {
+              "name": "check-tracked-diff",
+              "state": "complete",
+              "reason": "",
+              "direct_exit_known": true
+            },
+            {
+              "name": "final-status",
+              "state": "complete",
+              "reason": "",
+              "direct_exit_known": true
+            }
+          ]
+        },
+        "step_inputs": [
+          {
+            "name": "go-version",
+            "files": {
+              "internal/api/liveness_task_native_windows_test.go": "867eed75fb4c6fa0f4d94d9c6a096da0a15395752a92b9143b2d6486fe8e6d3b",
+              "internal/api/liveness_task.go": "7423c2a7fa8e20b117a5db72349e7840fa7adcbdc396ee26adf9caa5c0d09d61",
+              "internal/scheduler/scheduler_liveness_xml.go": "2568c3ff86d57a82058e7b7888d6c616236ec9aad2da9e9612b6b0cd398348e0",
+              "internal/scheduler/scheduler_xml_create_windows.go": "8189d20e687b3d25bed74d81471a884b5b1137bb739b8a7f201772c13c912cc3",
+              "internal/api/main_test.go": "a34d3b8e14f610945662a7aeee122068641b931af19ffd9535ba6e24b186d869",
+              "go.mod": "805a7dd76431a24ebd6ce346682e7bc321e4dae0e37488448811bfa624122edd",
+              "go.sum": "61f4a30f006f3bc99b1d2500646d9fd381c3c8d72050ca76dce2f9321c3ecae2"
+            }
+          },
+          {
+            "name": "new-test-default-off",
+            "files": {
+              "internal/api/liveness_task_native_windows_test.go": "867eed75fb4c6fa0f4d94d9c6a096da0a15395752a92b9143b2d6486fe8e6d3b",
+              "internal/api/liveness_task.go": "7423c2a7fa8e20b117a5db72349e7840fa7adcbdc396ee26adf9caa5c0d09d61",
+              "internal/scheduler/scheduler_liveness_xml.go": "2568c3ff86d57a82058e7b7888d6c616236ec9aad2da9e9612b6b0cd398348e0",
+              "internal/scheduler/scheduler_xml_create_windows.go": "8189d20e687b3d25bed74d81471a884b5b1137bb739b8a7f201772c13c912cc3",
+              "internal/api/main_test.go": "a34d3b8e14f610945662a7aeee122068641b931af19ffd9535ba6e24b186d869",
+              "go.mod": "805a7dd76431a24ebd6ce346682e7bc321e4dae0e37488448811bfa624122edd",
+              "go.sum": "61f4a30f006f3bc99b1d2500646d9fd381c3c8d72050ca76dce2f9321c3ecae2"
+            }
+          },
+          {
+            "name": "new-test-tagged-default-off",
+            "files": {
+              "internal/api/liveness_task_native_windows_test.go": "867eed75fb4c6fa0f4d94d9c6a096da0a15395752a92b9143b2d6486fe8e6d3b",
+              "internal/api/liveness_task.go": "7423c2a7fa8e20b117a5db72349e7840fa7adcbdc396ee26adf9caa5c0d09d61",
+              "internal/scheduler/scheduler_liveness_xml.go": "2568c3ff86d57a82058e7b7888d6c616236ec9aad2da9e9612b6b0cd398348e0",
+              "internal/scheduler/scheduler_xml_create_windows.go": "8189d20e687b3d25bed74d81471a884b5b1137bb739b8a7f201772c13c912cc3",
+              "internal/api/main_test.go": "a34d3b8e14f610945662a7aeee122068641b931af19ffd9535ba6e24b186d869",
+              "go.mod": "805a7dd76431a24ebd6ce346682e7bc321e4dae0e37488448811bfa624122edd",
+              "go.sum": "61f4a30f006f3bc99b1d2500646d9fd381c3c8d72050ca76dce2f9321c3ecae2"
+            }
+          },
+          {
+            "name": "check-tracked-diff",
+            "files": {
+              "internal/api/liveness_task_native_windows_test.go": "867eed75fb4c6fa0f4d94d9c6a096da0a15395752a92b9143b2d6486fe8e6d3b",
+              "internal/api/liveness_task.go": "7423c2a7fa8e20b117a5db72349e7840fa7adcbdc396ee26adf9caa5c0d09d61",
+              "internal/scheduler/scheduler_liveness_xml.go": "2568c3ff86d57a82058e7b7888d6c616236ec9aad2da9e9612b6b0cd398348e0",
+              "internal/scheduler/scheduler_xml_create_windows.go": "8189d20e687b3d25bed74d81471a884b5b1137bb739b8a7f201772c13c912cc3",
+              "internal/api/main_test.go": "a34d3b8e14f610945662a7aeee122068641b931af19ffd9535ba6e24b186d869",
+              "go.mod": "805a7dd76431a24ebd6ce346682e7bc321e4dae0e37488448811bfa624122edd",
+              "go.sum": "61f4a30f006f3bc99b1d2500646d9fd381c3c8d72050ca76dce2f9321c3ecae2"
+            }
+          },
+          {
+            "name": "final-status",
+            "files": {
+              "internal/api/liveness_task_native_windows_test.go": "867eed75fb4c6fa0f4d94d9c6a096da0a15395752a92b9143b2d6486fe8e6d3b",
+              "internal/api/liveness_task.go": "7423c2a7fa8e20b117a5db72349e7840fa7adcbdc396ee26adf9caa5c0d09d61",
+              "internal/scheduler/scheduler_liveness_xml.go": "2568c3ff86d57a82058e7b7888d6c616236ec9aad2da9e9612b6b0cd398348e0",
+              "internal/scheduler/scheduler_xml_create_windows.go": "8189d20e687b3d25bed74d81471a884b5b1137bb739b8a7f201772c13c912cc3",
+              "internal/api/main_test.go": "a34d3b8e14f610945662a7aeee122068641b931af19ffd9535ba6e24b186d869",
+              "go.mod": "805a7dd76431a24ebd6ce346682e7bc321e4dae0e37488448811bfa624122edd",
+              "go.sum": "61f4a30f006f3bc99b1d2500646d9fd381c3c8d72050ca76dce2f9321c3ecae2"
+            }
+          }
+        ],
+        "steps_received": [
+          "go-version",
+          "new-test-default-off",
+          "new-test-tagged-default-off",
+          "check-tracked-diff",
+          "final-status"
+        ]
+      }
+    }
+  ],
+  "review": {
+    "kind": "independent internal static review",
+    "reviewer": "functional_frontier_a",
+    "file_sha256": "867eed75fb4c6fa0f4d94d9c6a096da0a15395752a92b9143b2d6486fe8e6d3b",
+    "blocking_findings": [],
+    "executed_by_reviewer": false,
+    "scope": [
+      "opt-out before native access",
+      "QA-name-only routing",
+      "independent expected inputs",
+      "production XML and matcher",
+      "unknown-create retention",
+      "QA cleanup does not confer generation ownership"
+    ],
+    "external_current_head_review": "NOT_RUN"
+  },
+  "effective_environment": {
+    "source": "existing run_wave_commands_v2.py read before this preparation; unchanged wrapper, configuration overrides its defaults",
+    "wrapper_original_sha256": "74ddf8a3610dc6c8f1bfcda4dbc349833bf334baf0f695999196fe5bd340b5fe",
+    "inherited_mcp_hub_variables": "all MCPHUB_* removed before explicit configuration overrides",
+    "defaults": {
+      "TEMP": "@@OWN_RUN_ROOT@@/tmp",
+      "TMP": "@@OWN_RUN_ROOT@@/tmp",
+      "TMPDIR": "@@OWN_RUN_ROOT@@/tmp",
+      "GOTMPDIR": "@@OWN_RUN_ROOT@@/tmp",
+      "GOCACHE": "@@FUNCTIONAL_RUN_ROOT@@/go-build",
+      "GOMODCACHE": "@@PREVIOUS_MODULE_CACHE@@",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "GOTOOLCHAIN": "local",
+      "GOFLAGS": "-mod=readonly",
+      "CGO_ENABLED": "0",
+      "PYTHONDONTWRITEBYTECODE": "1"
+    },
+    "dependency_download_override": {
+      "GOPROXY": "https://proxy.golang.org",
+      "GOSUMDB": "sum.golang.org",
+      "GOMODCACHE": "@@MODULE_CACHE@@"
+    },
+    "successful_default_off_override": {
+      "GOMODCACHE": "@@MODULE_CACHE@@",
+      "GOENV": "off",
+      "GOWORK": "off",
+      "MCPHUB_E2E_SCHEDULER": "none",
+      "MCPHUB_TARGET_LIVENESS_QA": ""
+    }
+  }
+}

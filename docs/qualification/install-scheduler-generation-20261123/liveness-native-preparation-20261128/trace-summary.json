@@ -1,0 +1,60 @@
+{
+  "schema": "liveness-native-opt-out-trace-v1",
+  "native_executions": 0,
+  "root_outcomes": {
+    "default": "SKIP",
+    "tagged": "SKIP"
+  },
+  "traces": {
+    "new-test-default-off.stdout.txt": {
+      "root_events": [
+        {
+          "Time": "2026-11-28T21:24:26.6602867+03:00",
+          "Action": "run",
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestEnsureLivenessTaskResolved_NativeXMLRoundTrip"
+        },
+        {
+          "Time": "2026-11-28T21:24:26.6608135+03:00",
+          "Action": "skip",
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestEnsureLivenessTaskResolved_NativeXMLRoundTrip",
+          "Elapsed": 0
+        }
+      ],
+      "package_events": [
+        {
+          "Time": "2026-11-28T21:24:26.7893762+03:00",
+          "Action": "pass",
+          "Package": "mcp-local-hub/internal/api",
+          "Elapsed": 0.151
+        }
+      ]
+    },
+    "new-test-tagged-default-off.stdout.txt": {
+      "root_events": [
+        {
+          "Time": "2026-11-28T21:24:49.4069594+03:00",
+          "Action": "run",
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestEnsureLivenessTaskResolved_NativeXMLRoundTrip"
+        },
+        {
+          "Time": "2026-11-28T21:24:49.4069594+03:00",
+          "Action": "skip",
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestEnsureLivenessTaskResolved_NativeXMLRoundTrip",
+          "Elapsed": 0
+        }
+      ],
+      "package_events": [
+        {
+          "Time": "2026-11-28T21:24:49.5269938+03:00",
+          "Action": "pass",
+          "Package": "mcp-local-hub/internal/api",
+          "Elapsed": 0.657
+        }
+      ]
+    }
+  }
+}

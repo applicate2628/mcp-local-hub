@@ -1,0 +1,2260 @@
+{
+  "schema": 1,
+  "audit_kind": "independent_local_raw_evidence_and_full_Git_blob_replay",
+  "audit_script_sha256": "45bccadf7ea21bca683ac35498dbe115dc6a89a4a6c555d814abd8158501b2a8",
+  "audit_project_execution": false,
+  "audit_remote_execution": false,
+  "archive": {
+    "filename": "raw-evidence.zip",
+    "bytes": 2208961,
+    "sha256": "1e95d5b473a2da7dbddf174d2ac4fd5bf8f0ee62415dc05c55c4e00fc8938cfb",
+    "members": 178,
+    "manifest_sha256": "9d72fe83e83ec7861f84de6206d50ccc0b281ca55cca6a6b47a5ca8ba2fc5e8f",
+    "all_177_payload_hashes_verified": true
+  },
+  "previous_archive": {
+    "bytes": 1695231,
+    "sha256": "858912769a69d45fd6fdd8e422ed169fd7bbc69c9a125e7fab8c2a0fe584bd29",
+    "members": 146,
+    "materialization_plan_identical": true,
+    "all_manifest_payload_hashes_verified": true
+  },
+  "source_provenance": {
+    "base_commit": "858812988833a84368c60fba1540ae601155fa71",
+    "base_tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+    "base": {
+      "files": 3281,
+      "bytes": 50583217,
+      "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+    },
+    "base_full_git_blobs_rehashed_locally": true,
+    "previous_replacements": [
+      {
+        "path": "internal/api/adopt.go",
+        "from": "predecessor/internal/api/adopt.go"
+      },
+      {
+        "path": "internal/api/adopt_provenance_events.go",
+        "from": "predecessor/internal/api/adopt_provenance_events.go"
+      },
+      {
+        "path": "internal/api/adopt_scheduler_recovery_test.go",
+        "from": "predecessor/internal/api/adopt_scheduler_recovery_test.go"
+      },
+      {
+        "path": "internal/api/install.go",
+        "from": "predecessor/internal/api/install.go"
+      },
+      {
+        "path": "internal/api/install_backend_hold_composition_windows_test.go",
+        "from": "predecessor/internal/api/install_backend_hold_composition_windows_test.go"
+      },
+      {
+        "path": "internal/api/install_hyphen_family_ownership_test.go",
+        "from": "predecessor/internal/api/install_hyphen_family_ownership_test.go"
+      },
+      {
+        "path": "internal/api/install_own_port_test.go",
+        "from": "predecessor/internal/api/install_own_port_test.go"
+      },
+      {
+        "path": "internal/api/install_parsed_manifest.go",
+        "from": "predecessor/internal/api/install_parsed_manifest.go"
+      },
+      {
+        "path": "internal/api/install_prune_recovery_test.go",
+        "from": "predecessor/internal/api/install_prune_recovery_test.go"
+      },
+      {
+        "path": "internal/api/install_scheduler_snapshot_test.go",
+        "from": "predecessor/internal/api/install_scheduler_snapshot_test.go"
+      },
+      {
+        "path": "internal/api/install_scheduler_stop_failure_test.go",
+        "from": "predecessor/internal/api/install_scheduler_stop_failure_test.go"
+      },
+      {
+        "path": "internal/api/install_task_mutation_failure_test.go",
+        "from": "predecessor/internal/api/install_task_mutation_failure_test.go"
+      },
+      {
+        "path": "internal/api/install_task_recovery.go",
+        "from": "predecessor/internal/api/install_task_recovery.go"
+      },
+      {
+        "path": "internal/api/install_task_recovery_storage_test.go",
+        "from": "predecessor/internal/api/install_task_recovery_storage_test.go"
+      },
+      {
+        "path": "internal/api/install_task_recovery_test.go",
+        "from": "predecessor/internal/api/install_task_recovery_test.go"
+      },
+      {
+        "path": "internal/api/install_task_rollback.go",
+        "from": "predecessor/internal/api/install_task_rollback.go"
+      },
+      {
+        "path": "internal/api/install_task_rollback_test.go",
+        "from": "predecessor/internal/api/install_task_rollback_test.go"
+      },
+      {
+        "path": "internal/api/intent_audit_caller_oracle_test.go",
+        "from": "predecessor/internal/api/intent_audit_caller_oracle_test.go"
+      },
+      {
+        "path": "internal/api/main_helper_dispatch_test.go",
+        "from": "predecessor/internal/api/main_helper_dispatch_test.go"
+      },
+      {
+        "path": "internal/api/main_helper_dispatch_validation_test.go",
+        "from": "predecessor/internal/api/main_helper_dispatch_validation_test.go"
+      },
+      {
+        "path": "internal/api/main_test.go",
+        "from": "predecessor/internal/api/main_test.go"
+      },
+      {
+        "path": "internal/api/prune_tasks_test.go",
+        "from": "predecessor/internal/api/prune_tasks_test.go"
+      },
+      {
+        "path": "internal/api/register.go",
+        "from": "weekly-candidate/internal/api/register.go"
+      },
+      {
+        "path": "internal/api/scheduler_mgmt.go",
+        "from": "candidate/internal/api/scheduler_mgmt.go"
+      },
+      {
+        "path": "internal/api/scheduler_mgmt_validation_test.go",
+        "from": "weekly-candidate/internal/api/scheduler_mgmt_validation_test.go"
+      },
+      {
+        "path": "internal/api/scheduler_owner_sid_windows_test.go",
+        "from": "predecessor/internal/api/scheduler_owner_sid_windows_test.go"
+      },
+      {
+        "path": "internal/api/scheduler_swap.go",
+        "from": "weekly-candidate/internal/api/scheduler_swap.go"
+      },
+      {
+        "path": "internal/api/scheduler_swap_test.go",
+        "from": "weekly-candidate/internal/api/scheduler_swap_test.go"
+      },
+      {
+        "path": "internal/api/scheduler_upgrade_recovery_test.go",
+        "from": "candidate/internal/api/scheduler_upgrade_recovery_test.go"
+      },
+      {
+        "path": "internal/api/scheduler_upgrade_snapshot_test.go",
+        "from": "candidate/internal/api/scheduler_upgrade_snapshot_test.go"
+      },
+      {
+        "path": "internal/api/secrets_test.go",
+        "from": "predecessor/internal/api/secrets_test.go"
+      },
+      {
+        "path": "internal/api/testhooks.go",
+        "from": "weekly-candidate/internal/api/testhooks.go"
+      },
+      {
+        "path": "internal/api/weekly_refresh.go",
+        "from": "weekly-candidate/internal/api/weekly_refresh.go"
+      },
+      {
+        "path": "internal/api/weekly_refresh_atomic_test.go",
+        "from": "weekly-candidate/internal/api/weekly_refresh_atomic_test.go"
+      },
+      {
+        "path": "internal/api/weekly_refresh_recovery_test.go",
+        "from": "weekly-candidate/internal/api/weekly_refresh_recovery_test.go"
+      },
+      {
+        "path": "internal/api/weekly_refresh_test.go",
+        "from": "weekly-candidate/internal/api/weekly_refresh_test.go"
+      },
+      {
+        "path": "internal/autostart/linux.go",
+        "from": "predecessor/internal/autostart/linux.go"
+      },
+      {
+        "path": "internal/autostart/linux_exec_percent_test.go",
+        "from": "predecessor/internal/autostart/linux_exec_percent_test.go"
+      },
+      {
+        "path": "internal/scheduler/entrypoint_migration_windows.go",
+        "from": "predecessor/internal/scheduler/entrypoint_migration_windows.go"
+      },
+      {
+        "path": "internal/scheduler/entrypoint_migration_windows_test.go",
+        "from": "predecessor/internal/scheduler/entrypoint_migration_windows_test.go"
+      },
+      {
+        "path": "internal/scheduler/scheduler.go",
+        "from": "predecessor/internal/scheduler/scheduler.go"
+      },
+      {
+        "path": "internal/scheduler/scheduler_com_windows.go",
+        "from": "predecessor/internal/scheduler/scheduler_com_windows.go"
+      },
+      {
+        "path": "internal/scheduler/scheduler_com_windows_test.go",
+        "from": "predecessor/internal/scheduler/scheduler_com_windows_test.go"
+      },
+      {
+        "path": "internal/scheduler/scheduler_create_conflict_windows_test.go",
+        "from": "predecessor/internal/scheduler/scheduler_create_conflict_windows_test.go"
+      },
+      {
+        "path": "internal/scheduler/scheduler_hidden_task_windows_test.go",
+        "from": "predecessor/internal/scheduler/scheduler_hidden_task_windows_test.go"
+      },
+      {
+        "path": "internal/scheduler/scheduler_last_result_windows_test.go",
+        "from": "predecessor/internal/scheduler/scheduler_last_result_windows_test.go"
+      },
+      {
+        "path": "internal/scheduler/scheduler_owned_run_windows_test.go",
+        "from": "predecessor/internal/scheduler/scheduler_owned_run_windows_test.go"
+      },
+      {
+        "path": "internal/scheduler/scheduler_owner_sid_windows_test.go",
+        "from": "predecessor/internal/scheduler/scheduler_owner_sid_windows_test.go"
+      },
+      {
+        "path": "internal/scheduler/scheduler_windows.go",
+        "from": "predecessor/internal/scheduler/scheduler_windows.go"
+      },
+      {
+        "path": "internal/scheduler/scheduler_windows_test.go",
+        "from": "predecessor/internal/scheduler/scheduler_windows_test.go"
+      },
+      {
+        "path": "internal/scheduler/scheduler_xml_create_windows.go",
+        "from": "predecessor/internal/scheduler/scheduler_xml_create_windows.go"
+      },
+      {
+        "path": "internal/scheduler/scheduler_xml_create_windows_test.go",
+        "from": "predecessor/internal/scheduler/scheduler_xml_create_windows_test.go"
+      }
+    ],
+    "previous_composition": {
+      "files": 3305,
+      "bytes": 50813638,
+      "inventory_sha256": "ecc139439ca1c3b1185cdd0c6fea9861c9ed3e989d89c09421a2584156645715"
+    },
+    "current_replacements": [
+      {
+        "path": "internal/api/weekly_refresh_atomic_test.go",
+        "from": "a1/internal/api/weekly_refresh_atomic_test.go"
+      },
+      {
+        "path": "internal/api/weekly_refresh_call_graph_origins_test.go",
+        "from": "a1/internal/api/weekly_refresh_call_graph_origins_test.go"
+      },
+      {
+        "path": "internal/api/weekly_refresh.go",
+        "from": "a2/internal/api/weekly_refresh.go"
+      },
+      {
+        "path": "internal/api/supervisor_intent_lock_ownership_test.go",
+        "from": "a2/internal/api/supervisor_intent_lock_ownership_test.go"
+      },
+      {
+        "path": "internal/api/weekly_refresh_testhooks.go",
+        "from": "a2/internal/api/weekly_refresh_testhooks.go"
+      },
+      {
+        "path": "internal/api/weekly_refresh_applied_result_test.go",
+        "from": "a2/internal/api/weekly_refresh_applied_result_test.go"
+      },
+      {
+        "path": "internal/gui/weekly_schedule_applied_result_test.go",
+        "from": "a2/internal/gui/weekly_schedule_applied_result_test.go"
+      }
+    ],
+    "physical_composition": {
+      "files": 3309,
+      "bytes": 50856246,
+      "inventory_sha256": "d556aebcb39a8fc9e965e00713fa99ee8562b669db1476b6ef6b4663112706e2"
+    },
+    "all_3309_source_contents_reconstructed_and_hashed_locally": true,
+    "receipt_source_head_and_tree_identify_base_not_composite_commit": true
+  },
+  "runner_sha256": "a483536d689df8c5713fddbdfd221b85953cf0ce4f9d578a31c4cdbfc6b9a26e",
+  "tool_pins": {
+    "C:\\msys64\\ucrt64\\bin\\go.exe": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113",
+    "C:\\msys64\\ucrt64\\bin\\gofmt.exe": "95368e4aafefa20f962a345ab02f53ffc035ed69349612abbf385b52f4fb25c5",
+    "C:\\msys64\\ucrt64\\bin\\gcc.exe": "f6ff9378c1edb591131304518eac6456708d28720284105930d0d687136bcdd3"
+  },
+  "phases": [
+    {
+      "phase": "a1-origin-proof",
+      "plan_path": "plans/a1-origin-proof.json",
+      "plan_sha256": "5771058018c43ca43d66b765ef1ef5840f2565b897c568ac132da0cb965fd5c9",
+      "started_utc": "2026-11-22T19:51:48.993337+00:00",
+      "finished_utc": "2026-11-22T19:53:01.798351+00:00",
+      "completed": false,
+      "error": "Command failed its declared oracle: a1-old-analyzer",
+      "physical_source": {
+        "files": 3309,
+        "bytes": 50856246,
+        "inventory_sha256": "d556aebcb39a8fc9e965e00713fa99ee8562b669db1476b6ef6b4663112706e2"
+      },
+      "input_inventory": {
+        "files": 12,
+        "bytes": 389112,
+        "inventory_sha256": "473191855392ea78882dcf7fa1cd5fb292b0023dca05c582064954af5f027bc3"
+      },
+      "before_after_equal": true,
+      "commands": [
+        {
+          "label": "a1-old-analyzer",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-tags=test_state_path_env",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\inputs\\a1-red-overlay.json",
+            "-run",
+            "^(TestWeeklyRefreshLockOrderInventory)$",
+            "./internal/api"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\candidate-source",
+          "pid": 30268,
+          "started_utc": "2026-11-22T19:51:53.041765+00:00",
+          "finished_utc": "2026-11-22T19:52:58.082125+00:00",
+          "exit_code": 1,
+          "planned_exit_code": 1,
+          "stdout": {
+            "bytes": 3565,
+            "sha256": "0d464d86b8cfe44126af3dcff9e2e39d547902c70b957734fff3c6f40a6a87c1"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "raw_directory": "evidence/a1-origin-proof/",
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "missing_required_output": [
+            "cleanup"
+          ],
+          "overlay": {
+            "overlay": "inputs/a1-red-overlay.json",
+            "overlay_sha256": "204800ed7fea2028a2d2ff7d44da9ed41bc6277881dc56ab4f186e5e3f03510d",
+            "replacements": [
+              {
+                "source_path": "internal/api/weekly_refresh_atomic_test.go",
+                "input_path": "inputs/control/weekly_refresh_atomic_test.go",
+                "path": "internal/api/weekly_refresh_atomic_test.go",
+                "bytes": 140805,
+                "sha256": "64c0731572009e8aedb691b6e36136195627103efa5d922f69020ae034e2eec8"
+              },
+              {
+                "source_path": "internal/api/weekly_refresh_call_graph_origins_test.go",
+                "input_path": "inputs/control/weekly_refresh_call_graph_origins_test.go",
+                "path": "internal/api/weekly_refresh_call_graph_origins_test.go",
+                "bytes": 12,
+                "sha256": "f3c61ca506361937d4fe8c5e231ff4d5edec3bdc8c29a1e476c4858fc2b52d7a"
+              }
+            ],
+            "effective_inventory": {
+              "files": 3309,
+              "bytes": 50831477,
+              "inventory_sha256": "7b0f19a69f7675e0005fe02b2a7f3c4443820abc3a13193283536f5dedda4b10"
+            }
+          },
+          "tests": {
+            "terminals": {
+              "pass": [],
+              "fail": [
+                "TestWeeklyRefreshLockOrderInventory",
+                "PACKAGE:mcp-local-hub/internal/api"
+              ],
+              "skip": []
+            },
+            "counts": {
+              "pass": 0,
+              "fail": 2,
+              "skip": 0
+            },
+            "named_tests": 1,
+            "leaf_cases": 1,
+            "event_actions": {
+              "start": 1,
+              "run": 1,
+              "output": 6,
+              "fail": 2
+            },
+            "exact_names_and_single_execution_verified": true,
+            "failed_outputs": {
+              "TestWeeklyRefreshLockOrderInventory": "=== RUN   TestWeeklyRefreshLockOrderInventory\n    weekly_refresh_atomic_test.go:3356: resolve type-aware weekly reachability: unresolved typed boundary from secureCreateClientConfigIfMissingImpl at secure_create_client_config_windows.go:129:3 (func(): function variable definition right-hand side is not an exact factory call; function variable must have one direct non-captured call use, got 4 at secure_create_client_config_windows.go:129:3,secure_create_client_config_windows.go:134:3,secure_create_client_config_windows.go:138:3,secure_create_client_config_windows.go:146:3); unresolved typed boundary from secureCreateClientConfigIfMissingImpl at secure_create_client_config_windows.go:134:3 (func(): function variable definition right-hand side is not an exact factory call; function variable must have one direct non-captured call use, got 4 at secure_create_client_config_windows.go:129:3,secure_create_client_config_windows.go:134:3,secure_create_client_config_windows.go:138:3,secure_create_client_config_windows.go:146:3); unresolved typed boundary from secureCreateClientConfigIfMissingImpl at secure_create_client_config_windows.go:138:3 (func(): function variable definition right-hand side is not an exact factory call; function variable must have one direct non-captured call use, got 4 at secure_create_client_config_windows.go:129:3,secure_create_client_config_windows.go:134:3,secure_create_client_config_windows.go:138:3,secure_create_client_config_windows.go:146:3); unresolved typed boundary from secureCreateClientConfigIfMissingImpl at secure_create_client_config_windows.go:146:3 (func(): function variable definition right-hand side is not an exact factory call; function variable must have one direct non-captured call use, got 4 at secure_create_client_config_windows.go:129:3,secure_create_client_config_windows.go:134:3,secure_create_client_config_windows.go:138:3,secure_create_client_config_windows.go:146:3)\n--- FAIL: TestWeeklyRefreshLockOrderInventory (16.52s)\n",
+              "PACKAGE:mcp-local-hub/internal/api": "FAIL\nFAIL\tmcp-local-hub/internal/api\t17.077s\n"
+            },
+            "all_test_outputs_sha256": {
+              "PACKAGE:mcp-local-hub/internal/api": "507eb302e8016584c26e89b2726c9d1877089821d47b1881feb60c106fe21dce",
+              "TestWeeklyRefreshLockOrderInventory": "352804162033584123d3d3f303e9737bf4ac4049cb430b9939b9914cf2bf1565"
+            }
+          },
+          "interpretation": "intended_cleanup_origin_boundary_observed_but_plan_requires_absent_literal_cleanup",
+          "runner_oracle_pass": false
+        }
+      ],
+      "not_run_after_failure": [
+        "a1-origin-fixtures",
+        "a1-lock-order"
+      ]
+    },
+    {
+      "phase": "a1-candidate-proof",
+      "plan_path": "plans/a1-candidate-proof.json",
+      "plan_sha256": "346419c76eec470740adb8921695b82b9480271c2b22fc375cb3ebec07dc730e",
+      "started_utc": "2026-11-22T19:54:16.423766+00:00",
+      "finished_utc": "2026-11-22T19:55:42.854452+00:00",
+      "completed": false,
+      "error": "Command failed its declared oracle: a1-lock-order",
+      "physical_source": {
+        "files": 3309,
+        "bytes": 50856246,
+        "inventory_sha256": "d556aebcb39a8fc9e965e00713fa99ee8562b669db1476b6ef6b4663112706e2"
+      },
+      "input_inventory": {
+        "files": 12,
+        "bytes": 389112,
+        "inventory_sha256": "473191855392ea78882dcf7fa1cd5fb292b0023dca05c582064954af5f027bc3"
+      },
+      "before_after_equal": true,
+      "commands": [
+        {
+          "label": "a1-origin-fixtures",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-tags=test_state_path_env",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-run",
+            "^(TestWeeklyTypedLocalLiteralOrigins|TestWeeklyTypedContextOrigins|TestWeeklyTypedCallGraphResolution|TestWeeklyTypedExportXMLBoundary)$",
+            "./internal/api"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\candidate-source",
+          "pid": 53364,
+          "started_utc": "2026-11-22T19:54:20.302732+00:00",
+          "finished_utc": "2026-11-22T19:55:04.941184+00:00",
+          "exit_code": 0,
+          "planned_exit_code": 0,
+          "stdout": {
+            "bytes": 71685,
+            "sha256": "9c9ad3675343b0eda288e29ec17150bf6d66355e98632a9b575bec57aa3a685d"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "raw_directory": "evidence/a1-candidate-proof/",
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "missing_required_output": [],
+          "overlay": {
+            "overlay": null,
+            "effective_inventory": {
+              "files": 3309,
+              "bytes": 50856246,
+              "inventory_sha256": "d556aebcb39a8fc9e965e00713fa99ee8562b669db1476b6ef6b4663112706e2"
+            },
+            "replacements": []
+          },
+          "tests": {
+            "terminals": {
+              "pass": [
+                "TestWeeklyTypedExportXMLBoundary/reviewed_reader_retains_local_settings_edges",
+                "TestWeeklyTypedExportXMLBoundary/same-shaped_unreviewed_helper_remains_unresolved",
+                "TestWeeklyTypedExportXMLBoundary/another_parameter_remains_unresolved",
+                "TestWeeklyTypedExportXMLBoundary/reassigned_reader_remains_unresolved",
+                "TestWeeklyTypedExportXMLBoundary/expanded_interface_remains_unresolved",
+                "TestWeeklyTypedExportXMLBoundary",
+                "TestWeeklyTypedCallGraphResolution/interface_false-positive_killer",
+                "TestWeeklyTypedCallGraphResolution/local_false-negative_killer",
+                "TestWeeklyTypedCallGraphResolution/allowlisted_ledgered_function-result_origin",
+                "TestWeeklyTypedCallGraphResolution/type_conversion_is_an_external_leaf",
+                "TestWeeklyTypedCallGraphResolution/function_parameter_remains_unresolved",
+                "TestWeeklyTypedCallGraphResolution/function_literal_alias_remains_unresolved",
+                "TestWeeklyTypedCallGraphResolution/named_function_assignment_remains_unresolved",
+                "TestWeeklyTypedCallGraphResolution/same-signature_non-allowlisted_factory_remains_unresolved",
+                "TestWeeklyTypedCallGraphResolution/assignment_instead_of_short_declaration_remains_unresolved",
+                "TestWeeklyTypedCallGraphResolution/conditional_definition_remains_unresolved",
+                "TestWeeklyTypedCallGraphResolution/reassigned_multiple-origin_variable_remains_unresolved",
+                "TestWeeklyTypedCallGraphResolution/escaped_function_variable_remains_unresolved",
+                "TestWeeklyTypedCallGraphResolution/returned_function_variable_remains_unresolved",
+                "TestWeeklyTypedCallGraphResolution/closure-captured_function_variable_remains_unresolved",
+                "TestWeeklyTypedCallGraphResolution/multiple_function-variable_calls_remain_unresolved",
+                "TestWeeklyTypedCallGraphResolution/allowlisted_direct_settings_factory_remains_reachable",
+                "TestWeeklyTypedCallGraphResolution/allowlisted_transitive_settings_factory_remains_reachable",
+                "TestWeeklyTypedCallGraphResolution/selected_Windows_package_callback_origin",
+                "TestWeeklyTypedCallGraphResolution/selected_non-Windows_package_callback_origin",
+                "TestWeeklyTypedCallGraphResolution/unconfigured_package_callback_remains_unresolved",
+                "TestWeeklyTypedCallGraphResolution/package_callback_wrong_target",
+                "TestWeeklyTypedCallGraphResolution/Windows_policy_rejects_non-Windows_target",
+                "TestWeeklyTypedCallGraphResolution/non-Windows_policy_rejects_Windows_target",
+                "TestWeeklyTypedCallGraphResolution/package_callback_multiple_init_writes",
+                "TestWeeklyTypedCallGraphResolution/package_callback_missing_init_has_no_fallback",
+                "TestWeeklyTypedCallGraphResolution/package_callback_nested_init_is_mutable_origin",
+                "TestWeeklyTypedCallGraphResolution/test_override_moved_into_production_is_a_second_write",
+                "TestWeeklyTypedCallGraphResolution/package_callback_escape_is_rejected",
+                "TestWeeklyTypedCallGraphResolution/package_callback_go_dispatch_is_rejected",
+                "TestWeeklyTypedCallGraphResolution/package_callback_missing_nil_guard",
+                "TestWeeklyTypedCallGraphResolution/package_callback_direct_forbidden_target_remains_reachable",
+                "TestWeeklyTypedCallGraphResolution/package_callback_transitive_forbidden_target_remains_reachable",
+                "TestWeeklyTypedCallGraphResolution/unresolved_fail-closed_killer",
+                "TestWeeklyTypedCallGraphResolution",
+                "TestWeeklyTypedLocalLiteralOrigins/four_direct_cleanup_calls_retain_one_literal_body",
+                "TestWeeklyTypedLocalLiteralOrigins/direct_settings_lock_in_cleanup_is_visible",
+                "TestWeeklyTypedLocalLiteralOrigins/transitive_settings_lock_in_cleanup_is_visible",
+                "TestWeeklyTypedLocalLiteralOrigins/reassigned_literal_fails_closed",
+                "TestWeeklyTypedLocalLiteralOrigins/literal_alias_fails_closed",
+                "TestWeeklyTypedLocalLiteralOrigins/address_escape_fails_closed",
+                "TestWeeklyTypedLocalLiteralOrigins/captured_callable_fails_closed",
+                "TestWeeklyTypedLocalLiteralOrigins/conditional_definition_fails_closed",
+                "TestWeeklyTypedLocalLiteralOrigins/goto_prevents_a_dominance_assumption",
+                "TestWeeklyTypedLocalLiteralOrigins",
+                "TestWeeklyTypedContextOrigins/nil_and_disabled_audit_propagate_through_reader_chain",
+                "TestWeeklyTypedContextOrigins/named_formatter_retains_transitive_settings_edge",
+                "TestWeeklyTypedContextOrigins/enabled_audit_retains_callback_body",
+                "TestWeeklyTypedContextOrigins/disabled_audit_excludes_only_unreachable_callback",
+                "TestWeeklyTypedContextOrigins/settings_lock_in_nil_branch_remains_visible",
+                "TestWeeklyTypedContextOrigins/deferred_closure_preserves_immutable_nil_capture",
+                "TestWeeklyTypedContextOrigins/unreviewed_forwarding_helper_stays_unresolved",
+                "TestWeeklyTypedContextOrigins/unguarded_nil_invocation_fails_closed",
+                "TestWeeklyTypedContextOrigins/callback_reassignment_discards_binding",
+                "TestWeeklyTypedContextOrigins/callback_alias_discards_binding",
+                "TestWeeklyTypedContextOrigins/callback_address_escape_discards_binding",
+                "TestWeeklyTypedContextOrigins/callback_field_storage_remains_unresolved",
+                "TestWeeklyTypedContextOrigins/unknown_input_remains_unresolved",
+                "TestWeeklyTypedContextOrigins/known_caller_does_not_erase_unknown_caller",
+                "TestWeeklyTypedContextOrigins/nil_context_does_not_erase_resource_context",
+                "TestWeeklyTypedContextOrigins/typed_nil_pointer_is_not_nil_interface",
+                "TestWeeklyTypedContextOrigins/nested_write_prevents_captured_nil_proof",
+                "TestWeeklyTypedContextOrigins/named_function_alias_is_not_exact_origin",
+                "TestWeeklyTypedContextOrigins/recursive_mixed_origin_stays_unresolved",
+                "TestWeeklyTypedContextOrigins/short_circuit_retains_condition_call_side_effects",
+                "TestWeeklyTypedContextOrigins/context_budget_fails_closed",
+                "TestWeeklyTypedContextOrigins",
+                "PACKAGE:mcp-local-hub/internal/api"
+              ],
+              "fail": [],
+              "skip": []
+            },
+            "counts": {
+              "pass": 73,
+              "fail": 0,
+              "skip": 0
+            },
+            "named_tests": 72,
+            "leaf_cases": 68,
+            "event_actions": {
+              "start": 1,
+              "run": 72,
+              "output": 146,
+              "pass": 73
+            },
+            "exact_names_and_single_execution_verified": true,
+            "failed_outputs": {},
+            "all_test_outputs_sha256": {
+              "PACKAGE:mcp-local-hub/internal/api": "a291974b49e4dedc992f1483b94fc9c481d210d0839b58c3f844ed80d7fe7103",
+              "TestWeeklyTypedCallGraphResolution": "60dd4de670afefff28f3c0530515f08e6d28eb16bb3c03026556a3c076e34419",
+              "TestWeeklyTypedCallGraphResolution/Windows_policy_rejects_non-Windows_target": "8bc179057487968ca9215718dc334eff5c800a977c95905db89632e31719c61f",
+              "TestWeeklyTypedCallGraphResolution/allowlisted_direct_settings_factory_remains_reachable": "6ae8786d8fc073beea7d786b9f6ef5a2723636b8186bbde50ef893e83a0a4985",
+              "TestWeeklyTypedCallGraphResolution/allowlisted_ledgered_function-result_origin": "40ffbbd9708c34837ddec21b356c223f3aee718244ac08eef229be6a7d244240",
+              "TestWeeklyTypedCallGraphResolution/allowlisted_transitive_settings_factory_remains_reachable": "16a311c4efcb09199488e3f5473ad40efdb85252334b6e22caaa92cf5cde1bdb",
+              "TestWeeklyTypedCallGraphResolution/assignment_instead_of_short_declaration_remains_unresolved": "b81d28ffa831e41b20b8061c42c784befeffba537b3be49b061bd0b0379fd2d4",
+              "TestWeeklyTypedCallGraphResolution/closure-captured_function_variable_remains_unresolved": "4af978fbc04abf5e7f814303ad2123388e6df5420a18dcc9af8e56592a6e18d3",
+              "TestWeeklyTypedCallGraphResolution/conditional_definition_remains_unresolved": "5b38fda6e5f751520c3bbf98f89978b9924bec3c428959df5a28ccc8ec58adbb",
+              "TestWeeklyTypedCallGraphResolution/escaped_function_variable_remains_unresolved": "9b5a1f0ac4c8bf2f707e121d34400541c2983e2378fc8ab8efe0e25e2e8d74a8",
+              "TestWeeklyTypedCallGraphResolution/function_literal_alias_remains_unresolved": "6b4fed18221f5256c730a898ca91d05109a4d1db17aa8cdcebf293d5ba1eab92",
+              "TestWeeklyTypedCallGraphResolution/function_parameter_remains_unresolved": "e9242eb600450534ef6a0ce7e3d5bd40b1ffc3881c6f145eca7337208edc0533",
+              "TestWeeklyTypedCallGraphResolution/interface_false-positive_killer": "fd0ec1b01d756b5b9e1ad7222793e843a8b055ac1364bbf5ed7e75be32e35ea2",
+              "TestWeeklyTypedCallGraphResolution/local_false-negative_killer": "67314d4e6701ff1a8551557f861d005d224620abe769f206d56aa67496812926",
+              "TestWeeklyTypedCallGraphResolution/multiple_function-variable_calls_remain_unresolved": "1f7f8f65f9102d0eb3c0afd28bd1787e3ea40f6db5aba75fb3f3052ca1a1c346",
+              "TestWeeklyTypedCallGraphResolution/named_function_assignment_remains_unresolved": "bf61840bc3f31d231be1199b90ae32295c781726cdc42eb43416e3a304245f5f",
+              "TestWeeklyTypedCallGraphResolution/non-Windows_policy_rejects_Windows_target": "d6dca73c220aaf595505fb611e48b20d5b239a7a8515feab74b71f1417cb24e2",
+              "TestWeeklyTypedCallGraphResolution/package_callback_direct_forbidden_target_remains_reachable": "cb64165193e5458485ac318bb01a18a8467b4d0b1cc5ececb8e3df32323677dd",
+              "TestWeeklyTypedCallGraphResolution/package_callback_escape_is_rejected": "3d64d96815f6540af1706cc89b1a627150069a64ff95b5e31ad958810e3b0815",
+              "TestWeeklyTypedCallGraphResolution/package_callback_go_dispatch_is_rejected": "9b5ac10e868248f98542b2469d257b0b1813251440eb507d795b8abe92a7242c",
+              "TestWeeklyTypedCallGraphResolution/package_callback_missing_init_has_no_fallback": "2fde229d231f1a1ebf9fd57ae20309452978811382a69e6439cf08cca787e507",
+              "TestWeeklyTypedCallGraphResolution/package_callback_missing_nil_guard": "e83828548717031776bf62decc9bed0bc7a6276ec0dc95bdc7730a97bc1e58c4",
+              "TestWeeklyTypedCallGraphResolution/package_callback_multiple_init_writes": "3e46d22ba3402b14d16a422fe826b60e43c858c9c0332d460ea01e144eb4a3a1",
+              "TestWeeklyTypedCallGraphResolution/package_callback_nested_init_is_mutable_origin": "bfe7ab83a6cf4e21e79cbda3280590060f92750d1ed796c60597a42ce1af2f9d",
+              "TestWeeklyTypedCallGraphResolution/package_callback_transitive_forbidden_target_remains_reachable": "c08f9a15aa62e647dcc3aba82c8e461dd35c4bc188584b3f490953d87cdb17b1",
+              "TestWeeklyTypedCallGraphResolution/package_callback_wrong_target": "6def7d0d2d1a8b37cfb92a7e8bfd5f7f89fe428c176ad54f1b273b99b6e00a33",
+              "TestWeeklyTypedCallGraphResolution/reassigned_multiple-origin_variable_remains_unresolved": "722b70a4cc51e8b31a725df8f6c872cb59f5f0b0aea7c9422c385f2ddfcf1f0e",
+              "TestWeeklyTypedCallGraphResolution/returned_function_variable_remains_unresolved": "b05aa3b57332d7cb13f8bb55d14d8685d311ca26ee05f0d7300b0c8b86b5a68f",
+              "TestWeeklyTypedCallGraphResolution/same-signature_non-allowlisted_factory_remains_unresolved": "ae8b755e45f29261451409dabdc220c93fe5bbede29d597e1bcd571815748cc4",
+              "TestWeeklyTypedCallGraphResolution/selected_Windows_package_callback_origin": "eb2c189d92abfc915f62de880d16438da5fdb63ffea25f6ef0f8e02b41541a4d",
+              "TestWeeklyTypedCallGraphResolution/selected_non-Windows_package_callback_origin": "715d35c02a55bd167e4f004a1d2b27b4c0f52a469f46c15a7df6e9dc06655dce",
+              "TestWeeklyTypedCallGraphResolution/test_override_moved_into_production_is_a_second_write": "416109cafedd8995ff54da602fe5ab8a5c29f777443ece56b5b5123d43a1a86a",
+              "TestWeeklyTypedCallGraphResolution/type_conversion_is_an_external_leaf": "0487d10b7ee9169690dd26c17ebf6bae9268815d35c495816e30e7030533cd0d",
+              "TestWeeklyTypedCallGraphResolution/unconfigured_package_callback_remains_unresolved": "b54219ab49ea1719404cf60b316c6667bd0947b17fc923b077f21ffc5c388a5e",
+              "TestWeeklyTypedCallGraphResolution/unresolved_fail-closed_killer": "e792386aed289ae997aeecbc60af6ec1180070fd13320ae224f1bbd3d4e43422",
+              "TestWeeklyTypedContextOrigins": "dee85cd297704ffb5151aec0af01abd8d694b65644db59504f03404edf6cf927",
+              "TestWeeklyTypedContextOrigins/callback_address_escape_discards_binding": "2e794d56c41d60ed03107c345b3942d3e638b6b88e1ee7cdafcc807d4c9b0154",
+              "TestWeeklyTypedContextOrigins/callback_alias_discards_binding": "dc10f82d67c79db64cf55a974e48298d4ddefa588875683931c7a5f1cf1dc545",
+              "TestWeeklyTypedContextOrigins/callback_field_storage_remains_unresolved": "d83438bbef14ea1634a4754bba2bcddcb39efb2418b4f00fa34a540f6943f8ac",
+              "TestWeeklyTypedContextOrigins/callback_reassignment_discards_binding": "36e7faecd9d7e9063f4fb5dbf354db19b4daeb7bc51b650ebb7eb4261f662457",
+              "TestWeeklyTypedContextOrigins/context_budget_fails_closed": "a59f9a402deaf31979729a37ab876b720efde327f44324e04c85c95ae7fa2a53",
+              "TestWeeklyTypedContextOrigins/deferred_closure_preserves_immutable_nil_capture": "06d6c241107956318d1cbd3874ded7136b8a24dd7553b2b14b1363211bef3f8d",
+              "TestWeeklyTypedContextOrigins/disabled_audit_excludes_only_unreachable_callback": "65590554bdb68d27235f09dd353482a143135b0d92cf17051e6ebcac4e82300e",
+              "TestWeeklyTypedContextOrigins/enabled_audit_retains_callback_body": "fc159a27a05fa3a120bcbb93b15b152a184a080e665267eeb33be35d49f91d54",
+              "TestWeeklyTypedContextOrigins/known_caller_does_not_erase_unknown_caller": "8e26a33f2c125a7f859951a1058d095c11ff7bf941aa0b85c741a5db4b7009ec",
+              "TestWeeklyTypedContextOrigins/named_formatter_retains_transitive_settings_edge": "7a4ca73aeed8a089066e78e4522d7df82605f91c8a9efbdd219f431f4d12b274",
+              "TestWeeklyTypedContextOrigins/named_function_alias_is_not_exact_origin": "e4b4911aaba553b2e4f465dd3affbb42cc68be79cb3391d9b27b2c6188df4383",
+              "TestWeeklyTypedContextOrigins/nested_write_prevents_captured_nil_proof": "874d9bc1108849769b5d2418b18e68b2d97cae432bd41b4bde984759a31ce65f",
+              "TestWeeklyTypedContextOrigins/nil_and_disabled_audit_propagate_through_reader_chain": "0933ef24e6fc9d9a8a2eaab45cbd6cc630158c88b40af6319b578d3fc6197488",
+              "TestWeeklyTypedContextOrigins/nil_context_does_not_erase_resource_context": "38324500d48586d685c980a5e373051583ac43ce215085a941a660dd3cc7432d",
+              "TestWeeklyTypedContextOrigins/recursive_mixed_origin_stays_unresolved": "fdbb04c4a8c89122c02c1f2cc29c1768e8d4ff15a70a168fc8d25239d7c08adf",
+              "TestWeeklyTypedContextOrigins/settings_lock_in_nil_branch_remains_visible": "f7fd74dd62ce08626fa98ff470ee9de6e4ba0cf136af390d0d0d2c44cf27c7f3",
+              "TestWeeklyTypedContextOrigins/short_circuit_retains_condition_call_side_effects": "d3e5f76e8b9058f681e6291a4e0b37b97aa717e6e902c29d02181a6f6c35d6c6",
+              "TestWeeklyTypedContextOrigins/typed_nil_pointer_is_not_nil_interface": "01b6b548f3c39df62e4a82a1321c88b85ba961f58847408ec2dfa398678d56a7",
+              "TestWeeklyTypedContextOrigins/unguarded_nil_invocation_fails_closed": "feeb544fb00aebb0038702bb2aef35ae94f31a8dcf9595c83f3fa6f940bcf9b4",
+              "TestWeeklyTypedContextOrigins/unknown_input_remains_unresolved": "d32c9eb4ace42a46e6159574e415dda05fb69d1ad8ec73391cb2a96edfb48a2b",
+              "TestWeeklyTypedContextOrigins/unreviewed_forwarding_helper_stays_unresolved": "b8a32251821c2b2ec363c4f1500b58f542e2d66d58727c8d45b9c3f3d6ce182d",
+              "TestWeeklyTypedExportXMLBoundary": "6f6f94244a7c6411d13c1c1a760b64b35dccae97430b11374ed7a22042a73cb9",
+              "TestWeeklyTypedExportXMLBoundary/another_parameter_remains_unresolved": "1a2405c8aca9baa7cd58ac0231004a159a594ffd08c92688382e7812a6f6a501",
+              "TestWeeklyTypedExportXMLBoundary/expanded_interface_remains_unresolved": "123d84a19701e114550e236e31832d9150a7f726e9aef7ef1c1c7d20ff858840",
+              "TestWeeklyTypedExportXMLBoundary/reassigned_reader_remains_unresolved": "f18549a63b563462088c38d077bcd485bb52f85d5569afc5318afa6498e17e3f",
+              "TestWeeklyTypedExportXMLBoundary/reviewed_reader_retains_local_settings_edges": "90bc4a1357a5ede408bd0730a7c6fe61e398808c94b691ecc48cf61936ac55bc",
+              "TestWeeklyTypedExportXMLBoundary/same-shaped_unreviewed_helper_remains_unresolved": "17e0bf62298f11106642c187199bd201035cf065de393290b536f3a421546fae",
+              "TestWeeklyTypedLocalLiteralOrigins": "2d2301b3fdca80ceb948cd57db02ee0dbcbd771cdcccc866ef7741ab4ade6c5a",
+              "TestWeeklyTypedLocalLiteralOrigins/address_escape_fails_closed": "dfa360cbd31bd0933f6001fdc14a7a79fd530ffca031883182fff6e724658ab7",
+              "TestWeeklyTypedLocalLiteralOrigins/captured_callable_fails_closed": "ee0ef3077cc750683651c272796bcbcadcb6f4dffc69ad909e7723c11eeb2297",
+              "TestWeeklyTypedLocalLiteralOrigins/conditional_definition_fails_closed": "d5513e4e78e2ae1c4b2e85e18efc9a8d3d7e72f495dd6e4a0cbf22b1fec82cc9",
+              "TestWeeklyTypedLocalLiteralOrigins/direct_settings_lock_in_cleanup_is_visible": "8a31dbc78c0bb52523ae2c070cca2d19c717c5b3e1bbf7724058e0310cdffbb4",
+              "TestWeeklyTypedLocalLiteralOrigins/four_direct_cleanup_calls_retain_one_literal_body": "237fb176a1e4fc30a5f2832ee16efc7e947c82a0103664d1c84920692b06d2b0",
+              "TestWeeklyTypedLocalLiteralOrigins/goto_prevents_a_dominance_assumption": "7ad9478c205ca88fe937d32439b82f99a999c5a2fc5e7f57e0bd5f5a5dcf9f6f",
+              "TestWeeklyTypedLocalLiteralOrigins/literal_alias_fails_closed": "abd7a423fee55010200152fed4fdee02239d1ce3a68f0f99f0145808d4ee856e",
+              "TestWeeklyTypedLocalLiteralOrigins/reassigned_literal_fails_closed": "3f9be81a0f9de885090ccf4499c2e47c1d20570ea006676ad02de6d6e8d79db1",
+              "TestWeeklyTypedLocalLiteralOrigins/transitive_settings_lock_in_cleanup_is_visible": "40359d20b4d96da2d6d80174d78ea6fec5d3f122b7454875aa7f8e3170baa172"
+            }
+          },
+          "interpretation": "all_selected_assertions_passed",
+          "runner_oracle_pass": true
+        },
+        {
+          "label": "a1-lock-order",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-tags=test_state_path_env",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-run",
+            "^(TestWeeklyRefreshLockOrderInventory)$",
+            "./internal/api"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\candidate-source",
+          "pid": 50484,
+          "started_utc": "2026-11-22T19:55:04.943596+00:00",
+          "finished_utc": "2026-11-22T19:55:39.160947+00:00",
+          "exit_code": 1,
+          "planned_exit_code": 0,
+          "stdout": {
+            "bytes": 1714,
+            "sha256": "7b8d67ab89e4003de303533a5d9ddc19a815a4e542a79981954fe0fc7b78190d"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "raw_directory": "evidence/a1-candidate-proof/",
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "missing_required_output": [],
+          "overlay": {
+            "overlay": null,
+            "effective_inventory": {
+              "files": 3309,
+              "bytes": 50856246,
+              "inventory_sha256": "d556aebcb39a8fc9e965e00713fa99ee8562b669db1476b6ef6b4663112706e2"
+            },
+            "replacements": []
+          },
+          "tests": {
+            "terminals": {
+              "pass": [],
+              "fail": [
+                "TestWeeklyRefreshLockOrderInventory",
+                "PACKAGE:mcp-local-hub/internal/api"
+              ],
+              "skip": []
+            },
+            "counts": {
+              "pass": 0,
+              "fail": 2,
+              "skip": 0
+            },
+            "named_tests": 1,
+            "leaf_cases": 1,
+            "event_actions": {
+              "start": 1,
+              "run": 1,
+              "output": 5,
+              "fail": 2
+            },
+            "exact_names_and_single_execution_verified": true,
+            "failed_outputs": {
+              "TestWeeklyRefreshLockOrderInventory": "=== RUN   TestWeeklyRefreshLockOrderInventory\n    weekly_refresh_atomic_test.go:3395: resolve type-aware weekly reachability: unresolved typed boundary from errnoIs at secure_create_client_config_windows.go:315:10 (func() error: local function or method has no indexed body)\n--- FAIL: TestWeeklyRefreshLockOrderInventory (28.20s)\n",
+              "PACKAGE:mcp-local-hub/internal/api": "FAIL\nFAIL\tmcp-local-hub/internal/api\t28.773s\n"
+            },
+            "all_test_outputs_sha256": {
+              "PACKAGE:mcp-local-hub/internal/api": "069138b15eaff22940289ad345441d3d46df4f25bf380838ce0f8505aaab0263",
+              "TestWeeklyRefreshLockOrderInventory": "c4c1beb6f43ff48a21e45422f7b2ef701d8772eccd5de0770cb42993070e29f3"
+            }
+          },
+          "interpretation": "candidate_analysis_fails_closed_at_local_dynamic_Unwrap_boundary_in_errnoIs",
+          "runner_oracle_pass": false
+        }
+      ],
+      "not_run_after_failure": []
+    },
+    {
+      "phase": "a2-applied-result",
+      "plan_path": "plans/a2-applied-result.json",
+      "plan_sha256": "8d72c4162b65701a711bc481383452820ffac83e325b04a8be35491fdf9c2648",
+      "started_utc": "2026-11-22T20:00:10.792043+00:00",
+      "finished_utc": "2026-11-22T20:02:15.810270+00:00",
+      "completed": false,
+      "error": "Command failed its declared oracle: a2-gui-result",
+      "physical_source": {
+        "files": 3309,
+        "bytes": 50856246,
+        "inventory_sha256": "d556aebcb39a8fc9e965e00713fa99ee8562b669db1476b6ef6b4663112706e2"
+      },
+      "input_inventory": {
+        "files": 12,
+        "bytes": 389112,
+        "inventory_sha256": "473191855392ea78882dcf7fa1cd5fb292b0023dca05c582064954af5f027bc3"
+      },
+      "before_after_equal": true,
+      "commands": [
+        {
+          "label": "a2-api-old-owner",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-tags=test_state_path_env",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\inputs\\a2-red-overlay.json",
+            "-run",
+            "^(TestWeeklyRefreshTransaction_AppliedReleaseDisposition|TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition)$",
+            "./internal/api"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\candidate-source",
+          "pid": 54212,
+          "started_utc": "2026-11-22T20:00:15.205781+00:00",
+          "finished_utc": "2026-11-22T20:01:04.052159+00:00",
+          "exit_code": 1,
+          "planned_exit_code": 1,
+          "stdout": {
+            "bytes": 27966,
+            "sha256": "c0893511d1486a07f2b750130170c00a80eeeb04fe680e4f522134ccfaa9f5b1"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "raw_directory": "evidence/a2-applied-result/",
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "missing_required_output": [],
+          "overlay": {
+            "overlay": "inputs/a2-red-overlay.json",
+            "overlay_sha256": "98ca308d0dbf34e172edf7ba988b0407271f3c933ac935f5fd0e550a75bd23f5",
+            "replacements": [
+              {
+                "source_path": "internal/api/weekly_refresh.go",
+                "input_path": "inputs/control/weekly_refresh.go",
+                "path": "internal/api/weekly_refresh.go",
+                "bytes": 23016,
+                "sha256": "6170694a3adae109994cdae591236ac0755d1fd12e4f3c825677b00d2dd37239"
+              }
+            ],
+            "effective_inventory": {
+              "files": 3309,
+              "bytes": 50855612,
+              "inventory_sha256": "3db098a0768e2e9fc039a82cbe14ce35b7dbd6c1b123a07a6b7c8f763fb7c460"
+            }
+          },
+          "tests": {
+            "terminals": {
+              "pass": [
+                "TestWeeklyRefreshTransaction_AppliedReleaseDisposition/create-error-after-write",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/create-failed/weekly",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/create-failed/settings",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/create-failed/both",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/create-failed-after-write/weekly",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/create-failed-after-write/settings",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/create-failed-after-write/both",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/prior-restored/weekly",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/prior-restored/settings",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/prior-restored/both"
+              ],
+              "fail": [
+                "TestWeeklyRefreshTransaction_AppliedReleaseDisposition/acknowledged-create",
+                "TestWeeklyRefreshTransaction_AppliedReleaseDisposition",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/committed/weekly",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/committed/settings",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/committed/both",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition",
+                "PACKAGE:mcp-local-hub/internal/api"
+              ],
+              "skip": []
+            },
+            "counts": {
+              "pass": 10,
+              "fail": 7,
+              "skip": 0
+            },
+            "named_tests": 16,
+            "leaf_cases": 14,
+            "event_actions": {
+              "start": 1,
+              "run": 16,
+              "output": 45,
+              "fail": 7,
+              "pass": 10
+            },
+            "exact_names_and_single_execution_verified": true,
+            "failed_outputs": {
+              "TestWeeklyRefreshTransaction_AppliedReleaseDisposition/acknowledged-create": "=== RUN   TestWeeklyRefreshTransaction_AppliedReleaseDisposition/acknowledged-create\n    weekly_refresh_applied_result_test.go:54: transaction applied disposition = false, want true: result={state:weekly-task-applied-release-unconfirmed restoreStatus:n/a finalXML:[60 84 97 115 107 62 60 82 101 103 105 115 116 114 97 116 105 111 110 73 110 102 111 62 60 68 101 115 99 114 105 112 116 105 111 110 62 109 99 112 45 108 111 99 97 108 45 104 117 98 58 32 119 101 101 107 108 121 32 114 101 102 114 101 115 104 32 111 102 32 119 111 114 107 115 112 97 99 101 45 115 99 111 112 101 100 32 108 97 122 121 32 112 114 111 120 105 101 115 60 47 68 101 115 99 114 105 112 116 105 111 110 62 60 47 82 101 103 105 115 116 114 97 116 105 111 110 73 110 102 111 62 60 84 114 105 103 103 101 114 115 62 60 67 97 108 101 110 100 97 114 84 114 105 103 103 101 114 62 60 83 116 97 114 116 66 111 117 110 100 97 114 121 62 50 48 50 54 45 48 49 45 48 52 84 49 52 58 51 48 58 48 48 60 47 83 116 97 114 116 66 111 117 110 100 97 114 121 62 60 69 110 97 98 108 101 100 62 116 114 117 101 60 47 69 110 97 98 108 101 100 62 60 83 99 104 101 100 117 108 101 66 121 87 101 101 107 62 60 68 97 121 115 79 102 87 101 101 107 62 60 84 117 101 115 100 97 121 47 62 60 47 68 97 121 115 79 102 87 101 101 107 62 60 87 101 101 107 115 73 110 116 101 114 118 97 108 62 49 60 47 87 101 101 107 115 73 110 116 101 114 118 97 108 62 60 47 83 99 104 101 100 117 108 101 66 121 87 101 101 107 62 60 47 67 97 108 101 110 100 97 114 84 114 105 103 103 101 114 62 60 47 84 114 105 103 103 101 114 115 62 60 80 114 105 110 99 105 112 97 108 115 62 60 80 114 105 110 99 105 112 97 108 32 105 100 61 34 65 117 116 104 111 114 34 62 60 76 111 103 111 110 84 121 112 101 62 73 110 116 101 114 97 99 116 105 118 101 84 111 107 101 110 60 47 76 111 103 111 110 84 121 112 101 62 60 82 117 110 76 101 118 101 108 62 76 101 97 115 116 80 114 105 118 105 108 101 103 101 60 47 82 117 110 76 101 118 101 108 62 60 47 80 114 105 110 99 105 112 97 108 62 60 47 80 114 105 110 99 105 112 97 108 115 62 60 83 101 116 116 105 110 103 115 62 60 65 108 108 111 119 72 97 114 100 84 101 114 109 105 110 97 116 101 62 116 114 117 101 60 47 65 108 108 111 119 72 97 114 100 84 101 114 109 105 110 97 116 101 62 60 83 116 97 114 116 87 104 101 110 65 118 97 105 108 97 98 108 101 62 102 97 108 115 101 60 47 83 116 97 114 116 87 104 101 110 65 118 97 105 108 97 98 108 101 62 60 82 117 110 79 110 108 121 73 102 78 101 116 119 111 114 107 65 118 97 105 108 97 98 108 101 62 102 97 108 115 101 60 47 82 117 110 79 110 108 121 73 102 78 101 116 119 111 114 107 65 118 97 105 108 97 98 108 101 62 60 77 117 108 116 105 112 108 101 73 110 115 116 97 110 99 101 115 80 111 108 105 99 121 62 83 116 111 112 69 120 105 115 116 105 110 103 60 47 77 117 108 116 105 112 108 101 73 110 115 116 97 110 99 101 115 80 111 108 105 99 121 62 60 68 105 115 97 108 108 111 119 83 116 97 114 116 73 102 79 110 66 97 116 116 101 114 105 101 115 62 102 97 108 115 101 60 47 68 105 115 97 108 108 111 119 83 116 97 114 116 73 102 79 110 66 97 116 116 101 114 105 101 115 62 60 83 116 111 112 73 102 71 111 105 110 103 79 110 66 97 116 116 101 114 105 101 115 62 102 97 108 115 101 60 47 83 116 111 112 73 102 71 111 105 110 103 79 110 66 97 116 116 101 114 105 101 115 62 60 73 100 108 101 83 101 116 116 105 110 103 115 62 60 83 116 111 112 79 110 73 100 108 101 69 110 100 62 102 97 108 115 101 60 47 83 116 111 112 79 110 73 100 108 101 69 110 100 62 60 82 101 115 116 97 114 116 79 110 73 100 108 101 62 102 97 108 115 101 60 47 82 101 115 116 97 114 116 79 110 73 100 108 101 62 60 47 73 100 108 101 83 101 116 116 105 110 103 115 62 60 65 108 108 111 119 83 116 97 114 116 79 110 68 101 109 97 110 100 62 116 114 117 101 60 47 65 108 108 111 119 83 116 97 114 116 79 110 68 101 109 97 110 100 62 60 69 110 97 98 108 101 100 62 116 114 117 101 60 47 69 110 97 98 108 101 100 62 60 72 105 100 100 101 110 62 102 97 108 115 101 60 47 72 105 100 100 101 110 62 60 82 117 110 79 110 108 121 73 102 73 100 108 101 62 102 97 108 115 101 60 47 82 117 110 79 110 108 121 73 102 73 100 108 101 62 60 87 97 107 101 84 111 82 117 110 62 102 97 108 115 101 60 47 87 97 107 101 84 111 82 117 110 62 60 69 120 101 99 117 116 105 111 110 84 105 109 101 76 105 109 105 116 62 80 84 48 83 60 47 69 120 101 99 117 116 105 111 110 84 105 109 101 76 105 109 105 116 62 60 80 114 105 111 114 105 116 121 62 55 60 47 80 114 105 111 114 105 116 121 62 60 47 83 101 116 116 105 110 103 115 62 60 65 99 116 105 111 110 115 32 67 111 110 116 101 120 116 61 34 65 117 116 104 111 114 34 62 60 69 120 101 99 62 60 67 111 109 109 97 110 100 62 68 58 92 100 101 118 92 67 104 97 116 71 80 84 92 109 99 112 45 114 101 115 105 100 117 97 108 45 110 101 120 116 45 50 48 50 54 49 49 50 50 45 100 99 98 52 48 102 98 97 92 114 117 110 116 105 109 101 92 97 50 45 97 112 112 108 105 101 100 45 114 101 115 117 108 116 92 116 109 112 92 84 101 115 116 87 101 101 107 108 121 82 101 102 114 101 115 104 84 114 97 110 115 97 99 116 105 111 110 95 65 112 112 108 105 101 100 82 101 108 101 97 115 101 68 105 115 112 111 115 105 116 105 111 110 97 99 107 110 111 119 108 101 100 50 55 51 51 54 50 51 49 56 49 92 48 48 49 92 109 99 112 45 108 111 99 97 108 45 104 117 98 92 109 99 112 104 117 98 46 101 120 101 60 47 67 111 109 109 97 110 100 62 60 65 114 103 117 109 101 110 116 115 62 119 111 114 107 115 112 97 99 101 45 119 101 101 107 108 121 45 114 101 102 114 101 115 104 60 47 65 114 103 117 109 101 110 116 115 62 60 87 111 114 107 105 110 103 68 105 114 101 99 116 111 114 121 62 68 58 92 100 101 118 92 67 104 97 116 71 80 84 92 109 99 112 45 114 101 115 105 100 117 97 108 45 110 101 120 116 45 50 48 50 54 49 49 50 50 45 100 99 98 52 48 102 98 97 92 114 117 110 116 105 109 101 92 97 50 45 97 112 112 108 105 101 100 45 114 101 115 117 108 116 92 116 109 112 92 84 101 115 116 87 101 101 107 108 121 82 101 102 114 101 115 104 84 114 97 110 115 97 99 116 105 111 110 95 65 112 112 108 105 101 100 82 101 108 101 97 115 101 68 105 115 112 111 115 105 116 105 111 110 97 99 107 110 111 119 108 101 100 50 55 51 51 54 50 51 49 56 49 92 48 48 49 92 109 99 112 45 108 111 99 97 108 45 104 117 98 60 47 87 111 114 107 105 110 103 68 105 114 101 99 116 111 114 121 62 60 47 69 120 101 99 62 60 47 65 99 116 105 111 110 115 62 60 47 84 97 115 107 62]} err=release weekly refresh singleton lock: lock release could not be confirmed; this process still holds the lock leaf: D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\a2-applied-result\\tmp\\TestWeeklyRefreshTransaction_AppliedReleaseDispositionacknowled2733623181\\001\\mcp-local-hub\\mcp-local-hub-workspace-weekly-refresh.scheduler.lock: injected weekly release result\n--- FAIL: TestWeeklyRefreshTransaction_AppliedReleaseDisposition/acknowledged-create (0.04s)\n",
+              "TestWeeklyRefreshTransaction_AppliedReleaseDisposition": "=== RUN   TestWeeklyRefreshTransaction_AppliedReleaseDisposition\n--- FAIL: TestWeeklyRefreshTransaction_AppliedReleaseDisposition (0.04s)\n",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/committed/weekly": "=== RUN   TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/committed/weekly\n    weekly_refresh_applied_result_test.go:126: Apply applied disposition = false, want true: release weekly refresh singleton lock: lock release could not be confirmed; this process still holds the lock leaf: D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\a2-applied-result\\tmp\\TestApplyWeeklyRefreshSchedule_AppliedReleaseDispositioncommitt1694929654\\001\\mcp-local-hub\\mcp-local-hub-workspace-weekly-refresh.scheduler.lock: injected weekly unlock failure\n--- FAIL: TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/committed/weekly (0.84s)\n",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/committed/settings": "=== RUN   TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/committed/settings\n    weekly_refresh_applied_result_test.go:126: Apply applied disposition = false, want true: release settings flock D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\a2-applied-result\\tmp\\TestApplyWeeklyRefreshSchedule_AppliedReleaseDispositioncommitt4090415280\\001\\mcp-local-hub\\gui-preferences.yaml.lock: lock release could not be confirmed; this process still holds the lock leaf: D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\a2-applied-result\\tmp\\TestApplyWeeklyRefreshSchedule_AppliedReleaseDispositioncommitt4090415280\\001\\mcp-local-hub\\gui-preferences.yaml.lock: injected settings unlock failure\n--- FAIL: TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/committed/settings (0.32s)\n",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/committed/both": "=== RUN   TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/committed/both\n    weekly_refresh_applied_result_test.go:126: Apply applied disposition = false, want true: release weekly refresh singleton lock: lock release could not be confirmed; this process still holds the lock leaf: D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\a2-applied-result\\tmp\\TestApplyWeeklyRefreshSchedule_AppliedReleaseDispositioncommitt806163016\\001\\mcp-local-hub\\mcp-local-hub-workspace-weekly-refresh.scheduler.lock: injected weekly unlock failure\n        release settings flock D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\a2-applied-result\\tmp\\TestApplyWeeklyRefreshSchedule_AppliedReleaseDispositioncommitt806163016\\001\\mcp-local-hub\\gui-preferences.yaml.lock: lock release could not be confirmed; this process still holds the lock leaf: D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\a2-applied-result\\tmp\\TestApplyWeeklyRefreshSchedule_AppliedReleaseDispositioncommitt806163016\\001\\mcp-local-hub\\gui-preferences.yaml.lock: injected settings unlock failure\n--- FAIL: TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/committed/both (0.37s)\n",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition": "=== RUN   TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition\n--- FAIL: TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition (4.03s)\n",
+              "PACKAGE:mcp-local-hub/internal/api": "FAIL\nFAIL\tmcp-local-hub/internal/api\t4.742s\n"
+            },
+            "all_test_outputs_sha256": {
+              "PACKAGE:mcp-local-hub/internal/api": "f125029954c03df7cbe3e40478fd35f27dba9dc8c37c705fa599b482fb199d2d",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition": "e713f819276bf2368d0046c4056023c6d9a635dcea6fed9f4045370df0575c0d",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/committed/both": "bd6710ad384daed78d33047a8a6a78ebfc221c385eff3d175997ed7c36e5f88c",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/committed/settings": "c8f905f8b50e463694243736934c84f4c9b0c646ce4bf86f3b24cc53fef9f81f",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/committed/weekly": "4def36a45eddb9eb78f0ca4e2f9ab9d9ad06d36d5f17d680a86738aee8b6aa16",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/create-failed-after-write/both": "4ac678cc54f264614023df9928358ee67f9f4d5814d8986e92829a91e7e0875e",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/create-failed-after-write/settings": "e0b1c765e42a071f7f826ca38af8b861e75f3ee9e73b9be353d60012c5f2b46e",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/create-failed-after-write/weekly": "d5b1ce3b9c4e1c52a6d5b462013d15fe40ebadd33141999295974dbada239705",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/create-failed/both": "5958473b3cb5fa0ba5fd5048853c0099208ed6b3c1d836217a391457f5ff24a4",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/create-failed/settings": "6bef1d69f2d1fa912846606fcae31e6e96cdf602a3760219bcb95eb45435c913",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/create-failed/weekly": "f586dea48275993f3fd54165b7e8facf8b342a5d2e0553a08cd98a7c31cfec88",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/prior-restored/both": "ac3b61c42c99501221707081c26d6d20de9ef90a24bde445267166c94f91e954",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/prior-restored/settings": "c4246b57666ace437880e4129eed37234163f23738a82c6efb09eba23531c01f",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/prior-restored/weekly": "789944d398f185365e93ab1ad2a744d1a44cff064a3ff8d6691f9ba7a1f7f547",
+              "TestWeeklyRefreshTransaction_AppliedReleaseDisposition": "4364ace8c39d8fbe993ef5307e3224339e0da3288e91c3c829c322662f42daf1",
+              "TestWeeklyRefreshTransaction_AppliedReleaseDisposition/acknowledged-create": "3fb67852c8bb94a7c49b533097e0b4e1d4907989d55d0956cc09611327de3790",
+              "TestWeeklyRefreshTransaction_AppliedReleaseDisposition/create-error-after-write": "13f453632cff34eb70daf4a5059f53872d71398726deb9644f51c59230e320e0"
+            }
+          },
+          "interpretation": "valid_negative_control_committed_results_lack_applied_release_marker",
+          "runner_oracle_pass": true
+        },
+        {
+          "label": "a2-gui-old-owner",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-tags=test_state_path_env",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\inputs\\a2-red-overlay.json",
+            "-run",
+            "^(TestWeeklyScheduleHandler_RealApplyReleaseSettlement)$",
+            "./internal/gui"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\candidate-source",
+          "pid": 59316,
+          "started_utc": "2026-11-22T20:01:04.053759+00:00",
+          "finished_utc": "2026-11-22T20:01:34.216088+00:00",
+          "exit_code": 1,
+          "planned_exit_code": 1,
+          "stdout": {
+            "bytes": 19052,
+            "sha256": "99f5b7addd1a768d0b17fdf25cb28343f290d51119e4deb3519204f59e844ef9"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "raw_directory": "evidence/a2-applied-result/",
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "missing_required_output": [],
+          "overlay": {
+            "overlay": "inputs/a2-red-overlay.json",
+            "overlay_sha256": "98ca308d0dbf34e172edf7ba988b0407271f3c933ac935f5fd0e550a75bd23f5",
+            "replacements": [
+              {
+                "source_path": "internal/api/weekly_refresh.go",
+                "input_path": "inputs/control/weekly_refresh.go",
+                "path": "internal/api/weekly_refresh.go",
+                "bytes": 23016,
+                "sha256": "6170694a3adae109994cdae591236ac0755d1fd12e4f3c825677b00d2dd37239"
+              }
+            ],
+            "effective_inventory": {
+              "files": 3309,
+              "bytes": 50855612,
+              "inventory_sha256": "3db098a0768e2e9fc039a82cbe14ce35b7dbd6c1b123a07a6b7c8f763fb7c460"
+            }
+          },
+          "tests": {
+            "terminals": {
+              "pass": [
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/failed-create-weekly-release",
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/create-error-after-write-both-releases",
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/prior-restored-settings-release"
+              ],
+              "fail": [
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-weekly-release",
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-settings-release",
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-both-releases",
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement",
+                "PACKAGE:mcp-local-hub/internal/gui"
+              ],
+              "skip": []
+            },
+            "counts": {
+              "pass": 3,
+              "fail": 5,
+              "skip": 0
+            },
+            "named_tests": 7,
+            "leaf_cases": 6,
+            "event_actions": {
+              "start": 1,
+              "run": 7,
+              "output": 37,
+              "fail": 5,
+              "pass": 3
+            },
+            "exact_names_and_single_execution_verified": true,
+            "failed_outputs": {
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-weekly-release": "=== RUN   TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-weekly-release\n2026/11/22 23:01:33 /api/daemons/weekly-schedule apply failed: weekly refresh task definition could not be reconciled; current task preserved: created mcp-local-hub-workspace-weekly-refresh does not match the requested definition\nweekly refresh task definition could not be reconciled; current task preserved: mcp-local-hub-workspace-weekly-refresh does not have its prior definition or confirmed absence\nrelease weekly refresh singleton lock: lock release could not be confirmed; this process still holds the lock leaf: D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\a2-applied-result\\tmp\\TestWeeklyScheduleHandler_RealApplyReleaseSettlementcommitted-w2851408396\\001\\mcp-local-hub\\mcp-local-hub-workspace-weekly-refresh.scheduler.lock: private-weekly-release-failure\n    weekly_schedule_applied_result_test.go:160: status = 500, want 200; body={\"detail\":\"internal error\",\"error\":\"scheduler_swap_failed\",\"manual_recovery\":\"The weekly schedule transaction did not commit because its lock release could not be confirmed. Restart the running mcp-local-hub process before retrying.\",\"restore_status\":\"degraded\",\"updated\":false}\n--- FAIL: TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-weekly-release (0.33s)\n",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-settings-release": "=== RUN   TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-settings-release\n2026/11/22 23:01:33 /api/daemons/weekly-schedule apply failed: weekly refresh task definition could not be reconciled; current task preserved: created mcp-local-hub-workspace-weekly-refresh does not match the requested definition\nweekly refresh task definition could not be reconciled; current task preserved: mcp-local-hub-workspace-weekly-refresh does not have its prior definition or confirmed absence\nrelease settings flock D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\a2-applied-result\\tmp\\TestWeeklyScheduleHandler_RealApplyReleaseSettlementcommitted-s330506804\\001\\mcp-local-hub\\gui-preferences.yaml.lock: lock release could not be confirmed; this process still holds the lock leaf: D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\a2-applied-result\\tmp\\TestWeeklyScheduleHandler_RealApplyReleaseSettlementcommitted-s330506804\\001\\mcp-local-hub\\gui-preferences.yaml.lock: private-settings-release-failure\n    weekly_schedule_applied_result_test.go:160: status = 500, want 200; body={\"detail\":\"internal error\",\"error\":\"scheduler_swap_failed\",\"manual_recovery\":\"The weekly schedule transaction did not commit because its lock release could not be confirmed. Restart the running mcp-local-hub process before retrying.\",\"restore_status\":\"degraded\",\"updated\":false}\n--- FAIL: TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-settings-release (0.12s)\n",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-both-releases": "=== RUN   TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-both-releases\n2026/11/22 23:01:33 /api/daemons/weekly-schedule apply failed: weekly refresh task definition could not be reconciled; current task preserved: created mcp-local-hub-workspace-weekly-refresh does not match the requested definition\nweekly refresh task definition could not be reconciled; current task preserved: mcp-local-hub-workspace-weekly-refresh does not have its prior definition or confirmed absence\nrelease weekly refresh singleton lock: lock release could not be confirmed; this process still holds the lock leaf: D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\a2-applied-result\\tmp\\TestWeeklyScheduleHandler_RealApplyReleaseSettlementcommitted-b423729154\\001\\mcp-local-hub\\mcp-local-hub-workspace-weekly-refresh.scheduler.lock: private-weekly-release-failure\nrelease settings flock D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\a2-applied-result\\tmp\\TestWeeklyScheduleHandler_RealApplyReleaseSettlementcommitted-b423729154\\001\\mcp-local-hub\\gui-preferences.yaml.lock: lock release could not be confirmed; this process still holds the lock leaf: D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\a2-applied-result\\tmp\\TestWeeklyScheduleHandler_RealApplyReleaseSettlementcommitted-b423729154\\001\\mcp-local-hub\\gui-preferences.yaml.lock: private-settings-release-failure\n    weekly_schedule_applied_result_test.go:160: status = 500, want 200; body={\"detail\":\"internal error\",\"error\":\"scheduler_swap_failed\",\"manual_recovery\":\"The weekly schedule transaction did not commit because its lock release could not be confirmed. Restart the running mcp-local-hub process before retrying.\",\"restore_status\":\"degraded\",\"updated\":false}\n--- FAIL: TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-both-releases (0.37s)\n",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement": "=== RUN   TestWeeklyScheduleHandler_RealApplyReleaseSettlement\n--- FAIL: TestWeeklyScheduleHandler_RealApplyReleaseSettlement (1.24s)\n",
+              "PACKAGE:mcp-local-hub/internal/gui": "FAIL\nFAIL\tmcp-local-hub/internal/gui\t1.699s\n"
+            },
+            "all_test_outputs_sha256": {
+              "PACKAGE:mcp-local-hub/internal/gui": "041ee54fd8539494864280a70843a23edd13ad518a7ee1bebf7c75892e711050",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement": "c91380345e6afab79b3d9daa3ba34ff368f5daaa85376c7cfda2620acf23e2be",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-both-releases": "6b3a3c23a93e0aca82984c371098c791f7507d95621ccc1c3d3cbbeb0f158f45",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-settings-release": "80793aa5e0dcca22124077b766cb22556453d9218dbaf6fa3423164273c25d19",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-weekly-release": "7c4a80ff47f0a9e0fb7d9c48d5ac401a1af39284f020c655b1b45c0a7e601847",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/create-error-after-write-both-releases": "fcade721038755fd3a8c396d2617705e6eedc0238df743f61dff4bd06be9186f",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/failed-create-weekly-release": "f3ff805cccb6e4bc0ccf88d49271abaca82bd8b6d90f16bcb08d5f542298b245",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/prior-restored-settings-release": "dc9c31bf21eea44c737f137e971189d304f60862892ea8fa2cd95a278dcde364"
+            }
+          },
+          "interpretation": "invalid_initial_XML_fixture_fails_before_applied_result_classification",
+          "runner_oracle_pass": true
+        },
+        {
+          "label": "a2-api-result",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-tags=test_state_path_env",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-run",
+            "^(TestWeeklyRefreshTransaction_AppliedReleaseDisposition|TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition)$",
+            "./internal/api"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\candidate-source",
+          "pid": 46196,
+          "started_utc": "2026-11-22T20:01:34.217502+00:00",
+          "finished_utc": "2026-11-22T20:01:43.267718+00:00",
+          "exit_code": 0,
+          "planned_exit_code": 0,
+          "stdout": {
+            "bytes": 16687,
+            "sha256": "6aba4757b2013fa6eb1bedcfde0f3f76de86be0df1d30c3171f89e973b8eeb51"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "raw_directory": "evidence/a2-applied-result/",
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "missing_required_output": [],
+          "overlay": {
+            "overlay": null,
+            "effective_inventory": {
+              "files": 3309,
+              "bytes": 50856246,
+              "inventory_sha256": "d556aebcb39a8fc9e965e00713fa99ee8562b669db1476b6ef6b4663112706e2"
+            },
+            "replacements": []
+          },
+          "tests": {
+            "terminals": {
+              "pass": [
+                "TestWeeklyRefreshTransaction_AppliedReleaseDisposition/acknowledged-create",
+                "TestWeeklyRefreshTransaction_AppliedReleaseDisposition/create-error-after-write",
+                "TestWeeklyRefreshTransaction_AppliedReleaseDisposition",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/committed/weekly",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/committed/settings",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/committed/both",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/create-failed/weekly",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/create-failed/settings",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/create-failed/both",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/create-failed-after-write/weekly",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/create-failed-after-write/settings",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/create-failed-after-write/both",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/prior-restored/weekly",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/prior-restored/settings",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/prior-restored/both",
+                "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition",
+                "PACKAGE:mcp-local-hub/internal/api"
+              ],
+              "fail": [],
+              "skip": []
+            },
+            "counts": {
+              "pass": 17,
+              "fail": 0,
+              "skip": 0
+            },
+            "named_tests": 16,
+            "leaf_cases": 14,
+            "event_actions": {
+              "start": 1,
+              "run": 16,
+              "output": 34,
+              "pass": 17
+            },
+            "exact_names_and_single_execution_verified": true,
+            "failed_outputs": {},
+            "all_test_outputs_sha256": {
+              "PACKAGE:mcp-local-hub/internal/api": "aa750d498ba07055cbfbf9fb071697c5259647b944abddd508313b67cf806c21",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition": "f8da43c676a14305e63a18ba3725696fbe0e542dd026aa5d4ffcce06ae34a20d",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/committed/both": "70f14b5a43d25a83b277bb0226e731933859bc1fb5077a8619606451e4c9b195",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/committed/settings": "317a40ad1dbc52a36b4d6a76fcef347e571102e13db364153a5f0b1ed000f613",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/committed/weekly": "adaed8fb490652f21150aee1f72491c2c4d5fa147a7e9870ecc11869e3804a5f",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/create-failed-after-write/both": "4ac678cc54f264614023df9928358ee67f9f4d5814d8986e92829a91e7e0875e",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/create-failed-after-write/settings": "10b9b1b4b5c87121fa6873f47a380d8a68b7e9855c3f37f76342a772aa4bbd13",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/create-failed-after-write/weekly": "825e1f007520fa0c3d9bdfb985981040f330114b175b99876de035560a1920ec",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/create-failed/both": "0421b73085b2a7ad5e960f64288b84bb7af32394ec4eb291faddce8fd6ca343a",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/create-failed/settings": "1d2742e9fa8b820bf60ba5a5818511ba150748efb5fceb70bf931db2c2a2a174",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/create-failed/weekly": "55e3e7d3e3cd46106294a47fcd9c7396aa7592f5ce6a6123cfb511bd0206661e",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/prior-restored/both": "f043d45c097ccfe244f068fff561c87e1e80d6b5e47f5a935b195419d99c5028",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/prior-restored/settings": "1857b8a6ec2ec3a35a96f63674ca4a92caf72e23a3b073327fe632839221e6fb",
+              "TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition/prior-restored/weekly": "3a4ccb584c4b4b8bf247b5c27b8509f02d25dd4808fc37f97c51140119c5bb21",
+              "TestWeeklyRefreshTransaction_AppliedReleaseDisposition": "d23580b029fc6440f5645961ba7ae0610d253640d32be3c0e48d23556fa51daa",
+              "TestWeeklyRefreshTransaction_AppliedReleaseDisposition/acknowledged-create": "217bda1178619e1c30d4daf37cbcbe3a7ae6138b28e7d804e95e80b2cba40ae3",
+              "TestWeeklyRefreshTransaction_AppliedReleaseDisposition/create-error-after-write": "13f453632cff34eb70daf4a5059f53872d71398726deb9644f51c59230e320e0"
+            }
+          },
+          "interpretation": "all_selected_assertions_passed",
+          "runner_oracle_pass": true
+        },
+        {
+          "label": "a2-gui-result",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-tags=test_state_path_env",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-run",
+            "^(TestWeeklyScheduleHandler_RealApplyReleaseSettlement)$",
+            "./internal/gui"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\candidate-source",
+          "pid": 44324,
+          "started_utc": "2026-11-22T20:01:43.269244+00:00",
+          "finished_utc": "2026-11-22T20:02:12.163833+00:00",
+          "exit_code": 1,
+          "planned_exit_code": 0,
+          "stdout": {
+            "bytes": 19055,
+            "sha256": "ab644cc0193d299dd8f6816a29dfd6fe6864af1ab257d6e6b3fc78d6d5be2087"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "raw_directory": "evidence/a2-applied-result/",
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "missing_required_output": [],
+          "overlay": {
+            "overlay": null,
+            "effective_inventory": {
+              "files": 3309,
+              "bytes": 50856246,
+              "inventory_sha256": "d556aebcb39a8fc9e965e00713fa99ee8562b669db1476b6ef6b4663112706e2"
+            },
+            "replacements": []
+          },
+          "tests": {
+            "terminals": {
+              "pass": [
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/failed-create-weekly-release",
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/create-error-after-write-both-releases",
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/prior-restored-settings-release"
+              ],
+              "fail": [
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-weekly-release",
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-settings-release",
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-both-releases",
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement",
+                "PACKAGE:mcp-local-hub/internal/gui"
+              ],
+              "skip": []
+            },
+            "counts": {
+              "pass": 3,
+              "fail": 5,
+              "skip": 0
+            },
+            "named_tests": 7,
+            "leaf_cases": 6,
+            "event_actions": {
+              "start": 1,
+              "run": 7,
+              "output": 37,
+              "fail": 5,
+              "pass": 3
+            },
+            "exact_names_and_single_execution_verified": true,
+            "failed_outputs": {
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-weekly-release": "=== RUN   TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-weekly-release\n2026/11/22 23:02:10 /api/daemons/weekly-schedule apply failed: weekly refresh task definition could not be reconciled; current task preserved: created mcp-local-hub-workspace-weekly-refresh does not match the requested definition\nweekly refresh task definition could not be reconciled; current task preserved: mcp-local-hub-workspace-weekly-refresh does not have its prior definition or confirmed absence\nrelease weekly refresh singleton lock: lock release could not be confirmed; this process still holds the lock leaf: D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\a2-applied-result\\tmp\\TestWeeklyScheduleHandler_RealApplyReleaseSettlementcommitted-w1648644536\\001\\mcp-local-hub\\mcp-local-hub-workspace-weekly-refresh.scheduler.lock: private-weekly-release-failure\n    weekly_schedule_applied_result_test.go:160: status = 500, want 200; body={\"detail\":\"internal error\",\"error\":\"scheduler_swap_failed\",\"manual_recovery\":\"The weekly schedule transaction did not commit because its lock release could not be confirmed. Restart the running mcp-local-hub process before retrying.\",\"restore_status\":\"degraded\",\"updated\":false}\n--- FAIL: TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-weekly-release (0.93s)\n",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-settings-release": "=== RUN   TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-settings-release\n2026/11/22 23:02:11 /api/daemons/weekly-schedule apply failed: weekly refresh task definition could not be reconciled; current task preserved: created mcp-local-hub-workspace-weekly-refresh does not match the requested definition\nweekly refresh task definition could not be reconciled; current task preserved: mcp-local-hub-workspace-weekly-refresh does not have its prior definition or confirmed absence\nrelease settings flock D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\a2-applied-result\\tmp\\TestWeeklyScheduleHandler_RealApplyReleaseSettlementcommitted-s877314512\\001\\mcp-local-hub\\gui-preferences.yaml.lock: lock release could not be confirmed; this process still holds the lock leaf: D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\a2-applied-result\\tmp\\TestWeeklyScheduleHandler_RealApplyReleaseSettlementcommitted-s877314512\\001\\mcp-local-hub\\gui-preferences.yaml.lock: private-settings-release-failure\n    weekly_schedule_applied_result_test.go:160: status = 500, want 200; body={\"detail\":\"internal error\",\"error\":\"scheduler_swap_failed\",\"manual_recovery\":\"The weekly schedule transaction did not commit because its lock release could not be confirmed. Restart the running mcp-local-hub process before retrying.\",\"restore_status\":\"degraded\",\"updated\":false}\n--- FAIL: TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-settings-release (0.16s)\n",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-both-releases": "=== RUN   TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-both-releases\n2026/11/22 23:02:11 /api/daemons/weekly-schedule apply failed: weekly refresh task definition could not be reconciled; current task preserved: created mcp-local-hub-workspace-weekly-refresh does not match the requested definition\nweekly refresh task definition could not be reconciled; current task preserved: mcp-local-hub-workspace-weekly-refresh does not have its prior definition or confirmed absence\nrelease weekly refresh singleton lock: lock release could not be confirmed; this process still holds the lock leaf: D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\a2-applied-result\\tmp\\TestWeeklyScheduleHandler_RealApplyReleaseSettlementcommitted-b1890789977\\001\\mcp-local-hub\\mcp-local-hub-workspace-weekly-refresh.scheduler.lock: private-weekly-release-failure\nrelease settings flock D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\a2-applied-result\\tmp\\TestWeeklyScheduleHandler_RealApplyReleaseSettlementcommitted-b1890789977\\001\\mcp-local-hub\\gui-preferences.yaml.lock: lock release could not be confirmed; this process still holds the lock leaf: D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\a2-applied-result\\tmp\\TestWeeklyScheduleHandler_RealApplyReleaseSettlementcommitted-b1890789977\\001\\mcp-local-hub\\gui-preferences.yaml.lock: private-settings-release-failure\n    weekly_schedule_applied_result_test.go:160: status = 500, want 200; body={\"detail\":\"internal error\",\"error\":\"scheduler_swap_failed\",\"manual_recovery\":\"The weekly schedule transaction did not commit because its lock release could not be confirmed. Restart the running mcp-local-hub process before retrying.\",\"restore_status\":\"degraded\",\"updated\":false}\n--- FAIL: TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-both-releases (0.12s)\n",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement": "=== RUN   TestWeeklyScheduleHandler_RealApplyReleaseSettlement\n--- FAIL: TestWeeklyScheduleHandler_RealApplyReleaseSettlement (1.98s)\n",
+              "PACKAGE:mcp-local-hub/internal/gui": "FAIL\nFAIL\tmcp-local-hub/internal/gui\t3.348s\n"
+            },
+            "all_test_outputs_sha256": {
+              "PACKAGE:mcp-local-hub/internal/gui": "37336f471875bf9e09069e1be0a87f9e2b7fdc82edc0057b6550b9ec268433f6",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement": "9be8cb6dc60a09a6754f3916d68398821d9e6113763a2092018baccb1ecb5e9a",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-both-releases": "1d7b6766ad913ad5a8f7954b4cf27353efbde5e9ef39ec47d8b10f175958d713",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-settings-release": "5f5cbf839a897aecf57c7b812172fc2d24546b26852bb0b968197724a9b1da29",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-weekly-release": "92ff5a4094370518ff40be8e797e841388884b201b342fc0fa065aaddb8da0fd",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/create-error-after-write-both-releases": "9533e23abca61fe5007aa99ac2eca6856ec219a34dbd9bed76ebaee4206b73f5",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/failed-create-weekly-release": "ceb99bf32d7230b5c15089cdb154709c52521f4ab21abe6478299f16a9845b74",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/prior-restored-settings-release": "dc5aaac66bc9620bd1f0f6258183d1514255363734cec22fcea5b4e15987080b"
+            }
+          },
+          "interpretation": "same_invalid_initial_XML_fixture_blocks_candidate_commit",
+          "runner_oracle_pass": false
+        }
+      ],
+      "not_run_after_failure": [
+        "a2-adjacent"
+      ]
+    },
+    {
+      "phase": "a2-route-fixture",
+      "plan_path": "plans/a2-route-fixture.json",
+      "plan_sha256": "cf496f002fee18190cb6319edf4971a139a7d302a9daa5e550ac7107bfc289c4",
+      "started_utc": "2026-11-22T20:05:08.029327+00:00",
+      "finished_utc": "2026-11-22T20:06:05.307102+00:00",
+      "completed": false,
+      "error": "Command failed its declared oracle: a2-adjacent",
+      "physical_source": {
+        "files": 3309,
+        "bytes": 50856246,
+        "inventory_sha256": "d556aebcb39a8fc9e965e00713fa99ee8562b669db1476b6ef6b4663112706e2"
+      },
+      "input_inventory": {
+        "files": 15,
+        "bytes": 399158,
+        "inventory_sha256": "1d74b033f28e98f1bd41305cf1ba7e547b533270c063fd7ee459d15eabe839ea"
+      },
+      "before_after_equal": true,
+      "commands": [
+        {
+          "label": "a2-gui-corrected-old-owner",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-tags=test_state_path_env",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\inputs\\a2-v2-red-overlay.json",
+            "-run",
+            "^(TestWeeklyScheduleHandler_RealApplyReleaseSettlement)$",
+            "./internal/gui"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\candidate-source",
+          "pid": 53236,
+          "started_utc": "2026-11-22T20:05:11.841506+00:00",
+          "finished_utc": "2026-11-22T20:05:27.810123+00:00",
+          "exit_code": 1,
+          "planned_exit_code": 1,
+          "stdout": {
+            "bytes": 16794,
+            "sha256": "8bef168ca2688385ff04f2768db48ae31fa79289148700d3492164cadd3b6877"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "raw_directory": "evidence/a2-route-fixture/",
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "missing_required_output": [],
+          "overlay": {
+            "overlay": "inputs/a2-v2-red-overlay.json",
+            "overlay_sha256": "63137001708f3dfba9331386bfa370908e7a0461b87f60ea0ad352514b90fa81",
+            "replacements": [
+              {
+                "source_path": "internal/gui/weekly_schedule_applied_result_test.go",
+                "input_path": "inputs/a2-v2/internal/gui/weekly_schedule_applied_result_test.go",
+                "path": "internal/gui/weekly_schedule_applied_result_test.go",
+                "bytes": 9274,
+                "sha256": "031757d9fb516606830701a026a8b8cf0915fc69e6f28bc17d7d6881b5eab399"
+              },
+              {
+                "source_path": "internal/api/weekly_refresh.go",
+                "input_path": "inputs/control/weekly_refresh.go",
+                "path": "internal/api/weekly_refresh.go",
+                "bytes": 23016,
+                "sha256": "6170694a3adae109994cdae591236ac0755d1fd12e4f3c825677b00d2dd37239"
+              }
+            ],
+            "effective_inventory": {
+              "files": 3309,
+              "bytes": 50856157,
+              "inventory_sha256": "dc2290db4de26b2f3ebd56e4fa2526b06a19e70d41bef2d6e150205f19f023b2"
+            }
+          },
+          "tests": {
+            "terminals": {
+              "pass": [
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/failed-create-weekly-release",
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/create-error-after-write-both-releases",
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/prior-restored-settings-release"
+              ],
+              "fail": [
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-weekly-release",
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-settings-release",
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-both-releases",
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement",
+                "PACKAGE:mcp-local-hub/internal/gui"
+              ],
+              "skip": []
+            },
+            "counts": {
+              "pass": 3,
+              "fail": 5,
+              "skip": 0
+            },
+            "named_tests": 7,
+            "leaf_cases": 6,
+            "event_actions": {
+              "start": 1,
+              "run": 7,
+              "output": 31,
+              "fail": 5,
+              "pass": 3
+            },
+            "exact_names_and_single_execution_verified": true,
+            "failed_outputs": {
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-weekly-release": "=== RUN   TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-weekly-release\n2026/11/22 23:05:27 /api/daemons/weekly-schedule apply failed: release weekly refresh singleton lock: lock release could not be confirmed; this process still holds the lock leaf: D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\a2-route-fixture\\tmp\\TestWeeklyScheduleHandler_RealApplyReleaseSettlementcommitted-w4040916996\\001\\mcp-local-hub\\mcp-local-hub-workspace-weekly-refresh.scheduler.lock: private-weekly-release-failure\n    weekly_schedule_applied_result_test.go:160: status = 500, want 200; body={\"detail\":\"internal error\",\"error\":\"scheduler_swap_failed\",\"manual_recovery\":\"The weekly schedule transaction did not commit because its lock release could not be confirmed. Restart the running mcp-local-hub process before retrying.\",\"restore_status\":\"n/a\",\"updated\":false}\n--- FAIL: TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-weekly-release (0.51s)\n",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-settings-release": "=== RUN   TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-settings-release\n2026/11/22 23:05:27 /api/daemons/weekly-schedule apply failed: release settings flock D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\a2-route-fixture\\tmp\\TestWeeklyScheduleHandler_RealApplyReleaseSettlementcommitted-s3722045643\\001\\mcp-local-hub\\gui-preferences.yaml.lock: lock release could not be confirmed; this process still holds the lock leaf: D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\a2-route-fixture\\tmp\\TestWeeklyScheduleHandler_RealApplyReleaseSettlementcommitted-s3722045643\\001\\mcp-local-hub\\gui-preferences.yaml.lock: private-settings-release-failure\n    weekly_schedule_applied_result_test.go:160: status = 500, want 200; body={\"detail\":\"internal error\",\"error\":\"scheduler_swap_failed\",\"manual_recovery\":\"The weekly schedule transaction did not commit because its lock release could not be confirmed. Restart the running mcp-local-hub process before retrying.\",\"restore_status\":\"n/a\",\"updated\":false}\n--- FAIL: TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-settings-release (0.09s)\n",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-both-releases": "=== RUN   TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-both-releases\n2026/11/22 23:05:27 /api/daemons/weekly-schedule apply failed: release weekly refresh singleton lock: lock release could not be confirmed; this process still holds the lock leaf: D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\a2-route-fixture\\tmp\\TestWeeklyScheduleHandler_RealApplyReleaseSettlementcommitted-b4148379049\\001\\mcp-local-hub\\mcp-local-hub-workspace-weekly-refresh.scheduler.lock: private-weekly-release-failure\nrelease settings flock D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\a2-route-fixture\\tmp\\TestWeeklyScheduleHandler_RealApplyReleaseSettlementcommitted-b4148379049\\001\\mcp-local-hub\\gui-preferences.yaml.lock: lock release could not be confirmed; this process still holds the lock leaf: D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\a2-route-fixture\\tmp\\TestWeeklyScheduleHandler_RealApplyReleaseSettlementcommitted-b4148379049\\001\\mcp-local-hub\\gui-preferences.yaml.lock: private-settings-release-failure\n    weekly_schedule_applied_result_test.go:160: status = 500, want 200; body={\"detail\":\"internal error\",\"error\":\"scheduler_swap_failed\",\"manual_recovery\":\"The weekly schedule transaction did not commit because its lock release could not be confirmed. Restart the running mcp-local-hub process before retrying.\",\"restore_status\":\"n/a\",\"updated\":false}\n--- FAIL: TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-both-releases (0.09s)\n",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement": "=== RUN   TestWeeklyScheduleHandler_RealApplyReleaseSettlement\n--- FAIL: TestWeeklyScheduleHandler_RealApplyReleaseSettlement (1.16s)\n",
+              "PACKAGE:mcp-local-hub/internal/gui": "FAIL\nFAIL\tmcp-local-hub/internal/gui\t1.645s\n"
+            },
+            "all_test_outputs_sha256": {
+              "PACKAGE:mcp-local-hub/internal/gui": "559a47117e9b3112eb73d75faa459ae6033fe5c45138ac6ddef3886f9f736472",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement": "08da533b07d3df4b9a2b1352d9972829f1a20ea8986ac8e8d6aa196a9c7fee6a",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-both-releases": "9f79cbf1bde24296e73890a9fdcbd225e45e48032261285a67d1817ef47e15ec",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-settings-release": "55ee06328c44fa4d0e2308536e56a507c3e70df88fc95b91cba1621fc6d0a211",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-weekly-release": "a6a45efe0045c4ec05683da2095fb15defb616191f3730bde437835611e6a4a7",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/create-error-after-write-both-releases": "cf9d99e7ce3afbc76408bbef6768aeddce0616082473ecd6deb6c966b5d6b61d",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/failed-create-weekly-release": "8e94e76b1615ec27aa3a17099da4718733843173c66c7a30b4be1e25e363ea91",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/prior-restored-settings-release": "eb7f3399c80a49027e52c3df1d8f9dec1c7c8890e50ab3ed44e771a80017a393"
+            }
+          },
+          "interpretation": "valid_negative_control_verified_commit_projects_as_HTTP_500_updated_false",
+          "runner_oracle_pass": true
+        },
+        {
+          "label": "a2-gui-corrected-result",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-tags=test_state_path_env",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\inputs\\a2-v2-green-overlay.json",
+            "-run",
+            "^(TestWeeklyScheduleHandler_RealApplyReleaseSettlement)$",
+            "./internal/gui"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\candidate-source",
+          "pid": 56020,
+          "started_utc": "2026-11-22T20:05:27.811635+00:00",
+          "finished_utc": "2026-11-22T20:05:42.607262+00:00",
+          "exit_code": 0,
+          "planned_exit_code": 0,
+          "stdout": {
+            "bytes": 15271,
+            "sha256": "02bc9c6c1e53103d359dcd9f9a5bb375016239c46abc174013f3db8a5fbd9bdb"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "raw_directory": "evidence/a2-route-fixture/",
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "missing_required_output": [],
+          "overlay": {
+            "overlay": "inputs/a2-v2-green-overlay.json",
+            "overlay_sha256": "791391611d287747f9ab05e0348e105a933fa519932f8ce7c1473e30f28f65e3",
+            "replacements": [
+              {
+                "source_path": "internal/gui/weekly_schedule_applied_result_test.go",
+                "input_path": "inputs/a2-v2/internal/gui/weekly_schedule_applied_result_test.go",
+                "path": "internal/gui/weekly_schedule_applied_result_test.go",
+                "bytes": 9274,
+                "sha256": "031757d9fb516606830701a026a8b8cf0915fc69e6f28bc17d7d6881b5eab399"
+              }
+            ],
+            "effective_inventory": {
+              "files": 3309,
+              "bytes": 50856791,
+              "inventory_sha256": "ce3cdf10a1fae33de68217eb37d455dc53c6729f41db3b84b99c25d3086ffdb7"
+            }
+          },
+          "tests": {
+            "terminals": {
+              "pass": [
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-weekly-release",
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-settings-release",
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-both-releases",
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/failed-create-weekly-release",
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/create-error-after-write-both-releases",
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/prior-restored-settings-release",
+                "TestWeeklyScheduleHandler_RealApplyReleaseSettlement",
+                "PACKAGE:mcp-local-hub/internal/gui"
+              ],
+              "fail": [],
+              "skip": []
+            },
+            "counts": {
+              "pass": 8,
+              "fail": 0,
+              "skip": 0
+            },
+            "named_tests": 7,
+            "leaf_cases": 6,
+            "event_actions": {
+              "start": 1,
+              "run": 7,
+              "output": 28,
+              "pass": 8
+            },
+            "exact_names_and_single_execution_verified": true,
+            "failed_outputs": {},
+            "all_test_outputs_sha256": {
+              "PACKAGE:mcp-local-hub/internal/gui": "0c68fd0b62dcc13e2a2f6099de17d50af9d2f9e5e37c366d7777b54a25df6b62",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement": "d6cc5eaae3db472012c99dea0f42d3e5d8ae0df819b375757ba90de1f803fca4",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-both-releases": "d81f5d556bd410e5481292d002657c92cf77c5e5a98f2c09776cb96a85a81bb6",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-settings-release": "5e3731119454c48fb8cab6cdd6ccd23764cb1712f2354b024e264f4703151443",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/committed-weekly-release": "ac185d380a39c070e7d631b09a154812bd9cea5809b6ac46fe4ab26315ec0888",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/create-error-after-write-both-releases": "4ae33641163c0d16fe3531f19764fb5c67864acaca80e53affb906d35d47d2d9",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/failed-create-weekly-release": "4515c190c8adb8f398b08daf0502b0a003d8e36e7e39deb5fa0f508398bd7b00",
+              "TestWeeklyScheduleHandler_RealApplyReleaseSettlement/prior-restored-settings-release": "289ec156672089ed7feaac4e1f5cdd4676423c43330bbcbbb610b9c031c582a8"
+            }
+          },
+          "interpretation": "all_selected_assertions_passed",
+          "runner_oracle_pass": true
+        },
+        {
+          "label": "a2-adjacent",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-tags=test_state_path_env",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-run",
+            "^(TestSupervisorIntentLockOwnershipProductionInventory|TestAppliedReleaseClassifierFixtureRejectsSibling|TestWeeklyRefreshReleaseSettlementMatrix|TestWeeklyScheduleSettingsReleaseSettlementMatrix|TestReleaseAndJoinAppliedSettlementMatrix)$",
+            "./internal/api"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\candidate-source",
+          "pid": 56600,
+          "started_utc": "2026-11-22T20:05:42.608682+00:00",
+          "finished_utc": "2026-11-22T20:06:01.647389+00:00",
+          "exit_code": 1,
+          "planned_exit_code": 0,
+          "stdout": {
+            "bytes": 24376,
+            "sha256": "3330ef1e138c336d396dd53e61fa20b8e03ca4a0e96e778758ac21bad8ab8af1"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "raw_directory": "evidence/a2-route-fixture/",
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "missing_required_output": [],
+          "overlay": {
+            "overlay": null,
+            "effective_inventory": {
+              "files": 3309,
+              "bytes": 50856246,
+              "inventory_sha256": "d556aebcb39a8fc9e965e00713fa99ee8562b669db1476b6ef6b4663112706e2"
+            },
+            "replacements": []
+          },
+          "tests": {
+            "terminals": {
+              "pass": [
+                "TestReleaseAndJoinAppliedSettlementMatrix/success-nil",
+                "TestReleaseAndJoinAppliedSettlementMatrix/success-primary",
+                "TestReleaseAndJoinAppliedSettlementMatrix/release-unapplied",
+                "TestReleaseAndJoinAppliedSettlementMatrix/release-applied",
+                "TestReleaseAndJoinAppliedSettlementMatrix/primary-and-release-applied",
+                "TestReleaseAndJoinAppliedSettlementMatrix",
+                "TestAppliedReleaseClassifierFixtureRejectsSibling",
+                "TestWeeklyRefreshReleaseSettlementMatrix/direct_owner_requires_acknowledged_creation_and_readback_before_applied-release-unconfirmed/create-error-current-matches=false",
+                "TestWeeklyRefreshReleaseSettlementMatrix/direct_owner_requires_acknowledged_creation_and_readback_before_applied-release-unconfirmed/create-error-current-matches=true",
+                "TestWeeklyRefreshReleaseSettlementMatrix/direct_owner_requires_acknowledged_creation_and_readback_before_applied-release-unconfirmed",
+                "TestWeeklyRefreshReleaseSettlementMatrix/Ensure_preserves_release_failure_and_later_fail-fast",
+                "TestWeeklyRefreshReleaseSettlementMatrix/swap_preserves_release_failure_and_later_fail-fast",
+                "TestWeeklyRefreshReleaseSettlementMatrix/upgrade_preserves_release_failure_and_later_fail-fast",
+                "TestWeeklyRefreshReleaseSettlementMatrix/Apply_distinguishes_acknowledged_creation_from_failed_creation_on_release_failure/create-error-current-matches=false",
+                "TestWeeklyRefreshReleaseSettlementMatrix/Apply_distinguishes_acknowledged_creation_from_failed_creation_on_release_failure/create-error-current-matches=true",
+                "TestWeeklyRefreshReleaseSettlementMatrix/Apply_distinguishes_acknowledged_creation_from_failed_creation_on_release_failure",
+                "TestWeeklyRefreshReleaseSettlementMatrix",
+                "TestWeeklyScheduleSettingsReleaseSettlementMatrix/successful_combined_Apply_reports_settings_release_failure_after_the_requested_pair_settles",
+                "TestWeeklyScheduleSettingsReleaseSettlementMatrix/callback_failure_after_rollback_remains_primary_and_joins_settings_release_failure",
+                "TestWeeklyScheduleSettingsReleaseSettlementMatrix"
+              ],
+              "fail": [
+                "TestSupervisorIntentLockOwnershipProductionInventory",
+                "PACKAGE:mcp-local-hub/internal/api"
+              ],
+              "skip": []
+            },
+            "counts": {
+              "pass": 20,
+              "fail": 2,
+              "skip": 0
+            },
+            "named_tests": 21,
+            "leaf_cases": 16,
+            "event_actions": {
+              "start": 1,
+              "run": 21,
+              "output": 45,
+              "pass": 20,
+              "fail": 2
+            },
+            "exact_names_and_single_execution_verified": true,
+            "failed_outputs": {
+              "TestSupervisorIntentLockOwnershipProductionInventory": "=== RUN   TestSupervisorIntentLockOwnershipProductionInventory\n    supervisor_intent_lock_ownership_test.go:64: owned call internal/api/hub_mcp_log.go:func:appendHubMcpLogLine calls=0, reviewed=1\n--- FAIL: TestSupervisorIntentLockOwnershipProductionInventory (11.61s)\n",
+              "PACKAGE:mcp-local-hub/internal/api": "FAIL\nFAIL\tmcp-local-hub/internal/api\t13.169s\n"
+            },
+            "all_test_outputs_sha256": {
+              "PACKAGE:mcp-local-hub/internal/api": "39a55ecddf9bb196c61e46cbcc5e352a9a7d7e2068aa2b53eda06feb56012ee9",
+              "TestAppliedReleaseClassifierFixtureRejectsSibling": "2cbc8422fcf7bfe3b82e7b8ed82ec9815498d196982b2ba17272e412a5c3cce1",
+              "TestReleaseAndJoinAppliedSettlementMatrix": "2760e182ecf8809e6d73525c0e41500d4fcc2ec4a967f44163569ba7dd836317",
+              "TestReleaseAndJoinAppliedSettlementMatrix/primary-and-release-applied": "775c79b4248b5df4a3c94f5625cdebda2da2b9b1b869ddad1ef10b7ad7912a08",
+              "TestReleaseAndJoinAppliedSettlementMatrix/release-applied": "19795e16b91b81aa800880811c765496d3edcb176c9b5c35ed8c0919d30b0342",
+              "TestReleaseAndJoinAppliedSettlementMatrix/release-unapplied": "df414173fea7e05ab66543787aed6fecc7854adf9bb8c30e0fdb2317b8e21aa7",
+              "TestReleaseAndJoinAppliedSettlementMatrix/success-nil": "0042ce40fdfdaea1cc57d3475f6af259d77db35fea0bf6e3b940e9b5f3bd6790",
+              "TestReleaseAndJoinAppliedSettlementMatrix/success-primary": "96329e0491dd15fb17df0194ff276116f2d2d1c2a1292632529e9e2f4d65c968",
+              "TestSupervisorIntentLockOwnershipProductionInventory": "272dccd51bec83e42018556e1c65e9603c05d90c122070918e6181e50e2582a7",
+              "TestWeeklyRefreshReleaseSettlementMatrix": "0da7bf555943018594f708f12358df498252a102aad1cb6dc3015e171baba2b6",
+              "TestWeeklyRefreshReleaseSettlementMatrix/Apply_distinguishes_acknowledged_creation_from_failed_creation_on_release_failure": "b6fa965c1af5c22d7da64bc8ef2731d702e16ab09d34b0ebb9476392a79e8420",
+              "TestWeeklyRefreshReleaseSettlementMatrix/Apply_distinguishes_acknowledged_creation_from_failed_creation_on_release_failure/create-error-current-matches=false": "0f0447d749f1bb1a7afa9298bf7f0212ac2e0ae424b9cdb6d6afe65db7b14644",
+              "TestWeeklyRefreshReleaseSettlementMatrix/Apply_distinguishes_acknowledged_creation_from_failed_creation_on_release_failure/create-error-current-matches=true": "40aacc41fa211448bb07f61ed6cf8e800ead44398ce86a6ee868d5c25e16f5d4",
+              "TestWeeklyRefreshReleaseSettlementMatrix/Ensure_preserves_release_failure_and_later_fail-fast": "89f640061853b7f1c66f1dd917c1ff94298739e431b8ecb8c17ae90acdea64f4",
+              "TestWeeklyRefreshReleaseSettlementMatrix/direct_owner_requires_acknowledged_creation_and_readback_before_applied-release-unconfirmed": "6551ed27bedfa027d28fab1ad2145cd708e81f1decb0f9242de2b1f3e43153ad",
+              "TestWeeklyRefreshReleaseSettlementMatrix/direct_owner_requires_acknowledged_creation_and_readback_before_applied-release-unconfirmed/create-error-current-matches=false": "2a77032ed43445a95648dd9a2a8e959591ada37889fcc8b1c485b31755bf7cc4",
+              "TestWeeklyRefreshReleaseSettlementMatrix/direct_owner_requires_acknowledged_creation_and_readback_before_applied-release-unconfirmed/create-error-current-matches=true": "43a2d5e96cb913096d269d92f3cb41b4a1cc40bf075e491df224862bdd0c084b",
+              "TestWeeklyRefreshReleaseSettlementMatrix/swap_preserves_release_failure_and_later_fail-fast": "83416eb120ac52084759c51abce065ade758b65402d28cae498ba2a62abb0ba8",
+              "TestWeeklyRefreshReleaseSettlementMatrix/upgrade_preserves_release_failure_and_later_fail-fast": "1ed5af4d4e340418ed9630ecedd272204c4ec52eb44fc8da4d5063f930eb2e1b",
+              "TestWeeklyScheduleSettingsReleaseSettlementMatrix": "a1451622261e5efa68ea6d4752901fd47f97021a0df2058da160bd0789bb585f",
+              "TestWeeklyScheduleSettingsReleaseSettlementMatrix/callback_failure_after_rollback_remains_primary_and_joins_settings_release_failure": "a3423e0e403d94c5420ab1b3993e7dcd5f97a8f1f2650ae53c2447776ebfd7e6",
+              "TestWeeklyScheduleSettingsReleaseSettlementMatrix/successful_combined_Apply_reports_settings_release_failure_after_the_requested_pair_settles": "c7e275d58bb6d40c2213f774befd513729023a05ea3612e518cc031944f98738"
+            }
+          },
+          "interpretation": "stale_owner_census_names_appendHubMcpLogLine_instead_of_actual_closure_owner",
+          "runner_oracle_pass": false
+        }
+      ],
+      "not_run_after_failure": []
+    },
+    {
+      "phase": "a2-owner-census",
+      "plan_path": "plans/a2-owner-census-formatted.json",
+      "plan_sha256": "a39aca0b450262f853da76e3c92d880df915a447d274872ebe297593b193c8a2",
+      "started_utc": "2026-11-22T20:14:24.525754+00:00",
+      "finished_utc": "2026-11-22T20:15:21.899544+00:00",
+      "completed": false,
+      "error": "Command failed its declared oracle: a2-owner-census-and-adjacent",
+      "physical_source": {
+        "files": 3309,
+        "bytes": 50856246,
+        "inventory_sha256": "d556aebcb39a8fc9e965e00713fa99ee8562b669db1476b6ef6b4663112706e2"
+      },
+      "input_inventory": {
+        "files": 17,
+        "bytes": 418187,
+        "inventory_sha256": "3bdbf2dcef2c94874e3eaba71dc842120aa8b3375ced2a1faf844ba686a58774"
+      },
+      "before_after_equal": true,
+      "commands": [
+        {
+          "label": "a2-owner-census-and-adjacent",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-tags=test_state_path_env",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\inputs\\a2-v3-green-overlay.json",
+            "-run",
+            "^(TestSupervisorIntentLockOwnershipProductionInventory|TestSupervisorIntentLockOwnershipFixtureMatrix|TestAppliedReleaseClassifierFixtureRejectsSibling|TestWeeklyRefreshReleaseSettlementMatrix|TestWeeklyScheduleSettingsReleaseSettlementMatrix|TestReleaseAndJoinAppliedSettlementMatrix)$",
+            "./internal/api"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\candidate-source",
+          "pid": 55500,
+          "started_utc": "2026-11-22T20:14:28.464929+00:00",
+          "finished_utc": "2026-11-22T20:15:18.170263+00:00",
+          "exit_code": 1,
+          "planned_exit_code": 0,
+          "stdout": {
+            "bytes": 39950,
+            "sha256": "02a00fa47fdf26d6af81fc4e008407cee1ded8bb5aac82e5a5452c6886ed28d4"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "raw_directory": "evidence/a2-owner-census/",
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "missing_required_output": [],
+          "overlay": {
+            "overlay": "inputs/a2-v3-green-overlay.json",
+            "overlay_sha256": "6c10f0c8ca9b66bb293fdab2e1c032cb68387b34556c01e4b5519f6b461634a8",
+            "replacements": [
+              {
+                "source_path": "internal/gui/weekly_schedule_applied_result_test.go",
+                "input_path": "inputs/a2-v2/internal/gui/weekly_schedule_applied_result_test.go",
+                "path": "internal/gui/weekly_schedule_applied_result_test.go",
+                "bytes": 9274,
+                "sha256": "031757d9fb516606830701a026a8b8cf0915fc69e6f28bc17d7d6881b5eab399"
+              },
+              {
+                "source_path": "internal/api/supervisor_intent_lock_ownership_test.go",
+                "input_path": "inputs/a2-v3/internal/api/supervisor_intent_lock_ownership_test.go",
+                "path": "internal/api/supervisor_intent_lock_ownership_test.go",
+                "bytes": 18481,
+                "sha256": "9a418e22322e1cdd1d0f6b5f0e111efcf2067c18a3f47f214a859f8eb3b9fad8"
+              }
+            ],
+            "effective_inventory": {
+              "files": 3309,
+              "bytes": 50856995,
+              "inventory_sha256": "867e263eff3c400f6252bf537263da6a67b02cb1104e091bac08c76de8aaa006"
+            }
+          },
+          "tests": {
+            "terminals": {
+              "pass": [
+                "TestReleaseAndJoinAppliedSettlementMatrix/success-nil",
+                "TestReleaseAndJoinAppliedSettlementMatrix/success-primary",
+                "TestReleaseAndJoinAppliedSettlementMatrix/release-unapplied",
+                "TestReleaseAndJoinAppliedSettlementMatrix/release-applied",
+                "TestReleaseAndJoinAppliedSettlementMatrix/primary-and-release-applied",
+                "TestReleaseAndJoinAppliedSettlementMatrix",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/typed_supervisor_caller_needs_no_census_update",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/comments_strings_and_local_shadow_are_not_target_calls",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/normal_target_alias",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/explicit_target_alias",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/dot_import_rejected_explicitly",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/direct_package_initializer",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/package_initializer_function_literal",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/package_initializer_literal_ordinal_spans_value_list",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/nested_function_literal",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/repeated_init_function_has_ordinal_owner",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/same_method_name_is_receiver_qualified",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/fake_generated_marker_has_no_exemption",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/canonical_generated_marker_has_no_exemption",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/second_call_in_allowlisted_owner_rejected",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix",
+                "TestAppliedReleaseClassifierFixtureRejectsSibling",
+                "TestWeeklyRefreshReleaseSettlementMatrix/direct_owner_requires_acknowledged_creation_and_readback_before_applied-release-unconfirmed/create-error-current-matches=false",
+                "TestWeeklyRefreshReleaseSettlementMatrix/direct_owner_requires_acknowledged_creation_and_readback_before_applied-release-unconfirmed/create-error-current-matches=true",
+                "TestWeeklyRefreshReleaseSettlementMatrix/direct_owner_requires_acknowledged_creation_and_readback_before_applied-release-unconfirmed",
+                "TestWeeklyRefreshReleaseSettlementMatrix/Ensure_preserves_release_failure_and_later_fail-fast",
+                "TestWeeklyRefreshReleaseSettlementMatrix/swap_preserves_release_failure_and_later_fail-fast",
+                "TestWeeklyRefreshReleaseSettlementMatrix/upgrade_preserves_release_failure_and_later_fail-fast",
+                "TestWeeklyRefreshReleaseSettlementMatrix/Apply_distinguishes_acknowledged_creation_from_failed_creation_on_release_failure/create-error-current-matches=false",
+                "TestWeeklyRefreshReleaseSettlementMatrix/Apply_distinguishes_acknowledged_creation_from_failed_creation_on_release_failure/create-error-current-matches=true",
+                "TestWeeklyRefreshReleaseSettlementMatrix/Apply_distinguishes_acknowledged_creation_from_failed_creation_on_release_failure",
+                "TestWeeklyRefreshReleaseSettlementMatrix",
+                "TestWeeklyScheduleSettingsReleaseSettlementMatrix/successful_combined_Apply_reports_settings_release_failure_after_the_requested_pair_settles",
+                "TestWeeklyScheduleSettingsReleaseSettlementMatrix/callback_failure_after_rollback_remains_primary_and_joins_settings_release_failure",
+                "TestWeeklyScheduleSettingsReleaseSettlementMatrix"
+              ],
+              "fail": [
+                "TestSupervisorIntentLockOwnershipProductionInventory",
+                "PACKAGE:mcp-local-hub/internal/api"
+              ],
+              "skip": []
+            },
+            "counts": {
+              "pass": 35,
+              "fail": 2,
+              "skip": 0
+            },
+            "named_tests": 36,
+            "leaf_cases": 30,
+            "event_actions": {
+              "start": 1,
+              "run": 36,
+              "output": 75,
+              "pass": 35,
+              "fail": 2
+            },
+            "exact_names_and_single_execution_verified": true,
+            "failed_outputs": {
+              "TestSupervisorIntentLockOwnershipProductionInventory": "=== RUN   TestSupervisorIntentLockOwnershipProductionInventory\n    supervisor_intent_lock_ownership_test.go:66: owned call internal/api/supervisor_lock.go:func:AcquireSupervisorLockQuietObserved calls=1, reviewed=0\n--- FAIL: TestSupervisorIntentLockOwnershipProductionInventory (5.79s)\n",
+              "PACKAGE:mcp-local-hub/internal/api": "FAIL\nFAIL\tmcp-local-hub/internal/api\t7.471s\n"
+            },
+            "all_test_outputs_sha256": {
+              "PACKAGE:mcp-local-hub/internal/api": "dba61bacff1c8065bdaf6b74c38dc8f1d88f7fe6a4d27e5f7cfc7c6eb091e653",
+              "TestAppliedReleaseClassifierFixtureRejectsSibling": "2cbc8422fcf7bfe3b82e7b8ed82ec9815498d196982b2ba17272e412a5c3cce1",
+              "TestReleaseAndJoinAppliedSettlementMatrix": "2760e182ecf8809e6d73525c0e41500d4fcc2ec4a967f44163569ba7dd836317",
+              "TestReleaseAndJoinAppliedSettlementMatrix/primary-and-release-applied": "775c79b4248b5df4a3c94f5625cdebda2da2b9b1b869ddad1ef10b7ad7912a08",
+              "TestReleaseAndJoinAppliedSettlementMatrix/release-applied": "19795e16b91b81aa800880811c765496d3edcb176c9b5c35ed8c0919d30b0342",
+              "TestReleaseAndJoinAppliedSettlementMatrix/release-unapplied": "df414173fea7e05ab66543787aed6fecc7854adf9bb8c30e0fdb2317b8e21aa7",
+              "TestReleaseAndJoinAppliedSettlementMatrix/success-nil": "0042ce40fdfdaea1cc57d3475f6af259d77db35fea0bf6e3b940e9b5f3bd6790",
+              "TestReleaseAndJoinAppliedSettlementMatrix/success-primary": "96329e0491dd15fb17df0194ff276116f2d2d1c2a1292632529e9e2f4d65c968",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix": "c152d1bdfdf5b5aa9bee2e0bd6307a120ff58c4ae0c87ea26f4b64ac1b96434d",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/canonical_generated_marker_has_no_exemption": "7a1db30dbc527f9c45b545f5fed4805ee9fdce698b5776836ae2c64b312baf62",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/comments_strings_and_local_shadow_are_not_target_calls": "ade1933535a6e0331d87a13123cf890feb00cc059ecae2c173da74b124c409fc",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/direct_package_initializer": "f78a5c552f029aa740363a5bdda8fc1ea9f83afd1ddc6c3208b78768fdd5694c",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/dot_import_rejected_explicitly": "8e6a3846e0e9c9a6582b3702fbddf2512128e601237d4e410b3ff7017271906f",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/explicit_target_alias": "b52afb6dddb7eb6319bc7a7e7d3916257c08dadef6fb814d80384b3d2cbf2fd3",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/fake_generated_marker_has_no_exemption": "d8947a85bf49200411b70d19d331ba7c7ce1c7830de1774a7ea2f426743d3c35",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/nested_function_literal": "03aa1881415daffd19f4dba995461059c0038f45f6fe34c42b1cdfba59666f7a",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/normal_target_alias": "c34086577219a4b99d2e3c60bb9eec6831b26474befd4f053d3d9f2bf2e623ef",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/package_initializer_function_literal": "c8c1132c3844d310291d4fff63df673a69bc5c3c65af5d391b3f6c5aec1c2248",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/package_initializer_literal_ordinal_spans_value_list": "1b239360ca1116888cf817152a27d1f32da931588ace178000de15b5bf489414",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/repeated_init_function_has_ordinal_owner": "8b60288ed304de1d9a7ad69c5cc4296e0dc2c09e4bea6535ff396016548d9f9e",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/same_method_name_is_receiver_qualified": "9e41f96f95d4ba2aed4766af9f06124d9c50264140b595c64577cab4b318e39a",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/second_call_in_allowlisted_owner_rejected": "b2c6bd46b481317e5acb3f8f47b8587d04062c7760ec6837a6daba11a0a2dd91",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/typed_supervisor_caller_needs_no_census_update": "dda856598fed5368dba5c109add03118b65e1a418d07d5d343a4605de826e5d1",
+              "TestSupervisorIntentLockOwnershipProductionInventory": "d9eccb1e8e7ecc5009a18bcb15ad8bc514dba59bc741c3f2bd9f1c0869d03c5d",
+              "TestWeeklyRefreshReleaseSettlementMatrix": "4b9e4933a4b20dfedf75e3200f58a1d1434d66c3c29c93798b3f2a77313ea4fb",
+              "TestWeeklyRefreshReleaseSettlementMatrix/Apply_distinguishes_acknowledged_creation_from_failed_creation_on_release_failure": "220034b133effc38fbe55fd726db7db7c38eef5f846bf94a120f5c9caad1792b",
+              "TestWeeklyRefreshReleaseSettlementMatrix/Apply_distinguishes_acknowledged_creation_from_failed_creation_on_release_failure/create-error-current-matches=false": "382ee53d9f66d50cb4e5e40bf10de7a72f3c360ca2de2965c7cd6768cffa333b",
+              "TestWeeklyRefreshReleaseSettlementMatrix/Apply_distinguishes_acknowledged_creation_from_failed_creation_on_release_failure/create-error-current-matches=true": "517afa250868ed6969db9907a89498e5d0dc119def8c88511f3db5c30f480c9f",
+              "TestWeeklyRefreshReleaseSettlementMatrix/Ensure_preserves_release_failure_and_later_fail-fast": "27ae71c9913221db5e1195420fb0034b0d5dcbd4cdd81970435f74d865ddf56b",
+              "TestWeeklyRefreshReleaseSettlementMatrix/direct_owner_requires_acknowledged_creation_and_readback_before_applied-release-unconfirmed": "6551ed27bedfa027d28fab1ad2145cd708e81f1decb0f9242de2b1f3e43153ad",
+              "TestWeeklyRefreshReleaseSettlementMatrix/direct_owner_requires_acknowledged_creation_and_readback_before_applied-release-unconfirmed/create-error-current-matches=false": "2a77032ed43445a95648dd9a2a8e959591ada37889fcc8b1c485b31755bf7cc4",
+              "TestWeeklyRefreshReleaseSettlementMatrix/direct_owner_requires_acknowledged_creation_and_readback_before_applied-release-unconfirmed/create-error-current-matches=true": "43a2d5e96cb913096d269d92f3cb41b4a1cc40bf075e491df224862bdd0c084b",
+              "TestWeeklyRefreshReleaseSettlementMatrix/swap_preserves_release_failure_and_later_fail-fast": "83416eb120ac52084759c51abce065ade758b65402d28cae498ba2a62abb0ba8",
+              "TestWeeklyRefreshReleaseSettlementMatrix/upgrade_preserves_release_failure_and_later_fail-fast": "1ed5af4d4e340418ed9630ecedd272204c4ec52eb44fc8da4d5063f930eb2e1b",
+              "TestWeeklyScheduleSettingsReleaseSettlementMatrix": "2e255edc27298e58f5777cd38627ded3e821440547f9e22cd865fe7df5310587",
+              "TestWeeklyScheduleSettingsReleaseSettlementMatrix/callback_failure_after_rollback_remains_primary_and_joins_settings_release_failure": "c158ec0f3cad3d6c1ab8db9c14b91be318a15c74ec946614fce11284c83e32e2",
+              "TestWeeklyScheduleSettingsReleaseSettlementMatrix/successful_combined_Apply_reports_settings_release_failure_after_the_requested_pair_settles": "0836c220f52e4de7ebee0580fddaa4015bc993c11fc6871967d92073231be191"
+            }
+          },
+          "interpretation": "publication_28_owner_census_is_incomplete_for_30_owner_qualification_composition",
+          "runner_oracle_pass": false
+        }
+      ],
+      "not_run_after_failure": [
+        "a2-full-build",
+        "a2-full-vet"
+      ]
+    },
+    {
+      "phase": "a2-composition-census",
+      "plan_path": "plans/a2-composition-census.json",
+      "plan_sha256": "c0527feac04d4c64007061f47f6180d6f52fbd82c484e7e1fd9061cecfad9ccf",
+      "started_utc": "2026-11-22T20:31:35.851860+00:00",
+      "finished_utc": "2026-11-22T20:33:24.523556+00:00",
+      "completed": true,
+      "error": null,
+      "physical_source": {
+        "files": 3309,
+        "bytes": 50856246,
+        "inventory_sha256": "d556aebcb39a8fc9e965e00713fa99ee8562b669db1476b6ef6b4663112706e2"
+      },
+      "input_inventory": {
+        "files": 19,
+        "bytes": 437429,
+        "inventory_sha256": "ebd300decaa16feac897d2ae01bbe007f9f095c5abbc9b76eeadd17dd109fb94"
+      },
+      "before_after_equal": true,
+      "commands": [
+        {
+          "label": "a2-composition-owner-census",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-tags=test_state_path_env",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\inputs\\a2-composition-green-overlay.json",
+            "-run",
+            "^(TestSupervisorIntentLockOwnershipProductionInventory|TestSupervisorIntentLockOwnershipFixtureMatrix|TestAppliedReleaseClassifierFixtureRejectsSibling|TestWeeklyRefreshReleaseSettlementMatrix|TestWeeklyScheduleSettingsReleaseSettlementMatrix|TestReleaseAndJoinAppliedSettlementMatrix)$",
+            "./internal/api"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\candidate-source",
+          "pid": 50540,
+          "started_utc": "2026-11-22T20:31:39.952046+00:00",
+          "finished_utc": "2026-11-22T20:32:37.116656+00:00",
+          "exit_code": 0,
+          "planned_exit_code": 0,
+          "stdout": {
+            "bytes": 39573,
+            "sha256": "6531898d5c09ee23c0448e6712bc22f31472403c13ff51dda211d72193f8901a"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "raw_directory": "evidence/a2-composition-census/",
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "missing_required_output": [],
+          "overlay": {
+            "overlay": "inputs/a2-composition-green-overlay.json",
+            "overlay_sha256": "0c8c3b60ba573bab2b538695cec83bb6de0e52fd527a6d90d72f35744fa7305d",
+            "replacements": [
+              {
+                "source_path": "internal/gui/weekly_schedule_applied_result_test.go",
+                "input_path": "inputs/a2-v2/internal/gui/weekly_schedule_applied_result_test.go",
+                "path": "internal/gui/weekly_schedule_applied_result_test.go",
+                "bytes": 9274,
+                "sha256": "031757d9fb516606830701a026a8b8cf0915fc69e6f28bc17d7d6881b5eab399"
+              },
+              {
+                "source_path": "internal/api/supervisor_intent_lock_ownership_test.go",
+                "input_path": "inputs/a2-composition/internal/api/supervisor_intent_lock_ownership_test.go",
+                "path": "internal/api/supervisor_intent_lock_ownership_test.go",
+                "bytes": 18685,
+                "sha256": "d5b22597fc78a9304ac9c630adb759932cd430afae7568e241a5812eff853e47"
+              }
+            ],
+            "effective_inventory": {
+              "files": 3309,
+              "bytes": 50857199,
+              "inventory_sha256": "50fa124ece10663171114a566d52f9bc9824635439324c5f42f9bdb11b1aba68"
+            }
+          },
+          "tests": {
+            "terminals": {
+              "pass": [
+                "TestReleaseAndJoinAppliedSettlementMatrix/success-nil",
+                "TestReleaseAndJoinAppliedSettlementMatrix/success-primary",
+                "TestReleaseAndJoinAppliedSettlementMatrix/release-unapplied",
+                "TestReleaseAndJoinAppliedSettlementMatrix/release-applied",
+                "TestReleaseAndJoinAppliedSettlementMatrix/primary-and-release-applied",
+                "TestReleaseAndJoinAppliedSettlementMatrix",
+                "TestSupervisorIntentLockOwnershipProductionInventory",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/typed_supervisor_caller_needs_no_census_update",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/comments_strings_and_local_shadow_are_not_target_calls",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/normal_target_alias",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/explicit_target_alias",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/dot_import_rejected_explicitly",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/direct_package_initializer",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/package_initializer_function_literal",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/package_initializer_literal_ordinal_spans_value_list",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/nested_function_literal",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/repeated_init_function_has_ordinal_owner",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/same_method_name_is_receiver_qualified",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/fake_generated_marker_has_no_exemption",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/canonical_generated_marker_has_no_exemption",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix/second_call_in_allowlisted_owner_rejected",
+                "TestSupervisorIntentLockOwnershipFixtureMatrix",
+                "TestAppliedReleaseClassifierFixtureRejectsSibling",
+                "TestWeeklyRefreshReleaseSettlementMatrix/direct_owner_requires_acknowledged_creation_and_readback_before_applied-release-unconfirmed/create-error-current-matches=false",
+                "TestWeeklyRefreshReleaseSettlementMatrix/direct_owner_requires_acknowledged_creation_and_readback_before_applied-release-unconfirmed/create-error-current-matches=true",
+                "TestWeeklyRefreshReleaseSettlementMatrix/direct_owner_requires_acknowledged_creation_and_readback_before_applied-release-unconfirmed",
+                "TestWeeklyRefreshReleaseSettlementMatrix/Ensure_preserves_release_failure_and_later_fail-fast",
+                "TestWeeklyRefreshReleaseSettlementMatrix/swap_preserves_release_failure_and_later_fail-fast",
+                "TestWeeklyRefreshReleaseSettlementMatrix/upgrade_preserves_release_failure_and_later_fail-fast",
+                "TestWeeklyRefreshReleaseSettlementMatrix/Apply_distinguishes_acknowledged_creation_from_failed_creation_on_release_failure/create-error-current-matches=false",
+                "TestWeeklyRefreshReleaseSettlementMatrix/Apply_distinguishes_acknowledged_creation_from_failed_creation_on_release_failure/create-error-current-matches=true",
+                "TestWeeklyRefreshReleaseSettlementMatrix/Apply_distinguishes_acknowledged_creation_from_failed_creation_on_release_failure",
+                "TestWeeklyRefreshReleaseSettlementMatrix",
+                "TestWeeklyScheduleSettingsReleaseSettlementMatrix/successful_combined_Apply_reports_settings_release_failure_after_the_requested_pair_settles",
+                "TestWeeklyScheduleSettingsReleaseSettlementMatrix/callback_failure_after_rollback_remains_primary_and_joins_settings_release_failure",
+                "TestWeeklyScheduleSettingsReleaseSettlementMatrix",
+                "PACKAGE:mcp-local-hub/internal/api"
+              ],
+              "fail": [],
+              "skip": []
+            },
+            "counts": {
+              "pass": 37,
+              "fail": 0,
+              "skip": 0
+            },
+            "named_tests": 36,
+            "leaf_cases": 30,
+            "event_actions": {
+              "start": 1,
+              "run": 36,
+              "output": 74,
+              "pass": 37
+            },
+            "exact_names_and_single_execution_verified": true,
+            "failed_outputs": {},
+            "all_test_outputs_sha256": {
+              "PACKAGE:mcp-local-hub/internal/api": "b32bd4dbc4328ddcf9c121aca560d9407b25843a21b409a7d75b78adacd251f9",
+              "TestAppliedReleaseClassifierFixtureRejectsSibling": "2cbc8422fcf7bfe3b82e7b8ed82ec9815498d196982b2ba17272e412a5c3cce1",
+              "TestReleaseAndJoinAppliedSettlementMatrix": "2760e182ecf8809e6d73525c0e41500d4fcc2ec4a967f44163569ba7dd836317",
+              "TestReleaseAndJoinAppliedSettlementMatrix/primary-and-release-applied": "775c79b4248b5df4a3c94f5625cdebda2da2b9b1b869ddad1ef10b7ad7912a08",
+              "TestReleaseAndJoinAppliedSettlementMatrix/release-applied": "19795e16b91b81aa800880811c765496d3edcb176c9b5c35ed8c0919d30b0342",
+              "TestReleaseAndJoinAppliedSettlementMatrix/release-unapplied": "df414173fea7e05ab66543787aed6fecc7854adf9bb8c30e0fdb2317b8e21aa7",
+              "TestReleaseAndJoinAppliedSettlementMatrix/success-nil": "0042ce40fdfdaea1cc57d3475f6af259d77db35fea0bf6e3b940e9b5f3bd6790",
+              "TestReleaseAndJoinAppliedSettlementMatrix/success-primary": "96329e0491dd15fb17df0194ff276116f2d2d1c2a1292632529e9e2f4d65c968",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix": "c152d1bdfdf5b5aa9bee2e0bd6307a120ff58c4ae0c87ea26f4b64ac1b96434d",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/canonical_generated_marker_has_no_exemption": "7a1db30dbc527f9c45b545f5fed4805ee9fdce698b5776836ae2c64b312baf62",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/comments_strings_and_local_shadow_are_not_target_calls": "ade1933535a6e0331d87a13123cf890feb00cc059ecae2c173da74b124c409fc",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/direct_package_initializer": "f78a5c552f029aa740363a5bdda8fc1ea9f83afd1ddc6c3208b78768fdd5694c",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/dot_import_rejected_explicitly": "8e6a3846e0e9c9a6582b3702fbddf2512128e601237d4e410b3ff7017271906f",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/explicit_target_alias": "b52afb6dddb7eb6319bc7a7e7d3916257c08dadef6fb814d80384b3d2cbf2fd3",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/fake_generated_marker_has_no_exemption": "d8947a85bf49200411b70d19d331ba7c7ce1c7830de1774a7ea2f426743d3c35",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/nested_function_literal": "03aa1881415daffd19f4dba995461059c0038f45f6fe34c42b1cdfba59666f7a",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/normal_target_alias": "c34086577219a4b99d2e3c60bb9eec6831b26474befd4f053d3d9f2bf2e623ef",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/package_initializer_function_literal": "c8c1132c3844d310291d4fff63df673a69bc5c3c65af5d391b3f6c5aec1c2248",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/package_initializer_literal_ordinal_spans_value_list": "1b239360ca1116888cf817152a27d1f32da931588ace178000de15b5bf489414",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/repeated_init_function_has_ordinal_owner": "8b60288ed304de1d9a7ad69c5cc4296e0dc2c09e4bea6535ff396016548d9f9e",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/same_method_name_is_receiver_qualified": "9e41f96f95d4ba2aed4766af9f06124d9c50264140b595c64577cab4b318e39a",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/second_call_in_allowlisted_owner_rejected": "b2c6bd46b481317e5acb3f8f47b8587d04062c7760ec6837a6daba11a0a2dd91",
+              "TestSupervisorIntentLockOwnershipFixtureMatrix/typed_supervisor_caller_needs_no_census_update": "dda856598fed5368dba5c109add03118b65e1a418d07d5d343a4605de826e5d1",
+              "TestSupervisorIntentLockOwnershipProductionInventory": "0a9c4b51ec58554e66bbf18a8c9218b8c8d057eeda2d4122ccec788a2b573c54",
+              "TestWeeklyRefreshReleaseSettlementMatrix": "2b02e5d7e2dc1554e9727ea61b6552c3824161afd96bfdbbe74428e355f413f9",
+              "TestWeeklyRefreshReleaseSettlementMatrix/Apply_distinguishes_acknowledged_creation_from_failed_creation_on_release_failure": "1ad2a1b40dd920ef4ff598baff60db011f4b8d7f74dc9d3fbf9a05ba2d7ec378",
+              "TestWeeklyRefreshReleaseSettlementMatrix/Apply_distinguishes_acknowledged_creation_from_failed_creation_on_release_failure/create-error-current-matches=false": "382ee53d9f66d50cb4e5e40bf10de7a72f3c360ca2de2965c7cd6768cffa333b",
+              "TestWeeklyRefreshReleaseSettlementMatrix/Apply_distinguishes_acknowledged_creation_from_failed_creation_on_release_failure/create-error-current-matches=true": "8604b5ef8b4ad17a57948afb67ab8a781f819b24dd6b5ff7208297061a02e109",
+              "TestWeeklyRefreshReleaseSettlementMatrix/Ensure_preserves_release_failure_and_later_fail-fast": "89f640061853b7f1c66f1dd917c1ff94298739e431b8ecb8c17ae90acdea64f4",
+              "TestWeeklyRefreshReleaseSettlementMatrix/direct_owner_requires_acknowledged_creation_and_readback_before_applied-release-unconfirmed": "6551ed27bedfa027d28fab1ad2145cd708e81f1decb0f9242de2b1f3e43153ad",
+              "TestWeeklyRefreshReleaseSettlementMatrix/direct_owner_requires_acknowledged_creation_and_readback_before_applied-release-unconfirmed/create-error-current-matches=false": "2a77032ed43445a95648dd9a2a8e959591ada37889fcc8b1c485b31755bf7cc4",
+              "TestWeeklyRefreshReleaseSettlementMatrix/direct_owner_requires_acknowledged_creation_and_readback_before_applied-release-unconfirmed/create-error-current-matches=true": "43a2d5e96cb913096d269d92f3cb41b4a1cc40bf075e491df224862bdd0c084b",
+              "TestWeeklyRefreshReleaseSettlementMatrix/swap_preserves_release_failure_and_later_fail-fast": "83416eb120ac52084759c51abce065ade758b65402d28cae498ba2a62abb0ba8",
+              "TestWeeklyRefreshReleaseSettlementMatrix/upgrade_preserves_release_failure_and_later_fail-fast": "1ed5af4d4e340418ed9630ecedd272204c4ec52eb44fc8da4d5063f930eb2e1b",
+              "TestWeeklyScheduleSettingsReleaseSettlementMatrix": "25f65847d9a41c9622ea5509a806b5a57d993b8fe4c12020778d58cb64215bf5",
+              "TestWeeklyScheduleSettingsReleaseSettlementMatrix/callback_failure_after_rollback_remains_primary_and_joins_settings_release_failure": "eea5f0c23762e120ba58603f8ac889f5c66e514e7e6d714a4729613f9eccf480",
+              "TestWeeklyScheduleSettingsReleaseSettlementMatrix/successful_combined_Apply_reports_settings_release_failure_after_the_requested_pair_settles": "d4ad71ba5e32fce50cdddc1b9aed0f8e7563dc05a323132c84b0ce91f156d9c0"
+            }
+          },
+          "interpretation": "all_selected_assertions_passed",
+          "runner_oracle_pass": true
+        },
+        {
+          "label": "a2-full-build",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "build",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\inputs\\a2-composition-green-overlay.json",
+            "./..."
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\candidate-source",
+          "pid": 15476,
+          "started_utc": "2026-11-22T20:32:37.118833+00:00",
+          "finished_utc": "2026-11-22T20:32:53.997829+00:00",
+          "exit_code": 0,
+          "planned_exit_code": 0,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "raw_directory": "evidence/a2-composition-census/",
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "missing_required_output": [],
+          "overlay": {
+            "overlay": "inputs/a2-composition-green-overlay.json",
+            "overlay_sha256": "0c8c3b60ba573bab2b538695cec83bb6de0e52fd527a6d90d72f35744fa7305d",
+            "replacements": [
+              {
+                "source_path": "internal/gui/weekly_schedule_applied_result_test.go",
+                "input_path": "inputs/a2-v2/internal/gui/weekly_schedule_applied_result_test.go",
+                "path": "internal/gui/weekly_schedule_applied_result_test.go",
+                "bytes": 9274,
+                "sha256": "031757d9fb516606830701a026a8b8cf0915fc69e6f28bc17d7d6881b5eab399"
+              },
+              {
+                "source_path": "internal/api/supervisor_intent_lock_ownership_test.go",
+                "input_path": "inputs/a2-composition/internal/api/supervisor_intent_lock_ownership_test.go",
+                "path": "internal/api/supervisor_intent_lock_ownership_test.go",
+                "bytes": 18685,
+                "sha256": "d5b22597fc78a9304ac9c630adb759932cd430afae7568e241a5812eff853e47"
+              }
+            ],
+            "effective_inventory": {
+              "files": 3309,
+              "bytes": 50857199,
+              "inventory_sha256": "50fa124ece10663171114a566d52f9bc9824635439324c5f42f9bdb11b1aba68"
+            }
+          },
+          "interpretation": "full_package_build_or_vet_passed_on_this_exact_overlay_composition_no_test_suite_execution",
+          "runner_oracle_pass": true
+        },
+        {
+          "label": "a2-full-vet",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "vet",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\inputs\\a2-composition-green-overlay.json",
+            "./..."
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\candidate-source",
+          "pid": 48108,
+          "started_utc": "2026-11-22T20:32:53.999148+00:00",
+          "finished_utc": "2026-11-22T20:33:20.703574+00:00",
+          "exit_code": 0,
+          "planned_exit_code": 0,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "raw_directory": "evidence/a2-composition-census/",
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "missing_required_output": [],
+          "overlay": {
+            "overlay": "inputs/a2-composition-green-overlay.json",
+            "overlay_sha256": "0c8c3b60ba573bab2b538695cec83bb6de0e52fd527a6d90d72f35744fa7305d",
+            "replacements": [
+              {
+                "source_path": "internal/gui/weekly_schedule_applied_result_test.go",
+                "input_path": "inputs/a2-v2/internal/gui/weekly_schedule_applied_result_test.go",
+                "path": "internal/gui/weekly_schedule_applied_result_test.go",
+                "bytes": 9274,
+                "sha256": "031757d9fb516606830701a026a8b8cf0915fc69e6f28bc17d7d6881b5eab399"
+              },
+              {
+                "source_path": "internal/api/supervisor_intent_lock_ownership_test.go",
+                "input_path": "inputs/a2-composition/internal/api/supervisor_intent_lock_ownership_test.go",
+                "path": "internal/api/supervisor_intent_lock_ownership_test.go",
+                "bytes": 18685,
+                "sha256": "d5b22597fc78a9304ac9c630adb759932cd430afae7568e241a5812eff853e47"
+              }
+            ],
+            "effective_inventory": {
+              "files": 3309,
+              "bytes": 50857199,
+              "inventory_sha256": "50fa124ece10663171114a566d52f9bc9824635439324c5f42f9bdb11b1aba68"
+            }
+          },
+          "interpretation": "full_package_build_or_vet_passed_on_this_exact_overlay_composition_no_test_suite_execution",
+          "runner_oracle_pass": true
+        }
+      ],
+      "not_run_after_failure": []
+    }
+  ],
+  "formatting": [
+    {
+      "phase": "format-a1",
+      "pid": 35420,
+      "exit_code": 0,
+      "settled": true,
+      "before": [
+        {
+          "path": "inputs/a1/internal/api/weekly_refresh_atomic_test.go",
+          "bytes": 142280,
+          "sha256": "002951c839ab9b929913b5bea068356778f2ff8f37b12083b641baa851df8ac0"
+        },
+        {
+          "path": "inputs/a1/internal/api/weekly_refresh_call_graph_origins_test.go",
+          "bytes": 23294,
+          "sha256": "ce2ddff4afbe529358f29abb98b8c2a77021c91dd7cbbe7d97fbebce031a8953"
+        }
+      ],
+      "after": [
+        {
+          "path": "inputs/a1/internal/api/weekly_refresh_atomic_test.go",
+          "bytes": 142280,
+          "sha256": "002951c839ab9b929913b5bea068356778f2ff8f37b12083b641baa851df8ac0"
+        },
+        {
+          "path": "inputs/a1/internal/api/weekly_refresh_call_graph_origins_test.go",
+          "bytes": 23306,
+          "sha256": "12da1b0b5a720197dd2e6d57b6363acca9efeda60a5f088e903498c008089ac2"
+        }
+      ],
+      "write_stream_hash_source": "PACKAGE_FILES.json (write receipt has no per-stream hash fields)",
+      "gofmt_check_stream_hashes_verified": true
+    },
+    {
+      "phase": "format-a2",
+      "pid": 53028,
+      "exit_code": 0,
+      "settled": true,
+      "before": [
+        {
+          "path": "inputs/a2/internal/api/weekly_refresh.go",
+          "bytes": 23650,
+          "sha256": "b66bf91a5419c75cfa728cba53ab86ac6c158dc7acdbb57e45affde60cffb89f"
+        },
+        {
+          "path": "inputs/a2/internal/api/supervisor_intent_lock_ownership_test.go",
+          "bytes": 18288,
+          "sha256": "369e280c4a4c4bcafb43d7ab06fc94dd044aa37b381e350cbe4487015f39772e"
+        },
+        {
+          "path": "inputs/a2/internal/api/weekly_refresh_testhooks.go",
+          "bytes": 2371,
+          "sha256": "ecd3409a4921a4cb798b1c4908de381d453c10a1f59e838c78d864ab17f9243c"
+        },
+        {
+          "path": "inputs/a2/internal/api/weekly_refresh_applied_result_test.go",
+          "bytes": 5937,
+          "sha256": "b1ce46b0218dda27fe1aa3acb92272db7f13ec7dba162e7208565793e7eecd59"
+        },
+        {
+          "path": "inputs/a2/internal/gui/weekly_schedule_applied_result_test.go",
+          "bytes": 8723,
+          "sha256": "f0a4762982efe50ca4886aaaf1c18f976b3288f79b148a237f9403980413183b"
+        }
+      ],
+      "after": [
+        {
+          "path": "inputs/a2/internal/api/weekly_refresh.go",
+          "bytes": 23650,
+          "sha256": "b66bf91a5419c75cfa728cba53ab86ac6c158dc7acdbb57e45affde60cffb89f"
+        },
+        {
+          "path": "inputs/a2/internal/api/supervisor_intent_lock_ownership_test.go",
+          "bytes": 18277,
+          "sha256": "2f253b54b17917651a4146ff7907781338e750d99bc85e41869fea7630772445"
+        },
+        {
+          "path": "inputs/a2/internal/api/weekly_refresh_testhooks.go",
+          "bytes": 2371,
+          "sha256": "ecd3409a4921a4cb798b1c4908de381d453c10a1f59e838c78d864ab17f9243c"
+        },
+        {
+          "path": "inputs/a2/internal/api/weekly_refresh_applied_result_test.go",
+          "bytes": 5932,
+          "sha256": "5e17a7dc9639448e034699cbc80963331f3739401a5751f4f71abe982ed4fba6"
+        },
+        {
+          "path": "inputs/a2/internal/gui/weekly_schedule_applied_result_test.go",
+          "bytes": 8729,
+          "sha256": "a173d9de0cd801a85a66b5e11328873211ecfd202d7c4a1954abc8c79cf650ed"
+        }
+      ],
+      "write_stream_hash_source": "PACKAGE_FILES.json (write receipt has no per-stream hash fields)",
+      "gofmt_check_stream_hashes_verified": true
+    },
+    {
+      "phase": "format-a2-v2",
+      "pid": 58936,
+      "exit_code": 0,
+      "settled": true,
+      "before": [
+        {
+          "path": "inputs/a2-v2/internal/gui/weekly_schedule_applied_result_test.go",
+          "bytes": 9274,
+          "sha256": "031757d9fb516606830701a026a8b8cf0915fc69e6f28bc17d7d6881b5eab399"
+        }
+      ],
+      "after": [
+        {
+          "path": "inputs/a2-v2/internal/gui/weekly_schedule_applied_result_test.go",
+          "bytes": 9274,
+          "sha256": "031757d9fb516606830701a026a8b8cf0915fc69e6f28bc17d7d6881b5eab399"
+        }
+      ],
+      "write_stream_hash_source": "PACKAGE_FILES.json (write receipt has no per-stream hash fields)",
+      "gofmt_check_stream_hashes_verified": true
+    },
+    {
+      "phase": "format-a2-v3",
+      "pid": 55824,
+      "exit_code": 0,
+      "settled": true,
+      "before": [
+        {
+          "path": "inputs/a2-v3/internal/api/supervisor_intent_lock_ownership_test.go",
+          "bytes": 18483,
+          "sha256": "cb168158eb7a872c4ef5bb69187f74e43ca97be3bce038a6bcd15304fd42c4a9"
+        }
+      ],
+      "after": [
+        {
+          "path": "inputs/a2-v3/internal/api/supervisor_intent_lock_ownership_test.go",
+          "bytes": 18481,
+          "sha256": "9a418e22322e1cdd1d0f6b5f0e111efcf2067c18a3f47f214a859f8eb3b9fad8"
+        }
+      ],
+      "write_stream_hash_source": "PACKAGE_FILES.json (write receipt has no per-stream hash fields)",
+      "gofmt_check_stream_hashes_verified": true
+    },
+    {
+      "phase": "format-a2-composition",
+      "pid": 56744,
+      "exit_code": 0,
+      "settled": true,
+      "before": [
+        {
+          "path": "inputs/a2-composition/internal/api/supervisor_intent_lock_ownership_test.go",
+          "bytes": 18685,
+          "sha256": "d5b22597fc78a9304ac9c630adb759932cd430afae7568e241a5812eff853e47"
+        }
+      ],
+      "after": [
+        {
+          "path": "inputs/a2-composition/internal/api/supervisor_intent_lock_ownership_test.go",
+          "bytes": 18685,
+          "sha256": "d5b22597fc78a9304ac9c630adb759932cd430afae7568e241a5812eff853e47"
+        }
+      ],
+      "write_stream_hash_source": "PACKAGE_FILES.json (write receipt has no per-stream hash fields)",
+      "gofmt_check_stream_hashes_verified": true
+    }
+  ],
+  "qualification_command_count": 14,
+  "checksummed_command_stream_pairs": 19,
+  "all_test_skips": 0,
+  "all_direct_commands_settled_without_timeout": true,
+  "publication_candidate_inputs": [
+    {
+      "path": "inputs/a1/internal/api/weekly_refresh_atomic_test.go",
+      "bytes": 142280,
+      "sha256": "002951c839ab9b929913b5bea068356778f2ff8f37b12083b641baa851df8ac0"
+    },
+    {
+      "path": "inputs/a1/internal/api/weekly_refresh_call_graph_origins_test.go",
+      "bytes": 23306,
+      "sha256": "12da1b0b5a720197dd2e6d57b6363acca9efeda60a5f088e903498c008089ac2"
+    },
+    {
+      "path": "inputs/a2/internal/api/weekly_refresh.go",
+      "bytes": 23650,
+      "sha256": "b66bf91a5419c75cfa728cba53ab86ac6c158dc7acdbb57e45affde60cffb89f"
+    },
+    {
+      "path": "inputs/a2/internal/api/weekly_refresh_testhooks.go",
+      "bytes": 2371,
+      "sha256": "ecd3409a4921a4cb798b1c4908de381d453c10a1f59e838c78d864ab17f9243c"
+    },
+    {
+      "path": "inputs/a2/internal/api/weekly_refresh_applied_result_test.go",
+      "bytes": 5932,
+      "sha256": "5e17a7dc9639448e034699cbc80963331f3739401a5751f4f71abe982ed4fba6"
+    },
+    {
+      "path": "inputs/a2-v2/internal/gui/weekly_schedule_applied_result_test.go",
+      "bytes": 9274,
+      "sha256": "031757d9fb516606830701a026a8b8cf0915fc69e6f28bc17d7d6881b5eab399"
+    },
+    {
+      "path": "inputs/a2-v3/internal/api/supervisor_intent_lock_ownership_test.go",
+      "bytes": 18481,
+      "sha256": "9a418e22322e1cdd1d0f6b5f0e111efcf2067c18a3f47f214a859f8eb3b9fad8"
+    }
+  ],
+  "census_scope": {
+    "initial_owners": 26,
+    "publication_owners": 28,
+    "qualification_composition_owners": 30,
+    "qualification_only_extra_owners": [
+      "internal/api/supervisor_lock.go:func:AcquireSupervisorLockQuietObserved",
+      "internal/api/supervisor_lock.go:func:ReadOccupiedSupervisorLockOwner/func-lit#1"
+    ],
+    "publication_test_sha256": "9a418e22322e1cdd1d0f6b5f0e111efcf2067c18a3f47f214a859f8eb3b9fad8",
+    "qualification_only_test_sha256": "d5b22597fc78a9304ac9c630adb759932cd430afae7568e241a5812eff853e47",
+    "full_qualification_supervisor_lock_file": {
+      "path": "internal/api/supervisor_lock.go",
+      "bytes": 22829,
+      "sha256": "222c4522ca19945151d539154170a47c15717f8957ab4710c67ccbb2e01e8d6a"
+    }
+  },
+  "remaining_limits": {
+    "a1_production_lock_order_gate": "FAILED: errnoIs dynamic local Unwrap boundary",
+    "initial_GUI_control_is_not_valid_behavioral_evidence": true,
+    "full_Go_test_suite": "NOT_RUN",
+    "native_scheduler_and_installed_Product_qualification": "NOT_RUN",
+    "whole_process_tree_settlement_independently_proved": false,
+    "publication_head_or_external_review": "NOT_ESTABLISHED_BY_THIS_ARCHIVE",
+    "separate_secrets_unlock_defect": {
+      "path": "internal/api/secrets_init_recovery.go",
+      "owner": "(*secretsInitRecoveryOwner).locked",
+      "source_sha256": "e585d5fc9c3b6a82f66b557b7fa50937fddfa2b94d7d473870d2cd1ae8971544",
+      "condition": "lock.Unlock returns an error after fn",
+      "consequence": "deferred Unlock error is discarded; fn result is returned without that release failure",
+      "fixed_or_behaviorally_qualified_here": false
+    }
+  }
+}

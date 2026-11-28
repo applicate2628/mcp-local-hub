@@ -38,8 +38,34 @@ func (*noopScheduler) Run(string) error                  { return errNoopSchedul
 func (*noopScheduler) Stop(string) error                 { return errNoopSchedulerMutation }
 func (*noopScheduler) Status(string) (TaskStatus, error) { return TaskStatus{}, ErrTaskNotFound }
 func (*noopScheduler) List(string) ([]TaskStatus, error) { return nil, nil }
-func (*noopScheduler) ListContext(context.Context, string) ([]TaskStatus, error) {
+func (*noopScheduler) ListContext(ctx context.Context, _ string) ([]TaskStatus, error) {
+	if ctx == nil {
+		return nil, ErrUnavailable
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Join(ErrUnavailable, err, context.Cause(ctx))
+	}
 	return nil, nil
 }
 func (*noopScheduler) ExportXML(string) ([]byte, error) { return nil, ErrTaskNotFound }
 func (*noopScheduler) ImportXML(string, []byte) error   { return errNoopSchedulerMutation }
+
+func (s *noopScheduler) ExportXMLContext(ctx context.Context, name string) ([]byte, error) {
+	if ctx == nil {
+		return nil, ErrUnavailable
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Join(ErrUnavailable, err, context.Cause(ctx))
+	}
+	return s.ExportXML(name)
+}
+
+func (s *noopScheduler) ImportXMLContext(ctx context.Context, name string, raw []byte) error {
+	if ctx == nil {
+		return ErrUnavailable
+	}
+	if err := ctx.Err(); err != nil {
+		return errors.Join(ErrUnavailable, err, context.Cause(ctx))
+	}
+	return s.ImportXML(name, raw)
+}

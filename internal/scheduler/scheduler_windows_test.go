@@ -179,8 +179,11 @@ func TestSameWindowsUser(t *testing.T) {
 		want    bool
 	}{
 		{name: "exact", owner: "alice", current: "alice", want: true},
-		{name: "domain prefixed", owner: `MACHINE\alice`, current: "alice", want: true},
-		{name: "case-insensitive", owner: `domain\ALICE`, current: "alice", want: true},
+		{name: "qualified is not short", owner: `MACHINE\alice`, current: "alice", want: false},
+		{name: "case-insensitive exact account", owner: `domain\ALICE`, current: `DOMAIN\alice`, want: true},
+		{name: "different domains", owner: `OTHER\alice`, current: `DOMAIN\alice`, want: false},
+		{name: "matching SID", owner: "S-1-5-21-100-200-300-1000", current: "S-1-5-21-100-200-300-1000", want: true},
+		{name: "different SID", owner: "S-1-5-21-100-200-300-2000", current: "S-1-5-21-100-200-300-1000", want: false},
 		{name: "different user", owner: "bob", current: "alice", want: false},
 		{name: "empty owner", owner: "", current: "alice", want: false},
 	}

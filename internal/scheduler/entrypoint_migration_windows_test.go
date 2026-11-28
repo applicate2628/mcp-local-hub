@@ -297,6 +297,12 @@ func TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation(t *testing
 			wantErr: "foreign owner",
 		},
 		{
+			name:    "same short name foreign domain",
+			owner:   `OTHER\test-user`,
+			xml:     taskXML("\\mcp-local-hub-autostart", `OTHER\test-user`, priorCLI, "gui", "autostart"),
+			wantErr: "foreign owner",
+		},
+		{
 			name:    "multiple actions",
 			owner:   "test-user",
 			xml:     []byte("<?xml version=\"1.0\" encoding=\"UTF-16\"?><Task><RegistrationInfo><URI>\\mcp-local-hub-autostart</URI></RegistrationInfo><Principals><Principal><UserId>test-user</UserId></Principal></Principals><Actions><Exec><Command>" + priorCLI + "</Command></Exec><ComHandler><ClassId>x</ClassId></ComHandler></Actions></Task>"),
@@ -367,6 +373,25 @@ func newEntrypointTaskBackendFake(tasks map[string][]byte, owner string) *entryp
 		owners[name] = owner
 	}
 	return &entrypointTaskBackendFake{tasks: copyTasks, owners: owners, failImportFor: map[string]error{}}
+}
+
+func (f *entrypointTaskBackendFake) ListContext(ctx context.Context, prefix string) ([]TaskStatus, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return f.List(prefix)
+}
+func (f *entrypointTaskBackendFake) ExportXMLContext(ctx context.Context, name string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return f.ExportXML(name)
+}
+func (f *entrypointTaskBackendFake) ImportXMLContext(ctx context.Context, name string, body []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return f.ImportXML(name, body)
 }
 
 func (f *entrypointTaskBackendFake) List(prefix string) ([]TaskStatus, error) {

@@ -111,6 +111,14 @@ func (t *OwnedEntrypointTaskTxn) validateContexts(ctx context.Context) error {
 	return nil
 }
 
+// transitionContext combines the original transaction lifetime with a caller
+// operation. Cancellation does not replace the caller's deadline with a fresh one.
+func (t *OwnedEntrypointTaskTxn) transitionContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	derived, cancel := context.WithCancelCause(ctx)
+	stop := context.AfterFunc(t.ctx, func() { cancel(context.Cause(t.ctx)) })
+	return derived, func() { stop(); cancel(context.Canceled) }
+}
+
 func (t *OwnedEntrypointTaskTxn) requireTransition(ctx context.Context, apply bool) error {
 	if !apply {
 		return entrypointTransitionError("apply-required", errors.New("positive Apply is required"))
@@ -175,8 +183,8 @@ func (t *OwnedEntrypointTaskTxn) transitionDefinitions(ctx context.Context, targ
 
 // transitionLiveSet checks the exact frozen population, including rows the
 // ordinary V3 path intentionally ignores for an operator command.
-func (t *OwnedEntrypointTaskTxn) transitionLiveSet() error {
-	statuses, err := t.backend.List(ownedEntrypointTaskPrefix)
+func (t *OwnedEntrypointTaskTxn) transitionLiveSet(ctx context.Context) error {
+	statuses, err := t.backend.ListContext(ctx, ownedEntrypointTaskPrefix)
 	if err != nil {
 		return err
 	}
@@ -198,7 +206,7 @@ func (t *OwnedEntrypointTaskTxn) transitionLiveSet() error {
 }
 
 func (t *OwnedEntrypointTaskTxn) verifyTransitionDefinitions(ctx context.Context, target EntrypointTaskTarget, expected map[string][]byte) (EntrypointTaskExcludedSnapshot, error) {
-	if err := t.transitionLiveSet(); err != nil {
+	if err := t.transitionLiveSet(ctx); err != nil {
 		return EntrypointTaskExcludedSnapshot{}, entrypointTransitionError("task-set-drift", err)
 	}
 	snapshot := EntrypointTaskExcludedSnapshot{Target: target, DefinitionSHA256: make(map[string]string, len(expected)), owner: t}
@@ -207,7 +215,7 @@ func (t *OwnedEntrypointTaskTxn) verifyTransitionDefinitions(ctx context.Context
 		if err := ctx.Err(); err != nil {
 			return EntrypointTaskExcludedSnapshot{}, entrypointTransitionError("context-expired", err)
 		}
-		raw, err := t.backend.ExportXML(t.inventory[key].name)
+		raw, err := t.backend.ExportXMLContext(ctx, t.inventory[key].name)
 		if err != nil {
 			return EntrypointTaskExcludedSnapshot{}, entrypointTransitionError("readback-failed", err)
 		}
@@ -251,6 +259,9 @@ func (t *OwnedEntrypointTaskTxn) DisableCapturedVerified(ctx context.Context, re
 	if err := t.requireTransition(ctx, request.Apply); err != nil {
 		return EntrypointTaskExcludedSnapshot{}, err
 	}
+	ctx, cancel := t.transitionContext(ctx)
+	defer cancel()
+
 	original, err := t.transitionDefinitions(ctx, EntrypointTaskCapturedPrior, false)
 	if err != nil {
 		return EntrypointTaskExcludedSnapshot{}, err
@@ -269,11 +280,14 @@ func (t *OwnedEntrypointTaskTxn) RestoreCapturedWhileDisabled(ctx context.Contex
 	if err := t.requireTransition(ctx, request.Apply); err != nil {
 		return EntrypointTaskExcludedSnapshot{}, err
 	}
+	ctx, cancel := t.transitionContext(ctx)
+	defer cancel()
+
 	disabled, err := t.transitionDefinitions(ctx, EntrypointTaskCapturedPrior, true)
 	if err != nil {
 		return EntrypointTaskExcludedSnapshot{}, err
 	}
-	if err := t.transitionLiveSet(); err != nil {
+	if err := t.transitionLiveSet(ctx); err != nil {
 		return EntrypointTaskExcludedSnapshot{}, entrypointTransitionError("task-set-drift", err)
 	}
 	return t.importExcluded(ctx, disabled)
@@ -286,7 +300,7 @@ func (t *OwnedEntrypointTaskTxn) importExcluded(ctx context.Context, disabled ma
 			errs = append(errs, err)
 			continue
 		}
-		if err := t.backend.ImportXML(t.inventory[key].name, disabled[key]); err != nil {
+		if err := t.backend.ImportXMLContext(ctx, t.inventory[key].name, disabled[key]); err != nil {
 			errs = append(errs, fmt.Errorf("disable import %q: %w", key, err))
 		}
 	}
@@ -340,6 +354,9 @@ func (t *OwnedEntrypointTaskTxn) RestoreOriginalEnabledAfterReady(ctx context.Co
 	if err := t.requireTransition(ctx, request.Apply); err != nil {
 		return "", err
 	}
+	ctx, cancel := t.transitionContext(ctx)
+	defer cancel()
+
 	excluded, err := t.transitionDefinitions(ctx, request.Target, true)
 	if err != nil {
 		return "", err
@@ -380,7 +397,7 @@ func (t *OwnedEntrypointTaskTxn) RestoreOriginalEnabledAfterReady(ctx context.Co
 		if err := t.validateContexts(ctx); err != nil {
 			return "", t.compensateExcluded(excluded, final, err)
 		}
-		if err := t.backend.ImportXML(t.inventory[key].name, final[key]); err != nil {
+		if err := t.backend.ImportXMLContext(ctx, t.inventory[key].name, final[key]); err != nil {
 			return "", t.compensateExcluded(excluded, final, fmt.Errorf("final import %q: %w", key, err))
 		}
 	}
@@ -395,9 +412,18 @@ func (t *OwnedEntrypointTaskTxn) RestoreOriginalEnabledAfterReady(ctx context.Co
 }
 
 func (t *OwnedEntrypointTaskTxn) compensateExcluded(excluded, final map[string][]byte, cause error) error {
+	if errors.Is(cause, ErrMutationOutcomeUnknown) {
+		// A lost mutation acknowledgement is not authority to replace the same
+		// task again. Preserve the original recovery domain for its coordinator.
+		return &EntrypointTaskPartialProgressError{Cause: entrypointTransitionError("final-outcome-unknown", cause)}
+	}
+	// Cleanup is already a distinct transaction obligation. Bound its entire
+	// set/readback sequence once, rather than renewing a deadline per task.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(t.ctx), schedulerCOMDeadline)
+	defer cancel()
 	errs := []error{cause}
 	for _, key := range t.sortedInventoryNames() {
-		raw, err := t.backend.ExportXML(t.inventory[key].name)
+		raw, err := t.backend.ExportXMLContext(ctx, t.inventory[key].name)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("compensation export %q: %w", key, err))
 			continue
@@ -407,22 +433,34 @@ func (t *OwnedEntrypointTaskTxn) compensateExcluded(excluded, final map[string][
 			continue
 		}
 		if !bytes.Equal(raw, excluded[key]) {
-			if err := t.backend.ImportXML(t.inventory[key].name, excluded[key]); err != nil {
+			if err := t.backend.ImportXMLContext(ctx, t.inventory[key].name, excluded[key]); err != nil {
 				errs = append(errs, fmt.Errorf("compensation import %q: %w", key, err))
 			}
 		}
 	}
 	// Cancellation does not erase the obligation to observe attempted cleanup.
-	if _, err := t.verifyTransitionDefinitions(context.WithoutCancel(t.ctx), "", excluded); err != nil {
+	if _, err := t.verifyTransitionDefinitions(ctx, "", excluded); err != nil {
 		errs = append(errs, err)
 	}
 	return &EntrypointTaskPartialProgressError{Cause: entrypointTransitionError("final-partial-progress", errors.Join(errs...))}
 }
 
 type ownedEntrypointTaskBackend interface {
-	List(prefix string) ([]TaskStatus, error)
-	ExportXML(name string) ([]byte, error)
-	ImportXML(name string, xml []byte) error
+	ListContext(context.Context, string) ([]TaskStatus, error)
+	ExportXMLContext(context.Context, string) ([]byte, error)
+	ImportXMLContext(context.Context, string, []byte) error
+}
+
+func newOwnedEntrypointTaskBackend() (ownedEntrypointTaskBackend, error) {
+	backend, err := New()
+	if err != nil {
+		return nil, err
+	}
+	contextual, ok := backend.(ownedEntrypointTaskBackend)
+	if !ok {
+		return nil, fmt.Errorf("%w: context-aware entrypoint task backend", ErrNotImplemented)
+	}
+	return contextual, nil
 }
 
 type ownedEntrypointTaskSnapshot struct {
@@ -459,7 +497,7 @@ type OwnedEntrypointTaskReference struct {
 // current-user tasks using the hub name prefix but an operator executable are
 // explicitly outside this transaction and are not returned or changed.
 func ScanOwnedEntrypointTaskReferences(ctx context.Context, operatorCLI, runtime string) ([]OwnedEntrypointTaskReference, error) {
-	backend, err := New()
+	backend, err := newOwnedEntrypointTaskBackend()
 	if err != nil {
 		return nil, fmt.Errorf("entrypoint task scan: scheduler: %w", err)
 	}
@@ -477,7 +515,7 @@ func scanOwnedEntrypointTaskReferences(ctx context.Context, backend ownedEntrypo
 	if backend == nil || strings.TrimSpace(owner) == "" || strings.TrimSpace(operatorCLI) == "" || strings.TrimSpace(runtime) == "" || operatorCLI == runtime {
 		return nil, errors.New("entrypoint task scan: invalid admitted pair")
 	}
-	statuses, err := backend.List(ownedEntrypointTaskPrefix)
+	statuses, err := backend.ListContext(ctx, ownedEntrypointTaskPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("entrypoint task scan: list: %w", err)
 	}
@@ -498,7 +536,7 @@ func scanOwnedEntrypointTaskReferences(ctx context.Context, backend ownedEntrypo
 			return nil, fmt.Errorf("entrypoint task scan: duplicate task %q", name)
 		}
 		seen[name] = struct{}{}
-		raw, err := backend.ExportXML(status.Name)
+		raw, err := backend.ExportXMLContext(ctx, status.Name)
 		if err != nil {
 			return nil, fmt.Errorf("entrypoint task scan: export %q: %w", name, err)
 		}
@@ -517,7 +555,7 @@ func scanOwnedEntrypointTaskReferences(ctx context.Context, backend ownedEntrypo
 // current-user task migration. A secure retained-artifact store is mandatory:
 // no production transaction can retain XML only in memory.
 func BeginOwnedEntrypointTaskTxn(ctx context.Context, lockPath, priorCLI, runtime string, store RetainedTaskXMLStore) (*OwnedEntrypointTaskTxn, error) {
-	backend, err := New()
+	backend, err := newOwnedEntrypointTaskBackend()
 	if err != nil {
 		return nil, fmt.Errorf("entrypoint task scheduler: %w", err)
 	}
@@ -612,7 +650,7 @@ func beginOwnedEntrypointTaskTxnWithStore(ctx context.Context, lockPath, priorCL
 // validates retained XML bodies against their journal metadata, and returns a
 // transaction that may only restore through the ordinary Import/readback path.
 func ReopenOwnedEntrypointTaskTxnWithStore(ctx context.Context, lockPath, priorCLI, runtime string, store RetainedTaskXMLStore, backups []OwnedEntrypointTaskBackup) (*OwnedEntrypointTaskTxn, error) {
-	backend, err := New()
+	backend, err := newOwnedEntrypointTaskBackend()
 	if err != nil {
 		return nil, fmt.Errorf("entrypoint task scheduler: %w", err)
 	}
@@ -676,14 +714,11 @@ func currentWindowsTaskOwner() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("entrypoint task current user: %w", err)
 	}
-	name := strings.TrimSpace(u.Username)
-	if i := strings.LastIndex(name, `\`); i >= 0 {
-		name = name[i+1:]
+	ownerSID := strings.TrimSpace(u.Uid)
+	if ownerSID == "" {
+		return "", errors.New("entrypoint task current user SID is empty")
 	}
-	if name == "" {
-		return "", errors.New("entrypoint task current user is empty")
-	}
-	return name, nil
+	return ownerSID, nil
 }
 
 // sameWindowsEntrypointPath compares only Windows path casing. It deliberately
@@ -702,7 +737,7 @@ func (t *OwnedEntrypointTaskTxn) InventoryExport() error {
 	if t.inventory != nil {
 		return errors.New("entrypoint task transaction: inventory already captured")
 	}
-	statuses, err := t.backend.List(ownedEntrypointTaskPrefix)
+	statuses, err := t.backend.ListContext(t.ctx, ownedEntrypointTaskPrefix)
 	if err != nil {
 		return fmt.Errorf("entrypoint task inventory: %w", err)
 	}
@@ -724,7 +759,7 @@ func (t *OwnedEntrypointTaskTxn) InventoryExport() error {
 		if !sameWindowsUser(status.Owner, t.owner) {
 			return fmt.Errorf("entrypoint task inventory: foreign owner for %q", name)
 		}
-		raw, err := t.backend.ExportXML(status.Name)
+		raw, err := t.backend.ExportXMLContext(t.ctx, status.Name)
 		if err != nil {
 			return fmt.Errorf("entrypoint task inventory export %q: %w", name, err)
 		}
@@ -773,7 +808,8 @@ func (t *OwnedEntrypointTaskTxn) Backups() []OwnedEntrypointTaskBackup {
 
 // RewriteCommand updates only the text inside the one Exec Command XML node.
 // A failed write can have partially applied, so it returns a typed error and
-// leaves the captured state untouched for the bundle coordinator to restore.
+// leaves captured state intact. The bundle coordinator must retain recovery
+// without any inverse when the cause is ErrMutationOutcomeUnknown.
 func (t *OwnedEntrypointTaskTxn) RewriteCommand() error {
 	if err := t.requireInventory(); err != nil {
 		return err
@@ -791,7 +827,7 @@ func (t *OwnedEntrypointTaskTxn) RewriteCommand() error {
 		if err != nil {
 			return &EntrypointTaskPartialProgressError{Cause: fmt.Errorf("entrypoint task rewrite %q: %w", key, err)}
 		}
-		if err := t.backend.ImportXML(snapshot.name, rewritten); err != nil {
+		if err := t.backend.ImportXMLContext(t.ctx, snapshot.name, rewritten); err != nil {
 			return &EntrypointTaskPartialProgressError{Cause: fmt.Errorf("entrypoint task import %q: %w", key, err)}
 		}
 	}
@@ -858,7 +894,7 @@ func (t *OwnedEntrypointTaskTxn) RestoreImport() error {
 	var errs []error
 	for _, key := range t.sortedInventoryNames() {
 		snapshot := t.inventory[key]
-		if err := t.backend.ImportXML(snapshot.name, snapshot.xml); err != nil {
+		if err := t.backend.ImportXMLContext(t.ctx, snapshot.name, snapshot.xml); err != nil {
 			errs = append(errs, fmt.Errorf("entrypoint task restore import %q: %w", key, err))
 		}
 	}
@@ -888,8 +924,8 @@ func (t *OwnedEntrypointTaskTxn) Close() error {
 
 // EntrypointTaskPartialProgressError tells the transaction coordinator that a
 // receiver write may already have changed one or more owned task rows. The
-// owner deliberately performs no compensation itself: exactly one coordinator
-// issues the guarded restore directive and records its receipt.
+// owner deliberately performs no compensation itself: one coordinator decides
+// whether the cause permits a guarded restore or requires retained recovery.
 type EntrypointTaskPartialProgressError struct{ Cause error }
 
 func (e *EntrypointTaskPartialProgressError) Error() string {
@@ -907,7 +943,7 @@ func (e *EntrypointTaskPartialProgressError) Unwrap() error {
 }
 
 func (t *OwnedEntrypointTaskTxn) verify(check func(ownedEntrypointTaskShape, ownedEntrypointTaskSnapshot, []byte) error) ([]ownedEntrypointTaskDigestRow, error) {
-	statuses, err := t.backend.List(ownedEntrypointTaskPrefix)
+	statuses, err := t.backend.ListContext(t.ctx, ownedEntrypointTaskPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("list owned tasks: %w", err)
 	}
@@ -929,7 +965,7 @@ func (t *OwnedEntrypointTaskTxn) verify(check func(ownedEntrypointTaskShape, own
 		if !sameWindowsUser(status.Owner, t.owner) {
 			return nil, fmt.Errorf("foreign owner for %q", name)
 		}
-		raw, err := t.backend.ExportXML(status.Name)
+		raw, err := t.backend.ExportXMLContext(t.ctx, status.Name)
 		if err != nil {
 			return nil, fmt.Errorf("export %q: %w", name, err)
 		}
