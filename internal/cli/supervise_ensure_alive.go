@@ -1753,12 +1753,19 @@ func runEnsureAliveContext(ctx context.Context, stateDir string, out io.Writer) 
 			fmt.Fprintf(out, "ensure-alive: supervise owner supervisor running (pid=%d); no action\n", pid)
 			return nil
 		}
-		if err := livenessRelaunchFn(); err != nil {
-			fmt.Fprintf(out, "ensure-alive: supervise owner supervisor not running; verified task relaunch FAILED (will retry next tick): %v\n", err)
+		if relaunchErr := api.NewAPI().AdmitGUIAutomaticStart(livenessRelaunchFn); relaunchErr != nil {
+			status := "FAILED (will retry next tick)"
+			message := "supervise owner supervisor is down and the verified canonical task relaunch failed; will retry next tick"
+			var admission *api.GUIAutomaticStartError
+			if errors.As(relaunchErr, &admission) && admission.Admitted {
+				status = "ADMITTED; settings release unconfirmed"
+				message = "verified canonical task admission succeeded; settings release unconfirmed; child startup/readiness unverified"
+			}
+			fmt.Fprintf(out, "ensure-alive: supervise owner supervisor not running; verified task relaunch %s: %v\n", status, relaunchErr)
 			emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
 				"liveness-supervise-owner-relaunch-failed",
-				"supervise owner supervisor is down and the verified canonical task relaunch failed; will retry next tick",
-				map[string]any{"relaunch_target": autostart.WindowsTaskName, "error": err.Error()})
+				message,
+				map[string]any{"relaunch_target": autostart.WindowsTaskName, "error": relaunchErr.Error()})
 			return nil
 		}
 		fmt.Fprintf(out, "ensure-alive: supervise owner supervisor not running; relaunched verified owner task via %s\n", autostart.WindowsTaskName)
@@ -1878,15 +1885,22 @@ func runEnsureAliveContext(ctx context.Context, stateDir string, out io.Writer) 
 		// task's StopExisting policy. A direct standalone `mcphub
 		// supervise` spawn takes the singleton flock (idempotent against a
 		// racing duplicate) and the GUI's poller reconnects to it via IPC.
-		if relaunchErr := standaloneRelaunchFn(); relaunchErr != nil {
+		if relaunchErr := api.NewAPI().AdmitGUIAutomaticStart(standaloneRelaunchFn); relaunchErr != nil {
+			status := "FAILED (will retry next tick)"
+			message := "supervisor down under a live-or-undeterminable GUI owner; the GUI-independent standalone supervisor relaunch failed; will retry next tick"
+			var admission *api.GUIAutomaticStartError
+			if errors.As(relaunchErr, &admission) && admission.Admitted {
+				status = "ADMITTED; settings release unconfirmed"
+				message = "standalone supervisor spawn succeeded; settings release unconfirmed; child readiness unverified"
+			}
 			if unknown {
-				fmt.Fprintf(out, "ensure-alive: supervisor down and GUI owner state undeterminable (pidport malformed/unresolvable); standalone supervisor relaunch FAILED (will retry next tick): %v\n", relaunchErr)
+				fmt.Fprintf(out, "ensure-alive: supervisor down and GUI owner state undeterminable (pidport malformed/unresolvable); standalone supervisor relaunch %s: %v\n", status, relaunchErr)
 			} else {
-				fmt.Fprintf(out, "ensure-alive: supervisor down under a live GUI owner (pid=%d); standalone supervisor relaunch FAILED (will retry next tick): %v\n", guiPID, relaunchErr)
+				fmt.Fprintf(out, "ensure-alive: supervisor down under a live GUI owner (pid=%d); standalone supervisor relaunch %s: %v\n", guiPID, status, relaunchErr)
 			}
 			emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
 				"liveness-standalone-relaunch-failed",
-				"supervisor down under a live-or-undeterminable GUI owner; the GUI-independent standalone supervisor relaunch failed; will retry next tick",
+				message,
 				map[string]any{"gui_owner_pid": guiPID, "gui_owner_state_unknown": unknown, "error": relaunchErr.Error()})
 			return nil
 		}

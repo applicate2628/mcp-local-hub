@@ -47,7 +47,7 @@ import (
 // serena teardown errors) to exercise the partial-report-on-error path. Never
 // reassigned in production.
 var pruneWorkspaceFn = func(workspacePath, backend string) (*api.PruneReport, error) {
-	return api.NewAPI().PruneWorkspace(workspacePath, backend)
+	return api.NewAPI().PruneWorkspace(workspacePath, backend, api.PrunePurposeExplicit)
 }
 
 // pruneInputIsTerminal is the interactive-shell seam the confirmation gate uses.

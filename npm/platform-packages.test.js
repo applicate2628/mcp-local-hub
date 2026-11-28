@@ -103,7 +103,20 @@ test("npm pack dry-run exposes only the Windows x64 native payload", () => {
         fs.mkdirSync(path.dirname(nativePath), { recursive: true });
         fs.writeFileSync(nativePath, `synthetic payload for ${target}/${relative}\n`);
       }
-      const packed = spawnSync(process.execPath, [npmCli, "pack", "--dry-run", "--json"], {
+      // Development SDKs and their bundled CLI must remain outside Product
+      // supply even when a developer environment is present beside/in a package.
+      for (const scope of [fixtureRoot, npmDir, packageDir]) {
+        for (const relative of [
+          "tools/codex/uv.lock",
+          "tools/codex/.venv/Lib/site-packages/openai_codex/__init__.py",
+          "tools/codex/.venv/Lib/site-packages/codex_cli_bin/codex.exe",
+        ]) {
+          const sentinel = path.join(scope, ...relative.split("/"));
+          fs.mkdirSync(path.dirname(sentinel), { recursive: true });
+          fs.writeFileSync(sentinel, "synthetic development-only SDK sentinel\n");
+        }
+      }
+      const packed = spawnSync(process.execPath, [npmCli, "pack", "--dry-run", "--json", "--ignore-scripts"], {
         cwd: packageDir,
         encoding: "utf8",
       });
@@ -125,6 +138,20 @@ test("npm pack dry-run exposes only the Windows x64 native payload", () => {
         result[0].files.map((entry) => entry.path).sort(),
         ["README.md", "bin/mcphub-product/mcphub.exe", "bin/mcphub.exe", "bin/windows-product-identity.json", "package.json"],
       );
+      const metaPack = spawnSync(process.execPath, [npmCli, "pack", "--dry-run", "--json", "--ignore-scripts"], {
+        cwd: npmDir,
+        encoding: "utf8",
+      });
+      assert.strictEqual(metaPack.status, 0, metaPack.stderr || metaPack.stdout);
+      const metaResult = JSON.parse(metaPack.stdout);
+      const metaManifest = JSON.parse(fs.readFileSync(path.join(npmDir, "package.json"), "utf8"));
+      const meta = Array.isArray(metaResult) ? metaResult[0] : metaResult[metaManifest.name];
+      // This fixture intentionally contains no shim payload; the exact Product
+      // allowlist is checked separately from the fixture's available files.
+      assert.deepStrictEqual(metaManifest.files, [
+        "bin/cli.js", "lib/platform-binary.js", "scripts/postinstall.js", "README.md",
+      ]);
+      assert.deepStrictEqual(meta.files.map((entry) => entry.path), ["package.json"]);
     }
   });
 });

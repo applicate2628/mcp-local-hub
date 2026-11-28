@@ -122,7 +122,7 @@ func newCanonicalPrepareFixture(t *testing.T, existingDirectory, guiOwned bool) 
 		t.Fatal(err)
 	}
 	var order []string
-	f.txn = &WindowsProductTxn{Opts: WindowsProductTxnOpts{
+	f.txn = &WindowsProductTxn{Opts: WindowsProductTxnOpts{JournalAllowance: productJournalFixtureAllowance(),
 		Context: ctx, StateDir: apitest.HardenedTempDir(t), Mode: WindowsProductPairModeCanonicalize,
 		EntrySet:           &stagedWindowsCanonicalEntrySetV1{original: stage},
 		CanonicalEntryPath: targets.CanonicalEntryPath, ProductPath: targets.ProductPath, IdentityPath: targets.IdentityPath,
@@ -163,7 +163,7 @@ func assertCanonicalPrepareColdAdmission(t *testing.T, txn *WindowsProductTxn) {
 		t.Fatalf("first durable checkpoint cannot supply native directory identity: %v", err)
 	}
 	tasks := &recoveryTaskTxnFake{}
-	req := windowsProductRecoveryRequest{
+	req := windowsProductRecoveryRequest{JournalAllowance: productJournalFixtureAllowance(),
 		Context: context.Background(), StateDir: txn.Opts.StateDir,
 		CanonicalEntryPath: txn.Opts.CanonicalEntryPath, ProductPath: txn.Opts.ProductPath,
 		IdentityPath: txn.Opts.IdentityPath, LegacyWindowlessPath: txn.Opts.LegacyWindowlessPath,

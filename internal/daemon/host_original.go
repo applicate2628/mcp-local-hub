@@ -27,6 +27,9 @@ type StdioHostSettlement struct {
 	PrimaryError, CleanupError                                            error
 	NoNativeAttempt, JobClosed, FilesClosed, ReadersJoined, WritersJoined bool
 	WatcherJoined, LifetimeJoined, LogClosed, Pending                     bool
+	PrivateStderrBytes                                                    int64
+	PrivateStderrEOF, PrivateStderrReadFailed, StdoutReadFailed           bool
+	StdoutProtocolInvalid                                                 bool
 }
 
 // Error callers retain the SAME host and attempt even when terminal evidence
@@ -79,15 +82,21 @@ type stdioOriginalInput struct {
 }
 
 func (s *stdioOriginalInput) Write(b []byte) (int, error) {
-	s.mu.Lock()
-	if s.retired {
-		s.mu.Unlock()
+	if !s.admitWrite() {
 		return 0, io.ErrClosedPipe
 	}
-	s.writers.Add(1)
-	s.mu.Unlock()
 	defer s.writers.Done()
 	return s.file.file.Write(b)
+}
+
+func (s *stdioOriginalInput) admitWrite() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.retired {
+		return false
+	}
+	s.writers.Add(1)
+	return true
 }
 
 func (s *stdioOriginalInput) Close() error {
@@ -107,7 +116,9 @@ type stdioOriginalLifecycle struct {
 	input                                                       *stdioOriginalInput
 	rootDone, stdoutDone, stderrDone, watcherDone, lifetimeDone chan struct{}
 	root                                                        process.OriginalRootWait
-	stdoutError, stderrError                                    error
+	stdoutError                                                 error
+	stderr                                                      stdioStderrObservation
+	privateInputClose                                           <-chan error
 	nativeAttempted                                             bool
 	identity                                                    process.ContainedRootIdentity
 	primary                                                     error
@@ -274,13 +285,16 @@ func (h *StdioHost) beginOriginalStop(ctx context.Context, cause error) {
 	if callerDeadline, ok := ctx.Deadline(); ok && callerDeadline.Before(deadline) {
 		deadline = callerDeadline
 	}
+	if h.private != nil {
+		deadline = h.private.stopDeadline
+	}
 	p.terminal = StdioHostSettlement{OriginalIdentity: p.identity, Deadline: deadline, PrimaryError: errors.Join(p.primary, cause), Pending: true}
 	p.stopMu.Unlock()
 	h.stopped = true
 	h.sessionMu.Lock()
 	h.sessions = nil
 	h.sessionMu.Unlock()
-	if !natural {
+	if !natural || h.private != nil {
 		p.doneOnce.Do(func() { close(h.done) })
 	}
 	h.mu.Unlock()
@@ -296,28 +310,65 @@ func (h *StdioHost) finishOriginalStop(p *stdioOriginalLifecycle, deadline time.
 	result := p.terminal
 	p.stopMu.Unlock()
 	add := func(err error) { result.CleanupError = errors.Join(result.CleanupError, err) }
-	if p.input != nil {
+	if p.input != nil && h.private != nil {
+		closed := make(chan error, 1)
+		p.privateInputClose = closed
+		go func() { closed <- p.input.Close() }()
+	} else if p.input != nil {
 		add(p.input.Close())
 	}
 	if p.original != nil {
+		if h.private != nil && p.original.Created() {
+			// EOF may unblock the child and inherited writers. A blocked
+			// stdin Close cannot consume the remaining original-Job budget.
+			grace, cancelGrace := context.WithDeadline(ctx, h.private.graceDeadline)
+			for _, done := range []<-chan struct{}{p.rootDone, p.stdoutDone, p.stderrDone} {
+				if originalJoin(grace, done) != nil {
+					break
+				}
+			}
+			if grace.Err() == nil && !p.root.Known {
+				// A failed root wait is not evidence of cooperative exit.
+				<-grace.Done()
+			}
+			cancelGrace()
+		}
 		natural := false
 		select {
 		case <-p.rootDone:
 			natural = p.root.Known
 		default:
 		}
-		native, err := p.observeOriginal(p.original, ctx, natural)
-		add(err)
-		if native.NoChildKnown {
-			result.NativeSettlement, err = p.original.ReleaseOriginal()
-			add(err)
-		} else if err := originalJoin(ctx, p.rootDone); err != nil {
-			add(fmt.Errorf("stdio original wait: %w", err))
+		if err := ctx.Err(); err != nil && h.private != nil {
+			add(fmt.Errorf("stdio original terminal deadline: %w", err))
 		} else {
-			result.RootWait = p.root
-			add(p.root.Error)
-			result.NativeSettlement, err = p.original.ReleaseOriginal()
+			var native process.ContainedNativeSnapshot
+			var err error
+			if h.private != nil && natural {
+				native, err = p.original.ObserveOriginalAfterEOF(ctx, h.private.graceDeadline)
+			} else {
+				native, err = p.observeOriginal(p.original, ctx, natural)
+			}
 			add(err)
+			switch {
+			case native.NoChildKnown:
+				result.NativeSettlement, err = p.original.ReleaseOriginal()
+				add(err)
+			default:
+				if err := originalJoin(ctx, p.rootDone); err != nil {
+					add(fmt.Errorf("stdio original wait: %w", err))
+				} else {
+					result.RootWait = p.root
+					add(p.root.Error)
+					// Closing this kill-on-close handle is terminal too.
+					// A failed private observation retains original custody.
+					if h.private == nil || (err == nil && native.RootIdentity.Known &&
+						native.MembersExited && native.AccountingKnown && native.FinalActive == 0 && p.root.Known) {
+						result.NativeSettlement, err = p.original.ReleaseOriginal()
+						add(err)
+					}
+				}
+			}
 		}
 	} else {
 		result.NoNativeAttempt = !p.nativeAttempted
@@ -334,25 +385,50 @@ func (h *StdioHost) finishOriginalStop(p *stdioOriginalLifecycle, deadline time.
 	// Readers get natural EOF first. Closing them only after that bounded join
 	// fails cannot disguise truncated/unreceived protocol output as clean EOF.
 	result.ReadersJoined = true
-	for _, reader := range []struct {
+	readerJoined := [2]bool{}
+	for index, reader := range []struct {
 		done <-chan struct{}
 		name string
 	}{{p.stdoutDone, "stdout"}, {p.stderrDone, "stderr"}} {
 		if err := originalJoin(ctx, reader.done); err != nil {
 			result.ReadersJoined = false
 			add(fmt.Errorf("stdio %s reader join: %w", reader.name, err))
+		} else {
+			readerJoined[index] = true
 		}
 	}
 	result.FilesClosed = true
-	for _, f := range p.files {
+	for index, f := range p.files {
+		if p.privateInputClose != nil && index == 1 {
+			select {
+			case err := <-p.privateInputClose:
+				result.FilesClosed = err == nil && result.FilesClosed
+				add(err)
+			case <-ctx.Done():
+				result.FilesClosed = false
+				add(fmt.Errorf("stdio input close receipt: %w", ctx.Err()))
+			}
+			continue
+		}
+		if h.private != nil && (index == 2 && !readerJoined[0] || index == 4 && !readerJoined[1]) {
+			result.FilesClosed = false
+			continue
+		}
 		if err := f.close(); err != nil {
 			result.FilesClosed = false
 			add(err)
 		}
 	}
-	if result.ReadersJoined {
+	if result.ReadersJoined || h.private != nil && readerJoined[0] {
 		add(p.stdoutError)
-		add(p.stderrError)
+		result.StdoutReadFailed = p.stdoutError != nil
+		result.StdoutProtocolInvalid = h.privateStdoutInvalid.Load()
+	}
+	if result.ReadersJoined || h.private != nil && readerJoined[1] {
+		add(p.stderr.err)
+		result.PrivateStderrBytes = p.stderr.bytes
+		result.PrivateStderrEOF = h.private != nil && p.stderr.eof
+		result.PrivateStderrReadFailed = h.private != nil && p.stderr.err != nil
 	}
 	// Publishing exit after reader receipt preserves the final reply preference.
 	// A bounded incomplete drain remains an error; it is never EOF evidence.

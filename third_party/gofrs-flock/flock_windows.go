@@ -165,6 +165,7 @@ func (f *Flock) try(locked *bool, flag uint32, original bool) (bool, error) {
 	}
 
 	err := windows.LockFileEx(windows.Handle(f.fh.Fd()), flag|windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &windows.Overlapped{})
+	f.recordSingleNativeAcquire(original, err)
 	if err != nil && !errors.Is(err, windows.Errno(0)) {
 		if errors.Is(err, ErrorLockViolation) || errors.Is(err, windows.ERROR_IO_PENDING) {
 			return false, nil
