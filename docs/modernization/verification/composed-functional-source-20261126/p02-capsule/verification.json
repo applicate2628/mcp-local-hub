@@ -1,0 +1,30 @@
+{
+  "status": "PASS_SNAPSHOT_RESTORATION_ONLY",
+  "manifest_sha256": "6a09a67917015c6f4b903bae5518c198fe31117df3bc53817e8d983ef059b06f",
+  "script_sha256": "f535cca5480ccd0c33e54c439eaee7d539e9c7864d3caf2e9682063e77f533ce",
+  "commit": "b6f82b3f531bb3eec197049167cdc5971b44e2b0",
+  "tree": "645ddcd88647b8c628ec966f037762886bd56b31",
+  "public_snapshots": 43,
+  "public_union_objects": 5328,
+  "target_objects": 4107,
+  "target_types": {
+    "blob": 3833,
+    "tree": 273,
+    "commit": 1
+  },
+  "rehash_target_payload_bytes": 111807172,
+  "target_object_ids_sha256": "5c5eb07623da17e1a22f077f2718ca520651c8f726ae61a0af55d4f43aa69c6a",
+  "target_from_public": 3974,
+  "target_from_capsule": 133,
+  "database_objects": 4490,
+  "extra_declared_public_trees": 383,
+  "parent_objects_present": {
+    "afdf474930da60080e9aa132a3a373fcf2009bab": false
+  },
+  "history_complete": false,
+  "alternates": false,
+  "branch_or_tag_refs_created": 0,
+  "network_fetches": 0,
+  "checkout_created": false,
+  "Go_native_publication": "NOT_RUN"
+}

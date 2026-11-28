@@ -1,0 +1,155 @@
+{
+  "schema": "root-owner-custody-local-fixtures-v1",
+  "status": "PASS",
+  "platform": "win32",
+  "native_windows_owner": true,
+  "remote_processes": true,
+  "old_held_scope_accessed": false,
+  "cases": [
+    {
+      "case": "native-ordinary-stdin",
+      "status": "PASS",
+      "native_owner": true,
+      "original_pid": 272580,
+      "stdin_bytes": 60000,
+      "output_bytes_per_stream": 65536
+    },
+    {
+      "case": "native-go-metadata",
+      "status": "PASS",
+      "literal_go_metadata_command": true,
+      "original_pid": 244456,
+      "budgets_seconds": [
+        5,
+        10
+      ]
+    },
+    {
+      "case": "metadata-normal",
+      "status": "PASS",
+      "error": null,
+      "command_state": "complete",
+      "capture_hash_calls": 2,
+      "original_workers_attempted": 2,
+      "bytes_seen": 2,
+      "bytes_stored": 2
+    },
+    {
+      "case": "metadata-first-join",
+      "status": "PASS",
+      "error": "RuntimeError: injected first original metadata join failure",
+      "command_state": "unknown",
+      "capture_hash_calls": 0,
+      "original_workers_attempted": 2,
+      "bytes_seen": 2,
+      "bytes_stored": 2
+    },
+    {
+      "case": "metadata-overflow",
+      "status": "PASS",
+      "error": "RuntimeError: ordinary command failed after original native/IO closure: incoming-build-info",
+      "command_state": "complete",
+      "capture_hash_calls": 2,
+      "original_workers_attempted": 2,
+      "bytes_seen": 1048593,
+      "bytes_stored": 1048576
+    },
+    {
+      "case": "safe-pass-replay",
+      "status": "PASS",
+      "child_exit": 0,
+      "raw_stdout_identical": true,
+      "raw_stderr_identical": true,
+      "original_issuer_joined": true
+    },
+    {
+      "case": "safe-fail-replay",
+      "status": "PASS",
+      "child_exit": 1,
+      "raw_stdout_identical": true,
+      "raw_stderr_identical": true,
+      "original_issuer_joined": true
+    },
+    {
+      "case": "client-death",
+      "status": "PASS",
+      "original_client_reaped": true,
+      "same_root_invocation_retained": true,
+      "live_original_worker_survived_client": true,
+      "unknown_response_no_raw": true,
+      "successor_refused": true,
+      "failure_immutable": true,
+      "consumer_clock_expiry_injected": false,
+      "real_355_second_latency_measured": false
+    },
+    {
+      "case": "client-timeout",
+      "status": "PASS",
+      "original_client_reaped": true,
+      "same_root_invocation_retained": true,
+      "live_original_worker_survived_client": true,
+      "unknown_response_no_raw": true,
+      "successor_refused": true,
+      "failure_immutable": true,
+      "consumer_clock_expiry_injected": true,
+      "real_355_second_latency_measured": false
+    },
+    {
+      "case": "request-negatives",
+      "status": "PASS",
+      "rejected": [
+        "issuer_nonce",
+        "plan_sha256",
+        "binary_sha256",
+        "commit",
+        "source_snapshot_sha256",
+        "cwd",
+        "argv",
+        "started_ns",
+        "deadline_ns",
+        "duplicate_slot"
+      ],
+      "native_commands": 0
+    },
+    {
+      "case": "start-failure",
+      "status": "PASS",
+      "no_unstarted_join": true,
+      "native_commands": 0
+    },
+    {
+      "case": "finalization-failure",
+      "status": "PASS",
+      "outermost_retention_executed": true,
+      "original_error_preserved": true,
+      "failure_immutable": true,
+      "false_publication_not_claimed": true
+    },
+    {
+      "case": "failed-receipt-save",
+      "status": "PASS",
+      "actual_save_failure_injected": true,
+      "original_failure_publication_not_claimed": true,
+      "original_custody_retained": true,
+      "held_capture_hash_calls": 0
+    },
+    {
+      "case": "invocation-deadline",
+      "status": "PASS",
+      "actual_root_invocation_method": true,
+      "original_deadline_not_restarted": true,
+      "cancelled_successor_refused": true,
+      "native_commands": 0
+    }
+  ],
+  "inputs": {
+    "guard-custody.py": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2",
+    "literal_go_exec_adapter_ready_v1.py": "e9ad8ea12d6e87833c8d5f347602a352e0a1733e8bf8ba83a9d6a3b36828403f",
+    "qualified_windows_products_consumer_v1.py": "87fafb9ed3b2f17f36b2829b41cc3a38a102198132dde04768131fc91491d6e1",
+    "qualify_owner_custody_local.py": "199c9183bb080565155f60003eed9f6ad4ee0a32c32c38c74ed8ed7746a87691",
+    "qualify_owner_custody_windows.py": "fa9677454c6c91baa63990168c4350f832f303cc5c2ea304c81c872570cc9d21",
+    "run_literal_go_gate_ready_v1.py": "1af0f9e564f876d1d1ae879ad1b11dc7875287be181413376e2f32bdd155f551"
+  },
+  "all_original_fixture_threads_joined": true,
+  "all_original_local_children_reaped": true
+}

@@ -1,0 +1,31 @@
+{
+  "cache_consumer_execution_performed": false,
+  "caches": {
+    "GOCACHE": {
+      "bytes": 950754890,
+      "destination": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\private\\go-build",
+      "files": 6200,
+      "source": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\serena-product-inputs-v2\\private\\go-build"
+    },
+    "GOMODCACHE": {
+      "bytes": 104585145,
+      "destination": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\private\\go-mod",
+      "files": 3663,
+      "source": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\serena-product-inputs-v2\\private\\go-mod"
+    }
+  },
+  "inventory": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\cache-copy-inventory.json",
+  "inventory_sha256": "07bdc579c7a995c6db48e6567b2825fc0ddb406c3e57903913227ebfa77dbab2",
+  "prior_control_pins": {
+    "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-error-dword-v4\\run_owned_commands.py": "6d16652d4893273b7e9d584920892ce5f5917622e7e242a62eb78ec824bcfb93",
+    "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-error-dword-v4\\serena-product-inputs-v2-plan.json": "e756d9109c96670a135224b47d0aed3b56379a43854b41738816832d06ef1254",
+    "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\copy_closed_caches_v6.py": "2577deae637071dbc9eb2dae6e6f64946379a30b093b6bc3fa120f687b365a16",
+    "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\serena-product-inputs-v2\\commands\\execution.json": "f1ae3cd770c7a4cc6437735c97cc6e87c7cf6344a1d65f153aded23c9674a8c0",
+    "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\serena-product-inputs-v2\\parent.json": "4a11f613e91c10121bacf9438eb7849962e880277a9e7f4c0809491bc453d440"
+  },
+  "prior_modified": false,
+  "prior_original_receiver": "PASS",
+  "schema": "fresh-closed-cache-copy-v1",
+  "source_and_destination_byte_inventories_equal": true,
+  "status": "COPIED"
+}

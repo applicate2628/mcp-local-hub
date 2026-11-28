@@ -1,0 +1,1238 @@
+{
+  "schema": "original-full-v6-failure-preservation-v1",
+  "classification": "FAIL/CLOSED",
+  "qualification_passed": false,
+  "original_failure_reclassified": false,
+  "test_source_commit": "727d66753814dc218e26d699e57402db2d13190a",
+  "test_source_tree": "d959ed0a4f8ab02947aec7569f3c0535a3cff533",
+  "product_source_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+  "primary_receipt": {
+    "role_path": "full/receipt.json",
+    "sha256": "6cd606a5ec4e6e1a3e74d4b8324786cc98dffe8cd587f4a41c89a751ea7f0c4a"
+  },
+  "literal_commands": [
+    "go build ./... && go vet ./... && go test -count=1 -timeout 5m ./...",
+    "go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/"
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "build",
+        "./..."
+      ],
+      "exit_code": 0,
+      "seconds": 116.711314199958,
+      "quiescence_state": "complete",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "vet",
+        "./..."
+      ],
+      "exit_code": 0,
+      "seconds": 123.38902150001377,
+      "quiescence_state": "complete",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "test",
+        "-count=1",
+        "-timeout",
+        "5m",
+        "./..."
+      ],
+      "exit_code": 1,
+      "seconds": 1224.826,
+      "quiescence_state": "complete",
+      "stdout_sha256": "4e7148e7fd547cd3478473b3b8432dfa98edba574fc5c880a1f258bac6074d74",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "test",
+        "-tags=test_state_path_env",
+        "-count=1",
+        "-timeout",
+        "5m",
+        "./internal/api/",
+        "./internal/cli/"
+      ],
+      "exit_code": 1,
+      "seconds": 313.641,
+      "quiescence_state": "complete",
+      "stdout_sha256": "cef4307a50dffe3686a9b9e21db1ab80a39f03012f975996679ceb1d8a4ba1d1",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "phases": [
+    {
+      "lane": "default",
+      "expected_invocations": 64,
+      "started_invocations": 64,
+      "completed_invocations": 64,
+      "missing_invocations": [],
+      "no_test_file_packages": 10,
+      "exit_code": 1,
+      "native_custody_settled": true,
+      "passed": false
+    },
+    {
+      "lane": "state",
+      "expected_invocations": 2,
+      "started_invocations": 1,
+      "completed_invocations": 1,
+      "missing_invocations": [
+        "mcp-local-hub/internal/cli"
+      ],
+      "no_test_file_packages": 0,
+      "exit_code": 1,
+      "native_custody_settled": true,
+      "passed": false
+    }
+  ],
+  "root_independent_audit": {
+    "role_path": "root-receiving/result.json",
+    "sha256": "f02bf04c80d0e84a5989297f742662ea874bbf7743c78ab3da947305004849d5",
+    "commands_checked": 283,
+    "package_commands_checked": 272,
+    "command_captures_hashed": 566,
+    "package_receipts_hashed": 65,
+    "original_owner_receipts_hashed": 130,
+    "source_files_hashed": 3509,
+    "input_files_hashed": 115,
+    "temporary_resource_restored_to_absent": true
+  },
+  "all_original_invocations_closed": true,
+  "commands_quiescent": true,
+  "source_unchanged": true,
+  "original_inputs_unchanged": true,
+  "actual_product_unchanged": true,
+  "private_migration_exports_unchanged": true,
+  "coverage": [
+    {
+      "lane": "literal-default",
+      "top_level_count": 10336,
+      "top_level_outcomes": {
+        "pass": 9746,
+        "skip": 194,
+        "fail": 7,
+        "NOT_RUN": 389
+      },
+      "all_terminal_count": 17559,
+      "all_terminal_outcomes": {
+        "pass": 17286,
+        "skip": 265,
+        "fail": 8
+      },
+      "started_without_terminal_count": 15,
+      "missing_top_level_count": 389,
+      "mandatory_passes_satisfied": false,
+      "packages": [
+        {
+          "package": "mcp-local-hub/cmd/godbolt",
+          "inventory_count": 0,
+          "top_level_outcomes": {},
+          "all_terminal_outcomes": {},
+          "package_terminal": "skip"
+        },
+        {
+          "package": "mcp-local-hub/cmd/lldb-bridge",
+          "inventory_count": 0,
+          "top_level_outcomes": {},
+          "all_terminal_outcomes": {},
+          "package_terminal": "skip"
+        },
+        {
+          "package": "mcp-local-hub/cmd/mcphub",
+          "inventory_count": 17,
+          "top_level_outcomes": {
+            "pass": 17
+          },
+          "all_terminal_outcomes": {
+            "pass": 57
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/cmd/mcphub-launcher",
+          "inventory_count": 6,
+          "top_level_outcomes": {
+            "pass": 6
+          },
+          "all_terminal_outcomes": {
+            "pass": 13
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/cmd/perftools",
+          "inventory_count": 0,
+          "top_level_outcomes": {},
+          "all_terminal_outcomes": {},
+          "package_terminal": "skip"
+        },
+        {
+          "package": "mcp-local-hub/internal/api",
+          "inventory_count": 3523,
+          "top_level_outcomes": {
+            "skip": 64,
+            "pass": 3455,
+            "fail": 4
+          },
+          "all_terminal_outcomes": {
+            "skip": 82,
+            "pass": 6189,
+            "fail": 4
+          },
+          "package_terminal": "fail"
+        },
+        {
+          "package": "mcp-local-hub/internal/api/apitest",
+          "inventory_count": 3,
+          "top_level_outcomes": {
+            "pass": 3
+          },
+          "all_terminal_outcomes": {
+            "pass": 3
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/api/binary_discovery",
+          "inventory_count": 4,
+          "top_level_outcomes": {
+            "pass": 4
+          },
+          "all_terminal_outcomes": {
+            "pass": 4
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/api/daemon_env_overlay",
+          "inventory_count": 33,
+          "top_level_outcomes": {
+            "pass": 28,
+            "skip": 5
+          },
+          "all_terminal_outcomes": {
+            "pass": 34,
+            "skip": 5
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/api/lsp_routing",
+          "inventory_count": 16,
+          "top_level_outcomes": {
+            "pass": 16
+          },
+          "all_terminal_outcomes": {
+            "pass": 23
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/api/serena_routing",
+          "inventory_count": 41,
+          "top_level_outcomes": {
+            "pass": 40,
+            "skip": 1
+          },
+          "all_terminal_outcomes": {
+            "pass": 44,
+            "skip": 1
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/archguard",
+          "inventory_count": 161,
+          "top_level_outcomes": {
+            "pass": 160,
+            "skip": 1
+          },
+          "all_terminal_outcomes": {
+            "pass": 254,
+            "skip": 1
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/autostart",
+          "inventory_count": 28,
+          "top_level_outcomes": {
+            "pass": 28
+          },
+          "all_terminal_outcomes": {
+            "pass": 48
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/binaryadmission",
+          "inventory_count": 59,
+          "top_level_outcomes": {
+            "pass": 57,
+            "skip": 2
+          },
+          "all_terminal_outcomes": {
+            "pass": 144,
+            "skip": 2
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/branding",
+          "inventory_count": 0,
+          "top_level_outcomes": {},
+          "all_terminal_outcomes": {},
+          "package_terminal": "skip"
+        },
+        {
+          "package": "mcp-local-hub/internal/buildinfo",
+          "inventory_count": 3,
+          "top_level_outcomes": {
+            "pass": 3
+          },
+          "all_terminal_outcomes": {
+            "pass": 9
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/canonicalnativefixture",
+          "inventory_count": 0,
+          "top_level_outcomes": {},
+          "all_terminal_outcomes": {},
+          "package_terminal": "skip"
+        },
+        {
+          "package": "mcp-local-hub/internal/cbuild",
+          "inventory_count": 34,
+          "top_level_outcomes": {
+            "pass": 33,
+            "skip": 1
+          },
+          "all_terminal_outcomes": {
+            "pass": 68,
+            "skip": 1
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/cbuild/mcp",
+          "inventory_count": 7,
+          "top_level_outcomes": {
+            "pass": 7
+          },
+          "all_terminal_outcomes": {
+            "pass": 7
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "inventory_count": 1988,
+          "top_level_outcomes": {
+            "pass": 1585,
+            "NOT_RUN": 389,
+            "skip": 14
+          },
+          "all_terminal_outcomes": {
+            "pass": 2516,
+            "skip": 17
+          },
+          "package_terminal": "fail"
+        },
+        {
+          "package": "mcp-local-hub/internal/clients",
+          "inventory_count": 899,
+          "top_level_outcomes": {
+            "pass": 894,
+            "skip": 5
+          },
+          "all_terminal_outcomes": {
+            "pass": 1503,
+            "skip": 5
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/cmakegraph",
+          "inventory_count": 86,
+          "top_level_outcomes": {
+            "pass": 86
+          },
+          "all_terminal_outcomes": {
+            "pass": 131
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/config",
+          "inventory_count": 115,
+          "top_level_outcomes": {
+            "pass": 115
+          },
+          "all_terminal_outcomes": {
+            "pass": 298
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/daemon",
+          "inventory_count": 305,
+          "top_level_outcomes": {
+            "pass": 292,
+            "skip": 12,
+            "fail": 1
+          },
+          "all_terminal_outcomes": {
+            "pass": 406,
+            "skip": 16,
+            "fail": 1
+          },
+          "package_terminal": "fail"
+        },
+        {
+          "package": "mcp-local-hub/internal/daemonrecovery",
+          "inventory_count": 51,
+          "top_level_outcomes": {
+            "pass": 51
+          },
+          "all_terminal_outcomes": {
+            "pass": 101
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/drmemory",
+          "inventory_count": 25,
+          "top_level_outcomes": {
+            "pass": 25
+          },
+          "all_terminal_outcomes": {
+            "pass": 31
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/e2e",
+          "inventory_count": 61,
+          "top_level_outcomes": {
+            "pass": 29,
+            "skip": 32
+          },
+          "all_terminal_outcomes": {
+            "pass": 119,
+            "skip": 32
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/e2e/scan_readiness_fixture/driver",
+          "inventory_count": 6,
+          "top_level_outcomes": {
+            "pass": 6
+          },
+          "all_terminal_outcomes": {
+            "pass": 6
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/e2e/scan_readiness_fixture/fixture",
+          "inventory_count": 3,
+          "top_level_outcomes": {
+            "pass": 3
+          },
+          "all_terminal_outcomes": {
+            "pass": 3
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/gdb",
+          "inventory_count": 22,
+          "top_level_outcomes": {
+            "pass": 22
+          },
+          "all_terminal_outcomes": {
+            "pass": 36
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/godbolt",
+          "inventory_count": 21,
+          "top_level_outcomes": {
+            "pass": 21
+          },
+          "all_terminal_outcomes": {
+            "pass": 21
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/gui",
+          "inventory_count": 1264,
+          "top_level_outcomes": {
+            "pass": 1250,
+            "skip": 14
+          },
+          "all_terminal_outcomes": {
+            "pass": 1952,
+            "skip": 14
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/hubtemp",
+          "inventory_count": 8,
+          "top_level_outcomes": {
+            "skip": 1,
+            "pass": 7
+          },
+          "all_terminal_outcomes": {
+            "skip": 1,
+            "pass": 7
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/kimi",
+          "inventory_count": 22,
+          "top_level_outcomes": {
+            "pass": 22
+          },
+          "all_terminal_outcomes": {
+            "pass": 79
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/lldb",
+          "inventory_count": 1,
+          "top_level_outcomes": {
+            "pass": 1
+          },
+          "all_terminal_outcomes": {
+            "pass": 1
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/mcpcompat",
+          "inventory_count": 1,
+          "top_level_outcomes": {
+            "pass": 1
+          },
+          "all_terminal_outcomes": {
+            "pass": 4
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/mcpcompat/readinesswire",
+          "inventory_count": 7,
+          "top_level_outcomes": {
+            "pass": 7
+          },
+          "all_terminal_outcomes": {
+            "pass": 14
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/mcproute",
+          "inventory_count": 3,
+          "top_level_outcomes": {
+            "pass": 3
+          },
+          "all_terminal_outcomes": {
+            "pass": 3
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/oneapi",
+          "inventory_count": 19,
+          "top_level_outcomes": {
+            "pass": 18,
+            "fail": 1
+          },
+          "all_terminal_outcomes": {
+            "pass": 18,
+            "fail": 1
+          },
+          "package_terminal": "fail"
+        },
+        {
+          "package": "mcp-local-hub/internal/oneapirun",
+          "inventory_count": 67,
+          "top_level_outcomes": {
+            "pass": 67
+          },
+          "all_terminal_outcomes": {
+            "pass": 83
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/perftools",
+          "inventory_count": 52,
+          "top_level_outcomes": {
+            "skip": 4,
+            "pass": 48
+          },
+          "all_terminal_outcomes": {
+            "skip": 4,
+            "pass": 74
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/process",
+          "inventory_count": 420,
+          "top_level_outcomes": {
+            "pass": 384,
+            "skip": 35,
+            "fail": 1
+          },
+          "all_terminal_outcomes": {
+            "pass": 1123,
+            "skip": 80,
+            "fail": 2
+          },
+          "package_terminal": "fail"
+        },
+        {
+          "package": "mcp-local-hub/internal/releasegen/serena",
+          "inventory_count": 20,
+          "top_level_outcomes": {
+            "pass": 20
+          },
+          "all_terminal_outcomes": {
+            "pass": 32
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/runtimeidentity",
+          "inventory_count": 4,
+          "top_level_outcomes": {
+            "pass": 4
+          },
+          "all_terminal_outcomes": {
+            "pass": 27
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/scheduler",
+          "inventory_count": 61,
+          "top_level_outcomes": {
+            "pass": 60,
+            "skip": 1
+          },
+          "all_terminal_outcomes": {
+            "pass": 169,
+            "skip": 1
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/secrets",
+          "inventory_count": 36,
+          "top_level_outcomes": {
+            "pass": 36
+          },
+          "all_terminal_outcomes": {
+            "pass": 40
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/sonnet",
+          "inventory_count": 60,
+          "top_level_outcomes": {
+            "pass": 59,
+            "skip": 1
+          },
+          "all_terminal_outcomes": {
+            "pass": 93,
+            "skip": 1
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/supervisorowner",
+          "inventory_count": 0,
+          "top_level_outcomes": {},
+          "all_terminal_outcomes": {},
+          "package_terminal": "skip"
+        },
+        {
+          "package": "mcp-local-hub/internal/testkit",
+          "inventory_count": 2,
+          "top_level_outcomes": {
+            "pass": 2
+          },
+          "all_terminal_outcomes": {
+            "pass": 10
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/toolchain",
+          "inventory_count": 6,
+          "top_level_outcomes": {
+            "pass": 6
+          },
+          "all_terminal_outcomes": {
+            "pass": 6
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/tray",
+          "inventory_count": 40,
+          "top_level_outcomes": {
+            "pass": 40
+          },
+          "all_terminal_outcomes": {
+            "pass": 70
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/unsafegate",
+          "inventory_count": 2,
+          "top_level_outcomes": {
+            "pass": 2
+          },
+          "all_terminal_outcomes": {
+            "pass": 2
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/urlredact",
+          "inventory_count": 3,
+          "top_level_outcomes": {
+            "pass": 3
+          },
+          "all_terminal_outcomes": {
+            "pass": 3
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp",
+          "inventory_count": 0,
+          "top_level_outcomes": {},
+          "all_terminal_outcomes": {},
+          "package_terminal": "skip"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/boundedio",
+          "inventory_count": 10,
+          "top_level_outcomes": {
+            "pass": 10
+          },
+          "all_terminal_outcomes": {
+            "pass": 22
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "inventory_count": 40,
+          "top_level_outcomes": {
+            "pass": 40
+          },
+          "all_terminal_outcomes": {
+            "pass": 48
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/cmakewrap",
+          "inventory_count": 22,
+          "top_level_outcomes": {
+            "pass": 22
+          },
+          "all_terminal_outcomes": {
+            "pass": 37,
+            "skip": 1
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/discovery",
+          "inventory_count": 18,
+          "top_level_outcomes": {
+            "pass": 18
+          },
+          "all_terminal_outcomes": {
+            "pass": 53
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/evidence",
+          "inventory_count": 0,
+          "top_level_outcomes": {},
+          "all_terminal_outcomes": {},
+          "package_terminal": "skip"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/lastfailure",
+          "inventory_count": 134,
+          "top_level_outcomes": {
+            "pass": 134
+          },
+          "all_terminal_outcomes": {
+            "pass": 187
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/patchesapply",
+          "inventory_count": 120,
+          "top_level_outcomes": {
+            "pass": 120
+          },
+          "all_terminal_outcomes": {
+            "pass": 281
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/pinstatus",
+          "inventory_count": 134,
+          "top_level_outcomes": {
+            "pass": 134
+          },
+          "all_terminal_outcomes": {
+            "pass": 273
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/portname",
+          "inventory_count": 4,
+          "top_level_outcomes": {
+            "pass": 4
+          },
+          "all_terminal_outcomes": {
+            "pass": 19
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/portresolution",
+          "inventory_count": 36,
+          "top_level_outcomes": {
+            "pass": 36
+          },
+          "all_terminal_outcomes": {
+            "pass": 104
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/publicresult",
+          "inventory_count": 3,
+          "top_level_outcomes": {
+            "pass": 3
+          },
+          "all_terminal_outcomes": {
+            "pass": 6
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/reversedepgraph",
+          "inventory_count": 31,
+          "top_level_outcomes": {
+            "pass": 30,
+            "skip": 1
+          },
+          "all_terminal_outcomes": {
+            "pass": 34,
+            "skip": 1
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "inventory_count": 37,
+          "top_level_outcomes": {
+            "pass": 37
+          },
+          "all_terminal_outcomes": {
+            "pass": 113
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vtune",
+          "inventory_count": 80,
+          "top_level_outcomes": {
+            "pass": 80
+          },
+          "all_terminal_outcomes": {
+            "pass": 85
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/servers",
+          "inventory_count": 0,
+          "top_level_outcomes": {},
+          "all_terminal_outcomes": {},
+          "package_terminal": "skip"
+        },
+        {
+          "package": "mcp-local-hub/tools/archcheck",
+          "inventory_count": 20,
+          "top_level_outcomes": {
+            "pass": 20
+          },
+          "all_terminal_outcomes": {
+            "pass": 24
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/tools/genicon",
+          "inventory_count": 0,
+          "top_level_outcomes": {},
+          "all_terminal_outcomes": {},
+          "package_terminal": "skip"
+        },
+        {
+          "package": "mcp-local-hub/tools/test-job-entry",
+          "inventory_count": 7,
+          "top_level_outcomes": {
+            "pass": 7
+          },
+          "all_terminal_outcomes": {
+            "pass": 47
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/tools/test-recovery-namespace",
+          "inventory_count": 9,
+          "top_level_outcomes": {
+            "pass": 9
+          },
+          "all_terminal_outcomes": {
+            "pass": 38
+          },
+          "package_terminal": "pass"
+        },
+        {
+          "package": "mcp-local-hub/tools/windows-product-validate",
+          "inventory_count": 16,
+          "top_level_outcomes": {
+            "pass": 16
+          },
+          "all_terminal_outcomes": {
+            "pass": 37
+          },
+          "package_terminal": "pass"
+        }
+      ]
+    },
+    {
+      "lane": "literal-state",
+      "top_level_count": 3529,
+      "top_level_outcomes": {
+        "skip": 65,
+        "pass": 3460,
+        "fail": 4
+      },
+      "all_terminal_count": 6281,
+      "all_terminal_outcomes": {
+        "skip": 83,
+        "pass": 6194,
+        "fail": 4
+      },
+      "started_without_terminal_count": 0,
+      "missing_top_level_count": 0,
+      "mandatory_passes_satisfied": false,
+      "packages": [
+        {
+          "package": "mcp-local-hub/internal/api",
+          "inventory_count": 3529,
+          "top_level_outcomes": {
+            "skip": 65,
+            "pass": 3460,
+            "fail": 4
+          },
+          "all_terminal_outcomes": {
+            "skip": 83,
+            "pass": 6194,
+            "fail": 4
+          },
+          "package_terminal": "fail"
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "inventory_count": 0,
+          "top_level_outcomes": {},
+          "all_terminal_outcomes": {},
+          "package_terminal": "fail"
+        }
+      ]
+    }
+  ],
+  "required_acceptance_roots": [
+    {
+      "group": "migration",
+      "test": "TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds",
+      "package": "mcp-local-hub/internal/cli",
+      "default": "NOT_RUN",
+      "state": "NOT_RUN_BUILD_FAILURE"
+    },
+    {
+      "group": "migration",
+      "test": "TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite",
+      "package": "mcp-local-hub/internal/cli",
+      "default": "NOT_RUN",
+      "state": "NOT_RUN_BUILD_FAILURE"
+    },
+    {
+      "group": "migration",
+      "test": "TestMigrateSerena_DrivesSupervisorRestart",
+      "package": "mcp-local-hub/internal/cli",
+      "default": "NOT_RUN",
+      "state": "NOT_RUN_BUILD_FAILURE"
+    },
+    {
+      "group": "migration",
+      "test": "TestMigrateSerena_NilSpecRowsHealedBeforeSpawn",
+      "package": "mcp-local-hub/internal/cli",
+      "default": "NOT_RUN",
+      "state": "NOT_RUN_BUILD_FAILURE"
+    },
+    {
+      "group": "migration",
+      "test": "TestMigrateSerena_LiveSupervisor_ReapClearsTheGateBeforeWrite",
+      "package": "mcp-local-hub/internal/cli",
+      "default": "NOT_RUN",
+      "state": "NOT_RUN_BUILD_FAILURE"
+    },
+    {
+      "group": "migration",
+      "test": "TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry",
+      "package": "mcp-local-hub/internal/cli",
+      "default": "NOT_RUN",
+      "state": "NOT_RUN_BUILD_FAILURE"
+    },
+    {
+      "group": "migration",
+      "test": "TestMigrateSerena_PostCommitReconcileReadyTimeout_ExitsZeroWithWarning",
+      "package": "mcp-local-hub/internal/cli",
+      "default": "NOT_RUN",
+      "state": "NOT_RUN_BUILD_FAILURE"
+    },
+    {
+      "group": "migration",
+      "test": "TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud",
+      "package": "mcp-local-hub/internal/cli",
+      "default": "NOT_RUN",
+      "state": "NOT_RUN_BUILD_FAILURE"
+    },
+    {
+      "group": "migration",
+      "test": "TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts",
+      "package": "mcp-local-hub/internal/cli",
+      "default": "NOT_RUN",
+      "state": "NOT_RUN_BUILD_FAILURE"
+    },
+    {
+      "group": "migration",
+      "test": "TestMigrateSerena_ConcurrentRegisterInWindow_AppearsInCommittedIntent",
+      "package": "mcp-local-hub/internal/cli",
+      "default": "NOT_RUN",
+      "state": "NOT_RUN_BUILD_FAILURE"
+    },
+    {
+      "group": "migration",
+      "test": "TestMigrateSerena_EmptyFirstSnapshot_WorkspaceRegisteredInWindow_RecomputesStart",
+      "package": "mcp-local-hub/internal/cli",
+      "default": "NOT_RUN",
+      "state": "NOT_RUN_BUILD_FAILURE"
+    },
+    {
+      "group": "migration",
+      "test": "TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut",
+      "package": "mcp-local-hub/internal/cli",
+      "default": "NOT_RUN",
+      "state": "NOT_RUN_BUILD_FAILURE"
+    },
+    {
+      "group": "migration",
+      "test": "TestMigrateSerena_EmptyFirstSnapshot_SupervisorRunning_LateReapClearsGate",
+      "package": "mcp-local-hub/internal/cli",
+      "default": "NOT_RUN",
+      "state": "NOT_RUN_BUILD_FAILURE"
+    },
+    {
+      "group": "migration",
+      "test": "TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow",
+      "package": "mcp-local-hub/internal/cli",
+      "default": "NOT_RUN",
+      "state": "NOT_RUN_BUILD_FAILURE"
+    },
+    {
+      "group": "canonical",
+      "test": "TestCanonicalGUIRuntimeRecoveryNativeIndependentReplay",
+      "package": "mcp-local-hub/internal/cli",
+      "default": "NOT_RUN",
+      "state": "NOT_RUN_BUILD_FAILURE"
+    },
+    {
+      "group": "canonical",
+      "test": "TestCanonicalSuccessorNativeControlRetainsOriginalFiles",
+      "package": "mcp-local-hub/internal/cli",
+      "default": "NOT_RUN",
+      "state": "NOT_RUN_BUILD_FAILURE"
+    },
+    {
+      "group": "api_stderr",
+      "test": "TestRotateSupervisorStderrSinkIfOversize_AtBoundary",
+      "package": "mcp-local-hub/internal/api",
+      "default": "pass",
+      "state": "pass"
+    },
+    {
+      "group": "api_stderr",
+      "test": "TestRotateSupervisorStderrSinkIfOversize_ReplacesExistingBackup",
+      "package": "mcp-local-hub/internal/api",
+      "default": "pass",
+      "state": "pass"
+    },
+    {
+      "group": "api_stderr",
+      "test": "TestSupervisorStderrSinkOversize_MatchesRotationThreshold",
+      "package": "mcp-local-hub/internal/api",
+      "default": "pass",
+      "state": "pass"
+    },
+    {
+      "group": "cli_stderr_additional",
+      "test": "TestSupervisorStderrSink_CapturesRuntimePanic",
+      "package": "mcp-local-hub/internal/cli",
+      "default": "pass",
+      "state": "NOT_RUN_BUILD_FAILURE"
+    },
+    {
+      "group": "cli_stderr_additional",
+      "test": "TestSupervisorStderrSink_CapturesMainGoroutinePanic",
+      "package": "mcp-local-hub/internal/cli",
+      "default": "pass",
+      "state": "NOT_RUN_BUILD_FAILURE"
+    },
+    {
+      "group": "cli_stderr_additional",
+      "test": "TestSupervisorStderrSink_RecordsErrorExit",
+      "package": "mcp-local-hub/internal/cli",
+      "default": "pass",
+      "state": "NOT_RUN_BUILD_FAILURE"
+    }
+  ],
+  "nonzero_packages": [
+    {
+      "phase": "default",
+      "package": "mcp-local-hub/internal/api",
+      "exit": 1,
+      "receipt_sha256": "2282b4b297e5d78f90da965383880674dd3f5529cfcfd6b9243cb56145927de8"
+    },
+    {
+      "phase": "default",
+      "package": "mcp-local-hub/internal/oneapi",
+      "exit": 1,
+      "receipt_sha256": "07e74dde1e6bf1c44bf92b555177f1ce3bf42bd1f9102a2765c2d1acf614956d"
+    },
+    {
+      "phase": "default",
+      "package": "mcp-local-hub/internal/daemon",
+      "exit": 1,
+      "receipt_sha256": "5a972718974b56fc28a4bbb23f43b4a47e9c88f796b2e388f8a775d4db772fbd"
+    },
+    {
+      "phase": "default",
+      "package": "mcp-local-hub/internal/cli",
+      "exit": 2,
+      "receipt_sha256": "a5bd2bae2fd38c7c28ef516840f613852d211b4c407fa62b0944c10a2c92fc8b"
+    },
+    {
+      "phase": "default",
+      "package": "mcp-local-hub/internal/process",
+      "exit": 1,
+      "receipt_sha256": "d599fa49174e490960b107daf53b83ef26f99a5302ad6e7773f947b85ace088f"
+    },
+    {
+      "phase": "state",
+      "package": "mcp-local-hub/internal/api",
+      "exit": 1,
+      "receipt_sha256": "faaa83cc72a378a18470d0c25fb621e7a12fc4f951283175599e2587f597c546"
+    }
+  ],
+  "tagged_cli": {
+    "started_test_invocation": false,
+    "expected_package": true,
+    "test_inventory_unavailable_after_compile_failure": true,
+    "source_location": "internal/cli/attach_client_real_supervisor_windows_test.go:109:24",
+    "diagnostic": "assignment mismatch: 3 variables but startSuperviseForIPCTest returns 4 values"
+  },
+  "default_cli": {
+    "inventory": 1988,
+    "pass": 1585,
+    "skip": 14,
+    "NOT_RUN": 389,
+    "started_without_terminal": 15,
+    "migration_started_without_terminal": 14,
+    "panic": "test timed out after 5m0s",
+    "test_running_at_alarm": "TestRunSupervisorHeartbeat_StopsOnDone",
+    "root_exit": 2,
+    "native_closed": true,
+    "termination_not_requested": true,
+    "canonical_requests": 0,
+    "canonical_cases_attempted": 0,
+    "regex_discrepancy": {
+      "test": "TestStrictModeRecover_OrdinaryIntentFailureStopsBeforeShim",
+      "physical_stdout_line": 5587,
+      "visible_prefix": "Branch [A/B]: ",
+      "go_frame_marker_hex": "16",
+      "terminal": "--- PASS: TestStrictModeRecover_OrdinaryIntentFailureStopsBeforeShim (0.02s)",
+      "naive_line_anchored_top_level_pass": 1584,
+      "frame_aware_top_level_pass": 1585
+    }
+  },
+  "remaining_original_expected_refusal": {
+    "status": "NOT_RUN / exact original name and argv unresolved",
+    "new_DWORD_or_namespace_refusals_are_not_substitutes": true
+  },
+  "scope": {
+    "new_source_test_or_native_commands_executed_by_capsule_author": false,
+    "cache_qualification_inherited": false,
+    "qualification_transferred_to_successor33": false,
+    "old_full_v8_unknown_preserved": true,
+    "old_full_v9_fail_unknown_preserved": true,
+    "all_566_raw_captures_archived_here": false,
+    "complete_outcome_ledgers_preserved_in_primary_receipt": true,
+    "keep_original_closed_run_until_separate_retention_review": true,
+    "cache_reuse_grant_issued_by_this_capsule": false
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "schema": "private-serena-migration-input-v1",
+  "purpose": "private-serena-migration-integration",
+  "source_root": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\source",
+  "source_epoch": "ae08125e26c7ed74cbda52e47903dfb8873ce19e852a675e0762af847b163ee9",
+  "source_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+  "test_state_path_env": false,
+  "image": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\publisher-test-images\\cli-publisher-default.test.exe",
+    "sha256": "5c5cfc94af370194bb047a433912b4cda50bcd4827633aa4c5185d6736364e7c"
+  },
+  "product_fixture": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\native-actor-fixture-v6.json",
+    "sha256": "4d92e007d57c09b412eb4b6f04d810a7e0f49beb1350c73eccb1fbd1857f8a15"
+  },
+  "catalog": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\source\\servers\\serena\\manifest.yaml",
+    "sha256": "3a6549e2edb169e6f2f88843f46a0de8fec426b86cb8c741420c3e110514ad17"
+  },
+  "uv": {
+    "path": "@@RECOVERY_SERENA_UV_HOME_ESCAPED@@\\uv.exe",
+    "sha256": "81ea623608f8c17720c62efd0a380a8ead380c4d365ba6968e9d279a2319c674"
+  },
+  "uvx": {
+    "path": "@@RECOVERY_SERENA_UV_HOME_ESCAPED@@\\uvx.exe",
+    "sha256": "836554a2ec223159df425d8c71292fef20ef7659469dd83bab840e80af81f5cc"
+  },
+  "python": {
+    "path": "@@RECOVERY_SERENA_PYTHON_HOME_ESCAPED@@\\python.exe",
+    "sha256": "204d51f19707da17766bccecce2ceececadab350663a8190420d1377bac1150d"
+  },
+  "issuance_receipt": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\compiler-inputs-default\\cli-publisher-test-inputs.json",
+    "sha256": "8bcf922364b2e162e6c20425300344a483678461379f721ed352080da4eeaa98"
+  },
+  "evidence_parent": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\o6d28",
+  "cache_seed": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\passive-uv-seed-copy-v1\\seed\\seed-descriptor.json",
+    "sha256": "0285a1be7101fe62c3c60f4375772dc3b791488594c686a931f0d3e72eb007cd"
+  }
+}

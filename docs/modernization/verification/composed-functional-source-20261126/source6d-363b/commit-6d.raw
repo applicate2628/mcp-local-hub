@@ -1,0 +1,6 @@
+tree 277dad42f9e9080d66955fa7469fbc68bc8618e4
+parent 5ed87ff759405efa739229b7307b5c2f9579c8fc
+author applicate2628 <dima_den@inbox.ru> 1795705475 +0300
+committer applicate2628 <dima_den@inbox.ru> 1795705475 +0300
+
+Preserve status observation order and join the orphan test loop

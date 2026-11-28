@@ -1,0 +1,38 @@
+{
+    "schema":  "windows-cli-publisher-test-inputs-v1",
+    "purpose":  "private-serena-migration-integration",
+    "prepared":  true,
+    "sourceRoot":  "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\source",
+    "sourceSnapshotPath":  "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\source-snapshot.json",
+    "publisherSource":  {
+                            "source_epoch":  "ae08125e26c7ed74cbda52e47903dfb8873ce19e852a675e0762af847b163ee9",
+                            "source_snapshot_sha256":  "5f59bbe051cbd6e160e3e84e67180d96940b13191988b7e41eb760d3eea1ac6f",
+                            "file_count":  3508
+                        },
+    "package":  "./internal/cli",
+    "goEntrypoint":  "mcp-local-hub/internal/cli.test",
+    "role":  "publisher-test",
+    "subsystem":  2,
+    "machine":  34404,
+    "windowsTargetArch":  "amd64",
+    "version":  "0.4.60",
+    "commit":  "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+    "buildDate":  "2026-11-28T11:11:34Z",
+    "buildTags":  [
+                      "test_state_path_env"
+                  ],
+    "ldflags":  "-H windowsgui -X mcp-local-hub/internal/buildinfo.version=0.4.60 -X mcp-local-hub/internal/buildinfo.commit=3ebe335a2f666a5279d7fafc31a6f4dc3feedff4 -X mcp-local-hub/internal/buildinfo.date=2026-11-28T11:11:34Z -X mcp-local-hub/internal/buildinfo.publisherSourceEpoch=ae08125e26c7ed74cbda52e47903dfb8873ce19e852a675e0762af847b163ee9",
+    "stagedResource":  "internal/cli/zz_publisher_test_versioninfo.syso",
+    "resourcePath":  "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\compiler-inputs-test_state_path_env\\cli-publisher-test.syso",
+    "resourceSHA256":  "37e97e1895c0947d41fe8e9082415796ed24176262f007b660c9885065abc634",
+    "resourceConfigurationPath":  "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\compiler-inputs-test_state_path_env\\cli-publisher-test.json",
+    "versionInfo":  {
+                        "ProductName":  "mcp-local-hub",
+                        "ProductVersion":  "0.4.60",
+                        "PrivateBuild":  "mcphub-build-v1;commit=3ebe335a2f666a5279d7fafc31a6f4dc3feedff4;build_date=2026-11-28T11:11:34Z",
+                        "SpecialBuild":  "mcphub-role-v1;role=publisher-test",
+                        "InternalName":  "mcphub-cli-publisher-test",
+                        "OriginalFilename":  "cli.test.exe",
+                        "Comments":  "Homepage: https://github.com/applicate2628/mcp-local-hub | Issues: https://github.com/applicate2628/mcp-local-hub/issues | License: MPL-2.0 | Commercial: https://github.com/applicate2628/mcp-local-hub/blob/master/README.md#license\nmcphub-source-v1;sha256=ae08125e26c7ed74cbda52e47903dfb8873ce19e852a675e0762af847b163ee9"
+                    }
+}

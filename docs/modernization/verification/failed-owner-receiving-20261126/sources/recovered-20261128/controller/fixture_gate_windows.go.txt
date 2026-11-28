@@ -1,0 +1,54 @@
+//go:build windows && amd64
+
+package main
+
+import (
+	"errors"
+	"path/filepath"
+
+	owner "mcp-local-hub/.scratch/__CANONICAL_EXTERNAL_STAGE__/canonicalcaseowner"
+)
+
+type testOnlyLateGateRecord struct {
+	Schema string `json:"schema"`
+	owner.TestOnlyLateGateSnapshot
+	CanonicalPlanSHA256            string `json:"canonical_plan_sha256"`
+	SourceCommit                   string `json:"source_commit"`
+	FocusedCase                    string `json:"focused_case"`
+	OriginalResultPath             string `json:"original_result_path"`
+	OriginalResultPublished        bool   `json:"original_result_published"`
+	OriginalResultPreserved        bool   `json:"original_result_preserved"`
+	OriginalFailure                string `json:"original_failure"`
+	OriginalExitCode               int    `json:"original_exit_code"`
+	QualificationDeadlinesExtended bool   `json:"qualification_deadlines_extended"`
+	QualificationPassed            bool   `json:"qualification_passed"`
+}
+
+func (s *session) releaseTestOnlyLateGate(code int) error {
+	if s.testOnlyLateGate == nil || !s.resultPublished || !s.unknown ||
+		s.record.QualificationPassed || code == 0 {
+		return errors.New("test-only release requires the same successfully published original failure")
+	}
+	// No file polling, parent timeout or physical receiver participates in
+	// release. This prebound channel is independent of late receiving itself.
+	s.testOnlyLateGate.ReleaseAfterOriginalFailure()
+	return s.publishTestOnlyLateGate("fixture-gate-release.json", code)
+}
+
+func (s *session) publishTestOnlyLateGate(name string, code int) error {
+	if s.testOnlyLateGate == nil || !s.rootCreated {
+		return nil
+	}
+	var original *owner.Owner
+	if c := s.caseByTest(s.plan.FocusedCase); c != nil {
+		original = c.Original.Load()
+	}
+	record := testOnlyLateGateRecord{
+		Schema: "b-native-fixture-gate-v1", TestOnlyLateGateSnapshot: s.testOnlyLateGate.Snapshot(original),
+		CanonicalPlanSHA256: s.record.CanonicalPlanSHA256, SourceCommit: s.plan.SourceCommit,
+		FocusedCase: s.plan.FocusedCase, OriginalResultPath: filepath.Join(s.root, "result.json"),
+		OriginalResultPublished: s.resultPublished, OriginalResultPreserved: s.resultPublished,
+		OriginalFailure: s.record.Failure, OriginalExitCode: code,
+	}
+	return publishResult(filepath.Join(s.root, name), record)
+}

@@ -1,0 +1,6 @@
+tree 4df69e99dca3f808b26e6a5bf7721bdd0ba3a91c
+parent 20807d2b0a713fff7900f3cd62b3db5561a0bdcf
+author applicate2628 <dima_den@inbox.ru> 1795693447 +0300
+committer applicate2628 <dima_den@inbox.ru> 1795693447 +0300
+
+Review complete observed-lock inventory in composed source

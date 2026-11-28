@@ -1,0 +1,300 @@
+diff --git a/tools/test-recovery-namespace/main_windows.go b/tools/test-recovery-namespace/main_windows.go
+index 7300d3468dec41f56686c43a1064b76c4cf42e4f..558a99c683b6d67a78ed6132ad36b1411035bb4e 100644
+--- a/tools/test-recovery-namespace/main_windows.go
++++ b/tools/test-recovery-namespace/main_windows.go
+@@ -53,8 +53,13 @@ func run() (returned error) {
+ 	testBinary := flag.String("test-binary", "", "prebuilt admitted API Product; enables one full suite without compilation")
+ 	expectedSHA256 := flag.String("expected-sha256", "", "exact incoming API executable SHA-256")
+ 	sourceDir := flag.String("source-dir", "", "original Go API package working directory")
++	requestSHA256 := flag.String("request-sha256", "", "original full-suite issuer request SHA-256")
++	requestNonce := flag.String("request-nonce", "", "original full-suite issuer request nonce")
+ 	flag.Parse()
+ 	wholeSuite := *testBinary != ""
++	if !wholeSuite && (*requestSHA256 != "" || *requestNonce != "") {
++		return errors.New("issuer request binding requires a supplied API binary")
++	}
+ 	if *buildTimeout <= 0 || *testTimeout <= 0 || *buildTimeout > 10*time.Minute || *testTimeout > 10*time.Minute {
+ 		return errors.New("invalid deadline")
+ 	}
+@@ -93,7 +98,21 @@ func run() (returned error) {
+ 			returned = errors.Join(returned, windows.CloseHandle(pins[i]))
+ 		}
+ 	}()
+-	for _, entry := range []struct {
++	refusalBinding := namespaceRefusalBinding{
++		RequestSHA256: *requestSHA256, RequestNonce: *requestNonce,
++		Binary: *testBinary, ExpectedSHA256: *expectedSHA256, SourceDir: *sourceDir,
++		Parent: parent, Args: append([]string(nil), flag.Args()...),
++		ControllerArgv: append([]string(nil), os.Args...), TestStatePathEnv: *testStatePathEnv,
++	}
++	parentPinned, stageEntered := false, false
++	// This runs before the pin-closing defer. It records only an original
++	// admission refusal; it does not construct a contained-process settlement.
++	defer func() {
++		if wholeSuite {
++			returned = errors.Join(returned, publishNamespacePrechildRefusal(refusalBinding, parentPinned, stageEntered, returned))
++		}
++	}()
++	for index, entry := range []struct {
+ 		path      string
+ 		directory bool
+ 	}{{repo, true}, {parent, true}, {goPath, false}, {pwsh, false}} {
+@@ -105,6 +124,9 @@ func run() (returned error) {
+ 			return err
+ 		}
+ 		pins = append(pins, held...)
++		if index == 1 {
++			parentPinned = true
++		}
+ 	}
+ 	var suite *namespaceSuiteInput
+ 	if wholeSuite {
+@@ -281,6 +303,7 @@ func run() (returned error) {
+ 		cmd := exec.Command(binary, suite.Args...)
+ 		cmd.Dir, cmd.Env = suite.SourceDir, env
+ 		workDeadline := started.Add(5*time.Second + *testTimeout)
++		stageEntered = true
+ 		receipt, runErr := runStage(root, "tests", cmd, workDeadline)
+ 		return finishNamespaceSuite(parent, root, suite, receipt, runErr, started, workDeadline)
+ 	}
+@@ -299,6 +322,51 @@ func run() (returned error) {
+ 	return nil
+ }
+ 
++type namespaceRefusalBinding struct {
++	RequestSHA256    string   `json:"request_sha256"`
++	RequestNonce     string   `json:"request_nonce"`
++	Binary           string   `json:"binary"`
++	ExpectedSHA256   string   `json:"expected_sha256"`
++	SourceDir        string   `json:"source_dir"`
++	Parent           string   `json:"parent"`
++	Args             []string `json:"args"`
++	ControllerArgv   []string `json:"controller_argv"`
++	TestStatePathEnv bool     `json:"test_state_path_env"`
++}
++
++type namespacePrechildRefusal struct {
++	Schema                string                  `json:"schema"`
++	Binding               namespaceRefusalBinding `json:"binding"`
++	ContainedStageEntered bool                    `json:"contained_stage_entered"`
++	Failure               string                  `json:"failure"`
++}
++
++func publishNamespacePrechildRefusal(binding namespaceRefusalBinding, parentPinned, stageEntered bool, failure error) error {
++	record, err := namespacePrechildRefusalRecord(binding, parentPinned, stageEntered, failure)
++	if err != nil || record == nil {
++		return err
++	}
++	return writeJSON(filepath.Join(binding.Parent, "namespace-suite-receipt.json"), record)
++}
++
++func namespacePrechildRefusalRecord(binding namespaceRefusalBinding, parentPinned, stageEntered bool, failure error) (*namespacePrechildRefusal, error) {
++	// Legacy callers supply no issuer request and retain their existing wire.
++	// Invalid or unpinned output paths never become a fallback receipt location.
++	if failure == nil || !parentPinned || stageEntered || binding.RequestSHA256 == "" && binding.RequestNonce == "" {
++		return nil, nil
++	}
++	nonce, nonceErr := hex.DecodeString(binding.RequestNonce)
++	if !namespaceSHA256(binding.RequestSHA256) || nonceErr != nil || len(nonce) != 16 || strings.ToLower(binding.RequestNonce) != binding.RequestNonce {
++		return nil, errors.New("invalid original issuer binding for namespace refusal")
++	}
++	if err := namespaceDPath(binding.Parent); err != nil {
++		return nil, err
++	}
++	return &namespacePrechildRefusal{
++		Schema: "api-namespace-prechild-refusal-v1", Binding: binding, Failure: failure.Error(),
++	}, nil
++}
++
+ func runStage(root, stage string, cmd *exec.Cmd, deadline time.Time) (receipt process.ContainedStreamReceiptV1, returned error) {
+ 	var empty process.ContainedStreamReceiptV1
+ 	if retainedNamespaceStage != nil {
+diff --git a/tools/test-recovery-namespace/prebuilt_windows.go b/tools/test-recovery-namespace/prebuilt_windows.go
+index bccf22363c9ec2090e8ec380cc533322cba5b413..2899f095b9614293ad997a0b7192129ca459bd62 100644
+--- a/tools/test-recovery-namespace/prebuilt_windows.go
++++ b/tools/test-recovery-namespace/prebuilt_windows.go
+@@ -188,9 +188,10 @@ func namespaceCompiledTags(info *debug.BuildInfo, expectedPath string, state boo
+ 	tags := []string{}
+ 	found := false
+ 	for _, setting := range info.Settings {
+-		if setting.Key == "-ldflags" && (strings.Contains(setting.Value, "internal/buildinfo.rustOwnerSHA256") ||
+-			strings.Contains(setting.Value, "internal/buildinfo.publisherSourceEpoch")) {
+-			return nil, errors.New("whole-suite image must not acquire a Rust or publisher source mark")
++		// Global Go flag metadata may include another package's publisher flags.
++		// Receive the source epoch through this image's canonical fixture below.
++		if setting.Key == "-ldflags" && strings.Contains(setting.Value, "internal/buildinfo.rustOwnerSHA256") {
++			return nil, errors.New("whole-suite image must not acquire a Rust mark")
+ 		}
+ 		if setting.Key != "-tags" {
+ 			continue
+@@ -405,8 +406,9 @@ func verifyNamespaceCanonicalFixture(ctx context.Context, path, binary, expected
+ 	if err := namespaceDPath(input.ProductRoot); err != nil {
+ 		return err
+ 	}
+-	if input.SourceEpoch != "" || input.ProductVersion == "" || input.ProductSHA256 != expected || !namespaceSHA256(input.IdentitySHA256) {
+-		return errors.New("unmarked canonical fixture does not describe this API receiver")
++	if (input.SourceEpoch != "" && !namespaceSHA256(input.SourceEpoch)) || input.ProductVersion == "" ||
++		input.ProductSHA256 != expected || !namespaceSHA256(input.IdentitySHA256) {
++		return errors.New("canonical fixture does not describe this API receiver")
+ 	}
+ 	binding, err := binaryadmission.NewWindowsCanonicalEntryBuildBindingV1(input.BuildID, input.CanonicalEntrySHA256, input.ReverseProjection)
+ 	if err != nil {
+@@ -423,7 +425,7 @@ func verifyNamespaceCanonicalFixture(ctx context.Context, path, binary, expected
+ 	if err != nil {
+ 		return err
+ 	}
+-	if observed.SourceEpoch != "" || observed.EntrySet.Product.SHA256 != expected ||
++	if observed.SourceEpoch != input.SourceEpoch || observed.EntrySet.Product.SHA256 != expected ||
+ 		observed.EntrySet.Identity.SHA256 != input.IdentitySHA256 ||
+ 		observed.EntrySet.ProductArtifact.Version != input.ProductVersion ||
+ 		observed.EntrySet.CanonicalEntry.SHA256 != input.CanonicalEntrySHA256 {
+diff --git a/tools/test-recovery-namespace/prebuilt_windows_test.go b/tools/test-recovery-namespace/prebuilt_windows_test.go
+index d093c8d2611d095a2f11a35206b8841d76bf05a3..238b0057677dacd348cfb0fd9f3dbc9acd861009 100644
+--- a/tools/test-recovery-namespace/prebuilt_windows_test.go
++++ b/tools/test-recovery-namespace/prebuilt_windows_test.go
+@@ -4,7 +4,10 @@ package main
+ 
+ import (
+ 	"bytes"
++	"encoding/json"
+ 	"errors"
++	"os"
++	"path/filepath"
+ 	"reflect"
+ 	"runtime/debug"
+ 	"strings"
+@@ -102,7 +105,6 @@ func TestNamespaceSuiteUsesActualCompiledTags(t *testing.T) {
+ 		{"extra-tag", &debug.BuildInfo{Path: path, Settings: []debug.BuildSetting{{Key: "-tags", Value: "test_state_path_env,extra"}}}, true},
+ 		{"duplicate-setting", &debug.BuildInfo{Path: path, Settings: []debug.BuildSetting{{Key: "-tags", Value: "test_state_path_env"}, {Key: "-tags", Value: "test_state_path_env"}}}, true},
+ 		{"rust-mark", &debug.BuildInfo{Path: path, Settings: []debug.BuildSetting{{Key: "-ldflags", Value: "-X=mcp-local-hub/internal/buildinfo.rustOwnerSHA256=value"}}}, false},
+-		{"publisher-mark", &debug.BuildInfo{Path: path, Settings: []debug.BuildSetting{{Key: "-ldflags", Value: "-X=mcp-local-hub/internal/buildinfo.publisherSourceEpoch=value"}}}, false},
+ 	} {
+ 		t.Run(item.name, func(t *testing.T) {
+ 			if _, err := namespaceCompiledTags(item.info, path, item.state); err == nil {
+@@ -112,6 +114,61 @@ func TestNamespaceSuiteUsesActualCompiledTags(t *testing.T) {
+ 	}
+ }
+ 
++func TestNamespaceSuiteAcceptsRecordedCLIScopedPublisherFlags(t *testing.T) {
++	const path = "mcp-local-hub/internal/api.test"
++	// Exact -ldflags metadata from the original full default API receiver.
++	const recordedCLIFlags = "mcp-local-hub/internal/cli=-H=windowsgui -s -w -X=mcp-local-hub/internal/buildinfo.version=0.4.60 -X=mcp-local-hub/internal/buildinfo.commit=25f9a79851dc7e3e409cfb823b54d590fb1ac550 -X=mcp-local-hub/internal/buildinfo.date=2026-11-26T22:52:46Z -X=mcp-local-hub/internal/buildinfo.publisherSourceEpoch=2107df204558378a9a47e655b9ce891f34c585a9ff01fa2df626729a4445c6a1"
++	for _, state := range []bool{false, true} {
++		info := &debug.BuildInfo{Path: path, Settings: []debug.BuildSetting{{Key: "-ldflags", Value: recordedCLIFlags}}}
++		if state {
++			info.Settings = append(info.Settings, debug.BuildSetting{Key: "-tags", Value: "test_state_path_env"})
++		}
++		tags, err := namespaceCompiledTags(info, path, state)
++		if err != nil {
++			t.Fatalf("valid publisher metadata for state=%v: %v", state, err)
++		}
++		want := []string{}
++		if state {
++			want = []string{"test_state_path_env"}
++		}
++		if !reflect.DeepEqual(tags, want) {
++			t.Fatalf("publisher metadata changed compiled tags: got %v, want %v", tags, want)
++		}
++	}
++}
++
++func TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch(t *testing.T) {
++	const expected = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
++	for name, epoch := range map[string]string{
++		"not-a-digest": "value",
++		"uppercase":    strings.Repeat("A", 64),
++		"short":        strings.Repeat("a", 63),
++		"non-hex":      strings.Repeat("g", 64),
++	} {
++		t.Run(name, func(t *testing.T) {
++			input := map[string]string{
++				"product_root":    `__APPROVED_WORK_AREA__\namespace-unused-product`,
++				"source_epoch":    epoch,
++				"product_version": "test",
++				"product_sha256":  expected,
++				"identity_sha256": strings.Repeat("b", 64),
++			}
++			raw, err := json.Marshal(input)
++			if err != nil {
++				t.Fatal(err)
++			}
++			fixture := filepath.Join(t.TempDir(), "fixture.json")
++			if err := os.WriteFile(fixture, raw, 0600); err != nil {
++				t.Fatal(err)
++			}
++			err = verifyNamespaceCanonicalFixture(t.Context(), fixture, `__APPROVED_WORK_AREA__\namespace-unused-product\mcphub-product\mcphub.exe`, expected)
++			if err == nil || err.Error() != "canonical fixture does not describe this API receiver" {
++				t.Fatalf("malformed source_epoch reached a different admission stage: %v", err)
++			}
++		})
++	}
++}
++
+ func TestNamespaceSuiteRetainsOriginalFailedRootExit(t *testing.T) {
+ 	infrastructure := errors.New("owner cleanup incomplete")
+ 	if got := namespaceSuiteExitCode(true, 97, infrastructure); got != 97 {
+diff --git a/tools/test-recovery-namespace/prechild_refusal_windows_test.go b/tools/test-recovery-namespace/prechild_refusal_windows_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..950066ad50e7a656bf13c9f5b37747481eb6d719
+--- /dev/null
++++ b/tools/test-recovery-namespace/prechild_refusal_windows_test.go
+@@ -0,0 +1,59 @@
++//go:build windows
++
++package main
++
++import (
++	"errors"
++	"reflect"
++	"strings"
++	"testing"
++)
++
++func TestNamespacePrechildRefusalRequiresOriginalUnstartedScope(t *testing.T) {
++	binding := namespaceRefusalBinding{
++		RequestSHA256: strings.Repeat("a", 64), RequestNonce: strings.Repeat("b", 32),
++		Binary: `__APPROVED_WORK_AREA__\fixture\api.exe`, ExpectedSHA256: strings.Repeat("c", 64),
++		SourceDir: `__APPROVED_WORK_AREA__\source\internal\api`, Parent: `__APPROVED_WORK_AREA__\fixture\n`,
++		Args:           []string{"-test.paniconexit0", "-test.v=test2json", "-test.count=1", "-test.timeout=5m"},
++		ControllerArgv: []string{"namespace.exe", "--test-binary", `__APPROVED_WORK_AREA__\fixture\api.exe`},
++	}
++	cause := errors.New("original admission refusal")
++	record, err := namespacePrechildRefusalRecord(binding, true, false, cause)
++	if err != nil || record == nil || record.Schema != "api-namespace-prechild-refusal-v1" ||
++		record.ContainedStageEntered || record.Failure != cause.Error() || !reflect.DeepEqual(record.Binding, binding) {
++		t.Fatalf("original refusal binding changed: record=%+v error=%v", record, err)
++	}
++	for _, tc := range []struct {
++		name         string
++		parentPinned bool
++		stageEntered bool
++		cause        error
++	}{
++		{name: "unadmitted parent", cause: cause},
++		{name: "stage already entered", parentPinned: true, stageEntered: true, cause: cause},
++		{name: "no refusal", parentPinned: true},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			got, err := namespacePrechildRefusalRecord(binding, tc.parentPinned, tc.stageEntered, tc.cause)
++			if err != nil || got != nil {
++				t.Fatalf("ineligible path produced refusal evidence: %+v %v", got, err)
++			}
++		})
++	}
++	legacy := binding
++	legacy.RequestSHA256, legacy.RequestNonce = "", ""
++	if got, err := namespacePrechildRefusalRecord(legacy, true, false, cause); got != nil || err != nil {
++		t.Fatalf("legacy caller acquired a new receipt: %+v %v", got, err)
++	}
++	for _, mutate := range []func(*namespaceRefusalBinding){
++		func(b *namespaceRefusalBinding) { b.RequestSHA256 = "" },
++		func(b *namespaceRefusalBinding) { b.RequestNonce = strings.Repeat("B", 32) },
++		func(b *namespaceRefusalBinding) { b.Parent = `C:\outside` },
++	} {
++		invalid := binding
++		mutate(&invalid)
++		if got, err := namespacePrechildRefusalRecord(invalid, true, false, cause); got != nil || err == nil {
++			t.Fatalf("invalid request/output binding produced a certificate: %+v %v", got, err)
++		}
++	}
++}

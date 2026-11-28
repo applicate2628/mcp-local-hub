@@ -1,0 +1,37 @@
+{
+  "token": {
+    "user_sid": "@@RECOVERY_OPERATOR_USER_SID_RAW@@",
+    "default_owner_sid": "@@RECOVERY_OPERATOR_USER_SID_RAW@@"
+  },
+  "scope": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\o6d28",
+  "directories": [
+    {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\o6d28",
+      "created_exclusively": true,
+      "volume_serial": 275429471,
+      "file_index": 2251799818412165,
+      "owner_sid": "@@RECOVERY_OPERATOR_USER_SID_RAW@@",
+      "dacl_protected": true,
+      "rules": [
+        {
+          "sid": "@@RECOVERY_OPERATOR_USER_SID_RAW@@",
+          "mask": 2032127,
+          "flags": 3
+        },
+        {
+          "sid": "S-1-5-18",
+          "mask": 2032127,
+          "flags": 3
+        },
+        {
+          "sid": "S-1-5-32-544",
+          "mask": 2032127,
+          "flags": 3
+        }
+      ],
+      "sddl": "O:@@RECOVERY_OPERATOR_USER_SID_RAW@@D:P(A;OICI;FA;;;@@RECOVERY_OPERATOR_USER_SID_RAW@@)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
+    }
+  ],
+  "existing_objects_mutated": false,
+  "recursive_acl_operations": false
+}

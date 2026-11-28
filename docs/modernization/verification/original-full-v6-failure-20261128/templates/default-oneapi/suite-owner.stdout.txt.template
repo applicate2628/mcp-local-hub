@@ -1,0 +1,60 @@
+=== RUN   TestMergeEnv_OverlayWinsKeepsBaseAppendsNew
+--- PASS: TestMergeEnv_OverlayWinsKeepsBaseAppendsNew (0.00s)
+=== NAME  
+=== RUN   TestMergeEnv_WindowsCaseInsensitiveKeyMatch
+--- PASS: TestMergeEnv_WindowsCaseInsensitiveKeyMatch (0.00s)
+=== NAME  
+=== RUN   TestMergeEnv_SkipsMalformedOverlayKeepsMalformedBase
+--- PASS: TestMergeEnv_SkipsMalformedOverlayKeepsMalformedBase (0.00s)
+=== NAME  
+=== RUN   TestEnvOverlay_HostIndependent
+    env_overlay_test.go:127: no oneAPI install on this host — EnvOverlay returned nil (documented fallback)
+--- PASS: TestEnvOverlay_HostIndependent (0.00s)
+=== NAME  
+=== RUN   TestDetectRootFound
+    oneapi_test.go:46: POSIX DetectRoot returned ok=true with no probe candidates; got "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\x3f95ee65cb8b\\TestDetectRootFound4282235050\\001"
+--- FAIL: TestDetectRootFound (0.00s)
+=== NAME  
+=== RUN   TestDetectRootMissing
+--- PASS: TestDetectRootMissing (0.00s)
+=== NAME  
+=== RUN   TestDLLDirsEnumeratesPriorityFirst
+--- PASS: TestDLLDirsEnumeratesPriorityFirst (0.01s)
+=== NAME  
+=== RUN   TestDLLDirsExcludesNoDLLComponent
+--- PASS: TestDLLDirsExcludesNoDLLComponent (0.00s)
+=== NAME  
+=== RUN   TestDLLDirsEmptyRootIsNil
+--- PASS: TestDLLDirsEmptyRootIsNil (0.00s)
+=== NAME  
+=== RUN   TestDLLDirsAgainstSeam
+--- PASS: TestDLLDirsAgainstSeam (0.00s)
+=== NAME  
+=== RUN   TestPrependEnvList_PrependsToExistingKey
+--- PASS: TestPrependEnvList_PrependsToExistingKey (0.00s)
+=== NAME  
+=== RUN   TestPrependEnvList_CaseInsensitiveKeyPreservesCasing
+--- PASS: TestPrependEnvList_CaseInsensitiveKeyPreservesCasing (0.00s)
+=== NAME  
+=== RUN   TestPrependEnvList_SynthesizesWhenAbsent
+--- PASS: TestPrependEnvList_SynthesizesWhenAbsent (0.00s)
+=== NAME  
+=== RUN   TestPrependEnvList_EmptyDirsReturnsCopy
+--- PASS: TestPrependEnvList_EmptyDirsReturnsCopy (0.00s)
+=== NAME  
+=== RUN   TestSetvarsCaptureBatchContent_GuardsSetWithCallFailure
+--- PASS: TestSetvarsCaptureBatchContent_GuardsSetWithCallFailure (0.00s)
+=== NAME  
+=== RUN   TestParseSetDump_ParsesKeyValueLines
+--- PASS: TestParseSetDump_ParsesKeyValueLines (0.00s)
+=== NAME  
+=== RUN   TestParseSetDump_SkipsBlankAndKeyless
+--- PASS: TestParseSetDump_SkipsBlankAndKeyless (0.00s)
+=== NAME  
+=== RUN   TestParseSetDump_ValueWithEquals
+--- PASS: TestParseSetDump_ValueWithEquals (0.00s)
+=== NAME  
+=== RUN   TestFileExists_DirIsNotFile
+--- PASS: TestFileExists_DirIsNotFile (0.00s)
+=== NAME  
+FAIL

@@ -1,0 +1,42 @@
+{
+  "schema": "recovered-cli-commits-public-manifest-v1",
+  "status": "EXACT_SOURCE_DATA_RECOVERED_FULL_ACCEPTANCE_PENDING",
+  "observed_publication_base": "513898c2029fb29dd7f15ce3598f518e42666f7b",
+  "files": [
+    {
+      "file": "06f77b3856e43ec5e8e3736123aedb896ae58817.commit",
+      "bytes": 812,
+      "sha256": "3748cc26cfe2bbcd38f8eb25409f4339e92b58992770308e1e77b5e010939c36"
+    },
+    {
+      "file": "06f77b3856e43ec5e8e3736123aedb896ae58817.patch",
+      "bytes": 13846,
+      "sha256": "c9e7eda48363283f846ddfd08088927ae23b94f5df3bc7580ef67086923e8f43"
+    },
+    {
+      "file": "33eaf8af8fc46cb231f48c70f4775922393245b1.commit",
+      "bytes": 270,
+      "sha256": "3c4d7f090083fdc2c5d82ac0a1158993d2e6102ff8f50b4fcf612e4eb29d28cf"
+    },
+    {
+      "file": "33eaf8af8fc46cb231f48c70f4775922393245b1.patch",
+      "bytes": 2388,
+      "sha256": "32e395148d91497def1ccf354ade7f342424c5e6780c08fc139dc8a296c87385"
+    },
+    {
+      "file": "README.md",
+      "bytes": 8811,
+      "sha256": "3552cf7a776866f9ca0c0a8b1e306c37fff62d20369a20c9e5095abb48239758"
+    },
+    {
+      "file": "recovery-evidence.json",
+      "bytes": 4677,
+      "sha256": "0ced84c21094c80ba09d68d638c4baf88f337221c79e8913e521d05a1cfb3ddc"
+    }
+  ],
+  "source_code_mutation": false,
+  "report_modified": false,
+  "git_index_commit_push_by_preparer": false,
+  "machine_paths_in_capsule": 0,
+  "original_git_author_and_committer_preserved": true
+}

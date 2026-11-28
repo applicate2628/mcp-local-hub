@@ -1,0 +1,554 @@
+{
+  "schema": "cache-acceptance-recovery-evidence-v1",
+  "date_utc": "2026-11-28",
+  "status": "RECOVERY_CONTINUES_FULL_ACCEPTANCE_OPEN",
+  "publication_base": {
+    "pr": 664,
+    "head": "078a70fd412e0b6c6f5be210154825addfed1736",
+    "tree": "629a159252b1f45a7924609f2e94428f1c30dbcc",
+    "prior_observed_head": "2b5c583b1ffcfd38529ac0a825d1faee5f02b7b9",
+    "concurrent_update_preserved": true
+  },
+  "source_manifest": "source4-manifest.json",
+  "evidence_type": "Sanitized projection of original closed receipts and current read-only source observations; raw private captures are retained by their original owner.",
+  "historical_cli": {
+    "root_count": 717,
+    "pass": 712,
+    "skip": 5,
+    "one_full_run": false,
+    "across_multiple_revisions": true,
+    "current_inventory_mapping": "UNRESOLVED",
+    "original_717_results_recovered": false
+  },
+  "absent_commits": {
+    "sha": [
+      "33eaf8af8fc46cb231f48c70f4775922393245b1",
+      "06f77b3856e43ec5e8e3736123aedb896ae58817"
+    ],
+    "github_api_observation": "422 No commit found for each SHA",
+    "local_object_lookup": "Reported absent from the checked original repository; no exhaustive-loss claim.",
+    "exact_commits_recovered": false
+  },
+  "focused_source4": {
+    "run": "focused-v1",
+    "source_commit": "4ac73379a10e09766fe8274a129129a2b565f757",
+    "parent": {
+      "sha256": "e20cade4e35dba13fd41da26ec43ebd910c7070f2c2c2655a81eb1d475529b49",
+      "bytes": 1431,
+      "status": "PASS",
+      "terminal_exit_received": true,
+      "exit_code": 0,
+      "physical_complete": true,
+      "seconds": 4.411061099963263
+    },
+    "execution": {
+      "sha256": "bd0c2a5c7bb8098a8935959f7086fb512c4cf5943cb40df1164b6878b1987b49",
+      "bytes": 31016,
+      "status": "PASS",
+      "commands": 4,
+      "command_exit_codes": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "all_commands_native_closed": true,
+      "all_original_readers_joined": true,
+      "inputs_unchanged": true
+    },
+    "cli": {
+      "counts": {
+        "pass": 24,
+        "fail": 0,
+        "skip": 0
+      },
+      "original_stdout": {
+        "bytes": 3227,
+        "sha256": "11e3fdee299837915448c21269d08aa76d7fe59e1862ba455f7d7f8f26fbc1fa"
+      },
+      "tests": [
+        {
+          "test": "TestF1_ForeignRespawnHeldNoSpawnNoIncrement",
+          "status": "PASS",
+          "reported_seconds": 0.01
+        },
+        {
+          "test": "TestF1_OwnSquatterReapedThenSpawnsNoIncrement",
+          "status": "PASS",
+          "reported_seconds": 0.01
+        },
+        {
+          "test": "TestF1_UnverifiedSpawnsAsToday",
+          "status": "PASS",
+          "reported_seconds": 0.01
+        },
+        {
+          "test": "TestF1_LoopNotBlockedByWorkerClassify",
+          "status": "PASS",
+          "reported_seconds": 0.02
+        },
+        {
+          "test": "TestF1_GatesEvIntentUpdateRespawn",
+          "status": "PASS",
+          "reported_seconds": 0.01
+        },
+        {
+          "test": "TestF1_GateClearedClearedOnSettle",
+          "status": "PASS",
+          "reported_seconds": 0.01
+        },
+        {
+          "test": "TestF1_GateClearedClearedOnNotFoundDrop",
+          "status": "PASS",
+          "reported_seconds": 0.01
+        },
+        {
+          "test": "TestF1_GatesEvStartRespawn",
+          "status": "PASS",
+          "reported_seconds": 0.01
+        },
+        {
+          "test": "TestF1_ColdStartEvStartFreePortSpawns",
+          "status": "PASS",
+          "reported_seconds": 0.01
+        },
+        {
+          "test": "TestF1_WorkerRestartDroppedOnStopClearsGateCleared",
+          "status": "PASS",
+          "reported_seconds": 0.06
+        },
+        {
+          "test": "TestSupervisorLivenessSweep_TwoStrike_DefersFirstMismatchThenDisowns",
+          "status": "PASS",
+          "reported_seconds": 0.33
+        },
+        {
+          "test": "TestSupervisorLivenessSweep_TwoStrike_ClearsOnRecovery",
+          "status": "PASS",
+          "reported_seconds": 0.3
+        },
+        {
+          "test": "TestSupervisorLivenessSweep_NilMismatchLatchDisownsOnFirstSweep",
+          "status": "PASS",
+          "reported_seconds": 0
+        },
+        {
+          "test": "TestSupervisorController_QuarantineParole_FiresAfterCooldownAndClears",
+          "status": "PASS",
+          "reported_seconds": 0.1
+        },
+        {
+          "test": "TestSupervisorController_QuarantineParole_ExponentialAndBounded",
+          "status": "PASS",
+          "reported_seconds": 0.38
+        },
+        {
+          "test": "TestSupervisorController_QuarantineParole_RespectsStoppedIntent",
+          "status": "PASS",
+          "reported_seconds": 0.2
+        },
+        {
+          "test": "TestSupervisorController_ParoleTick_OnLoopDispatchFires",
+          "status": "PASS",
+          "reported_seconds": 0.83
+        },
+        {
+          "test": "TestSupervisorController_ParoleGraduationVsThreshold_NoWedge",
+          "status": "PASS",
+          "reported_seconds": 0.02
+        },
+        {
+          "test": "TestSupervisorController_ParolePostRoutesThroughQuarantined",
+          "status": "PASS",
+          "reported_seconds": 0.01
+        },
+        {
+          "test": "TestSupervisorController_ParoleQueuedStop_PostSelfHonorsStop",
+          "status": "PASS",
+          "reported_seconds": 0.01
+        },
+        {
+          "test": "TestSupervisorLivenessSweep_DisownEvChildExitCarriesGeneration",
+          "status": "PASS",
+          "reported_seconds": 0
+        },
+        {
+          "test": "TestSupervisorController_StaleLivenessDisownDroppedByGeneration",
+          "status": "PASS",
+          "reported_seconds": 0.02
+        },
+        {
+          "test": "TestSupervisorController_QuarantineParole_ClassFlipToJobRefusedClearsLadder",
+          "status": "PASS",
+          "reported_seconds": 0.66
+        },
+        {
+          "test": "TestSupervisorController_QuarantineParole_BareTaskNameKeyParoled",
+          "status": "PASS",
+          "reported_seconds": 0
+        }
+      ]
+    },
+    "api": {
+      "counts": {
+        "pass": 4,
+        "fail": 0,
+        "skip": 0
+      },
+      "original_stdout": {
+        "bytes": 3507,
+        "sha256": "4c1027e56370a03dacd23747001b14ad5a5d526515608922ace8fa8f68318f89"
+      },
+      "tests": [
+        {
+          "test": "TestClassifyAPITestHelperDispatch",
+          "status": "PASS",
+          "reported_seconds": 0
+        },
+        {
+          "test": "TestClassifyAPITestHelperDispatchRejectsUnsafeInputs",
+          "status": "PASS",
+          "reported_seconds": 0
+        },
+        {
+          "test": "TestRequiredSecretGate_SecretSetNoBlock",
+          "status": "PASS",
+          "reported_seconds": 0.02
+        },
+        {
+          "test": "TestRequiredSecretGate_ReadinessReadyWhenSet",
+          "status": "PASS",
+          "reported_seconds": 0.02
+        }
+      ]
+    },
+    "scope": "Addressed fixture roots in directly executed test images, plus inventories. Not the full CLI/API suites or either mandatory command."
+  },
+  "inventory": {
+    "cli_test_roots": 2099,
+    "api_test_roots": 3695,
+    "api_benchmarks": 1,
+    "source": "checkpoint-20261127T1722 plus focused inventory commands; listing is not execution"
+  },
+  "controller_correction": {
+    "input_revision": "inputs-error-dword-v4",
+    "change": "Preserve the unsigned DWORD representation at the native GetLastError producer and rebind the guard; the command runner bytes are unchanged.",
+    "payload_sha256": {
+      "runner": "6d16652d4893273b7e9d584920892ce5f5917622e7e242a62eb78ec824bcfb93",
+      "guard": "e7c663f4ba2fd558005bc110173609cb19465ff33d3f4678aeb53b5ba00e0924",
+      "windows_job": "d94583001a33ef34adb67feec34b4f4b0bf3626df9f63da3c7a7c85bf3e0b552"
+    },
+    "preparation_receipt": {
+      "sha256": "70f0d021601100836b8668ed92b93d5278b0b85192fc5200f4046b618233149b",
+      "bytes": 1518,
+      "original_status": "PREPARED_NOT_RUN"
+    },
+    "observed_refusal": {
+      "run": "pwsh-highbit-refusal-v2",
+      "status": "FAIL",
+      "classification": "CLOSED_PRESTART_FAIL",
+      "expected_refusal_received": true,
+      "command_success": false,
+      "parent": {
+        "sha256": "3005b897df93cc7c70ca1c917683ed937971bb96229faa894e7e1bf85a6946c0",
+        "bytes": 1471,
+        "terminal_exit_received": true,
+        "exit_code": 1,
+        "physical_complete": true,
+        "seconds": 0.15528399997856468
+      },
+      "execution": {
+        "sha256": "cd7c448f1c3cf337e13e4ad77001c6692627e639624f70ede09cd8a9b08d1562",
+        "bytes": 4754,
+        "status": "FAIL",
+        "physical_complete": true,
+        "command_executed": false,
+        "process_creation": {
+          "attempted": true,
+          "created": false,
+          "win32_last_error": 3221684229
+        },
+        "child_exit_code": null,
+        "captures": "NOT_CREATED",
+        "readers": "NOT_STARTED",
+        "deadline_exceeded": false,
+        "input_files_unchanged": true
+      },
+      "interpretation": "The expected native creation refusal was received with closed resources. No child was created or executed; neither a successful command nor a full runtime qualification is claimed."
+    }
+  },
+  "controller_finish_v3": {
+    "status": "FAIL",
+    "physical_complete": true,
+    "parent_sha256": "6932a89976f4c98d6484d0cad9c30005e22a6bd366bd8496f52e5d848f13932b",
+    "execution_sha256": "aca65241f615640d459f04f12637b8ecc0ccf2bd60a9df573208e03c0cb4e6eb",
+    "canonical_test_command_exit_code": 1,
+    "selected_tests": [
+      "TestCanonicalManifestDirIgnoresExecutableContextAndExistence",
+      "TestCanonicalManifestDirRejectsUncleanCanonicalPathWithoutIO"
+    ],
+    "limit": "Failure of the selected canonical-manifest command is retained. It is not reclassified by the later expected-refusal result."
+  },
+  "unresolved_parent_snapshots": [
+    {
+      "run": "canonical-controller-build-v1",
+      "status": "UNKNOWN",
+      "terminal_exit_received": false,
+      "physical_complete": "UNPROVEN",
+      "parent_sha256": "b77748549792d34a7800c4385398efbf07e9f6e8184eee11d5265a6139eb2ef3"
+    },
+    {
+      "run": "pwsh-probe-v1",
+      "status": "UNKNOWN",
+      "terminal_exit_received": false,
+      "physical_complete": "UNPROVEN",
+      "parent_sha256": "256a0bffaeec61f079bf8640f5244e3d77d573a0b6cd4991b587c707e8a9473d"
+    },
+    {
+      "run": "serena-product-inputs-v1",
+      "status": "UNKNOWN",
+      "terminal_exit_received": false,
+      "physical_complete": "UNPROVEN",
+      "parent_sha256": "3a926233f4ddb1f83faf850c1661e71cdbfac7ba42e772ff39c999e9ea0afa4b"
+    }
+  ],
+  "preserved_history": {
+    "old_full_v8": "Original FAIL/UNKNOWN remains unchanged; this packet adds no original-owner closure proof.",
+    "old_full_v9": "Original FAIL/UNKNOWN and separately historical physical CLOSED retain their original scope.",
+    "partial_source_preparation": "Earlier CLOSED timeout and CLOSED_PRE_RESUME_FAIL remain failures.",
+    "independent_AD": "Current #664 A–D code and evidence remain unchanged."
+  },
+  "cache_handoff": {
+    "status": "NOT_ACCEPTED",
+    "source": "Requires a completed accepted CLI run with original process/stream closure and an independently received cache copy.",
+    "unknown_run_caches_reusable": false
+  },
+  "mandatory_commands": [
+    {
+      "command": "go build ./... && go vet ./... && go test -count=1 -timeout 5m ./...",
+      "status": "NOT_RUN",
+      "source_commit": "4ac73379a10e09766fe8274a129129a2b565f757"
+    },
+    {
+      "command": "go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/",
+      "status": "NOT_RUN",
+      "source_commit": "4ac73379a10e09766fe8274a129129a2b565f757"
+    }
+  ],
+  "remaining": [
+    "Receive the final Source, Product, runtime and private migration inputs.",
+    "Run the complete current CLI suite and accept its original closure and cache handoff.",
+    "Obtain 14 migration and 2 canonical controls in both default and test_state_path_env modes.",
+    "Run both unchanged mandatory commands, including the three required stderr scenarios and the remaining expected-failure control.",
+    "Review the exact code/evidence deltas, publish to existing owner branches through the established native gate, read back and settle owned resources."
+  ],
+  "publication": {
+    "package_kind": "evidence-only Source4 preservation",
+    "production_files_modified_by_package": false,
+    "index_commit_push_performed_by_preparer": false,
+    "existing_prs": [
+      637,
+      664,
+      665,
+      666
+    ],
+    "new_pr_created": false,
+    "merged": false
+  },
+  "helper_observation_v2": {
+    "status": "PASS",
+    "scope": "Separate three-layout helper observation at unchanged 10-second deadline; does not replace the canonical-root suite or full acceptance.",
+    "parent_sha256": "4d22c7e6a6f93049a4d3703077629a9efdf7448b81740c8e7d21de84975f8a8f",
+    "execution_sha256": "2794ee7ca14c7d51fa5db256daee3e45463a2bd398f16ba29453dbc455d1a75b",
+    "source_changed": false,
+    "product_claim": false,
+    "receipt_hash_provenance": "Original owner supplied hashes; observations independently reread after closure.",
+    "observations": [
+      {
+        "context": "original",
+        "binary_sha256": "20091a574762827e5c563c67c9e0673c7ff05137d0eec8223ed1c3b7af0fad52",
+        "creation_seconds": 0.005460600019432604,
+        "total_seconds": 0.15087080001831055,
+        "deadline_seconds": 10,
+        "deadline_exceeded": false,
+        "original_exit_code": 0,
+        "original_reaped": true,
+        "stdout_closed": true,
+        "stderr_closed": true,
+        "canonical_parent_created": false,
+        "stdout_canonical_role": "absent-canonical/servers",
+        "stdout_terminal_pass": true,
+        "stderr_empty": true
+      },
+      {
+        "context": "npm-layout",
+        "binary_sha256": "20091a574762827e5c563c67c9e0673c7ff05137d0eec8223ed1c3b7af0fad52",
+        "creation_seconds": 1.6100867999484763,
+        "total_seconds": 1.7474114999640733,
+        "deadline_seconds": 10,
+        "deadline_exceeded": false,
+        "original_exit_code": 0,
+        "original_reaped": true,
+        "stdout_closed": true,
+        "stderr_closed": true,
+        "canonical_parent_created": false,
+        "stdout_canonical_role": "absent-canonical/servers",
+        "stdout_terminal_pass": true,
+        "stderr_empty": true
+      },
+      {
+        "context": "direct-layout",
+        "binary_sha256": "20091a574762827e5c563c67c9e0673c7ff05137d0eec8223ed1c3b7af0fad52",
+        "creation_seconds": 1.0016502999933437,
+        "total_seconds": 1.1322292999830097,
+        "deadline_seconds": 10,
+        "deadline_exceeded": false,
+        "original_exit_code": 0,
+        "original_reaped": true,
+        "stdout_closed": true,
+        "stderr_closed": true,
+        "canonical_parent_created": false,
+        "stdout_canonical_role": "absent-canonical/servers",
+        "stdout_terminal_pass": true,
+        "stderr_empty": true
+      }
+    ]
+  },
+  "runtime_and_helper_observation_v1": {
+    "status": "FAIL",
+    "execution_sha256": "e10d4991f2a634ddb26510a34b3b5bba768e69fb4da33dc2ab73966132cf608d",
+    "physical_complete": true,
+    "terminal_parent_received": true,
+    "streams_closed": true,
+    "runtime_inventory_deadline_seconds": 180,
+    "runtime_inventory_timed_out": true,
+    "receiver_data_refusals": {
+      "command_status": "PASS",
+      "exit_code": 0,
+      "reported_seconds": 0.067
+    },
+    "provenance": "Original owner reported closed outcome and execution hash; this public projection does not claim full runtime acceptance."
+  },
+  "runtime_readback_v2": {
+    "status": "PASS",
+    "scope": "Readback of the preserved runtime plus native version probe; no Product or full regression qualification.",
+    "parent": {
+      "sha256": "5ebe2877936e27f89a2e28c5a50518fcbd84c2780e7366482fc55fe1e95666a5",
+      "terminal_exit_received": true,
+      "exit_code": 0,
+      "physical_complete": true,
+      "seconds": 162.3973291000584,
+      "parent_capture_files_closed": true
+    },
+    "execution": {
+      "sha256": "5ea18b28ca3f52f2d1ad13f0680320bb83ff938ec6369383bcc932e66cb4a43e",
+      "status": "PASS",
+      "commands": 2,
+      "command_exit_codes": [
+        0,
+        0
+      ],
+      "command_seconds": [
+        160.33937089995015,
+        1.7346429000608623
+      ],
+      "all_native_owners_and_readers_closed": true,
+      "inputs_unchanged": true
+    },
+    "inventory": {
+      "sha256": "0518fd112ec8d386564a01ac74824624c5c5076159510bbc4aaa943247bdb00a",
+      "preserved_manifest_sha256": "5933d944eda2b7b40705411d02fbc18f0c8ae6f7c6096ff3a64f68a5d128a52c",
+      "files": 1276,
+      "directories": 52,
+      "bytes": 310287418,
+      "complete_manifest_equal": true,
+      "pwsh_sha256": "f2833e07a5a7d59153ffc63db83bd6b62f6c63ffd8b5b5099a2feadf6b605336"
+    },
+    "native_probe": {
+      "powershell_version": "7.7.0",
+      "framework": ".NET 11.0.0",
+      "exit_code": 0
+    },
+    "deadline": {
+      "runtime_inventory_seconds": 600,
+      "previous_runtime_and_helper_observation_v1_seconds": 180,
+      "reason": "Fresh full-file readback used the measured earlier 410/264-second namespace/copy envelope; the earlier 180-second timeout remains FAIL. Mandatory Go and 10-second helper deadlines are unchanged."
+    },
+    "receipt_provenance": "Original closed parent/execution/inventory/probe content independently reread; exact receipt hashes are rechecked in the native capsule finalization."
+  },
+  "receiver_data_checks": {
+    "result_file": "receiver-data-refusals.json",
+    "scope": "DATA-only exact pure receiver functions; no native process creation or capture I/O",
+    "status": "PASS",
+    "accepted_synthetic_closed_failure_codes": [
+      0,
+      3221684229,
+      4294967295
+    ],
+    "rejected_fixture_cases": 18,
+    "original_receipt_result_preserved": "FAIL"
+  },
+  "controller_sources": {
+    "directory": "sources",
+    "revision": "inputs-error-dword-v4",
+    "exact_files": [
+      "windows_job.py",
+      "guard-custody.py",
+      "prestart_receiver_check.py",
+      "observe_runtime_and_helper.py",
+      "observe_runtime_progress_v2.py"
+    ],
+    "hash_inventory": "artifact-manifest.json",
+    "scope": "Five exact standalone controller and observer sources plus a portable runner template; no private plan, activation or product-code change is performed by publication.",
+    "portable_runner": {
+      "template_file": "sources/run_owned_commands.py.template",
+      "template_sha256": "232641e3f7ea43aa594a8e71a6aff2e24dcb29c6eeee82458e485e73436876a5",
+      "template_bytes": 29643,
+      "reconstructor_file": "sources/reconstruct_runner.py",
+      "reconstructor_sha256": "f353e98917127b15aaa7084009f35aaba98146a0f4631f953b15b79249be9901",
+      "original_executed_sha256": "6d16652d4893273b7e9d584920892ce5f5917622e7e242a62eb78ec824bcfb93",
+      "original_executed_bytes": 29603,
+      "markers": {
+        "raw": "__APPROVED_WORK_AREA_RAW__",
+        "raw_count": 1,
+        "escaped": "__APPROVED_WORK_AREA_ESCAPED__",
+        "escaped_count": 2
+      },
+      "operator_parameter": "original approved work area, explicitly supplied by the caller",
+      "embedded_host_path_or_default": false,
+      "reconstruction_verified_in_memory": true,
+      "reconstructed_bytes_equal_executed_original": true,
+      "actual_executed_local_runner_unchanged": true,
+      "scope": "Publication template only. Historical test and command receipts bind the original executed bytes, not this template."
+    }
+  },
+  "remaining_expected_failure": {
+    "status": "NOT_RUN_OR_NOT_YET_IDENTIFIED_IN_ORIGINAL_AGREEMENT",
+    "new_dword_refusal_is_substitute": false,
+    "native_late_owner_scope": {
+      "reference": "../failed-owner-receiving-20261126/README.md#следующий-шаг-приёмки",
+      "status": "NOT_QUALIFIED",
+      "cases": [
+        "late original return",
+        "late reader",
+        "read failure after closure",
+        "unknown frozen outer",
+        "one-shot close refusal"
+      ],
+      "mapping_to_original_agreed_item": "NOT_ESTABLISHED"
+    }
+  },
+  "parallel_AD_scope": {
+    "preserved_in_publication_base": "078a70fd412e0b6c6f5be210154825addfed1736",
+    "source_labels": [
+      "Source6d",
+      "Source52"
+    ],
+    "product_commit": "b8d44b8cdfa2f57d17d80a2a59f3f7b6a6ec4647",
+    "test_commit": "a1798d121cec86cfe825db0fe4f29f840f4c2563",
+    "p2_work_is_separate": true,
+    "included_in_source4": false,
+    "qualification_transferred_between_lines": false,
+    "source4_is_current_all_open_PR_composition": false
+  }
+}

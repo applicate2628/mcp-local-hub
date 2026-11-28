@@ -1,0 +1,96 @@
+{
+  "schema": "historical-cli717-public-artifact-manifest-v1",
+  "files": [
+    {
+      "file": "README.md",
+      "bytes": 24011,
+      "sha256": "b1fde0010aa54eae06cf52c148cacb5a05b325dbf05f90416b54fdfc5cf8d235",
+      "git_blob": "23c428a57557f62ca164cb1392356d0ab0f1df8b"
+    },
+    {
+      "file": "evidence.json",
+      "bytes": 77975,
+      "sha256": "963cec64e68bd7d450a4c6aee300db2a2e25efa85eb765221c4b24565313383e",
+      "git_blob": "d658e8fc9b10240b6738dcff2d4d1d1a0bdd8d96"
+    },
+    {
+      "file": "ledger.jsonl",
+      "bytes": 282630,
+      "sha256": "bd67d058b2fcbed6796a04411c31d0b44ce90b62fa73d1778d59bbbded537baf",
+      "git_blob": "24749c004d46094279cc8b26680b3baf3c0c0f29"
+    },
+    {
+      "file": "cli717-roots.txt",
+      "bytes": 40832,
+      "sha256": "e5b4c2c96999995960e28931f4632a6a29b195933f13e1038aa0559885716cc6",
+      "git_blob": "9ea2ba62b97c5a24ba6506d1a1f89c31af93a352"
+    },
+    {
+      "file": "verify_history.py",
+      "bytes": 9170,
+      "sha256": "aa443d3bb7dcd6c604a6f6e0a7c368f28ae89c44d03de0b810647b6a1fb88c9c",
+      "git_blob": "b4e54887d1123299a724b0b13a7cd72b7331e4db"
+    },
+    {
+      "file": "data-replay-result.json",
+      "bytes": 390,
+      "sha256": "617c5890b678691227125d34811425884865720e1b334d1b89fa277a72e1e1eb",
+      "git_blob": "d4d07485b93b3059e7aff5c8b0d473f92740479d"
+    },
+    {
+      "file": "data-replay-evidence.json",
+      "bytes": 5616,
+      "sha256": "1e9e75dc875a5f06e6f582fc1c849219d2ebc325ec44924427acc33bb39246e3",
+      "git_blob": "b8aa4a9f792ad22e07ba1a80b2927456abcf6b50"
+    }
+  ],
+  "scope": {
+    "historical_aggregate_only": true,
+    "roots": 717,
+    "PASS": 712,
+    "SKIP": 5,
+    "original_runs": 4,
+    "source_revisions": 3,
+    "original_root_observations": 720,
+    "original_failures_preserved": true,
+    "mandatory_full_gate_qualification": false,
+    "cache_reuse_authorized": false,
+    "parser_executed": true,
+    "new_product_or_test_commands": false,
+    "data_parser_process_executed": true
+  },
+  "privacy": {
+    "host_paths_in_public_files": 0,
+    "raw_private_captures_included": false,
+    "private_process_ids_included": false
+  },
+  "review": {
+    "source_of_data": "Original closed metadata then original captures; every raw input digest is recorded in evidence.json.",
+    "root_review": "PENDING",
+    "native_publication_gate": "NOT_RUN"
+  },
+  "scope_at_initial_authoring": {
+    "historical_aggregate_only": true,
+    "roots": 717,
+    "PASS": 712,
+    "SKIP": 5,
+    "original_runs": 4,
+    "source_revisions": 3,
+    "original_root_observations": 720,
+    "original_failures_preserved": true,
+    "mandatory_full_gate_qualification": false,
+    "cache_reuse_authorized": false,
+    "new_tests_or_native_execution": false,
+    "parser_executed": false
+  },
+  "initial_authoring_manifest": {
+    "bytes": 1894,
+    "sha256": "4b1c589c33e0a19e47200db49550d32784afbb735a78110576fc65cdc5ef0b9b"
+  },
+  "data_replay": {
+    "file": "data-replay-evidence.json",
+    "sha256": "1e9e75dc875a5f06e6f582fc1c849219d2ebc325ec44924427acc33bb39246e3",
+    "result_file": "data-replay-result.json",
+    "result_sha256": "617c5890b678691227125d34811425884865720e1b334d1b89fa277a72e1e1eb"
+  }
+}

@@ -101,21 +101,42 @@ func TestRunStrictlyContained_WindowsTimeoutProofWindowFastAndSlow(t *testing.T)
 			}
 			cmd := exec.Command(os.Args[0], "-test.run=^TestRunStrictlyContained_WindowsTimeoutProofWindowFastAndSlow$")
 			cmd.Env = append(os.Environ(), "MCPHUB_STRICT_PROOF_WINDOW_HELPER=1")
-			firstWait := time.Time{}
+			NoConsole(cmd)
+			// Model the proof window instead of asserting that the host must
+			// signal a terminated process within 50ms. The original native
+			// handle must still really signal before positive settlement.
+			// Real-time timeout acceptance is covered separately above.
+			virtual := time.Unix(0, 0)
+			start := virtual
+			queries := 0
+			nativeAccounting := job.terminationOperations().accounting
+			var initial jobObjectBasicAccountingInformation
 			realSignaled := false
-			job.terminationOps = &jobTerminationOps{wait: func(h windows.Handle) (uint32, error) {
-				if firstWait.IsZero() {
-					firstWait = time.Now()
-				}
-				if time.Since(firstWait) < tc.delay {
-					return uint32(windows.WAIT_TIMEOUT), nil
-				}
-				status, waitErr := windows.WaitForSingleObject(h, 0)
-				if waitErr == nil && status == uint32(windows.WAIT_OBJECT_0) {
-					realSignaled = true
-				}
-				return status, waitErr
-			}}
+			job.terminationOps = &jobTerminationOps{
+				now:   func() time.Time { return virtual },
+				sleep: func(d time.Duration) { virtual = virtual.Add(d) },
+				accounting: func(got *Job) (jobObjectBasicAccountingInformation, error) {
+					queries++
+					if queries == 1 {
+						var err error
+						initial, err = nativeAccounting(got)
+						return initial, err
+					}
+					// Only the post-termination accounting phase is modeled. Keep
+					// the real captured lifetime count; it is not always one.
+					return jobObjectBasicAccountingInformation{TotalProcesses: initial.TotalProcesses}, nil
+				},
+				wait: func(h windows.Handle) (uint32, error) {
+					if virtual.Sub(start) < tc.delay {
+						return uint32(windows.WAIT_TIMEOUT), nil
+					}
+					status, waitErr := windows.WaitForSingleObject(h, 2000)
+					if waitErr == nil && status == uint32(windows.WAIT_OBJECT_0) {
+						realSignaled = true
+					}
+					return status, waitErr
+				},
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
 			defer cancel()
 			result, runErr := runStrictlyContainedWithJob(ctx, StrictRunInvocation{Command: cmd, InputLimit: 1, StdoutLimit: 1024, StderrLimit: 1024}, job)

@@ -1,0 +1,189 @@
+{
+  "schema": "original-private-publisher-inputs-v6",
+  "status": "COMPILED_INPUTS_ONLY",
+  "source_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+  "source_root": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\source",
+  "source_snapshot": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\source-snapshot.json",
+    "sha256": "5f59bbe051cbd6e160e3e84e67180d96940b13191988b7e41eb760d3eea1ac6f"
+  },
+  "publisher_source": {
+    "schema": "windows-publisher-source-input-v1",
+    "source_snapshot_sha256": "5f59bbe051cbd6e160e3e84e67180d96940b13191988b7e41eb760d3eea1ac6f",
+    "source_epoch": "ae08125e26c7ed74cbda52e47903dfb8873ce19e852a675e0762af847b163ee9",
+    "file_count": 3508
+  },
+  "inputs": {
+    "default": {
+      "input": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\migration-default-input.json",
+        "sha256": "bd0ad3fcf51941c7bf98e7a3c0e3d877ff298e6d17e24e50eb2e58aee4c5a47e"
+      },
+      "image": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\publisher-test-images\\cli-publisher-default.test.exe",
+        "sha256": "5c5cfc94af370194bb047a433912b4cda50bcd4827633aa4c5185d6736364e7c"
+      },
+      "issuer": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\compiler-inputs-default\\cli-publisher-test-inputs.json",
+        "sha256": "8bcf922364b2e162e6c20425300344a483678461379f721ed352080da4eeaa98"
+      },
+      "evidence_parent": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\o6d28",
+      "evidence_creation": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\evidence-parent-default.json",
+        "sha256": "0ad0c9460d12e313e9e96d33693b07df8f0f39d0349685aa98031228484595e9"
+      },
+      "compiler_argv": [
+        "@@RECOVERY_MSYS2_HOME_ESCAPED@@\\ucrt64\\lib\\go\\bin\\go.exe",
+        "test",
+        "-c",
+        "-o",
+        "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\publisher-test-images\\cli-publisher-default.test.exe",
+        "-ldflags",
+        "-H windowsgui -X mcp-local-hub/internal/buildinfo.version=0.4.60 -X mcp-local-hub/internal/buildinfo.commit=3ebe335a2f666a5279d7fafc31a6f4dc3feedff4 -X mcp-local-hub/internal/buildinfo.date=2026-11-28T11:11:34Z -X mcp-local-hub/internal/buildinfo.publisherSourceEpoch=ae08125e26c7ed74cbda52e47903dfb8873ce19e852a675e0762af847b163ee9",
+        "./internal/cli"
+      ],
+      "issuer_argv": [
+        "@@RECOVERY_WINDOWS_HOME_ESCAPED@@\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "-NoLogo",
+        "-NoProfile",
+        "-File",
+        "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\invoke_fixed_build_utf8.ps1",
+        "-SourcePath",
+        "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\source\\build.ps1",
+        "-SourceSHA256",
+        "5038e339e55b4dcc4b2fca3d1231790c00a833431bb3608826ce74d4bca8c9f6",
+        "-PrepareCLIPrivatePreparationInputs",
+        "-PrivateCLIPreparationLane",
+        "default",
+        "-WindowsTargetArch",
+        "amd64",
+        "-OutputDirectory",
+        "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\compiler-inputs-default",
+        "-ReleaseVersion",
+        "0.4.60",
+        "-ReleaseCommit",
+        "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+        "-ReleaseBuildDate",
+        "2026-11-28T11:11:34Z",
+        "-SourceSnapshotPath",
+        "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\source-snapshot.json"
+      ],
+      "generated_main": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\default-generated-testmain.go",
+        "sha256": "8e7be415bbeef2c11e0f3b0204a2dd3fb3afae46e12ca4bcb74cc336365af2b7"
+      },
+      "closures": {
+        "before": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\default-closure-before.json",
+          "sha256": "c1f35cd70ac735ff8da8c23f90f8220909f1c44e121dabc7bbd75e908a4d7faa",
+          "generated_main": {
+            "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-private-compile-v7\\private\\go-build\\8e\\8e7be415bbeef2c11e0f3b0204a2dd3fb3afae46e12ca4bcb74cc336365af2b7-d",
+            "sha256": "8e7be415bbeef2c11e0f3b0204a2dd3fb3afae46e12ca4bcb74cc336365af2b7"
+          }
+        },
+        "staged": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\default-closure-staged.json",
+          "sha256": "d537dc4d673bd86ddbb3c335fd1254f303319bd0a4de727482f964cbdc2e9f93",
+          "generated_main": {
+            "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-private-compile-v7\\private\\go-build\\8e\\8e7be415bbeef2c11e0f3b0204a2dd3fb3afae46e12ca4bcb74cc336365af2b7-d",
+            "sha256": "8e7be415bbeef2c11e0f3b0204a2dd3fb3afae46e12ca4bcb74cc336365af2b7"
+          }
+        }
+      },
+      "build_info": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\publisher-default-go-build-info.json",
+        "sha256": "9612239b134bd245086bdbc2bd0f0d64edc18c37a380a8d58825aa13ec9dbc07"
+      }
+    },
+    "state": {
+      "input": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\migration-state-input.json",
+        "sha256": "9455c97de4bcf709a392f2909ddba977e2a914bcf94465009a52038bd6d994a9"
+      },
+      "image": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\publisher-test-images\\cli-publisher-state.test.exe",
+        "sha256": "0bd8fd3bc4deeadec72a6659056d23d4f47928214456ed6637a62731ee3d8911"
+      },
+      "issuer": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\compiler-inputs-test_state_path_env\\cli-publisher-test-inputs.json",
+        "sha256": "0a3b69f75cc547865e85adab30bdcf5402a080cf3534aefc2ebc95cf6fc9aada"
+      },
+      "evidence_parent": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\o6s28",
+      "evidence_creation": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\evidence-parent-state.json",
+        "sha256": "08cce646e929c26f546eaea3317e3f9265a214ec4f5dbad0261236bcc7ce5888"
+      },
+      "compiler_argv": [
+        "@@RECOVERY_MSYS2_HOME_ESCAPED@@\\ucrt64\\lib\\go\\bin\\go.exe",
+        "test",
+        "-c",
+        "-o",
+        "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\publisher-test-images\\cli-publisher-state.test.exe",
+        "-ldflags",
+        "-H windowsgui -X mcp-local-hub/internal/buildinfo.version=0.4.60 -X mcp-local-hub/internal/buildinfo.commit=3ebe335a2f666a5279d7fafc31a6f4dc3feedff4 -X mcp-local-hub/internal/buildinfo.date=2026-11-28T11:11:34Z -X mcp-local-hub/internal/buildinfo.publisherSourceEpoch=ae08125e26c7ed74cbda52e47903dfb8873ce19e852a675e0762af847b163ee9",
+        "-tags",
+        "test_state_path_env",
+        "./internal/cli"
+      ],
+      "issuer_argv": [
+        "@@RECOVERY_WINDOWS_HOME_ESCAPED@@\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "-NoLogo",
+        "-NoProfile",
+        "-File",
+        "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\invoke_fixed_build_utf8.ps1",
+        "-SourcePath",
+        "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\source\\build.ps1",
+        "-SourceSHA256",
+        "5038e339e55b4dcc4b2fca3d1231790c00a833431bb3608826ce74d4bca8c9f6",
+        "-PrepareCLIPrivatePreparationInputs",
+        "-PrivateCLIPreparationLane",
+        "test_state_path_env",
+        "-WindowsTargetArch",
+        "amd64",
+        "-OutputDirectory",
+        "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\compiler-inputs-test_state_path_env",
+        "-ReleaseVersion",
+        "0.4.60",
+        "-ReleaseCommit",
+        "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+        "-ReleaseBuildDate",
+        "2026-11-28T11:11:34Z",
+        "-SourceSnapshotPath",
+        "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\source-snapshot.json"
+      ],
+      "generated_main": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\state-generated-testmain.go",
+        "sha256": "c638ea7c9ab03a083ef404b022d7986959e6f1a9e4a93b6f55e720cc6dc71a91"
+      },
+      "closures": {
+        "before": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\state-closure-before.json",
+          "sha256": "fab7b537e6a5d05259d6b8c55c651e9bce7dad93a94d76b2be38485e7a2d21e4",
+          "generated_main": {
+            "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-private-compile-v7\\private\\go-build\\c6\\c638ea7c9ab03a083ef404b022d7986959e6f1a9e4a93b6f55e720cc6dc71a91-d",
+            "sha256": "c638ea7c9ab03a083ef404b022d7986959e6f1a9e4a93b6f55e720cc6dc71a91"
+          }
+        },
+        "staged": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\state-closure-staged.json",
+          "sha256": "e401c612bea3bd49e544c6dff95634a04086ae8a1685b9dff45323ba7d72346e",
+          "generated_main": {
+            "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-private-compile-v7\\private\\go-build\\c6\\c638ea7c9ab03a083ef404b022d7986959e6f1a9e4a93b6f55e720cc6dc71a91-d",
+            "sha256": "c638ea7c9ab03a083ef404b022d7986959e6f1a9e4a93b6f55e720cc6dc71a91"
+          }
+        }
+      },
+      "build_info": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\publisher-state-go-build-info.json",
+        "sha256": "69a5d8a56b9c0254587dc9bac664b4aaca68bd3bd934fae3052f5b7278b4c8d4"
+      }
+    }
+  },
+  "source_restored": true,
+  "tests_executed": false,
+  "bindings": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\original-product-build-bindings-v7.json",
+    "sha256": "1a4fa1f84632e73005919cbb0aa4dfda299fb96ec793b0ac2a74cce4fc052381"
+  },
+  "scope": "Separate 3ebe publisher images for14 migration child roots. Literal incoming727d Go image is independently compiled by unchanged mandatory commands."
+}

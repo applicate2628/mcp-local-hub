@@ -1,0 +1,253 @@
+diff --git a/internal/cli/upgrade_gui_qualified_fixture_windows_test.go b/internal/cli/upgrade_gui_qualified_fixture_windows_test.go
+index 647c9568e0a5d8a82cff0ba60316cadfd5079259..55add3dc53965a53d818e0c0cdd05f723847b4e7 100644
+--- a/internal/cli/upgrade_gui_qualified_fixture_windows_test.go
++++ b/internal/cli/upgrade_gui_qualified_fixture_windows_test.go
+@@ -48,18 +48,18 @@
+ // The supplied build data must independently agree with the public build
+ // observer and a native acquisition. The explicit test-Product mode permits
+ // absent publisher-source metadata; it never relaxes file or binding admission.
+-func loadWindowsCanonicalEntryFixture(t *testing.T, requiredEnv string) *windowsCanonicalEntryFixture {
++func loadWindowsCanonicalEntryFixture(t *testing.T, fixtureEnv, requiredEnv string) *windowsCanonicalEntryFixture {
+ 	t.Helper()
+ 	required, requireSet := os.LookupEnv(requiredEnv)
+ 	if requireSet && required != "1" {
+ 		t.Fatalf("%s must be 1 when supplied", requiredEnv)
+ 	}
+-	inputPath, inputSet := os.LookupEnv("MCPHUB_CANONICAL_ENTRY_FIXTURE")
++	inputPath, inputSet := os.LookupEnv(fixtureEnv)
+ 	if !inputSet && !requireSet {
+ 		t.Skip("requires an explicitly supplied qualified Windows canonical entry fixture")
+ 	}
+ 	if !filepath.IsAbs(inputPath) {
+-		t.Fatal("MCPHUB_CANONICAL_ENTRY_FIXTURE requires an absolute fixture input file")
++		t.Fatalf("%s requires an absolute fixture input file", fixtureEnv)
+ 	}
+ 	raw, err := os.ReadFile(inputPath)
+ 	if err != nil {
+@@ -160,7 +160,7 @@
+ 
+ func newQualifiedUpgradeGUICommandFixture(t *testing.T) *qualifiedUpgradeGUICommandFixture {
+ 	t.Helper()
+-	built := loadWindowsCanonicalEntryFixture(t, "MCPHUB_CANONICAL_COMMAND_FIXTURE_REQUIRED")
++	built := loadWindowsCanonicalEntryFixture(t, "MCPHUB_CANONICAL_ENTRY_FIXTURE", "MCPHUB_CANONICAL_COMMAND_FIXTURE_REQUIRED")
+ 	executable, err := os.Executable()
+ 	if err != nil || !samePath(executable, built.Targets.ProductPath) {
+ 		t.Fatalf("command fixture must execute its qualified Product: executable=%q Product=%q error=%v", executable, built.Targets.ProductPath, err)
+diff --git a/internal/cli/windows_canonical_entry_gui_native_replay_windows_test.go b/internal/cli/windows_canonical_entry_gui_native_replay_windows_test.go
+index b76bf5bb84d7f13ee818405faedf24f457e5814c..ec46d9e40f64f2db15565296656be2a0f7375688 100644
+--- a/internal/cli/windows_canonical_entry_gui_native_replay_windows_test.go
++++ b/internal/cli/windows_canonical_entry_gui_native_replay_windows_test.go
+@@ -24,7 +24,7 @@
+ // Only the GUI boundary is headless: it proves continuation to GUI start, not a
+ // running GUI, its health endpoint, or Windows Task Scheduler integration.
+ func TestCanonicalGUIRuntimeRecoveryNativeIndependentReplay(t *testing.T) {
+-	fixture := loadWindowsCanonicalEntryFixture(t, "MCPHUB_CANONICAL_ENTRY_FIXTURE_REQUIRED")
++	fixture := loadWindowsCanonicalEntryFixture(t, "MCPHUB_CANONICAL_NATIVE_ENTRY_FIXTURE", "MCPHUB_CANONICAL_ENTRY_FIXTURE_REQUIRED")
+ 	requireCanonicalGUIReplayStateIsolation(t, fixture.Targets.ProductPath)
+ 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+ 	defer cancel()
+diff --git a/internal/cli/supervisor_launch_successor_runtime_windows_test.go b/internal/cli/supervisor_launch_successor_runtime_windows_test.go
+index cd49eac954ba1358d466e6ea880a5fa3178758de..4878f4c23771729359149e7bc88e11fa0dda4db2 100644
+--- a/internal/cli/supervisor_launch_successor_runtime_windows_test.go
++++ b/internal/cli/supervisor_launch_successor_runtime_windows_test.go
+@@ -25,7 +25,7 @@
+ // native stage/prior FileObjects and supervisor creator/control/readiness. Only
+ // task storage is in-process; no GUI, task registration or daemon is started.
+ func TestCanonicalSuccessorNativeControlRetainsOriginalFiles(t *testing.T) {
+-	built := loadWindowsCanonicalEntryFixture(t, "MCPHUB_CANONICAL_ENTRY_FIXTURE_REQUIRED")
++	built := loadWindowsCanonicalEntryFixture(t, "MCPHUB_CANONICAL_NATIVE_ENTRY_FIXTURE", "MCPHUB_CANONICAL_ENTRY_FIXTURE_REQUIRED")
+ 	requireCanonicalGUIReplayStateIsolation(t, built.Targets.ProductPath)
+ 	for _, priorKind := range []string{"absent", "identical", "different-identity"} {
+ 		t.Run(priorKind, func(t *testing.T) {
+diff --git a/internal/cli/windows_product_preflight_original_windows_test.go b/internal/cli/windows_product_preflight_original_windows_test.go
+index 4083571410ac4f0aeaaee8a05159bbfe96f3dde8..151410a7586b9379bbf15269f5743562a21c1d1b 100644
+--- a/internal/cli/windows_product_preflight_original_windows_test.go
++++ b/internal/cli/windows_product_preflight_original_windows_test.go
+@@ -75,7 +75,7 @@
+ }
+ 
+ func TestWindowsProductPreflightOriginalEntrySet(t *testing.T) {
+-	built := loadWindowsCanonicalEntryFixture(t, "MCPHUB_CANONICAL_ENTRY_FIXTURE_REQUIRED")
++	built := loadWindowsCanonicalEntryFixture(t, "MCPHUB_CANONICAL_ENTRY_FIXTURE", "MCPHUB_CANONICAL_ENTRY_FIXTURE_REQUIRED")
+ 	for _, tc := range []struct {
+ 		prior       string
+ 		disposition windowsProductTargetDispositionV1
+diff --git a/internal/process/jobobject_windows_test.go b/internal/process/jobobject_windows_test.go
+index 1d2cd7ae38db2d1d5a5d2e1ef5df114166f7a202..b079fc962fae048d8e6e72234f3247bcfc019550 100644
+--- a/internal/process/jobobject_windows_test.go
++++ b/internal/process/jobobject_windows_test.go
+@@ -509,6 +509,7 @@
+ 
+ const jobFixtureEntryPrefix = "WJOB-ENTRY-V1 "
+ const jobFixtureEntryConfigEnv = "MCPHUB_JOB_FIXTURE_ENTRY_CONFIG"
++const jobFixtureFullSuiteEnv = "MCPHUB_JOB_FIXTURE_FULL_SUITE"
+ const jobFixtureFrameLimit = 8192
+ 
+ type jobFixtureEntryBind struct {
+@@ -575,6 +576,53 @@
+ 	attempted bool
+ }
+ 
++// The explicit full-suite controller needs the original grant before any test
++// can create another process. The fixed two-test entry remains demand-driven.
++func TestMain(m *testing.M) {
++	if os.Getenv(jobFixtureFullSuiteEnv) == "" {
++		os.Exit(m.Run())
++	}
++	if os.Getenv(jobFixtureFullSuiteEnv) != "1" {
++		fmt.Fprintln(os.Stderr, "invalid full-suite Job entry mode")
++		os.Exit(2)
++	}
++	jobFixtureEntryLease.Lock()
++	jobFixtureEntryLease.attempted = true
++	jobFixtureEntryLease.token, jobFixtureEntryLease.err = receiveJobFixtureEntry()
++	token, err := jobFixtureEntryLease.token, jobFixtureEntryLease.err
++	jobFixtureEntryLease.Unlock()
++	if err != nil || token == nil || token.Ready.PID != uint32(os.Getpid()) {
++		fmt.Fprintln(os.Stderr, "qualified full-suite original entry refused:", err)
++		os.Exit(2)
++	}
++	// Self helper children must not start a second entry handshake.
++	if err := errors.Join(os.Unsetenv(jobFixtureEntryConfigEnv), os.Unsetenv(jobFixtureFullSuiteEnv)); err != nil {
++		fmt.Fprintln(os.Stderr, "clear consumed full-suite entry environment:", err)
++		os.Exit(2)
++	}
++	// receiveJobFixtureEntry received EOF and closed its control pipe. Restore
++	// the actual NUL input used by the ordinary noninteractive Go test driver,
++	// both for os.Stdin readers and native GetStdHandle consumers.
++	input, err := os.Open(os.DevNull)
++	if err != nil {
++		fmt.Fprintln(os.Stderr, "open full-suite NUL stdin:", err)
++		os.Exit(2)
++	}
++	if err := windows.SetStdHandle(windows.STD_INPUT_HANDLE, windows.Handle(input.Fd())); err != nil {
++		fmt.Fprintln(os.Stderr, "set full-suite NUL stdin:", errors.Join(err, input.Close()))
++		os.Exit(2)
++	}
++	os.Stdin = input
++	code := m.Run()
++	if err := errors.Join(windows.SetStdHandle(windows.STD_INPUT_HANDLE, 0), input.Close()); err != nil {
++		fmt.Fprintln(os.Stderr, "close full-suite NUL stdin:", err)
++		if code == 0 {
++			code = 1
++		}
++	}
++	os.Exit(code)
++}
++
+ func jobFixtureHex(value string, size int) bool {
+ 	if len(value) != size || strings.ToLower(value) != value {
+ 		return false
+diff --git a/internal/cli/attach_client_real_supervisor_windows_test.go b/internal/cli/attach_client_real_supervisor_windows_test.go
+index e078843fdf2403930745f2dc3a78497ed0b984b7..673549bccf66c005c527bfabe92df5dd6f2f6528 100644
+--- a/internal/cli/attach_client_real_supervisor_windows_test.go
++++ b/internal/cli/attach_client_real_supervisor_windows_test.go
+@@ -106,7 +106,7 @@
+ 	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
+ 		t.Fatal(err)
+ 	}
+-	conn, reader, stop := startSuperviseForIPCTest(t, stateDir)
++	conn, reader, _, stop := startSuperviseForIPCTest(t, stateDir)
+ 	stopped := false
+ 	defer func() {
+ 		if !stopped {
+diff --git a/internal/process/run_strictly_contained_windows_test.go b/internal/process/run_strictly_contained_windows_test.go
+index 17e60f3fbc598c8d608180c0334ec25a2651f12c..3034a398598215aa8162a08b6884354e6408e7e3 100644
+--- a/internal/process/run_strictly_contained_windows_test.go
++++ b/internal/process/run_strictly_contained_windows_test.go
+@@ -101,21 +101,71 @@
+ 			}
+ 			cmd := exec.Command(os.Args[0], "-test.run=^TestRunStrictlyContained_WindowsTimeoutProofWindowFastAndSlow$")
+ 			cmd.Env = append(os.Environ(), "MCPHUB_STRICT_PROOF_WINDOW_HELPER=1")
++			native := job.terminationOperations()
++			clock := time.Now()
+ 			firstWait := time.Time{}
+-			realSignaled := false
+-			job.terminationOps = &jobTerminationOps{wait: func(h windows.Handle) (uint32, error) {
+-				if firstWait.IsZero() {
+-					firstWait = time.Now()
+-				}
+-				if time.Since(firstWait) < tc.delay {
+-					return uint32(windows.WAIT_TIMEOUT), nil
+-				}
+-				status, waitErr := windows.WaitForSingleObject(h, 0)
+-				if waitErr == nil && status == uint32(windows.WAIT_OBJECT_0) {
+-					realSignaled = true
+-				}
+-				return status, waitErr
+-			}}
++			var originalHandle windows.Handle
++			nativeSignalReceived, realSignaled := false, false
++			job.terminationOps = &jobTerminationOps{
++				openProcess: func(pid uint32) (windows.Handle, error) {
++					h, openErr := native.openProcess(pid)
++					if openErr == nil && pid == uint32(cmd.Process.Pid) {
++						// Borrow the member handle already owned by TerminateAll.
++						originalHandle = h
++					}
++					return h, openErr
++				},
++				terminate: func(job *Job) error {
++					if err := native.terminate(job); err != nil {
++						return err
++					}
++					if originalHandle == 0 {
++						return errors.New("fixture did not capture its original member handle")
++					}
++					// Receive real exit and same-Job accounting before the model clock.
++					// One native deadline bounds synchronization, not exit latency.
++					syncDeadline := native.now().Add(5 * time.Second)
++					for {
++						status, waitErr := windows.WaitForSingleObject(originalHandle, 0)
++						info, accountingErr := native.accounting(job)
++						if waitErr != nil || accountingErr != nil {
++							return errors.Join(waitErr, accountingErr)
++						}
++						if status != uint32(windows.WAIT_OBJECT_0) && status != uint32(windows.WAIT_TIMEOUT) {
++							return errors.New("fixture original member wait returned an unexpected status")
++						}
++						if !native.now().Before(syncDeadline) {
++							return errors.New("fixture original signal/accounting synchronization expired")
++						}
++						if status == uint32(windows.WAIT_OBJECT_0) && info.ActiveProcesses == 0 {
++							nativeSignalReceived = true
++							return nil
++						}
++						pause := time.Millisecond
++						if remaining := syncDeadline.Sub(native.now()); remaining < pause {
++							pause = remaining
++						}
++						if pause > 0 {
++							native.sleep(pause)
++						}
++					}
++				},
++				now:   func() time.Time { return clock },
++				sleep: func(delay time.Duration) { clock = clock.Add(delay) },
++				wait: func(h windows.Handle) (uint32, error) {
++					if firstWait.IsZero() {
++						firstWait = clock
++					}
++					if clock.Sub(firstWait) < tc.delay {
++						return uint32(windows.WAIT_TIMEOUT), nil
++					}
++					status, waitErr := windows.WaitForSingleObject(h, 0)
++					if waitErr == nil && status == uint32(windows.WAIT_OBJECT_0) {
++						realSignaled = true
++					}
++					return status, waitErr
++				},
++			}
+ 			ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+ 			defer cancel()
+ 			result, runErr := runStrictlyContainedWithJob(ctx, StrictRunInvocation{Command: cmd, InputLimit: 1, StdoutLimit: 1024, StderrLimit: 1024}, job)
+@@ -123,6 +173,9 @@
+ 			if !errors.As(runErr, &strict) || strict.Kind != StrictRunTimeout || !errors.Is(runErr, context.DeadlineExceeded) {
+ 				t.Fatalf("timeout contract=%v", runErr)
+ 			}
++			if !nativeSignalReceived {
++				t.Fatalf("fixture lacked a real original member signal: %v", runErr)
++			}
+ 			if (result.SettledExit != nil) != tc.want {
+ 				t.Fatalf("positive fact=%+v want=%v run=%v", result.SettledExit, tc.want, runErr)
+ 			}

@@ -1,0 +1,280 @@
+{
+  "schema": "mcphub-integration-replay-verification-v1",
+  "scope": "Source tree replay only; no build or native runtime execution",
+  "composition_sha256": "cdcb3f9583e1c6b06171e978bab75102808b230c648a99c7dccd5a38fc0b31b6",
+  "historical_target_commit": "c730cae455ef84d226ac5323953d9e7209b4016e",
+  "expected_tree": "0c42ea39f241077cb6a9e1a64efe6d1e0a726751",
+  "steps": [
+    {
+      "id": "public-668",
+      "tree": "2b94bf81d498b9149a67ac758a21e6b03b195a9a",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "public-669",
+      "tree": "8c76e7fbf4b3b1eef1d54327ed0da155359bc30b",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "public-632",
+      "tree": "4610d5041402d8e304ec2ec3b3ad15b01c62ff56",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "public-635",
+      "tree": "b94fd611b2a0083572d6680856194af17dd99cc4",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "public-643",
+      "tree": "64f40820ae749b0b6f2e182fe40913c6e1a1f004",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "public-649",
+      "tree": "58225d1eeca5b2f5c281943d40b93f111110552e",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "public-637",
+      "tree": "97fe8da6523cb24ce7ba979140076766c4add8d6",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "public-646",
+      "tree": "7e63313a85aa38440d5c024425c1b661424f9820",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "public-647",
+      "tree": "e7494a115fee73c60f7bdb3803c0b0a7e4ef9f6d",
+      "observed_conflicts": [
+        "internal/api/serena_build_environment.go"
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "public-650",
+      "tree": "b7cc4bfa49748404a80c7d6b53de0529bb463799",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "public-653",
+      "tree": "89acf527e780fbb30bf161354cf7c9ca7b54a2c0",
+      "observed_conflicts": [
+        "internal/api/serena_tcp_rows_observed_windows.go"
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "public-654",
+      "tree": "0d247414b2b33e194822e5bfb9d28705cf80465f",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "public-655",
+      "tree": "71bdb65c74b5c4e2f561fdf33b42f6ef26fe1c34",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "public-628",
+      "tree": "d463b056dd68e8a8a99a7a99c5dc63a07393870e",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "public-660",
+      "tree": "ca4343c9660d7aba0d3ba66cb5beea90287db1f1",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "public-659",
+      "tree": "fa4de8aacc0cba7830ddb76d0d4aa574ff039834",
+      "observed_conflicts": [
+        "internal/api/main_test.go"
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "public-663",
+      "tree": "b03dcb4fc0d387d95274beae39022a441e25a01c",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "public-657",
+      "tree": "ab41c224a0c1f331a04742c9699a29be5223a53f",
+      "observed_conflicts": [
+        "build.ps1"
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "public-661",
+      "tree": "e60437e56278232259b5d716d98e6e2e0678ee72",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "public-664",
+      "tree": "31dfcf2b37efacbc65a93b105601b11e152d59d2",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "public-665",
+      "tree": "4d16d80048ad6dab0c96d7ff61067be4af87f55e",
+      "observed_conflicts": [
+        "internal/api/intent_audit_caller_oracle_test.go",
+        "internal/api/main_test.go"
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "public-666",
+      "tree": "f1e0e211a441f9346a80a6994f1472819fd6a1ca",
+      "observed_conflicts": [
+        "internal/cli/secrets_audit_test.go",
+        "internal/cli/settings_registry_test.go",
+        "internal/cli/testmain_helpers_test.go"
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "public-667",
+      "tree": "2c2825ee25932199eda3626ee2c26da31c99be74",
+      "observed_conflicts": [
+        "internal/perftools/discovery.go",
+        "internal/perftools/exec.go",
+        "internal/perftools/exec_test.go"
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "public-624",
+      "tree": "820def5a4f98f7f8ddedeea53a145a10bcc09141",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "public-626",
+      "tree": "f6ef2a362e168a7523794863c68c96d5555b0761",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "public-629",
+      "tree": "40f27c0a8318184d71d8733df2e1e6c4408406bc",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "owner-cmake",
+      "tree": "6ac4185086da9437361f512d3f2bfca2ed38c98f",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "owner-relay",
+      "tree": "a98687d91ccefb82c50ac66b874f3cfa2095f228",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "owner-serena",
+      "tree": "703d37ed1aecca336da743178d49d8379f0586e2",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "owner-scheduler",
+      "tree": "52f85abe4262200fb6f325032a4145bc21c7aa59",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "owner-process",
+      "tree": "c54b32c925b13816d837690c5b3133c65fd3cbc3",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "owner-windows",
+      "tree": "30ea08ccdfdd7757a470b79d35abcaa3e92bd6d4",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "owner-windows-npm",
+      "tree": "a12dab34bbb3bbfdfeb92a9ee1f8013576424e56",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "owner-force_stop",
+      "tree": "edc0477d7f40137bc72f706f17b8907873d0c874",
+      "observed_conflicts": [
+        "internal/cli/supervise.go",
+        "internal/cli/supervisor_controller.go"
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "test-api-port-helper",
+      "tree": "f500c523b030c6aa7739446973615cbbd539e4f7",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "native-gofmt",
+      "tree": "6081e50fc5f3c33c27b223cfd68e2d1dbe404356",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "native-test-fixture-margin",
+      "tree": "386923930b874526a0e6896bde1857c4ecc95d63",
+      "observed_conflicts": [],
+      "status": "PASS"
+    },
+    {
+      "id": "native-gate-fixtures",
+      "tree": "0c42ea39f241077cb6a9e1a64efe6d1e0a726751",
+      "observed_conflicts": [],
+      "status": "PASS"
+    }
+  ],
+  "application_code_execution": "NONE",
+  "network": "NONE",
+  "refs_or_worktree_changes": "NONE",
+  "owner_source_files_verified": 89,
+  "pinned_input_commits_verified": 39,
+  "git_version": "git version 2.56.1",
+  "python_version": "3.12.14",
+  "actual_tree": "0c42ea39f241077cb6a9e1a64efe6d1e0a726751",
+  "status": "PASS",
+  "replay_script_sha256": "b05ef008fab4bc6c25d2131ea4c41f7727a0cfc407c5a535a917741eb85e318b",
+  "verification_boundary": "Original source inputs, recorded resolutions and patches produced every expected tree. This does not establish compilation, native behavior, Product qualification, or merge readiness.",
+  "extension_verification": {
+    "previous_composition_sha256": "743a7441e86f41d4063cc7724ebff183179525970ea2c6af2fe73ca84fb2dce9",
+    "unchanged_prefix_steps": 37,
+    "prefix_step_records_sha256": "4fa409a9c602da89c4b70cec1c47243f01a2c3d98ec1e5da44b2c43be24ec8cb",
+    "prefix_verification_records_sha256": "7c1799a6d5a2ede2b7c5851fe1a6e32f89e806c3e341ec4e074609b66972d97f",
+    "json_digest_encoding": "UTF-8 JSON, sorted object keys, compact separators",
+    "source_input_commits_and_owner_file_pins": "UNCHANGED",
+    "additional_patch_stages": 1,
+    "observed_new_step_conflicts": []
+  }
+}

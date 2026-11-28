@@ -1,0 +1,15 @@
+{
+  "base": "20807d2b0a713fff7900f3cd62b3db5561a0bdcf",
+  "tree_before_native_format": "4df69e99dca3f808b26e6a5bf7721bdd0ba3a91c",
+  "path": "internal/api/supervisor_intent_lock_ownership_test.go",
+  "raw_owner_additions": [
+    "tryAcquireLedgeredObservedLeaf",
+    "AcquireSupervisorLockQuietObserved",
+    "ObserveOccupiedSupervisorLockOwner",
+    "ReadOccupiedSupervisorLockOwner/func-lit#1"
+  ],
+  "review": "Four existing P02 acquisition owners reviewed from complete bodies and release/ledger paths; original legacy recovery raw row stays absent; WeeklyRefreshSet classifier map stays unchanged. Production source unchanged.",
+  "diagnostics": "Compare all mismatches in sorted order, preserving non-nil refusal on any mismatch and per-owner details.",
+  "v1_and_v2_failed_results_preserved": true,
+  "patch_sha256": "0d3d7543602a36bbfdec98839fc5738575011db9f9e8460c8526e9ad9c1e2bc1"
+}

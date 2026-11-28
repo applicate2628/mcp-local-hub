@@ -1,0 +1,740 @@
+{
+  "commands": [
+    {
+      "argv": [
+        "C:\\Program Files\\Git\\cmd\\git.exe",
+        "rev-parse",
+        "HEAD"
+      ],
+      "cwd": "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02",
+      "stdout": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\p02-source-commit-v3\\head.stdout.txt",
+      "stderr": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\p02-source-commit-v3\\head.stderr.txt",
+      "captures_measured": true,
+      "command_success": true,
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 41,
+          "bytes_stored": 41,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 407229.1493276
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 407229.1492882
+        }
+      },
+      "work_seconds": 30,
+      "cleanup_seconds": 10,
+      "native_owner": {
+        "path": "C:\\Users\\.orche\\releases\\dad4875f\\app\\scripts\\process_supervision\\windows_job.py",
+        "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+      },
+      "console": {
+        "attached": true,
+        "visible": false
+      },
+      "stdin_mode": "null",
+      "before_resume_entered": true,
+      "before_resume_returned": true,
+      "before_resume_deadline_exceeded": false,
+      "phases_elapsed_seconds": {
+        "initial_save_started": 5.4100004490464926e-05,
+        "initial_save_finished": 0.008909799973480403,
+        "launch_entered": 0.008914300007745624,
+        "before_resume_entered": 0.01499669998884201,
+        "before_resume_returned": 0.014999899955000728,
+        "launch_returned": 0.015024099964648485,
+        "launch_exception": null,
+        "external_settle_end": 0.10156109998933971
+      },
+      "quiescence_state": "complete",
+      "original_pid": 474644,
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "work_elapsed_seconds": 0.10135429998626933,
+      "cleanup_interval_seconds": 10.0,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "exit_code": 0,
+      "worker_join_observations": [
+        {
+          "name": "head-stdout",
+          "ident": 370104,
+          "native_id": 370104,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.10162109998054802,
+          "remaining_seconds": 9.999733200005721,
+          "last_entered_seconds": 0.10162109998054802,
+          "last_remaining_seconds": 9.999733200005721,
+          "returned_seconds": 0.10163289995398372,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.10088280000491068
+        },
+        {
+          "name": "head-stderr",
+          "ident": 293892,
+          "native_id": 293892,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.10163990000728518,
+          "remaining_seconds": 9.999714399978984,
+          "last_entered_seconds": 0.10163990000728518,
+          "last_remaining_seconds": 9.999714399978984,
+          "returned_seconds": 0.1016478999517858,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.10084339999593794
+        }
+      ],
+      "seconds": 0.10166939999908209,
+      "cleanup_deadline_exceeded": false,
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "original_input_writers_retained": true,
+      "original_input_writer_joined": false,
+      "completion_receiving": {
+        "schema": "ordinary-original-native-io-completion-v1",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "io": {
+          "stdout": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 41,
+            "bytes_stored": 41,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 407229.1493276
+          },
+          "stderr": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 0,
+            "bytes_stored": 0,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 407229.1492882
+          }
+        },
+        "stdin_mode": "null",
+        "stdin": {},
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "original_input_writer_joined": false,
+        "lifecycle_state": "CLOSED"
+      },
+      "stdout_sha256": "a75b41b752a6a160b04c7158a6c04fd7673ae102bcb0988cac66a6a0db539a6f",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "C:\\Program Files\\Git\\cmd\\git.exe",
+        "write-tree"
+      ],
+      "cwd": "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02",
+      "stdout": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\p02-source-commit-v3\\write-v3-composition-tree.stdout.txt",
+      "stderr": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\p02-source-commit-v3\\write-v3-composition-tree.stderr.txt",
+      "captures_measured": true,
+      "command_success": true,
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 41,
+          "bytes_stored": 41,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 407229.7606536
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 407229.7606195
+        }
+      },
+      "work_seconds": 30,
+      "cleanup_seconds": 10,
+      "native_owner": {
+        "path": "C:\\Users\\.orche\\releases\\dad4875f\\app\\scripts\\process_supervision\\windows_job.py",
+        "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+      },
+      "console": {
+        "attached": true,
+        "visible": false
+      },
+      "stdin_mode": "null",
+      "before_resume_entered": true,
+      "before_resume_returned": true,
+      "before_resume_deadline_exceeded": false,
+      "phases_elapsed_seconds": {
+        "initial_save_started": 4.640000406652689e-05,
+        "initial_save_finished": 0.0006673000170849264,
+        "launch_entered": 0.0006696999771520495,
+        "before_resume_entered": 0.005250499991234392,
+        "before_resume_returned": 0.005252700007986277,
+        "launch_returned": 0.005272399983368814,
+        "launch_exception": null,
+        "external_settle_end": 0.6065497000236064
+      },
+      "quiescence_state": "complete",
+      "original_pid": 431228,
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "work_elapsed_seconds": 0.6064373999834061,
+      "cleanup_interval_seconds": 10.0,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "exit_code": 0,
+      "worker_join_observations": [
+        {
+          "name": "write-v3-composition-tree-stdout",
+          "ident": 361408,
+          "native_id": 361408,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.606579800019972,
+          "remaining_seconds": 9.999857599963434,
+          "last_entered_seconds": 0.606579800019972,
+          "last_remaining_seconds": 9.999857599963434,
+          "returned_seconds": 0.6065858000074513,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.6059474999783561
+        },
+        {
+          "name": "write-v3-composition-tree-stderr",
+          "ident": 428640,
+          "native_id": 428640,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.6065893999766558,
+          "remaining_seconds": 9.99984800000675,
+          "last_entered_seconds": 0.6065893999766558,
+          "last_remaining_seconds": 9.99984800000675,
+          "returned_seconds": 0.6065904999850318,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.6059134000097401
+        }
+      ],
+      "seconds": 0.6066036999691278,
+      "cleanup_deadline_exceeded": false,
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "original_input_writers_retained": true,
+      "original_input_writer_joined": false,
+      "completion_receiving": {
+        "schema": "ordinary-original-native-io-completion-v1",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "io": {
+          "stdout": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 41,
+            "bytes_stored": 41,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 407229.7606536
+          },
+          "stderr": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 0,
+            "bytes_stored": 0,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 407229.7606195
+          }
+        },
+        "stdin_mode": "null",
+        "stdin": {},
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "original_input_writer_joined": false,
+        "lifecycle_state": "CLOSED"
+      },
+      "stdout_sha256": "0a5f5748d77aea913f138bd4db09fcaf0656c3b71810356e5eed9c7b5b3267f1",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "C:\\Program Files\\Git\\cmd\\git.exe",
+        "commit-tree",
+        "4df69e99dca3f808b26e6a5bf7721bdd0ba3a91c",
+        "-p",
+        "20807d2b0a713fff7900f3cd62b3db5561a0bdcf",
+        "-m",
+        "Review complete observed-lock inventory in composed source"
+      ],
+      "cwd": "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02",
+      "stdout": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\p02-source-commit-v3\\create-v3-source-commit.stdout.txt",
+      "stderr": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\p02-source-commit-v3\\create-v3-source-commit.stderr.txt",
+      "captures_measured": true,
+      "command_success": true,
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 41,
+          "bytes_stored": 41,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 407230.7449478
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 407230.7450892
+        }
+      },
+      "work_seconds": 30,
+      "cleanup_seconds": 10,
+      "native_owner": {
+        "path": "C:\\Users\\.orche\\releases\\dad4875f\\app\\scripts\\process_supervision\\windows_job.py",
+        "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+      },
+      "console": {
+        "attached": true,
+        "visible": false
+      },
+      "stdin_mode": "null",
+      "before_resume_entered": true,
+      "before_resume_returned": true,
+      "before_resume_deadline_exceeded": false,
+      "phases_elapsed_seconds": {
+        "initial_save_started": 2.8100039344280958e-05,
+        "initial_save_finished": 0.0007180999964475632,
+        "launch_entered": 0.0007195000071078539,
+        "before_resume_entered": 0.007818899990525097,
+        "before_resume_returned": 0.007820500002708286,
+        "launch_returned": 0.007839900034014136,
+        "launch_exception": null,
+        "external_settle_end": 0.988993400009349
+      },
+      "quiescence_state": "complete",
+      "original_pid": 335944,
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "work_elapsed_seconds": 0.9782268999842927,
+      "cleanup_interval_seconds": 10.0,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "exit_code": 0,
+      "worker_join_observations": [
+        {
+          "name": "create-v3-source-commit-stdout",
+          "ident": 505272,
+          "native_id": 505272,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.9890331000206061,
+          "remaining_seconds": 9.989193799963687,
+          "last_entered_seconds": 0.9890331000206061,
+          "last_remaining_seconds": 9.989193799963687,
+          "returned_seconds": 0.9890420000301674,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.9776502000167966
+        },
+        {
+          "name": "create-v3-source-commit-stderr",
+          "ident": 484928,
+          "native_id": 484928,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.9890460000024177,
+          "remaining_seconds": 9.989180899981875,
+          "last_entered_seconds": 0.9890460000024177,
+          "last_remaining_seconds": 9.989180899981875,
+          "returned_seconds": 0.9890473000123166,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.9777915999875404
+        }
+      ],
+      "seconds": 0.9890600999933667,
+      "cleanup_deadline_exceeded": false,
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "original_input_writers_retained": true,
+      "original_input_writer_joined": false,
+      "completion_receiving": {
+        "schema": "ordinary-original-native-io-completion-v1",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "io": {
+          "stdout": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 41,
+            "bytes_stored": 41,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 407230.7449478
+          },
+          "stderr": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 0,
+            "bytes_stored": 0,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 407230.7450892
+          }
+        },
+        "stdin_mode": "null",
+        "stdin": {},
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "original_input_writer_joined": false,
+        "lifecycle_state": "CLOSED"
+      },
+      "stdout_sha256": "82ae303f5d486bb26e50d9495890b8f797684b522cfe02c19db647eaf629fb79",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "guard_sha256": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2",
+  "config_sha256": "69f46f99869d03fcd9c1b300f7f07b4d56266f39074efacc8e30fdfcff6abc4e",
+  "expected_head": "20807d2b0a713fff7900f3cd62b3db5561a0bdcf",
+  "source": "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02",
+  "status": "PASS",
+  "command_quiescence": {
+    "complete": true,
+    "commands": [
+      {
+        "name": "head",
+        "state": "complete",
+        "reason": "",
+        "direct_exit_known": true
+      },
+      {
+        "name": "write-v3-composition-tree",
+        "state": "complete",
+        "reason": "",
+        "direct_exit_known": true
+      },
+      {
+        "name": "create-v3-source-commit",
+        "state": "complete",
+        "reason": "",
+        "direct_exit_known": true
+      }
+    ]
+  },
+  "step_inputs": [
+    {
+      "name": "write-v3-composition-tree",
+      "files": {
+        "go.mod": "6d61e480d392b8ff20530467851e45d92c01bbde65468796f013d7eb30315392",
+        "go.sum": "61f4a30f006f3bc99b1d2500646d9fd381c3c8d72050ca76dce2f9321c3ecae2",
+        "internal/api/adopt_codex_transport_test.go": "e15d9ebf574459f5d13db01d58301df9cdebffa31870bc558b97b87af560d602",
+        "internal/api/adopt_deadopt_lifecycle_test.go": "f82d97abeffe51c45c2f3978937c8d679c8bef90612897a7fa25020bf05a4346",
+        "internal/api/adopt_h4_summary_signal_test.go": "bcbb8bd9352245f1e82ee5e97796109fee492ac70f75c42a32979a1fedb146a4",
+        "internal/api/adopt_lease_namespace_windows_test.go": "a438b754993f59bfc4924ceec9b93de481619d73b9caf522d8793260f648cfbb",
+        "internal/api/adopt_lease_owner_test.go": "5644d51a482785bf0078df9f2bd6abcf4c7c640b7c4821543af94ad9549321a7",
+        "internal/api/adopt_mcpcompat_test.go": "469c703c4678646076aed8d346ce4c70d0ff49cf5063752dab3dfc8a984cbbd9",
+        "internal/api/adopt_project_plan_test.go": "83938bc05419d530c579686b901f33d5324fa795d114fe50e54c71d79669cbb7",
+        "internal/api/adopt_provider_working_directory_windows_test.go": "1427099b98f5d851cb8bb2462bfa166ea7687d8ab34cc14142e9344fb39bb4f9",
+        "internal/api/adopt_test.go": "addd4a85c55dda9944e21a8d709fbda31a280c5ca474363fa656bebeb8302567",
+        "internal/api/install_legacy_scheduler_test.go": "77b058511a996340f4eb7932fd57e46bc793c0da5070f8fbd148805f0cb9a16e",
+        "internal/api/install_parsed_manifest.go": "1cb74920c1b4f1ebd7edc040236f922878d2845a72f63be9009fa2ac2aeaa4b7",
+        "internal/api/install_parsed_manifest_test.go": "3e52e75bd748e70c4995cdc9c26d7635c5390a7126c0101fc83da28b509cf98f",
+        "internal/api/liveness_task.go": "f17872de8e8390c650f59c364ea43ad45653fc9a2bde0054a58b7589a28c36fe",
+        "internal/api/liveness_task_test.go": "748280d678dfd1d3f092e10bad91bec97ecf55d2f7c790d0e9a31bccd5d4d963",
+        "internal/api/main_test.go": "db2c64934d607f167ea84136e16ecaf700232da3e89fa0b6ecd176147ed55c36",
+        "internal/api/phase_f_lifecycle_test.go": "9115fa55866088f5bdaae582927fd4ebfca599ffcbf42f112253e7f074fba702",
+        "internal/api/r36_lane_a2_fixes_test.go": "3f440542b79f85ec6e68795793bbdd84b81601a347c97528024baa6d2578ea47",
+        "internal/api/scheduler_mgmt.go": "858400e70dbc5c609aeebf99c5cd3d201e9088ce0309dee65151553185e67bcc",
+        "internal/api/scheduler_replacement.go": "257f6840bc7bb6279ea9753dfaae494bc486f55e142578820eb6e7d8497eb731",
+        "internal/api/scheduler_replacement_test.go": "2405ff31fe809cb6d49afbe63e9fc28eca497c3e8506f2f01965293eb6944880",
+        "internal/api/supervisor_intent_lock_ownership_test.go": "f5cca8c427319b92b58a2485c528c1338f955ebe405bbbc259ea013a360f0412",
+        "internal/api/supervisor_lock_test.go": "e230f1a0716b72507af573bf3b916ffabc3c51cd5ff385a7664aa654b14ec90e",
+        "internal/autostart/autostart.go": "4cbcda2e6fa67fa64e1a4f49f59706662b036c7607b8d9b6269d0480c8657649",
+        "internal/autostart/windows.go": "1332a7bceee2259f0db8c501f854431f5d7f9d8874076d13e15b3e6405ed9e3e",
+        "internal/autostart/windows_native_roundtrip_test.go": "9c9a4db59573d74f6ec8f7933352f7b1907d0b511c033b8752a994af882deb18",
+        "internal/autostart/windows_test.go": "ded4e1af9ac6b8fd11e36b0748b57e7048460144403422d8b1b5c2fd87093d18",
+        "internal/cli/adopt_mcpcompat_test.go": "1bece58170bc93053f2f6dbd5af2e6a6c47ace05187e1aa6c01021552215d88b",
+        "internal/cli/adopt_test.go": "7419bbbc572c752dd5c6e438cf964fb9e426d82304811b751f59a007f1f1712b",
+        "internal/cli/autostart.go": "0bfb9347472de56e671b69d9df5fe03aba7d49ce7beaae092326958450d30cf0",
+        "internal/cli/scheduler_cmd.go": "7e99119fef78bfba4d409f4602448a2be64159a96aaee346af507f14038d7c68",
+        "internal/cli/setup.go": "286231e9c27ed1fa72724a9d73b645ecefa88861b8d86bdf0c48712f74f7120d",
+        "internal/cli/setup_watchdog_test.go": "0663f6a8773e336c1f2c5af8508439d30b01101deefca2468050284fbc45e8a4",
+        "internal/cli/strict_mode.go": "67045dd8f6bc7abba9dc94c98aa5287354de44777a560f33a372fd481c683557",
+        "internal/cli/strict_mode_test.go": "9784b49574f37465f132ec0aac5051a1cd57d21701ddf12aabaa63be4ff6c7ad",
+        "internal/process/contained_stream_observed.go": "8d462e85903ad92167b8ff7034d672e7e7e8baefddf29f2698ea756e7bae11ef",
+        "internal/scheduler/scheduler.go": "bb826adf8a627f90eb6fedd7fbef2854d97ac2320bfffff295641554934e075d",
+        "internal/scheduler/task_xml_match.go": "61bff24e2abe59f100920fa3bd9c3303928c0e2d813e1bfdc51db788776c7b1e",
+        "internal/scheduler/task_xml_match_test.go": "fc40e670b6f1a2e5fe0b97cdb42cfd1457884031104ab24450a6f7c7ae8d0de3",
+        "internal/scheduler/task_xml_match_windows.go": "a6d238f6e8e1cae48f79a4aa06290162fb5b062456ce0624421ba12b2275f9de",
+        "internal/scheduler/task_xml_match_windows_test.go": "7be3d01fecef08c2e196256c21a1c42b000722974449c1e5efd5c71824a06fac",
+        "internal/vcpkgmcp/cmaketrace/parse.go": "f2601b4986d8cdaebd21539dab77e0ca49853d8e80bc555866372c0ce615ab44",
+        "internal/vcpkgmcp/cmaketrace/projection.go": "c336cc47835766b6e40f5183501967b56b69c3d46cb69902cab715c0f9709220",
+        "internal/vcpkgmcp/cmaketrace/r22_bot_regressions_test.go": "b7957d4283a6832ec7cad36bef01831de12aa2eda39914c9c47e08bf5b1accf7",
+        "internal/vcpkgmcp/cmaketrace/r32_bot_regressions_test.go": "7df8e57fd571b92d70e5d8849ed96898f3a4874d119dfd21858e581fb7f41522"
+      }
+    },
+    {
+      "name": "create-v3-source-commit",
+      "files": {
+        "go.mod": "6d61e480d392b8ff20530467851e45d92c01bbde65468796f013d7eb30315392",
+        "go.sum": "61f4a30f006f3bc99b1d2500646d9fd381c3c8d72050ca76dce2f9321c3ecae2",
+        "internal/api/adopt_codex_transport_test.go": "e15d9ebf574459f5d13db01d58301df9cdebffa31870bc558b97b87af560d602",
+        "internal/api/adopt_deadopt_lifecycle_test.go": "f82d97abeffe51c45c2f3978937c8d679c8bef90612897a7fa25020bf05a4346",
+        "internal/api/adopt_h4_summary_signal_test.go": "bcbb8bd9352245f1e82ee5e97796109fee492ac70f75c42a32979a1fedb146a4",
+        "internal/api/adopt_lease_namespace_windows_test.go": "a438b754993f59bfc4924ceec9b93de481619d73b9caf522d8793260f648cfbb",
+        "internal/api/adopt_lease_owner_test.go": "5644d51a482785bf0078df9f2bd6abcf4c7c640b7c4821543af94ad9549321a7",
+        "internal/api/adopt_mcpcompat_test.go": "469c703c4678646076aed8d346ce4c70d0ff49cf5063752dab3dfc8a984cbbd9",
+        "internal/api/adopt_project_plan_test.go": "83938bc05419d530c579686b901f33d5324fa795d114fe50e54c71d79669cbb7",
+        "internal/api/adopt_provider_working_directory_windows_test.go": "1427099b98f5d851cb8bb2462bfa166ea7687d8ab34cc14142e9344fb39bb4f9",
+        "internal/api/adopt_test.go": "addd4a85c55dda9944e21a8d709fbda31a280c5ca474363fa656bebeb8302567",
+        "internal/api/install_legacy_scheduler_test.go": "77b058511a996340f4eb7932fd57e46bc793c0da5070f8fbd148805f0cb9a16e",
+        "internal/api/install_parsed_manifest.go": "1cb74920c1b4f1ebd7edc040236f922878d2845a72f63be9009fa2ac2aeaa4b7",
+        "internal/api/install_parsed_manifest_test.go": "3e52e75bd748e70c4995cdc9c26d7635c5390a7126c0101fc83da28b509cf98f",
+        "internal/api/liveness_task.go": "f17872de8e8390c650f59c364ea43ad45653fc9a2bde0054a58b7589a28c36fe",
+        "internal/api/liveness_task_test.go": "748280d678dfd1d3f092e10bad91bec97ecf55d2f7c790d0e9a31bccd5d4d963",
+        "internal/api/main_test.go": "db2c64934d607f167ea84136e16ecaf700232da3e89fa0b6ecd176147ed55c36",
+        "internal/api/phase_f_lifecycle_test.go": "9115fa55866088f5bdaae582927fd4ebfca599ffcbf42f112253e7f074fba702",
+        "internal/api/r36_lane_a2_fixes_test.go": "3f440542b79f85ec6e68795793bbdd84b81601a347c97528024baa6d2578ea47",
+        "internal/api/scheduler_mgmt.go": "858400e70dbc5c609aeebf99c5cd3d201e9088ce0309dee65151553185e67bcc",
+        "internal/api/scheduler_replacement.go": "257f6840bc7bb6279ea9753dfaae494bc486f55e142578820eb6e7d8497eb731",
+        "internal/api/scheduler_replacement_test.go": "2405ff31fe809cb6d49afbe63e9fc28eca497c3e8506f2f01965293eb6944880",
+        "internal/api/supervisor_intent_lock_ownership_test.go": "f5cca8c427319b92b58a2485c528c1338f955ebe405bbbc259ea013a360f0412",
+        "internal/api/supervisor_lock_test.go": "e230f1a0716b72507af573bf3b916ffabc3c51cd5ff385a7664aa654b14ec90e",
+        "internal/autostart/autostart.go": "4cbcda2e6fa67fa64e1a4f49f59706662b036c7607b8d9b6269d0480c8657649",
+        "internal/autostart/windows.go": "1332a7bceee2259f0db8c501f854431f5d7f9d8874076d13e15b3e6405ed9e3e",
+        "internal/autostart/windows_native_roundtrip_test.go": "9c9a4db59573d74f6ec8f7933352f7b1907d0b511c033b8752a994af882deb18",
+        "internal/autostart/windows_test.go": "ded4e1af9ac6b8fd11e36b0748b57e7048460144403422d8b1b5c2fd87093d18",
+        "internal/cli/adopt_mcpcompat_test.go": "1bece58170bc93053f2f6dbd5af2e6a6c47ace05187e1aa6c01021552215d88b",
+        "internal/cli/adopt_test.go": "7419bbbc572c752dd5c6e438cf964fb9e426d82304811b751f59a007f1f1712b",
+        "internal/cli/autostart.go": "0bfb9347472de56e671b69d9df5fe03aba7d49ce7beaae092326958450d30cf0",
+        "internal/cli/scheduler_cmd.go": "7e99119fef78bfba4d409f4602448a2be64159a96aaee346af507f14038d7c68",
+        "internal/cli/setup.go": "286231e9c27ed1fa72724a9d73b645ecefa88861b8d86bdf0c48712f74f7120d",
+        "internal/cli/setup_watchdog_test.go": "0663f6a8773e336c1f2c5af8508439d30b01101deefca2468050284fbc45e8a4",
+        "internal/cli/strict_mode.go": "67045dd8f6bc7abba9dc94c98aa5287354de44777a560f33a372fd481c683557",
+        "internal/cli/strict_mode_test.go": "9784b49574f37465f132ec0aac5051a1cd57d21701ddf12aabaa63be4ff6c7ad",
+        "internal/process/contained_stream_observed.go": "8d462e85903ad92167b8ff7034d672e7e7e8baefddf29f2698ea756e7bae11ef",
+        "internal/scheduler/scheduler.go": "bb826adf8a627f90eb6fedd7fbef2854d97ac2320bfffff295641554934e075d",
+        "internal/scheduler/task_xml_match.go": "61bff24e2abe59f100920fa3bd9c3303928c0e2d813e1bfdc51db788776c7b1e",
+        "internal/scheduler/task_xml_match_test.go": "fc40e670b6f1a2e5fe0b97cdb42cfd1457884031104ab24450a6f7c7ae8d0de3",
+        "internal/scheduler/task_xml_match_windows.go": "a6d238f6e8e1cae48f79a4aa06290162fb5b062456ce0624421ba12b2275f9de",
+        "internal/scheduler/task_xml_match_windows_test.go": "7be3d01fecef08c2e196256c21a1c42b000722974449c1e5efd5c71824a06fac",
+        "internal/vcpkgmcp/cmaketrace/parse.go": "f2601b4986d8cdaebd21539dab77e0ca49853d8e80bc555866372c0ce615ab44",
+        "internal/vcpkgmcp/cmaketrace/projection.go": "c336cc47835766b6e40f5183501967b56b69c3d46cb69902cab715c0f9709220",
+        "internal/vcpkgmcp/cmaketrace/r22_bot_regressions_test.go": "b7957d4283a6832ec7cad36bef01831de12aa2eda39914c9c47e08bf5b1accf7",
+        "internal/vcpkgmcp/cmaketrace/r32_bot_regressions_test.go": "7df8e57fd571b92d70e5d8849ed96898f3a4874d119dfd21858e581fb7f41522"
+      }
+    }
+  ],
+  "steps_received": [
+    "write-v3-composition-tree",
+    "create-v3-source-commit"
+  ]
+}

@@ -1,0 +1,169 @@
+{
+  "schema": "observed-controller-recovery-inventory-v1",
+  "status": "SOURCE_RECOVERED_CANONICAL_BINDING_PENDING",
+  "qualification": {
+    "build": "NOT_RUN",
+    "native": "NOT_RUN",
+    "receiver": "NOT_RECOVERED",
+    "canonical_manifest": "NOT_RECOVERED",
+    "template9315": "NOT_RECOVERED"
+  },
+  "canonical_manifest_expected_sha256": "e74ff2ed872591e32b5fdd948d90959b9a564843534f1c46621dc6a409bf47c3",
+  "published_base_commit": "2b5c583b1ffcfd38529ac0a825d1faee5f02b7b9",
+  "source_envelopes": [
+    {
+      "name": "owner-recovery-20261128-v1.json",
+      "sha256": "f7a93089af086bd57cefd6281e983c99ce39384e1181cb3412fd4cf830cf55e2",
+      "bytes": 116867,
+      "source_bytes_recounted": 84654,
+      "original_total_source_bytes": null
+    },
+    {
+      "name": "recovered-controller-publication-inputs-20261128-v1.json",
+      "sha256": "2df4e36dbfda2816833d4323a2bce4d90973641918b05b753605091578a8f687",
+      "bytes": 174928
+    }
+  ],
+  "normalization": {
+    "from": "\"mcp-local-hub/.scratch/b-native-next-52a2d-v1/canonicalcaseowner\"",
+    "to": "\"mcp-local-hub/.scratch/__CANONICAL_EXTERNAL_STAGE__/canonicalcaseowner\"",
+    "rule": "Exactly one import byte replacement in each of four controller files; no replacements in other files. Main and physical match independently known current pins. Other normalized hashes remain candidates until canonical manifest receiving."
+  },
+  "files": [
+    {
+      "path": "controller/cases_windows.go.txt",
+      "original_bytes": 19163,
+      "original_sha256": "38df3543a511603ad0ff87c0cb75ac57af9578158f1688991f4fd9091a30395a",
+      "namespace_substitutions": 1,
+      "bytes": 19169,
+      "sha256": "f727398b6c61bf5730b16b77127a9877c4c5c68288a960eb9f6e08c31e57a269",
+      "matches_published_candidate": false,
+      "prior_bytes": 19128,
+      "published_path": "sources/recovered-20261128/controller/cases_windows.go.txt"
+    },
+    {
+      "path": "controller/fixture_gate_windows.go.txt",
+      "original_bytes": 2288,
+      "original_sha256": "ee21a92a6907fd2f51334ebda03fe1fc0ab4bc0b4e86bd2117b22179c9ae3448",
+      "namespace_substitutions": 1,
+      "bytes": 2294,
+      "sha256": "000b27c1ec33b74cecd8c018e3b9834a382b41a5e6cceaa403f60e5b4b741a56",
+      "matches_published_candidate": false,
+      "prior_bytes": null,
+      "published_path": "sources/recovered-20261128/controller/fixture_gate_windows.go.txt"
+    },
+    {
+      "path": "controller/inputs_windows.go.txt",
+      "original_bytes": 11040,
+      "original_sha256": "345197b965bd59a97c43e846ab35a37393852cbac7dfe5cabc0f0a109576e6cc",
+      "namespace_substitutions": 0,
+      "bytes": 11040,
+      "sha256": "345197b965bd59a97c43e846ab35a37393852cbac7dfe5cabc0f0a109576e6cc",
+      "matches_published_candidate": true,
+      "prior_bytes": 11040,
+      "published_path": "sources/candidate/controller/inputs_windows.go.txt"
+    },
+    {
+      "path": "controller/main_windows.go.txt",
+      "original_bytes": 24220,
+      "original_sha256": "87b8c9972b6e9b8ac5fbea13af13c79e6e10f154e81b9ca46b44094f2ee87811",
+      "namespace_substitutions": 1,
+      "bytes": 24226,
+      "sha256": "5e0768342e22728205ee2e6f7ab052d005bb278377c985240579ec499212e53c",
+      "matches_published_candidate": false,
+      "prior_bytes": 23392,
+      "published_path": "sources/recovered-20261128/controller/main_windows.go.txt"
+    },
+    {
+      "path": "controller/physical_windows.go.txt",
+      "original_bytes": 11627,
+      "original_sha256": "7c83b368148a60fbae402441ea1ac14f33fce23d3a94bf67f97e73d460bf98b6",
+      "namespace_substitutions": 1,
+      "bytes": 11633,
+      "sha256": "2b36397be3d45ebf0bb378eb89ba8a8086ff8d17b4c76d58b474f78fb5d63429",
+      "matches_published_candidate": true,
+      "prior_bytes": 11633,
+      "published_path": "sources/candidate/controller/physical_windows.go.txt"
+    },
+    {
+      "path": "controller/physical_windows_test.go.txt",
+      "original_bytes": 4118,
+      "original_sha256": "69562a90ae6be02fa43f2bd5b84d7d5ed4c70bb900443869e60099c40f901925",
+      "namespace_substitutions": 0,
+      "bytes": 4118,
+      "sha256": "69562a90ae6be02fa43f2bd5b84d7d5ed4c70bb900443869e60099c40f901925",
+      "matches_published_candidate": true,
+      "prior_bytes": 4118,
+      "published_path": "sources/candidate/controller/physical_windows_test.go.txt"
+    },
+    {
+      "path": "owner/canonicalcaseowner/capture_windows_amd64.go.txt",
+      "original_bytes": 3655,
+      "original_sha256": "17125768cd4b406ce16429826a366abc829c5adf767f80a8606f38f2409dff3d",
+      "namespace_substitutions": 0,
+      "bytes": 3655,
+      "sha256": "17125768cd4b406ce16429826a366abc829c5adf767f80a8606f38f2409dff3d",
+      "matches_published_candidate": false,
+      "prior_bytes": 3395,
+      "published_path": "sources/recovered-20261128/owner/canonicalcaseowner/capture_windows_amd64.go.txt"
+    },
+    {
+      "path": "owner/canonicalcaseowner/events_windows_amd64.go.txt",
+      "original_bytes": 27810,
+      "original_sha256": "f1f077b17d1a7f6dba774bd0c637c7cc20edcfaadd4fff77c82df46709d2e811",
+      "namespace_substitutions": 0,
+      "bytes": 27810,
+      "sha256": "f1f077b17d1a7f6dba774bd0c637c7cc20edcfaadd4fff77c82df46709d2e811",
+      "matches_published_candidate": true,
+      "prior_bytes": 27810,
+      "published_path": "sources/candidate/owner/canonicalcaseowner/events_windows_amd64.go.txt"
+    },
+    {
+      "path": "owner/canonicalcaseowner/fixture_gate_windows_amd64.go.txt",
+      "original_bytes": 4078,
+      "original_sha256": "f69507763d9adfc5a7b3268b6ece12a2757ae9dfee977cce879a5b6bac6dc2f1",
+      "namespace_substitutions": 0,
+      "bytes": 4078,
+      "sha256": "f69507763d9adfc5a7b3268b6ece12a2757ae9dfee977cce879a5b6bac6dc2f1",
+      "matches_published_candidate": false,
+      "prior_bytes": null,
+      "published_path": "sources/recovered-20261128/owner/canonicalcaseowner/fixture_gate_windows_amd64.go.txt"
+    },
+    {
+      "path": "owner/canonicalcaseowner/native_windows_amd64.go.txt",
+      "original_bytes": 11982,
+      "original_sha256": "8729ac9c525e664c5d7f279b277a93b9e06841e6757a14de508719d026335f87",
+      "namespace_substitutions": 0,
+      "bytes": 11982,
+      "sha256": "8729ac9c525e664c5d7f279b277a93b9e06841e6757a14de508719d026335f87",
+      "matches_published_candidate": true,
+      "prior_bytes": 11982,
+      "published_path": "sources/candidate/owner/canonicalcaseowner/native_windows_amd64.go.txt"
+    },
+    {
+      "path": "owner/canonicalcaseowner/owner_windows_amd64.go.txt",
+      "original_bytes": 30035,
+      "original_sha256": "6c94c62a0d32c357d5f99f270a7c394f8c370e0d7eab9b09f48cbefd237419fd",
+      "namespace_substitutions": 0,
+      "bytes": 30035,
+      "sha256": "6c94c62a0d32c357d5f99f270a7c394f8c370e0d7eab9b09f48cbefd237419fd",
+      "matches_published_candidate": false,
+      "prior_bytes": 29509,
+      "published_path": "sources/recovered-20261128/owner/canonicalcaseowner/owner_windows_amd64.go.txt"
+    },
+    {
+      "path": "owner/canonicalcaseowner/physical_windows_amd64.go.txt",
+      "original_bytes": 7094,
+      "original_sha256": "6749335513771a7daf8be423809262f57039f25a940114e5ba46b5a76802216a",
+      "namespace_substitutions": 0,
+      "bytes": 7094,
+      "sha256": "6749335513771a7daf8be423809262f57039f25a940114e5ba46b5a76802216a",
+      "matches_published_candidate": true,
+      "prior_bytes": 7094,
+      "published_path": "sources/candidate/owner/canonicalcaseowner/physical_windows_amd64.go.txt"
+    }
+  ],
+  "file_count": 12,
+  "total_normalized_bytes": 157134,
+  "new_source_files": 6
+}

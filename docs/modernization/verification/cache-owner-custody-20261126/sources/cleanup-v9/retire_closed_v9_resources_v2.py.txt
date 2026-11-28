@@ -1,0 +1,303 @@
+"""Move only four closed-v9 directories to the root-prepared trash bucket.
+
+No subprocesses, source/cache content reads, copy, delete, replacement, ACL
+changes, directory creation, rollback or automatic replay. Journals stay out
+of trash. Root must create the two empty output directories and review this
+exact script before activation.
+"""
+import sys
+sys.dont_write_bytecode = True
+
+import contextlib
+import ctypes as C
+import hashlib
+import json
+import os
+from pathlib import Path
+import stat
+import types
+
+REVIEW_COMPLETE = True
+TASK = Path(r"<TASK>")
+INPUTS = TASK / "closed-v9-retirement-inputs-v2"
+SELF = INPUTS / "retire_closed_v9_resources_v2.py"
+PLAN = INPUTS / "retirement-plan.json"
+PLAN_SHA256 = "78b8cc17e2060014733014357ee60b1475eb3a4ede07bd152f10f32ca6d9055e"
+LIMIT = 16 * 1024 * 1024
+
+
+def require(value, message):
+    if not value:
+        raise RuntimeError(message)
+
+
+def ordinary(path, directory):
+    path = Path(path)
+    for parent in reversed(path.parents):
+        info = parent.lstat()
+        require(stat.S_ISDIR(info.st_mode) and not info.st_file_attributes & 0x400,
+                "nonordinary ancestor: " + str(parent))
+    info = path.lstat()
+    require(not info.st_file_attributes & 0x400
+            and (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)),
+            "nonordinary path: " + str(path))
+    return info
+
+
+def pinned(pair):
+    path = Path(pair["path"])
+    before = ordinary(path, False)
+    require(before.st_size <= LIMIT, "metadata input exceeds bound")
+    with path.open("rb") as stream:
+        opened = os.fstat(stream.fileno())
+        require((opened.st_dev, opened.st_ino) == (before.st_dev, before.st_ino),
+                "metadata object changed during open")
+        raw = stream.read(LIMIT + 1)
+    require(len(raw) <= LIMIT and hashlib.sha256(raw).hexdigest() == pair["sha256"],
+            "exact metadata digest differs: " + str(path))
+    return raw
+
+
+def receive_controls(plan, values):
+    predecessor, qualification = values["retirement_predecessor"], values["rename_qualification"]
+    require(predecessor.get("schema") == "closed-v9-four-resource-retirement-v1"
+            and predecessor.get("status") == "FAIL" and predecessor.get("moved") == []
+            and predecessor.get("plan_sha256") == "20aa192c88e0c2d1ab0a383011cd157d9286b3c29bc47009a118f4ec75a4803c",
+            "previous retirement did not stop before all moves")
+    require(qualification.get("schema") == "native-rename-qualification-v2"
+            and qualification.get("status") == "PASS"
+            and qualification.get("original_handles_closed") is True
+            and qualification.get("events", [])[-1:] == [{"form": "absolute_new_target", "same_original_identity": True, "source_absent": True}]
+            and qualification.get("events", [None, {}])[1].get("both_unchanged") is True,
+            "absolute rename and collision refusal were not qualified")
+    parent, receipt = values["full_parent"], values["full_receipt"]
+    require(parent.get("schema") == "native-final-literal-parent-v1"
+            and parent.get("state") == "received" and parent.get("original_pid") == 268116
+            and parent.get("exit_code") == 1 and parent.get("child_status") == "FAIL"
+            and parent.get("command_count") == 7 and parent.get("commands_quiescent") is True
+            and parent.get("terminal_exit_received") is True
+            and parent.get("parent_capture_files_closed") is True
+            and parent.get("deadline_exceeded") is False and "launcher_error" not in parent
+            and parent.get("literal_pre_push_commands_passed") is False
+            and parent.get("child_schema") == "literal-go-prepush-gate-v1"
+            and parent.get("candidate_commit") == plan["source_commit"]
+            and parent.get("original_receipt_sha256") == plan["controls"]["full_receipt"]["sha256"],
+            "original full-v9 parent did not close with its unchanged failure")
+    require(receipt.get("run") == plan["closed_run"] and receipt.get("status") == "FAIL"
+            and receipt.get("commands_quiescent") is True
+            and all(receipt.get(k) is True for k in ("source_unchanged", "original_inputs_unchanged",
+                                                    "private_migration_exports_unchanged"))
+            and not any(k in receipt for k in ("literal_build_chain", "literal_phases", "plans",
+                                               "original_invocation_issuer")),
+            "closed-v9 attempt or no-invocation boundary differs")
+    commands = receipt.get("commands", [])
+    require(len(commands) == 7, "expected seven original commands")
+    for command in commands:
+        native, completion = command.get("native", {}), command.get("completion_receiving", {})
+        require(command.get("quiescence_state") == "complete" and command.get("exit_code") == 0
+                and all(native.get(k) is True for k in ("direct_reaped", "active_zero", "handles_closed"))
+                and native.get("direct_exit_code") == 0 and native.get("issues") == []
+                and completion.get("lifecycle_state") == "CLOSED"
+                and completion.get("native") == native and completion.get("io") == command.get("io")
+                and command.get("original_readers_joined") is True,
+                "original command ownership remains unresolved")
+        for stream in ("stdout", "stderr"):
+            item = command["io"][stream]
+            require(all(item.get(k) is True for k in ("worker_complete", "eof", "pipe_close_returned",
+                                                     "capture_close_returned"))
+                    and item.get("error") is None and item.get("bytes_seen") == item.get("bytes_stored"),
+                    "original stream was not received completely")
+        joins = command.get("worker_join_observations", [])
+        require(len(joins) == 2 and all(j.get("joined") is True and j.get("alive_after") is False
+                and j.get("join_error_count") == 0 for j in joins), "original reader join differs")
+    bootstrap = values["cache_bootstrap"]
+    require(receipt["cache_bootstrap"]["record"] == bootstrap
+            and {k: receipt["cache_bootstrap"][k] for k in ("path", "sha256")}
+                == plan["controls"]["cache_bootstrap"]
+            and bootstrap.get("schema") == "go-cache-bootstrap-v1"
+            and bootstrap.get("consumer_run") == plan["closed_run"]
+            and bootstrap.get("consumer_source_commit") == plan["source_commit"]
+            and bootstrap.get("prior_cache_consumer") is None, "cache creator binding differs")
+    for prefix, pid in (("old", 274628), ("current", 264320)):
+        p, r = values[prefix + "_data_parent"], values[prefix + "_data_receipt"]
+        require(p.get("schema") == "serena-evidence-rebinding-parent-v2" and p.get("state") == "received"
+                and p.get("original_pid") == pid and p.get("exit_code") == 0 and p.get("child_status") == "PASS"
+                and p.get("terminal_exit_received") is True and p.get("parent_capture_files_closed") is True
+                and p.get("deadline_exceeded") is False and "launcher_error" not in p
+                and p.get("original_receipt_sha256") == plan["controls"][prefix + "_data_receipt"]["sha256"]
+                and p.get("output_controls_received") is True
+                and r.get("schema") == "private-serena-evidence-rebinding-v2" and r.get("status") == "PASS",
+                "original DATA parent/report differs")
+    grant, manifest = values["current_grant"], values["current_manifest"]
+    require(grant.get("consumer_run") == manifest.get("full_run") == plan["active_consumer_run"]
+            and grant.get("source_commit") == manifest.get("source_commit") == plan["source_commit"]
+            and set(grant.get("evidence_roots", {}).values()) == set(plan["active_evidence_parents"])
+            and values["current_data_receipt"]["retained_input_access"] == plan["controls"]["current_grant"]
+            and manifest.get("retained_admission") == plan["controls"]["current_grant"],
+            "active consumer resource separation differs")
+    active_caches = manifest["bootstrap_contract"]
+    require(active_caches.get("consumer_run") == plan["active_consumer_run"]
+            and active_caches.get("module_cache") == str(Path(plan["active_consumer_run"]) / "seed-modules")
+            and active_caches.get("build_cache") == str(Path(plan["active_consumer_run"]) / "isolated-build-cache")
+            and active_caches.get("predecessor_cache_authority") is False, "active caches are not independent")
+    require([r["name"] for r in plan["resources"]] == ["seed-modules", "isolated-build-cache", "d9", "s9"],
+            "retirement scope must contain exactly four fixed resources")
+    for row in plan["resources"]:
+        if row["kind"] == "cache":
+            original = bootstrap["created_caches"]["GOMODCACHE" if row["name"] == "seed-modules" else "GOCACHE"]
+            require(original == dict(row["creation_identity"], path=row["source"],
+                                     created_exclusively=True, empty_at_creation=True), "cache creation identity differs")
+        else:
+            original = values["old_data_receipt"]["evidence_parent_creation"][row["role"]]["directories"][0]
+            require(original["path"] == row["source"] and original["created_exclusively"] is True
+                    and {k: original[k] for k in row["native_identity"]} == row["native_identity"]
+                    and row["require_empty"] is True, "original d9/s9 identity differs")
+
+
+def open_locked_directory(scope, path, for_rename=False):
+    # LIST_DIRECTORY makes the no-delete-sharing lock effective for the name.
+    # DELETE access authorizes rename of this original handle; it does not delete.
+    access = scope.READ_CONTROL | scope.FILE_READ_ATTRIBUTES | 0x1 | 0x20
+    if for_rename:
+        access |= 0x00010000
+    handle = scope.K.CreateFileW(str(path), access, 1 | 2, None, 3, 0x02200000, None)
+    return scope.handle_scope(handle)
+
+
+def identity(scope, handle, path):
+    native = scope.directory_identity(handle)
+    info = ordinary(path, True)
+    require(native["file_index"] == info.st_ino and native["volume_serial"] == info.st_dev & 0xffffffff,
+            "path and retained native handle identify different objects")
+    return {"native": native, "stat": {"device": info.st_dev, "inode": info.st_ino}}
+
+
+def require_empty(path):
+    with os.scandir(path) as entries:
+        require(next(entries, None) is None, "directory must be empty: " + str(path))
+
+
+def rename_original(scope, handle, destination):
+    class RenameInfo(C.Structure):
+        _fields_ = [("flags", C.c_uint32), ("root", C.c_void_p),
+                    ("length", C.c_uint32), ("name", C.c_uint16 * 1)]
+    if C.sizeof(C.c_void_p) != 8 or RenameInfo.name.offset != 20:
+        raise RuntimeError("unexpected FILE_RENAME_INFO layout")
+    encoded = str(destination).encode("utf-16-le")
+    raw = C.create_string_buffer(max(C.sizeof(RenameInfo), RenameInfo.name.offset + len(encoded) + 2))
+    value = RenameInfo.from_buffer(raw)
+    value.root, value.length = None, len(encoded)
+    C.memmove(C.addressof(raw) + RenameInfo.name.offset, encoded, len(encoded))
+    function = scope.bind(scope.K, "SetFileInformationByHandle", C.c_int,
+                          [C.c_void_p, C.c_int, C.c_void_p, C.c_uint32])
+    scope.require(function(handle, 3, raw, len(raw)), "absolute original-directory rename")
+
+
+def append_record(stream, value):
+    raw = (json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+    stream.write(raw)
+    stream.flush()
+    os.fsync(stream.fileno())
+
+
+def retire(plan, scope):
+    bucket, evidence = Path(plan["trash_bucket"]), Path(plan["evidence_root"])
+    sources = [Path(row["source"]) for row in plan["resources"]]
+    require(bucket == TASK / "trash" / "closed-full-v9-20261126-v2"
+            and evidence == TASK / "closed-v9-retirement-v2", "fixed authorized destination paths required")
+    with contextlib.ExitStack() as retained:
+        parents = set()
+        for path in sources + [bucket / "placeholder", evidence / "placeholder"]:
+            parents.update(path.parents)
+        parent_handles = {}
+        for path in sorted(parents, key=lambda p: (len(p.parts), str(p))):
+            ordinary(path, True)
+            handle = retained.enter_context(open_locked_directory(scope, path))
+            scope.directory_identity(handle)
+            parent_handles[path] = handle
+        require_empty(bucket)
+        require_empty(evidence)
+        bucket_identity = identity(scope, parent_handles[bucket], bucket)
+        evidence_identity = identity(scope, parent_handles[evidence], evidence)
+        checked = []
+        for row, source in zip(plan["resources"], sources):
+            ordinary(source, True)
+            handle = retained.enter_context(open_locked_directory(scope, source, True))
+            before = identity(scope, handle, source)
+            require(before["native"] == row["native_identity"], "original native resource identity changed")
+            if row["kind"] == "cache":
+                require(before["stat"] == row["creation_identity"], "original cache creation identity changed")
+            require(before["stat"]["device"] == bucket_identity["stat"]["device"], "cross-volume move refused")
+            if row["require_empty"]:
+                require_empty(source)
+            destination = bucket / row["name"]
+            require(not os.path.lexists(destination), "existing trash target refused")
+            checked.append((row, source, destination, handle, before))
+        # All four objects are checked and held before the first move.
+        summary = {"schema": "closed-v9-four-resource-retirement-v1", "status": "IN_PROGRESS",
+                   "plan_sha256": PLAN_SHA256, "controls": plan["controls"],
+                   "bucket_identity": bucket_identity, "evidence_identity": evidence_identity,
+                   "moved": [], "delete_copy_replace_or_acl_change": False,
+                   "raw_captures_or_cache_contents_read": False, "original_failure_rewritten": False}
+        try:
+            for row, source, destination, handle, before in checked:
+                journal = evidence / (row["name"] + ".jsonl")
+                with journal.open("xb") as stream:
+                    base = {"schema": "original-directory-trash-move-v1", "name": row["name"],
+                            "source": str(source), "destination": str(destination),
+                            "creation_identity": row["creation_identity"], "before": before,
+                            "plan_sha256": PLAN_SHA256, "empty_required": row["require_empty"]}
+                    append_record(stream, dict(base, phase="PREPARED"))
+                    try:
+                        require(identity(scope, handle, source) == before, "source changed before rename")
+                        if row["require_empty"]:
+                            require_empty(source)
+                        rename_original(scope, handle, destination)
+                        after = identity(scope, handle, destination)
+                        require(after == before and not os.path.lexists(source), "rename identity postcondition differs")
+                        if row["require_empty"]:
+                            require_empty(destination)
+                        append_record(stream, dict(base, phase="MOVED", after=after, source_absent=True))
+                        summary["moved"].append({"name": row["name"], "destination": str(destination),
+                                                 "identity": after, "journal": str(journal)})
+                    except BaseException as error:
+                        append_record(stream, dict(base, phase="ERROR", error=repr(error),
+                                                   automatic_retry_or_rollback=False))
+                        raise
+            require(identity(scope, parent_handles[bucket], bucket) == bucket_identity
+                    and identity(scope, parent_handles[evidence], evidence) == evidence_identity,
+                    "original output parent identity changed")
+            summary["status"] = "PASS"
+        except BaseException as error:
+            summary["status"], summary["error"] = "FAIL", repr(error)
+            raise
+        finally:
+            with (evidence / "receipt.json").open("xb") as stream:
+                append_record(stream, summary)
+    return summary
+
+
+def main():
+    require(REVIEW_COMPLETE is True, "disabled: exact root review required before upload/execution")
+    require(os.name == "nt" and not sys.argv[1:] and sys.flags.isolated and sys.flags.no_site
+            and sys.flags.dont_write_bytecode and Path.cwd() == TASK and Path(__file__).absolute() == SELF,
+            "exact native Python -I -S -B, path, cwd and no arguments required")
+    plan = json.loads(pinned({"path": str(PLAN), "sha256": PLAN_SHA256}))
+    require(plan.get("schema") == "closed-v9-four-resource-retirement-plan-v1"
+            and plan.get("task") == str(TASK) and plan.get("issuer") == str(SELF), "exact task-bound plan required")
+    require(Path(sys.executable).resolve(strict=True) == Path(plan["python"]["path"]), "native Python path differs")
+    pinned(plan["python"])
+    values = {name: json.loads(pinned(pair)) for name, pair in plan["controls"].items()}
+    receive_controls(plan, values)
+    code = pinned(plan["identity_helper"])
+    scope = types.ModuleType("retirement_identity_helper")
+    scope.__file__ = plan["identity_helper"]["path"]
+    exec(compile(code, scope.__file__, "exec"), scope.__dict__)
+    result = retire(plan, scope)
+    print(json.dumps({"status": result["status"], "moved": len(result["moved"]),
+                      "receipt": str(Path(plan["evidence_root"]) / "receipt.json")}), flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

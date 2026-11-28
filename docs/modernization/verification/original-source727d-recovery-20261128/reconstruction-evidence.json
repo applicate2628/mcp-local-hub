@@ -1,0 +1,98 @@
+{
+  "schema": "original-source727d-public-base-data-verification-v1",
+  "public_base": {
+    "publication_commit": "c80fd6b4e6f9806eb7d94726a979e9e89d46ec75",
+    "directory": "experiments/rust-process-owner/ffi/verification/stdio-consumer-2026-11-26/source-capsule-3ebe",
+    "anchor_commit": "62c853e8a9e9b2817f5fcaf15018450b76798690",
+    "source_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+    "source_tree": "67c13b8fc1317b4fd60e3135a3eb8a376fe01817",
+    "source_files": 3508,
+    "source_bytes": 57144526,
+    "source_files_sha256": "706c4f284ff9ec4aefd8c61ee18809a6e5424d350206d1403b96006468b78c00",
+    "source_commit_sha256": "a951fc2799e12e93e118ea1251438fb8ca908c86786f0bf65a4e522e04bfe537",
+    "all_public_inventory_paths_modes_blobs_match_recovered_source": true,
+    "published_large_patch_download_in_this_review": "NOT_RECEIVED_CONNECTOR_SIZE_LIMIT",
+    "published_large_patch_sha256_from_manifest": "10af6f1b1b179c04299c13024ca75b4dc868fb945574a3e941b34ac343d7c03e",
+    "published_large_patch_git_blob": "4e3de11f96f0b3136b7f749f1319f9d5f11e8be6"
+  },
+  "stages": [
+    {
+      "patch": "3ebe-to-0145.patch",
+      "bytes": 66642,
+      "sha256": "f76c246cadbc3d9a8fa7e1b5eaa2555a50d1e1aae4d0088fd4b8b06d9ac404b2",
+      "changed_paths": 27,
+      "hunks_applied_as_data": 99,
+      "every_afterimage_matches_original_git_blob": true,
+      "complete_tree_matches": true,
+      "source_files": 3508
+    },
+    {
+      "patch": "0145-to-727d.patch",
+      "bytes": 14766,
+      "sha256": "d2f167d9e76c06d8398d02f5bd446e08756c662323f87733ecf9ae8ebb647722",
+      "changed_paths": 4,
+      "hunks_applied_as_data": 12,
+      "every_afterimage_matches_original_git_blob": true,
+      "complete_tree_matches": true,
+      "source_files": 3509
+    }
+  ],
+  "template": {
+    "file": "0145-to-727d.patch.template",
+    "bytes": 14814,
+    "sha256": "a118ee2b3454f57210a5bbfc45d181ab1bc60697205953806836b3d0332e08c6",
+    "marker": "__APPROVED_WORK_AREA__",
+    "marker_count": 6,
+    "parameter_name": "approved_work_area",
+    "operator_must_supply_original_historical_value": true,
+    "no_default_or_encoded_original_value": true,
+    "exact_patch_sha256": "d2f167d9e76c06d8398d02f5bd446e08756c662323f87733ecf9ae8ebb647722",
+    "in_memory_reconstruction_equal": true
+  },
+  "scope": {
+    "data_only_patch_application_to_immutable_preimages": true,
+    "source_code_executed": false,
+    "new_test_qualification": false,
+    "git_index_or_refs_mutated": false,
+    "native_public_anchor_reconstruction_in_this_review": "NOT_RUN",
+    "historical_fail_unknown_unchanged": true
+  },
+  "independent_native_restoration": {
+    "run": "original-source-restore-v2",
+    "status": "PASS",
+    "physical_complete": true,
+    "commands": 9,
+    "commands_closed": 9,
+    "parent_exit_code": 0,
+    "parent_seconds": 47.35906030004844,
+    "parent_sha256": "665099615fc911e5db3eef74de7c28e06ea35fcece33d290f5d0439fb3268f20",
+    "execution_sha256": "890fecd2b2a4e7a1acf36b0d5f3fb7135518d7eeb32498c8610bd7f0965ac4e5",
+    "snapshots": [
+      {
+        "role": "original727d",
+        "commit": "727d66753814dc218e26d699e57402db2d13190a",
+        "tree": "d959ed0a4f8ab02947aec7569f3c0535a3cff533",
+        "parent": "0145a2547a3025cc518cf3e2fa89d2e22cb73c08",
+        "tracked_files": 3509,
+        "receipt_bytes": 885110,
+        "receipt_sha256": "a3483e469b606fa297a4b33698cd22db7bf25493023f3117feeafb52bb9db5f1"
+      },
+      {
+        "role": "original3ebe",
+        "commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+        "tree": "67c13b8fc1317b4fd60e3135a3eb8a376fe01817",
+        "parent": "c3b8c802be190c335b84ff7323a14d9eb63518b6",
+        "tracked_files": 3508,
+        "receipt_bytes": 884841,
+        "receipt_sha256": "c63d8b13331a752c85c5e62f4c4ce0a2ee19cc0c129c83b4dd6ed99fbd944b46"
+      }
+    ],
+    "all_tracked_files_checked": true,
+    "git_objects_independent": true,
+    "alternates_or_hardlinks": false,
+    "remote_or_include_config": false,
+    "source_status_empty_after_restoration": true,
+    "old_worktree_or_cache_read": false,
+    "runtime_or_full_suite_qualification": false
+  }
+}

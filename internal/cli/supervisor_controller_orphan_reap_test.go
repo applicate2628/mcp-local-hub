@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -91,7 +93,6 @@ func newReapTestHarness(t *testing.T) *reapTestHarness {
 	terminatedPIDs := make(chan int, 8)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 
 	loop := api.NewEventLoop(64)
 	h := &reapTestHarness{
@@ -163,7 +164,17 @@ func newReapTestHarness(t *testing.T) *reapTestHarness {
 	}
 	// Register the controller handler and start the real loop.
 	loop.RegisterHandler(h.ctrl.handleLoopEvent)
-	go loop.Run(ctx)
+	loopDone := make(chan struct{})
+	go func() {
+		defer close(loopDone)
+		loop.Run(ctx)
+	}()
+	// Cancellation cannot interrupt an in-flight handler. Join this original
+	// loop before the earlier event-log and TempDir cleanup callbacks run.
+	t.Cleanup(func() {
+		cancel()
+		<-loopDone
+	})
 	return h
 }
 
@@ -187,6 +198,10 @@ func (h *reapTestHarness) sync() {
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
+		// Record the original handler stacks before cleanup joins the loop.
+		stacks := make([]byte, 1<<20)
+		n := runtime.Stack(stacks, true)
+		fmt.Fprintf(os.Stderr, "reap test harness barrier timeout before cleanup (goroutine stacks truncated=%t):\n%s", n == len(stacks), stacks[:n])
 		panic("reap test harness sync timed out (loop wedged?)")
 	}
 }

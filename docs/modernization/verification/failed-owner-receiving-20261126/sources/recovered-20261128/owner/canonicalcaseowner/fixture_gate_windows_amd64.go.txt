@@ -1,0 +1,119 @@
+//go:build windows && amd64
+
+package canonicalcaseowner
+
+import (
+	"errors"
+	"sync"
+	"time"
+)
+
+// TestOnlyLateGate belongs to one invocation of this standalone test helper.
+// It owns no native handle and never closes or replaces a process or reader.
+// The controller allocates its release channel before any actor is created.
+type TestOnlyLateGate struct {
+	mode                                     string
+	release                                  chan struct{}
+	mu                                       sync.Mutex
+	original                                 *Owner
+	boundAt                                  time.Time
+	reachedAt, releasedAt, passedAt          time.Time
+	reachedNS, releasedNS, passedNS          int64
+	reachedCount, releasedCount, passedCount int
+}
+
+type TestOnlyLateGateSnapshot struct {
+	Mode                        string `json:"mode"`
+	BoundBeforeNativeAllocation bool   `json:"bound_before_native_allocation"`
+	OriginalOwnerMatched        bool   `json:"original_owner_matched"`
+	ReachedCount                int    `json:"reached_count"`
+	ReleasedCount               int    `json:"released_count"`
+	PassedCount                 int    `json:"passed_count"`
+	ReachedUTC                  string `json:"reached_utc"`
+	ReleasedUTC                 string `json:"released_utc"`
+	PassedUTC                   string `json:"passed_utc"`
+	ReachedElapsedNS            int64  `json:"reached_elapsed_ns"`
+	ReleasedElapsedNS           int64  `json:"released_elapsed_ns"`
+	PassedElapsedNS             int64  `json:"passed_elapsed_ns"`
+}
+
+func NewTestOnlyLateGate(mode string) (*TestOnlyLateGate, error) {
+	if mode != "run-return" && mode != "stdout-reader" {
+		return nil, errors.New("test-only gate must select one original Run return or stdout reader")
+	}
+	return &TestOnlyLateGate{mode: mode, release: make(chan struct{})}, nil
+}
+
+// bind runs after the original Owner is retained, before prepare allocates any
+// image, stdin or capture. Sharing a gate across invocations is refused there.
+func (g *TestOnlyLateGate) bind(original *Owner) error {
+	if g == nil {
+		return nil
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if original == nil || g.original != nil || g.releasedCount != 0 {
+		return errors.New("test-only late gate requires one prebound original owner")
+	}
+	g.original, g.boundAt = original, time.Now()
+	return nil
+}
+
+func (g *TestOnlyLateGate) waitAt(mode string) {
+	if g == nil || g.mode != mode {
+		return
+	}
+	g.mu.Lock()
+	g.reachedCount++
+	if g.reachedCount == 1 {
+		g.reachedAt = time.Now()
+		g.reachedNS = g.reachedAt.Sub(g.boundAt).Nanoseconds()
+	}
+	g.mu.Unlock()
+	// A context timeout must not release this test gate. The existing original
+	// controller alone releases it after successful failed-result publication.
+	<-g.release
+	g.mu.Lock()
+	g.passedCount++
+	if g.passedCount == 1 {
+		g.passedAt = time.Now()
+		g.passedNS = g.passedAt.Sub(g.boundAt).Nanoseconds()
+	}
+	g.mu.Unlock()
+}
+
+// ReleaseAfterOriginalFailure is called only by the original controller's
+// post-publication path. Repeated calls remain visible in the test evidence.
+func (g *TestOnlyLateGate) ReleaseAfterOriginalFailure() {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.releasedCount++
+	if g.releasedCount == 1 {
+		g.releasedAt = time.Now()
+		if !g.boundAt.IsZero() {
+			g.releasedNS = g.releasedAt.Sub(g.boundAt).Nanoseconds()
+		}
+		close(g.release)
+	}
+}
+
+func (g *TestOnlyLateGate) Snapshot(original *Owner) TestOnlyLateGateSnapshot {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	stamp := func(value time.Time) string {
+		if value.IsZero() {
+			return ""
+		}
+		return value.UTC().Format(time.RFC3339Nano)
+	}
+	return TestOnlyLateGateSnapshot{
+		Mode: g.mode, BoundBeforeNativeAllocation: g.original != nil,
+		OriginalOwnerMatched: original != nil && g.original == original,
+		ReachedCount:         g.reachedCount, ReleasedCount: g.releasedCount, PassedCount: g.passedCount,
+		ReachedUTC: stamp(g.reachedAt), ReleasedUTC: stamp(g.releasedAt), PassedUTC: stamp(g.passedAt),
+		ReachedElapsedNS: g.reachedNS, ReleasedElapsedNS: g.releasedNS, PassedElapsedNS: g.passedNS,
+	}
+}

@@ -1,0 +1,155 @@
+{
+  "schema": "api-namespace-full-suite-v1",
+  "mode": "prebuilt-full-suite",
+  "evidence_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\n14fe6816051b\\n\\r",
+  "binary": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\xe288dd1b2ed2\\bundle\\mcphub-product\\mcphub.exe",
+  "expected_sha256": "c23946fc480494976ccbdd0f5738cf6279e3e2b6de2037943c76cd0b6c64a560",
+  "binary_sha256": "c23946fc480494976ccbdd0f5738cf6279e3e2b6de2037943c76cd0b6c64a560",
+  "source_dir": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2\\internal\\api",
+  "args": [
+    "-test.paniconexit0",
+    "-test.v=test2json",
+    "-test.count=1",
+    "-test.timeout=5m0s"
+  ],
+  "go_version": "go1.27.4",
+  "compiled_tags": [],
+  "fixture_environment": {
+    "GOTMPDIR": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\n14fe6816051b\\n\\r\\temp",
+    "MCPHUB_CANONICAL_COMMAND_FIXTURE_REQUIRED": "1",
+    "MCPHUB_CANONICAL_ENTRY_FIXTURE": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\xe288dd1b2ed2\\incoming-fixture.json",
+    "MCPHUB_CANONICAL_ENTRY_FIXTURE_REQUIRED": "1",
+    "MCPHUB_CANONICAL_FIXTURE_TEST_PRODUCT": "1",
+    "MCPHUB_E2E_SCHEDULER": "none",
+    "MCPHUB_RECOVERY_NAMESPACE_FIXTURE_HELPER": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\n14fe6816051b\\n\\r\\helper.ps1",
+    "MCPHUB_RECOVERY_NAMESPACE_FIXTURE_SHA256": "1124cee665be8249ef2c1f10460b7a4626dd24170db8ceed73fb51b5ab4d7b3b",
+    "MCPHUB_RECOVERY_NAMESPACE_PWSH": "@@RECOVERY_NATIVE_POWERSHELL_WORK_AREA_JSON@@\\bns26\\pwsh7\\pwsh.exe",
+    "MCPHUB_RECOVERY_NAMESPACE_ROOT": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\n14fe6816051b\\n\\r",
+    "TEMP": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\n14fe6816051b\\n\\r\\temp",
+    "TMP": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\n14fe6816051b\\n\\r\\temp",
+    "TMPDIR": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\n14fe6816051b\\n\\r\\temp"
+  },
+  "canonical_fixture_sha256": "9bfbaa670a13919290b52c2f663927d7882bd398b38fc28aaa59fc69e8251c0a",
+  "started_utc": "2026-11-28T11:50:19.1293538Z",
+  "finished_utc": "2026-11-28T11:55:18.8653317Z",
+  "work_deadline": "2026-11-28T14:55:24.1293538+03:00",
+  "absolute_cleanup_deadline": "2026-11-28T14:55:34.1293538+03:00",
+  "root": {
+    "Known": true,
+    "PID": 72104,
+    "StartedAt": "2026-11-28T11:50:19.3021188Z",
+    "NativeBirthFILETIME": 134403402193021188
+  },
+  "native": {
+    "RootIdentity": {
+      "Known": true,
+      "PID": 72104,
+      "StartedAt": "2026-11-28T11:50:19.3021188Z",
+      "NativeBirthFILETIME": 134403402193021188
+    },
+    "NoChildKnown": false,
+    "RootWaitKnown": true,
+    "RootExitCode": 1,
+    "TerminalAction": "not-requested",
+    "MembersExited": true,
+    "AccountingKnown": true,
+    "InitialTotal": 1363,
+    "FinalActive": 0,
+    "CapturedMemberPIDs": null,
+    "HandlesClosed": true,
+    "Error": null
+  },
+  "io": {
+    "Stdin": {
+      "Acquired": true,
+      "CloseAttempted": true,
+      "Closed": true,
+      "CloseError": null
+    },
+    "StdoutRead": {
+      "Acquired": true,
+      "CloseAttempted": true,
+      "Closed": true,
+      "CloseError": null
+    },
+    "StdoutWrite": {
+      "Acquired": true,
+      "CloseAttempted": true,
+      "Closed": true,
+      "CloseError": null
+    },
+    "StderrRead": {
+      "Acquired": true,
+      "CloseAttempted": true,
+      "Closed": true,
+      "CloseError": null
+    },
+    "StderrWrite": {
+      "Acquired": true,
+      "CloseAttempted": true,
+      "Closed": true,
+      "CloseError": null
+    },
+    "Stdout": {
+      "WorkerStarted": true,
+      "WorkerComplete": true,
+      "EOF": true,
+      "Bytes": 1207113,
+      "Limit": 16777216,
+      "LimitExceeded": false,
+      "Error": null
+    },
+    "Stderr": {
+      "WorkerStarted": true,
+      "WorkerComplete": true,
+      "EOF": true,
+      "Bytes": 0,
+      "Limit": 16777216,
+      "LimitExceeded": false,
+      "Error": null
+    }
+  },
+  "stage": "exit",
+  "primary_error": "contained process exited non-zero",
+  "root_wait_known": true,
+  "root_exit_code": 1,
+  "settlement_complete": true,
+  "native_complete": true,
+  "io_complete": true,
+  "custody_retained": false,
+  "observations_verified": true,
+  "mandatory_tests": {
+    "TestSecretsInit_RecoveryNamespaceBoundary": {
+      "Runs": 1,
+      "Passes": 1,
+      "Fails": 0,
+      "Skips": 0
+    },
+    "TestSecretsInit_RecoveryNamespaceFailurePaths": {
+      "Runs": 1,
+      "Passes": 1,
+      "Fails": 0,
+      "Skips": 0
+    },
+    "TestSecretsInit_RecoveryNamespaceRetainedDirectory": {
+      "Runs": 1,
+      "Passes": 1,
+      "Fails": 0,
+      "Skips": 0
+    },
+    "TestSupervisorPeerStrictControlConnections": {
+      "Runs": 1,
+      "Passes": 1,
+      "Fails": 0,
+      "Skips": 0
+    }
+  },
+  "mandatory_tests_passed": true,
+  "binary_unchanged": true,
+  "stdout_path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\n14fe6816051b\\n\\r\\proof\\tests.stdout.log",
+  "stderr_path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\n14fe6816051b\\n\\r\\proof\\tests.stderr.log",
+  "stdout_sha256": "664ff94ef54d97d0088b74b0b669edc292589f1911b49798c71192aa79b17541",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "forwarding": "raw bytes replayed once after original settlement; no cross-stream ordering claim",
+  "failure": "contained process exit failed\nfull API receiver identity, wait, image or settlement is incomplete"
+}

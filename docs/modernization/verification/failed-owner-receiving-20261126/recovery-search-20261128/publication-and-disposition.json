@@ -1,0 +1,328 @@
+{
+  "schema": "ad-publication-and-disposition-v1",
+  "scope": "Published evidence bytes and disposition of three verified disposable Git batch transports; not product acceptance.",
+  "github_readback": {
+    "schema": "ad-github-byte-readback-v1",
+    "commits": {
+      "A": "8204d3400cbfde401850d3acd3479fb8b1450fd3",
+      "B": "3482ed4ed093cc1ebfa968dea4e7127bf40e6b13"
+    },
+    "files": [
+      {
+        "scope": "A",
+        "path": "docs/qualification/install-scheduler-generation-20261123/remaining-scheduler-owners.md",
+        "bytes": 33513,
+        "sha256": "26aa2e507cfcaa7998b2d05b53322d38bbc0e75e24481b24e7a2fa3f41727b04",
+        "git_blob_sha1": "f05a780687c79e89834b27abeecaa4e9e1fb8e57",
+        "status": "EXACT"
+      },
+      {
+        "scope": "A",
+        "path": "docs/qualification/install-scheduler-generation-20261123/installed-liveness-20261128/.gitattributes",
+        "bytes": 87,
+        "sha256": "36984213a43a734e5a609359fdb6e0d54a8b8c63c6204daa11e772a153e16d21",
+        "git_blob_sha1": "877652730505abe80355039f18191d7755141d06",
+        "status": "EXACT"
+      },
+      {
+        "scope": "A",
+        "path": "docs/qualification/install-scheduler-generation-20261123/installed-liveness-20261128/README.md",
+        "bytes": 14443,
+        "sha256": "2237057ffb4664968570bbbdb42d855d410765eaf7be260f1085b76a17f0403c",
+        "git_blob_sha1": "2e3a84b066166daa1a5c4b0ce5d3426cf2ef9b8e",
+        "status": "EXACT"
+      },
+      {
+        "scope": "A",
+        "path": "docs/qualification/install-scheduler-generation-20261123/installed-liveness-20261128/execution-receipt.json",
+        "bytes": 14898,
+        "sha256": "04ff69ad36af9345c2bda20a991842bfa2db579106f90b1158e77a55f312fcec",
+        "git_blob_sha1": "0ac477e6f34a8a57535d91a0e82e231f26ff4c9c",
+        "status": "EXACT"
+      },
+      {
+        "scope": "A",
+        "path": "docs/qualification/install-scheduler-generation-20261123/installed-liveness-20261128/observation.json",
+        "bytes": 8540,
+        "sha256": "97fc9668067b6c53c123cd6c9c333bd284f0bf21a9f8a08da0d370b1d58a9c57",
+        "git_blob_sha1": "bded7033dcca6f23037d4d3afaced5eed7b302f0",
+        "status": "EXACT"
+      },
+      {
+        "scope": "A",
+        "path": "docs/qualification/install-scheduler-generation-20261123/installed-liveness-20261128/observe_installed_liveness.ps1",
+        "bytes": 5885,
+        "sha256": "7e0d3fd5ff98ba71dcb11271e511db12f5a6a338b88bd017e1b441dcd3ab7a4a",
+        "git_blob_sha1": "ce3aa546a8e836fa858121192b1a8030b8d02914",
+        "status": "EXACT"
+      },
+      {
+        "scope": "A",
+        "path": "docs/qualification/install-scheduler-generation-20261123/installed-liveness-20261128/root-receiving.json",
+        "bytes": 243,
+        "sha256": "b234b3d2e332774b92ce923992ce6b5c35eb6d845a350548c218c4c7c1310c22",
+        "git_blob_sha1": "623cce53c224719d293dd59f0af9f311660b27e8",
+        "status": "EXACT"
+      },
+      {
+        "scope": "A",
+        "path": "docs/qualification/install-scheduler-generation-20261123/installed-liveness-20261128/artifact-bindings.json",
+        "bytes": 3617,
+        "sha256": "d46f4b3c5b7b135e31237381c8364816426b9a3ea4372fcf67c7b8cd5618e356",
+        "git_blob_sha1": "067b97d9b569aecb857353b8dff02ba23a714535",
+        "status": "EXACT"
+      },
+      {
+        "scope": "B",
+        "path": ".plans/2026-11/open-pr-integration-20261117.md",
+        "bytes": 267922,
+        "sha256": "82c5236b4ed4d1d0313ec3529298aa80564a72fdbd618163bd3c8111ddded382",
+        "git_blob_sha1": "bdb4ddff9f0328f41b515a385051b3b025793935",
+        "status": "EXACT"
+      },
+      {
+        "scope": "B",
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/.gitattributes",
+        "bytes": 54,
+        "sha256": "33faa5a7af5fe8175ee6f5322ceb98e839551ca24de6261a4d7c2a001bb672fb",
+        "git_blob_sha1": "de95c92d2e5d0a6e7bc8ba66874a23feea6b73e7",
+        "status": "EXACT"
+      },
+      {
+        "scope": "B",
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/README.md",
+        "bytes": 20769,
+        "sha256": "76d680da244b478094f00af8e0449f7df7e4cc37f7594d05e7534101d5753fd6",
+        "git_blob_sha1": "95ff244f7aa4db9abdb92ffc9f16f48c75abd0a5",
+        "status": "EXACT"
+      },
+      {
+        "scope": "B",
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/git-recovery-report.json",
+        "bytes": 31791,
+        "sha256": "d2c9ee0ad66088b90cebc1c5aa1ec41daa04449f63743820f7097c95f87511b3",
+        "git_blob_sha1": "9d5e40ab6368714fd9510f9df460badac2c7642a",
+        "status": "EXACT"
+      },
+      {
+        "scope": "B",
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/git-recovery-readset.jsonl",
+        "bytes": 995579,
+        "sha256": "c997a2540d2caf2349330d436cd8870769c17187b10fca6c4707b2c82e775cf5",
+        "git_blob_sha1": "8a3717983bc212493474dd31e36827675b9f5ffe",
+        "status": "EXACT"
+      },
+      {
+        "scope": "B",
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-content-v1.json",
+        "bytes": 5017726,
+        "sha256": "ed47cf3832e0231f03a5598653ae1a7b1680165998c87c2415b4a138b58d2aca",
+        "git_blob_sha1": "1cae16ea4f644ab35ab82fc23ed95baec4f0da74",
+        "status": "EXACT"
+      },
+      {
+        "scope": "B",
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-content-v2.json",
+        "bytes": 11139,
+        "sha256": "3ff56663b5cd01b7f91b5623958d9cbc266ecde58c25f47fe7255bbd715106c5",
+        "git_blob_sha1": "5abaccf410c6cdd86397fc510a636521e7beb0b3",
+        "status": "EXACT"
+      },
+      {
+        "scope": "B",
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-evidence-schema-v1.md",
+        "bytes": 2800,
+        "sha256": "5a23a54982a5703a4a22fd040eb4061db782fc2402bc1b57976dc171ba408951",
+        "git_blob_sha1": "1fd31ed197d2c95c1bd0d1ef705470d3a7d0c774",
+        "status": "EXACT"
+      },
+      {
+        "scope": "B",
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-recovery-summary-v2.json",
+        "bytes": 8297,
+        "sha256": "9336e822163440faabca0bff24952915ae3f9b4cfbdcddbe0d03d2ec786ef479",
+        "git_blob_sha1": "5a6087e5b5e15c71694d78637b01d75826ae98ce",
+        "status": "EXACT"
+      },
+      {
+        "scope": "B",
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-selection-v1.json",
+        "bytes": 73209,
+        "sha256": "f7527ee0011e2871d41ae703dd23a421000e027fe6970370e6cedd337dc1cd41",
+        "git_blob_sha1": "afd323c9c8f19ef1ad2ee1e37f36cf3b03e6fcd4",
+        "status": "EXACT"
+      },
+      {
+        "scope": "B",
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-transformation-manifest-v1.json",
+        "bytes": 4498,
+        "sha256": "06718a331e5ff33b055800ded6a2242984471cb661552be9dfb7bbfc2933c987",
+        "git_blob_sha1": "0e37f78373d1dce9752b976b2741e1fde3af86d8",
+        "status": "EXACT"
+      },
+      {
+        "scope": "B",
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/transport-inputs-v1.json",
+        "bytes": 64929,
+        "sha256": "513dc809de55908f25466e9398863d9d0c2069c6348a5ee48456a3f67720c957",
+        "git_blob_sha1": "d9793090fab14245b76b6252786d31d6bc33e7e0",
+        "status": "EXACT"
+      },
+      {
+        "scope": "B",
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/transport-inputs-v2.json",
+        "bytes": 24311,
+        "sha256": "4a67dd6310df6e705a40dcdeb2ae7e4c896e06ccf39c77a71b5f22bba3b4b3c4",
+        "git_blob_sha1": "d0d826f62ca2d28cef9d1e9f3e81c68faf905a8c",
+        "status": "EXACT"
+      },
+      {
+        "scope": "B",
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/structural-verification.json",
+        "bytes": 8412,
+        "sha256": "c04432c955bef8d57b9c8e90b57e455c14aa3b099e5e77fea556cad3ffcccfac",
+        "git_blob_sha1": "24889b2b07871cf25520b2620ecb1c30f6ec66c3",
+        "status": "EXACT"
+      },
+      {
+        "scope": "B",
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/artifact-bindings.json",
+        "bytes": 6921,
+        "sha256": "05358f4ad646eb386f02969ed39cf07470ccf5e9a599a7837dd7646b60dfd856",
+        "git_blob_sha1": "c4711fa139337d1a2f6c52ee72a8d8578cc5308c",
+        "status": "EXACT"
+      }
+    ],
+    "exact_files": 23,
+    "big_archive_candidate_rows": 13635
+  },
+  "native_publication": {
+    "A": {
+      "commit": "8204d3400cbfde401850d3acd3479fb8b1450fd3",
+      "status": "PASS/CLOSED",
+      "gate": "clean v3/v4",
+      "changed_files": 8,
+      "receipt_sha256": "524c31e1c30c8abcb1ec8f3e0d74442c11c76b8755d1498a99b1dfee4845417f",
+      "commands_closed": 5,
+      "readers_closed": 10
+    },
+    "B": {
+      "commit": "3482ed4ed093cc1ebfa968dea4e7127bf40e6b13",
+      "status": "PASS/CLOSED",
+      "gate": "clean v3/v4",
+      "changed_files": 15,
+      "receipt_sha256": "793926fe1c6514b1e0aae00bd2fc71daa55401d97d264da0883a0e2e06483c32",
+      "commands_closed": 5,
+      "readers_closed": 10
+    }
+  },
+  "preserved_preparation_failure": {
+    "stage": "first B index diff check",
+    "status": "FAIL/CLOSED",
+    "exit_code": 2,
+    "receipt_sha256": "6c37e8a312846a1e95f562e425e0c1972c4bfc19ba94bcee412f383308194fdb",
+    "scope": "Extra README terminal blank line and exact CRLF JSON treated as trailing whitespace; no search bytes changed.",
+    "fixed_stage_receipt_sha256": "0f300799131b3f86ef8df9308fb26dfbd262a53572882757214fcb139cc73b84"
+  },
+  "git_original_availability": {
+    "status": "PASS/CLOSED",
+    "commands_closed": 4,
+    "readers_closed": 8,
+    "receipt_sha256": "71344fcfd4dd3d0b37c347f4f4781d22e4477536582aae640e623e6c9a016ca7"
+  },
+  "transport_disposition": {
+    "schema": "git-transport-trash-disposition-v1",
+    "timestamp_utc": "2026-11-28T14:00:58.386514+00:00",
+    "previous_search_report_unchanged": true,
+    "publication": {
+      "A": "8204d3400cbfde401850d3acd3479fb8b1450fd3",
+      "B": "3482ed4ed093cc1ebfa968dea4e7127bf40e6b13"
+    },
+    "github_readback_exact_files": 23,
+    "availability_kind": "fresh cat-file --batch-check of exact OIDs/types/sizes; full object hashes were verified by the original saved search",
+    "availability_receipt_sha256": "71344fcfd4dd3d0b37c347f4f4781d22e4477536582aae640e623e6c9a016ca7",
+    "available_unique_objects": 5985,
+    "availability": [
+      {
+        "store": "published",
+        "objects": 66,
+        "oid_list_sha256": "1c978ecee232e989665a4b202fdb7a1d47719d3c4893913ff06440a3e45a24df",
+        "availability_sha256": "b0cea587cc36938fb463533cf6983c7ccd5cd706a667a345278a9ea01f84fb8c",
+        "all_types_and_sizes_match": true
+      },
+      {
+        "store": "working",
+        "objects": 5482,
+        "oid_list_sha256": "5bc607d01b5b07250f2f012ed39cec0b58c4c3db6b0f95b597a87de0b3a3e300",
+        "availability_sha256": "05dce97c827114eee67c9369d7e1c8bc0bc4be8683279e361056544e077d302d",
+        "all_types_and_sizes_match": true
+      },
+      {
+        "store": "composition_e",
+        "objects": 437,
+        "oid_list_sha256": "b2b28010477b506456d01b34f63e655c6fc3294c0c13559c17b5bdbc598615fc",
+        "availability_sha256": "45901bbbff70c4c5b0edd2cc9629f637355a7f5992ac975c26535c03afc65c69",
+        "all_types_and_sizes_match": true
+      }
+    ],
+    "source_transport_bytes": 203711168,
+    "destination_role": "R_TRASH",
+    "destination_directory": "mcphub-git-batch-20261128-3482ed4e",
+    "preserved_inputs": {
+      "git-recovery-report.json": "d2c9ee0ad66088b90cebc1c5aa1ec41daa04449f63743820f7097c95f87511b3",
+      "git-recovery-readset.jsonl": "c997a2540d2caf2349330d436cd8870769c17187b10fca6c4707b2c82e775cf5",
+      "union-selected.json": "b90c69890cbc875a99fd8e908475bca44469d6a217a65c9ff80270449d3dcf30",
+      "hash-results.json": "f3abc0c114fb4e10d1dc0a79a93a4226a81a3c0fa86d83786379c44f0a26f15b",
+      "published-oids.txt": "1c978ecee232e989665a4b202fdb7a1d47719d3c4893913ff06440a3e45a24df",
+      "working-oids.txt": "5bc607d01b5b07250f2f012ed39cec0b58c4c3db6b0f95b597a87de0b3a3e300",
+      "composition_e-oids.txt": "b2b28010477b506456d01b34f63e655c6fc3294c0c13559c17b5bdbc598615fc"
+    },
+    "moves": [
+      {
+        "name": "published-blobs.bin",
+        "bytes": 1091152,
+        "sha256": "f6f435414bad496c1a86e41ad23982774ef4ffb947450ce551f1ea25a4bdfa49",
+        "status": "MOVED_TO_TRASH_VERIFIED"
+      },
+      {
+        "name": "working-blobs.bin",
+        "bytes": 185540412,
+        "sha256": "a95da783add9b81df969b06bc7df85f88eb125bae054c4f43ef77edfee073e1f",
+        "status": "MOVED_TO_TRASH_VERIFIED"
+      },
+      {
+        "name": "composition_e-blobs.bin",
+        "bytes": 17079604,
+        "sha256": "f80676a864a88c25a79d828b8d0a5c68dd6a00492f575b36bc71249eb865a1d5",
+        "status": "MOVED_TO_TRASH_VERIFIED"
+      }
+    ],
+    "status": "MOVED_TO_TRASH_VERIFIED",
+    "trash_emptied": false
+  },
+  "transport_owner_receiving": {
+    "status": "PASS/CLOSED",
+    "commands_closed": 2,
+    "readers_closed": 4,
+    "receipt_sha256": "38731bd703e7f563639cfd8530bfe3788900848ddd32dd60644d8ed20730e221",
+    "original_controller_reaped": true,
+    "controller_capture_handles_closed": true
+  },
+  "independent_internal_review": {
+    "reviewer": "next_functional_boundary",
+    "result": "accepted in declared scopes; budget checkpoint semantics clarified before publication; exact three-transport move reviewed before execution",
+    "external_provider": "none",
+    "model_profile": "unspecified by runtime"
+  },
+  "preserved_unknown": {
+    "scope": "earliest archive dependent launcher",
+    "terminal_status": "UNKNOWN",
+    "native_closure_status": "UNKNOWN",
+    "excluded_from_closed_totals": true
+  },
+  "production_code_changed": false,
+  "new_product_tests_run": false,
+  "manual_ci_started": false,
+  "merged": false,
+  "binding_note": "The two cited commits and their 23 file byte sequences are immutable inputs to this record. This added record is verified separately after its own publication and does not claim a self-referential readback."
+}

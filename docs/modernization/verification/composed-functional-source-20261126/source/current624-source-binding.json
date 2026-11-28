@@ -1,0 +1,26 @@
+[
+  {
+    "path": "internal/vcpkgmcp/cmaketrace/parse.go",
+    "sha": "40b3ba7e0d70e9b1ad332d7b95b406956bf49a79",
+    "composed_blob": "27d5f57e46012567c8ee9d33a81a21333ef3c6d6",
+    "same": false
+  },
+  {
+    "path": "internal/vcpkgmcp/cmaketrace/projection.go",
+    "sha": "2a7e5e84f1a2598933eeab9fb0699f6a353b5e5e",
+    "composed_blob": "84f1bae7b1f5fd489dd45c76c9099b5e29d45839",
+    "same": false
+  },
+  {
+    "path": "internal/vcpkgmcp/cmaketrace/r22_bot_regressions_test.go",
+    "sha": "c91ae4e70456924c7841ac68eae542a616a921b8",
+    "composed_blob": "73e585c102d8bcc13af20f009243c0379edb484c",
+    "same": false
+  },
+  {
+    "path": "internal/vcpkgmcp/cmaketrace/r32_bot_regressions_test.go",
+    "sha": "d8ed7589c05386a25bd843c8d770d31a667a16c9",
+    "composed_blob": "addd70fe9f7c2ccdb31f625bf859d62ff7e4619c",
+    "same": false
+  }
+]

@@ -1,0 +1,308 @@
+{
+  "schema": "b-evidence-structural-verification-v1",
+  "status": "PASS",
+  "archive_files": [
+    {
+      "name": "archive-content-v1.json",
+      "bytes": 5017726,
+      "sha256": "ed47cf3832e0231f03a5598653ae1a7b1680165998c87c2415b4a138b58d2aca"
+    },
+    {
+      "name": "archive-content-v2.json",
+      "bytes": 11139,
+      "sha256": "3ff56663b5cd01b7f91b5623958d9cbc266ecde58c25f47fe7255bbd715106c5"
+    },
+    {
+      "name": "archive-evidence-schema-v1.md",
+      "bytes": 2097,
+      "sha256": "991e2a71dac5acdf0bb3c5da7de424d581eed79515a4070b55dee1411ae60aaf"
+    },
+    {
+      "name": "archive-recovery-summary-v2.json",
+      "bytes": 8297,
+      "sha256": "9336e822163440faabca0bff24952915ae3f9b4cfbdcddbe0d03d2ec786ef479"
+    },
+    {
+      "name": "archive-selection-v1.json",
+      "bytes": 73209,
+      "sha256": "f7527ee0011e2871d41ae703dd23a421000e027fe6970370e6cedd337dc1cd41"
+    },
+    {
+      "name": "archive-transformation-manifest-v1.json",
+      "bytes": 4498,
+      "sha256": "06718a331e5ff33b055800ded6a2242984471cb661552be9dfb7bbfc2933c987"
+    },
+    {
+      "name": "transport-inputs-v1.json",
+      "bytes": 64929,
+      "sha256": "513dc809de55908f25466e9398863d9d0c2069c6348a5ee48456a3f67720c957"
+    },
+    {
+      "name": "transport-inputs-v2.json",
+      "bytes": 24311,
+      "sha256": "4a67dd6310df6e705a40dcdeb2ae7e4c896e06ccf39c77a71b5f22bba3b4b3c4"
+    }
+  ],
+  "original_public_checks": [
+    {
+      "name": "archive-selection-v1.json",
+      "original_bytes_verified": true,
+      "public_bytes_verified": true,
+      "all_json_fields_preserved": false
+    },
+    {
+      "name": "transport-inputs-v1.json",
+      "original_bytes_verified": true,
+      "public_bytes_verified": true,
+      "all_json_fields_preserved": true
+    },
+    {
+      "name": "transport-inputs-v2.json",
+      "original_bytes_verified": true,
+      "public_bytes_verified": true,
+      "all_json_fields_preserved": true
+    },
+    {
+      "name": "archive-content-v1.json",
+      "original_bytes_verified": true,
+      "public_bytes_verified": true,
+      "all_json_fields_preserved": true
+    },
+    {
+      "name": "archive-content-v2.json",
+      "original_bytes_verified": true,
+      "public_bytes_verified": true,
+      "all_json_fields_preserved": true
+    },
+    {
+      "name": "archive-recovery-summary-v2.json",
+      "original_bytes_verified": true,
+      "public_bytes_verified": true,
+      "all_json_fields_preserved": false
+    }
+  ],
+  "substitution_counts_for_four_full_reports": {
+    "{D_WORKTREE_ROOT}": 0,
+    "{D_REPOSITORY_ROOT}": 3520,
+    "{D_TASK_ROOT}": 0,
+    "{E_IMPORTED_TASK_ROOT}": 10618
+  },
+  "candidate_rows": [
+    13635,
+    1
+  ],
+  "candidate_first_keys": [
+    "source",
+    "bytes",
+    "sha256",
+    "targets",
+    "prefix9315_only"
+  ],
+  "content_report_outlines": [
+    {
+      "schema": "b-archive-content-search-v1",
+      "selection": "Prior E archive report: b-native/failed-owner/current5e/fresh/canonical/lf363b/source52/ab664; selected D p0/source/candidate capsules. Broader content and JSON-base64 coverage than previous filename-only pass.",
+      "selected": 266,
+      "limits": {
+        "type": "object",
+        "keys": [
+          "archive",
+          "member",
+          "nested_decode",
+          "seconds",
+          "compressed_total"
+        ]
+      },
+      "archives": {
+        "type": "array",
+        "count": 244,
+        "first_keys": [
+          "path",
+          "bytes",
+          "sha256",
+          "members"
+        ]
+      },
+      "exact": {
+        "type": "array",
+        "count": 0,
+        "first_keys": null
+      },
+      "skipped": {
+        "type": "array",
+        "count": 3,
+        "first_keys": [
+          "archive",
+          "member",
+          "reason"
+        ]
+      },
+      "errors": {
+        "type": "array",
+        "count": 2,
+        "first_keys": [
+          "path",
+          "error"
+        ]
+      },
+      "remaining": {
+        "type": "array",
+        "count": 22,
+        "first_keys": null
+      },
+      "complete_for_declared_scope": false,
+      "compressed_bytes_read": 268496235,
+      "nested_bytes_decoded": 295587,
+      "elapsed_seconds": 7.616161099984311,
+      "unique_archives": 58
+    },
+    {
+      "schema": "b-archive-content-search-v2",
+      "selection": "Prior E archive report: b-native/failed-owner/current5e/fresh/canonical/lf363b/source52/ab664; selected D p0/source/candidate capsules. Broader content and JSON-base64 coverage than previous filename-only pass.",
+      "selected": 23,
+      "limits": {
+        "type": "object",
+        "keys": [
+          "archive",
+          "member",
+          "nested_decode",
+          "seconds",
+          "compressed_total"
+        ]
+      },
+      "archives": {
+        "type": "array",
+        "count": 23,
+        "first_keys": [
+          "path",
+          "bytes",
+          "sha256",
+          "same_bytes_as"
+        ]
+      },
+      "exact": {
+        "type": "array",
+        "count": 0,
+        "first_keys": null
+      },
+      "skipped": {
+        "type": "array",
+        "count": 0,
+        "first_keys": null
+      },
+      "errors": {
+        "type": "array",
+        "count": 0,
+        "first_keys": null
+      },
+      "new_unique_archives": 1,
+      "remaining": {
+        "type": "array",
+        "count": 0,
+        "first_keys": null
+      },
+      "complete_for_declared_scope": true,
+      "compressed_bytes_read": 20401061,
+      "nested_bytes_decoded": 0,
+      "elapsed_seconds": 0.8405488999560475,
+      "unique_archives": 58
+    }
+  ],
+  "selection_outline": {
+    "schema": "b-archive-search-selection-public-v1",
+    "source_schema": "b-archive-search-selection-v1",
+    "source_strategy": "Only archives already inventoried by D v1/v3/v4; exclude dependency caches and >64MiB; no archive content read in selection.",
+    "source_inputs": {
+      "type": "array",
+      "count": 3,
+      "first_keys": [
+        "name",
+        "bytes",
+        "sha256"
+      ]
+    },
+    "original_selection_sha256": "224bf701e5bba9c64f0d125fa5d2268dc80d7800d68521c2232a051897aeac49",
+    "original_d_inventory": {
+      "type": "object",
+      "keys": [
+        "enumerated",
+        "selected",
+        "excluded",
+        "excluded_reason_counts"
+      ]
+    },
+    "selected_for_archive_reading": {
+      "type": "array",
+      "count": 266,
+      "first_keys": [
+        "path",
+        "bytes",
+        "sha256"
+      ]
+    },
+    "selected_path_count": 266,
+    "d_selected_rows_used": {
+      "type": "array",
+      "count": 6,
+      "first_keys": [
+        "path",
+        "bytes"
+      ]
+    },
+    "d_selected_rows_omitted": 1810,
+    "d_excluded_rows_omitted": 1753,
+    "projection_reason": "Preliminary D inventory contains unrelated dependency/archive paths. Only the actual 266 archive paths are published here. Omitted preliminary rows remain bound by original input SHA and exact counts. Full candidate/hash/status/error/queue data remain in the content reports.",
+    "prior_e_archive_input": "e-priority-archive-search-v2.json, identified by SHA in archive-content-v1.json"
+  },
+  "transport_outlines": [
+    {
+      "schema": "b-transport-content-inspection-v1",
+      "data_only": true,
+      "exact": {
+        "type": "array",
+        "count": 0,
+        "first_keys": null
+      },
+      "errors": {
+        "type": "array",
+        "count": 0,
+        "first_keys": null
+      }
+    },
+    {
+      "schema": "b-transport-content-inspection-v2",
+      "data_only": true,
+      "exact": {
+        "type": "array",
+        "count": 0,
+        "first_keys": null
+      },
+      "errors": {
+        "type": "array",
+        "count": 0,
+        "first_keys": null
+      }
+    }
+  ],
+  "git_report_bytes": 31791,
+  "git_report_sha256": "d2c9ee0ad66088b90cebc1c5aa1ec41daa04449f63743820f7097c95f87511b3",
+  "git_readset_rows": 5985,
+  "git_readset_first": {
+    "git_oid": "73e585c102d8bcc13af20f009243c0379edb484c",
+    "sha256": "77a072ac7f78557aec3ffc1bb1d6dde1c42e2d36e77fcbc80f172a3092060ed7",
+    "bytes": 1099,
+    "stores": [
+      "published",
+      "working",
+      "composition_e"
+    ]
+  },
+  "git_readset_summary": {
+    "file": "git-recovery-readset.jsonl",
+    "bytes": 995579,
+    "sha256": "c997a2540d2caf2349330d436cd8870769c17187b10fca6c4707b2c82e775cf5",
+    "rows": 5985
+  },
+  "early_archive_launcher": "UNKNOWN",
+  "product_acceptance": false
+}

@@ -1,0 +1,85 @@
+{
+  "schema": "cache-acceptance-source4-capsule-v1",
+  "base": {
+    "commit": "e66f5c6fab7da2a2eff16ff1f0891991ca1a839c",
+    "tree": "4df69e99dca3f808b26e6a5bf7721bdd0ba3a91c",
+    "capsule": "../composed-functional-source-20261126/README.md"
+  },
+  "source": {
+    "commit": "4ac73379a10e09766fe8274a129129a2b565f757",
+    "tree": "5b24c5f32541316bb8d24ad75a306c250b14b0b3",
+    "parent": "e66f5c6fab7da2a2eff16ff1f0891991ca1a839c",
+    "tracked_files": 3867,
+    "changed_test_files": 5,
+    "production_changed": false
+  },
+  "exact_inputs": {
+    "patch": {
+      "file": "source4.patch",
+      "bytes": 11152,
+      "sha256": "f39a10a395675c93068ff8f19a98de1ce856b616de3fc911e28d6b4a2e88ef89"
+    },
+    "commit": {
+      "file": "source4.commit",
+      "git_commit": "4ac73379a10e09766fe8274a129129a2b565f757"
+    }
+  },
+  "files": [
+    {
+      "path": "internal/api/main_helper_dispatch_test.go",
+      "before_bytes": 4398,
+      "before_sha256": "d2c9cda18bda45717100535feaac8a35d5245d7bea33d524284bcdbf80b7ae75",
+      "after_bytes": 4676,
+      "after_sha256": "98c72607aa90c7e2ffa40e92e709e2e3b5704c4a825c1517ae188a4da026ee59",
+      "after_git_blob": "9295eaf48853cec96cc7d80fb6ba31c9d72f9c24"
+    },
+    {
+      "path": "internal/api/main_helper_dispatch_validation_test.go",
+      "before_bytes": 7027,
+      "before_sha256": "33fab6b57ed392489761206ed9ef523a0ba4db36d64ff06381b094e742d6ba40",
+      "after_bytes": 7686,
+      "after_sha256": "cb7a9cfd4fa2671cb064866f98a64236f5603d10efc21b257d52d3b60457e567",
+      "after_git_blob": "8d5995adbea4894def6be2974ad2140d44769a7b"
+    },
+    {
+      "path": "internal/api/required_secret_gate_test.go",
+      "before_bytes": 18782,
+      "before_sha256": "d90b41770ba06e5cc4d729a2dde1b699f7412763cb293884189e1d7cabf2f218",
+      "after_bytes": 18672,
+      "after_sha256": "46d86ac763146e58d8bd9426f534116fa4f38fe28f440d4b14953b352beedbf8",
+      "after_git_blob": "12e16793df6f749ade0ea548703c3b0d2dd32cac"
+    },
+    {
+      "path": "internal/cli/supervise_lostchild_f1_f3_test.go",
+      "before_bytes": 57100,
+      "before_sha256": "7f8b20df285565214d08beb1a0c69950714e62d48774825e0f794180205a93c7",
+      "after_bytes": 57233,
+      "after_sha256": "9337faab29ba07e3b9bb99a67ac14104b1c7154c24fcdc1c4e8a4faac9983d33",
+      "after_git_blob": "5ad38146732a4475896286714df9aa4189d203a8"
+    },
+    {
+      "path": "internal/cli/supervise_lostchild_f6_f2_test.go",
+      "before_bytes": 40971,
+      "before_sha256": "db977a528f7b8c85d8d5198ffe82f1f2caad5ce7da42ecc7fb78255c339d06d0",
+      "after_bytes": 41573,
+      "after_sha256": "bf70bb03deafe16ecd22b9b049d68b3fa205889047c10e1dcd7037f0301f0a1f",
+      "after_git_blob": "3889a513c18f61aac499ce5bb9e77317b8cb533d"
+    }
+  ],
+  "original_source_receipt": {
+    "role": "source4-test-fix-receipt",
+    "bytes": 2484,
+    "sha256": "a5614d3c4b08ef74f9065496000a9576927594710e4da642a5c169aa3c751125"
+  },
+  "recovery_checks": {
+    "current_source_head_and_tree_matched": true,
+    "current_source_worktree_clean": true,
+    "reverse_git_apply_check_exit": 0,
+    "scope": "Read-only check of the exact patch against the surviving Source4 checkout; no full regression was run by this check."
+  },
+  "limits": [
+    "This capsule reconstructs Source4 from the already public e66 snapshot.",
+    "It does not recover the two absent unpublished commits or missing pre-P02 ancestor history.",
+    "The patch is stored as evidence; it is not applied to the publication worktree production/test files."
+  ]
+}

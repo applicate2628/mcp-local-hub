@@ -1,0 +1,52 @@
+diff --git a/internal/cli/supervise_reconcile_ipc_test.go b/internal/cli/supervise_reconcile_ipc_test.go
+index 4fbe28e28679c5a48b4731057683ac6f19607137..82fcacfd60f4d51cc1efd094e391601b8a2107ce 100644
+--- a/internal/cli/supervise_reconcile_ipc_test.go
++++ b/internal/cli/supervise_reconcile_ipc_test.go
+@@ -182,7 +182,14 @@ type reconcileTestFixture struct {
+ 
+ func newReconcileTestFixture(t *testing.T, intent *api.SupervisorIntentFile) *reconcileTestFixture {
+ 	t.Helper()
+-	tmpHome := apitest.HardenedTempDir(t)
++	return newReconcileTestFixtureWithStateDir(t, intent, "")
++}
++
++func newReconcileTestFixtureWithStateDir(t *testing.T, intent *api.SupervisorIntentFile, tmpHome string) *reconcileTestFixture {
++	t.Helper()
++	if tmpHome == "" {
++		tmpHome = apitest.HardenedTempDir(t)
++	}
+ 	// handleReconcile's apply-mode branch now calls
+ 	// RepairSerenaIntentFromRegistry(deps.stateDir), which resolves the
+ 	// WORKSPACE REGISTRY through api.DefaultRegistryPath() — a resolver
+diff --git a/internal/cli/workspace_cmd_test.go b/internal/cli/workspace_cmd_test.go
+index d267cab054419fccba218348777fe7ad2a714332..a5c940ea6683d140ade80e72c3ceb5535990c27f 100644
+--- a/internal/cli/workspace_cmd_test.go
++++ b/internal/cli/workspace_cmd_test.go
+@@ -21,6 +21,7 @@ import (
+ 	"gopkg.in/yaml.v3"
+ 
+ 	"mcp-local-hub/internal/api"
++	"mcp-local-hub/internal/api/apitest"
+ 	"mcp-local-hub/internal/config"
+ 	"mcp-local-hub/internal/process"
+ 	"mcp-local-hub/internal/scheduler"
+@@ -1982,7 +1983,18 @@ func TestWorkspaceRegisterSerena_NativePreparationProducerToTerminalFrame(t *tes
+ 		})
+ 	}
+ 	before.Daemons = append(before.Daemons, api.BuildBuiltinRouteDaemon(image, DefaultRouteDaemonPort))
+-	fx := newReconcileTestFixture(t, before)
++	// Native dependency builds add deep paths below this owned state root.
++	// Avoid t.TempDir's long test-name prefix while retaining a private DACL.
++	shortRoot, err := os.MkdirTemp("", "wp-")
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() {
++		if err := os.RemoveAll(shortRoot); err != nil {
++			t.Errorf("remove isolated workspace state: %v", err)
++		}
++	})
++	fx := newReconcileTestFixtureWithStateDir(t, before, apitest.HardenedDir(t, shortRoot))
+ 	before, err = api.ReadSupervisorIntent(filepath.Join(fx.deps.stateDir, "supervisor-intent.json"))
+ 	if err != nil || before.HasRuntimeSpecRow() {
+ 		t.Fatal("original absence capture failed")

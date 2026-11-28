@@ -1,0 +1,9 @@
+{"Time":"2026-11-26T14:39:47.5825259+03:00","Action":"start","Package":"mcp-local-hub/internal/api"}
+{"Time":"2026-11-26T14:39:49.6558128+03:00","Action":"run","Package":"mcp-local-hub/internal/api","Test":"TestSupervisorIntentLockOwnershipProductionInventory"}
+{"Time":"2026-11-26T14:39:49.6558128+03:00","Action":"output","Package":"mcp-local-hub/internal/api","Test":"TestSupervisorIntentLockOwnershipProductionInventory","Output":"=== RUN   TestSupervisorIntentLockOwnershipProductionInventory\n","OutputType":"frame"}
+{"Time":"2026-11-26T14:40:14.5379089+03:00","Action":"output","Package":"mcp-local-hub/internal/api","Test":"TestSupervisorIntentLockOwnershipProductionInventory","Output":"    supervisor_intent_lock_ownership_test.go:65: owned call internal/api/state_file_observed_lease.go:func:tryAcquireLedgeredObservedLeaf calls=1, reviewed=0\n","OutputType":"error"}
+{"Time":"2026-11-26T14:40:14.5379089+03:00","Action":"output","Package":"mcp-local-hub/internal/api","Test":"TestSupervisorIntentLockOwnershipProductionInventory","Output":"--- FAIL: TestSupervisorIntentLockOwnershipProductionInventory (24.88s)\n","OutputType":"frame"}
+{"Time":"2026-11-26T14:40:14.5379089+03:00","Action":"fail","Package":"mcp-local-hub/internal/api","Test":"TestSupervisorIntentLockOwnershipProductionInventory","Elapsed":24.88}
+{"Time":"2026-11-26T14:40:14.5379089+03:00","Action":"output","Package":"mcp-local-hub/internal/api","Output":"FAIL\n","OutputType":"frame"}
+{"Time":"2026-11-26T14:40:14.6368958+03:00","Action":"output","Package":"mcp-local-hub/internal/api","Output":"FAIL\tmcp-local-hub/internal/api\t27.053s\n","OutputType":"frame"}
+{"Time":"2026-11-26T14:40:14.6368958+03:00","Action":"fail","Package":"mcp-local-hub/internal/api","Elapsed":27.054}

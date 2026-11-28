@@ -1,0 +1,27 @@
+{
+  "schema": "failed-owner-core-method-provenance-v1",
+  "model_input": "existing published v13 core copied to external-owner-inputs/public-v13-qualified_windows_products_consumer_v1.py",
+  "public_source": {
+    "commit": "0c255490461fed0a3ee3d43acdd5216e2e064a53",
+    "repo_path": "docs/modernization/verification/cache-owner-custody-20261126/sources/full-v13/qualified_windows_products_consumer_v1.py.txt",
+    "git_blob": "e1f4373aa2bffadd2ef32494ec59da380abc72b5",
+    "file_sha256": "e11118b22a6d805fd9984c885fb646e29638777b46b2227c788864c8d6d7953d",
+    "bytes": 125192,
+    "method_ast_sha256": "1d32f9a1b4488234e6eff022998334aecf407b0e5a3acbf333fe98f95a2aa8cc",
+    "method_source_sha256": "e08bd87ebc6c18ab593d936a7e3468a9b4392892e765f99f98b2e20ca04fbe1c"
+  },
+  "actual_runtime_v14_source": {
+    "file_sha256": "b679aadd8455cb70c8a445e3abf99484edaf76208fffc0f8347100d12c5976c8",
+    "bytes": 126758,
+    "method_ast_sha256": "1d32f9a1b4488234e6eff022998334aecf407b0e5a3acbf333fe98f95a2aa8cc",
+    "method_source_sha256": "e08bd87ebc6c18ab593d936a7e3468a9b4392892e765f99f98b2e20ca04fbe1c"
+  },
+  "method": "Run.retain_failed_full_workers",
+  "same_method_ast": true,
+  "same_method_source": true,
+  "runtime_core_imported_by_model": false,
+  "whole_core_equivalence_claimed": false,
+  "native_or_cache_authority_from_this_model": false,
+  "local_exact_v14_reconstruction_checked": true,
+  "full_core_or_unrelated_core_delta_included_in_publication": false
+}

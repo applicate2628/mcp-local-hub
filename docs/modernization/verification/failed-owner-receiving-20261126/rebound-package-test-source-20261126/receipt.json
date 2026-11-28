@@ -1,0 +1,42 @@
+{
+    "schema":  "mcp-hub-rebound-product-and-test-inputs-v1",
+    "target":  "windows/amd64",
+    "go":  "go1.27.4",
+    "product_source":  {
+                           "commit":  "b3014dbe6fa2f33f4b034782acc78ff482b646f9",
+                           "tree":  "3f21d0706e3123cec7d1b004f97a6719456dc6c0",
+                           "parent":  "e66f5c6fab7da2a2eff16ff1f0891991ca1a839c",
+                           "epoch":  "4d51c0b6a3d8817f83ee033fedacc9cc8f1ee003af063e279e62839c99685930",
+                           "source_snapshot_sha256":  "91e85cac0cb569c5f0b2724be5e275788eb369e5c7d49b19462dc93b6b7a1f60",
+                           "published_source_delta":  "41b6192b6c02a7cc7c4365e512b36c52bfa024cd",
+                           "product_sha256":  "fef99a8289eb382aa16e2d1c2c7f145e429f9335ed8fb6f1ccbedc7e020bb0cf"
+                       },
+    "pack":  {
+                 "platform_sha256":  "53154c1d816616cced4b3ee2b78c84daa1067f5edf8a458b08e421f513d2105e",
+                 "meta_sha256":  "9d1e8f7adc159ea2e11988423f37866c46ffa5c2be69d320045d8df8ee62e19e",
+                 "platform_verifier_exit":  0,
+                 "meta_verifier_exit":  0,
+                 "installed_prefix_packages":  2,
+                 "host_version_started_child":  false
+             },
+    "test_source":  {
+                        "commit":  "b05d0e838af9da7ede6fbf537c84c4a4a5697037",
+                        "tree":  "504e78be00bade4944ee827d23f8eebd5a4c0357",
+                        "parent":  "b3014dbe6fa2f33f4b034782acc78ff482b646f9",
+                        "patch_sha256":  "6ea7dc996c0a5115b77eebd15310bb9696f4a960c44eea00293f66c0684180d6"
+                    },
+    "command_test":  {
+                         "case":  "TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade",
+                         "product_sha256":  "39922dd5836d1c6c7143e84fe9aa3de26813656c1edf0ec190cb20b1df88be50",
+                         "fixture_sha256":  "24bc7449f37fb28250682e02c2c683e45401e238cab8103a87910d3febbcfa13",
+                         "native_exit":  2,
+                         "status":  "FAIL_TIMEOUT_IN_FIXTURE_FLUSH",
+                         "first_pass_output_exit_unconfirmed":  true,
+                         "original_wait_received":  true,
+                         "capture_readers_joined":  true,
+                         "stdout_sha256":  "a01502fa029a0b12ef26078a9fc99f94527d0096da789ab74975bdf62932b791",
+                         "stderr_sha256":  "97abc65aa41f51f6ac82cb88ef9f36981591df6632a9c132e6a1d8188d835164"
+                     },
+    "full_native_acceptance":  false,
+    "running_installation_changed":  false
+}

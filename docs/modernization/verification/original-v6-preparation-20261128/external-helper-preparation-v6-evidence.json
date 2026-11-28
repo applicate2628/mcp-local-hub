@@ -1,0 +1,402 @@
+{
+  "schema": "original-external-helper-inputs-v6-public-evidence-v1",
+  "status": "PASS",
+  "physical_state": "CLOSED",
+  "scope": "Five-command preparation compiled the two original external helpers and received their DATA. It did not execute those helpers or the requested acceptance tests.",
+  "primary_artifacts": [
+    {
+      "role_path": "original-external-helper-inputs-v6/parent.json",
+      "bytes": 1509,
+      "sha256": "2c04ece4441ec83193a98d6f0179f01dfab4679eeb7df1e765de703e98960ee7",
+      "actual_metadata_bytes_reread": true
+    },
+    {
+      "role_path": "original-external-helper-inputs-v6/commands/execution.json",
+      "bytes": 7292621,
+      "sha256": "788e55531f52d64516664f65043c9130c0cd90cf89c96cdd13d0af362f21a255",
+      "actual_metadata_bytes_reread": true
+    },
+    {
+      "role_path": "inputs-original-v6/original-external-helper-inputs-v6-outer-original.json",
+      "bytes": 450,
+      "sha256": "e44dc076c85a77f16ba0a4252c30e453c14e0d690e7aab6ccd967a4d22fd811c",
+      "actual_metadata_bytes_reread": true
+    },
+    {
+      "role_path": "inputs-original-v6/external-prepare-candidate/original-external-helper-inputs-v6-plan.json",
+      "bytes": 717683,
+      "sha256": "961da89130054f1edbc4d1a8170353b84d900dbaa0c2699af9bf4e6db32fd783",
+      "actual_metadata_bytes_reread": true
+    },
+    {
+      "role_path": "inputs-original-v6/external-prepare-candidate/original-external-helper-inputs-v6-plan.candidate.json",
+      "bytes": 717684,
+      "sha256": "dbe9d2e7cc72b7a0816209f24d20f2299d4c6778dc40ae13ba069e50d86f9d57",
+      "actual_metadata_bytes_reread": true
+    },
+    {
+      "role_path": "original-external-helper-inputs-v6/external-helper-inputs.json",
+      "bytes": 4312,
+      "sha256": "9c7c519e90d6c1ebc64020e11eba983f540c7204fdc6462a9747758ab21da1a5",
+      "actual_metadata_bytes_reread": true
+    },
+    {
+      "role_path": "original-external-helper-inputs-v6/external-source-preparation.json",
+      "bytes": 7810,
+      "sha256": "72d6b8ba65a116ac5bf0d7f06c11def7d080db8bd66550d68811dbd1d22991c0",
+      "actual_metadata_bytes_reread": true
+    },
+    {
+      "role_path": "inputs-original-v6/external-prepare-candidate/external-build-bindings.json",
+      "bytes": 6354,
+      "sha256": "6a8ea2aafc49ebe85af0b78a71bf197829c46d7390ba6a87e9fce47f1adbf9a9",
+      "actual_metadata_bytes_reread": true
+    }
+  ],
+  "parent": {
+    "schema": "fresh-owned-commands-v1-parent",
+    "status": "PASS",
+    "plan_sha256": "961da89130054f1edbc4d1a8170353b84d900dbaa0c2699af9bf4e6db32fd783",
+    "terminal_exit_received": true,
+    "parent_capture_files_closed": true,
+    "deadline_exceeded": false,
+    "exit_code": 0,
+    "seconds": 105.73429619998205,
+    "execution_sha256": "788e55531f52d64516664f65043c9130c0cd90cf89c96cdd13d0af362f21a255",
+    "child_status": "PASS",
+    "physical_complete": true,
+    "capture_closure": [
+      {
+        "name": "stdout",
+        "close_attempted": true,
+        "close_returned": true,
+        "wrapper_closed": true
+      },
+      {
+        "name": "stderr",
+        "close_attempted": true,
+        "close_returned": true,
+        "wrapper_closed": true
+      }
+    ]
+  },
+  "outer": {
+    "schema": "original-external-helper-build-original-parent-v1",
+    "plan_sha256": "961da89130054f1edbc4d1a8170353b84d900dbaa0c2699af9bf4e6db32fd783",
+    "same_process_start_object": true,
+    "exit_code": 0,
+    "wait_returned": true,
+    "original_process_object_disposed": true,
+    "new_job_or_tree_wait": false,
+    "create_no_window": true,
+    "wait_errors": []
+  },
+  "payload_sha256": {
+    "guard": "e7c663f4ba2fd558005bc110173609cb19465ff33d3f4678aeb53b5ba00e0924",
+    "runner": "6d16652d4893273b7e9d584920892ce5f5917622e7e242a62eb78ec824bcfb93",
+    "windows_job": "d94583001a33ef34adb67feec34b4f4b0bf3626df9f63da3c7a7c85bf3e0b552"
+  },
+  "commands": [
+    {
+      "name": "copy-current-closed-build-caches",
+      "exit_code": 0,
+      "command_success": true,
+      "captures_measured": true,
+      "quiescence_state": "complete",
+      "seconds": 76.99802119995002,
+      "original_owner_retained": true,
+      "original_readers_joined": true,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "io_closed_and_error_free": true,
+      "completion_lifecycle_state": "CLOSED",
+      "recorded_pins_before": 3535,
+      "recorded_pins_after": 3535,
+      "recorded_before_and_after_maps_equal_to_plan": true,
+      "captures": {
+        "stdout": {
+          "role_path": "original-external-helper-inputs-v6/commands/copy-current-closed-build-caches.stdout.txt",
+          "bytes": 691,
+          "sha256": "8226de29cfda65176d41e4240a06359fdf12cd11b1948e1ed3fdd8350f6d6277",
+          "actual_bytes_reread_after_closure": true,
+          "raw_capture_published": false
+        },
+        "stderr": {
+          "role_path": "original-external-helper-inputs-v6/commands/copy-current-closed-build-caches.stderr.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "actual_bytes_reread_after_closure": true,
+          "raw_capture_published": false
+        }
+      }
+    },
+    {
+      "name": "stage-exact-original-external-sources",
+      "exit_code": 0,
+      "command_success": true,
+      "captures_measured": true,
+      "quiescence_state": "complete",
+      "seconds": 0.7616216999012977,
+      "original_owner_retained": true,
+      "original_readers_joined": true,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "io_closed_and_error_free": true,
+      "completion_lifecycle_state": "CLOSED",
+      "recorded_pins_before": 3535,
+      "recorded_pins_after": 3535,
+      "recorded_before_and_after_maps_equal_to_plan": true,
+      "captures": {
+        "stdout": {
+          "role_path": "original-external-helper-inputs-v6/commands/stage-exact-original-external-sources.stdout.txt",
+          "bytes": 53,
+          "sha256": "6bab5e6eddaed0260e6dd3a3b8df545b134a4babfccbbdbf3a755e9d5c5efdb1",
+          "actual_bytes_reread_after_closure": true,
+          "raw_capture_published": false
+        },
+        "stderr": {
+          "role_path": "original-external-helper-inputs-v6/commands/stage-exact-original-external-sources.stderr.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "actual_bytes_reread_after_closure": true,
+          "raw_capture_published": false
+        }
+      }
+    },
+    {
+      "name": "compile-original-contained-helper",
+      "exit_code": 0,
+      "command_success": true,
+      "captures_measured": true,
+      "quiescence_state": "complete",
+      "seconds": 7.494271999923512,
+      "original_owner_retained": true,
+      "original_readers_joined": true,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "io_closed_and_error_free": true,
+      "completion_lifecycle_state": "CLOSED",
+      "recorded_pins_before": 3535,
+      "recorded_pins_after": 3535,
+      "recorded_before_and_after_maps_equal_to_plan": true,
+      "captures": {
+        "stdout": {
+          "role_path": "original-external-helper-inputs-v6/commands/compile-original-contained-helper.stdout.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "actual_bytes_reread_after_closure": true,
+          "raw_capture_published": false
+        },
+        "stderr": {
+          "role_path": "original-external-helper-inputs-v6/commands/compile-original-contained-helper.stderr.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "actual_bytes_reread_after_closure": true,
+          "raw_capture_published": false
+        }
+      }
+    },
+    {
+      "name": "compile-original-canonical-helper",
+      "exit_code": 0,
+      "command_success": true,
+      "captures_measured": true,
+      "quiescence_state": "complete",
+      "seconds": 6.205355199985206,
+      "original_owner_retained": true,
+      "original_readers_joined": true,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "io_closed_and_error_free": true,
+      "completion_lifecycle_state": "CLOSED",
+      "recorded_pins_before": 3535,
+      "recorded_pins_after": 3535,
+      "recorded_before_and_after_maps_equal_to_plan": true,
+      "captures": {
+        "stdout": {
+          "role_path": "original-external-helper-inputs-v6/commands/compile-original-canonical-helper.stdout.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "actual_bytes_reread_after_closure": true,
+          "raw_capture_published": false
+        },
+        "stderr": {
+          "role_path": "original-external-helper-inputs-v6/commands/compile-original-canonical-helper.stderr.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "actual_bytes_reread_after_closure": true,
+          "raw_capture_published": false
+        }
+      }
+    },
+    {
+      "name": "receive-original-external-helper-data",
+      "exit_code": 0,
+      "command_success": true,
+      "captures_measured": true,
+      "quiescence_state": "complete",
+      "seconds": 0.7935742998961359,
+      "original_owner_retained": true,
+      "original_readers_joined": true,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "io_closed_and_error_free": true,
+      "completion_lifecycle_state": "CLOSED",
+      "recorded_pins_before": 3535,
+      "recorded_pins_after": 3535,
+      "recorded_before_and_after_maps_equal_to_plan": true,
+      "captures": {
+        "stdout": {
+          "role_path": "original-external-helper-inputs-v6/commands/receive-original-external-helper-data.stdout.txt",
+          "bytes": 516,
+          "sha256": "299417078bcf48c2a9e58f0a3ac27e05e7c425abb7213960e28e58c462c414ed",
+          "actual_bytes_reread_after_closure": true,
+          "raw_capture_published": false
+        },
+        "stderr": {
+          "role_path": "original-external-helper-inputs-v6/commands/receive-original-external-helper-data.stderr.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "actual_bytes_reread_after_closure": true,
+          "raw_capture_published": false
+        }
+      }
+    }
+  ],
+  "approved_plan_change": {
+    "only_reviewed_false_to_true": true,
+    "candidate_sha256": "dbe9d2e7cc72b7a0816209f24d20f2299d4c6778dc40ae13ba069e50d86f9d57",
+    "approved_sha256": "961da89130054f1edbc4d1a8170353b84d900dbaa0c2699af9bf4e6db32fd783"
+  },
+  "receiving": {
+    "schema": "original-external-helper-compiled-inputs-v6",
+    "status": "COMPILED_DATA_ONLY",
+    "source_commit": "727d66753814dc218e26d699e57402db2d13190a",
+    "source_tree": "d959ed0a4f8ab02947aec7569f3c0535a3cff533",
+    "tests_executed": false,
+    "qualification_passed": false,
+    "native_authority_transferred": false,
+    "native_build_exit_receiving": "separate original owned-command execution and parent receipts",
+    "producer_capability": {
+      "late_failed_physical_closure_issued": false,
+      "normal_receiving": "canonical_receiving_v4 original f6445f4060310d0d545853fdc0233ff4576359eabf6c61dd9e31bb91bc4bf91e predicate",
+      "resources_finalized_api": false,
+      "retains_incomplete_original": true,
+      "source_generation": "original-ext17"
+    },
+    "staged_sources": {
+      "qualified-original-external-v6-canonical/canonicalcaseowner/capture_windows_amd64.go": {
+        "bytes": 3395,
+        "sha256": "e734df342f5b863ffe9916fa71d9c7712b5c305346662419bccc7716517e0053"
+      },
+      "qualified-original-external-v6-canonical/canonicalcaseowner/events_windows_amd64.go": {
+        "bytes": 27574,
+        "sha256": "3b3137d2bdc6284a497fe2052d3e78e7bd426a0f7694b381043523e555c0a1fa"
+      },
+      "qualified-original-external-v6-canonical/canonicalcaseowner/native_windows_amd64.go": {
+        "bytes": 11982,
+        "sha256": "8729ac9c525e664c5d7f279b277a93b9e06841e6757a14de508719d026335f87"
+      },
+      "qualified-original-external-v6-canonical/canonicalcaseowner/owner_windows_amd64.go": {
+        "bytes": 29509,
+        "sha256": "7276febe485aea1791fc6757ad1c710a108e3c60e7aa263e656ad985dfe22294"
+      },
+      "qualified-original-external-v6-canonical/cases_windows.go": {
+        "bytes": 19087,
+        "sha256": "f46dcae12c58fa8f1d75366430e4ad83b0b2df0e3536a4c44cc4dbd590203441"
+      },
+      "qualified-original-external-v6-canonical/inputs_windows.go": {
+        "bytes": 11040,
+        "sha256": "345197b965bd59a97c43e846ab35a37393852cbac7dfe5cabc0f0a109576e6cc"
+      },
+      "qualified-original-external-v6-canonical/main_windows.go": {
+        "bytes": 23646,
+        "sha256": "c48b5b339d7ece5cd6ecdad4c870e0968a33867e1bc5f2ae0e2b5a58f3b591ef"
+      },
+      "qualified-original-external-v6-receiver/main.go": {
+        "bytes": 17383,
+        "sha256": "59fa2cc432b887114497c3c6625731d4dcde207e38b412371eb5fa83b39ed8a9"
+      }
+    },
+    "helper_outputs": {
+      "canonical": {
+        "file": "literal-canonical.exe",
+        "bytes": 7034368,
+        "sha256": "cc06ab8aeca193473acf341e1c201c69a02f1588f84325cdc245deccc73ea6b5",
+        "actual_bytes_reread_after_closure": true,
+        "executed_for_this_evidence_preparation": false
+      },
+      "contained": {
+        "file": "literal-contained.exe",
+        "bytes": 6350848,
+        "sha256": "5b26fefbda8c7925562431acfcf1b058c0f95ac24dca624640bfb6ad877ff100",
+        "actual_bytes_reread_after_closure": true,
+        "executed_for_this_evidence_preparation": false
+      }
+    },
+    "substitution": {
+      "count": 1,
+      "replacement": "qualified-original-external-v6-canonical",
+      "source": "controller/cases_windows.go",
+      "token": "__CANONICAL_EXTERNAL_STAGE__"
+    },
+    "tracked_source_mutated": false
+  },
+  "recorded_input_pin_count": 3535,
+  "recorded_source_pin_count": 3509,
+  "independent_static_review": {
+    "candidate_manifest_sha256": "05cc1ec0605d71bd33cc08e3002c1914559772901cc54708694526622d15e87f",
+    "five_candidate_payload_sha256_and_sizes_recomputed": true,
+    "original_private_scope_template_sha256": "ce16701c0c8951d73a9e002c0447fe108ee2bcaa31437bde63bc184e509ec654",
+    "private_helper_only_runs_and_artifacts_placeholders_changed": true,
+    "cases_token_count": 1,
+    "cases_original_sha256": "9b1af23646315fc6b08c45a634ae5adebb05635c38fb21e4e56e0fb152184631",
+    "cases_staged_sha256": "f46dcae12c58fa8f1d75366430e4ad83b0b2df0e3536a4c44cc4dbd590203441",
+    "source_pins_compared_to_closed_receiving": 3509,
+    "source_pin_mismatches": 0,
+    "extra_source_pins": 0,
+    "command_budget_sum_seconds": 1560,
+    "parent_budget_seconds": 1800,
+    "concrete_static_blocker_found": false,
+    "candidate_executed_or_imported_by_reviewer": false,
+    "scope": "Static reading and in-memory DATA comparisons. Native execution authority remained with the parent owner."
+  },
+  "scope_limits": {
+    "full_acceptance_pass_claimed": false,
+    "migration_14_plus_canonical_2_both_modes_qualified": false,
+    "three_stderr_scenarios_qualified": false,
+    "original_remaining_expected_refusal_satisfied": false,
+    "new_product_test_build_commands_launched_for_this_capsule": false,
+    "source_or_cache_payload_reread_for_this_capsule": false
+  }
+}

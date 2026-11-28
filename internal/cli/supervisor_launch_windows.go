@@ -279,8 +279,19 @@ func (l *ownedSupervisorLaunch) Abort(ctx context.Context) error {
 			errs = append(errs, errSupervisorPeerIPCSenderRequired)
 		} else if !graceful && l.proof != nil {
 			limit, cancel := context.WithTimeout(ctx, time.Duration(defaultExitTimeoutMs)*time.Millisecond)
-			owner, err := l.observeControl(limit, l.proof.expected)
-			if err == nil && owner == l.proof.owner {
+			// BindControl already accepted this original creator and native peer.
+			// Reuse its private proof; strict peer IPC still refuses a replacement
+			// listener without repeating role discovery during the exit budget.
+			proof := l.proof
+			owner := api.SupervisorLockOwner{PID: l.original.PID, StartedAt: l.original.StartedAt.UTC().Format(time.RFC3339Nano)}
+			var err error
+			if proof.issuer != l || l.cmd == nil || proof.creator != l.cmd.Process ||
+				proof.owner != owner || proof.peer != l.peer {
+				err = errSupervisorControlBinding
+			} else {
+				err = l.validateControlExpectation(proof.expected)
+			}
+			if err == nil {
 				select {
 				case <-l.waitDone:
 					graceful = true // Retained original outcome: do not contact a replacement.
@@ -395,7 +406,7 @@ func observeOriginalSupervisorRuntime(ctx context.Context, binaryPath, expectedS
 		return peer, fmt.Errorf("verify original supervisor generation: %w", err)
 	}
 	// Query the role while this exact generation is held. The operation's
-	// context also bounds the underlying WMI lookup during Abort cleanup.
+	// context also bounds the underlying WMI lookup during control admission.
 	identity, err := process.LookupProcessIdentityContext(ctx, owner.PID)
 	if err != nil {
 		return peer, fmt.Errorf("probe original supervisor role: %w", err)

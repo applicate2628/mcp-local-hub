@@ -1,0 +1,215 @@
+{
+  "schema": "source5-data-composition-publication-draft-v1",
+  "status": "DATA_AND_TWO_CASE_COMPOSITION_PASS_PRELAUNCH_RECEIVED",
+  "publication_status": "LOCAL_DRAFT_NOT_PUBLISHED",
+  "slice": "Closed DATA rebinding and composition, exact final binding, then one native RUNNING parent observation; no terminal full-gate result.",
+  "source": {
+    "private_test_commit": "001648f44bf6ef0191f1e21d92f1aecf2a2a3022",
+    "product_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+    "tracked_files": 3508,
+    "changed_test_files": 13,
+    "unchanged_files": 3495,
+    "unchanged_non_test_files": 2012,
+    "identity_is_public_PR_head": false
+  },
+  "data_rebinding": {
+    "schema": "private-serena-evidence-rebinding-v2",
+    "status": "PASS",
+    "preparation_run": "serena-evidence-rebinding-v11",
+    "issuer_and_parent_version": "v12",
+    "original_parent_exit_code": 0,
+    "parent_seconds": 41.178962200006936,
+    "original_parent_terminal_and_capture_closure_received": true,
+    "source_snapshot_is_unchanged_Product_map": true,
+    "original_inputs_unchanged": true,
+    "fresh_parent_creation_records_received": 2,
+    "fresh_parent_paths": [
+      "d11",
+      "s11"
+    ],
+    "fixture_comparison": {
+      "default": {
+        "original": {
+          "path": "recovery/rebinding-v12-preparation/actual/original-default-input.json",
+          "sha256": "af37fdf488e76089fe8a2a9ff073db77e160c63360384ee6fef263bee49d719a",
+          "bytes": 2198
+        },
+        "rebound": {
+          "path": "recovery/rebinding-v12-preparation/actual/migration-default-input.json",
+          "sha256": "7e963e574401820e7502f61bfddd9ea2867844f4920597c9f930c0f4c2b7e0d9",
+          "bytes": 2161
+        },
+        "evidence_parent": "<TASK_WORKSPACE>\\d11",
+        "only_changed_field": "evidence_parent"
+      },
+      "state": {
+        "original": {
+          "path": "recovery/rebinding-v12-preparation/actual/original-state-input.json",
+          "sha256": "583ecfd7859d903a0e3835cc150075164f08660d9258aa2b66859cce20416b52",
+          "bytes": 2149
+        },
+        "rebound": {
+          "path": "recovery/rebinding-v12-preparation/actual/migration-state-input.json",
+          "sha256": "e3349958d50c928f0c4c9cd32a112cb3e81b18a6cf97d595c547fe46d364a143",
+          "bytes": 2150
+        },
+        "evidence_parent": "<TASK_WORKSPACE>\\s11",
+        "only_changed_field": "evidence_parent"
+      }
+    },
+    "source_check": "pinned-source-v5-and-update-metadata-plus-original-exports",
+    "commands_executed": 0,
+    "tests_executed": false,
+    "artifacts_recompiled": false,
+    "cache_handoff_issued": false,
+    "consumer_source_tree_read": false
+  },
+  "composition": {
+    "status": "PASS",
+    "runner_sha256": "ed5cf35884ad0821345234159ea31ceea1ae928e067de372169fe4b9e1cc9a54",
+    "controller_exit_code": 0,
+    "controller_seconds": 4.7306682000053115,
+    "watchdog_seconds": 60,
+    "original_controller_reaped": true,
+    "original_capture_handles_closed": true,
+    "all_original_probe_workers_joined": true,
+    "actual_full_driver_and_owner_runtime_imported": true,
+    "actual_Source5_scope_and_grant_received": true,
+    "imported_helpers": 6,
+    "cases": [
+      {
+        "name": "begin-registration-before-first-command",
+        "status": "PASS",
+        "observed_boundary": "The same actual Run is registered before the first command; original error preserved; no native command in this case."
+      },
+      {
+        "name": "outer-run-finalization-retains-original-workers",
+        "status": "PASS",
+        "observed_boundary": "Original Run retained through reader join; one physical completion receiving; failure immutable; raw unmeasured; successor refused; original error preserved."
+      }
+    ],
+    "scope": "Two synthetic lifecycle schedules using the actual native Windows owner and exact composed modules; not a full regression or replay of fourteen owner cases.",
+    "native14_owner_cases_repeated": false,
+    "Serena_qualification_repeated": false,
+    "full_regression_executed_by_composition": false
+  },
+  "final_binding": {
+    "manifest_sha256": "15756f71977804cb683ac3cc27f15b7eae1c2b869d28db94c2f501816ee807c8",
+    "parent_sha256": "b031831ac7ca2425b970df6afb01a69382a6e5d1cd83c7910a6e2a4177612faa",
+    "manifest_files_unchanged_from_native_composition_bundle": 8,
+    "six_native_probe_inputs_exact_subset_of_manifest": true,
+    "grant_and_qualifier_bytes_unchanged": true,
+    "actual_source_DATA_local_bindings_verified": 19,
+    "runtime_function_definitions_unchanged": 184,
+    "parent_final_delta": [
+      "REVIEW_COMPLETE",
+      "INPUT_MANIFEST_SHA256"
+    ],
+    "manifest_final_delta": [
+      "status",
+      "composition_qualification.root.sha256",
+      "composition_qualification.cases.sha256"
+    ],
+    "literal_commands_and_budgets_unchanged": true,
+    "literal_commands": [
+      "go build ./... && go vet ./... && go test -count=1 -timeout 5m ./...",
+      "go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/"
+    ],
+    "Go_timeout": "5m",
+    "outer_diagnostic_seconds": 4800
+  },
+  "native_prelaunch_observation": {
+    "state": "running",
+    "original_pid": 482868,
+    "source_commit": "001648f44bf6ef0191f1e21d92f1aecf2a2a3022",
+    "root_cases_runner_SHA_barrier_passed_before_original_Popen": true,
+    "basis": "Exact native RUNNING control plus reviewed parent control flow; not inferred from a terminal receipt.",
+    "terminal_exit_received": false,
+    "parent_capture_files_closed": false,
+    "full_regression_terminal_status": "NOT_RECEIVED_IN_THIS_SLICE",
+    "full_regression_pass": false
+  },
+  "transport_and_review_limits": {
+    "composition_root_initial_local_copy": "Reconstructed with exact qualified UTF-8 LF indent=2 writer; original native cases digest matched.",
+    "separate_native_PowerShell_hash_probe": "NOT_RUN_COMMAND_CHECK_TIMEOUT_NO_PROCESS",
+    "later_native_parent_validated_root_cases_runner_before_launch": true,
+    "root_native_control_acquisition": "Raw UTF-8/LF DC read reported by root; local bytes received without JS reserialization.",
+    "local_original_fixture_JSON_copies_verified": true,
+    "raw_export_artifacts_or_physical_source_reread_by_reviewer": false,
+    "current_live_evidence_parent_identity_or_emptiness_claimed": false,
+    "current_full_progress_not_projected_from_running_control": true,
+    "old_Source4_status": "CLOSED_FAIL_UNCHANGED",
+    "old_full_v10_status": "FAIL_UNCHANGED",
+    "original_held_scope": "UNKNOWN_UNCHANGED",
+    "publication_or_operative_mutations": false,
+    "native_processes_or_remote_calls_by_reviewer": false,
+    "source_update_frozen_docs_modified": false
+  },
+  "evidence": {
+    "data_parent": {
+      "path": "recovery/rebinding-v12-preparation/actual/parent.json",
+      "sha256": "1811aa6a2d84de0c3665bc61774167620b29f3871aa78d337c415df2f331b747",
+      "bytes": 2653
+    },
+    "data_result": {
+      "path": "recovery/rebinding-v12-preparation/actual/rebinding.json",
+      "sha256": "33bdcf7b39a6d5813f5ef488706a52628ddcb862c9ba269866589914139973e7",
+      "bytes": 447986
+    },
+    "data_root_review": {
+      "path": "recovery/rebinding-v12-preparation/actual/root-review.json",
+      "sha256": "e0071567efb7b381e6483a9acdc7ed4c4970387fdd432197f7599c116ace8a78",
+      "bytes": 1376
+    },
+    "composition_root": {
+      "path": "recovery/runtime-v14-preparation-v1/composition-actual/root-receiving.json",
+      "sha256": "ddd2628a66e7d54b93538bd6ff03341ffde82cd90548f1a540da481d62a4abc4",
+      "bytes": 1270
+    },
+    "composition_cases": {
+      "path": "recovery/runtime-v14-preparation-v1/composition-actual/cases.json",
+      "sha256": "ab07f3e5be0bfed53e884dceabc1ef69c8ac50725eb850189dd12d286fcd49db",
+      "bytes": 4562
+    },
+    "composition_launch": {
+      "path": "recovery/runtime-v14-preparation-v1/composition-actual/launch.json",
+      "sha256": "a2367501d8337fc322ff2abd7c4e4ffa61a394fff1fad62b4670d7285468133a",
+      "bytes": 844
+    },
+    "composition_runner": {
+      "path": "recovery/runtime-v14-preparation-v1/bound-final-v1/composition/qualify_runtime_custody.py",
+      "sha256": "ed5cf35884ad0821345234159ea31ceea1ae928e067de372169fe4b9e1cc9a54",
+      "bytes": 22330
+    },
+    "final_manifest": {
+      "path": "recovery/runtime-v14-preparation-v1/bound-final-v1/actual-manifest.json",
+      "sha256": "15756f71977804cb683ac3cc27f15b7eae1c2b869d28db94c2f501816ee807c8",
+      "bytes": 8865
+    },
+    "final_parent_code": {
+      "path": "recovery/runtime-v14-preparation-v1/bound-final-v1/launch_literal_final_v14.py",
+      "sha256": "b031831ac7ca2425b970df6afb01a69382a6e5d1cd83c7910a6e2a4177612faa",
+      "bytes": 28208
+    },
+    "retained_grant": {
+      "path": "recovery/runtime-v14-preparation-v1/bound-final-v1/runtime/retained-input-access.json",
+      "sha256": "e24d58882397ffdbcdb41bb20a4f12921f0c10d66329b641809c9ed4b81d0aec",
+      "bytes": 17070
+    },
+    "independent_actual_review": {
+      "path": "recovery/runtime-v14-preparation-v1/independent-actual-handoff-review.json",
+      "sha256": "51785e887eb11808bf5814f354da5c3d6ab006a95c2dc3a9a2e20a60852e4a12",
+      "bytes": 8377
+    },
+    "native_prelaunch_supplement": {
+      "path": "recovery/runtime-v14-preparation-v1/independent-native-prelaunch-supplement.json",
+      "sha256": "045fef79b41cf0aa24768c97fd0e624027fd77c59c5a816f0830e025eec49834",
+      "bytes": 4938
+    },
+    "native_running_control": {
+      "path": "recovery/full-v11/parent-running-observation.json",
+      "sha256": "7c8118b70db47baf56e58d4a1a58b80538c488d098d3441f7bf0226dd223f8c0",
+      "bytes": 22318
+    }
+  }
+}

@@ -1,0 +1,18 @@
+diff --git a/internal/cli/private_serena_migration_fixture_windows_test.go b/internal/cli/private_serena_migration_fixture_windows_test.go
+index 34fe4df0782a9f824caeef7e8ce75a5d47214363..6a5cfa4f2a7e9f4bf18db1d8b243b2c06b06d502 100644
+--- a/internal/cli/private_serena_migration_fixture_windows_test.go
++++ b/internal/cli/private_serena_migration_fixture_windows_test.go
+@@ -119,4 +119,3 @@ func (f *windowsCanonicalNativeActorFixture) verifyRuntimeLibrary(t *testing.T,
+ 		t.Fatalf("native actor DLL receiving differs from its original identity: %v", err)
+ 	}
+ }
+-
+diff --git a/internal/cli/private_serena_migration_publish_windows_test.go b/internal/cli/private_serena_migration_publish_windows_test.go
+index 35bdfac714074d9c5abfc312481686def352c627..c489831064af35c33250f088b40127633bfa3f43 100644
+--- a/internal/cli/private_serena_migration_publish_windows_test.go
++++ b/internal/cli/private_serena_migration_publish_windows_test.go
+@@ -135,4 +135,3 @@ func publishPrivateSerenaMigrationCase(path string, value any) error {
+ 	// No REPLACE_EXISTING: each control frame is published at most once.
+ 	return windows.MoveFileEx(from, to, 0)
+ }
+-

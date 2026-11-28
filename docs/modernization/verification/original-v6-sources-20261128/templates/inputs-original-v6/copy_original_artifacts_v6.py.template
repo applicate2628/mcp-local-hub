@@ -1,0 +1,97 @@
+"""Copy exact immutable Product DATA into a fresh independent v6 input directory.
+The old working Source/cache are never read. Original FAIL and authority remain unchanged.
+"""
+import sys
+sys.dont_write_bytecode=True
+import argparse,hashlib,json,os,shutil,stat
+from pathlib import Path
+TASK=Path(r"@@RECOVERY_WORK_AREA_RAW@@\mcp-acceptance-rebuild-20261127-v1")
+def require(ok,message):
+    if not ok: raise RuntimeError(message)
+def sha(path):
+    with Path(path).open("rb") as stream: return hashlib.file_digest(stream,"sha256").hexdigest()
+def ordinary(path,directory=False):
+    path=Path(path)
+    require(path.is_absolute() and ".." not in path.parts,"absolute ordinary artifact required")
+    for p in (*reversed(path.parents),path):
+        s=p.lstat()
+        require(not stat.S_ISLNK(s.st_mode) and not getattr(s,"st_file_attributes",0)&0x400,"reparse artifact refused")
+    require(path.is_dir() if directory else path.is_file(),"artifact kind differs")
+    return path
+def read_pin(pair):
+    p=ordinary(pair["path"]); raw=p.read_bytes()
+    require(hashlib.sha256(raw).hexdigest()==pair["sha256"],"pinned original DATA differs")
+    return json.loads(raw)
+def write_json(path,value):
+    with Path(path).open("x",encoding="utf-8",newline="\n") as stream:
+        json.dump(value,stream,indent=2);stream.write("\n");stream.flush();os.fsync(stream.fileno())
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--manifest",required=True);parser.add_argument("--manifest-sha256",required=True)
+    parser.add_argument("--actor-fixture",required=True);parser.add_argument("--actor-fixture-sha256",required=True)
+    args=parser.parse_args()
+    manifest=read_pin({"path":args.manifest,"sha256":args.manifest_sha256})
+    target=Path(manifest["output"])
+    require(manifest["schema"]=="original-independent-artifact-copy-v6"
+            and target==TASK/"original-product-inputs-v6/received" and not target.exists(),
+            "fresh exact independent Product input directory required")
+    controls={key:read_pin(pair) for key,pair in manifest["controls"].items()}
+    parent,physical,native,marked,execution=(controls[key] for key in
+        ("source_parent","original_physical","native_build","marked_parent","marked_execution"))
+    require(parent.get("status")=="PASS" and parent.get("exit_code")==0 and
+            all(parent.get(key) is True for key in ("terminal_exit_received","parent_capture_files_closed","physical_complete")),
+            "independent new Source producer is not physically closed")
+    inner=physical.get("physical_receiving",{})
+    require(physical.get("schema")=="literal-full-failed-original-physical-closure-v1"
+            and physical.get("status")=="CLOSED" and physical.get("original_gate_status")=="FAIL"
+            and physical.get("original_gate_reclassified") is False
+            and inner.get("schema")=="failed-original-worker-physical-closure-v1" and inner.get("status")=="CLOSED"
+            and inner.get("original_command_states_unchanged") is True
+            and inner.get("commands") and all(row.get("state")=="CLOSED" for row in inner["commands"])
+            and all(inner.get(key) is False for key in ("qualification_passed","capture_access_issued","new_commands_permitted"))
+            and physical.get("source_or_cache_access_issued") is False,
+            "exact last original physical closure metadata remains unreceived")
+    require(native.get("schema")=="regression-resume-compiled-artifacts-receiving-v2"
+            and native.get("status")=="PASS" and native.get("original_status")=="FAIL"
+            and native.get("commands_quiescent") is True,
+            "original separate native Product build-only receiving differs")
+    require(marked.get("schema")=="cache-acceptance-parent-v1" and marked.get("status")=="PASS"
+            and marked.get("child_status")=="PASS" and marked.get("exit_code")==0
+            and marked.get("terminal_exit_received") is True and marked.get("parent_capture_files_closed") is True
+            and marked.get("commands_quiescent") is True and execution.get("commands_quiescent") is True
+            and marked.get("child_sha256")==manifest["controls"]["marked_execution"]["sha256"],
+            "original marked Product producer closure differs")
+    ordinary(target.parent,True);target.mkdir()
+    copied={}
+    for row in manifest["files"]:
+        relative=Path(row["relative"])
+        require(not relative.is_absolute() and ".." not in relative.parts and row["relative"] not in copied,
+                "unambiguous relative copy target required")
+        source=ordinary(row["source"]);dest=target/relative
+        require(sha(source)==row["sha256"],"original immutable artifact changed")
+        dest.parent.mkdir(parents=True,exist_ok=True)
+        with source.open("rb") as incoming,dest.open("xb") as outgoing:
+            shutil.copyfileobj(incoming,outgoing,1<<20);outgoing.flush();os.fsync(outgoing.fileno())
+        require(sha(source)==sha(dest)==row["sha256"],"independent artifact copy differs")
+        copied[row["relative"]]={"source":str(source),"destination":str(dest),"sha256":row["sha256"],"bytes":dest.stat().st_size}
+    fixture=read_pin({"path":args.actor_fixture,"sha256":args.actor_fixture_sha256})
+    original=json.loads((target/"native3ebe-original-entry.json").read_text(encoding="utf-8-sig"))
+    expected=dict(original,product_root=str(target/"native3ebe-bundle"))
+    require(fixture.get("entry_set")==expected and set(fixture)=={"entry_set","runtime_library_sha256","runtime_identity_sha256"}
+            and fixture["runtime_library_sha256"]==sha(target/"native3ebe-bundle/mcphub-product/mcphub-owner.dll")
+            and fixture["runtime_identity_sha256"]==sha(target/"native3ebe-bundle/mcphub-product/mcphub-owner-identity.json"),
+            "new native fixture must change only the copied entry's product_root")
+    for row in manifest["files"]:
+        require(sha(ordinary(row["source"]))==sha(ordinary(target/row["relative"]))==row["sha256"],
+                "original or independent bytes changed before copy receiving")
+    for pair in manifest["controls"].values(): read_pin(pair)
+    result={"schema":"original-independent-artifact-copy-receiving-v6","status":"COPIED",
+        "manifest":{"path":args.manifest,"sha256":args.manifest_sha256},
+        "controls":manifest["controls"],"files":copied,
+        "actor_fixture":{"path":args.actor_fixture,"sha256":args.actor_fixture_sha256},
+        "entry_fixture_changed_fields":["product_root"],"old_source_or_cache_payload_read":False,
+        "original_gate_reclassified":False,"native_authority_transferred":False,"qualification_inherited":False}
+    write_json(target/"copy-receipt.json",result)
+    print(json.dumps({"status":"COPIED","files":len(copied),"receipt":str(target/"copy-receipt.json")}))
+if __name__=="__main__":
+    main()

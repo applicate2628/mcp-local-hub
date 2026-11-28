@@ -1,0 +1,354 @@
+{
+  "files": [
+    {
+      "pr": 665,
+      "path": "internal/api/adopt_codex_transport_test.go",
+      "before_sha256": "203130a9449ad7c97191b514720975f5647f9fb416d3bfab340093323e8d48dd",
+      "after_sha256": "e15d9ebf574459f5d13db01d58301df9cdebffa31870bc558b97b87af560d602",
+      "git_blob_before": "ef55fd131bf051c5dad6b20723c81b563aa0ccf4",
+      "git_blob_after": "332b49f17cc30d558a0d3c59b602b3625dcd09bc",
+      "matches_private_after": true,
+      "added": 6,
+      "removed": 5
+    },
+    {
+      "pr": 665,
+      "path": "internal/api/adopt_deadopt_lifecycle_test.go",
+      "before_sha256": "15bf34d4efecb5f61ba597c0d3bc255b6d5ced6ca0ef4f843d567d16cf13d6c9",
+      "after_sha256": "f82d97abeffe51c45c2f3978937c8d679c8bef90612897a7fa25020bf05a4346",
+      "git_blob_before": "37f34d636c1d0883dd988a1c5b84aca964dce7c5",
+      "git_blob_after": "36279734c2f6be64dc81e60c2f8d0d01ed8ce68f",
+      "matches_private_after": true,
+      "added": 1,
+      "removed": 1
+    },
+    {
+      "pr": 665,
+      "path": "internal/api/adopt_h4_summary_signal_test.go",
+      "before_sha256": "976dea698f201702480ebf8e6dd24e4e926e40900d7535332eddaacb290524d6",
+      "after_sha256": "bcbb8bd9352245f1e82ee5e97796109fee492ac70f75c42a32979a1fedb146a4",
+      "git_blob_before": "ab36c0df5efa705b28cb3a52dc707c1ec8f789eb",
+      "git_blob_after": "229619d7b027df355e38e0805a3be4c7f0d9c930",
+      "matches_private_after": true,
+      "added": 8,
+      "removed": 8
+    },
+    {
+      "pr": 665,
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "before_sha256": "dcc8a711f284f81fb762ff619946b9a5a041d266dc10a3e6b1516f4d657e67c2",
+      "after_sha256": "a95638abca1b51a45bf30cfcdd72f165f3fa5e2ac71d6985f468a0fcbcbd121e",
+      "git_blob_before": "bc49ccc7810e27dc97731d8a107ea072e889ac63",
+      "git_blob_after": "f3d7b2a593d093ff21c92ee8a947283ab18bb42c",
+      "matches_private_after": false,
+      "added": 11,
+      "removed": 11
+    },
+    {
+      "pr": 665,
+      "path": "internal/api/adopt_lease_owner_test.go",
+      "before_sha256": "07ed1d764cdc38d0656526885e9a2324e2409df2c6ac6d33cb0849cd6680ec37",
+      "after_sha256": "5644d51a482785bf0078df9f2bd6abcf4c7c640b7c4821543af94ad9549321a7",
+      "git_blob_before": "8f19522959dc3cb497046cdaef46d70937918537",
+      "git_blob_after": "a0f540b4d982eeef4696fa90318de3ecbc993d6d",
+      "matches_private_after": true,
+      "added": 1,
+      "removed": 1
+    },
+    {
+      "pr": 665,
+      "path": "internal/api/adopt_mcpcompat_test.go",
+      "before_sha256": "1c9400a300b08af5c04f59e1738b357df1965da2ad54f7688f30bb293521b490",
+      "after_sha256": "469c703c4678646076aed8d346ce4c70d0ff49cf5063752dab3dfc8a984cbbd9",
+      "git_blob_before": "a43df81f21c3107d149317cb5226f096b83208cc",
+      "git_blob_after": "6f336ba8b7b5d9fbb87e43387d3aff464c3b1c48",
+      "matches_private_after": true,
+      "added": 2,
+      "removed": 2
+    },
+    {
+      "pr": 665,
+      "path": "internal/api/adopt_project_plan_test.go",
+      "before_sha256": "4eccaebc6bfb3be956abce0b1b3f011baa23454fb09b43f7116ae2fefb557c40",
+      "after_sha256": "83938bc05419d530c579686b901f33d5324fa795d114fe50e54c71d79669cbb7",
+      "git_blob_before": "b4eefa18a4490275829eef8217148f9b701047ec",
+      "git_blob_after": "74b312a793fa54c51c94f52ca768d4b5d02dd5d3",
+      "matches_private_after": true,
+      "added": 4,
+      "removed": 4
+    },
+    {
+      "pr": 665,
+      "path": "internal/api/adopt_test.go",
+      "before_sha256": "e8023af03d1834255c08de894d83c2acd946dc29422fcb64b23afbc70306511c",
+      "after_sha256": "35a732e5c96b2f881f8bfc149008f2ebc6873fe7971ea637cb313fbbb1111aa8",
+      "git_blob_before": "19a853e732cb1d30bc54692e05d72a1b56438161",
+      "git_blob_after": "08b88a3e12d4e1a60238e0f76325d5dc7e967246",
+      "matches_private_after": true,
+      "added": 14,
+      "removed": 14
+    },
+    {
+      "pr": 666,
+      "path": "internal/cli/adopt_mcpcompat_test.go",
+      "before_sha256": "904164739b1ac56bfe4036ae43ce6f1679791d9d7d9ba96c0199e906b3451253",
+      "after_sha256": "1bece58170bc93053f2f6dbd5af2e6a6c47ace05187e1aa6c01021552215d88b",
+      "git_blob_before": "3a33178a57f99998ac9a86878a27b90636569d13",
+      "git_blob_after": "403eefdea619e4df0b57d56d22b618293d20b699",
+      "matches_private_after": true,
+      "added": 1,
+      "removed": 1
+    },
+    {
+      "pr": 666,
+      "path": "internal/cli/adopt_test.go",
+      "before_sha256": "9b8d81f913cb8f9e276b07b636465002706b161249c8ac61cf4a4e214856d218",
+      "after_sha256": "011bacb2b6b85f5f92a283d3b56cca55cc4e97354da70889a761d7206c599fe0",
+      "git_blob_before": "0cdd27c31a69d591e0a99ca1db162e4bbb822fb2",
+      "git_blob_after": "cbf5a0e603c7fb98233d275557c36b25da16abb8",
+      "matches_private_after": false,
+      "added": 2,
+      "removed": 2,
+      "private_after_difference": "Two original fixed-port call sites intentionally retained on the #666 preimage because current #664 independently covers dry-run allocation and the namespace refusal oracle."
+    }
+  ],
+  "changed_test_roots": [
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_codex_transport_test.go",
+      "test": "TestAdoptCodexToolTimeoutRoundTripsBindingAndDeAdopt"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_codex_transport_test.go",
+      "test": "TestBuildAdoptPlanCodexCollisionFreezesTargetEntryName"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_codex_transport_test.go",
+      "test": "TestExecuteAndDeAdoptCodexCollisionUsesFrozenTargetEntry"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_deadopt_lifecycle_test.go",
+      "test": "TestAdoptDeAdoptLifecycleRoundTrip"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_h4_summary_signal_test.go",
+      "test": "TestAdoptAPI_HSettlementEventFailureCarriesCommittedRow"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_h4_summary_signal_test.go",
+      "test": "TestAdoptCodexSettlementSurvivesOuterFailureWithoutAdoptSuccess"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_h4_summary_signal_test.go",
+      "test": "TestAdoptNonCodexCompatibilityMatrixDoesNotEmitHSettlement"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_h4_summary_signal_test.go",
+      "test": "TestCodexCollisionDryRunUsesPortableSettlementSummary"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_h4_summary_signal_test.go",
+      "test": "TestCodexCollisionEmitsCommittedThenExplicitAlreadyConfigured"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_h4_summary_signal_test.go",
+      "test": "TestCodexCollisionRelocationFailureEmitsNoCommittedSignal"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "test": "TestBuildAdoptPlanWithLegacyLeaseNamespaceDoesNotMutate"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "test": "TestExecuteAdoptDoesNotMigrateWhenStateRootIsRefused"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "test": "TestExecuteAdoptLegacyLeaseMigrationFailureRollsBackWithoutLease"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "test": "TestExecuteAdoptMigratesEligibleLegacyLeaseNamespaceAndRepeats"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "test": "TestExecuteAdoptMigratesEligibleLegacyStateRoot"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "test": "TestPreflightAdoptPlanAdmitsLegacyStateRootWithoutMutation"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "test": "TestPreflightAdoptPlanRefusesHostileStateRootsWithoutMutation"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "test": "TestPreflightAdoptPlanStateRootDriftRefusesApplyWithoutMutation"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_lease_owner_test.go",
+      "test": "TestAdoptExecutedEventRequiresLeaseSettlement"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_mcpcompat_test.go",
+      "test": "TestAdoptCodeGraphLegacyProfilePersistsAndRenders"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_mcpcompat_test.go",
+      "test": "TestAdoptWithoutLegacyProfileRemainsStrict"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_project_plan_test.go",
+      "test": "TestBuildAdoptPlanGlobalLegacyBehaviorRemainsUnchanged"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_project_plan_test.go",
+      "test": "TestBuildAdoptPlanProjectSourceDerivesDistinctSameNameIdentities"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_project_plan_test.go",
+      "test": "TestPrintAdoptPlanProjectSourceUsesProjectTargetText"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_test.go",
+      "test": "TestAdoptPlanOutputReportsOmittedSameNameClients"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_test.go",
+      "test": "TestAdoptSensitiveLiteralRoutesToVaultAndRedactsPlan"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_test.go",
+      "test": "TestExecuteAdoptExitZeroRequiresAllReceivers"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_test.go",
+      "test": "TestExecuteAdoptInstallFailureRemovesAdoptCreatedManifestAndSaysRerun"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_test.go",
+      "test": "TestExecuteAdoptRefusesUnavailableVaultBeforeManifestWrite"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_test.go",
+      "test": "TestExecuteAdoptRemovesManifestLeaseAfterVerifiedSuccess"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_test.go",
+      "test": "TestExecuteAdoptRollbackRestoresDirectStdioPriorFromBackupOnSecondClientFailure"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_test.go",
+      "test": "TestExecuteAdoptScopedConsentDoesNotAuthorizeConcurrentNonAdoptWrite"
+    },
+    {
+      "pr": 665,
+      "package": "mcp-local-hub/internal/api",
+      "path": "internal/api/adopt_test.go",
+      "test": "TestExecuteAdoptWritesManifestIntentAndRepointsCodexPreservingForeignTables"
+    },
+    {
+      "pr": 666,
+      "package": "mcp-local-hub/internal/cli",
+      "path": "internal/cli/adopt_mcpcompat_test.go",
+      "test": "TestAdoptCLIProfilePersistsAndBuildsLegacyHost"
+    },
+    {
+      "pr": 666,
+      "package": "mcp-local-hub/internal/cli",
+      "path": "internal/cli/adopt_test.go",
+      "test": "TestAdoptCLI_GlobalCodexSameNamePathHasNoHSettlement"
+    },
+    {
+      "pr": 666,
+      "package": "mcp-local-hub/internal/cli",
+      "path": "internal/cli/adopt_test.go",
+      "test": "TestAdoptLeaseCleanupFailureKeepsCLIChannelsRedacted"
+    }
+  ],
+  "gui_force_already_public_reverse_check": true,
+  "runtime_tests_run": false,
+  "full_public_head_pass": false,
+  "historical_private_test_roots": 38,
+  "current_candidate_test_roots": 36,
+  "covered_upstream_dependencies": [
+    {
+      "pr": 664,
+      "head": "62199b68b2fc59095edacfe47d6990d48accbb2f",
+      "test": "TestAdoptCmdDryRunByDefaultMutatesNothingAndRedactsSecrets",
+      "reason": "Already handled by current #664 real-planner auto-port change.",
+      "included_in_current_666_delta": false
+    },
+    {
+      "pr": 664,
+      "head": "62199b68b2fc59095edacfe47d6990d48accbb2f",
+      "test": "TestAdoptCmdDryRunRefusesStateRootBeforeOfferingPlan",
+      "reason": "Already handled by current #664 bounded valid-plan seam; retained9314 is a plan datum and does not allocate a socket.",
+      "included_in_current_666_delta": false
+    }
+  ]
+}

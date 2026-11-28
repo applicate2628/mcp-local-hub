@@ -1,0 +1,145 @@
+{
+  "schema": "cache-acceptance-public-artifact-manifest-v3",
+  "publication_base": "078a70fd412e0b6c6f5be210154825addfed1736",
+  "files": [
+    {
+      "file": "README.md",
+      "bytes": 23306,
+      "sha256": "9b9490c2c0117688da75f10572ef56ec967288eb5c264bcef7201382d56715c4",
+      "git_blob": "4ed76faa729d1eb1a7e062ef9ed968d8a11dce0e"
+    },
+    {
+      "file": "evidence.json",
+      "bytes": 20631,
+      "sha256": "3876d5ab31915e9b515805fd745c4d93d23f6ffebfc88207a67ede8c91c1c072",
+      "git_blob": "047caa8657ccb7051cb56573b355348ad95627f4"
+    },
+    {
+      "file": "receiver-data-refusals.json",
+      "bytes": 980,
+      "sha256": "77d21cd857c112cc75db3f60d1968d84c0b7f8b72e3dab10ecb927b478d9624f",
+      "git_blob": "6a65ad8d66f7e7b0413ac409e1cf9f93fd4a3e18"
+    },
+    {
+      "file": "source4-manifest.json",
+      "bytes": 3522,
+      "sha256": "e119b6adc37f0252a728fe5b76716b2c5409542950e23ea26bcd414d8074cf85",
+      "git_blob": "334ab8166a056818aa2d22390ae27bb0e9fc03c3"
+    },
+    {
+      "file": "source4.commit",
+      "bytes": 271,
+      "sha256": "b837d7876e44e85c69da29319ac43fec1b4de2dfaf85d237d3341d11231f6c3b",
+      "git_blob": "61e9e1cff2bb11316ab92d968a14c96d9ae99395"
+    },
+    {
+      "file": "source4.patch",
+      "bytes": 11152,
+      "sha256": "f39a10a395675c93068ff8f19a98de1ce856b616de3fc911e28d6b4a2e88ef89",
+      "git_blob": "52a89c88ccbec849e35063c61b65175c7ddf8060"
+    },
+    {
+      "file": "sources/guard-custody.py",
+      "bytes": 49750,
+      "sha256": "e7c663f4ba2fd558005bc110173609cb19465ff33d3f4678aeb53b5ba00e0924",
+      "git_blob": "8b69af7f928e35d93d8e93199b7e4d43044b1855"
+    },
+    {
+      "file": "sources/observe_runtime_and_helper.py",
+      "bytes": 5241,
+      "sha256": "ddbbb930af60a829f04ede87c6cc3f616598e1d2cd439f72169c5c088113667f",
+      "git_blob": "34711b15cf62dc044058f410933a9db5fbb7d2d4"
+    },
+    {
+      "file": "sources/observe_runtime_progress_v2.py",
+      "bytes": 5447,
+      "sha256": "70e35169ecc7145f2ba803427d109db8fcb216869904078dc159a780ad1a0c67",
+      "git_blob": "6f35b943881a0ef513ae5f49b1385339985406e7"
+    },
+    {
+      "file": "sources/prestart_receiver_check.py",
+      "bytes": 5239,
+      "sha256": "62620129eaacd9ee7ceab111e379b26d3e2e455315d1bcbff2e5eab39af73b16",
+      "git_blob": "180e1bf04da44bd0f22ffe8f9b5cea2580c11400"
+    },
+    {
+      "file": "sources/reconstruct_runner.py",
+      "kind": "data-only reconstruction utility",
+      "bytes": 2306,
+      "sha256": "f353e98917127b15aaa7084009f35aaba98146a0f4631f953b15b79249be9901",
+      "git_blob": "eb78bd15b721052a9c98267fed8a3cec6442a675"
+    },
+    {
+      "file": "sources/run_owned_commands.py.template",
+      "bytes": 29643,
+      "sha256": "232641e3f7ea43aa594a8e71a6aff2e24dcb29c6eeee82458e485e73436876a5",
+      "git_blob": "999b68a6fe9c3f3f57a83e8a19b678ec90fdc245",
+      "kind": "portable template; not the historical executed bytes",
+      "original_executed_sha256": "6d16652d4893273b7e9d584920892ce5f5917622e7e242a62eb78ec824bcfb93"
+    },
+    {
+      "file": "sources/windows_job.py",
+      "bytes": 30063,
+      "sha256": "d94583001a33ef34adb67feec34b4f4b0bf3626df9f63da3c7a7c85bf3e0b552",
+      "git_blob": "ea893c9db7500855eb0143de79f286e8b2cde56b"
+    }
+  ],
+  "source_commit_raw_bytes": 271,
+  "source_commit_recomputed_git_id": "4ac73379a10e09766fe8274a129129a2b565f757",
+  "report": {
+    "file": ".plans/2026-11/open-pr-integration-20261117.md",
+    "authoritative_base_commit": "078a70fd412e0b6c6f5be210154825addfed1736",
+    "before_bytes": 224230,
+    "before_sha256": "7b9fc2f838095ed75c519a96b2d79960321b2193b8d7a4be3bcdce0c5780e8cf",
+    "before_git_blob": "e8b1e9b4f49a24bf6c0b2db91fc6ce2a6c2bd52c",
+    "after_bytes": 228842,
+    "after_sha256": "0d557c23564de75df80ef74394885295ae10d74eecd3a27042151e157c1b2f6e",
+    "insertion_bytes": 4612,
+    "original_report_recovered_exactly_by_removing_section": true,
+    "original_history_suffix_unchanged": true,
+    "concurrent_AD_publication_preserved": true
+  },
+  "scope": {
+    "changes": [
+      "new evidence capsule",
+      "one report prefix insertion"
+    ],
+    "production_and_test_code_modified": false,
+    "git_index_touched": false,
+    "commit_or_push_performed": false
+  },
+  "content_scan": {
+    "machine_paths": 0,
+    "embedded_host_path_or_encoded_default": false,
+    "raw_private_captures_included": false,
+    "synthetic_test_fixture_literals_preserved_in_exact_patch": true
+  },
+  "closed_original_receipt_hashes_rechecked": {
+    "runtime-readback-v2/parent.json": "5ebe2877936e27f89a2e28c5a50518fcbd84c2780e7366482fc55fe1e95666a5",
+    "runtime-readback-v2/commands/execution.json": "5ea18b28ca3f52f2d1ad13f0680320bb83ff938ec6369383bcc932e66cb4a43e",
+    "runtime-readback-v2/runtime-current-inventory.json": "0518fd112ec8d386564a01ac74824624c5c5076159510bbc4aaa943247bdb00a",
+    "helper-observation-v2/parent.json": "4d22c7e6a6f93049a4d3703077629a9efdf7448b81740c8e7d21de84975f8a8f",
+    "helper-observation-v2/commands/execution.json": "2794ee7ca14c7d51fa5db256daee3e45463a2bd398f16ba29453dbc455d1a75b"
+  },
+  "portable_runner": {
+    "template_file": "sources/run_owned_commands.py.template",
+    "template_sha256": "232641e3f7ea43aa594a8e71a6aff2e24dcb29c6eeee82458e485e73436876a5",
+    "template_bytes": 29643,
+    "reconstructor_file": "sources/reconstruct_runner.py",
+    "reconstructor_sha256": "f353e98917127b15aaa7084009f35aaba98146a0f4631f953b15b79249be9901",
+    "original_executed_sha256": "6d16652d4893273b7e9d584920892ce5f5917622e7e242a62eb78ec824bcfb93",
+    "original_executed_bytes": 29603,
+    "markers": {
+      "raw": "__APPROVED_WORK_AREA_RAW__",
+      "raw_count": 1,
+      "escaped": "__APPROVED_WORK_AREA_ESCAPED__",
+      "escaped_count": 2
+    },
+    "operator_parameter": "original approved work area, explicitly supplied by the caller",
+    "embedded_host_path_or_default": false,
+    "reconstruction_verified_in_memory": true,
+    "reconstructed_bytes_equal_executed_original": true,
+    "actual_executed_local_runner_unchanged": true,
+    "scope": "Publication template only. Historical test and command receipts bind the original executed bytes, not this template."
+  }
+}

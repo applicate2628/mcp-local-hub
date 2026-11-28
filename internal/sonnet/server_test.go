@@ -1207,6 +1207,13 @@ func TestRunStorePersistsAppendOnlyGenerationSnapshots(t *testing.T) {
 	projectRoot := writeProject(t)
 	storeRoot := t.TempDir()
 	s := NewServer(testConfig(storeRoot, &fakeDriver{}))
+	defer func() {
+		// Fatal must still join this original owner before TempDir cleanup.
+		// A stuck owner remains subject to the package test deadline.
+		if err := s.Close(context.Background()); err != nil {
+			t.Errorf("owner cleanup: %v", err)
+		}
+	}()
 	started, err := s.Start(context.Background(), StartRequest{ProjectRoot: projectRoot, ProjectFile: "sample.son", TimeoutSeconds: 10})
 	if err != nil {
 		t.Fatal(err)

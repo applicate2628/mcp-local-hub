@@ -1,0 +1,265 @@
+{
+  "schema": "ab-functional-source52-progress-v1",
+  "repository": "applicate2628/mcp-local-hub",
+  "target_pr": 664,
+  "source": {
+    "commit": "52a2d9ef57b7c372b9fa149adf062ad7e503b22d",
+    "tree": "51258ebd9ad3a654418b6ecb9163947734ef0314",
+    "parent": "6d4fa7b8f9b86079020af125b030a26350cb5bb0",
+    "commit_receipt_sha256": "7310b496e3d248c41f2035ff0c4aa942c142330f4131fade9b4ba235a422c9a3",
+    "capsule": "../composed-functional-source-20261126/source52-363b/README.md",
+    "capsule_publication_status": "separate additive capsule prepared for the same publication"
+  },
+  "run": {
+    "id": "ab-regressions-52a2-363b-v1",
+    "original_receipt_sha256": "5ce22474571013d116634bf2b08043372487b594e577122e341f08eb8ca7b430",
+    "status": "FAIL",
+    "physical_lifecycle": "CLOSED",
+    "command_count": 4,
+    "original_reader_count": 8,
+    "command_quiescence_complete": true,
+    "commands": [
+      {
+        "name": "source-identity",
+        "program": "git",
+        "args": [
+          "rev-parse",
+          "HEAD"
+        ],
+        "exit_code": 0,
+        "seconds": 0.07330829999409616,
+        "work_deadline_seconds": 30,
+        "cleanup_interval_seconds": 10,
+        "lifecycle_state": "CLOSED",
+        "captures_measured": true,
+        "original_readers_joined": true,
+        "native": {
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "issues": []
+        },
+        "readers": {
+          "stdout": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null
+          },
+          "stderr": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null
+          }
+        },
+        "stdout_sha256": "ef3e4f771265c261306e8bfb2144e4e0aee244c988be4fe8e0410516b3e3154e",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "build-all",
+        "program": "go",
+        "args": [
+          "build",
+          "./..."
+        ],
+        "exit_code": 0,
+        "seconds": 25.69068060000427,
+        "work_deadline_seconds": 360,
+        "cleanup_interval_seconds": 10,
+        "lifecycle_state": "CLOSED",
+        "captures_measured": true,
+        "original_readers_joined": true,
+        "native": {
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "issues": []
+        },
+        "readers": {
+          "stdout": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null
+          },
+          "stderr": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null
+          }
+        },
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "vet-all",
+        "program": "go",
+        "args": [
+          "vet",
+          "./..."
+        ],
+        "exit_code": 0,
+        "seconds": 36.90420350001659,
+        "work_deadline_seconds": 360,
+        "cleanup_interval_seconds": 10,
+        "lifecycle_state": "CLOSED",
+        "captures_measured": true,
+        "original_readers_joined": true,
+        "native": {
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "issues": []
+        },
+        "readers": {
+          "stdout": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null
+          },
+          "stderr": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null
+          }
+        },
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "controller-fixtures-default",
+        "program": "go",
+        "args": [
+          "test",
+          "-json",
+          "-count=1",
+          "-timeout",
+          "5m",
+          "-run",
+          "^TestSupervisorController_(OrphanReap.*|StaleLivenessDisownDroppedByGeneration|QuarantineParole_.*|Parole.*)$",
+          "./internal/cli/"
+        ],
+        "exit_code": 1,
+        "seconds": 41.856602300016675,
+        "work_deadline_seconds": 360,
+        "cleanup_interval_seconds": 10,
+        "lifecycle_state": "CLOSED",
+        "captures_measured": true,
+        "original_readers_joined": true,
+        "native": {
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "issues": []
+        },
+        "readers": {
+          "stdout": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null
+          },
+          "stderr": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null
+          }
+        },
+        "stdout_sha256": "75a0c0947eea3dcd73817ee3ee150333d5e8fe6743ac6eed6901a705bc16f855",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ]
+  },
+  "tests": {
+    "default_controller_selection": {
+      "regex": "^TestSupervisorController_(OrphanReap.*|StaleLivenessDisownDroppedByGeneration|QuarantineParole_.*|Parole.*)$",
+      "package": "mcp-local-hub/internal/cli",
+      "status": "FAIL",
+      "counts": {
+        "top_level_pass": 47,
+        "pass_including_subtests": 49,
+        "top_level_fail": 1,
+        "fail_including_subtests": 1
+      },
+      "package_elapsed_seconds": 24.367,
+      "original_command_seconds": 41.856602300016675,
+      "observed_passes": [
+        {
+          "selector": "^TestSupervisorController_OrphanReap.*$",
+          "scope": "selected cases in this command",
+          "status": "PASS",
+          "provenance": "root result receiving; not all tests outside this selector"
+        },
+        {
+          "test": "TestSupervisorController_StaleLivenessDisownDroppedByGeneration",
+          "status": "PASS",
+          "provenance": "root result receiving"
+        }
+      ],
+      "failure": {
+        "test": "TestSupervisorController_ParoleQueuedStop_PostSelfHonorsStop",
+        "file": "internal/cli/supervise_lostchild_f6_f2_test.go",
+        "line": 651,
+        "observed_state": "spawning",
+        "expected_state": "exiting",
+        "elapsed_seconds": 14.05,
+        "helper_observation_seconds": 2,
+        "runtime_blocking_instruction": "UNDETERMINED",
+        "queue_order_defect_proven": false,
+        "delta_causation_proven": false,
+        "total_duration_is_not_handler_or_join_duration": true
+      }
+    },
+    "tagged_controller_selection": "NOT_RUN",
+    "full_default_suite": "NOT_RUN",
+    "full_tagged_api_cli": "NOT_RUN"
+  },
+  "diagnostic_follow_up": {
+    "status": "NOT_RUN",
+    "prepared": "failure-only bounded runtime.Stack before unchanged lostChildWaitForSMState Fatal; diagnostic Go overlay proposed",
+    "before_sha256": "8bd40a8b1d41becc6d21192044883f994516e666951d781a61cc1eda71e65be4",
+    "diagnostic_after_sha256": "3ac226efd68d34c6109aa79b2e36b91d9f4cb16add8bff57416fe026748b3d66",
+    "patch_sha256": "1c645109a1665b3baeadff2a3bf35cf34c1f74b9c1fd1223306b4f489902f858",
+    "original_test_failure_reclassified": false,
+    "runs": []
+  },
+  "history": {
+    "source6d_report": "../ab-functional-source6d-20261126/README.md",
+    "lostchild_change": "../lostchild-loop-cleanup-20261126/README.md",
+    "previous_documents_modified": false,
+    "source6d_fail_closed_preserved": true,
+    "older_negative_control_physical_unknown_preserved": true,
+    "held_invocation_touched": false
+  },
+  "acceptance": {
+    "full_qualification": false,
+    "full_suite_pass": false,
+    "installed_lifecycle_acceptance": false,
+    "release_readiness": false
+  },
+  "sanitization": {
+    "machine_paths": false,
+    "process_ids": false,
+    "local_usernames": false,
+    "raw_native_captures_included": false
+  },
+  "provenance": {
+    "execution": "root received original native batch",
+    "analysis": "root local ab-positive52-analysis.json; command closure and durations additionally read from closed original receipt",
+    "publication_packet": "functional_review; no native execution or source mutation"
+  }
+}
+

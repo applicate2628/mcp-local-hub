@@ -1,0 +1,132 @@
+{
+  "schema": "b-recovery-search-publication-bindings-v1",
+  "publication_base": "05fbffa30f99914c8174966525a70bc9984e7038",
+  "source52": "52a2d9ef57b7c372b9fa149adf062ad7e503b22d",
+  "source52_tree": "51258ebd9ad3a654418b6ecb9163947734ef0314",
+  "A_observation_commit": "8204d3400cbfde401850d3acd3479fb8b1450fd3",
+  "exact_receiver_recovered": false,
+  "canonical_manifest_recovered": false,
+  "complete_template_identity_known": false,
+  "canonical_controller_binding_complete": false,
+  "product_acceptance": false,
+  "search_input_programs_executed": false,
+  "structural_verification": {
+    "status": "PASS",
+    "receipt_sha256": "fcea5d822c46cdfa4e9207a4d6e7a5bd6a0ceeb7d148a522d31c4ebf38b9003e",
+    "representation": "All result JSON fields retained and serialized as UTF-8 LF. Its schema-file hash refers to the public preparation package before the documentation-only budget annotation."
+  },
+  "schema_annotation": {
+    "original_bytes": 2097,
+    "original_sha256": "991e2a71dac5acdf0bb3c5da7de424d581eed79515a4070b55dee1411ae60aaf",
+    "operation": "Append explicit compressed-byte and time checkpoint semantics, preserving all original schema text."
+  },
+  "copied_exact_data_files": [
+    "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/git-recovery-report.json",
+    "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/git-recovery-readset.jsonl",
+    "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-content-v1.json",
+    "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-content-v2.json",
+    "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-recovery-summary-v2.json",
+    "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-selection-v1.json",
+    "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-transformation-manifest-v1.json",
+    "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/transport-inputs-v1.json",
+    "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/transport-inputs-v2.json"
+  ],
+  "early_archive_launcher": {
+    "terminal": "UNKNOWN",
+    "native_closure": "UNKNOWN",
+    "included_in_closed_totals": false
+  },
+  "provenance": {
+    "git_search_producer": "recover_git_objects",
+    "archive_search_producer": "recover_archives",
+    "root_structural_verifier": "root",
+    "independent_text_and_scope_reviewer": "next_functional_boundary",
+    "execution_path": "internal collaboration and Remote Desktop Commander",
+    "external_provider": "none",
+    "model_profile": "unspecified by runtime"
+  },
+  "search_helpers_executed": true,
+  "files": [
+    {
+      "path": ".plans/2026-11/open-pr-integration-20261117.md",
+      "bytes": 267922,
+      "sha256": "82c5236b4ed4d1d0313ec3529298aa80564a72fdbd618163bd3c8111ddded382"
+    },
+    {
+      "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/.gitattributes",
+      "bytes": 54,
+      "sha256": "33faa5a7af5fe8175ee6f5322ceb98e839551ca24de6261a4d7c2a001bb672fb"
+    },
+    {
+      "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/README.md",
+      "bytes": 20769,
+      "sha256": "76d680da244b478094f00af8e0449f7df7e4cc37f7594d05e7534101d5753fd6"
+    },
+    {
+      "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/git-recovery-report.json",
+      "bytes": 31791,
+      "sha256": "d2c9ee0ad66088b90cebc1c5aa1ec41daa04449f63743820f7097c95f87511b3"
+    },
+    {
+      "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/git-recovery-readset.jsonl",
+      "bytes": 995579,
+      "sha256": "c997a2540d2caf2349330d436cd8870769c17187b10fca6c4707b2c82e775cf5"
+    },
+    {
+      "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-content-v1.json",
+      "bytes": 5017726,
+      "sha256": "ed47cf3832e0231f03a5598653ae1a7b1680165998c87c2415b4a138b58d2aca"
+    },
+    {
+      "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-content-v2.json",
+      "bytes": 11139,
+      "sha256": "3ff56663b5cd01b7f91b5623958d9cbc266ecde58c25f47fe7255bbd715106c5"
+    },
+    {
+      "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-evidence-schema-v1.md",
+      "bytes": 2800,
+      "sha256": "5a23a54982a5703a4a22fd040eb4061db782fc2402bc1b57976dc171ba408951"
+    },
+    {
+      "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-recovery-summary-v2.json",
+      "bytes": 8297,
+      "sha256": "9336e822163440faabca0bff24952915ae3f9b4cfbdcddbe0d03d2ec786ef479"
+    },
+    {
+      "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-selection-v1.json",
+      "bytes": 73209,
+      "sha256": "f7527ee0011e2871d41ae703dd23a421000e027fe6970370e6cedd337dc1cd41"
+    },
+    {
+      "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-transformation-manifest-v1.json",
+      "bytes": 4498,
+      "sha256": "06718a331e5ff33b055800ded6a2242984471cb661552be9dfb7bbfc2933c987"
+    },
+    {
+      "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/transport-inputs-v1.json",
+      "bytes": 64929,
+      "sha256": "513dc809de55908f25466e9398863d9d0c2069c6348a5ee48456a3f67720c957"
+    },
+    {
+      "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/transport-inputs-v2.json",
+      "bytes": 24311,
+      "sha256": "4a67dd6310df6e705a40dcdeb2ae7e4c896e06ccf39c77a71b5f22bba3b4b3c4"
+    },
+    {
+      "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/structural-verification.json",
+      "bytes": 8412,
+      "sha256": "c04432c955bef8d57b9c8e90b57e455c14aa3b099e5e77fea556cad3ffcccfac"
+    }
+  ],
+  "publication_preparation_history": {
+    "first_stage_receipt_sha256": "6c37e8a312846a1e95f562e425e0c1972c4bfc19ba94bcee412f383308194fdb",
+    "status": "FAIL/CLOSED",
+    "command": "git diff --cached --check",
+    "exit_code": 2,
+    "causes": [
+      "README had an additional terminal blank line",
+      "Exact original git-recovery-report.json uses CRLF and Git classified CR as trailing whitespace"
+    ],
+    "correction": "Removed only the additional README terminal blank line; declared cr-at-eol for the one exact CRLF JSON. Search evidence bytes were not normalized or changed."
+  }
+}

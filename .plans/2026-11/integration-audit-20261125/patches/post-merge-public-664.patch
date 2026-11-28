@@ -1,0 +1,9 @@
+diff --git a/docs/modernization/verification/gui-original-owner-2026-11-22/publication-readback.json b/docs/modernization/verification/gui-original-owner-2026-11-22/publication-readback.json
+index cb37af3756fd525cd08dace918cae72bd7c0a2c4..1cf97c2d6421c70b395a8a6daefd5d5213c24466 100644
+--- a/docs/modernization/verification/gui-original-owner-2026-11-22/publication-readback.json
++++ b/docs/modernization/verification/gui-original-owner-2026-11-22/publication-readback.json
+@@ -132,4 +132,3 @@
+   "merge_performed": false,
+   "force_push": false
+ }
+-

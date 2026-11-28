@@ -1,0 +1,109 @@
+{
+  "schema": "failed-owner-native-source-binding-v1",
+  "source_commit": "b6f82b3f531bb3eec197049167cdc5971b44e2b0",
+  "staging_substitution": {
+    "from": "__CANONICAL_EXTERNAL_STAGE__",
+    "to": "failed-owner-review-20261126-v1"
+  },
+  "go_files": [
+    {
+      "candidate_path": "candidate/controller/cases_windows.go",
+      "candidate_bytes": 19128,
+      "candidate_sha256": "a9565d3140accddc8601c2a5132afaf109c86a6e2c3f582de3d272b900cf6d87",
+      "staged_path": ".scratch/failed-owner-review-20261126-v1/controller/cases_windows.go",
+      "staged_bytes": 19131,
+      "staged_sha256": "9ff2e4e57043a6fdfe9b99bc9f66694ca2bdb8f8a122867d492fb85a7602602d",
+      "matches_native_test_input": true
+    },
+    {
+      "candidate_path": "candidate/controller/inputs_windows.go",
+      "candidate_bytes": 11040,
+      "candidate_sha256": "345197b965bd59a97c43e846ab35a37393852cbac7dfe5cabc0f0a109576e6cc",
+      "staged_path": ".scratch/failed-owner-review-20261126-v1/controller/inputs_windows.go",
+      "staged_bytes": 11040,
+      "staged_sha256": "345197b965bd59a97c43e846ab35a37393852cbac7dfe5cabc0f0a109576e6cc",
+      "matches_native_test_input": true
+    },
+    {
+      "candidate_path": "candidate/controller/main_windows.go",
+      "candidate_bytes": 23392,
+      "candidate_sha256": "44072cc697d8087d28653880533589442635deb94bbe81588a96af9bb22f1135",
+      "staged_path": ".scratch/failed-owner-review-20261126-v1/controller/main_windows.go",
+      "staged_bytes": 23392,
+      "staged_sha256": "44072cc697d8087d28653880533589442635deb94bbe81588a96af9bb22f1135",
+      "matches_native_test_input": true
+    },
+    {
+      "candidate_path": "candidate/controller/physical_windows.go",
+      "candidate_bytes": 11633,
+      "candidate_sha256": "2b36397be3d45ebf0bb378eb89ba8a8086ff8d17b4c76d58b474f78fb5d63429",
+      "staged_path": ".scratch/failed-owner-review-20261126-v1/controller/physical_windows.go",
+      "staged_bytes": 11636,
+      "staged_sha256": "c308b5703ae7f2ed650f53d053d27c79e2d13c3f0fa060cbcdd000f601b5532e",
+      "matches_native_test_input": true
+    },
+    {
+      "candidate_path": "candidate/controller/physical_windows_test.go",
+      "candidate_bytes": 4118,
+      "candidate_sha256": "69562a90ae6be02fa43f2bd5b84d7d5ed4c70bb900443869e60099c40f901925",
+      "staged_path": ".scratch/failed-owner-review-20261126-v1/controller/physical_windows_test.go",
+      "staged_bytes": 4118,
+      "staged_sha256": "69562a90ae6be02fa43f2bd5b84d7d5ed4c70bb900443869e60099c40f901925",
+      "matches_native_test_input": true
+    },
+    {
+      "candidate_path": "candidate/owner/canonicalcaseowner/capture_windows_amd64.go",
+      "candidate_bytes": 3395,
+      "candidate_sha256": "e734df342f5b863ffe9916fa71d9c7712b5c305346662419bccc7716517e0053",
+      "staged_path": ".scratch/failed-owner-review-20261126-v1/canonicalcaseowner/capture_windows_amd64.go",
+      "staged_bytes": 3395,
+      "staged_sha256": "e734df342f5b863ffe9916fa71d9c7712b5c305346662419bccc7716517e0053",
+      "matches_native_test_input": true
+    },
+    {
+      "candidate_path": "candidate/owner/canonicalcaseowner/events_windows_amd64.go",
+      "candidate_bytes": 27810,
+      "candidate_sha256": "f1f077b17d1a7f6dba774bd0c637c7cc20edcfaadd4fff77c82df46709d2e811",
+      "staged_path": ".scratch/failed-owner-review-20261126-v1/canonicalcaseowner/events_windows_amd64.go",
+      "staged_bytes": 27810,
+      "staged_sha256": "f1f077b17d1a7f6dba774bd0c637c7cc20edcfaadd4fff77c82df46709d2e811",
+      "matches_native_test_input": true
+    },
+    {
+      "candidate_path": "candidate/owner/canonicalcaseowner/native_windows_amd64.go",
+      "candidate_bytes": 11982,
+      "candidate_sha256": "8729ac9c525e664c5d7f279b277a93b9e06841e6757a14de508719d026335f87",
+      "staged_path": ".scratch/failed-owner-review-20261126-v1/canonicalcaseowner/native_windows_amd64.go",
+      "staged_bytes": 11982,
+      "staged_sha256": "8729ac9c525e664c5d7f279b277a93b9e06841e6757a14de508719d026335f87",
+      "matches_native_test_input": true
+    },
+    {
+      "candidate_path": "candidate/owner/canonicalcaseowner/owner_windows_amd64.go",
+      "candidate_bytes": 29509,
+      "candidate_sha256": "7276febe485aea1791fc6757ad1c710a108e3c60e7aa263e656ad985dfe22294",
+      "staged_path": ".scratch/failed-owner-review-20261126-v1/canonicalcaseowner/owner_windows_amd64.go",
+      "staged_bytes": 29509,
+      "staged_sha256": "7276febe485aea1791fc6757ad1c710a108e3c60e7aa263e656ad985dfe22294",
+      "matches_native_test_input": true
+    },
+    {
+      "candidate_path": "candidate/owner/canonicalcaseowner/physical_windows_amd64.go",
+      "candidate_bytes": 7094,
+      "candidate_sha256": "6749335513771a7daf8be423809262f57039f25a940114e5ba46b5a76802216a",
+      "staged_path": ".scratch/failed-owner-review-20261126-v1/canonicalcaseowner/physical_windows_amd64.go",
+      "staged_bytes": 7094,
+      "staged_sha256": "6749335513771a7daf8be423809262f57039f25a940114e5ba46b5a76802216a",
+      "matches_native_test_input": true
+    }
+  ],
+  "only_gofmt_changed_path": ".scratch/failed-owner-review-20261126-v1/controller/physical_windows.go",
+  "before_gofmt_sha256": "c97b934b5ed748d11ed4f8184ad1c3be065ac6c66a521d26e588caea2a60f180",
+  "after_gofmt_sha256": "c308b5703ae7f2ed650f53d053d27c79e2d13c3f0fa060cbcdd000f601b5532e",
+  "tracked_dependency_inputs": {
+    "go.mod": "6d61e480d392b8ff20530467851e45d92c01bbde65468796f013d7eb30315392",
+    "go.sum": "61f4a30f006f3bc99b1d2500646d9fd381c3c8d72050ca76dce2f9321c3ecae2",
+    "internal/process/contained_stream_observed.go": "8d462e85903ad92167b8ff7034d672e7e7e8baefddf29f2698ea756e7bae11ef"
+  },
+  "candidate_runtime_activated": false
+}

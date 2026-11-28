@@ -1,0 +1,717 @@
+"""DATA-only receiving of original fixed canonical-controller observations.
+No files, processes, hashes, or callbacks are opened here. These checks consume
+the exact original receipt before the adapter may read any process captures.
+Synthetic callers of this module never acquire native ownership.
+The compact auxiliary counters preserve source-owned close/continue accounting;
+they do not reconstruct each omitted event, thread ID, or full event chronology.
+"""
+import calendar
+import ntpath
+import re
+from datetime import datetime
+
+SCHEMA = "canonical-external-controller-v1"
+PLAN_SCHEMA = "canonical-external-plan-v1"
+ROOTS = (
+    "TestCanonicalGUIRuntimeRecoveryNativeIndependentReplay",
+    "TestCanonicalSuccessorNativeControlRetainsOriginalFiles",
+)
+SLOTS = dict(zip(ROOTS, ("gui-replay", "successor")))
+CHILDREN = {
+    ROOTS[0]: (
+        "original-control-rejects-different-hash",
+        "original-control-rejects-foreign-path-and-generation",
+        "failed-headless-start-preserves-generation",
+        "continues-to-headless-start",
+        "cleanup-uses-current-operation-context",
+        "closed-original-refuses-runtime-proof",
+    ),
+    ROOTS[1]: ("absent", "identical", "different-identity"),
+}
+HEX = re.compile(r"[0-9a-f]{64}")
+NS = 1_000_000_000
+LIMIT = 4 << 20
+EVENT_LEDGER_FORMAT = "lifecycle-and-auxiliary-counts-v1"
+MAX_PROCESS_HANDLES = 256
+MAX_THREAD_HANDLES = 4096
+MAX_CRITICAL_EVENTS = 2 * MAX_THREAD_HANDLES + MAX_PROCESS_HANDLES
+MAX_AUXILIARY_BINS_PER_PROCESS = 5
+CLOSURE_MODEL = "fixed-canonical-case-observed-debug-chain-v1"
+CLOSURE_LIMIT = ("Completion covers the original observed debug chain under the fixed-source/no-new-debug-chain assumption; "
+                 "it is not universal process-tree containment.")
+
+def need(value, reason):
+    if not value:
+        raise ValueError("canonical original receiving: " + reason)
+
+def integer(value, minimum=0):
+    return type(value) is int and value >= minimum
+
+def uint64(value, minimum=0):
+    return integer(value, minimum) and value < 1 << 64
+
+def instant(value):
+    match = re.fullmatch(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z", value or "")
+    need(match is not None, "canonical UTC timestamp required")
+    whole = calendar.timegm(datetime.strptime(match[1], "%Y-%m-%dT%H:%M:%S").timetuple())
+    return whole * NS + int((match[2] or "").ljust(9, "0") or "0")
+
+def same_path(left, right):
+    return isinstance(left, str) and isinstance(right, str) and ntpath.normcase(left) == ntpath.normcase(right)
+
+def exact_image(image, source):
+    need(isinstance(image, dict) and same_path(image.get("Path"), source["path"])
+         and image.get("SHA256") == source["sha256"]
+         and isinstance(image.get("FileID"), str) and image["FileID"]
+         and integer(image.get("Bytes"), 1) and image.get("Machine") == 0x8664,
+         "actual pinned image evidence differs")
+
+def strict_outer(proof, plan, run_root):
+    need(proof.get("schema") == "literal-contained-test-run-v1"
+         and proof.get("binary") == plan["binary"]["path"]
+         and proof.get("binary_sha256") == plan["binary"]["sha256"]
+         and proof.get("source_dir") == plan["source_dir"]
+         and proof.get("args") == plan["original_args"]
+         and proof.get("inventory") is False,
+         "original strict outer invocation differs")
+    need(proof.get("root_wait_known") is True and proof.get("settlement_complete") is True
+         and proof.get("custody_retained") is False and integer(proof.get("root_exit_code")),
+         "original strict outer is incomplete")
+    root, native, io = proof.get("root", {}), proof.get("native", {}), proof.get("io", {})
+    need(root.get("Known") is True and integer(root.get("PID"), 1)
+         and integer(root.get("NativeBirthFILETIME"), 1) and native.get("RootIdentity") == root,
+         "original outer native identity differs")
+    need(native.get("NoChildKnown") is False and native.get("RootWaitKnown") is True
+         and native.get("RootExitCode") == proof["root_exit_code"]
+         and native.get("HandlesClosed") is True and native.get("FinalActive") == 0
+         and native.get("Error") is None
+         and (native.get("OriginalJobExited") is True
+              or native.get("MembersExited") is True and native.get("AccountingKnown") is True),
+         "original outer process/Job receiving is incomplete")
+    for name in ("Stdin", "StdoutRead", "StdoutWrite", "StderrRead", "StderrWrite"):
+        handle = io.get(name, {})
+        need(all(handle.get(key) is True for key in ("Acquired", "CloseAttempted", "Closed"))
+             and handle.get("CloseError") is None, "outer original IO handle is not closed: " + name)
+    for name in ("Stdout", "Stderr"):
+        stream = io.get(name, {})
+        need(all(stream.get(key) is True for key in ("WorkerStarted", "WorkerComplete", "EOF"))
+             and stream.get("LimitExceeded") is False and stream.get("Error") is None
+             and integer(stream.get("Bytes")), "outer original IO worker is incomplete: " + name)
+    for name, filename in (("stdout_sink", "stdout.raw"), ("stderr_sink", "stderr.txt")):
+        sink = proof.get(name, {})
+        need(same_path(sink.get("path"), ntpath.join(run_root, filename))
+             and all(sink.get(key) is True for key in ("sync_attempted", "synced", "close_attempted", "closed"))
+             and sink.get("error") == "", "outer original capture sink is incomplete: " + name)
+    start, work, cleanup, finish = (instant(proof.get(key)) for key in
+        ("started_utc", "work_deadline", "cleanup_deadline", "finished_utc"))
+    duration = 300 if plan["profile"] == "full" else 120
+    need(work - start == (duration + 5) * NS and cleanup - work == 10 * NS
+         and start <= finish < cleanup and proof.get("bootstrap_budget") == "5s"
+         and proof.get("test_timeout") == ("5m0s" if duration == 300 else "2m0s"),
+         "original outer fixed deadlines differ")
+    return root, start, work, cleanup
+
+def native_case(case, plan, top, outer_start, outer_work, outer_cleanup):
+    name, slot = case["test"], case["slot"]
+    slot_root = ntpath.join(top["run_root"], "channel", slot)
+    temp_root = ntpath.join(slot_root, "actor-tmp")
+    cfg, native = case.get("config", {}), case.get("native", {})
+    need(case.get("native_owner_matched") is True and case.get("physical_complete") is True
+         and case.get("custody_retained") is False, "original case owner/physical receiving is incomplete")
+    need(cfg.get("Version") == 2 and cfg.get("Test") == name
+         and isinstance(cfg.get("Nonce"), str) and HEX.fullmatch(cfg["Nonce"])
+         and cfg.get("Image") == plan["binary"]["path"]
+         and cfg.get("ImageSHA256") == plan["binary"]["sha256"]
+         and cfg.get("Fixture") == plan["fixture"]["path"]
+         and cfg.get("FixtureSHA256") == plan["fixture"]["sha256"],
+         "case config differs from the original fixed plan")
+    args = [cfg["Image"], "-test.paniconexit0", "-test.v", "-test.count=1",
+            "-test.timeout=" + cfg["Timeout"], "-test.run=^" + name + "$"]
+    work, cleanup = instant(cfg.get("WorkDeadline")), instant(cfg.get("CleanupDeadline"))
+    need(outer_start <= work <= outer_work and cleanup - work == 10 * NS and cleanup <= outer_cleanup,
+         "case endpoints escape the original outer bound")
+    need(native.get("Case") == slot and same_path(native.get("CaseTempRoot"), temp_root)
+         and native.get("CommandPath") == cfg["Image"]
+         and native.get("CommandArgs") == args and native.get("WorkDeadline") == cfg["WorkDeadline"]
+         and native.get("CleanupDeadline") == cfg["CleanupDeadline"],
+         "native original command or case binding differs")
+    need(all(native.get(key) is True for key in (
+        "Complete", "NativeComplete", "IOComplete", "HostNoJobChecked", "KillOnExitArmed",
+        "CreatingThreadSignaled", "CreatingThreadCloseAttempted", "CreatingThreadClosed",
+        "ImagePinClosed", "ImagePinsClosed"))
+        and native.get("Unknown") is False and native.get("NoCreateAttempted") is False,
+        "original native process/thread/IO/pins are incomplete")
+    need(integer(native.get("CreatingThreadID"), 1) and integer(top.get("startup_thread_id"), 1)
+         and native["CreatingThreadID"] != top["startup_thread_id"],
+         "original debugger thread was not distinct from startup")
+    need(native.get("ClosureModel") == CLOSURE_MODEL and native.get("ClosureLimit") == CLOSURE_LIMIT,
+         "fixed-source debug-chain boundary is absent")
+    need(native.get("EventLedgerFormat") == EVENT_LEDGER_FORMAT,
+         "original event ledger format differs")
+    need("PendingEvent" in native and native["PendingEvent"] is None,
+         "original event receiving has no explicit empty pending slot")
+    completed = instant(native.get("CompleteReceivedAt"))
+    need(outer_start <= completed < cleanup and completed <= instant(top["finished_utc"]),
+         "case completion is outside its original bound")
+    inputs = {"actor": plan["binary"], "product": plan["product"], **plan["tools"]}
+    pins = native.get("ImagePins")
+    need(isinstance(pins, list) and len(pins) == len(inputs)
+         and {pin.get("Role") for pin in pins} == set(inputs),
+         "original finite source pin set differs")
+    pin_images = {}
+    for pin in pins:
+        role = pin["Role"]
+        need(all(pin.get(key) is True for key in ("Acquired", "CloseAttempted", "Closed"))
+             and pin.get("CloseError") == "", "original source pin not closed: " + role)
+        exact_image(pin.get("Image"), inputs[role])
+        # Conhost is a separately pinned GUI system image, not a Product role.
+        need(pin["Image"].get("Subsystem") == (2 if role in ("actor", "product", "conhost") else 3),
+             "source image subsystem differs: " + role)
+        pin_images[role] = pin["Image"]
+    need(native.get("Image") == pin_images["actor"], "original actor primary image differs")
+    processes, threads, events = (native.get(key) for key in ("Processes", "Threads", "Events"))
+    need(isinstance(processes, list) and processes and isinstance(threads, list) and threads
+         and isinstance(events, list) and events, "actual dynamic original cohort is absent")
+    auxiliary, observed = native.get("AuxiliaryEvents"), native.get("ObservedEventCount")
+    need(isinstance(auxiliary, list) and uint64(observed, 1),
+         "original auxiliary event array or observed count is absent or invalid")
+    need(len(processes) <= MAX_PROCESS_HANDLES and len(threads) <= MAX_THREAD_HANDLES
+         and len(events) <= MAX_CRITICAL_EVENTS
+         and len(auxiliary) <= MAX_AUXILIARY_BINS_PER_PROCESS * len(processes),
+         "original event/cohort storage exceeds the fixed native bounds")
+    pids, roots = set(), []
+    for process in processes:
+        pid = process.get("PID")
+        need(integer(pid, 1) and pid not in pids
+             and re.fullmatch(r"[1-9][0-9]*", process.get("NativeBirthFILETIME", "")) is not None
+             and int(process["NativeBirthFILETIME"]) < 1 << 64,
+             "actual process identity is invalid or duplicated")
+        need(all(process.get(key) is True for key in (
+            "KernelSignaled", "DuplicateCloseAttempted", "DuplicateClosed",
+            "ExitEventReceived", "ExitContinued")) and integer(process.get("ExitCode")),
+            "actual original process lifetime is incomplete")
+        absent, image = process.get("ImageFileAbsent"), process.get("Image", {})
+        need(type(absent) is bool, "original CREATE hFile disposition is absent")
+        if absent:
+            need(process.get("ImageFileCloseAttempted") is False and process.get("ImageFileClosed") is False
+                 and all(image.get(key) == "" for key in ("Path", "FileID", "SHA256"))
+                 and all(type(image.get(key)) is int and image[key] == 0
+                         for key in ("Bytes", "Machine", "Subsystem")),
+                 "absent event image has fabricated evidence or close facts")
+        else:
+            need(process.get("ImageFileCloseAttempted") is True and process.get("ImageFileClosed") is True,
+                 "original CREATE image file was not closed")
+        if process.get("ImageDisposition") == "admitted":
+            role = process.get("Role")
+            need(role in inputs and not absent and process.get("ImageAdmissionError") == ""
+                 and process.get("ImageRejectStopBeforeContinue") is False,
+                 "admitted original image disposition differs")
+            if role != "product":
+                need(image == pin_images[role], "actual event image differs from original source pin")
+            else:
+                image_path = image.get("Path")
+                relative = ntpath.relpath(image_path, temp_root) if isinstance(image_path, str) else ".."
+                parts = relative.split("\\")
+                need(image.get("SHA256") == pin_images["product"]["SHA256"]
+                     and all(image.get(key) == pin_images["product"][key]
+                             for key in ("Bytes", "Machine", "Subsystem"))
+                     and isinstance(image.get("FileID"), str) and image["FileID"]
+                     and len(parts) >= 4 and ".." not in parts and ":" not in relative
+                     and [part.lower() for part in parts[-3:]] == ["product", "mcphub-product", "mcphub.exe"],
+                     "actual Product copy differs from the qualified bytes")
+            if role in ("actor", "product"):
+                need(process.get("InAnyJob") is False, "original actor/Product was in a Job")
+        else:
+            need(process.get("ImageDisposition") == "rejected"
+                 and isinstance(process.get("ImageAdmissionError"), str) and process["ImageAdmissionError"]
+                 and process.get("ImageRejectStopBeforeContinue") is True
+                 and process.get("TerminateAttempted") is True
+                 and (process.get("TerminateAccepted") is True or process.get("TerminateAlreadyExited") is True),
+                 "rejected original image lacks stop-before-Continue receiving")
+        if process.get("TerminateAlreadyExited") is True:
+            need(process.get("TerminateAttempted") is True and process.get("TerminateAccepted") is False
+                 and process.get("TerminateExitStatusObserved") is True
+                 and (process.get("TerminateWaitSignaled") is True
+                      or process.get("TerminateObservedExitCode") != 259)
+                 and process.get("TerminateObservedExitCode") == process.get("ExitCode"),
+                 "original termination race is unresolved")
+        pids.add(pid)
+        if process.get("InitialRoot") is True:
+            roots.append(process)
+    waited = native.get("RootWait", {})
+    need(len(roots) == 1 and integer(native.get("RootPID"), 1) and roots[0]["PID"] == native["RootPID"]
+         and waited.get("Returned") is True and waited.get("Known") is True
+         and integer(waited.get("ExitCode")) and waited["ExitCode"] == roots[0]["ExitCode"],
+         "one original root EXIT and Cmd.Wait result are required")
+    if roots[0].get("ImageDisposition") == "admitted":
+        need(roots[0].get("Role") == "actor" and roots[0].get("Image") == pin_images["actor"],
+             "original initial root is not the exact pinned actor")
+    need(all(process.get("Role") != "actor" or process.get("InitialRoot") is True
+             for process in processes), "another process was labelled as the original actor")
+    admitted_products = sum(process.get("Role") == "product" and process.get("ImageDisposition") == "admitted"
+                            for process in processes)
+    need(admitted_products <= (2 if name == ROOTS[0] else 3), "admitted Product count exceeds the fixed profile")
+    for thread in threads:
+        need(thread.get("PID") in pids and integer(thread.get("TID"), 1)
+             and all(thread.get(key) is True for key in
+                     ("KernelSignaled", "DuplicateCloseAttempted", "DuplicateClosed")),
+             "original thread lifetime is incomplete")
+    creates, exits, created_threads = [], [], []
+    live_processes, live_threads, explicitly_exited_threads = set(), {}, set()
+    by_pid = {process["PID"]: process for process in processes}
+    create_events, exit_events, critical_sequences = {}, {}, set()
+    previous_sequence = 0
+    for event in events:
+        sequence = event.get("Sequence")
+        need(uint64(sequence, 1) and previous_sequence < sequence <= observed
+             and event.get("PID") in pids
+             and type(event.get("Code")) is int and event["Code"] in (2, 3, 4, 5)
+             and integer(event.get("TID"), 1) and event.get("Continued") is True
+             and type(event.get("ContinueStatus")) is int and event["ContinueStatus"] == 0x00010002
+             and outer_start <= instant(event.get("ReceivedAt")) <= completed,
+             "original event order, identity or continuation differs")
+        previous_sequence = sequence
+        critical_sequences.add(sequence)
+        if event.get("ImageFilePresent") is True:
+            need(event.get("ImageFileCloseAttempted") is True and event.get("ImageFileClosed") is True,
+                 "original event image file was not closed before Continue")
+        if event.get("Code") == 3:
+            need(event["PID"] not in live_processes and event["PID"] not in creates,
+                 "original process CREATE is repeated")
+            live_processes.add(event["PID"])
+            process = by_pid[event["PID"]]
+            need(event.get("ImageFilePresent") is (not process["ImageFileAbsent"])
+                 and (not process["ImageFileAbsent"]
+                      or event.get("ImageFileCloseAttempted") is False and event.get("ImageFileClosed") is False),
+                 "original CREATE event and process hFile facts differ")
+            creates.append(event["PID"])
+            create_events[event["PID"]] = event
+        else:
+            need(event["PID"] in live_processes, "original event precedes CREATE or follows EXIT")
+        key = (event["PID"], event["TID"])
+        if event.get("Code") in (2, 3):
+            need(key not in live_threads, "original thread CREATE repeats a live identity")
+            live_threads[key] = len(created_threads)
+            created_threads.append(key)
+        elif event.get("Code") == 4:
+            need(key in live_threads, "original thread EXIT has no live CREATE")
+            explicitly_exited_threads.add(live_threads.pop(key))
+        elif event.get("Code") == 5:
+            exits.append(event["PID"])
+            exit_events[event["PID"]] = event
+            live_processes.remove(event["PID"])
+            live_threads = {key: index for key, index in live_threads.items() if key[0] != event["PID"]}
+    need(len(creates) == len(exits) == len(pids) and set(creates) == set(exits) == pids
+         and events[0].get("Code") == 3 and events[0].get("PID") == native["RootPID"]
+         and events[0]["Sequence"] == 1 and events[-1].get("Code") == 5
+         and events[-1]["Sequence"] == observed,
+         "original CREATE/EXIT event sets differ")
+    need(not live_processes and not live_threads
+         and created_threads == [(thread["PID"], thread["TID"]) for thread in threads]
+         and all(thread.get("ExitContinued") is (index in explicitly_exited_threads)
+                 for index, thread in enumerate(threads)),
+         "original thread creation/exit records differ from the actual event ledger")
+    # Successful auxiliary rows are counters from the original owner's stream,
+    # not a reconstructed list of individual events or their thread identities.
+    accounted, bins = len(events), set()
+    allowed_bins = {(1, 0x00010002), (1, 0x80010001),
+                    (6, 0x00010002), (7, 0x00010002), (8, 0x00010002)}
+    for row in auxiliary:
+        need(isinstance(row, dict), "original auxiliary event row is invalid")
+        pid, code, status = (row.get(key) for key in ("PID", "Code", "ContinueStatus"))
+        count, first, last = (row.get(key) for key in ("Count", "FirstSequence", "LastSequence"))
+        need(integer(pid, 1) and pid in pids and type(code) is int and type(status) is int
+             and (code, status) in allowed_bins and (pid, code, status) not in bins,
+             "original auxiliary event bin is foreign, repeated or unsupported")
+        bins.add((pid, code, status))
+        need(uint64(count, 1) and uint64(first, 1) and uint64(last, 1)
+             and first <= last and count <= last - first + 1
+             and (count != 1 or first == last),
+             "original auxiliary event count or sequence span is invalid")
+        created, exited = create_events[pid], exit_events[pid]
+        need(created["Sequence"] < first <= last < exited["Sequence"]
+             and first not in critical_sequences and last not in critical_sequences,
+             "original auxiliary event range is outside its original process lifetime")
+        first_time, last_time = instant(row.get("FirstReceivedAt")), instant(row.get("LastReceivedAt"))
+        need(instant(created["ReceivedAt"]) <= first_time <= last_time <= instant(exited["ReceivedAt"])
+             and (count != 1 or first_time == last_time),
+             "original auxiliary event time is outside its original process lifetime")
+        file_counts = [row.get(key) for key in
+                       ("ImageFilePresentCount", "ImageFileCloseAttemptedCount", "ImageFileClosedCount")]
+        need(all(uint64(value) for value in file_counts)
+             and file_counts[0] == file_counts[1] == file_counts[2] <= count
+             and (code == 6 or file_counts[0] == 0),
+             "original auxiliary image file close accounting is incomplete")
+        accounted += count
+    need(accounted == observed, "original event accounting does not cover the observed stream")
+    initial = case.get("initial_root")
+    if initial is not None:
+        need(case.get("initial_owner_matched") is True and isinstance(initial, dict)
+             and roots[0].get("ImageDisposition") == "admitted"
+             and initial.get("PID") == native["RootPID"]
+             and initial.get("NativeBirthFILETIME") == roots[0]["NativeBirthFILETIME"]
+             and initial.get("Image") == roots[0]["Image"]
+             and initial.get("InAnyJob") is False and initial.get("CreateContinued") is True
+             and initial.get("CreateReceivedAt") == events[0]["ReceivedAt"]
+             and instant(initial.get("CreateReceivedAt")) <= instant(initial.get("PublishedAt")) <= completed,
+             "one original initial-root admission differs")
+    else:
+        need(case.get("initial_owner_matched") is False and not case.get("ready")
+             and not case.get("grant") and case.get("ready_received") is False
+             and case.get("grant_published") is False,
+             "missing initial admission has fabricated READY or GRANT claims")
+    for stream, key in (("Stdout", "raw_stdout"), ("Stderr", "raw_stderr")):
+        io, capture = native.get(stream, {}), case.get(key, {})
+        need(all(io.get(name) is True for name in
+                 ("WorkerReturned", "EOF", "WriterCloseAttempted", "WriterClosed", "ReaderClosed"))
+             and type(io.get("Overflow")) is bool
+             and all(io.get(name) == "" for name in ("ReadError", "ReaderCloseError", "WriterCloseError")),
+             "original case IO worker or handle remains incomplete")
+        capture_name = "stdout.raw" if stream == "Stdout" else "stderr.txt"
+        need(integer(io.get("Bytes")) and capture.get("bytes") == min(io["Bytes"], LIMIT)
+             and io["Overflow"] is (io["Bytes"] > LIMIT)
+             and same_path(capture.get("path"), ntpath.join(slot_root, capture_name))
+             and capture.get("closed") is True and isinstance(capture.get("sha256"), str)
+             and HEX.fullmatch(capture["sha256"]),
+             "case capture writer has not been received")
+    return roots[0]
+
+def receive(proof, binding):
+    """Return physical receiving and a separate qualification verdict.
+    binding contains the original plan object, its exact path/SHA, and run_root.
+    A ValueError denies capture access; a False qualification permits only
+    diagnostics after full original receiving. Neither value creates ownership.
+    """
+    plan = binding["plan"]
+    need(plan.get("schema") == PLAN_SCHEMA and plan.get("profile") in ("full", "focused"),
+         "fixed original plan required")
+    tools = plan.get("tools")
+    need(isinstance(tools, dict) and set(tools) in (
+             {"powershell", "netstat", "netsh", "conhost"},
+             {"powershell", "netstat", "netsh", "conhost", "wmic"}),
+         "fixed original tool set differs")
+    need(same_path(tools["conhost"]["path"],
+                   ntpath.join(ntpath.dirname(tools["netsh"]["path"]), "conhost.exe")),
+         "conhost source path differs from the bound system directory")
+    required = list(ROOTS) if plan["profile"] == "full" else [plan.get("focused_case")]
+    need(plan.get("expected_root_names") == required and all(name in ROOTS for name in required)
+         and (plan["profile"] != "full" or plan.get("focused_case") == ""),
+         "fixed original selected case set differs")
+    argv = plan.get("original_args")
+    fixed = ["-test.paniconexit0", "-test.v=test2json", "-test.count=1"]
+    if plan["profile"] == "full":
+        need(isinstance(argv, list) and len(argv) == 4 and len(set(argv)) == 4
+             and (set(argv) == set(fixed + ["-test.timeout=5m"])
+                  or set(argv) == set(fixed + ["-test.timeout=5m0s"])),
+             "original full-suite arguments differ")
+    else:
+        need(argv == fixed + ["-test.timeout=2m0s", "-test.run=^" + required[0] + "$"],
+             "original focused arguments differ")
+    expected = {
+        "schema": SCHEMA, "canonical_plan": binding["canonical_plan"],
+        "canonical_plan_sha256": binding["canonical_plan_sha256"], "run_root": binding["run_root"],
+        "profile": plan["profile"], "focused_case": plan["focused_case"],
+        "binary": plan["binary"]["path"], "binary_sha256": plan["binary"]["sha256"],
+        "source_dir": plan["source_dir"], "args": plan["original_args"],
+        "fixture": plan["fixture"]["path"], "fixture_sha256": plan["fixture"]["sha256"],
+    }
+    need(all(proof.get(key) == value for key, value in expected.items()),
+         "original composite invocation differs")
+    need(proof.get("composite_complete") is True and proof.get("custody_retained") is False
+         and proof.get("captures_finalized") is True,
+         "original composite or capture completion remains unknown")
+    outer, start, work, cleanup = strict_outer(proof.get("outer", {}), plan, binding["run_root"])
+    need(proof.get("work_deadline") == proof["outer"]["work_deadline"]
+         and proof.get("cleanup_deadline") == proof["outer"]["cleanup_deadline"]
+         and start == instant(proof.get("started_utc"))
+         and start <= instant(proof.get("finished_utc")) < cleanup,
+         "composite original deadline binding differs")
+    channel = proof.get("channel", {})
+    need(channel.get("version") == 2 and channel.get("joined") is True
+         and channel.get("stopped") is True and channel.get("required_slots") == required
+         and same_path(channel.get("root"), ntpath.join(binding["run_root"], "channel"))
+         and isinstance(channel.get("run_nonce"), str) and HEX.fullmatch(channel["run_nonce"]),
+         "original channel service did not join")
+    cases = proof.get("cases")
+    need(isinstance(cases, list) and len(cases) == 2
+         and [case.get("test") for case in cases] == list(ROOTS)
+         and all(case.get("slot") == SLOTS[case["test"]] and type(case.get("attempted")) is bool for case in cases),
+         "original two-slot registry differs")
+    passed_cases = []
+    need(type(channel.get("request_count")) is int
+         and channel["request_count"] == sum(case["attempted"] for case in cases),
+         "original channel request count differs from attempted case records")
+    for case in cases:
+        if not case["attempted"]:
+            need(case.get("native") is None and case.get("initial_root") is None and case.get("request") is None
+                 and all(case.get(key) is False for key in ("physical_complete", "custody_retained",
+                     "native_owner_matched", "initial_owner_matched", "ready_received", "grant_published",
+                     "final_received", "request_parent_matches_outer"))
+                 and all(case.get(key) is None for key in ("ready", "grant", "actor_final"))
+                 and all(case.get(key) == {"path": "", "bytes": 0, "sha256": "", "closed": False}
+                         for key in ("raw_stdout", "raw_stderr")),
+                 "unattempted slot contains a fabricated native invocation")
+            continue
+        need(case["test"] in required and case.get("request_parent_matches_outer") is True,
+             "case request does not bind the original terminal outer parent")
+        request = case.get("request", {})
+        need(request.get("version") == 2 and request.get("run_nonce") == channel["run_nonce"]
+             and request.get("slot") == case["slot"] and request.get("config") == case.get("config")
+             and type(request.get("parent_pid")) is int and request["parent_pid"] == outer["PID"]
+             and request.get("parent_birth") == str(outer["NativeBirthFILETIME"]),
+             "original request/nonce/terminal parent identity differs")
+        need(instant(case["config"]["CleanupDeadline"]) <= instant(request.get("parent_deadline")) - NS,
+             "case cleanup exceeds the original parent test deadline")
+        native_case(case, plan, proof, start, work, cleanup)
+        cfg, ready, grant, final = (case.get(key) for key in ("config", "ready", "grant", "actor_final"))
+        frames_ok = False
+        if all(isinstance(value, dict) for value in (ready, grant, final)):
+            expected = dict(ready, Kind="grant")
+            expected_final = dict(expected, Kind="final", InnerHandleClosed=True)
+            frames_ok = (ready.get("Bind") == cfg and ready.get("Kind") == "ready"
+                and ready.get("BeforeFlags") == 0 and ready.get("InnerFlags") == 0x800
+                and all(ready.get(key) is True for key in ("NoJobChecked", "InitialNoJob", "Assigned", "InnerMember"))
+                and all(ready.get(key) is False for key in ("StrictMember", "InnerHandleClosed", "Failed"))
+                and ready.get("Error") == "" and grant == expected and final == expected_final
+                and ready.get("PID") == case["native"]["RootPID"]
+                and ready.get("Birth") == (case.get("initial_root") or {}).get("NativeBirthFILETIME"))
+        ledger = case.get("ledger", {})
+        names = {case["test"], *(case["test"] + "/" + suffix for suffix in CHILDREN[case["test"]])}
+        terminals = ledger.get("terminals", [])
+        ledger_ok = (ledger.get("complete") is True and ledger.get("passed") is True
+            and ledger.get("root_runs") == ledger.get("root_passes") == 1
+            and ledger.get("root_fails") == ledger.get("root_skips") == 0
+            and isinstance(terminals, list) and len(terminals) == len(names)
+            and {item.get("test") for item in terminals} == names
+            and all(item.get("outcome") == "pass" for item in terminals))
+        if (frames_ok and ledger_ok and all(case.get(key) is True for key in
+                ("initial_owner_matched", "ready_received", "grant_published", "final_received"))
+                and case["native"]["RootWait"]["ExitCode"] == 0 and not case["native"].get("Failure")
+                and all(case["native"][key].get("Overflow") is False for key in ("Stdout", "Stderr"))
+                and all(process.get("ImageDisposition") == "admitted" for process in case["native"]["Processes"])
+                and sum(process.get("Role") == "product" for process in case["native"]["Processes"])
+                    == (2 if case["test"] == ROOTS[0] else 3)
+                and not case.get("failure")):
+            passed_cases.append(case["test"])
+    successful = (set(passed_cases) == set(required) and proof.get("qualification_passed") is True
+        and proof["outer"]["root_exit_code"] == 0 and not proof.get("failure") and not channel.get("errors")
+        and proof.get("binary_after_measured") is True and proof.get("binary_unchanged") is True)
+    return {"physical_complete": True, "qualification_passed": successful,
+            "required_cases": required, "passed_cases": passed_cases,
+            "outer_pid": outer["PID"], "outer_birth": str(outer["NativeBirthFILETIME"])}
+
+
+def failed_case_physical(row, original, plan, run_root, start, work, cleanup):
+    """Check physical metadata from the same private Owner after its Run return.
+
+    NativeComplete/IOComplete/Complete/Unknown and the original failure remain
+    qualification history. Read errors, overflow and a late receive cannot grant
+    capture access, but do not make already closed original handles live again.
+    """
+    need(row.get("physical_complete") is True and row.get("stdin_closed") is True,
+         "failed case physical close remains unreceived")
+    if row["attempted"] is False:
+        need(row.get("native") is None and row.get("original_return_received") is False
+             and row.get("original_owner_matched") is False
+             and row.get("native_no_create_received") is False,
+             "unattempted failed slot contains a fabricated invocation")
+        return
+    need(row.get("original_return_received") is True and row.get("original_owner_matched") is True,
+         "failed case lacks its original Run return and Owner")
+    cfg, native = original.get("config", {}), row.get("native")
+    need(isinstance(native, dict) and cfg.get("Version") == 2 and cfg.get("Test") == row["test"]
+         and cfg.get("Image") == plan["binary"]["path"]
+         and cfg.get("ImageSHA256") == plan["binary"]["sha256"]
+         and cfg.get("Fixture") == plan["fixture"]["path"]
+         and cfg.get("FixtureSHA256") == plan["fixture"]["sha256"],
+         "failed case differs from its original fixed config")
+    case_work, case_cleanup = instant(cfg.get("WorkDeadline")), instant(cfg.get("CleanupDeadline"))
+    need(start <= case_work <= work and case_cleanup - case_work == 10 * NS and case_cleanup <= cleanup,
+         "failed case endpoints escape the original bounds")
+    args = [cfg["Image"], "-test.paniconexit0", "-test.v", "-test.count=1",
+            "-test.timeout=" + cfg["Timeout"], "-test.run=^" + row["test"] + "$"]
+    need(native.get("Case") == row["slot"]
+         and same_path(native.get("CaseTempRoot"), ntpath.join(run_root, "channel", row["slot"], "actor-tmp"))
+         and native.get("CommandPath") == cfg["Image"] and native.get("CommandArgs") == args
+         and native.get("WorkDeadline") == cfg["WorkDeadline"]
+         and native.get("CleanupDeadline") == cfg["CleanupDeadline"]
+         and native.get("ClosureModel") == CLOSURE_MODEL and native.get("ClosureLimit") == CLOSURE_LIMIT,
+         "failed native owner does not bind the original command and endpoints")
+    previous = original.get("native")
+    if previous is not None:
+        need(all(native.get(key) == previous.get(key) for key in
+                 ("NativeComplete", "IOComplete", "Complete", "Unknown", "CompleteReceivedAt", "Failure")),
+             "failed native qualification history changed")
+    need("PendingEvent" in native and native["PendingEvent"] is None,
+         "failed native event is still held")
+    no_create = row.get("native_no_create_received")
+    need(type(no_create) is bool and native.get("NoCreateAttempted") is no_create,
+         "original no-create receiving differs")
+    inputs = {"actor": plan["binary"], "product": plan["product"], **plan["tools"]}
+    pins = native.get("ImagePins") or []
+    need(isinstance(pins, list) and len({pin.get("Role") for pin in pins}) == len(pins),
+         "failed source pins are duplicated")
+    for pin in pins:
+        need(pin.get("Role") in inputs and type(pin.get("Acquired")) is bool,
+             "failed source pin is foreign")
+        if pin["Acquired"]:
+            need(pin.get("CloseAttempted") is True and pin.get("Closed") is True and pin.get("CloseError") == "",
+                 "original failed source pin close is incomplete")
+            if not no_create:
+                exact_image(pin.get("Image"), inputs[pin["Role"]])
+    for stream in (native.get("Stdout", {}), native.get("Stderr", {})):
+        need(all(stream.get(key) == "" for key in ("ReaderCloseError", "WriterCloseError")),
+             "original failed pipe close has an error")
+        if not no_create or stream.get("WorkerReturned") is True or stream.get("WriterCloseAttempted") is True:
+            need(all(stream.get(key) is True for key in ("WriterCloseAttempted", "WriterClosed", "ReaderClosed"))
+                 and (no_create or stream.get("WorkerReturned") is True),
+                 "original failed IO worker or handle remains live")
+    if no_create:
+        need(native.get("Unknown") is False and native.get("RootPID") == 0
+             and not native.get("Processes") and not native.get("Threads")
+             and not native.get("Events") and not native.get("AuxiliaryEvents")
+             and native.get("ObservedEventCount") == 0 and native.get("RootWait", {}).get("Returned") is False,
+             "source-owned no-create result contains a native creation")
+        thread_facts = [native.get(key) for key in
+                        ("CreatingThreadSignaled", "CreatingThreadCloseAttempted", "CreatingThreadClosed")]
+        need(all(value is True for value in thread_facts) or all(value is False for value in thread_facts),
+             "original no-create thread handle remains live")
+        return
+    need(all(native.get(key) is True for key in ("HostNoJobChecked", "KillOnExitArmed",
+             "CreatingThreadSignaled", "CreatingThreadCloseAttempted", "CreatingThreadClosed",
+             "ImagePinClosed", "ImagePinsClosed")) and integer(native.get("CreatingThreadID"), 1)
+         and {pin["Role"] for pin in pins} == set(inputs) and all(pin["Acquired"] for pin in pins),
+         "original failed native thread or finite pin set remains incomplete")
+    processes, threads = native.get("Processes"), native.get("Threads")
+    need(isinstance(processes, list) and 0 < len(processes) <= MAX_PROCESS_HANDLES
+         and isinstance(threads, list) and 0 < len(threads) <= MAX_THREAD_HANDLES,
+         "original failed native cohort is absent or outside its bound")
+    pids = {process.get("PID") for process in processes}
+    need(len(pids) == len(processes) and all(integer(pid, 1) for pid in pids),
+         "original failed process identities are invalid or duplicated")
+    for process in processes:
+        need(all(process.get(key) is True for key in ("ExitEventReceived", "ExitContinued", "KernelSignaled",
+                 "DuplicateCloseAttempted", "DuplicateClosed")) and integer(process.get("ExitCode"))
+             and re.fullmatch(r"[1-9][0-9]*", process.get("NativeBirthFILETIME", "")) is not None,
+             "original failed process exit or handle remains unreceived")
+        need(process.get("ImageFileAbsent") is True or process.get("ImageFileCloseAttempted") is True
+             and process.get("ImageFileClosed") is True, "original event image handle remains open")
+    roots = [process for process in processes if process.get("InitialRoot") is True]
+    waited = native.get("RootWait", {})
+    need(len(roots) == 1 and roots[0]["PID"] == native.get("RootPID")
+         and waited.get("Returned") is True and waited.get("Known") is True
+         and waited.get("ExitCode") == roots[0]["ExitCode"],
+         "failed case lacks its single original root Wait/EXIT receiving")
+    for thread in threads:
+        need(thread.get("PID") in pids and integer(thread.get("TID"), 1)
+             and all(thread.get(key) is True for key in ("KernelSignaled", "DuplicateCloseAttempted", "DuplicateClosed")),
+             "original failed thread handle remains unreceived")
+    events, auxiliary, observed = (native.get(key) for key in ("Events", "AuxiliaryEvents", "ObservedEventCount"))
+    need(native.get("EventLedgerFormat") == EVENT_LEDGER_FORMAT and isinstance(events, list)
+         and 0 < len(events) <= MAX_CRITICAL_EVENTS and isinstance(auxiliary, list)
+         and len(auxiliary) <= MAX_AUXILIARY_BINS_PER_PROCESS * len(processes) and uint64(observed, 1),
+         "original failed event accounting is absent or outside its bound")
+    sequences = []
+    for event in events:
+        need(event.get("PID") in pids and event.get("Code") in (2, 3, 4, 5)
+             and uint64(event.get("Sequence"), 1) and event["Sequence"] <= observed
+             and event.get("Continued") is True and event.get("ContinueStatus") == 0x00010002,
+             "original failed event is unreceived or uncontinued")
+        need(event.get("ImageFilePresent") is False or event.get("ImageFileCloseAttempted") is True
+             and event.get("ImageFileClosed") is True, "original failed event file remains open")
+        sequences.append(event["Sequence"])
+    need(sequences == sorted(set(sequences))
+         and {event["PID"] for event in events if event["Code"] == 3} == pids
+         and {event["PID"] for event in events if event["Code"] == 5} == pids,
+         "original failed lifecycle receiving is incomplete")
+    for event in auxiliary:
+        need(event.get("PID") in pids and uint64(event.get("Count"), 1)
+             and event.get("ImageFilePresentCount") == event.get("ImageFileCloseAttemptedCount")
+             == event.get("ImageFileClosedCount") and uint64(event.get("ImageFileClosedCount")),
+             "original failed auxiliary file receiving is incomplete")
+    need(len(events) + sum(event["Count"] for event in auxiliary) == observed,
+         "original failed event accounting omits observed events")
+
+
+def receive_failed(proof, binding, original, controller_pid, direct_exit_code):
+    """Accept only physical closure; original FAIL and every access ban survive.
+
+    This DATA check consumes a source-owned original-object receive. It creates
+    no ownership, cannot repair a frozen outer receipt, and reads no artifact.
+    """
+    plan = binding["plan"]
+    need(plan.get("schema") == PLAN_SCHEMA and plan.get("profile") in ("full", "focused")
+         and isinstance(plan.get("tools"), dict), "failed receiving lacks the original fixed plan")
+    expected = {"canonical_plan": binding["canonical_plan"],
+        "canonical_plan_sha256": binding["canonical_plan_sha256"], "run_root": binding["run_root"],
+        "profile": plan["profile"], "focused_case": plan["focused_case"],
+        "binary": plan["binary"]["path"], "binary_sha256": plan["binary"]["sha256"],
+        "source_dir": plan["source_dir"], "args": plan["original_args"]}
+    need(proof.get("schema") == "canonical-external-failed-physical-closure-v1"
+         and original.get("schema") == SCHEMA
+         and all(proof.get(key) == value == original.get(key) for key, value in expected.items())
+         and original.get("fixture") == plan["fixture"]["path"]
+         and original.get("fixture_sha256") == plan["fixture"]["sha256"],
+         "failed receiving differs from the original composite invocation")
+    images = {"actor": plan["binary"], "product": plan["product"], "fixture": plan["fixture"],
+              "wmic": None, **plan["tools"]}
+    need(proof.get("images") == images, "failed receiving differs from the original pinned images")
+    need(integer(controller_pid, 1) and proof.get("controller_pid") == controller_pid
+         and integer(direct_exit_code, 1) and proof.get("original_exit_code") == direct_exit_code
+         and proof.get("original_failure") == original.get("failure")
+         and isinstance(original.get("failure"), str) and original["failure"]
+         and original.get("qualification_passed") is False
+         and original.get("custody_retained") is True and proof.get("original_result_preserved") is True
+         and same_path(proof.get("original_result_path"), ntpath.join(binding["run_root"], "result.json")),
+         "failed receiving lost the original process, failure or result")
+    need(all(proof.get(key) is True for key in ("physical_complete", "outer_return_received",
+             "outer_resources_finalized", "control_joined", "control_stopped", "stdout_sink_closed", "stderr_sink_closed"))
+         and all(proof.get(key) is False for key in ("qualification_passed", "capture_access_issued",
+             "source_or_cache_access_issued", "new_commands_permitted", "qualification_deadlines_extended")),
+         "failed receiving remains incomplete or grants forbidden work")
+    start, work, cleanup = (instant(original.get(key)) for key in
+                            ("started_utc", "work_deadline", "cleanup_deadline"))
+    duration = 305 if plan["profile"] == "full" else 125
+    need(proof.get("work_deadline") == original["work_deadline"]
+         and proof.get("cleanup_deadline") == original["cleanup_deadline"]
+         and work - start == duration * NS and cleanup - work == 10 * NS
+         and instant(proof.get("received_utc")) >= instant(original.get("finished_utc")) >= start,
+         "failed receiving changed original endpoints or predates the failure")
+    io = proof.get("outer_io_settlement", {})
+    for name in ("Stdin", "StdoutRead", "StdoutWrite", "StderrRead", "StderrWrite"):
+        slot = io.get(name, {})
+        need(type(slot.get("Acquired")) is bool and (slot["Acquired"] is False
+             or slot.get("CloseAttempted") is True and slot.get("Closed") is True and slot.get("CloseError") is None),
+             "original failed outer IO handle remains live: " + name)
+    for name in ("Stdout", "Stderr"):
+        stream = io.get(name, {})
+        need(type(stream.get("WorkerStarted")) is bool and (stream["WorkerStarted"] is False
+             or stream.get("WorkerComplete") is True), "original failed outer worker remains live: " + name)
+    native, root = proof.get("outer_native_snapshot"), proof.get("outer_root_identity", {})
+    need(type(root.get("Known")) is bool and type(proof.get("root_wait_known")) is bool,
+         "failed outer original identity facts are absent")
+    if native is None:
+        need(root["Known"] is False and proof["root_wait_known"] is False,
+             "original failed outer has no source-owned no-create result")
+    else:
+        need(native.get("HandlesClosed") is True and native.get("RootIdentity") == root
+             and (native.get("NoChildKnown") is True
+                  or proof["root_wait_known"] is True and native.get("RootWaitKnown") is True
+                  and native.get("RootExitCode") == proof.get("root_exit_code")
+                  and native.get("MembersExited") is True and native.get("AccountingKnown") is True
+                  and native.get("FinalActive") == 0),
+             "frozen original outer native closure remains incomplete")
+    cases, previous = proof.get("cases"), original.get("cases")
+    need(isinstance(cases, list) and isinstance(previous, list) and len(cases) == len(previous) == len(ROOTS)
+         and [row.get("test") for row in cases] == [row.get("test") for row in previous] == list(ROOTS),
+         "failed receiving changed the original two-slot registry")
+    for row, old in zip(cases, previous):
+        need(row.get("slot") == old.get("slot") == SLOTS[row["test"]]
+             and type(row.get("attempted")) is bool and row["attempted"] is old.get("attempted"),
+             "failed receiving added a case or changed its original slot")
+        failed_case_physical(row, old, plan, binding["run_root"], start, work, cleanup)
+    return {"physical_complete": True, "qualification_passed": False,
+            "capture_access_issued": False, "source_or_cache_access_issued": False,
+            "new_commands_permitted": False, "qualification_deadlines_extended": False,
+            "original_controller_pid": controller_pid, "original_direct_exit_code": direct_exit_code,
+            "original_result_preserved": True}

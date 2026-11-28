@@ -1,0 +1,412 @@
+{
+  "schema": "closed-api-failure-evidence-v1",
+  "status": "FAIL",
+  "physical_state": "CLOSED",
+  "scope": {
+    "package": "mcp-local-hub/internal/api",
+    "phase": "default",
+    "source_commit": "727d66753814dc218e26d699e57402db2d13190a",
+    "source_tree": "d959ed0a4f8ab02947aec7569f3c0535a3cff533",
+    "product_source_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+    "run_role": "literal-original-runs-v6/xe288dd1b2ed2",
+    "namespace_role": "literal-original-runs-v6/n14fe6816051b/n",
+    "parent_full_run_qualification": "NOT_CLAIMED",
+    "exact_source33_or_newer_ad_qualification": "NOT_CLAIMED"
+  },
+  "primary_artifacts": [
+    {
+      "role_path": "closed-api/receipt.json",
+      "bytes": 2338457,
+      "sha256": "2282b4b297e5d78f90da965383880674dd3f5529cfcfd6b9243cb56145927de8",
+      "preserved_as": "templates/api-receipt.json.template"
+    },
+    {
+      "role_path": "closed-api/namespace-suite-receipt.json",
+      "bytes": 5732,
+      "sha256": "2fe7149ad8fb358eba3aabae1d7d0d4e11a535b19622b0057f52ff7e034dd98b",
+      "preserved_as": "templates/namespace-suite-receipt.json.template"
+    },
+    {
+      "role_path": "closed-api/suite-owner.stdout.txt",
+      "bytes": 1207113,
+      "sha256": "664ff94ef54d97d0088b74b0b669edc292589f1911b49798c71192aa79b17541",
+      "preserved_as": "templates/suite-owner.stdout.txt.template"
+    },
+    {
+      "role_path": "closed-api/suite-owner.stderr.txt",
+      "bytes": 341,
+      "sha256": "0c954a4a1713930d9b849eaa415d7f195a799745a14df141f7cf71b81d614107",
+      "preserved_as": "templates/suite-owner.stderr.txt.template"
+    }
+  ],
+  "derived_test2json": {
+    "role_path": "closed-api/suite-events.stdout.txt",
+    "bytes": 4685811,
+    "sha256": "146486690e5b25bd45e34db6f27f6c0df62f4b906636a5027a976f2aa41dfe48",
+    "events": 25354,
+    "preserved_separately": false,
+    "reason": "Derived from the preserved original stdout; primary receipt and original capture retain the evidence. Verifier rebuilds the exact terminal ledger without duplicating this JSON.",
+    "time_fields": 0,
+    "elapsed_fields": 0,
+    "converter_args": [
+      "test2json",
+      "-p",
+      "mcp-local-hub/internal/api"
+    ]
+  },
+  "outcomes": {
+    "top_level": {
+      "total": 3523,
+      "pass": 3455,
+      "skip": 64,
+      "fail": 4
+    },
+    "including_subtests": {
+      "total": 6275,
+      "pass": 6189,
+      "skip": 82,
+      "fail": 4
+    },
+    "all_inventory_top_levels_received": true,
+    "started_without_terminal": [],
+    "missing_top_level": [],
+    "missing_package_terminal": [],
+    "package_terminal": "fail",
+    "mandatory_passes": [
+      [
+        "mcp-local-hub/internal/api",
+        "TestSecretsInit_RecoveryNamespaceBoundary"
+      ],
+      [
+        "mcp-local-hub/internal/api",
+        "TestSecretsInit_RecoveryNamespaceRetainedDirectory"
+      ],
+      [
+        "mcp-local-hub/internal/api",
+        "TestSecretsInit_RecoveryNamespaceFailurePaths"
+      ],
+      [
+        "mcp-local-hub/internal/api",
+        "TestSupervisorPeerStrictControlConnections"
+      ],
+      [
+        "mcp-local-hub/internal/api",
+        "TestRotateSupervisorStderrSinkIfOversize_AtBoundary"
+      ],
+      [
+        "mcp-local-hub/internal/api",
+        "TestRotateSupervisorStderrSinkIfOversize_ReplacesExistingBackup"
+      ],
+      [
+        "mcp-local-hub/internal/api",
+        "TestSupervisorStderrSinkOversize_MatchesRotationThreshold"
+      ]
+    ],
+    "mandatory_passes_satisfied": true,
+    "canonical_ledger": {
+      "row_count": 6275,
+      "top_level_count": 3523,
+      "canonical_format": "UTF-8 JSON, ensure_ascii=false, compact separators, array sorted by test, keys package/test/outcome, final LF",
+      "canonical_ledger": {
+        "bytes": 810017,
+        "sha256": "9c5e0262be78f623ec0f744c721b0b856592796c00e93208526f793513c40001"
+      },
+      "raw_matches_primary_coverage": true
+    }
+  },
+  "failures": [
+    {
+      "test": "TestPreparedSerenaBuildConstraintCompactAttemptLifecycle",
+      "stdout_lines": [
+        14424,
+        14426
+      ],
+      "lines": [
+        "    serena_prepared_build_constraint_integration_windows_test.go:68: original inert command or pin finish did not settle: run=contained process start failed finish=<nil>"
+      ],
+      "elapsed_rounded_seconds": 0.01
+    },
+    {
+      "test": "TestPreparedSerenaFailureDiagnosticsOriginalCommand",
+      "stdout_lines": [
+        14509,
+        14511
+      ],
+      "lines": [
+        "    serena_prepared_diagnostics_windows_test.go:27: no remaining original command work interval"
+      ],
+      "elapsed_rounded_seconds": 0
+    },
+    {
+      "test": "TestIsDeadGitWorktreePath_SubmoduleInsideWorktree_RealGit",
+      "stdout_lines": [
+        18817,
+        18821
+      ],
+      "lines": [
+        "    workspace_prune_test.go:1266: git submodule add -q @@RECOVERY_APPROVED_WORK_AREA@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\n14fe6816051b\\n\\r\\temp\\TestIsDeadGitWorktreePath_SubmoduleInsideWorktree_RealGit2762683948\\001\\sub-origin sub (in @@RECOVERY_APPROVED_WORK_AREA@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\n14fe6816051b\\n\\r\\temp\\TestIsDeadGitWorktreePath_SubmoduleInsideWorktree_RealGit2762683948\\001\\main): exit status 128",
+        "        fatal: transport 'file' not allowed",
+        "        fatal: clone of '@@RECOVERY_APPROVED_WORK_AREA@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\n14fe6816051b\\n\\r\\temp\\TestIsDeadGitWorktreePath_SubmoduleInsideWorktree_RealGit2762683948\\001\\sub-origin' into submodule path '@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/literal-original-runs-v6/n14fe6816051b/n/r/temp/TestIsDeadGitWorktreePath_SubmoduleInsideWorktree_RealGit2762683948/001/main/sub' failed"
+      ],
+      "elapsed_rounded_seconds": 1.23
+    },
+    {
+      "test": "TestIsDeadGitWorktreePath_SubmoduleInsideRemovedWorktreeNotPruned_RealGit",
+      "stdout_lines": [
+        18873,
+        18877
+      ],
+      "lines": [
+        "    workspace_prune_test.go:1667: git submodule add -q @@RECOVERY_APPROVED_WORK_AREA@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\n14fe6816051b\\n\\r\\temp\\TestIsDeadGitWorktreePath_SubmoduleInsideRemovedWorktreeNotPrune4087390461\\001\\sub-origin sub (in @@RECOVERY_APPROVED_WORK_AREA@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\n14fe6816051b\\n\\r\\temp\\TestIsDeadGitWorktreePath_SubmoduleInsideRemovedWorktreeNotPrune4087390461\\001\\main): exit status 128",
+        "        fatal: transport 'file' not allowed",
+        "        fatal: clone of '@@RECOVERY_APPROVED_WORK_AREA@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\n14fe6816051b\\n\\r\\temp\\TestIsDeadGitWorktreePath_SubmoduleInsideRemovedWorktreeNotPrune4087390461\\001\\sub-origin' into submodule path '@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/literal-original-runs-v6/n14fe6816051b/n/r/temp/TestIsDeadGitWorktreePath_SubmoduleInsideRemovedWorktreeNotPrune4087390461/001/main/sub' failed"
+      ],
+      "elapsed_rounded_seconds": 1.03
+    }
+  ],
+  "closure": {
+    "api_native_custody_settled": true,
+    "commands_quiescent": true,
+    "command_count": 8,
+    "command_quiescence": {
+      "complete": true,
+      "commands": [
+        {
+          "name": "incoming-build-info",
+          "state": "complete",
+          "reason": "",
+          "direct_exit_known": true
+        },
+        {
+          "name": "incoming-product",
+          "state": "complete",
+          "reason": "",
+          "direct_exit_known": true
+        },
+        {
+          "name": "incoming-validate-entry-set-build",
+          "state": "complete",
+          "reason": "",
+          "direct_exit_known": true
+        },
+        {
+          "name": "incoming-validate-entry-set",
+          "state": "complete",
+          "reason": "",
+          "direct_exit_known": true
+        },
+        {
+          "name": "incoming-native",
+          "state": "complete",
+          "reason": "",
+          "direct_exit_known": true
+        },
+        {
+          "name": "inventory-owner",
+          "state": "complete",
+          "reason": "",
+          "direct_exit_known": true
+        },
+        {
+          "name": "suite-owner",
+          "state": "complete",
+          "reason": "",
+          "direct_exit_known": true
+        },
+        {
+          "name": "suite-events",
+          "state": "complete",
+          "reason": "",
+          "direct_exit_known": true
+        }
+      ]
+    },
+    "namespace": {
+      "root_wait_known": true,
+      "root_exit_code": 1,
+      "settlement_complete": true,
+      "native_complete": true,
+      "io_complete": true,
+      "custody_retained": false,
+      "observations_verified": true,
+      "mandatory_tests_passed": true,
+      "binary_unchanged": true,
+      "native": {
+        "RootWaitKnown": true,
+        "RootExitCode": 1,
+        "TerminalAction": "not-requested",
+        "MembersExited": true,
+        "AccountingKnown": true,
+        "InitialTotal": 1363,
+        "FinalActive": 0,
+        "HandlesClosed": true,
+        "Error": null
+      },
+      "io": {
+        "Stdin": {
+          "Acquired": true,
+          "CloseAttempted": true,
+          "Closed": true,
+          "CloseError": null
+        },
+        "StdoutRead": {
+          "Acquired": true,
+          "CloseAttempted": true,
+          "Closed": true,
+          "CloseError": null
+        },
+        "StdoutWrite": {
+          "Acquired": true,
+          "CloseAttempted": true,
+          "Closed": true,
+          "CloseError": null
+        },
+        "StderrRead": {
+          "Acquired": true,
+          "CloseAttempted": true,
+          "Closed": true,
+          "CloseError": null
+        },
+        "StderrWrite": {
+          "Acquired": true,
+          "CloseAttempted": true,
+          "Closed": true,
+          "CloseError": null
+        },
+        "Stdout": {
+          "WorkerStarted": true,
+          "WorkerComplete": true,
+          "EOF": true,
+          "Bytes": 1207113,
+          "Limit": 16777216,
+          "LimitExceeded": false,
+          "Error": null
+        },
+        "Stderr": {
+          "WorkerStarted": true,
+          "WorkerComplete": true,
+          "EOF": true,
+          "Bytes": 0,
+          "Limit": 16777216,
+          "LimitExceeded": false,
+          "Error": null
+        }
+      },
+      "started_utc": "2026-11-28T11:50:19.1293538Z",
+      "finished_utc": "2026-11-28T11:55:18.8653317Z",
+      "owner_elapsed_seconds_approximate": 299.736
+    },
+    "command_results": [
+      {
+        "index": 0,
+        "role": "incoming-build-info",
+        "exit_code": 0,
+        "quiescence_state": "complete",
+        "seconds": 0.32464609993621707,
+        "stdout_sha256": "6f861b70ce91ac432b7453d2ee6cf7ee69c4730914c82a747b901a730b906a72",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "captures_measured": true
+      },
+      {
+        "index": 1,
+        "role": "incoming-product",
+        "exit_code": 0,
+        "quiescence_state": "complete",
+        "seconds": 0.8947846000082791,
+        "stdout_sha256": "09cc37eef118a1f09efdc99a53c9602040c6f918a2f83783429f13b20b618d7d",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "captures_measured": true
+      },
+      {
+        "index": 2,
+        "role": "incoming-validate-entry-set-build",
+        "exit_code": 0,
+        "quiescence_state": "complete",
+        "seconds": 0.194393299985677,
+        "stdout_sha256": "3d2baac94edc0bc42d38f8be30415457ca0b0db4f8e5a40fa03d8121ff15e002",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "captures_measured": true
+      },
+      {
+        "index": 3,
+        "role": "incoming-validate-entry-set",
+        "exit_code": 0,
+        "quiescence_state": "complete",
+        "seconds": 0.37760979996528476,
+        "stdout_sha256": "e2b27d045a2963b0f0f6b6a68cf692fb9a9609f735e9de925bb3a33015dc93d6",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "captures_measured": true
+      },
+      {
+        "index": 4,
+        "role": "incoming-native",
+        "exit_code": 0,
+        "quiescence_state": "complete",
+        "seconds": 0.2253650000784546,
+        "stdout_sha256": "856c4ac90d29e0bbfd4b1174731c6c53a7e561dcd1c83af66e887e65a78ff8ba",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "captures_measured": true
+      },
+      {
+        "index": 5,
+        "role": "inventory-owner",
+        "exit_code": 0,
+        "quiescence_state": "complete",
+        "seconds": 1.787,
+        "stdout_sha256": "2da0b57ce2187f307cd0a449696bfaee26e92c3b0dd10fb3ce11fbba53a70da3",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "captures_measured": true
+      },
+      {
+        "index": 6,
+        "role": "suite-owner",
+        "exit_code": 1,
+        "quiescence_state": "complete",
+        "seconds": 299.87,
+        "stdout_sha256": "664ff94ef54d97d0088b74b0b669edc292589f1911b49798c71192aa79b17541",
+        "stderr_sha256": "0c954a4a1713930d9b849eaa415d7f195a799745a14df141f7cf71b81d614107",
+        "captures_measured": true
+      },
+      {
+        "index": 7,
+        "role": "suite-events",
+        "exit_code": 0,
+        "quiescence_state": "complete",
+        "seconds": 0.20214530010707676,
+        "stdout_sha256": "146486690e5b25bd45e34db6f27f6c0df62f4b906636a5027a976f2aa41dfe48",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "captures_measured": true
+      }
+    ],
+    "outputs": {
+      "original_stdout_replayed_identically": true,
+      "original_stderr_replayed_identically": false,
+      "native_suite_stderr_bytes": 0,
+      "native_suite_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "wrapper_stderr_contains_own_diagnostic": true
+    },
+    "image_unchanged": true,
+    "bundle_unchanged": true,
+    "headless_configuration_received": true,
+    "original_inputs_unchanged": true
+  },
+  "limitations": {
+    "full_or_state_mode_pass": false,
+    "main_full_scope_read": false,
+    "original_wrong_owner_assignment": "UNVERIFIED: the ordinary-token assignment was refused; this prior limitation remains visible in the original stderr.",
+    "native_start_errno": "NOT_RECORDED",
+    "no_panic_or_timeout_stack_in_capture": true,
+    "generic_receiver_failure_string_not_a_physical_closure_override": true,
+    "cache_authority_issued": false,
+    "retry_or_resource_reconstruction_authority_issued": false
+  },
+  "provenance": {
+    "original_receipts_and_closed_captures_read_only": true,
+    "original_stdout_and_stderr_hashes_checked": true,
+    "primary_namespace_receipt_hash_checked": true,
+    "all_four_original_bytes_reconstructed_in_memory": true,
+    "source_or_test_commands_executed_for_this_capsule": false,
+    "publication_not_performed_by_capsule_author": true,
+    "native_ids_preserved": true
+  }
+}

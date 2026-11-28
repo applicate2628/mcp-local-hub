@@ -1,0 +1,166 @@
+diff --git a/internal/cli/secrets_helper_dispatch_test.go b/internal/cli/secrets_helper_dispatch_test.go
+index de5d5db25e4250cf6124907c7d417f24ad032d91..7ac8da1155eb7d5adc23a5c96bcf9f47ed0fddd9 100644
+--- a/internal/cli/secrets_helper_dispatch_test.go
++++ b/internal/cli/secrets_helper_dispatch_test.go
+@@ -3,41 +3,72 @@ package cli
+ import (
+ 	"bytes"
+ 	"context"
++	"encoding/binary"
+ 	"os"
+ 	"os/exec"
+ 	"path/filepath"
+ 	"testing"
+ 	"time"
+ 
++	"mcp-local-hub/internal/api"
+ 	"mcp-local-hub/internal/api/apitest"
+ 	"mcp-local-hub/internal/process"
+ 	"mcp-local-hub/internal/secrets"
+ )
+ 
+ func TestCLITestBinaryConcurrentSecretsHelperUsesCallerStateRoot(t *testing.T) {
+-	stateDir, _ := secretsCliAuditEnv(t)
++	// Give the parent and child the same private temp namespace. The secure
++	// helper admits only an original fixture directly beneath this base.
++	childTemp := t.TempDir()
++	for _, key := range []string{"TEMP", "TMP", "TMPDIR"} {
++		t.Setenv(key, childTemp)
++	}
++	base, err := concurrentSecretsTempBase()
++	if err != nil {
++		t.Fatal("resolve concurrent secrets fixture temp base")
++	}
++	root, err := os.MkdirTemp(base, concurrentSecretsDirPrefix)
++	if err != nil {
++		t.Fatal("create concurrent secrets fixture root")
++	}
++	t.Cleanup(func() {
++		if err := apitest.RemoveTestMainRoot(root); err != nil {
++			t.Error("remove concurrent secrets fixture root")
++		}
++	})
++	apitest.HardenedDir(t, root)
++	stateDir, _ := secretsCliAuditEnvAt(t, root)
+ 	apitest.HardenedDir(t, stateDir)
+-	vaultPath := filepath.Join(stateDir, "secrets.age")
+-	keyPath := filepath.Join(stateDir, ".age-key")
+-	if secrets.DefaultVaultPath() != vaultPath || secrets.DefaultKeyPath() != keyPath {
++	t.Setenv(api.RequireSingleUserHomeEnv, "1")
++	paths := concurrentSecretsFixturePaths(stateDir)
++	if err := secrets.WithVaultLock(paths.vault, func() error {
++		return secrets.InitVault(paths.key, paths.vault)
++	}); err != nil {
++		t.Fatal("prepare original concurrent secrets fixture")
++	}
++	if secrets.DefaultVaultPath() != paths.vault || secrets.DefaultKeyPath() != paths.key {
+ 		t.Fatal("vault fixture resolved outside its owned state directory")
+ 	}
+-	initVaultForCliTest(t)
+ 
+ 	// The ordinary parent TestMain owns its package root. The child must use
+ 	// this vault's root without creating another package root in childTemp.
+-	childTemp := t.TempDir()
+ 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+ 	defer cancel()
+-	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSecretsConcurrentSetHelperProcess$")
++	expected, _, err := observeConcurrentSecretsFixture(ctx, paths)
++	if err != nil {
++		t.Fatal("observe original concurrent secrets fixture")
++	}
++	var proof bytes.Buffer
++	if err := binary.Write(&proof, binary.LittleEndian, expected); err != nil {
++		t.Fatal("encode concurrent secrets fixture identity")
++	}
++	cmd := exec.CommandContext(ctx, os.Args[0], concurrentSecretsSelector)
+ 	process.NoConsole(cmd)
+ 	cmd.Env = append(withoutCLITestHelperEnvironment(os.Environ()),
+-		"TEMP="+childTemp, "TMP="+childTemp, "TMPDIR="+childTemp,
+-		"MCPHUB_TEST_CONCURRENT_SET=fixture-key",
+-		"MCPHUB_TEST_CONCURRENT_VAL=fixture-value",
+-		"MCPHUB_TEST_VAULT_PATH="+vaultPath,
+-		"MCPHUB_TEST_KEY_PATH="+keyPath,
++		concurrentSecretsRootEnv+"="+stateDir,
++		api.RequireSingleUserHomeEnv+"=1",
+ 	)
++	cmd.Stdin = &proof
+ 	var stderr bytes.Buffer
+ 	cmd.Stderr = &stderr
+ 	if err := cmd.Start(); err != nil {
+@@ -50,12 +81,16 @@ func TestCLITestBinaryConcurrentSecretsHelperUsesCallerStateRoot(t *testing.T) {
+ 	if waitErr != nil || ctx.Err() != nil || globErr != nil || len(roots) != 0 {
+ 		t.Fatalf("helper wait=%v deadline=%v roots=%d glob=%v stderr=%s", waitErr, ctx.Err(), len(roots), globErr, stderr.String())
+ 	}
+-	vault, err := secrets.OpenVault(keyPath, vaultPath)
++	actual, _, err := observeConcurrentSecretsFixture(ctx, paths)
++	if err != nil || !expected.sameScope(actual) || actual.Vault == expected.Vault {
++		t.Fatal("helper did not replace only its original fixture vault")
++	}
++	vault, err := secrets.OpenVault(paths.key, paths.vault)
+ 	if err != nil {
+ 		t.Fatalf("read caller vault: %v", err)
+ 	}
+-	value, err := vault.Get("fixture-key")
+-	if err != nil || value != "fixture-value" {
++	value, err := vault.Get(concurrentSecretsFixtureKey)
++	if err != nil || value != concurrentSecretsFixtureValue {
+ 		t.Fatal("helper did not update the caller vault")
+ 	}
+ }
+diff --git a/internal/cli/testmain_dispatch_test.go b/internal/cli/testmain_dispatch_test.go
+index 5478ec02f99aef81dd95e15fa4664599861314b8..91a2befd59bbbeeec900f0c7b530619f9069e2b0 100644
+--- a/internal/cli/testmain_dispatch_test.go
++++ b/internal/cli/testmain_dispatch_test.go
+@@ -41,7 +41,7 @@ func TestClassifyCLITestHelperDispatch(t *testing.T) {
+ 	invalid := cliTestHelperDispatch{invalid: true}
+ 	legacy := cliTestHelperDispatch{runSelectedTest: true}
+ 	mustExit := cliTestHelperDispatch{runSelectedTest: true, mustExit: true}
+-	secret := cliTestHelperDispatch{runSelectedTest: true, mustExit: true, stateRoot: root}
++	secret := invalid // The superseded arbitrary-path secrets envelope is refused.
+ 	windowsRole := mustExit
+ 	windowsChecks := 2
+ 	if runtime.GOOS != "windows" {
+@@ -106,8 +106,8 @@ func TestClassifyCLITestHelperDispatch(t *testing.T) {
+ 		{name: "CodeGraph missing marker", args: []string{"test", "-test.run=^TestDaemonCmdCodeGraphDiskManifestCompatibilityHelper$", "--"}, want: invalid},
+ 		{name: "CodeGraph empty marker", args: []string{"test"}, env: map[string]string{"MCPHUB_CODEGRAPH_COMPAT_HELPER": ""}, want: invalid},
+ 		{name: "CodeGraph unsupported marker", args: []string{"test", "-test.run=^TestDaemonCmdCodeGraphDiskManifestCompatibilityHelper$", "--"}, env: map[string]string{"MCPHUB_CODEGRAPH_COMPAT_HELPER": "2"}, want: invalid},
+-		{name: "secrets empty value is valid", args: secretArgs, env: secretEnv, want: secret, wantChecks: 4},
+-		{name: "secrets nonempty value", args: secretArgs, env: withSecret("MCPHUB_TEST_CONCURRENT_VAL", "fixture-value", false), want: secret, wantChecks: 4},
++		{name: "legacy secrets envelope with empty value refused", args: secretArgs, env: secretEnv, want: secret},
++		{name: "legacy secrets envelope with arbitrary value refused", args: secretArgs, env: withSecret("MCPHUB_TEST_CONCURRENT_VAL", "fixture-value", false), want: secret},
+ 		{name: "secrets missing value", args: secretArgs, env: withSecret("MCPHUB_TEST_CONCURRENT_VAL", "", true), want: invalid},
+ 		{name: "secrets empty key", args: secretArgs, env: withSecret("MCPHUB_TEST_CONCURRENT_SET", "", false), want: invalid},
+ 		{name: "secrets orphan value", args: secretArgs, env: map[string]string{"MCPHUB_TEST_CONCURRENT_VAL": ""}, want: invalid},
+@@ -118,12 +118,12 @@ func TestClassifyCLITestHelperDispatch(t *testing.T) {
+ 		{name: "secrets broad selector", args: []string{"test", "-test.run=TestSecrets"}, env: secretEnv, want: invalid},
+ 		{name: "secrets duplicate selector", args: []string{"test", secretArgs[1], secretArgs[1]}, env: secretEnv, want: invalid},
+ 		{name: "secrets extra flag", args: []string{"test", secretArgs[1], "-test.v"}, env: secretEnv, want: invalid},
+-		{name: "secrets missing marker", args: secretArgs, want: invalid},
++		{name: "secrets selector without marker stays ordinary", args: secretArgs},
+ 		{name: "secrets missing checker", args: secretArgs, env: secretEnv, want: invalid, nilCheck: true},
+-		{name: "secrets rejected root", args: secretArgs, env: secretEnv, want: invalid, failCheck: 1, wantChecks: 1},
+-		{name: "secrets rejected vault", args: secretArgs, env: secretEnv, want: invalid, failCheck: 2, wantChecks: 2},
+-		{name: "secrets rejected key", args: secretArgs, env: secretEnv, want: invalid, failCheck: 3, wantChecks: 3},
+-		{name: "secrets rejected lock leaf", args: secretArgs, env: secretEnv, want: invalid, failCheck: 4, wantChecks: 4},
++		{name: "legacy secrets envelope refused before root checker", args: secretArgs, env: secretEnv, want: invalid, failCheck: 1},
++		{name: "legacy secrets envelope refused before vault checker", args: secretArgs, env: secretEnv, want: invalid, failCheck: 2},
++		{name: "legacy secrets envelope refused before key checker", args: secretArgs, env: secretEnv, want: invalid, failCheck: 3},
++		{name: "legacy secrets envelope refused before lock checker", args: secretArgs, env: secretEnv, want: invalid, failCheck: 4},
+ 		{name: "mixed new roles before native checks", args: secretArgs, env: withSecret("MCPHUB_CODEGRAPH_COMPAT_HELPER", "1", false), want: invalid},
+ 		{name: "mixed legacy and new before native checks", args: secretArgs, env: withSecret("MCPHUB_PID_MATCH_HELPER", "1", false), want: invalid},
+ 		{name: "mapped exact child", args: []string{"test", "-test.run=^TestWindowsMappedImageRenameRequiresExactGenerationReceipt$"}, env: map[string]string{"MCPHUB_MAPPED_IMAGE_RENAME_HELPER": markerPath}, want: windowsRole, wantChecks: windowsChecks},
+@@ -179,14 +179,6 @@ func TestClassifyCLITestHelperDispatch(t *testing.T) {
+ 			if len(checks) != tc.wantChecks {
+ 				t.Fatalf("path checks = %d, want %d", len(checks), tc.wantChecks)
+ 			}
+-			if got.stateRoot != "" {
+-				want := []check{{root, cliTestHelperDirectory}, {vaultPath, cliTestHelperExistingFile}, {keyPath, cliTestHelperExistingFile}, {vaultPath + ".lock", cliTestHelperOptionalFile}}
+-				for i := range want {
+-					if checks[i] != want[i] {
+-						t.Fatalf("path check %d = %+v, want %+v", i, checks[i], want[i])
+-					}
+-				}
+-			}
+ 		})
+ 	}
+ }

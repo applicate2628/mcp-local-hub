@@ -1,0 +1,479 @@
+{
+  "schema": "history-publication-v3-public-evidence-v1",
+  "scope": "Independent public GitHub commit readback plus separate, immutable command qualification and late physical closure.",
+  "primary_artifacts": [
+    {
+      "role_path": "functional-publication/cache-acceptance-push-20261128-v3/receipt.json",
+      "bytes": 16779,
+      "sha256": "db1f650adb684f87a8ecaf4cc56551f65004b5e4415697dafff6ce8d4c9fb979",
+      "actual_metadata_bytes_reread": true
+    },
+    {
+      "role_path": "functional-publication/cache-acceptance-push-20261128-v3/failed-worker-physical-closure.json",
+      "bytes": 2340,
+      "sha256": "53da30a4fd3bab5396ac544d6d508d583feea29a4877887f5415c752a22b8ae1",
+      "actual_metadata_bytes_reread": true
+    },
+    {
+      "role_path": "functional-publication/cache-acceptance-push-20261128-v3-outer-original.json",
+      "bytes": 480,
+      "sha256": "2967a9168e115dc79a7c88549eca55a30ed58a1f3b53898417ed21a61fd65171",
+      "actual_metadata_bytes_reread": true
+    }
+  ],
+  "installed_gate": {
+    "role": "installed-universal-hooks/check-git-push-gate.py",
+    "sha256": "04285948382b6e42c2a1fed826ea98fec3ca5ff98373549361da7ad363f72c7f",
+    "exit_code_from_original_receipt": 0,
+    "capture_text_read_for_this_capsule": false,
+    "gate_policy_changed": false,
+    "approval_created": false
+  },
+  "public_commit_readback": {
+    "url": "https://github.com/applicate2628/mcp-local-hub/commit/5e95aab6d9765701ec6c49ddcecc6cde3293eb65",
+    "api_url": "https://api.github.com/repos/applicate2628/mcp-local-hub/commits/5e95aab6d9765701ec6c49ddcecc6cde3293eb65",
+    "sha": "5e95aab6d9765701ec6c49ddcecc6cde3293eb65",
+    "tree": "a6b284f8634c1595880421ea02371e2462d93854",
+    "parents": [
+      "513898c2029fb29dd7f15ce3598f518e42666f7b"
+    ],
+    "message": "docs: preserve exact CLI commits and recovered 717 history",
+    "files": [
+      {
+        "path": ".plans/2026-11/open-pr-integration-20261117.md",
+        "status": "modified",
+        "git_blob": "71078dd7e433e70fc1336e3d2ed96f5769c82999"
+      },
+      {
+        "path": "docs/modernization/verification/historical-cli717-recovery-20261128/README.md",
+        "status": "added",
+        "git_blob": "23c428a57557f62ca164cb1392356d0ab0f1df8b"
+      },
+      {
+        "path": "docs/modernization/verification/historical-cli717-recovery-20261128/artifact-manifest.json",
+        "status": "added",
+        "git_blob": "498e04b63900e444d997620341bb3be3b26eb39f"
+      },
+      {
+        "path": "docs/modernization/verification/historical-cli717-recovery-20261128/cli717-roots.txt",
+        "status": "added",
+        "git_blob": "9ea2ba62b97c5a24ba6506d1a1f89c31af93a352"
+      },
+      {
+        "path": "docs/modernization/verification/historical-cli717-recovery-20261128/data-replay-evidence.json",
+        "status": "added",
+        "git_blob": "b8aa4a9f792ad22e07ba1a80b2927456abcf6b50"
+      },
+      {
+        "path": "docs/modernization/verification/historical-cli717-recovery-20261128/data-replay-result.json",
+        "status": "added",
+        "git_blob": "d4d07485b93b3059e7aff5c8b0d473f92740479d"
+      },
+      {
+        "path": "docs/modernization/verification/historical-cli717-recovery-20261128/evidence.json",
+        "status": "added",
+        "git_blob": "d658e8fc9b10240b6738dcff2d4d1d1a0bdd8d96"
+      },
+      {
+        "path": "docs/modernization/verification/historical-cli717-recovery-20261128/ledger.jsonl",
+        "status": "added",
+        "git_blob": "24749c004d46094279cc8b26680b3baf3c0c0f29"
+      },
+      {
+        "path": "docs/modernization/verification/historical-cli717-recovery-20261128/verify_history.py",
+        "status": "added",
+        "git_blob": "b4e54887d1123299a724b0b13a7cd72b7331e4db"
+      },
+      {
+        "path": "docs/modernization/verification/recovered-cli-commits-20261128/06f77b3856e43ec5e8e3736123aedb896ae58817.commit",
+        "status": "added",
+        "git_blob": "4d900fb03a288b8dde7181634547dfcc25179696"
+      },
+      {
+        "path": "docs/modernization/verification/recovered-cli-commits-20261128/06f77b3856e43ec5e8e3736123aedb896ae58817.patch",
+        "status": "added",
+        "git_blob": "7b2f45ba0c30c18111a9787f4df88fdfbd8a8558"
+      },
+      {
+        "path": "docs/modernization/verification/recovered-cli-commits-20261128/33eaf8af8fc46cb231f48c70f4775922393245b1.commit",
+        "status": "added",
+        "git_blob": "817cdbd21f924fb366e3073247ee8a52e8732b94"
+      },
+      {
+        "path": "docs/modernization/verification/recovered-cli-commits-20261128/33eaf8af8fc46cb231f48c70f4775922393245b1.patch",
+        "status": "added",
+        "git_blob": "975eb42e2e7920687647854c041af2c6b250d467"
+      },
+      {
+        "path": "docs/modernization/verification/recovered-cli-commits-20261128/README.md",
+        "status": "added",
+        "git_blob": "26c2280b29a9e95b36bde311ba8af82108dc3ce1"
+      },
+      {
+        "path": "docs/modernization/verification/recovered-cli-commits-20261128/artifact-manifest.json",
+        "status": "added",
+        "git_blob": "bb892d41ffcfede739828953227191a0f58cc266"
+      },
+      {
+        "path": "docs/modernization/verification/recovered-cli-commits-20261128/recovery-evidence.json",
+        "status": "added",
+        "git_blob": "87bf3b789a757baa7909470e8503eb3af7dee26c"
+      }
+    ]
+  },
+  "interpretation": {
+    "document_commit_publicly_available": true,
+    "original_wrapper_status": "FAIL",
+    "original_native_publication_quiescence": "unknown",
+    "late_physical_state": "CLOSED",
+    "late_closure_does_not_reclassify_original_qualification": true,
+    "failed_push_captures_accessed_or_rehashed": false,
+    "capture_access_issued": false,
+    "qualification_passed": false,
+    "new_commands_permitted_by_late_receipt": false,
+    "public_commit_is_not_full_test_pass": true,
+    "recovered_code_commits_on_pr666_published_by_this_evidence": false
+  },
+  "publication_scope": {
+    "report_path": ".plans/2026-11/open-pr-integration-20261117.md",
+    "historical_cli717_directory": "docs/modernization/verification/historical-cli717-recovery-20261128",
+    "recovered_commit_artifacts_directory": "docs/modernization/verification/recovered-cli-commits-20261128",
+    "changed_paths": 16,
+    "summary": "Exact recovered commit objects and patches, the historical 712 PASS + 5 SKIP ledger and its actual DATA parser receipt, and an additive report update.",
+    "production_source_changes": false
+  },
+  "original_receipt": {
+    "status": "FAIL",
+    "error": "RuntimeError: original ordinary custody unresolved; captures retained unmeasured: native-history-publication",
+    "command_quiescence": {
+      "complete": false,
+      "commands": [
+        {
+          "name": "head",
+          "state": "complete",
+          "reason": "",
+          "direct_exit_known": true
+        },
+        {
+          "name": "native-history-publication",
+          "state": "unknown",
+          "reason": "original ordinary native/EOF/close remains unresolved",
+          "direct_exit_known": true
+        }
+      ]
+    },
+    "commands": [
+      {
+        "captures_measured": true,
+        "command_success": true,
+        "work_seconds": 30,
+        "cleanup_seconds": 10,
+        "stdin_mode": "null",
+        "quiescence_state": "complete",
+        "timed_out": false,
+        "work_deadline_exceeded": false,
+        "work_elapsed_seconds": 0.03673180006444454,
+        "cleanup_interval_seconds": 10,
+        "exit_code": 0,
+        "seconds": 0.036913600051775575,
+        "cleanup_deadline_exceeded": false,
+        "original_owner_retained": true,
+        "original_readers_retained": true,
+        "original_readers_joined": true,
+        "original_input_writers_retained": true,
+        "original_input_writer_joined": false,
+        "name": "head",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "io": {
+          "stdout": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 41,
+            "bytes_stored": 41,
+            "limit_bytes": null,
+            "limit_exceeded": false
+          },
+          "stderr": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 0,
+            "bytes_stored": 0,
+            "limit_bytes": null,
+            "limit_exceeded": false
+          }
+        },
+        "original_worker_join_observations": [
+          {
+            "name": "head-stdout",
+            "alive_before": false,
+            "alive_after": false,
+            "join_attempted": true,
+            "join_attempt_count": 1,
+            "join_error_count": 0,
+            "joined": true,
+            "stream_before": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true
+            },
+            "stream_after": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true
+            }
+          },
+          {
+            "name": "head-stderr",
+            "alive_before": false,
+            "alive_after": false,
+            "join_attempted": true,
+            "join_attempt_count": 1,
+            "join_error_count": 0,
+            "joined": true,
+            "stream_before": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true
+            },
+            "stream_after": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true
+            }
+          }
+        ],
+        "capture_metadata": {
+          "stdout": {
+            "sha256_recorded": "7ab9f951582012d3447047d11168ba7d076c01fdfe05052e05b9a72bf2fe763c",
+            "actual_bytes_reread_for_this_evidence": false
+          },
+          "stderr": {
+            "sha256_recorded": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "actual_bytes_reread_for_this_evidence": false
+          }
+        }
+      },
+      {
+        "captures_measured": false,
+        "command_success": false,
+        "work_seconds": 600,
+        "cleanup_seconds": 10,
+        "stdin_mode": "null",
+        "quiescence_state": "unknown",
+        "timed_out": false,
+        "work_deadline_exceeded": false,
+        "work_elapsed_seconds": 10.524035100010224,
+        "cleanup_interval_seconds": 10,
+        "exit_code": 0,
+        "seconds": 20.524450900033116,
+        "cleanup_deadline_exceeded": true,
+        "original_owner_retained": true,
+        "original_readers_retained": true,
+        "original_readers_joined": false,
+        "original_input_writers_retained": true,
+        "original_input_writer_joined": false,
+        "quiescence_reason": "original ordinary native/EOF/close remains unresolved",
+        "name": "native-history-publication",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "io": {
+          "stdout": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 1924,
+            "bytes_stored": 1924,
+            "limit_bytes": null,
+            "limit_exceeded": false
+          },
+          "stderr": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 157,
+            "bytes_stored": 157,
+            "limit_bytes": null,
+            "limit_exceeded": false
+          }
+        },
+        "original_worker_join_observations": [
+          {
+            "name": "native-history-publication-stdout",
+            "alive_before": true,
+            "alive_after": true,
+            "join_attempted": true,
+            "join_attempt_count": 1829,
+            "join_error_count": 0,
+            "joined": false,
+            "stream_before": {
+              "worker_complete": false,
+              "eof": false,
+              "pipe_close_returned": false,
+              "capture_close_returned": false
+            },
+            "stream_after": {
+              "worker_complete": false,
+              "eof": false,
+              "pipe_close_returned": false,
+              "capture_close_returned": false
+            }
+          },
+          {
+            "name": "native-history-publication-stderr",
+            "alive_before": false,
+            "alive_after": false,
+            "join_attempted": true,
+            "join_attempt_count": 1,
+            "join_error_count": 0,
+            "joined": true,
+            "stream_before": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true
+            },
+            "stream_after": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true
+            }
+          }
+        ],
+        "capture_metadata": {
+          "stdout": {
+            "sha256_recorded": null,
+            "actual_bytes_reread_for_this_evidence": false
+          },
+          "stderr": {
+            "sha256_recorded": null,
+            "actual_bytes_reread_for_this_evidence": false
+          }
+        }
+      }
+    ],
+    "guard_sha256": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2",
+    "config_sha256": "f48d5199c6d32ef949a4a974237edf9751cb07c16f46e93c6dae1f234093f27c",
+    "expected_head": "5e95aab6d9765701ec6c49ddcecc6cde3293eb65"
+  },
+  "late_physical_closure": {
+    "schema": "failed-original-worker-physical-closure-v1",
+    "status": "CLOSED",
+    "seconds": 0.00007409998215734959,
+    "receiving_error": null,
+    "deadline_exceeded": false,
+    "original_command_states_unchanged": true,
+    "qualification_passed": false,
+    "capture_access_issued": false,
+    "new_commands_permitted": false,
+    "commands": [
+      {
+        "name": "native-history-publication",
+        "state": "CLOSED",
+        "original_state": "unknown",
+        "capture_access_issued": false,
+        "seconds": 0.00006830005440860987,
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "io": {
+          "stdout": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 1924,
+            "bytes_stored": 1924,
+            "limit_bytes": null,
+            "limit_exceeded": false
+          },
+          "stderr": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 157,
+            "bytes_stored": 157,
+            "limit_bytes": null,
+            "limit_exceeded": false
+          }
+        },
+        "workers": [
+          {
+            "name": "native-history-publication-stdout",
+            "join_calls": 1,
+            "joined": true,
+            "alive_after": false,
+            "join_error_count": 0,
+            "first_join_error": null
+          },
+          {
+            "name": "native-history-publication-stderr",
+            "join_calls": 1,
+            "joined": true,
+            "alive_after": false,
+            "join_error_count": 0,
+            "first_join_error": null
+          }
+        ]
+      }
+    ]
+  },
+  "outer_process": {
+    "mode": "cache-acceptance-push-20261128-v3.json",
+    "config_sha256": "f48d5199c6d32ef949a4a974237edf9751cb07c16f46e93c6dae1f234093f27c",
+    "expected_start_head": "5e95aab6d9765701ec6c49ddcecc6cde3293eb65",
+    "same_process_start_object": true,
+    "exit_code": 1,
+    "wait_returned": true,
+    "original_process_object_disposed": true,
+    "new_job_or_tree_wait": false,
+    "wait_errors": []
+  }
+}

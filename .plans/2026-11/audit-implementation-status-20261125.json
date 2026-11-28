@@ -1,0 +1,1750 @@
+{
+  "schema": "mcp-local-hub.audit-implementation-status.v1",
+  "date": "2026-11-25",
+  "coordination_pr": 664,
+  "coordination_pr_url": "https://github.com/applicate2628/mcp-local-hub/pull/664",
+  "snapshot_kind": "Seven published owner updates; full 14af gates failed; c730 test-only fixture follow-up has focused results but no full rerun",
+  "historical_audit": {
+    "commit": "9bc3d18c6d820a4eafb3672fa45545e9ff2ebc5b",
+    "publication_status": "PUBLISHED",
+    "source_ref": "S01"
+  },
+  "publication_status": "OWNER_UPDATES_PUBLISHED_COORDINATION_INCLUDED_IN_THIS_PR",
+  "final_gate_status": "NOT_QUALIFIED",
+  "qualified_integration_head": null,
+  "final_gate_evidence": {
+    "source_head": "14af01ea06063a2c2306aeaa1accf454151d7e6b",
+    "source_tree": "386923930b874526a0e6896bde1857c4ecc95d63",
+    "source_ref": "S11",
+    "build": {
+      "status": "PASS",
+      "command": "go build ./...",
+      "seconds": 24.184
+    },
+    "vet": {
+      "status": "PASS",
+      "command": "go vet ./...",
+      "seconds": 54.056
+    },
+    "default": {
+      "status": "FAIL",
+      "command": "go test -count=1 -timeout 5m ./...",
+      "exit_code": 1,
+      "command_seconds": 373.028,
+      "packages_pass": 56,
+      "packages_fail": 8,
+      "packages_no_tests": 11,
+      "top_level_fail": 23,
+      "go_package_timeouts": 3,
+      "failed_packages": [
+        "internal/api",
+        "internal/binaryadmission",
+        "internal/cli",
+        "internal/daemonrecovery",
+        "internal/gui",
+        "internal/process",
+        "internal/sonnet",
+        "internal/vtune"
+      ],
+      "original_receipt_sha256": "ad64c05213bcbae5136783adb481787bc88f77a4c034c499b09b286166a4eb63"
+    },
+    "tagged": {
+      "status": "FAIL",
+      "command": "go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/",
+      "exit_code": 1,
+      "command_seconds": 338.72,
+      "packages_pass": 0,
+      "packages_fail": 2,
+      "top_level_fail": 36,
+      "go_package_timeouts": 2,
+      "original_receipt_sha256": "4be7f36f6310ff1b0bc34b70feb99968d86e48763b7c398d69d9bef346836209"
+    },
+    "original_controllers_reaped": true,
+    "original_owners_closed": true,
+    "original_readers_joined": true,
+    "qualification_status": "NOT_PASSED",
+    "counts_scope": "Observed package summary lines and top-level failure lines; timeouts can overlap failed packages and are not independent root-cause counts."
+  },
+  "prepared_integration_head": "2c71dd70fba1125bd10d4a3506516be4d6820101",
+  "owner_commit_registry_sha256": "f3ce58349c9ad3476c185246338d7a758e957bdd15d243b8aa124b58c35fd2a1",
+  "coverage": {
+    "original_findings": 19,
+    "bug_dispositions": 13,
+    "additional_implementation_findings": 7,
+    "prepared_owner_commits": 7,
+    "fully_closed_findings_claimed": 0,
+    "published_owner_commits": 7
+  },
+  "interpretation": [
+    "Focused PASS applies only to its recorded input hashes and scope. It is not full repository, installed Product or original bug-flow acceptance.",
+    "Existing public reader/secrets and CP-02/03/06/07 fixes are preserved, not reimplemented or newly attributed.",
+    "Published owner updates are open Draft PR heads, not merges. The failed full 14af gates are retained; c730 focused results do not establish full qualification. Coordination publication remains separate.",
+    "Top-level FAIL counts and Go package timeouts are separate observations, not counts of independent root causes. Native controllers settled; a Go package timeout is not an external controller timeout."
+  ],
+  "owner_updates": [
+    {
+      "lane": "cmake",
+      "owner": "CMake trace",
+      "pr": 624,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/624",
+      "base_commit": "ee20f6009a8581c8141352cdbd261e1a97a0e805",
+      "prepared_commit": "5c36f626467bc6c8446d621f3a2b3fc7fd507b4b",
+      "publication_status": "PUBLISHED",
+      "published_head": "5c36f626467bc6c8446d621f3a2b3fc7fd507b4b",
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "source_ref": "S03",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "publication_source_ref": "S13"
+    },
+    {
+      "lane": "relay",
+      "owner": "Relay",
+      "pr": 629,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/629",
+      "base_commit": "e33924ac97449c7cb8f103d80a39ecbb064310d3",
+      "prepared_commit": "6808e99bacc0961fef2a511b1ae1a088f12a1e12",
+      "publication_status": "PUBLISHED",
+      "published_head": "6808e99bacc0961fef2a511b1ae1a088f12a1e12",
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "source_ref": "S04",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "publication_source_ref": "S13"
+    },
+    {
+      "lane": "serena",
+      "owner": "Кэши Serena/registry",
+      "pr": 655,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/655",
+      "base_commit": "1a5a7dd04fe732df5c539860dde813c8c703586d",
+      "prepared_commit": "6743f3d552027395daf06bfd4fbc0123a374703b",
+      "publication_status": "PUBLISHED",
+      "published_head": "6743f3d552027395daf06bfd4fbc0123a374703b",
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "source_ref": "S05",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "publication_source_ref": "S13"
+    },
+    {
+      "lane": "scheduler",
+      "owner": "Scheduler",
+      "pr": 660,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/660",
+      "base_commit": "892fa82e0e1aa5746d97365f96a9b69ef7934168",
+      "prepared_commit": "8d4f2606c9af7e20181e4ad290b29be0e0a2dd0f",
+      "publication_status": "PUBLISHED",
+      "published_head": "8d4f2606c9af7e20181e4ad290b29be0e0a2dd0f",
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "source_ref": "S06",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "publication_source_ref": "S13"
+    },
+    {
+      "lane": "process",
+      "owner": "Тест окна завершения process",
+      "pr": 628,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/628",
+      "base_commit": "e7fee02b5ce1b965486b15f13938bd0d67c841d8",
+      "prepared_commit": "0b3a9e0edafc41e7e8567abfde878e8f169405ef",
+      "publication_status": "PUBLISHED",
+      "published_head": "0b3a9e0edafc41e7e8567abfde878e8f169405ef",
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "source_ref": "S07",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "publication_source_ref": "S13"
+    },
+    {
+      "lane": "windows",
+      "owner": "Windows / private stdio / npm",
+      "pr": 671,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/671",
+      "base_commit": "09dc07e01d1a3236ab5f45f384e11fe2f9dfd30d",
+      "prepared_commit": "891ef8bfd0764a969db2f800578fd45acd5623d6",
+      "publication_status": "PUBLISHED",
+      "published_head": "891ef8bfd0764a969db2f800578fd45acd5623d6",
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "source_ref": "S08",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "publication_source_ref": "S13"
+    },
+    {
+      "lane": "force_stop",
+      "owner": "Supervisor force-stop",
+      "pr": 659,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/659",
+      "base_commit": "a3568dfe3426afaca4176d57a2310097e5214e77",
+      "prepared_commit": "9043acae5a778b9b123b195d3c04cb213e5e568d",
+      "publication_status": "PUBLISHED",
+      "published_head": "9043acae5a778b9b123b195d3c04cb213e5e568d",
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "source_ref": "S09",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "publication_source_ref": "S13"
+    }
+  ],
+  "findings": [
+    {
+      "id": "WL-01",
+      "original_title": "Устаревшая запись владельца может привести к преждевременному завершению нового Supervisor",
+      "topic": "Устаревший Supervisor sidecar",
+      "severity": "P1",
+      "owner_prs": [
+        671
+      ],
+      "owner_pr_urls": [
+        "https://github.com/applicate2628/mcp-local-hub/pull/671"
+      ],
+      "change_origin": "NEW_OWNER_DELTA",
+      "implementation_status": "IMPLEMENTED_FOCUSED",
+      "implemented": "Устаревшая запись владельца больше не разрешает преждевременно завершить нового исходного child; конкурент подтверждается, identity-проверка получает контекст ожидания.",
+      "focused_evidence": "Windows: TestGUISupervisor(NativeControl|Control) PASS, 0.470 s; управляемые readiness/конкурент/отмена.",
+      "remaining": "Полный обычный запуск установленного GUI, реальные IPC-переходы и console qualification остаются открытыми.",
+      "source_refs": [
+        "S01",
+        "S08"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "PUBLISHED_OWNER_DELTA",
+      "prepared_commit": "891ef8bfd0764a969db2f800578fd45acd5623d6",
+      "published_commits": [
+        "891ef8bfd0764a969db2f800578fd45acd5623d6"
+      ]
+    },
+    {
+      "id": "WL-02",
+      "original_title": "Публичный #671 отвергает setup --clean после выборочного отката с сохранёнными исходными файлами runtime",
+      "topic": "Выборочный rollback и setup --clean",
+      "severity": "P1",
+      "owner_prs": [
+        671
+      ],
+      "owner_pr_urls": [
+        "https://github.com/applicate2628/mcp-local-hub/pull/671"
+      ],
+      "change_origin": "REUSED_WAVE_DELTA",
+      "implementation_status": "IMPLEMENTED_FOCUSED",
+      "implemented": "Перенесена узкая правка Wave: проверяется полный набор, но cleanup получает только выданные staged-originals; сохранённый canonical runtime исключён из удаления.",
+      "focused_evidence": "Native selective rollback PASS, 4.190 s, с обычным compiled registry и синтетическими файлами/настоящими identities. Предыдущий запуск без registry — FAIL до subtest.",
+      "remaining": "Полная upgrade/rollback/clean-цепь настоящего Product, прерывания и сохранение recovery evidence ещё не приняты.",
+      "source_refs": [
+        "S01",
+        "S08"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "PUBLISHED_OWNER_DELTA",
+      "prepared_commit": "891ef8bfd0764a969db2f800578fd45acd5623d6",
+      "published_commits": [
+        "891ef8bfd0764a969db2f800578fd45acd5623d6"
+      ]
+    },
+    {
+      "id": "WL-03",
+      "original_title": "Scheduler теряет NextRun и показывает ожидающую еженедельную задачу как Stopped",
+      "topic": "NextRun и Scheduled",
+      "severity": "P2",
+      "owner_prs": [
+        660
+      ],
+      "owner_pr_urls": [
+        "https://github.com/applicate2628/mcp-local-hub/pull/660"
+      ],
+      "change_origin": "NEW_OWNER_DELTA",
+      "implementation_status": "IMPLEMENTED_FOCUSED",
+      "implemented": "COM передаёт локальное календарное NextRun: будущее, наблюдённый DATE zero и недоступное поле различаются; Disabled, SID, hidden lookup и LastResult сохранены.",
+      "focused_evidence": "Весь Scheduler PASS, 37.948 s; производственный PowerShell producer проверен с локальными COM-подобными объектами. Read-only образцы настоящего COM — отдельное наблюдение.",
+      "remaining": "Изменённая цепь настоящего Task Scheduler → status --health на квалифицированном Product ещё не исполнена; прогноз времени не доказывает readiness.",
+      "source_refs": [
+        "S01",
+        "S06"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "PUBLISHED_OWNER_DELTA",
+      "prepared_commit": "8d4f2606c9af7e20181e4ad290b29be0e0a2dd0f",
+      "published_commits": [
+        "8d4f2606c9af7e20181e4ad290b29be0e0a2dd0f"
+      ]
+    },
+    {
+      "id": "WL-04",
+      "original_title": "Force-stop сохраняет разрыв между проверкой PID и остановкой процесса по тому же числу",
+      "topic": "Force-stop и исходный creator",
+      "severity": "P1",
+      "owner_prs": [
+        659
+      ],
+      "owner_pr_urls": [
+        "https://github.com/applicate2628/mcp-local-hub/pull/659"
+      ],
+      "change_origin": "NEW_OWNER_DELTA",
+      "implementation_status": "IMPLEMENTED_FOCUSED",
+      "implemented": "Добавлен authenticated force_stop для точного поколения через сохранённого creator/Job и одну completion cell; Desired=running сохраняется. Старые PID-only leaf возвращают типизированный отказ.",
+      "focused_evidence": "Windows API PASS, 14.479 s; окончательный CLI/native creator/terminal-cell/exit PASS, 0.862 s. Wire проверен через net.Pipe; это не реальный named pipe.",
+      "remaining": "Нужен полный реальный authenticated named-pipe обмен. Автоматическая очистка удаляемого descriptor по прежнему PID-only снимку не реализована: остаётся refusal/warning, без перенаправления на successor.",
+      "source_refs": [
+        "S01",
+        "S09"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "PUBLISHED_OWNER_DELTA",
+      "prepared_commit": "9043acae5a778b9b123b195d3c04cb213e5e568d",
+      "published_commits": [
+        "9043acae5a778b9b123b195d3c04cb213e5e568d"
+      ]
+    },
+    {
+      "id": "WL-05",
+      "original_title": "Scheduler Create/Run/ImportXML не принимают общий контекст и могут ждать внешнюю команду без срока",
+      "topic": "Общий deadline Scheduler и unknown mutation",
+      "severity": "P2",
+      "owner_prs": [
+        660
+      ],
+      "owner_pr_urls": [
+        "https://github.com/applicate2628/mcp-local-hub/pull/660"
+      ],
+      "change_origin": "NEW_OWNER_DELTA",
+      "implementation_status": "IMPLEMENTED_FOCUSED",
+      "implemented": "Контекст операции связан с существующим backend; reused contained runner ограничивает вывод. Unknown сохраняет причины и останавливает связанный rollback до первого inverse; известная LSP-компенсация имеет независимый общий срок.",
+      "focused_evidence": "Scheduler PASS 37.948 s; API transaction regressions PASS 8.228 s; CLI V3 recovery PASS 0.597 s. Три caller-path замечания и происхождение no-dispatch marker исправлены.",
+      "remaining": "Итоговая композиция, реальные task mutations/restore и Product update не приняты. Новый capture budget 16 MiB stdout / 64 KiB stderr — явное изменение совместимости; fallback без ContextBinder не обещает прерывание.",
+      "source_refs": [
+        "S01",
+        "S06"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "PUBLISHED_OWNER_DELTA",
+      "prepared_commit": "8d4f2606c9af7e20181e4ad290b29be0e0a2dd0f",
+      "published_commits": [
+        "8d4f2606c9af7e20181e4ad290b29be0e0a2dd0f"
+      ]
+    },
+    {
+      "id": "WL-06",
+      "original_title": "Не все фоновые запуски принимают политику скрытия консоли из #628; ветки Rust не включают позднюю правку #625",
+      "topic": "Console policy и экспериментальный Rust",
+      "severity": "P2",
+      "owner_prs": [
+        628,
+        664,
+        665,
+        666,
+        667
+      ],
+      "owner_pr_urls": [
+        "https://github.com/applicate2628/mcp-local-hub/pull/628",
+        "https://github.com/applicate2628/mcp-local-hub/pull/664",
+        "https://github.com/applicate2628/mcp-local-hub/pull/665",
+        "https://github.com/applicate2628/mcp-local-hub/pull/666",
+        "https://github.com/applicate2628/mcp-local-hub/pull/667"
+      ],
+      "change_origin": "EXISTING_PUBLIC_PR_PRESERVED_WITH_TEST_DELTA",
+      "implementation_status": "PARTIAL_PRESERVED",
+      "implemented": "Сохранены Go NoConsole/HideToolConsole и consumer-правки публичных PR. Новый delta #628 меняет только тест окна подтверждения, не production-сроки. Rust #625/#644/#631 остаётся отдельным экспериментом.",
+      "focused_evidence": "Новый тест #628 PASS 0.409 s; он не доказывает 50-мс производительность или отсутствие окон. Новой полной console qualification нет.",
+      "remaining": "Проверить два AllocConsole, наследование, foreground exception и потоки на точном Product. Согласование поздней #625 с #644/#631 открыто и не является production-интеграцией Rust.",
+      "source_refs": [
+        "S01",
+        "S07"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "PUBLISHED_OWNER_DELTA",
+      "prepared_commit": "0b3a9e0edafc41e7e8567abfde878e8f169405ef",
+      "published_commits": [
+        "0b3a9e0edafc41e7e8567abfde878e8f169405ef"
+      ]
+    },
+    {
+      "id": "ARA-01",
+      "original_title": "Изоляция состояния Sequential Thinking не включена в производственный запуск",
+      "topic": "Изоляция Sequential Thinking",
+      "severity": "P1",
+      "owner_prs": [
+        671
+      ],
+      "owner_pr_urls": [
+        "https://github.com/applicate2628/mcp-local-hub/pull/671"
+      ],
+      "change_origin": "NEW_PARTIAL_WIRING",
+      "implementation_status": "PARTIAL_FOCUSED",
+      "implemented": "Существующий private stdio owner подключён к зарегистрированным front sessions. Shipped manifest, install/reconcile/restore и project enrollment/rebind не объявлены завершёнными.",
+      "focused_evidence": "Registered route с двумя native fixture children PASS 14.323 s; isolated-owner group PASS 5.407 s. Launch inputs и qualification data подставлены fixture.",
+      "remaining": "Нужны shipped session-local declaration, согласованный install/reconcile/restore и rollback, project enrollment/rebind, настоящий закреплённый провайдер и квалифицированный Product. ARA-01 остаётся открытой.",
+      "source_refs": [
+        "S01",
+        "S08"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "PUBLISHED_OWNER_DELTA",
+      "prepared_commit": "891ef8bfd0764a969db2f800578fd45acd5623d6",
+      "published_commits": [
+        "891ef8bfd0764a969db2f800578fd45acd5623d6"
+      ]
+    },
+    {
+      "id": "ARA-02",
+      "original_title": "Relay блокирует ответы клиента и отмену тем же допуском, который удерживает ожидающий их запрос",
+      "topic": "Relay: ответы и отмена при насыщении",
+      "severity": "P1",
+      "owner_prs": [
+        629
+      ],
+      "owner_pr_urls": [
+        "https://github.com/applicate2628/mcp-local-hub/pull/629"
+      ],
+      "change_origin": "NEW_OWNER_DELTA",
+      "implementation_status": "IMPLEMENTED_FOCUSED",
+      "implemented": "Завершение initialize отделено от необязательного Session-Id. Ответы/уведомления обходят request slots; 65-й request получает отказ до отправки, не блокируя stdin.",
+      "focused_evidence": "Windows Relay/HTTPToStdio PASS 2.761 s; stateless и saturated дали причинный FAIL на исходном production-коде.",
+      "remaining": "Полные gates на 14af дали FAIL; полный c730 NOT_RUN. Race detector и внешний клиентский сценарий остаются открытыми; бюджет 64 requests плюс один control POST сохранён явно.",
+      "source_refs": [
+        "S01",
+        "S04",
+        "S11"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "PUBLISHED_OWNER_DELTA",
+      "prepared_commit": "6808e99bacc0961fef2a511b1ae1a088f12a1e12",
+      "published_commits": [
+        "6808e99bacc0961fef2a511b1ae1a088f12a1e12"
+      ]
+    },
+    {
+      "id": "ARA-03",
+      "original_title": "После HTTP 404 об утрате сессии Relay продолжает использовать эту сессию",
+      "topic": "Relay: HTTP 404 и потеря сессии",
+      "severity": "P2",
+      "owner_prs": [
+        629
+      ],
+      "owner_pr_urls": [
+        "https://github.com/applicate2628/mcp-local-hub/pull/629"
+      ],
+      "change_origin": "NEW_OWNER_DELTA",
+      "implementation_status": "IMPLEMENTED_FOCUSED",
+      "implemented": "POST/GET 404 завершает текущий Run; workers присоединяются, новый Run начинает initialize без старого токена. Уже отправленный эффект не повторяется.",
+      "focused_evidence": "Та же Windows-группа PASS 2.761 s включает expiry и настоящий Go SDK consumer без replay.",
+      "remaining": "Автоматический restart конкретного внешнего клиента и полная клиентская цепь не квалифицированы; новый транспорт должен заново инициализироваться.",
+      "source_refs": [
+        "S01",
+        "S04"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "PUBLISHED_OWNER_DELTA",
+      "prepared_commit": "6808e99bacc0961fef2a511b1ae1a088f12a1e12",
+      "published_commits": [
+        "6808e99bacc0961fef2a511b1ae1a088f12a1e12"
+      ]
+    },
+    {
+      "id": "ARA-04",
+      "original_title": "Парсер трассы CMake теряет ошибку чтения при одновременном превышении лимита",
+      "topic": "CMake: Read error на лимите",
+      "severity": "P2",
+      "owner_prs": [
+        624
+      ],
+      "owner_pr_urls": [
+        "https://github.com/applicate2628/mcp-local-hub/pull/624"
+      ],
+      "change_origin": "NEW_OWNER_DELTA",
+      "implementation_status": "IMPLEMENTED_FOCUSED",
+      "implemented": "Полученная ошибка чтения проверяется до ветвей truncation; non-EOF ошибка остаётся unknown/trace_unreadable, частичный результат не публикуется.",
+      "focused_evidence": "Два предельных сценария дали причинный FAIL на базе; весь cmaketrace PASS 1.339 s, закрытие исходного reader проверено.",
+      "remaining": "Полные gates на 14af дали FAIL; source replay c730 PASS не заменяет runtime-приёмку. Пределы и нормальный EOF не изменены.",
+      "source_refs": [
+        "S01",
+        "S03",
+        "S11"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "PUBLISHED_OWNER_DELTA",
+      "prepared_commit": "5c36f626467bc6c8446d621f3a2b3fc7fd507b4b",
+      "published_commits": [
+        "5c36f626467bc6c8446d621f3a2b3fc7fd507b4b"
+      ]
+    },
+    {
+      "id": "ARA-05",
+      "original_title": "Go reader: повторное закрытие дескриптора и потеря составных ошибок ещё не исправлены в master",
+      "topic": "Reader: однократное close и все причины",
+      "severity": "P1",
+      "owner_prs": [
+        668
+      ],
+      "owner_pr_urls": [
+        "https://github.com/applicate2628/mcp-local-hub/pull/668"
+      ],
+      "change_origin": "EXISTING_PUBLIC_PR_PRESERVED",
+      "implementation_status": "PRESERVED_PUBLIC_SOURCE",
+      "implemented": "Сохранено уже публичное исправление Windows/POSIX #668 и двух прямых потребителей: один close, составные ошибки и запрет compensation при неоднозначном отсутствии файла. Нового delta этого владельца нет.",
+      "focused_evidence": "В исходном аудите учтены scoped Windows/build/vet и Linux compile evidence #668. Новое выполнение этой строки здесь не заявляется.",
+      "remaining": "Полные Windows gates на 14af дали FAIL; полный c730, исполнение Linux и внешнее ревью точной вершины остаются отдельными требованиями; compile не равен execution.",
+      "source_refs": [
+        "S01",
+        "S11"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "EXISTING_PUBLIC_PR_PRESERVED",
+      "prepared_commit": null
+    },
+    {
+      "id": "ARA-06",
+      "original_title": "Восстановление secrets скрывает ошибку снятия блокировки и может повторно ждать ту же блокировку",
+      "topic": "Secrets: release ledger и unwrap",
+      "severity": "P2",
+      "owner_prs": [
+        669
+      ],
+      "owner_pr_urls": [
+        "https://github.com/applicate2628/mcp-local-hub/pull/669"
+      ],
+      "change_origin": "EXISTING_PUBLIC_PR_PRESERVED",
+      "implementation_status": "PRESERVED_PUBLIC_SOURCE",
+      "implemented": "Сохранены уже публичные #669: release ledger, отказ повторного входа после неподтверждённого unlock и распознаваемость всех причин. Правка не дублируется в #660.",
+      "focused_evidence": "Сохранены существующие различающие проверки старого lock-owner и старого Unwrap; новый native namespace PASS здесь не заявляется.",
+      "remaining": "Полные default/tagged на 14af дали FAIL. Приёмка применимых namespace сценариев и всей secrets-цепи на итоговом составе остаётся открытой; fixture owner PASS не является общим secrets PASS.",
+      "source_refs": [
+        "S01",
+        "S11"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "EXISTING_PUBLIC_PR_PRESERVED",
+      "prepared_commit": null
+    },
+    {
+      "id": "CP-01",
+      "original_title": "Полная приёмка v10 не пройдена; публичный журнал содержит более ранний результат",
+      "topic": "Полная квалификация v10",
+      "severity": "P1",
+      "owner_prs": [
+        664,
+        665,
+        666,
+        667,
+        637,
+        657,
+        661
+      ],
+      "owner_pr_urls": [
+        "https://github.com/applicate2628/mcp-local-hub/pull/664",
+        "https://github.com/applicate2628/mcp-local-hub/pull/665",
+        "https://github.com/applicate2628/mcp-local-hub/pull/666",
+        "https://github.com/applicate2628/mcp-local-hub/pull/667",
+        "https://github.com/applicate2628/mcp-local-hub/pull/637",
+        "https://github.com/applicate2628/mcp-local-hub/pull/657",
+        "https://github.com/applicate2628/mcp-local-hub/pull/661"
+      ],
+      "change_origin": "QUALIFICATION_GAP",
+      "implementation_status": "OPEN_QUALIFICATION",
+      "implemented": "Исходный аудит опубликован; семь owner updates опубликованы в существующих Draft PR. Сохранены раздельные роли Source/Product и владельцы package helpers. В #664 подготовлена композиция и четыре test-only fixture corrections; полная квалификация остаётся открытой.",
+      "focused_evidence": "На 14af build/vet PASS; default FAIL: 56 пакетов PASS, 8 FAIL, 11 без тестов, 23 top-level FAIL и 3 package timeout. Tagged FAIL: 36 top-level FAIL и 2 package timeout. На c730 source replay 38 PASS, focused fixtures частично PASS; recovery timing FAIL; полный набор c730 NOT_RUN.",
+      "remaining": "Разобрать подтверждённые причины полных FAIL и оставшийся recovery timing, затем пройти обязательные gates на точном Source/Product. Нужны фактические обязательные cases и обе private migration lanes. Публикация тематических правок не означает приёмку.",
+      "source_refs": [
+        "S01",
+        "S02",
+        "S10",
+        "S11",
+        "S12",
+        "S13"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "HISTORICAL_AUDIT_PUBLISHED_COORDINATION_UPDATE_PENDING",
+      "prepared_commit": null
+    },
+    {
+      "id": "CP-02",
+      "original_title": "При публикации Ready проверяется неверный исходный предел чтения",
+      "topic": "Ready: исходный предел чтения",
+      "severity": "P1",
+      "owner_prs": [
+        654
+      ],
+      "owner_pr_urls": [
+        "https://github.com/applicate2628/mcp-local-hub/pull/654"
+      ],
+      "change_origin": "EXISTING_PUBLIC_PR_PRESERVED",
+      "implementation_status": "PRESERVED_PUBLIC_SOURCE",
+      "implemented": "Сохранена публичная #654: отдельная проверка 0<len<=1 MiB и Validate с исходным len(raw), без ослабления общего валидатора. Нового delta нет.",
+      "focused_evidence": "Подтверждено исходниками и исходным реестром; свежий targeted runtime данной строки не приписывается cache-тестам.",
+      "remaining": "Финальная Serena preparation/Ready цепь и обязательные gates на точном Source/Product.",
+      "source_refs": [
+        "S01"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "EXISTING_PUBLIC_PR_PRESERVED",
+      "prepared_commit": null
+    },
+    {
+      "id": "CP-03",
+      "original_title": "Prepare отменяет рабочий контекст до получения результатов закрытия исходных writer",
+      "topic": "Prepare: settlement до cancel",
+      "severity": "P1",
+      "owner_prs": [
+        655
+      ],
+      "owner_pr_urls": [
+        "https://github.com/applicate2628/mcp-local-hub/pull/655"
+      ],
+      "change_origin": "EXISTING_PUBLIC_PR_PRESERVED",
+      "implementation_status": "PRESERVED_PUBLIC_SOURCE",
+      "implemented": "Сохранён публичный base #655: локальный cancel после settlement, первичная Serve error отдельно от close. Новый commit #655 относится к CP-04, не является новым исправлением CP-03.",
+      "focused_evidence": "Исходное исправление сохранено по коду; cache PASS 28.106 s не переименован в доказательство всей Prepare-цепи.",
+      "remaining": "Полная подготовка/отмена/закрытие исходных writer и общие gates на итоговой композиции.",
+      "source_refs": [
+        "S01",
+        "S05"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "EXISTING_PUBLIC_PR_PRESERVED",
+      "prepared_commit": null
+    },
+    {
+      "id": "CP-04",
+      "original_title": "Кеш остановки не различает замену intent с теми же размером и временем изменения",
+      "topic": "Файловая identity в кэшах",
+      "severity": "P2",
+      "owner_prs": [
+        655
+      ],
+      "owner_pr_urls": [
+        "https://github.com/applicate2628/mcp-local-hub/pull/655"
+      ],
+      "change_origin": "NEW_OWNER_DELTA",
+      "implementation_status": "IMPLEMENTED_FOCUSED",
+      "implemented": "Кэш учитывает исходную file identity и метаданные; same-file byte refresh ограничен 32 обращениями. Отсутствие → пустой файл больше не переиспользует decoded nil и не разрешает Wake.",
+      "focused_evidence": "Windows cache/registry/Wake regressions PASS 28.106 s; пять входных файлов закреплены, установленные сервисы не запускались.",
+      "remaining": "Общие gates и полная Serena migration открыты. Предел 32 относится к числу обращений, не к времени; мгновенное обнаружение in-place записи не обещается.",
+      "source_refs": [
+        "S01",
+        "S05"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "PUBLISHED_OWNER_DELTA",
+      "prepared_commit": "6743f3d552027395daf06bfd4fbc0123a374703b",
+      "published_commits": [
+        "6743f3d552027395daf06bfd4fbc0123a374703b"
+      ]
+    },
+    {
+      "id": "CP-05",
+      "original_title": "В исходниках npm-упаковки отсутствуют лицензионные материалы gofrs/flock",
+      "topic": "npm: notice gofrs/flock",
+      "severity": "P2",
+      "owner_prs": [
+        671
+      ],
+      "owner_pr_urls": [
+        "https://github.com/applicate2628/mcp-local-hub/pull/671"
+      ],
+      "change_origin": "NEW_OWNER_DELTA",
+      "implementation_status": "IMPLEMENTED_FOCUSED",
+      "implemented": "Генератор и README добавляют исходный текст gofrs/flock вместе с сохранёнными go-winio/runtime notices; некорректные материалы отклоняются.",
+      "focused_evidence": "Platform checks 12/12; после отдельной коррекции устаревшего test expectation полный npm test PASS 19/19. npm pack выполнен только над fixture.",
+      "remaining": "Реальный release payload/архив, состав распространяемых компонентов и установленный Product не квалифицированы; общего юридического заключения нет.",
+      "source_refs": [
+        "S01",
+        "S08"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "PUBLISHED_OWNER_DELTA",
+      "prepared_commit": "891ef8bfd0764a969db2f800578fd45acd5623d6",
+      "published_commits": [
+        "891ef8bfd0764a969db2f800578fd45acd5623d6"
+      ]
+    },
+    {
+      "id": "CP-06",
+      "original_title": "Selected Source может ошибочно получить признак clean после удаления из индекса Git",
+      "topic": "Selected Source: удаление из индекса",
+      "severity": "P2",
+      "owner_prs": [
+        635,
+        671
+      ],
+      "owner_pr_urls": [
+        "https://github.com/applicate2628/mcp-local-hub/pull/635",
+        "https://github.com/applicate2628/mcp-local-hub/pull/671"
+      ],
+      "change_origin": "EXISTING_PUBLIC_PR_PRESERVED",
+      "implementation_status": "PRESERVED_PUBLIC_SOURCE",
+      "implemented": "Проверка committed paths, отсутствующих в stage-0, из #635 уже была в публичной #671 и сохранена. Новый duplicate delta не создавался.",
+      "focused_evidence": "Исходники и точные публичные вершины подтверждают сохранение; новое выполнение regression этой строки не заявляется.",
+      "remaining": "Финальная source qualification должна сохранить dirty=true для удаления с оставленным или удалённым рабочим файлом и точный состав выданного Source.",
+      "source_refs": [
+        "S01"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "EXISTING_PUBLIC_PR_PRESERVED",
+      "prepared_commit": null
+    },
+    {
+      "id": "CP-07",
+      "original_title": "Поиск uv использует PATH текущего процесса вместо выбранного окружения выполнения",
+      "topic": "uv из выбранного PATH",
+      "severity": "P2",
+      "owner_prs": [
+        632,
+        646,
+        647
+      ],
+      "owner_pr_urls": [
+        "https://github.com/applicate2628/mcp-local-hub/pull/632",
+        "https://github.com/applicate2628/mcp-local-hub/pull/646",
+        "https://github.com/applicate2628/mcp-local-hub/pull/647"
+      ],
+      "change_origin": "EXISTING_PUBLIC_PR_PRESERVED",
+      "implementation_status": "PRESERVED_PUBLIC_SOURCE",
+      "implemented": "Сохранена публичная #632: uv выбирается из утверждённого execution PATH; отдельные Python preference #646 и Windows PATHEXT/longpaths #647 сохранены в композиции.",
+      "focused_evidence": "Сохранение проверено по исходникам; новый полный Windows preparation PASS этой строки не заявлен.",
+      "remaining": "Приёмка настоящей подготовки с системным Python, длинными Git paths и неизменяемым выбранным environment на точном Source.",
+      "source_refs": [
+        "S01",
+        "S10"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "EXISTING_PUBLIC_PR_PRESERVED",
+      "prepared_commit": null
+    }
+  ],
+  "additional_implementation_findings": [
+    {
+      "id": "IMPL-01",
+      "topic": "API port-helper перед чистым допуском",
+      "owner_prs": [
+        664
+      ],
+      "related_prs": [
+        659,
+        665
+      ],
+      "change_origin": "COMPOSITION_OVERLAY",
+      "implementation_status": "IMPLEMENTED_FOCUSED_CAUSAL_VERIFIED",
+      "implemented": "Port fixture вызывается после обеих pure gates; port marker считается отдельной ролью. Добавлены bounded subprocess negative cases, ordinary netstat и сохранение unexpected-WMIC witness. Ровно четыре существующих test files, production-код не меняется.",
+      "focused_evidence": "Первый native запуск сохранён как FAIL: ordinary netstat превысил 10 s (case 14.25 s; API 45.505 s). Test-only 10→30 s на 14af не меняет production budget. Fixed-2 PASS: API 89.752 s, контроллер 161.598 s. Отдельный причинный контроль дал ожидаемый Go exit 1: пять отрицательных classifier cases и четыре subprocess cases; API 19.776 s. Исходные owners, Job и readers закрыты.",
+      "remaining": "Исторический FAIL и отдельный negative patch сохранены. PASS 89.752 s не доказывает запас к 90 s. Полные 14af gates FAIL; полный c730 NOT_RUN.",
+      "source_refs": [
+        "S10",
+        "S11"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "COORDINATION_UPDATE_PENDING",
+      "native_history": [
+        {
+          "status": "FAIL",
+          "scope": "initial fixed overlay run",
+          "case": "ordinary copied netstat",
+          "cause": "test child exceeded the 10-second context deadline",
+          "case_seconds": 14.25,
+          "api_package_seconds": 45.505,
+          "original_resources_closed_reported": true,
+          "evidence_origin": "Recorded native-evidence.json; original receipt and stream hashes retained"
+        },
+        {
+          "status": "PASS",
+          "scope": "fixed-2 focused API overlay checks",
+          "head": "14af01ea06063a2c2306aeaa1accf454151d7e6b",
+          "change": "test-only child deadline 10 to 30 seconds; production budgets unchanged",
+          "api_package_seconds": 89.752,
+          "controller_seconds": 161.598,
+          "original_controller_reaped_reported": true,
+          "job_active_zero_reported": true,
+          "native_handles_closed_reported": true,
+          "readers_joined_reported": true,
+          "evidence_origin": "Recorded native-evidence.json; original receipt and stream hashes retained",
+          "limit": "A focused PASS at this elapsed time does not establish timing headroom or full qualification."
+        },
+        {
+          "status": "EXPECTED_FAILURE_OBSERVED",
+          "scope": "causal negative control in a separate copy of the same 14af source",
+          "head": "14af01ea06063a2c2306aeaa1accf454151d7e6b",
+          "go_exit_code": 1,
+          "api_package_seconds": 19.776,
+          "controller_seconds": 52.114,
+          "classifier_failure_cases": 5,
+          "subprocess_failure_cases": 4,
+          "original_receipt_sha256": "5fdd54c0cff1ee8342865d1a111b08f6c10ce11e69a56eb7f2a965d4599ea355",
+          "source_ref": "S11",
+          "limit": "The control observed expected assertion failures, not a passing product test."
+        }
+      ]
+    },
+    {
+      "id": "IMPL-02",
+      "topic": "Потеря известного creator exit code",
+      "owner_prs": [
+        659
+      ],
+      "related_prs": [],
+      "change_origin": "ADAPTED_WAVE_CONSUMER",
+      "implementation_status": "IMPLEMENTED_FOCUSED",
+      "implemented": "Адресно перенесён daemonWaitExitCode из Wave c3b8c802: Known CreatorRootExitSnapshot имеет приоритет, включая 0 и полный DWORD; Unknown не заимствует чужой ExitError, fallback остаётся только legacy cmd.Wait. Исходные wait error и closure gate сохранены.",
+      "focused_evidence": "Старая классификация дала причинный FAIL для известных 7/259/2147483649/4294967295 и observer error; окончательная CLI-группа PASS 0.862 s. Использованы уже допущенные helpers.",
+      "remaining": "Полные 14af gates FAIL; полный c730 NOT_RUN. Перенос остальных старых Wave TestMain/secrets фрагментов не выполнялся и не требуется.",
+      "source_refs": [
+        "S09"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "PUBLISHED_OWNER_DELTA",
+      "published_commits": [
+        "9043acae5a778b9b123b195d3c04cb213e5e568d"
+      ]
+    },
+    {
+      "id": "IMPL-03",
+      "topic": "Устаревшее точное ожидание npm payload",
+      "owner_prs": [
+        671
+      ],
+      "related_prs": [],
+      "change_origin": "TEST_EXPECTATION_CORRECTION",
+      "implementation_status": "IMPLEMENTED_FOCUSED",
+      "implemented": "После FAIL 18/19 исправлены только имя кейса и точный V4 file list в postinstall.test.js. deepStrictEqual и запрет собственного bin сохранены; production generator/manifest ради PASS не менялись.",
+      "focused_evidence": "Первый полный npm test: 18/19, platform 12/12. Повтор после test-only delta: 19/19, Node v24.22.3 / npm 11.19.1; исходные входы/выходы закреплены.",
+      "remaining": "Реальная release-упаковка и Product qualification отдельно; этот PASS не заменяет Go gates.",
+      "source_refs": [
+        "S08"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "PUBLISHED_OWNER_DELTA",
+      "published_commits": [
+        "891ef8bfd0764a969db2f800578fd45acd5623d6"
+      ]
+    },
+    {
+      "id": "IMPL-04",
+      "topic": "Владелец legacy namespace fixture",
+      "implemented": "У свежих fixture объектов через один удерживаемый Windows handle задан текущий token user как owner. OWNER-only mutation и readback сохраняют DACL; отрицательные проверки широких и наследуемых разрешений не ослаблены.",
+      "focused_evidence": "На c730 legacy default и tagged: по 24 top-level PASS, 0 top-level SKIP и 0 nested SKIP; API 5.226/5.796 s. Это изолированные fixtures, не приёмка установленной миграции.",
+      "remaining": "Сохранить full-14af FAIL как историю; полный c730 и настоящий пользовательский legacy migration сценарий ещё не квалифицированы.",
+      "paths": [
+        "internal/api/adopt_lease_namespace_windows_test.go"
+      ],
+      "implementation_status": "TEST_FIXTURE_IMPLEMENTED_FOCUSED",
+      "owner_prs": [
+        664
+      ],
+      "related_prs": [],
+      "change_origin": "INTEGRATION_TEST_FIXTURE_CORRECTION",
+      "source_refs": [
+        "S10",
+        "S11",
+        "S12"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "COORDINATION_UPDATE_PENDING",
+      "source_head": "c730cae455ef84d226ac5323953d9e7209b4016e"
+    },
+    {
+      "id": "IMPL-05",
+      "topic": "Фиксированные порты CLI adopt fixtures",
+      "implemented": "Real redaction planner использует штатный auto-port вместо фиксированного 9313. State-root refusal получает валидный план через существующий PlanBuilder и проверяет настоящий preflight без обращения к 9314. Canary и no-mutation assertions сохранены; новый production seam не введён.",
+      "focused_evidence": "На c730 оба CLI adopt теста PASS, 0.997 s. Прошлый отказ bind не приписан коллизии или постороннему listener: его владелец не наблюдался.",
+      "remaining": "Redaction fixture по-прежнему требует хотя бы один доступный порт штатного диапазона; полный c730 NOT_RUN. PASS двух tests не доказывает весь adopt lifecycle.",
+      "paths": [
+        "internal/cli/adopt_test.go"
+      ],
+      "implementation_status": "TEST_FIXTURE_IMPLEMENTED_FOCUSED",
+      "owner_prs": [
+        664
+      ],
+      "related_prs": [],
+      "change_origin": "INTEGRATION_TEST_FIXTURE_CORRECTION",
+      "source_refs": [
+        "S10",
+        "S11",
+        "S12"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "COORDINATION_UPDATE_PENDING",
+      "source_head": "c730cae455ef84d226ac5323953d9e7209b4016e"
+    },
+    {
+      "id": "IMPL-06",
+      "topic": "Recovery fixture: join до TempDir cleanup",
+      "implemented": "Cleanup освобождает исходный audit flock и ждёт исходный Execute через закрываемый completion latch. Deferred close покрывает Goexit; отдельный returned различает отсутствующий результат и нормальный nil error. Исходный односекундный oracle сохранён.",
+      "focused_evidence": "На c730 timing assertion всё ещё FAIL: case 1.77 s, пакет 2.282 s; повторного TempDir cleanup error нет. В отдельном controlled-failure запуске callback Goexit дал заданный Fatal и cleanup сообщил отсутствующий результат; case 1.00 s, пакет 1.333 s. Исходные resources закрыты, timeout и TempDir failure не наблюдались.",
+      "remaining": "Причина и фаза оставшегося timing FAIL неизвестны. Текст waited on replay их не доказывает; direct fixture persistence игнорирует ctx и вызывает File.Sync. Срок не увеличен, production не менялся; нужен отдельный причинный разбор.",
+      "paths": [
+        "internal/daemonrecovery/recovery_test.go"
+      ],
+      "implementation_status": "TEST_CLEANUP_IMPLEMENTED_TIMING_FAILURE_OPEN",
+      "owner_prs": [
+        664
+      ],
+      "related_prs": [],
+      "change_origin": "INTEGRATION_TEST_FIXTURE_CORRECTION",
+      "source_refs": [
+        "S10",
+        "S11",
+        "S12"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "COORDINATION_UPDATE_PENDING",
+      "source_head": "c730cae455ef84d226ac5323953d9e7209b4016e",
+      "cleanup_control_status": "EXPECTED_FAILURE_OBSERVED"
+    },
+    {
+      "id": "IMPL-07",
+      "topic": "Sonnet fixture: Close исходного Server при Fatal",
+      "implemented": "Deferred Close установлен до Start и ждёт исходного Server до очистки TempDir. Ошибка Close видима; прежний явный success-path Close и assertions сохранены. Повторный успешный Close не освобождает уже снятый lease.",
+      "focused_evidence": "На c730 Sonnet: 3 top-level PASS, 0.627 s. Отдельный Fatal после Start подтвердил ORIGINAL_CLOSE_OBSERVED: case 0.08 s, пакет 0.475 s, без timeout и TempDir failure. Соседний неизменённый VTune control: 1 PASS, 1.495 s; его прежний full-suite FAIL остаётся историческим.",
+      "remaining": "Cleanup при намеренном Fatal наблюдён; это не заменяет полный c730 и не устанавливает причину прежнего full-suite Sonnet FAIL.",
+      "paths": [
+        "internal/sonnet/server_test.go"
+      ],
+      "implementation_status": "TEST_FIXTURE_IMPLEMENTED_FOCUSED",
+      "owner_prs": [
+        664
+      ],
+      "related_prs": [],
+      "change_origin": "INTEGRATION_TEST_FIXTURE_CORRECTION",
+      "source_refs": [
+        "S10",
+        "S11",
+        "S12"
+      ],
+      "closure_claim": false,
+      "final_gate_status": "INTEGRATION_NOT_QUALIFIED",
+      "publication_status": "COORDINATION_UPDATE_PENDING",
+      "source_head": "c730cae455ef84d226ac5323953d9e7209b4016e",
+      "cleanup_control_status": "EXPECTED_FAILURE_OBSERVED"
+    }
+  ],
+  "bug_disposition": [
+    {
+      "id": "B01",
+      "original_file": "2026-09-27-hfss-mcp-readonly-source-query-gap.md",
+      "original_sha256": "aee655ff2fdbfefbd3d5f223144ea41f31e1ee923c10a8226cd56c97eccff925",
+      "original_status": "Открытая capability/приёмка",
+      "original_findings": "HFSS",
+      "topic": "HFSS saved-source",
+      "related_prs": [],
+      "status": "OPEN",
+      "current_disposition": "Новых исправлений HFSS в семи коммитах нет; local query/getter и честные physical_complete=false / mesh unavailable сохранены как наработка.",
+      "remaining": "Сначала исходный Job/streams settlement; затем source-only query на копии и четыре дизайна без solve/save.",
+      "source_refs": [
+        "S01"
+      ],
+      "closure_claim": false
+    },
+    {
+      "id": "B02",
+      "original_file": "2026-09-29-mcphub-sview-serena-dynamic-pool-migration-blocked.md",
+      "original_sha256": "448ea2e37d77cff3f18a86b7017ce4c707a5974a6fb313481b9d0319386b00e6",
+      "original_status": "Частично подготовлено; пользовательский путь открыт",
+      "original_findings": "Serena",
+      "topic": "Serena migration / SView",
+      "related_prs": [
+        632,
+        635,
+        643,
+        649,
+        637,
+        660
+      ],
+      "status": "PARTIAL",
+      "current_disposition": "Сохранена Serena chain, добавлены cache и Scheduler corrections; это не acceptance исходной миграции.",
+      "remaining": "Настоящие preview→apply→readiness→rollback, symlink/layering и обе private migration lanes.",
+      "source_refs": [
+        "S01",
+        "S05",
+        "S06"
+      ],
+      "closure_claim": false
+    },
+    {
+      "id": "B03",
+      "original_file": "2026-10-04-mcphub-aggressive-cleanup-includes-active-codex-host.md",
+      "original_sha256": "14b5246c0350ef7a82d6e564090da2fd5f4c19fce0e7985709ccbae882fe8699",
+      "original_status": "Защитный отказ реализован; positive cleanup открыт",
+      "original_findings": "WL-04",
+      "topic": "Aggressive cleanup / защищённый host",
+      "related_prs": [
+        659
+      ],
+      "status": "REFUSAL_PRESERVED",
+      "current_disposition": "Защитный отказ не отменён. Новый force-stop управляет доступным исходным creator; старый PID-only cleanup получает refusal/warning.",
+      "remaining": "Positive cleanup только подтверждённо retired own resources; старые PID и имена процессов не дают полномочий.",
+      "source_refs": [
+        "S01",
+        "S09"
+      ],
+      "closure_claim": false
+    },
+    {
+      "id": "B04",
+      "original_file": "2026-10-04-mcphub-graft-adopt-readiness-and-job-reap-failure.md",
+      "original_sha256": "3bb66872c60b3a064186f84408e48ded540ad437253d9a208486134d5f0759ff",
+      "original_status": "Открытая readiness / original Job приёмка",
+      "original_findings": "WL-01/WL-05",
+      "topic": "Adopt readiness и original Job",
+      "related_prs": [
+        671,
+        660
+      ],
+      "status": "PARTIAL",
+      "current_disposition": "WL-01 и WL-05 имеют focused regressions. Это не воспроизведение исходного MCP_READINESS_HOST_UNAVAILABLE или доказательство числа orphan processes.",
+      "remaining": "Отдельно принять readiness, исходный Job/streams и recovery прежней операции до нового adopt.",
+      "source_refs": [
+        "S01",
+        "S08",
+        "S06"
+      ],
+      "closure_claim": false
+    },
+    {
+      "id": "B05",
+      "original_file": "2026-10-05-mcphub037-canonical-task-retention-failure.md",
+      "original_sha256": "4d210d7e6d7778f1c839af261a1ddb8d34c21b9ba0ff1f7dafba33fef96c7939",
+      "original_status": "Частично исправлено; exact-target acceptance открыт",
+      "original_findings": "WL-03/WL-05",
+      "topic": "Canonical Task XML retention",
+      "related_prs": [
+        660
+      ],
+      "status": "PARTIAL",
+      "current_disposition": "Сохранены Task XML и прежние known-failure restore; добавлены общий context и запрет inverse при unknown. Исторический V3 PASS остаётся историческим.",
+      "remaining": "Точный legacy target: XML/ref→Command rewrite→original store closure, включая interruption/restore и сохранённые recovery residues.",
+      "source_refs": [
+        "S01",
+        "S06"
+      ],
+      "closure_claim": false
+    },
+    {
+      "id": "B06",
+      "original_file": "2026-10-10-mcphub-gdb-metadata-call-latency-budget.md",
+      "original_sha256": "c2afd64fa3d66c1b49abe0467f4cb36560028ba9b8b3d9e8b0c3958de6700f6a",
+      "original_status": "Открытая performance diagnosis",
+      "original_findings": "Performance",
+      "topic": "GDB metadata latency",
+      "related_prs": [],
+      "status": "OPEN",
+      "current_disposition": "Новых причинных измерений или GDB-правок нет; исходные задержки не объявлены исправленными.",
+      "remaining": "Ограниченная трасса client→backend→cleanup, разделение cold preparation и query; без назначения rewrite или увеличения лимита без причины.",
+      "source_refs": [
+        "S01"
+      ],
+      "closure_claim": false
+    },
+    {
+      "id": "B07",
+      "original_file": "2026-10-14-mcphub-codex-layered-adoption.md",
+      "original_sha256": "084403fdce0005069e37fdf14f471b31690887f189124d8579e75c709665c265",
+      "original_status": "Частичная source readback; полный user flow открыт",
+      "original_findings": "ARA-01/ARA-06",
+      "topic": "Codex layered adoption",
+      "related_prs": [
+        668,
+        669,
+        671
+      ],
+      "status": "PARTIAL",
+      "current_disposition": "Существующие layer readback, V4/preimage и ошибки reader/secrets сохранены. Project enrollment/rebind остаётся неподключённым.",
+      "remaining": "Настоящая эффективная CLI/Desktop конфигурация, оба исходных файла/symlink identity, selected-only apply/rollback и enrollment с существующим release ledger.",
+      "source_refs": [
+        "S01",
+        "S08"
+      ],
+      "closure_claim": false
+    },
+    {
+      "id": "B08",
+      "original_file": "2026-10-15-mcphub-0437-stale-shipped-mcp-pins.md",
+      "original_sha256": "197f91f2ff3ffd082fe032133f5ded4679726bee8ff3e7cbc4f66ad5adb208a6",
+      "original_status": "Исторические source pins обновлены; installed receiving отдельно",
+      "original_findings": "CP-02/CP-03/CP-07",
+      "topic": "Shipped MCP pins",
+      "related_prs": [
+        632,
+        654,
+        655,
+        671
+      ],
+      "status": "SOURCE_UPDATED_ACCEPTANCE_OPEN",
+      "current_disposition": "Исходный аудит уже зафиксировал обновлённые source pins; эта работа не выдаёт их за обновление установленного экземпляра.",
+      "remaining": "Проследить descriptor→manifest→catalog→package→installed executable→реальный tools/call; сохранить CP-02/03/07.",
+      "source_refs": [
+        "S01"
+      ],
+      "closure_claim": false
+    },
+    {
+      "id": "B09",
+      "original_file": "2026-10-18-mcphub-0441-npm-native-startup-stale-path.md",
+      "original_sha256": "ceca9975e6e7cc07a5a0501d6a091e1b79fa2b28dcec14c5903cc44876dbde08",
+      "original_status": "Смешанный residual; не закрыта одним upgrade exit0",
+      "original_findings": "WL-01/WL-02/WL-06",
+      "topic": "npm-native startup / stale path",
+      "related_prs": [
+        671,
+        628
+      ],
+      "status": "PARTIAL",
+      "current_disposition": "WL-01/02 исправлены и проверены scoped fixtures; CP-05 и npm test correction опубликованы в #671. Старый upgrade 19/20 не стал новым PASS.",
+      "remaining": "Обычный launcher→GUI/daemon lifecycle, прежний startup сценарий и точный Product; не менять неизвестный intent только по имени пути.",
+      "source_refs": [
+        "S01",
+        "S08",
+        "S07"
+      ],
+      "closure_claim": false
+    },
+    {
+      "id": "B10",
+      "original_file": "2026-10-21-mcphub041-codex163-project-profile-compatibility.md",
+      "original_sha256": "7984c5c8178e8d3cc3c2218ed7cf9245674baa868c39404ac1c26ad989660eda",
+      "original_status": "Открытая ограниченная совместимость",
+      "original_findings": "Codex",
+      "topic": "Codex 0.163 compatibility",
+      "related_prs": [],
+      "status": "OPEN",
+      "current_disposition": "В исходном срезе supported cohort — 0.162.0/0.162.1; нового producer definition для 0.163 эти коммиты не вводят.",
+      "remaining": "Read-only inventory действующего producer/CLI, точная schema и проверенная definition/merge enabled,args,command; без wildcard допуска.",
+      "source_refs": [
+        "S01"
+      ],
+      "closure_claim": false
+    },
+    {
+      "id": "B11",
+      "original_file": "2026-10-28-debugmcp-endpoint-unreachable.md",
+      "original_sha256": "fff117f1d09702f4155c2432d0702ce365d57816c605d9342f7bb89028b97ea4",
+      "original_status": "Частичное восстановление; affected Desktop открыт",
+      "original_findings": "MCP consumer",
+      "topic": "DebugMCP affected Desktop",
+      "related_prs": [],
+      "status": "OPEN",
+      "current_disposition": "Поздний standalone/CLI успех из заявки сохранён; affected Desktop timeout новой работой не проверен.",
+      "remaining": "Переиспользовать исходного standalone creator, законное stop/restart управление и tools/call из исходного Desktop, без второго host.",
+      "source_refs": [
+        "S01"
+      ],
+      "closure_claim": false
+    },
+    {
+      "id": "B12",
+      "original_file": "2026-11-18-mcphub-sequential-thinking-cross-client-state.md",
+      "original_sha256": "c9bb5e1d24fd2be8e4486321343cc74f14a27c9f31ccac267958d2f1efe3c18b",
+      "original_status": "Открытый production wiring gap",
+      "original_findings": "ARA-01",
+      "topic": "Sequential Thinking cross-client state",
+      "related_prs": [
+        671
+      ],
+      "status": "PARTIAL",
+      "current_disposition": "P04 проверяет две зарегистрированные front sessions с fixture providers и раздельное settlement; это продвижение ARA-01, не полное закрытие заявки.",
+      "remaining": "Shipped manifest, install/reconcile/restore, project enrollment и настоящий pinned provider через qualified Product с независимой историей клиентов.",
+      "source_refs": [
+        "S01",
+        "S08"
+      ],
+      "closure_claim": false
+    },
+    {
+      "id": "B13",
+      "original_file": "mcphub_codex_final_reviewed_prompt_ru.md",
+      "original_sha256": "af49c4da2eddf0c82e805a225d2606d5b4dd2e07f72dcb501b0326bc7100e94f",
+      "original_status": "Исследовательская задача с открытой матрицей",
+      "original_findings": "ARA-01/ARA-02/ARA-03",
+      "topic": "Codex transport/session research",
+      "related_prs": [
+        629,
+        671
+      ],
+      "status": "PARTIAL",
+      "current_disposition": "Relay control/session fixes и private registered-route fixture готовы; Apps/Browser/Computer Use и настоящие account/confirmation lifetimes не квалифицированы.",
+      "remaining": "Inventory эффективной конфигурации и creators; настоящие отмена/server requests/state isolation с сохранением атрибуции и подтверждений; неизвестный effect не replay.",
+      "source_refs": [
+        "S01",
+        "S04",
+        "S08"
+      ],
+      "closure_claim": false
+    }
+  ],
+  "final_gates": [
+    {
+      "name": "Exact source / source replay",
+      "status": "PASS_SOURCE_ONLY",
+      "owner": "Root",
+      "detail": "c730 / 0c42; all 38 recorded intermediate trees replayed. Native and Product acceptance are separate."
+    },
+    {
+      "name": "Qualified Windows Product and mandatory private lanes",
+      "status": "NOT_QUALIFIED",
+      "owner": "Root",
+      "detail": "No full Product qualification or original user-flow acceptance is inferred from fixture tests."
+    },
+    {
+      "name": "go build ./...",
+      "status": "PASS",
+      "source_head": "14af01ea06063a2c2306aeaa1accf454151d7e6b",
+      "owner": "Root",
+      "detail": "24.184 s; ordinary Go build is not release Product qualification."
+    },
+    {
+      "name": "go vet ./...",
+      "status": "PASS",
+      "source_head": "14af01ea06063a2c2306aeaa1accf454151d7e6b",
+      "owner": "Root",
+      "detail": "54.056 s."
+    },
+    {
+      "name": "go test -count=1 -timeout 5m ./...",
+      "status": "FAIL",
+      "source_head": "14af01ea06063a2c2306aeaa1accf454151d7e6b",
+      "owner": "Root",
+      "detail": "56 packages PASS, 8 FAIL, 11 no tests; 23 top-level FAIL; 3 Go package timeouts. Original controller and resources closed."
+    },
+    {
+      "name": "go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/",
+      "status": "FAIL",
+      "source_head": "14af01ea06063a2c2306aeaa1accf454151d7e6b",
+      "owner": "Root",
+      "detail": "2 packages FAIL; 36 top-level FAIL; 2 Go package timeouts. Original controller and resources closed."
+    },
+    {
+      "name": "API overlay fixed and causal negative filters",
+      "status": "PASS_AND_EXPECTED_FAILURE_OBSERVED",
+      "source_head": "14af01ea06063a2c2306aeaa1accf454151d7e6b",
+      "owner": "Root",
+      "detail": "Fixed-2 API 89.752 s; negative Go exit 1 with 5 classifier and 4 subprocess assertion failures; historical first fixed FAIL retained."
+    },
+    {
+      "name": "c730 focused fixture follow-up",
+      "status": "PARTIAL_PASS_RECOVERY_FAIL",
+      "source_head": "c730cae455ef84d226ac5323953d9e7209b4016e",
+      "owner": "Root",
+      "detail": "Legacy default/tagged 24 PASS each, CLI adopt 2 PASS, Sonnet 3 PASS, unchanged VTune 1 PASS. Recovery timing still FAIL; no repeated TempDir cleanup error."
+    },
+    {
+      "name": "c730 full default and tagged rerun",
+      "status": "NOT_RUN",
+      "source_head": "c730cae455ef84d226ac5323953d9e7209b4016e",
+      "owner": "Root",
+      "detail": "No new full run is implied or scheduled merely to relabel previous failures."
+    },
+    {
+      "name": "Fixture intentional-failure cleanup control",
+      "status": "EXPECTED_FAILURE_OBSERVED",
+      "owner": "Root",
+      "detail": "Controller PASS requires Go exit 1 and four named observations; original resources closed, no package timeout or TempDir failure. Normal recovery timing remains FAIL.",
+      "source_head": "c730cae455ef84d226ac5323953d9e7209b4016e"
+    },
+    {
+      "name": "Seven owner publications and remote head readback",
+      "status": "PUBLISHED",
+      "owner": "Root",
+      "detail": "All seven exact owner commits match captured remote heads; all PRs open, Draft and unmerged."
+    },
+    {
+      "name": "Coordination implementation/evidence publication in #664",
+      "status": "INCLUDED_IN_THIS_PR",
+      "owner": "Root",
+      "detail": "Historical audit 9bc remains public; this PR includes the coordination updates. Post-push exact head readback is recorded in the PR description."
+    }
+  ],
+  "sources": [
+    {
+      "id": "S01",
+      "title": "Опубликованный исходный аудит и реестр",
+      "pr": 664,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/664",
+      "documents": [
+        {
+          "path": ".plans/2026-11/mcp-local-hub-audit-20261125.md"
+        },
+        {
+          "path": ".plans/2026-11/mcp-local-hub-audit-registry-20261125.json",
+          "sha256": "99cbe7f6835291a2afdf715cded8250dde1bc33aba853ca534c0c88854667298"
+        }
+      ],
+      "published_commit": "9bc3d18c6d820a4eafb3672fa45545e9ff2ebc5b"
+    },
+    {
+      "id": "S02",
+      "title": "Канонический план исправлений",
+      "pr": 664,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/664",
+      "documents": [
+        {
+          "path": ".plans/2026-11/audit-remediation-20261125.md"
+        }
+      ],
+      "ownership": "Root updates the canonical plan; this matrix does not replace it."
+    },
+    {
+      "id": "S03",
+      "title": "CMake: причина, контроль и scoped evidence",
+      "pr": 624,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/624",
+      "base_commit": "ee20f6009a8581c8141352cdbd261e1a97a0e805",
+      "prepared_commit": "5c36f626467bc6c8446d621f3a2b3fc7fd507b4b",
+      "publication_status": "PUBLISHED",
+      "documents": [
+        {
+          "path": ".plans/2026-11/cmake-audit-evidence-20261125.json",
+          "sha256": "3db794cc27b1e47c348bebed32c710e14fde557c71de00d90412043ce9bc6027"
+        },
+        {
+          "path": ".plans/2026-11/cmake-audit-remediation-20261125.md",
+          "sha256": "42e885197dcea8432cf2f15b2ed3681c6d8134d51b856b47f248f56bd359acd3"
+        }
+      ],
+      "published_commit": "5c36f626467bc6c8446d621f3a2b3fc7fd507b4b",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "id": "S04",
+      "title": "Relay: допуск, окончание сессии и scoped evidence",
+      "pr": 629,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/629",
+      "base_commit": "e33924ac97449c7cb8f103d80a39ecbb064310d3",
+      "prepared_commit": "6808e99bacc0961fef2a511b1ae1a088f12a1e12",
+      "publication_status": "PUBLISHED",
+      "documents": [
+        {
+          "path": ".plans/2026-11/relay-audit-evidence-20261125.json",
+          "sha256": "19e72cb45b38b520ce38f9b6c6f7b7c89877a7f335f933cbcb30c965db75dd7a"
+        },
+        {
+          "path": ".plans/2026-11/relay-audit-remediation-20261125.md",
+          "sha256": "1cabdbaadadc9b814d16b9f34ba42a14ffdb49775894eea227c7e48376049475"
+        }
+      ],
+      "published_commit": "6808e99bacc0961fef2a511b1ae1a088f12a1e12",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "id": "S05",
+      "title": "Кэши Serena/registry и scoped evidence",
+      "pr": 655,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/655",
+      "base_commit": "1a5a7dd04fe732df5c539860dde813c8c703586d",
+      "prepared_commit": "6743f3d552027395daf06bfd4fbc0123a374703b",
+      "publication_status": "PUBLISHED",
+      "documents": [
+        {
+          "path": ".plans/2026-11/cache-audit-remediation-20261125.md",
+          "sha256": "8bea32d1fc60c2af39b727163984c09b6a0313863dbc19810365191782d71d41"
+        },
+        {
+          "path": ".plans/2026-11/serena-audit-evidence-20261125.json",
+          "sha256": "b34916d1e57d6a1be0722a777fb67592661086204a086a3e6bf752a568fc15cf"
+        }
+      ],
+      "published_commit": "6743f3d552027395daf06bfd4fbc0123a374703b",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "id": "S06",
+      "title": "Scheduler: контракты, регрессии и scoped evidence",
+      "pr": 660,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/660",
+      "base_commit": "892fa82e0e1aa5746d97365f96a9b69ef7934168",
+      "prepared_commit": "8d4f2606c9af7e20181e4ad290b29be0e0a2dd0f",
+      "publication_status": "PUBLISHED",
+      "documents": [
+        {
+          "path": ".plans/2026-11/scheduler-audit-evidence-20261125.json",
+          "sha256": "3433edb5e9a6308de576029f446fbde8ad474b4a9478b7a52cf8352586d25e6e"
+        },
+        {
+          "path": ".plans/2026-11/scheduler-audit-remediation-20261125.md",
+          "sha256": "e5e0ff8e04516a5fb89d062e36d6ced82683929e30ca6eb212d69c71fc15f368"
+        }
+      ],
+      "published_commit": "8d4f2606c9af7e20181e4ad290b29be0e0a2dd0f",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "id": "S07",
+      "title": "Process: детерминированное окно подтверждения",
+      "pr": 628,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/628",
+      "base_commit": "e7fee02b5ce1b965486b15f13938bd0d67c841d8",
+      "prepared_commit": "0b3a9e0edafc41e7e8567abfde878e8f169405ef",
+      "publication_status": "PUBLISHED",
+      "documents": [
+        {
+          "path": ".plans/2026-11/process-audit-evidence-20261125.json",
+          "sha256": "5ed6f2193dc1aea1c437b51c99c4160a2083c8ff7377da311f02aee9bcfe373e"
+        },
+        {
+          "path": ".plans/2026-11/process-audit-remediation-20261125.md",
+          "sha256": "95c68dd4702e7ad5c3ed60dd1743ce65a405fd9586ec80930cf47bda447b1d46"
+        }
+      ],
+      "published_commit": "0b3a9e0edafc41e7e8567abfde878e8f169405ef",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "id": "S08",
+      "title": "#671: Windows, private stdio и npm",
+      "pr": 671,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/671",
+      "base_commit": "09dc07e01d1a3236ab5f45f384e11fe2f9dfd30d",
+      "prepared_commit": "891ef8bfd0764a969db2f800578fd45acd5623d6",
+      "publication_status": "PUBLISHED",
+      "documents": [
+        {
+          "path": ".plans/2026-11/pr671-remediation-evidence-20261125.json",
+          "sha256": "8936e069bb00c5dbf396638d6325829217d7ce553d39ad43d140a591a55c2064"
+        },
+        {
+          "path": ".plans/2026-11/pr671-remediation-evidence-20261125.md",
+          "sha256": "e633d7a450589b31f8cc7bc3b7cbdc2e58ffd910e573a08e9bd3308c7c846cb6"
+        },
+        {
+          "path": ".plans/2026-11/registered-stdio-isolation-20261125.md",
+          "sha256": "85752adcb646859f241158fd9467363a73c88d625f7e350dd79f1226f10a108f"
+        }
+      ],
+      "published_commit": "891ef8bfd0764a969db2f800578fd45acd5623d6",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "id": "S09",
+      "title": "#659: force-stop и исходный exit code",
+      "pr": 659,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/659",
+      "base_commit": "a3568dfe3426afaca4176d57a2310097e5214e77",
+      "prepared_commit": "9043acae5a778b9b123b195d3c04cb213e5e568d",
+      "publication_status": "PUBLISHED",
+      "documents": [
+        {
+          "path": ".plans/2026-11/force-stop-audit-evidence-20261125.json",
+          "sha256": "a11bfda88c320009b4616993daa66faa1c1c10aad8ec8a6c59bde3ed73fd7d3b"
+        },
+        {
+          "path": ".plans/2026-11/force-stop-audit-remediation-20261125.md",
+          "sha256": "36778c38492a3fa2211b308ac944085707a8ef1514e51838b2c293c006db2e64"
+        }
+      ],
+      "published_commit": "9043acae5a778b9b123b195d3c04cb213e5e568d",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "id": "S10",
+      "title": "Композиция и API port-helper overlay",
+      "pr": 664,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/664",
+      "prepared_integration_head": "2c71dd70fba1125bd10d4a3506516be4d6820101",
+      "documents": [
+        {
+          "path": ".plans/2026-11/integration-audit-20261125/README.md"
+        },
+        {
+          "path": ".plans/2026-11/integration-audit-20261125/composition.json"
+        },
+        {
+          "path": ".plans/2026-11/integration-audit-20261125/verification.json"
+        },
+        {
+          "path": ".plans/2026-11/integration-audit-20261125/patches/api-port-helper-admission.patch"
+        },
+        {
+          "path": ".plans/2026-11/integration-audit-20261125/negative-controls/api-port-helper-admission-negative.patch"
+        }
+      ],
+      "publication_status": "INCLUDED_IN_THIS_PR",
+      "native_status": "Full 14af default/tagged FAIL; c730 focused partial PASS with recovery FAIL; full c730 NOT_RUN",
+      "note": "The negative control is a separate test input, never a production/publication overlay.",
+      "reported_formatted_integration_head": "c2901b4a006ee0813b3b8b4e4afbb211f27b1cd4",
+      "latest_reported_head_prefix": "c730cae",
+      "current_prepared_head": "c730cae455ef84d226ac5323953d9e7209b4016e",
+      "current_prepared_tree": "0c42ea39f241077cb6a9e1a64efe6d1e0a726751"
+    },
+    {
+      "id": "S11",
+      "title": "Нативные результаты и исходное завершение",
+      "pr": 664,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/664",
+      "documents": [
+        {
+          "path": ".plans/2026-11/integration-audit-20261125/native-evidence.md"
+        },
+        {
+          "path": ".plans/2026-11/integration-audit-20261125/native-evidence.json"
+        }
+      ],
+      "note": "Root owns the native evidence export; the matrix records observed results and does not modify that ledger."
+    },
+    {
+      "id": "S12",
+      "title": "Четыре исправления fixtures и отдельный failure control",
+      "pr": 664,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/664",
+      "documents": [
+        {
+          "path": ".plans/2026-11/integration-audit-20261125/patches/native-gate-fixtures.patch",
+          "sha256": "4fd19883e0c133725b56f12567000bc89f4da48d0b15cd9bbe30df9fc08bc56e"
+        },
+        {
+          "path": ".plans/2026-11/gate-fixtures-failure-control-20261125.patch",
+          "sha256": "f0c3f87ad59d3b5bd82d23e894fa0347c11615acb228b73be2b8ec92cf5c435e"
+        }
+      ],
+      "publication_status": "INCLUDED_IN_THIS_PR",
+      "note": "The intentional-failure patch is a separate test input, never a positive source or production patch."
+    },
+    {
+      "id": "S13",
+      "title": "Подтверждённые опубликованные owner heads",
+      "pr": 664,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/664",
+      "documents": [
+        {
+          "path": ".plans/2026-11/integration-audit-20261125/composition.json"
+        },
+        {
+          "path": ".plans/2026-11/audit-publication-readback-20261125.json"
+        }
+      ],
+      "publication_readback_sha256": "42a7e2849c6b8cb0cb415fa215cb004d94574a11f921012a7cef19364f46f3c6",
+      "owner_commit_registry_sha256": "f3ce58349c9ad3476c185246338d7a758e957bdd15d243b8aa124b58c35fd2a1",
+      "readback": [
+        {
+          "pr": 624,
+          "branch": "perf/rx01-cmaketrace-benchmark-20261112",
+          "sha": "5c36f626467bc6c8446d621f3a2b3fc7fd507b4b",
+          "state": "open",
+          "draft": true,
+          "merged": false
+        },
+        {
+          "pr": 629,
+          "branch": "fix/relay-output-failure-contract-20261113",
+          "sha": "6808e99bacc0961fef2a511b1ae1a088f12a1e12",
+          "state": "open",
+          "draft": true,
+          "merged": false
+        },
+        {
+          "pr": 655,
+          "branch": "fix/serena-finalize-context-20261115",
+          "sha": "6743f3d552027395daf06bfd4fbc0123a374703b",
+          "state": "open",
+          "draft": true,
+          "merged": false
+        },
+        {
+          "pr": 660,
+          "branch": "fix/scheduler-hidden-task-lookup-20261119",
+          "sha": "8d4f2606c9af7e20181e4ad290b29be0e0a2dd0f",
+          "state": "open",
+          "draft": true,
+          "merged": false
+        },
+        {
+          "pr": 628,
+          "branch": "perf/rx16-native-observation-20261112",
+          "sha": "0b3a9e0edafc41e7e8567abfde878e8f169405ef",
+          "state": "open",
+          "draft": true,
+          "merged": false
+        },
+        {
+          "pr": 671,
+          "branch": "codex/windows-installer-review",
+          "sha": "891ef8bfd0764a969db2f800578fd45acd5623d6",
+          "state": "open",
+          "draft": true,
+          "merged": false
+        },
+        {
+          "pr": 659,
+          "branch": "fix/api-port-pid-observation-20261118",
+          "sha": "9043acae5a778b9b123b195d3c04cb213e5e568d",
+          "state": "open",
+          "draft": true,
+          "merged": false
+        }
+      ]
+    }
+  ],
+  "document_validation": {
+    "original_ids_complete": true,
+    "bug_ids_complete": true,
+    "prepared_code_hashes_match_registry": true,
+    "prepared_documents_match_commit": true,
+    "new_execution_performed_for_this_document": false,
+    "native_commands_run_by_document_author": false,
+    "publication_readback_matches_all_seven_commits": true,
+    "full_gate_counts_recomputed_from_retained_logs": true,
+    "focused_counts_including_nested_skips_recomputed": true,
+    "source_replay_receipt_read_not_rerun": true,
+    "controlled_failure_receipt_and_required_markers_checked": true
+  },
+  "reported_formatted_integration_head": "c2901b4a006ee0813b3b8b4e4afbb211f27b1cd4",
+  "latest_reported_integration_head_prefix": "c730cae",
+  "latest_reported_integration_status": "Source replay 38 PASS; focused fixtures partly PASS with recovery timing FAIL; full c730 default/tagged NOT_RUN",
+  "current_prepared_integration_head": "c730cae455ef84d226ac5323953d9e7209b4016e",
+  "current_prepared_integration_tree": "0c42ea39f241077cb6a9e1a64efe6d1e0a726751",
+  "publication_readback_sha256": "42a7e2849c6b8cb0cb415fa215cb004d94574a11f921012a7cef19364f46f3c6",
+  "latest_composition_full_gate_status": "NOT_RUN",
+  "last_full_gate_head": "14af01ea06063a2c2306aeaa1accf454151d7e6b",
+  "last_full_gate_tree": "386923930b874526a0e6896bde1857c4ecc95d63",
+  "fixture_followup": {
+    "source_head": "c730cae455ef84d226ac5323953d9e7209b4016e",
+    "source_tree": "0c42ea39f241077cb6a9e1a64efe6d1e0a726751",
+    "source_replay_status": "PASS",
+    "source_replay_steps": 38,
+    "scope": "Four test files only; no production changes or assertion deadline increases",
+    "patch": {
+      "path": ".plans/2026-11/integration-audit-20261125/patches/native-gate-fixtures.patch",
+      "sha256": "4fd19883e0c133725b56f12567000bc89f4da48d0b15cd9bbe30df9fc08bc56e"
+    },
+    "focused_export_sha256": "7f3b04f10108b3576d43ffade79863bd8d8370bc0b9d3bd06e66fd4055901ae6",
+    "focused_overall_status": "FAIL",
+    "focused_results": [
+      {
+        "name": "legacy-default",
+        "status": "PASS",
+        "top_level_pass": 24,
+        "top_level_skip": 0,
+        "nested_skip": 0,
+        "package_seconds": 5.226
+      },
+      {
+        "name": "legacy-tagged",
+        "status": "PASS",
+        "top_level_pass": 24,
+        "top_level_skip": 0,
+        "nested_skip": 0,
+        "package_seconds": 5.796
+      },
+      {
+        "name": "cli-adopt",
+        "status": "PASS",
+        "top_level_pass": 2,
+        "package_seconds": 0.997
+      },
+      {
+        "name": "recovery",
+        "status": "FAIL",
+        "top_level_fail": 1,
+        "case_seconds": 1.77,
+        "package_seconds": 2.282,
+        "remaining_cause": "UNKNOWN",
+        "repeated_tempdir_cleanup_error_observed": false
+      },
+      {
+        "name": "sonnet",
+        "status": "PASS",
+        "top_level_pass": 3,
+        "package_seconds": 0.627
+      },
+      {
+        "name": "vtune-unchanged-control",
+        "status": "PASS",
+        "top_level_pass": 1,
+        "package_seconds": 1.495
+      }
+    ],
+    "original_controller_reaped": true,
+    "command_quiescence_complete": true,
+    "original_owners_closed": true,
+    "original_readers_joined": true,
+    "full_default_status": "NOT_RUN",
+    "full_tagged_status": "NOT_RUN",
+    "controlled_failure": {
+      "status": "EXPECTED_FAILURE_OBSERVED",
+      "path": ".plans/2026-11/gate-fixtures-failure-control-20261125.patch",
+      "sha256": "f0c3f87ad59d3b5bd82d23e894fa0347c11615acb228b73be2b8ec92cf5c435e",
+      "scope": "Separate intentional Sonnet Fatal and recovery callback Goexit control; never applied to positive/publication source",
+      "controller_status": "PASS",
+      "go_exit_code": 1,
+      "controller_seconds": 18.550832,
+      "export_sha256": "e38713e73b6edb2e9aff93f03ce955d00de67c624665a3b34c285b93a2f51ba1",
+      "original_receipt_sha256": "ca6b7998da9dab390f3acb9b5b2c8b97452a6e24abadf1e9bc2be410d3ceaba4",
+      "required_markers_observed": [
+        "AUDIT_EXPECTED_RECOVERY_CALLBACK_GOEXIT",
+        "recovery exited without an execution result during cleanup",
+        "AUDIT_EXPECTED_FATAL_AFTER_SONNET_START",
+        "AUDIT_SONNET_ORIGINAL_CLOSE_OBSERVED"
+      ],
+      "recovery": {
+        "case_seconds": 1.0,
+        "package_seconds": 1.333,
+        "goexit_observed": true,
+        "missing_result_observed": true,
+        "respawn_dispatched_latch_closed": false,
+        "latch_explanation": "The callback intentionally exits before the dispatch observation is emitted."
+      },
+      "sonnet": {
+        "case_seconds": 0.08,
+        "package_seconds": 0.475,
+        "fatal_after_start_observed": true,
+        "original_close_observed": true
+      },
+      "original_controller_reaped": true,
+      "command_quiescence_complete": true,
+      "original_owners_closed": true,
+      "original_readers_joined": true,
+      "test_timeout_observed": false,
+      "tempdir_cleanup_failure_observed": false,
+      "limit": "This proves original cleanup completed under the controlled fatal paths; it does not prove the normal one-second recovery contract."
+    },
+    "source_refs": [
+      "S10",
+      "S11",
+      "S12"
+    ],
+    "focused_original_receipt_sha256": "6d6d1142ffb63e8426830e88ce5bd5b1c84f355a9f0b7f2d626a662d491dad43"
+  },
+  "coordination_publication_note": "This PR includes the coordination evidence and four fixture source changes. Exact publication receipt and remote head are recorded in the PR description after push, avoiding a self-referential commit hash."
+}

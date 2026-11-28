@@ -1,0 +1,4 @@
+native/** -text
+source/*.commit -text
+source/*.patch -text
+b-fixture-delta/*.patch -text

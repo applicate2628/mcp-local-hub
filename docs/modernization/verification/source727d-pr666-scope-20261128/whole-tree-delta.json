@@ -1,0 +1,6044 @@
+{
+  "schema": "complete-source-tree-delta-v1",
+  "direction": "recovered33_to_Source727d",
+  "recovered33_tree": "9e46575153d8a70c98c5629fdaa4767f61401f6c",
+  "source727d_tree": "d959ed0a4f8ab02947aec7569f3c0535a3cff533",
+  "rows": [
+    {
+      "path": ".github/workflows/npm-publish.yml",
+      "kind": "changed",
+      "from": "8ed260ad5036af6cdea455fb042580fdf7555e7a",
+      "to": "d84a2f77a5ef099bb7f47f25bb3ed878aff968fb",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": ".plans/2026-11/archguard-source-binding-20261122.json",
+      "kind": "public_only",
+      "from": "e37b24d9804de327b0ed64b6ca7b0dccc0bda9d9",
+      "mode": "100644"
+    },
+    {
+      "path": ".plans/2026-11/cmake-terminal-closeout-20261122.json",
+      "kind": "public_only",
+      "from": "05ed734c9844a67855ddaacf89223a53180a4cb9",
+      "mode": "100644"
+    },
+    {
+      "path": ".plans/2026-11/continuation-closeout-20261122.json",
+      "kind": "public_only",
+      "from": "9ac2ddc4dfd3ea6c54e67f89bae9b0f45d5a5a02",
+      "mode": "100644"
+    },
+    {
+      "path": ".plans/2026-11/continuation-closeout-evidence-20261122.tar.xz",
+      "kind": "public_only",
+      "from": "d46294b4a2644f09e1d5b0cb90c23b37200856f7",
+      "mode": "100644"
+    },
+    {
+      "path": ".plans/2026-11/continuation-final-readback-20261122.json",
+      "kind": "public_only",
+      "from": "7184d58ba300faeff1a443486af73c78fe9b1cc0",
+      "mode": "100644"
+    },
+    {
+      "path": ".plans/2026-11/continuation-scope-audit-20261122.md",
+      "kind": "public_only",
+      "from": "d605fe7430f0f808a9cf7d0a1d5ea6bff3f883a1",
+      "mode": "100644"
+    },
+    {
+      "path": ".plans/2026-11/open-pr-integration-20261117.md",
+      "kind": "public_only",
+      "from": "4221de27b445026ce9d5aa4e01746cb76af2947f",
+      "mode": "100644"
+    },
+    {
+      "path": ".plans/2026-11/p0-continuation-closeout-20261122.json",
+      "kind": "public_only",
+      "from": "c7f1b4717279f5e437b59f08053b6550fdc3b2fc",
+      "mode": "100644"
+    },
+    {
+      "path": ".plans/2026-11/p0-continuation-evidence-20261122.zip",
+      "kind": "public_only",
+      "from": "b9788f200a706e607d6dfa5e8b64ca83fbd1e172",
+      "mode": "100644"
+    },
+    {
+      "path": ".plans/2026-11/p0-continuation-local-cleanup-20261122/cleanup_local.py",
+      "kind": "public_only",
+      "from": "9c468318038878d6f2a56df8d97956cee79becf0",
+      "mode": "100644"
+    },
+    {
+      "path": ".plans/2026-11/p0-continuation-local-cleanup-20261122/local-cleanup-inventory.jsonl.gz",
+      "kind": "public_only",
+      "from": "f67f9602810863c27c247a5933881d09163cbbed",
+      "mode": "100644"
+    },
+    {
+      "path": ".plans/2026-11/p0-continuation-local-cleanup-20261122/local-cleanup.json",
+      "kind": "public_only",
+      "from": "4f01561932d89fd208469b57978d9e89d363fc7b",
+      "mode": "100644"
+    },
+    {
+      "path": ".plans/2026-11/p0-continuation-local-cleanup-20261122/plan-publication-readback.json",
+      "kind": "public_only",
+      "from": "8aa020c0d77af6b4d3dc576f2d3c97198ed97365",
+      "mode": "100644"
+    },
+    {
+      "path": ".plans/2026-11/p0-next-architecture-triage-20261122.json",
+      "kind": "public_only",
+      "from": "48c4580bdf22e6bdc43158dea03ec4f0e3812722",
+      "mode": "100644"
+    },
+    {
+      "path": ".plans/2026-11/p0-next-closeout-20261122.json",
+      "kind": "public_only",
+      "from": "ee67733db9eb35f9019f2d4159b0d78fd86c1426",
+      "mode": "100644"
+    },
+    {
+      "path": ".plans/2026-11/p0-next-evidence-20261122.zip",
+      "kind": "public_only",
+      "from": "fff6b9354e0e34bdd55fcf7ab702daead8af61ef",
+      "mode": "100644"
+    },
+    {
+      "path": ".plans/2026-11/p0-publication-closeout-20261122.json",
+      "kind": "public_only",
+      "from": "59162e42cc9a86003cdb6ac801893c8456a3c786",
+      "mode": "100644"
+    },
+    {
+      "path": ".plans/2026-11/p0-publication-readback-20261122.json",
+      "kind": "public_only",
+      "from": "10b832d1075016f556bf19ed912259be3c1b5db4",
+      "mode": "100644"
+    },
+    {
+      "path": ".plans/2026-11/prune-recovery-closeout-20261121.json",
+      "kind": "public_only",
+      "from": "2a0fe92225c8daa4f8f932103d97fb6bc8e39152",
+      "mode": "100644"
+    },
+    {
+      "path": ".plans/2026-11/reader-relay-closeout-20261122.json",
+      "kind": "public_only",
+      "from": "6cb561bb687cc82b426f48b023e44791a57d24cf",
+      "mode": "100644"
+    },
+    {
+      "path": ".plans/2026-11/reader-relay-closeout-evidence-20261122.tar.gz",
+      "kind": "public_only",
+      "from": "b115394d95fa3baf8f16efe5df7d8ec8c7190712",
+      "mode": "100644"
+    },
+    {
+      "path": ".plans/2026-11/reader-relay-local-cleanup-20261122.json",
+      "kind": "public_only",
+      "from": "5825cb22062952846f856fe6c5208be0c9c1b022",
+      "mode": "100644"
+    },
+    {
+      "path": ".plans/2026-11/residual-closeout-20261122.json",
+      "kind": "public_only",
+      "from": "cbdd954e6397aa2b6d72a9e1cf9678d8d3e20817",
+      "mode": "100644"
+    },
+    {
+      "path": ".plans/2026-11/serena-composition-closeout-20261122.json",
+      "kind": "public_only",
+      "from": "ff5e4f6541968100b85db18b339f773904a12731",
+      "mode": "100644"
+    },
+    {
+      "path": "AGENTS.md",
+      "kind": "public_only",
+      "from": "cc889dd7c9679985fab7ae55d82d76597bbebcdc",
+      "mode": "100644"
+    },
+    {
+      "path": "CLAUDE.md",
+      "kind": "changed",
+      "from": "43c994c2d3617f947bcb5adf1933e21dabe46bb5",
+      "to": "2bafe12915c29b935c6e9280c9a23817ba753286",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "kind": "changed",
+      "from": "c44704c7d2341e6c0c5be1767bcb0737a88546a4",
+      "to": "80d598e6293a054cc7c3f0d98edecbbecc201d89",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "README.md",
+      "kind": "changed",
+      "from": "18b83f0cae1d48e6bda8a734735922c6e596af9a",
+      "to": "bf95082ff0fa296628ca4e71f84c6c6c33120434",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "build.ps1",
+      "kind": "changed",
+      "from": "8d042c8e8417b579bf7ace90da1a73d8b5484b2e",
+      "to": "af75420fad6094b470ba97ab4fbfb4d61c0d6da6",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "build.sh",
+      "kind": "changed",
+      "from": "2cfb4a2036bd729c168cb0a0d70db1434c7040e9",
+      "to": "1fa8caecce401893e4e6de81e75fcc8210ed3f23",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "cmd/mcphub-launcher/main_windows.go",
+      "kind": "changed",
+      "from": "c96cc81488cabfd58758751ce2fc1e93cbe406f6",
+      "to": "f65ec90172c991c969c482fccf1770f008a0eaf6",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "cmd/mcphub-launcher/outcome_windows.go",
+      "kind": "changed",
+      "from": "bfbbbb4bb94cfc5858a62dbc4fbd25c7c22e1a28",
+      "to": "a0f48ccd0153f76491519a98afa65195534d4929",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "cmd/mcphub-launcher/outcome_windows_test.go",
+      "kind": "changed",
+      "from": "76c9f26d76ab6225513a68fe00ecde3949f8b355",
+      "to": "95e0e56b778692febf9030976704b723dc036ecc",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "cmd/mcphub/main.go",
+      "kind": "changed",
+      "from": "10e7aaf4c614bc9f3bad5c1df404ac7471181f1a",
+      "to": "22c133acf5209c6dd8b2458daae37ca80e3da0da",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "cmd/mcphub/main_test.go",
+      "kind": "changed",
+      "from": "64b2e519fc4e6692dfcfe462db728478a2b0c7bc",
+      "to": "2c6a59c6df43eb47c76f48de8a5515b9c32ebbd8",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "cmd/mcphub/versioninfo.json",
+      "kind": "changed",
+      "from": "9325cd8b878456aa3755964929a354afe4e73245",
+      "to": "3d537e22791bb3084a7ccd88e20744e37ecd0cd1",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "docs/agent-runbook.md",
+      "kind": "public_only",
+      "from": "1e7e066e99e021a93af80ddb2401ad0399b3df15",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/frontend-flowbite.md",
+      "kind": "changed",
+      "from": "1e87230105d1e183dd8f088a4ec39adbaba1cc2d",
+      "to": "6378d16c327dd53a1e4af672e7551c02574150f2",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "docs/modernization/adr/0007-rust-owner-sidecar.md",
+      "kind": "source_only",
+      "to": "685ac99e43cff39808048bebf366e8a66febc5af",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/decisions.md",
+      "kind": "changed",
+      "from": "a32d4054aa7bfaa4a8578149155ece678f08bf41",
+      "to": "7671741c57a63a47d10ca7477085042565f026a3",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "docs/modernization/verification/cli-helper-dispatch-2026-11-21/README.md",
+      "kind": "public_only",
+      "from": "ed4273700b5caba30efcbf38cab239296479fc6f",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/cli-helper-dispatch-2026-11-21/cli-evidence.zip",
+      "kind": "public_only",
+      "from": "73988cbd2292953d06e2c454f66761147cee612b",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/cli-helper-dispatch-2026-11-21/source-inputs.json",
+      "kind": "public_only",
+      "from": "3e49aa916fd7055f72804db90aade3da050f19b7",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/gui-original-owner-2026-11-22/README.md",
+      "kind": "public_only",
+      "from": "9c5cb05e4a4b8a5910c41508f4ffde39fee5c501",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/gui-original-owner-2026-11-22/archive.json",
+      "kind": "public_only",
+      "from": "d7afd63152e70610a90ebb0d364b5cd1ec56aa2f",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/gui-original-owner-2026-11-22/gui-owner-evidence.zip",
+      "kind": "public_only",
+      "from": "2e5050d5c856399c90b33875df535807508fa9d6",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/gui-original-owner-2026-11-22/publication-readback.json",
+      "kind": "public_only",
+      "from": "cb37af3756fd525cd08dace918cae72bd7c0a2c4",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/gui-original-owner-2026-11-22/qualification.json",
+      "kind": "public_only",
+      "from": "fefd603a58845b929abaa5ad6469c8ee18e369be",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/gui-original-owner-2026-11-22/source-composition-proof.json",
+      "kind": "public_only",
+      "from": "6b8d493108a3ca7c55e89503266aacd6630e6f1d",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/member-ffi-2026-11-19.md",
+      "kind": "source_only",
+      "to": "2cd7a7db36d636c1c69594467ebbeedb69f59cf2",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/native-observation-2026-11-18/.gitattributes",
+      "kind": "public_only",
+      "from": "fa1385d99a319b43c06f5309d1aae9fdd3adea46",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/native-observation-2026-11-18/RESULTS.md",
+      "kind": "public_only",
+      "from": "0bc4099439687927588a8eff4fb9fa1008528ca8",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/native-observation-2026-11-18/SHA256SUMS",
+      "kind": "public_only",
+      "from": "96e6c7f3f41490d1b82936f6d6f2a9aae2bf10a0",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/native-observation-2026-11-18/logs.zip",
+      "kind": "public_only",
+      "from": "000fb62d859edf1b94d3ad9fd8f26c1e84440151",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/native-observation-2026-11-18/manifest.json",
+      "kind": "public_only",
+      "from": "00197ee1009131e4afc3021840fda62b64263a71",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/p0-safe-test-gates-2026-11-21/README.md",
+      "kind": "public_only",
+      "from": "4790080b0d9d14da586fcdc586ac96c77202c533",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/p0-safe-test-gates-2026-11-21/p0-gates-evidence.zip",
+      "kind": "public_only",
+      "from": "c5e443ec0d550c15dad7f6d5fd202d045111691f",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/p0-safe-test-gates-2026-11-21/qualification.json",
+      "kind": "public_only",
+      "from": "74f5e4a4ec444969ff13eecdfa0fa2575a1efa66",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/publisher-roles-20261123/README.md",
+      "kind": "public_only",
+      "from": "b92d29207bf43d2fb4df9ea1ad6899986580537c",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/publisher-roles-20261123/audit.json",
+      "kind": "public_only",
+      "from": "b18f228797cbc5296f1f08df5de22f66bba93174",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/publisher-roles-20261123/namespace-build-receipt.json",
+      "kind": "public_only",
+      "from": "6776b399d2382e2ce7e491b8eeb7e7b670cef329",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/publisher-roles-20261123/preparation-attempt-v1.txt",
+      "kind": "public_only",
+      "from": "0f0c47daaca81b28732f24f6525e3a35813d34c5",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/publisher-roles-20261123/publisher-roles-20261123-57604a3a.zip",
+      "kind": "public_only",
+      "from": "64086e3452d1db6f0e29af17b789d3eac63d20d7",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/publisher-roles-20261123/residual-plan.md",
+      "kind": "public_only",
+      "from": "03c7cb830b8df83e4fc7045a806c028a6cd6cc34",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/publisher-roles-20261123/trash-receipt.json",
+      "kind": "public_only",
+      "from": "ff81917e45b9cdc6cbb6dab4c2f98882fe0ecdd0",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/residual-next-closeout-20261122/C-source-triage/A217-SOURCE-ACQUIRED.md",
+      "kind": "public_only",
+      "from": "d4e263cd8ae31376c5fc08f6ca2c85bd1c8ed0bd",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/residual-next-closeout-20261122/C-source-triage/README.md",
+      "kind": "public_only",
+      "from": "29f4654e33b2541763af63e9fdc1398820cd7cb2",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/residual-next-closeout-20261122/C-source-triage/archive.json",
+      "kind": "public_only",
+      "from": "9371e5ebacdf55cdc08f195da1c94108626994fd",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/residual-next-closeout-20261122/C-source-triage/source-evidence.zip",
+      "kind": "public_only",
+      "from": "22e8b574e479e47959152934d9bd1e8ec4d14395",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/residual-next-closeout-20261122/README.md",
+      "kind": "public_only",
+      "from": "ec3dfa56f6f0ef5d601fc003ed88256821e7833d",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/residual-next-closeout-20261122/archive.json",
+      "kind": "public_only",
+      "from": "32419c76df0a44af8cdeb52996694d542da00d94",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/residual-next-closeout-20261122/queue-audit/README-pre664-publication-20261122T213449Z.md",
+      "kind": "public_only",
+      "from": "040ee075845300751a04526a7c71b1043063b1b7",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/residual-next-closeout-20261122/queue-audit/README.md",
+      "kind": "public_only",
+      "from": "7708d50fddffca699e4496af934e00bf7201778e",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/residual-next-closeout-20261122/queue-audit/queue-snapshot-pre664-publication-20261122T213449Z.json",
+      "kind": "public_only",
+      "from": "3eae3f6807056e5be547948bf69718e1211b6d56",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/residual-next-closeout-20261122/queue-audit/queue-snapshot.json",
+      "kind": "public_only",
+      "from": "d7020f1636bdb6c7c80a89866c46a209dab3db41",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/residual-next-closeout-20261122/verification-evidence.zip",
+      "kind": "public_only",
+      "from": "a6b639d308ccf229a920e5bfc68f088950f5ec1f",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/rust-owner-custody-retry-audit-2026-11-19.md",
+      "kind": "source_only",
+      "to": "47f755c8e756ada8bdeccf9cdef33cb8e5c5d549",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/rust-owner-foreground-console-audit-2026-11-20.md",
+      "kind": "source_only",
+      "to": "c28bd3c586710750c2f4b5e2bde470c0aa60be55",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/rust-owner-product-audit-2026-11-17.md",
+      "kind": "source_only",
+      "to": "91cf030ff3eabcebe9121ccf2b51396ea5e3642e",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/rust-owner-product-facade-audit-2026-11-19.md",
+      "kind": "source_only",
+      "to": "5b9c8d23ddcc85e915489135b2a3182afa96103e",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/rust-owner-product-host-audit-2026-11-19.md",
+      "kind": "source_only",
+      "to": "5c1b3063e968a366aee65162ce3561fe83393ea6",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/rust-owner-product-io-audit-2026-11-19.md",
+      "kind": "source_only",
+      "to": "97f8308c2e674c993a0eeafbd338be73214840de",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/rust-owner-product-io-plan-2026-11-19.md",
+      "kind": "source_only",
+      "to": "93ec969337c85b71f961da8da2d895a511277aa5",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/rust-owner-product-members-audit-2026-11-19.md",
+      "kind": "source_only",
+      "to": "33d988b989961e213e076a86b5616954c609cc02",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/rust-owner-product-supervisor-audit-2026-11-19.md",
+      "kind": "source_only",
+      "to": "76b3dfdfe172486a9784791caeb2d3a3546644f6",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/rust-owner-rust100-audit-2026-11-19.md",
+      "kind": "source_only",
+      "to": "83b0a41afba632fbdad45bcd04137979cb15e39d",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/serena-product-composition-20261122/README.md",
+      "kind": "public_only",
+      "from": "732dc8624da7e5284cd14a9cedc124a21c9a4291",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/serena-product-composition-20261122/candidate-inputs.zip",
+      "kind": "public_only",
+      "from": "3c13230a665d7dac1d5717fa33602265cb51045a",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/serena-product-composition-20261122/compose.py",
+      "kind": "public_only",
+      "from": "b223a83c300272c817d9bcacdb7bccf852089f80",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/serena-product-composition-20261122/composition-evidence.json",
+      "kind": "public_only",
+      "from": "bc9154d73054133621884a035eb429601a9b868b",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/serena-product-composition-20261122/manifest.json",
+      "kind": "public_only",
+      "from": "1943a6cccc16c76b351f87149c49a4856be17ea3",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/serena-source-preparation-20261122/README.md",
+      "kind": "public_only",
+      "from": "cf63659b4e38125263bab44c5c1fb771a31862b9",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/serena-source-preparation-20261122/archive.json",
+      "kind": "public_only",
+      "from": "d963cb962e72a6caf56b195477f0cefe4b616cf8",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/serena-source-preparation-20261122/audit-report.md",
+      "kind": "public_only",
+      "from": "8cdfdabb8f52f0b50ea01940576ac88dc7b94f74",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/serena-source-preparation-20261122/audit.json",
+      "kind": "public_only",
+      "from": "8be70a4918d6ad23c63f87cf9ec07c85aca2f501",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/serena-source-preparation-20261122/bundle.zip",
+      "kind": "public_only",
+      "from": "b45d145834c8221a7cc1932c4688e3fbdd466953",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/serena-source-preparation-20261122/replay.py",
+      "kind": "public_only",
+      "from": "1c5ae8d8f73f3e0faee7420aa2a7fffa1ac06ba8",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/serena-source-preparation-20261122/verification.json",
+      "kind": "public_only",
+      "from": "773dbbbd58c3643ad72b8abc7b2438e5e7fe0a89",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/status-observation-2026-11-19/RESULTS.md",
+      "kind": "public_only",
+      "from": "f3676789a6f9afaf9ac593916da69c254b7aca16",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/modernization/verification/status-observation-2026-11-19/evidence-redacted.zip",
+      "kind": "public_only",
+      "from": "ea1289254d5d32cb36fb6cbabe0938c77c0b6302",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/skills/mcphub-explained/SKILL.md",
+      "kind": "changed",
+      "from": "1382aee61c9b6dd3f03d1d70359265712703c2af",
+      "to": "9c05d8bc95d97acc15fb8581589dfb462e354f9c",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "experiments/rust-process-owner/.gitignore",
+      "kind": "source_only",
+      "to": "b83d22266ac8aa2f8df2edef68082c789727841d",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/Cargo.lock",
+      "kind": "source_only",
+      "to": "2395f800e796dfae7a6f3b1ffa241de573b37873",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/Cargo.toml",
+      "kind": "source_only",
+      "to": "a6e8d41637e2b3d755f81b52565b999255f79c3f",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/README.md",
+      "kind": "source_only",
+      "to": "d46f0cee2cffe87a9a64057558ee0709b0b79481",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/Cargo.lock",
+      "kind": "source_only",
+      "to": "f81b4c8ac7de43021692d5072fb3f0b143dfc85f",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/Cargo.toml",
+      "kind": "source_only",
+      "to": "35df5080fe63636219021cbc7840b25167374af1",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/README.md",
+      "kind": "source_only",
+      "to": "516865ccd9202fdedaf9333093c32196acacea06",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/admission_windows.go",
+      "kind": "source_only",
+      "to": "f5203d071b4a8913a44d36285a794b77c6144180",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/admission_windows_test.go",
+      "kind": "source_only",
+      "to": "437f1765bff85aa12bc845c1d2d942a4d2d6941d",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/bridge_windows.go",
+      "kind": "source_only",
+      "to": "0f7ff1b6675a6acc5dc172e5e432b36fb93d094f",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/bridge_windows_test.go",
+      "kind": "source_only",
+      "to": "084b46d6ebc67581ca787f5bc2b257b726f27d34",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/environment_windows.go",
+      "kind": "source_only",
+      "to": "3d358e24c12655f49bbab6e509713a15f955010b",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/environment_windows_test.go",
+      "kind": "source_only",
+      "to": "ffc0db2c1ea507fcf657e3c59e776f7d7b62a4d5",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/faults_windows_test.go",
+      "kind": "source_only",
+      "to": "5bc13caaf6342bac6fada0bddefef1e0fe6c71e7",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/finish_context_windows.go",
+      "kind": "source_only",
+      "to": "d11fc4b252f9e533263dbc4a738a6b14591d775d",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/finish_context_windows_test.go",
+      "kind": "source_only",
+      "to": "52fc25444eb5bd7a9d4f4819c5abadcbaec2e6c9",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/go.mod",
+      "kind": "source_only",
+      "to": "199b42593568e3b007d0f3f413c3d27f4d501d2f",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/identity_faults_windows_test.go",
+      "kind": "source_only",
+      "to": "de66d28b78b71bb4dc4dca6e3e9fd2556f54783c",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/identity_legacy_windows_test.go",
+      "kind": "source_only",
+      "to": "94c813d7c8d8323b7903278d3a4e97e90ba7f0eb",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/identity_query_faults_windows_test.go",
+      "kind": "source_only",
+      "to": "dc323fa8434ca87119f9f273a3dffce70d853259",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/identity_query_legacy_windows_test.go",
+      "kind": "source_only",
+      "to": "df53da8b222d8e0229d0429a2095a944f68b6b65",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/identity_query_windows_test.go",
+      "kind": "source_only",
+      "to": "09c46fd2dd868ec8339ed85e2e52eafa2e283ced",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/identity_windows.go",
+      "kind": "source_only",
+      "to": "7f963020fa5f8fe2e5db64bab1776ed66d380827",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/identity_windows_test.go",
+      "kind": "source_only",
+      "to": "6283b931293ca1863c2e3ba7d824eb699d699340",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/io_lifecycle_windows_test.go",
+      "kind": "source_only",
+      "to": "5ac8808f85bcbf46a472dd752a1c1cf9084b9c5b",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/loader_windows_test.go",
+      "kind": "source_only",
+      "to": "7aca5bf2b38bcea857d6267e53576763c2e14365",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/members_faults_windows_test.go",
+      "kind": "source_only",
+      "to": "0f46b1796532613eebfd8e74842eb44217c1dd7a",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/members_legacy_windows_test.go",
+      "kind": "source_only",
+      "to": "026b4b45b37cedefcd3014a6a75bdabd43e1c7c5",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/members_report_windows_test.go",
+      "kind": "source_only",
+      "to": "b1da3dc082f14ffc07a1ea04cff68a47e6588296",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/members_windows.go",
+      "kind": "source_only",
+      "to": "b9b5488128888d7eca4e14b0642d57b723f3299f",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/members_windows_test.go",
+      "kind": "source_only",
+      "to": "9c97e52a029da819a5032c40715735546eb844b8",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/native_cleanup_windows_test.go",
+      "kind": "source_only",
+      "to": "e17b0086ef9c417d53716eafc2c714d9f46a55ee",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/outcome_faults_windows_test.go",
+      "kind": "source_only",
+      "to": "4b54d43dfce901cd56ad7d4bd7b90b886ea44727",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/outcome_windows.go",
+      "kind": "source_only",
+      "to": "39cb54ab8fd2c0589f6aecd85e1d9ac18bdcba38",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/outcome_windows_test.go",
+      "kind": "source_only",
+      "to": "39febddd51b659d483d3799f1c0ae2ffcd4ca07e",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/stdio_windows.go",
+      "kind": "source_only",
+      "to": "98beaedf13824b08e5d49624c9c6a8767620db8f",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/stdio_windows_test.go",
+      "kind": "source_only",
+      "to": "2fdd1245ebfa3d2dc8e536facdc4183b51032905",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/wait_legacy_windows_test.go",
+      "kind": "source_only",
+      "to": "01311adcc77cfb1a443bdc41498fa2b2274aa19f",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/wait_windows.go",
+      "kind": "source_only",
+      "to": "064a3777627712b04f29eef73704ca4897a150f6",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/wait_windows_test.go",
+      "kind": "source_only",
+      "to": "c6c6fb5c7e109b1f3d8c96b0112d49eae08c4543",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/include/identity_v1.h",
+      "kind": "source_only",
+      "to": "13d535c80c1fd1fdd0f075799cc18b9611772fb8",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/include/members_v1.h",
+      "kind": "source_only",
+      "to": "4ced211c17c8c5977f4e9c394c2ba07083cf5924",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/include/owner_v1.h",
+      "kind": "source_only",
+      "to": "3bda9dce0dd1f316da99985eec3300bc78f67a68",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/src/argv0_tests.rs",
+      "kind": "source_only",
+      "to": "6661864cf1fa863d89c96c8e62d35a26c3173f71",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/src/identity.rs",
+      "kind": "source_only",
+      "to": "a01f21656d55b3689a0ac0eb700cd6c74dc3a73d",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/src/lib.rs",
+      "kind": "source_only",
+      "to": "2a89392d5cf7d18fa9139170b7fea4a2ce31cac2",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/src/members.rs",
+      "kind": "source_only",
+      "to": "69dddfc5016f66a936ece97e5769d650a3e1136e",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/src/members_tests.rs",
+      "kind": "source_only",
+      "to": "d362d8339ec67147691f5678640bef7247010745",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/src/process_borrow.rs",
+      "kind": "source_only",
+      "to": "8af6740dfd0ef4538e1b90b9a248b7b691fda01a",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/src/process_borrow_tests.rs",
+      "kind": "source_only",
+      "to": "b2fa752d807c325cd17721bd7d1c3cbeeeef6a88",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/src/tests.rs",
+      "kind": "source_only",
+      "to": "6799d78d143d20daabdf5ee0751ca304b00a4018",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/README.md",
+      "kind": "source_only",
+      "to": "6d4d01a8b3e7c7ac26ce800c13fecee2ad21ddc2",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/AUDIT.md",
+      "kind": "source_only",
+      "to": "eeda30d712a8911155d114adf22c83017a5ba705",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/RESULTS.md",
+      "kind": "source_only",
+      "to": "bf77e16faef5b33b6c6d2f8be4dd18bcf632222b",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/SHA256SUMS",
+      "kind": "source_only",
+      "to": "515746a2d1547fc11337033dd789e79b5815f577",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/artifacts.json",
+      "kind": "source_only",
+      "to": "72aefeed38b48768601fbb37bc91e417c90e4195",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/audit.zip",
+      "kind": "source_only",
+      "to": "eb32d7ff30d5d3af1e9225cc1c139d911c30595f",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/controls.json",
+      "kind": "source_only",
+      "to": "cd8ccf904de8984d8dde95b37b0079b48b9f48f3",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/controls.ps1",
+      "kind": "source_only",
+      "to": "2fb3395a5def7b059e770e342690735b73d5d22d",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/disposition.json",
+      "kind": "source_only",
+      "to": "83ca08d6ac99baf1b90a5eef6df5481d41256534",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/log-manifest.json",
+      "kind": "source_only",
+      "to": "100c04b718ccd36db7fa29ae8458aed01ebcc10e",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/logs.zip",
+      "kind": "source_only",
+      "to": "f90eca9c0500418b2b53feac06e0efffa65e643a",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/pr-audit.json",
+      "kind": "source_only",
+      "to": "025e657d1b2ee36cffbf2c1f3cd2c966dea72d65",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/qualification.json",
+      "kind": "source_only",
+      "to": "c18707aca963b9e540fe13e01c8eca091fcd7843",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/repository-gates.json",
+      "kind": "source_only",
+      "to": "ea0a2338e18e28007bab224075d675cbd39424c8",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/repository-gates.ps1",
+      "kind": "source_only",
+      "to": "74f570c8ccdacfe83f3c544e0f11f8caa48376d4",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/run.ps1",
+      "kind": "source_only",
+      "to": "cbeb52979d343607fedc41d84949d8cac11470f0",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/source-hashes.json",
+      "kind": "source_only",
+      "to": "9a8f367ace721fb95f8dcdaee7ffe321824d8fae",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/source-identity.json",
+      "kind": "source_only",
+      "to": "81f95b81639c1a95e40d77400192a3869d7a84e5",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/legacy/SHA256SUMS",
+      "kind": "source_only",
+      "to": "5c3952287fffd8d24fcc854937356a0e6fb777ee",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/legacy/compaction.json",
+      "kind": "source_only",
+      "to": "0f314d17a3ec0e9be786c2213351064164d08fe8",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/legacy/history.zip",
+      "kind": "source_only",
+      "to": "f6f27a6cdf2b562e3ce95094cb9199e1ee907194",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/legacy/manifest.tsv",
+      "kind": "source_only",
+      "to": "134875f14c956dd24b6623a2134e1af18c7c4a8c",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/legacy/receipt.json",
+      "kind": "source_only",
+      "to": "94cddd212403d9cdbcf3b8365e312c9e2876c97b",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/query-2026-11-15/RESULTS.md",
+      "kind": "source_only",
+      "to": "de48b054cf0eda01fbb2bffe9e474bc560565410",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/query-2026-11-15/SHA256SUMS",
+      "kind": "source_only",
+      "to": "a5faf6fc5cae0cb46ec043a09a42e188c25907d0",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/query-2026-11-15/logs.zip",
+      "kind": "source_only",
+      "to": "baf87c6fdb4b8650d6240f7c319c8617a056d36c",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/verification/query-2026-11-15/manifest.json",
+      "kind": "source_only",
+      "to": "9f7d90ae1a0ea156f9bcdd552c7c88932b256bc4",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/src/argv0_tests.rs",
+      "kind": "source_only",
+      "to": "b81b42423ff66b5e049ac5dd5e32a8d8336f814d",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/src/bin/owner_child.rs",
+      "kind": "source_only",
+      "to": "a084e8e1b4a4740b7f9064434d9240266c96892f",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/src/bin/owner_crash_fixture.rs",
+      "kind": "source_only",
+      "to": "9f716015bfbcd8f9a2824ad050b5a4a58566dce4",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/src/foreground_console_tests.rs",
+      "kind": "source_only",
+      "to": "11316ffbc6400e44ea3dd0a6a02c9020ca47f903",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/src/job_member_tests.rs",
+      "kind": "source_only",
+      "to": "22e8d9ae5671a58b7081d3f7519656155167ef23",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/src/job_members.rs",
+      "kind": "source_only",
+      "to": "2291e3d523b9dc33c5dcc929550df37e59ac0637",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/src/launch_context.rs",
+      "kind": "source_only",
+      "to": "13cd1fbac2881a2535fd74c92cba3e74cd0cd96d",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/src/lib.rs",
+      "kind": "source_only",
+      "to": "91f684a82616de706b87b351e3f92ef78459827d",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/src/native_failure_tests.rs",
+      "kind": "source_only",
+      "to": "46f37a23a0104bf5e7a6f85bf3197ffb6fcfea63",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/src/process_borrow_tests.rs",
+      "kind": "source_only",
+      "to": "7819cd248c4cb66c9f16aeecdbec0216a568913c",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/src/token_user.rs",
+      "kind": "source_only",
+      "to": "9a2dbd58f52800b6c35300afcf51a1c5036d5113",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/src/windows.rs",
+      "kind": "source_only",
+      "to": "c279bfba630d1748c8894a41de69401a10a66165",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/tests/launch_context.rs",
+      "kind": "source_only",
+      "to": "a60704b07ec9b71388d129e1ba47bb04ec647ecd",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/tests/lifecycle.rs",
+      "kind": "source_only",
+      "to": "0aa1350c7e2ac6288122a7c38d11dd5f02052e1d",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/tests/owner_crash.rs",
+      "kind": "source_only",
+      "to": "5431f3ece763aea6ad86ce75a29ccbe503065e27",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/tests/stdio.rs",
+      "kind": "source_only",
+      "to": "956033ecd1246eceed9738fa3b7aef103ed1bffd",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/verification/identity-2026-11-14/RESULTS.md",
+      "kind": "source_only",
+      "to": "429d8a71d9ad834e42268dbc6f63b18e6336d0e0",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/verification/identity-2026-11-14/SHA256SUMS.txt",
+      "kind": "source_only",
+      "to": "aebf2d083b66b5a5006eae5deb8ed89719a2bae7",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/verification/identity-2026-11-14/consumer-final.log",
+      "kind": "source_only",
+      "to": "1a171542e42931961ab6956a834720a205e859ea",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/verification/identity-2026-11-14/consumer.ps1",
+      "kind": "source_only",
+      "to": "b931cbca7095170d6c611ea364717b2e639ad850",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/verification/identity-2026-11-14/disposition.json",
+      "kind": "source_only",
+      "to": "fdb0fd29dead8f230b9e13889ee6e682414df499",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/verification/identity-2026-11-14/history.zip",
+      "kind": "source_only",
+      "to": "09ef83767756ba3fced5a029e2e4936e2e9353c4",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/verification/identity-2026-11-14/native-final.log",
+      "kind": "source_only",
+      "to": "af7d3d1e284db383be3106e799a56030fd40ba50",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/verification/identity-2026-11-14/run.ps1",
+      "kind": "source_only",
+      "to": "67f722ed05cc852822197c0ba375ae1c62c828f8",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/verification/identity-2026-11-14/verification.json",
+      "kind": "source_only",
+      "to": "65456ce90cf457517f3fade6121906cca4f421c8",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/verification/query-2026-11-15/RESULTS.md",
+      "kind": "source_only",
+      "to": "90262049507f10d1782a508dc72632824fa235d0",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/verification/query-2026-11-15/SHA256SUMS",
+      "kind": "source_only",
+      "to": "2cde92b8d2a13a82ab99737d08c20eac8bbf02b2",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/verification/query-2026-11-15/logs.zip",
+      "kind": "source_only",
+      "to": "d60ad096824705251416445c50ab553748bf1e2a",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/verification/query-2026-11-15/manifest.json",
+      "kind": "source_only",
+      "to": "03c00adb00c63f22b66d0bc743cab8b3262f7190",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/verification/sid-2026-11-14/RESULTS.md",
+      "kind": "source_only",
+      "to": "c471ed2114419b09b90d4804a058cf92af8f2303",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/verification/sid-2026-11-14/SHA256SUMS",
+      "kind": "source_only",
+      "to": "93f2fa72fd2ef32ac04488a4ceab08e0a59722aa",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/verification/sid-2026-11-14/consumer-final.log",
+      "kind": "source_only",
+      "to": "6e01850588e1ad9847feddc524a6588a8a12d126",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/verification/sid-2026-11-14/disposition.json",
+      "kind": "source_only",
+      "to": "be6e30fc6dc64cbafdbc4601cdd6736202e40327",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/verification/sid-2026-11-14/history.zip",
+      "kind": "source_only",
+      "to": "9339f6104a355a8ce76c81d6e1149a633f0a706a",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/verification/sid-2026-11-14/native-final.log",
+      "kind": "source_only",
+      "to": "cf907c048e40fde00171fef294924c517cef60d1",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/verification/sid-2026-11-14/run.ps1",
+      "kind": "source_only",
+      "to": "5f3ed0f8c8704a53baf3ce736b38427a80c5261d",
+      "mode": "100644"
+    },
+    {
+      "path": "experiments/rust-process-owner/verification/sid-2026-11-14/verification.json",
+      "kind": "source_only",
+      "to": "357130a8b0fbc06facca2841af1da5916f37ff38",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/adopt_codex_transport_test.go",
+      "kind": "changed",
+      "from": "ef55fd131bf051c5dad6b20723c81b563aa0ccf4",
+      "to": "332b49f17cc30d558a0d3c59b602b3625dcd09bc",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/adopt_deadopt_lifecycle_test.go",
+      "kind": "changed",
+      "from": "37f34d636c1d0883dd988a1c5b84aca964dce7c5",
+      "to": "36279734c2f6be64dc81e60c2f8d0d01ed8ce68f",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/adopt_h4_summary_signal_test.go",
+      "kind": "changed",
+      "from": "ab36c0df5efa705b28cb3a52dc707c1ec8f789eb",
+      "to": "229619d7b027df355e38e0805a3be4c7f0d9c930",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "kind": "changed",
+      "from": "bc49ccc7810e27dc97731d8a107ea072e889ac63",
+      "to": "19da9dff6e6464bab2e9b607afd7dfb5a86afaad",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/adopt_lease_owner_test.go",
+      "kind": "changed",
+      "from": "28f76fd00521c291d2d0a6fc0dee10133da549d3",
+      "to": "a0f540b4d982eeef4696fa90318de3ecbc993d6d",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/adopt_mcpcompat_test.go",
+      "kind": "changed",
+      "from": "a43df81f21c3107d149317cb5226f096b83208cc",
+      "to": "6f336ba8b7b5d9fbb87e43387d3aff464c3b1c48",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/adopt_project_plan_test.go",
+      "kind": "changed",
+      "from": "b4eefa18a4490275829eef8217148f9b701047ec",
+      "to": "74b312a793fa54c51c94f52ca768d4b5d02dd5d3",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/adopt_provider_working_directory_windows_test.go",
+      "kind": "changed",
+      "from": "61fa3fe0aae2735f8ef2988cbb19501d0c6e447d",
+      "to": "e86bfecabc0a05a37099cd30dc1108805cc43988",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/adopt_test.go",
+      "kind": "changed",
+      "from": "19a853e732cb1d30bc54692e05d72a1b56438161",
+      "to": "08b88a3e12d4e1a60238e0f76325d5dc7e967246",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/api.go",
+      "kind": "changed",
+      "from": "938adb8bce844805a0c431ef88e0195c9e454b38",
+      "to": "0c5ce23648afe6d6d5d2d812e49bd16ba05610b8",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/attach_client_plan_windows_test.go",
+      "kind": "changed",
+      "from": "871b90e935ca5306848cbd498c91d909c5522cd1",
+      "to": "82960d9c03f0bdc54bd820cc54b84ad82528a385",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/attach_client_public_cli_receiving_windows_test.go",
+      "kind": "changed",
+      "from": "9f1ff4104a81b0b2bd295729daf8232f08df3a05",
+      "to": "94c4428d9c6fbac88a121530d549977c7cbf5685",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/client_install_prefs_test.go",
+      "kind": "changed",
+      "from": "892e7ee2760bf5fc81563b85024420a41494b773",
+      "to": "c4e62ea351eea5584edd756ad7aeb2f1deef8efc",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/daemon_intent_test.go",
+      "kind": "changed",
+      "from": "ae25a6d52b5427d242606438f6c745a269d34b7e",
+      "to": "4d4f25b47ad9e8d11a1aa4a2c2ecacb40c9b50d0",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/deadopt.go",
+      "kind": "changed",
+      "from": "b33a999fcd14428451df6ba68144feaf9cfcaa34",
+      "to": "d0711329242de74018d2184201ac6f8d03d261ad",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/deadopt_test.go",
+      "kind": "changed",
+      "from": "0921ff376c46244e411524ec07526a1b17ef9789",
+      "to": "04654f2805758decefab7757863f9d75777fcab9",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/export_bundle.go",
+      "kind": "changed",
+      "from": "99fc2adb56f4a173a313ac38443cd18b080a4883",
+      "to": "1f74a118d622490affa7f41ab09323fbd7a7a385",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/gui_owner_control.go",
+      "kind": "changed",
+      "from": "9b13717c953b48f93180e9aea745fbfc79501dad",
+      "to": "ef49812eb115fdd77afb01becedf6d2dea3e3064",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/hub_mcp_groups.go",
+      "kind": "changed",
+      "from": "dde0ed8cd380546d3b97e92582886126f56930f4",
+      "to": "bc3053bb7341768b8750c8ff73d6021019d4fcb1",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/hub_mcp_project_authority.go",
+      "kind": "public_only",
+      "from": "11a244f47b40eceb119fd1115d369ddf70cc90ce",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/hub_mcp_project_authority_test.go",
+      "kind": "public_only",
+      "from": "ad6e4f311223532dc8fbaf2f606d9d0f8ea8aa22",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/hub_mcp_state_read_inode_windows.go",
+      "kind": "changed",
+      "from": "a195ce33e11c5a0090f00a4d6df535094bcac318",
+      "to": "5b8e75060ca88ccba974b0b5f831472627db19be",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/hub_mcp_state_read_policy_windows_test.go",
+      "kind": "public_only",
+      "from": "f981b0a0649002e4f6c1c5f10e0d8b3eb90bc826",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/hub_mcp_tokens.go",
+      "kind": "changed",
+      "from": "724915714315d15e7a40502dc84f2e0fa4bda86a",
+      "to": "77ed0440081be42f2c278a3f2964870dcea661e0",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/idle_prune_bridge_test.go",
+      "kind": "public_only",
+      "from": "bbad24d5dcd19d7f649784ac2197be64fe96801f",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/idle_prune_gui_external_test.go",
+      "kind": "public_only",
+      "from": "b1067eff6a876e4d673c66732c986b52c1a64728",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/import_vscode.go",
+      "kind": "changed",
+      "from": "2ebab43ea2c078d86a397587c01c704333e00474",
+      "to": "bf2e9079b4b4fae3932ee41d6c4059c242a0a971",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/install.go",
+      "kind": "changed",
+      "from": "bb45b6e98e4f040934fb68d366c5e1ba7001169a",
+      "to": "57a661fa0ddd2632974cda1823befc593fe8cd11",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/install_codex_repeat_receiving_test.go",
+      "kind": "source_only",
+      "to": "15b017ab36cd502bd74e0e496d7045a859e13d9e",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/install_parsed_manifest.go",
+      "kind": "changed",
+      "from": "e4ec3ca2f8d048b4504aab26d4e9664a8480f11a",
+      "to": "3c13cc7efb9542733d6c56ac1d9c4467ec9567a2",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/install_parsed_manifest_lane_b_test.go",
+      "kind": "changed",
+      "from": "f4756e97580d61110636f3fc7a7da46f2621d39b",
+      "to": "0dd3495a12748266ca0efc86bf3f740a58061b4b",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/install_parsed_manifest_test.go",
+      "kind": "changed",
+      "from": "f1ff936968edacd37e1e3e1e766848c8c238847f",
+      "to": "7f2f70f1b11b5343126bbc29b1cfb9ac0374d1e5",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/install_test.go",
+      "kind": "changed",
+      "from": "51bc0486322f19c1ea9aac3c972c0bfc85df520a",
+      "to": "c013912c413d7a40b134e3b41a24575c10a40846",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/intent_audit_caller_oracle_test.go",
+      "kind": "changed",
+      "from": "267856a46c7ad7553b1d0bdf3d9a824c06ec02cd",
+      "to": "dc16f03b830eb8b884c90b1427005e72877e7d58",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/lsp_routing/main_test.go",
+      "kind": "public_only",
+      "from": "262f6e75e8e32d94c96020915b949f8c260c2544",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/lsp_routing/resolver_benchmark_test.go",
+      "kind": "changed",
+      "from": "453c1908a8d4974750259e1b2509c9ee87e430a0",
+      "to": "2052121191baf17dd07aaa27522397791c99574a",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/lsp_routing/resolver_test.go",
+      "kind": "changed",
+      "from": "3bb39e2b2854b2d189f4c4fc1ba7c24d67b31629",
+      "to": "657f3b10fd122e5371a3c82aad89a847098029c8",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/main_helper_dispatch_test.go",
+      "kind": "source_only",
+      "to": "289a3e0d632e83b43d78154ea833c79c828ffeee",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/main_helper_dispatch_validation_test.go",
+      "kind": "source_only",
+      "to": "4bb29e54e6f8526d5d40f1b484227ad71c4e8e75",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/main_test.go",
+      "kind": "changed",
+      "from": "0aebe605b377efd27cbcf8b57d4c417b151ce298",
+      "to": "88b0c35c6848e775c08fcefaa32207486bf4af8f",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/managed_backend_install.go",
+      "kind": "changed",
+      "from": "1f5130993cddd5f2e1fd7c1697e5f51c1048cc6c",
+      "to": "d5e752083eb2053c64619c1955a88561a8edf322",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/managed_registration_install_test.go",
+      "kind": "changed",
+      "from": "b1e96f5be2eecdadb4f7744afbe6dc13b48dcdd7",
+      "to": "91a50251204a4c044595f641e337e271dbe2367a",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/managed_registration_runtime.go",
+      "kind": "changed",
+      "from": "83d5dc6ee91000e973b244a0c1696e7aad9aa057",
+      "to": "bc1fee97f3ac520fe56d6009e4728ec1353204c8",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/managed_registration_synthetic_receiving_test.go",
+      "kind": "changed",
+      "from": "8c5fef963fd26cc9d2672e63dac9da320776378e",
+      "to": "e4dcbc1297079c76413a43d57993a266bf8e2877",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/manifest_canonical_root_test.go",
+      "kind": "changed",
+      "from": "1f8905d50d0460b107c0db59d1c1f0a749e82659",
+      "to": "fc85a9e8952478d758f38b987ff9dbdb3c13e737",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/manifest_test_remote_test.go",
+      "kind": "changed",
+      "from": "f95462ebd0846ff161e53ab5b3d3b821239e8d7c",
+      "to": "32bf7a049bccad727cf1135d0ac2b9e574f52958",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/marketplace_cache.go",
+      "kind": "changed",
+      "from": "ec219eaf5de4d053e6989677731da521d7f33402",
+      "to": "50c97fcefccd056a1c8a7992e2b4844a8069f898",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/marketplace_cache_test.go",
+      "kind": "changed",
+      "from": "04039c71bbf8faa5a5c55272e6c12cd18869e10f",
+      "to": "41ffc7d4331cfa97e3207749ed297735ccf4b2ee",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/marketplace_catalog.go",
+      "kind": "changed",
+      "from": "f2fa21b9050907ff45f8ed7b87c375a800c2f444",
+      "to": "42525eb340922b0de1ab0eaed41d56144b9a2150",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/marketplace_catalog_test.go",
+      "kind": "changed",
+      "from": "40481e6dee5c5006f743e5353e156596127e0cd0",
+      "to": "b19b338ca2c7778f6851d0e32a9de35315e9dbc5",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/matching_process_context_test.go",
+      "kind": "public_only",
+      "from": "a772c402a0477275872072a39187a7924b276ab3",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/process_probe_exec.go",
+      "kind": "changed",
+      "from": "7169aec764067aa63bee52fa47466ea579f92cd5",
+      "to": "a288272f39f45b951f1ec87f531c9f9ed370c4c2",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/processes.go",
+      "kind": "changed",
+      "from": "01452ca00998eb941d6bafdfd03c0593bb22c853",
+      "to": "dbb9c9fb8e4f73de4a67247c89e37beb4910ce61",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/project_client_attachment_install.go",
+      "kind": "changed",
+      "from": "0e1c7550201a3b8d9b5d2ae8dd5e080fc0d59450",
+      "to": "64af91d71921eb82b9d4b657cbcd488badff9a89",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/project_codex_adapter_composition_test.go",
+      "kind": "changed",
+      "from": "79d80031a708238ae26e41c91cbc557265ffe6d5",
+      "to": "a886f9a288eb25a0a4328013c0104d20191b09c9",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/prune_workspace.go",
+      "kind": "changed",
+      "from": "b80b37fd15d43c91c7f692729e58acbd61b82b89",
+      "to": "b34bbae59c0f7c3c51628488d22d315d80ba3950",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/register_supervisor.go",
+      "kind": "changed",
+      "from": "1153277060ce2745a15c3c511d62759bc687dce7",
+      "to": "170f259daab4c3043510a3ba5b9a6a9050103127",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/register_test.go",
+      "kind": "changed",
+      "from": "abbc61e9b69c45a266b489f7044666392b6aac5d",
+      "to": "612a03783e76a8963e513ee4db9434a9158bcc4f",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/required_secret_gate_test.go",
+      "kind": "changed",
+      "from": "5c3e99cfabdc09983f7136979be3f739af761800",
+      "to": "12e16793df6f749ade0ea548703c3b0d2dd32cac",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/secrets_init_recovery.go",
+      "kind": "changed",
+      "from": "39caf9cc5d2a0162ac6b0ca5df73e0af3bb6e56d",
+      "to": "343fc877f60d5c33015e64ed2f42975fc11e8dc1",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/secrets_init_recovery_directory_probe_nonwindows_test.go",
+      "kind": "source_only",
+      "to": "1aa9972c810ab92a34c7356caf722598e25270ef",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/secrets_init_recovery_directory_probe_windows_test.go",
+      "kind": "source_only",
+      "to": "ad4ccac3b9053a9937d5f68a0b7f718df416299f",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/secrets_init_recovery_test.go",
+      "kind": "changed",
+      "from": "90b596965456187271d6092596fa3dd037397bae",
+      "to": "2f730943cc7c0393a5464383c2cba36f3fab8636",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/secrets_test.go",
+      "kind": "changed",
+      "from": "2454c53a777b727d386c7a28ccd886e9d2b0d9d9",
+      "to": "ce45e86c6df0cda46e38240dadb03b64b9830b05",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/secure_create_client_config_parent_windows_test.go",
+      "kind": "changed",
+      "from": "83ab63a6a38f7f3bbe3a35c114779b515e553ec5",
+      "to": "94c9d49af93999f8dbad472506297e7baab40106",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/secure_create_parent_anywhere_windows.go",
+      "kind": "changed",
+      "from": "ca778abafbe92077e9ad37fb5b166ef3213d4f4b",
+      "to": "9ee98be2f35df220923bcd90e099b86b4fe0c62f",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_auto_register.go",
+      "kind": "changed",
+      "from": "99487b5ad246d404ac2eef4dcd7fc28959299a10",
+      "to": "c503c4ea9c30e83d044c13a3daf971b9f3525ef4",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_auto_register_preparation_test.go",
+      "kind": "source_only",
+      "to": "2749e71f89b64d41a19ec224a1032358b5165f07",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_auto_register_test.go",
+      "kind": "changed",
+      "from": "433d56c0ca2907c5db1df1f4bcfc432ee8fe4144",
+      "to": "9b449468312516f8ffa857192d96f64cbbc7c43b",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_build_constraint_policy_windows_test.go",
+      "kind": "source_only",
+      "to": "4c25fa37f43e97feedc9d02eaa475d39f29e5bae",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_build_environment.go",
+      "kind": "changed",
+      "from": "35af40886d457d10e7de63edec99b11262a0006c",
+      "to": "de80d106a1abe94e56e98b010ef424bb06d48a9c",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_build_environment_source.go",
+      "kind": "changed",
+      "from": "dac996afbb422ec9d97eff7cc9710853c314a39f",
+      "to": "8b51938117adefb0b0f6b4906a1ae3d7cc3bfd0f",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_build_environment_test.go",
+      "kind": "source_only",
+      "to": "f01c668d6bc25aef7ae47329eef3accf746c6869",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_build_environment_windows_test.go",
+      "kind": "source_only",
+      "to": "15de08da8226793979d4179fdb879c6ab5547c3e",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_client_reconcile_test.go",
+      "kind": "changed",
+      "from": "e6b76597618866a01e05331b2c72d47512d53c36",
+      "to": "9fbb9f44a0942d0fbf3f027adf34b9c2c9bdba7a",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_consumer_coordinator.go",
+      "kind": "changed",
+      "from": "b39982a3e993bf518f9a442113d1ff8bf08e2178",
+      "to": "72166de959efc195da64006c39a7afae4d73bd2c",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_consumer_invocation.go",
+      "kind": "changed",
+      "from": "31468a609d5fa8d7f71eb2679501f8cde91ca899",
+      "to": "44002f84bf5aed95d0d29871d12299cf14b5f853",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_finalization_context_windows_test.go",
+      "kind": "source_only",
+      "to": "7f1e5aa41c0b346afd8dc7b059e3b4992a0634e5",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_intent_repair.go",
+      "kind": "changed",
+      "from": "da1deebec53810322af7a385656c2abfbb244ab6",
+      "to": "5bd9e58805d8c5e322a425b691b4342a749ffd22",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_owned_attempt_layout_windows_test.go",
+      "kind": "source_only",
+      "to": "260019a6d1e7cf45bb5e7780f087147a3216946c",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_owned_tree.go",
+      "kind": "changed",
+      "from": "c69b1943fd64c2459038e43cca0d36db1b6e79ed",
+      "to": "01c4e7eadc8e821e400ab1f35a1784e8f919db29",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_owned_tree_delete_windows_test.go",
+      "kind": "source_only",
+      "to": "caf03e0efcd99f82c28abd482828b1edb029cc24",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_owned_tree_streams_windows_test.go",
+      "kind": "source_only",
+      "to": "2162ae7d6488bf44299f742c8a03f1c1d32305a0",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_owned_tree_windows.go",
+      "kind": "changed",
+      "from": "6d4a2e8982654c10132cb3e0c863e5acc73cb358",
+      "to": "964279951600bee86057a4794c89c05adfde84b6",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_parsed_intent_observed.go",
+      "kind": "changed",
+      "from": "f5f1175ccc93f6f95d973ce82db47e56089879fd",
+      "to": "0a783dfaddad8dc3dc1666e4122f0f9d016510a1",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_parsed_preparation.go",
+      "kind": "changed",
+      "from": "7b6d33b2ed30ffbe1b4736a9d0947fb8f02d7f0b",
+      "to": "24ab4075dd1e28cfb87a297c4725017eba153bd0",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_parsed_preparation_test.go",
+      "kind": "changed",
+      "from": "a7910e133ebf218ce73a6274f1d06785d221c7a3",
+      "to": "4f4864cfe597c327f938cedc71bc2b84ba0f8669",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_preparation_assembly.go",
+      "kind": "changed",
+      "from": "740539f6d7c5912751c03ee82f48c44ec6d8efa4",
+      "to": "76b86ac369534be55610452239998ef142309bf1",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_acquisition.go",
+      "kind": "changed",
+      "from": "3cb72448d854ebd76f79647d54d35a8c70fe7733",
+      "to": "4ca4111e8b3d92933eab9cdd179bab878df70e48",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_acquisition_context_test.go",
+      "kind": "source_only",
+      "to": "f54aa58e857b9e703b96de5ad287a008e41e0cd3",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_prepared_acquisition_windows_test.go",
+      "kind": "source_only",
+      "to": "ee0b946864b0385b4fdb17f1e1d2ac19ac24695d",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_prepared_build_constraint.go",
+      "kind": "source_only",
+      "to": "4a1682d2d9820cde34422b482d3052d53976f790",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_prepared_build_constraint_integration_windows_test.go",
+      "kind": "source_only",
+      "to": "8eec0326c838a824ef93f63eb645f86b14db9515",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_prepared_build_constraint_pin_windows_test.go",
+      "kind": "source_only",
+      "to": "0798bba831c055965be0b4326a44b3c4bf97346b",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_prepared_build_constraint_test.go",
+      "kind": "source_only",
+      "to": "38c82a218355a4245cd60b93ca33c3904c59ed68",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_prepared_build_constraint_unsupported.go",
+      "kind": "source_only",
+      "to": "635b65c9f92fd8799e485b7122b04d11a71bc614",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_prepared_build_constraint_windows.go",
+      "kind": "source_only",
+      "to": "67bb5184be847fd6b0986f753863bd2daecc64c7",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_prepared_consumer.go",
+      "kind": "changed",
+      "from": "1a806b399dc9a6be1ad50a756ef1f2e65a05f3ee",
+      "to": "193dbc60556b8f4c63930df172854a78ed4f75d1",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_consumer_ticket.go",
+      "kind": "changed",
+      "from": "c8984d40a2591e84489d0939dcca2cb16232701c",
+      "to": "acb206cdda2ca9b221acb2d80872835aea219a48",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_diagnostics.go",
+      "kind": "source_only",
+      "to": "602f3177d357f0687e3ccaf7e49c5e270d9de1fa",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_prepared_diagnostics_test.go",
+      "kind": "source_only",
+      "to": "04c813bf745b1384d0c34c9d0f7baa3e129bfa50",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_prepared_diagnostics_windows_test.go",
+      "kind": "source_only",
+      "to": "54345920399ea5aabdab9f7499d281023256d74a",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_prepared_effects.go",
+      "kind": "changed",
+      "from": "05eff3480bbf929f7b9eace482cb3cd52f5acfa9",
+      "to": "488dda9e8f117ebdbf0d38134e1e2e03767cbaf7",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_execution.go",
+      "kind": "changed",
+      "from": "c471c34f910195bc1ceec5e6fa0db5a6299f7a39",
+      "to": "57d92ddf892a07cfe008b2af671df99fbcbacfc8",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_file_unsupported.go",
+      "kind": "changed",
+      "from": "58fffea91b00a37c9e881446fef1c083d7322227",
+      "to": "431a9889abd931a6900fc2156f05db8e6ba75eeb",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_file_windows.go",
+      "kind": "changed",
+      "from": "9b7fbd1270420a05ad1e2e825ff0291192d722d1",
+      "to": "0e36d5b6adc2950a2f49d477ae56e390628d3c0a",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_inputs.go",
+      "kind": "changed",
+      "from": "8c5e13ae17037761d42be026dc0991a62be17ca1",
+      "to": "7f09479fce10d43512d8f7f09ec0ff3a98b7ec0d",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_install_effects.go",
+      "kind": "changed",
+      "from": "1cb841f32af85f0367fd7ae5f6b6c3e3500baec0",
+      "to": "564f5d8e1a47e07dc6d54e5aafc56976cf4e5ef2",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_interpreter_unsupported.go",
+      "kind": "source_only",
+      "to": "ecd852e318ab512338a3a93ed9eaa12ae767a420",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_prepared_interpreter_windows.go",
+      "kind": "source_only",
+      "to": "54594e5def9e2d522b2078d42e269525792cf085",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_prepared_interpreter_windows_test.go",
+      "kind": "source_only",
+      "to": "1483a6b987e892746358d12375a080fb6a0c1b06",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_prepared_launch.go",
+      "kind": "changed",
+      "from": "c16a6c4d9d4f0bbf5dd5ad39b6143531c2bfc06f",
+      "to": "ae107d8d1c8dab659ffc7dc99f4a28e41f25bb0e",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_metadata.go",
+      "kind": "changed",
+      "from": "3d7bf5594f2dfdb3c963d43b1fc4a056ec5dd725",
+      "to": "f7c1c100c694b10fccb961a79d080a409ec156d6",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_owned_file_windows.go",
+      "kind": "source_only",
+      "to": "ebbcdc12878fbc12ab79eb5fe25a578686d439c1",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_prepared_owned_file_windows_test.go",
+      "kind": "source_only",
+      "to": "8da2ce58a7c3669e8a6d41c7f327165387a3a295",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_prepared_owned_generation_integration_windows_test.go",
+      "kind": "source_only",
+      "to": "8e6df68f0bfae7ff89a151f95e5978449fbf4188",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_prepared_prior_lifetime_windows_test.go",
+      "kind": "source_only",
+      "to": "04c07d971df9a5d945d8852b3b86ae9b60f22709",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_prepared_publication.go",
+      "kind": "changed",
+      "from": "865c7b948d4f2c3fc38c562c52ce69e5ed6324ed",
+      "to": "c94012d8fa6a086ea3bf71df1c409425e369480d",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_publication_native_windows_test.go",
+      "kind": "source_only",
+      "to": "56263ea20d159dd637ce3dde267621b3707c0dc0",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_prepared_qualification.go",
+      "kind": "changed",
+      "from": "ff7cd293a7e64707b1c48f84ae8a87b03254e224",
+      "to": "1a4deb4edaf61e8eb8d17d42db1195e08c7374c9",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_runtime.go",
+      "kind": "changed",
+      "from": "da74b9d3a183204d64a420ef4c57a8bbbe625702",
+      "to": "68b0b8c50350961c183e109e176db6e02819cef6",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_private_cache_seed.go",
+      "kind": "source_only",
+      "to": "b2ab3c9fef386b92c0e9dc59f3e14ed2d0fd9345",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_private_cache_seed_tar.go",
+      "kind": "source_only",
+      "to": "8f237b625e552b8c81d1a61e5af5acee48d1faa8",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_private_cache_seed_test.go",
+      "kind": "source_only",
+      "to": "1cb02f47d88a71e1e221dec82cdce4a58ca6f41c",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_private_cache_seed_unsupported.go",
+      "kind": "source_only",
+      "to": "aa8f1ce849a9030d1dd7884a9bd24d4878823ec0",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_private_cache_seed_windows.go",
+      "kind": "source_only",
+      "to": "13afc079291cf202dacfd27ea03b49d7d37048d6",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_private_cache_seed_windows_test.go",
+      "kind": "source_only",
+      "to": "6c5d24226cc9ffbf634b876ded7360034cc5fb3e",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_private_integration_publisher.go",
+      "kind": "source_only",
+      "to": "74a9717086b319e637f248c72902e2738f50fda6",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_private_integration_publisher_test.go",
+      "kind": "source_only",
+      "to": "9fb3dc7d31e9ec5abdc0a546365f5f6de2a35cbc",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_private_publisher_namespace.go",
+      "kind": "source_only",
+      "to": "f324e211c23fba1bbc9c3ca29c1efad264a95d88",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_private_publisher_namespace_test.go",
+      "kind": "source_only",
+      "to": "e60579eb4dc17c6a4c9bfdc6ea0413dd10e07e1e",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_publisher_image.go",
+      "kind": "changed",
+      "from": "b25944a782c32d724f5090b6a9902d3f77d10053",
+      "to": "c7b670de9446808da31b95db5e3f5f7774da1a8a",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_publisher_image_policy.go",
+      "kind": "source_only",
+      "to": "aba060e163d116170b969df70df9f7795a0c9263",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_publisher_image_policy_test.go",
+      "kind": "source_only",
+      "to": "258f9a4c955c6389ce03384da1894ab1b719c31a",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_qualification_resources.go",
+      "kind": "changed",
+      "from": "fb195efd4a277155437d0a91f7beb81c1dda8cbb",
+      "to": "3b5642c1fc6dfddaf2504db3409671b124599aeb",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_routing/main_test.go",
+      "kind": "public_only",
+      "from": "ca4b250ceb9f4248389e2c827ce930d792f5efcd",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_routing/resolver_test.go",
+      "kind": "changed",
+      "from": "6cf4f042ab562157e9eede75be9d27743ec5c577",
+      "to": "32851306a8bd27e4a562dae7c75b821289bd2cc5",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_routing/shared_observer_public_test.go",
+      "kind": "changed",
+      "from": "d41cb9db5e83fc6d9799b18b2151543f63dd8ce5",
+      "to": "e9d0d4552a087557be9f15a756de2c973a013df5",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_tcp_rows_observed.go",
+      "kind": "changed",
+      "from": "d142fd7cd5636c6f307c7776963c0a8904dc09d9",
+      "to": "1b8d16a0fc02495545153ea1d69230dced683f9c",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_tcp_rows_observed_native_windows_test.go",
+      "kind": "source_only",
+      "to": "e7f9786d7ea696a311bb7f1adcb934ec36b8986b",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/serena_tcp_rows_observed_test.go",
+      "kind": "changed",
+      "from": "a96e799794b5347f9bf251df80e6051be2cf0f29",
+      "to": "6dc44790481a0f52ae7735da06a3b5c71b26eb2d",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/serena_tcp_rows_observed_windows.go",
+      "kind": "changed",
+      "from": "39c2e453fd8ca7d9c1bdaea567b19ab26286021e",
+      "to": "cd566b8c0de75cf31901046b37e503b633b24f8e",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/settings.go",
+      "kind": "changed",
+      "from": "479e82ea0d9f0a85233476be52399d9dd989f908",
+      "to": "281d99be83e36643cac9a8b07eb532f18abc1460",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/state_dacl_repair_windows_test.go",
+      "kind": "changed",
+      "from": "503f14b9eca30193e061a2ec624bd9d263776664",
+      "to": "cea765939d8b679387dcd8ca5d7005fcf784f951",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/state_dir_resolution_observed.go",
+      "kind": "changed",
+      "from": "4d17e680e55d2b8aa9652206909df9b0a44f0b18",
+      "to": "34940211dbddb0ea37a3ed3a75317856c4960f97",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/state_dir_resolution_observed_windows.go",
+      "kind": "changed",
+      "from": "045902a8e93af9c4395e876275bd53d28cce587f",
+      "to": "943a440a210af118f06c799b4be16a897f4ed427",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/state_dir_resolution_observed_windows_test.go",
+      "kind": "source_only",
+      "to": "bcea0c3bfc3461767548a9378905f5ac6c3f4522",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/state_read_caps.go",
+      "kind": "changed",
+      "from": "196cfa92da759ae32c84524b1259d57c17c3b96b",
+      "to": "2ed7b688982723db24532d7f11bb353c57a0d0dc",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/state_read_observation.go",
+      "kind": "changed",
+      "from": "6ee914cf02d3d61a447aea384b7304319685e1ff",
+      "to": "6b95455f79844099930fb9984b049bf3c1ec5ec6",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/stdio_bridge_admission_test.go",
+      "kind": "changed",
+      "from": "9ed96aa0309498f0aa923f450b47e6b51dcceb3c",
+      "to": "cb76761c5439b2eeb956c94909fa1ef4870fe82f",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/supervisor_backend_hold_passive_windows_test.go",
+      "kind": "public_only",
+      "from": "736b7ce13750418b6054ff708dcedfa788e40179",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/supervisor_backend_run_hold.go",
+      "kind": "public_only",
+      "from": "acc44a2009eb573449ed88c893c2e6daf7b0f073",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/supervisor_file_mutation_observed.go",
+      "kind": "changed",
+      "from": "eda8ef291ea7755f647d44fa9c006bbd3b8ab4b2",
+      "to": "4db69198874e25206e673c3f87b27c1bf87ad3d8",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/supervisor_intent.go",
+      "kind": "changed",
+      "from": "de079b2c518198c94efe62f790789a1442453f93",
+      "to": "8402896781d2aa4b1574222e1143e1b21e1831b4",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/supervisor_intent_build.go",
+      "kind": "changed",
+      "from": "4ebcc74c14459763b27c7aa6558ec316645f1553",
+      "to": "416c651f8434cfb7a8b36a1ac17a3318bf4e0cb9",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/supervisor_intent_build_test.go",
+      "kind": "changed",
+      "from": "d0bd26179ea3cf7c4e5f8fec3b14ecc873d5c206",
+      "to": "823a43e39d481afaaf09ee4a56d5f86403d7a310",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/supervisor_intent_lock_ownership_test.go",
+      "kind": "changed",
+      "from": "c924bbbf57c8350c7ee6fde4b92c24f2bcc518ba",
+      "to": "a066f788c4aabd7de6eb72efecf501264d86637b",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/supervisor_intent_mutate.go",
+      "kind": "changed",
+      "from": "ae825017ec427fe5393bb2c76e8fe9b599f1e40b",
+      "to": "33fc2d415b2052249d7773315969b9cdee21702a",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/supervisor_ipc_aggregate_status.go",
+      "kind": "public_only",
+      "from": "ea4d7b51fcf7fd387f852a00c3886fe3ab29d732",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/supervisor_ipc_peer_transport_windows_test.go",
+      "kind": "changed",
+      "from": "9d649f1a09023512c8078413807f24c06daef5aa",
+      "to": "fd6c6cf05e39039aa4883165daf69d3f61eb794b",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/supervisor_ipc_status_client.go",
+      "kind": "changed",
+      "from": "82e408d41309f7fda6cbf3d9eb7bb851df152674",
+      "to": "d1a2d26b5dcb95d32ad77d68f59ca02d32ad237a",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/supervisor_ipc_status_client_test.go",
+      "kind": "changed",
+      "from": "5430c88dad6222fcf23ae7be5a067987aa353592",
+      "to": "5202badcfe8e94fc5a7fa92e66d2d648633b4406",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/supervisor_lock.go",
+      "kind": "changed",
+      "from": "1022c0512b1e4c5d0969c83a5e869a6ea4f808e5",
+      "to": "1c57f4e95aba48b1be621d58f0ca97bb6d2b60da",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/supervisor_lock_occupied_windows_test.go",
+      "kind": "public_only",
+      "from": "9f04f6b3fad4a147faef501f66ba57a62822ed8d",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/supervisor_status_server_identity_other.go",
+      "kind": "changed",
+      "from": "0e9786598fb709cd65a65795fb322b75e3bbd23d",
+      "to": "40e06ec769fc2a28bfea4600ec7a7928cb02cd9d",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/supervisor_status_server_identity_windows.go",
+      "kind": "changed",
+      "from": "0d020a94cff0fc33003038fd7b2a5bae2f5fdb35",
+      "to": "950ea51eb5f8692ca4be173dae433bf3cf2ba50e",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/supervisor_stderr_sink_test.go",
+      "kind": "changed",
+      "from": "39142cc73a25f9fdc92d6ebaf89b43967851e9b4",
+      "to": "da2038a30beec9a4ea7710f55063c0f600762d6b",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/tool_catalog_test.go",
+      "kind": "changed",
+      "from": "7c038dd326adafb10f3b3d9423adc01b4c698f65",
+      "to": "960a48ccac549883f7d5bd0af3a241100fe8f1c5",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/upgrade_fence_test.go",
+      "kind": "changed",
+      "from": "25b49eae7c38e154e72973102f0282ca57e70dd6",
+      "to": "581ef9193b85b6e35aaec30eaab7aacc386a73fb",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/weekly_refresh_atomic_test.go",
+      "kind": "changed",
+      "from": "c5f3ea22dd616cf12dddba7638925262bd07f7ed",
+      "to": "863f09e837e7516e2ae1dad2dc6ab89687eeab7a",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/api/workspace_prune_test.go",
+      "kind": "changed",
+      "from": "8c2238448ccace764dbc813afec13ab4baf763ab",
+      "to": "212750b52a9eeab958e11a6a15a53f25f1c12a05",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/binaryadmission/runtime_inventory.go",
+      "kind": "public_only",
+      "from": "7c3d7ed0bc2756dcb21f21cd8adbe65aa96f2bfa",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/runtime_inventory_windows.go",
+      "kind": "public_only",
+      "from": "0d018ff17cf8c49359d8c6b9bb13654777cc9e9b",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/windows_canonical_entry_bundle_unsupported.go",
+      "kind": "public_only",
+      "from": "d01b5f73d1c24e55adc71521fd59c9ddb9509817",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/windows_canonical_entry_bundle_windows.go",
+      "kind": "public_only",
+      "from": "1d7f754c1fe579970048d3157c69a9d2ab2a74c3",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/windows_canonical_entry_close_prefix_windows.go",
+      "kind": "public_only",
+      "from": "6c484490c4d8132f0a7ff028413e0c5e172bed67",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/windows_canonical_entry_dispatch.go",
+      "kind": "public_only",
+      "from": "568e59af37c561b081f075efc0710f0e602ff4b1",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/windows_canonical_entry_files_windows.go",
+      "kind": "public_only",
+      "from": "1cc0cc4d7f8b5f54dd5f13e7ee00bb0bd8e8244d",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/windows_canonical_entry_installed_binding_windows_test.go",
+      "kind": "public_only",
+      "from": "8e226049b25faa944ef18cc2946dff0597609d05",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/windows_canonical_entry_members.go",
+      "kind": "public_only",
+      "from": "1c9acb3d2405692ff5f1475377fa83ed732645ce",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/windows_canonical_entry_members_unsupported.go",
+      "kind": "public_only",
+      "from": "8ae7cd72501db5f1b836b3124c3b7f930442bb89",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/windows_canonical_entry_members_windows.go",
+      "kind": "public_only",
+      "from": "46efc0dc6ab39fe8276b1164c865228684c44d05",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/windows_canonical_entry_native_windows.go",
+      "kind": "changed",
+      "from": "62e2a88e085e6d96611d3d89f7a087011735c4f1",
+      "to": "ca7160d4ba84ce1e1eaa8b06135b2ad3ddd60c66",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/binaryadmission/windows_canonical_entry_payload_directory.go",
+      "kind": "changed",
+      "from": "8396468c9c078b72b325645633dc5879480bfed7",
+      "to": "ce6f1dbb190be17bd0f591c5729c01711244fc25",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/binaryadmission/windows_canonical_entry_payload_directory_windows.go",
+      "kind": "changed",
+      "from": "8a92c3cde3e960a61e37d5ce2869d49a01cd0890",
+      "to": "a8346a28ea8677725819074dab9037e01ee794ff",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/binaryadmission/windows_canonical_entry_prior_read_windows.go",
+      "kind": "public_only",
+      "from": "5c672f4dce54e097f06c33598df4f0a4bdbb6c42",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/windows_canonical_entry_read_comments.go",
+      "kind": "public_only",
+      "from": "1b7f196e830e9193dfadbffb5d74ff95ddd8489b",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/windows_canonical_entry_runtime_bound_windows_test.go",
+      "kind": "public_only",
+      "from": "0a2f259c38873a2e7aa0fb5e62a6f64d47b787d5",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/windows_canonical_entry_set.go",
+      "kind": "changed",
+      "from": "c3a6d5c1767b52b70f6f6b7cdb790dfde913b024",
+      "to": "ea98c2c92b4a1d7395dd6e9c804a1bd5fe50f6f9",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/binaryadmission/windows_canonical_entry_stage_windows.go",
+      "kind": "changed",
+      "from": "f9612c6ee60b93b4d14f97e159c01ca04c7a98de",
+      "to": "93c1ea4836f699c8f3ceaf6decec8ea2cfc67d6d",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/binaryadmission/windows_canonical_entry_successor_runtime_v2_windows.go",
+      "kind": "public_only",
+      "from": "082a87c20152b80b7cd21f845b0cf1fc306a86ee",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/windows_canonical_entry_transaction.go",
+      "kind": "public_only",
+      "from": "bc989265469690949f48b3ed28f04b39fa28a21c",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/windows_canonical_entry_transaction_unsupported.go",
+      "kind": "public_only",
+      "from": "8d706d932cd64acec2d13a57eb4489fc92536544",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/windows_canonical_entry_transaction_windows.go",
+      "kind": "public_only",
+      "from": "0dd22c637281a6b7cd8d5d043faa6d89b533c611",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/windows_canonical_entry_unsupported.go",
+      "kind": "changed",
+      "from": "8235985221e6bbe029400e75c6d63eb83c4f0518",
+      "to": "7bc7f2f9372cdb2dcd2b925dbd59a2ccc3749709",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/binaryadmission/windows_pe.go",
+      "kind": "changed",
+      "from": "3754b1f5434c425b6d7dfe927fe9f8ef3a38c8a1",
+      "to": "eb868e4d228a1613c2ac5a187318bde058bb67c0",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/binaryadmission/windows_product_identity_v2.go",
+      "kind": "public_only",
+      "from": "2b229bee0f4c28eeee6c666cbec830dfb889e8e6",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/windows_product_registry_compiled.go",
+      "kind": "public_only",
+      "from": "fed7b730d8ae683f150f1b67d373308097ba614d",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/windows_product_registry_v4.go",
+      "kind": "public_only",
+      "from": "da492e9af6ed86033ee74f2e06f38d44cf1c9ef7",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/windows_publisher_test_identity_test.go",
+      "kind": "source_only",
+      "to": "3a54220e5cd0a028b3292a47fa25822d4fe9ff75",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/windows_runtime_index.go",
+      "kind": "public_only",
+      "from": "8ecffd3716db744f19b743b6b96239216d0a86cf",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/windows_runtime_library.go",
+      "kind": "source_only",
+      "to": "84bfb38dbcf4310c2b812c4480534bbd0e930365",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/windows_runtime_library_test.go",
+      "kind": "source_only",
+      "to": "000f6e8c99abef7e94d04c12b3f7aeb9f9e8c996",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/windows_v2_producttxn_fixture_export_windows_test.go",
+      "kind": "public_only",
+      "from": "e03fb44372250b6ebaa8c036b4bbd829c97fc8cc",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/binaryadmission/windows_versioninfo.go",
+      "kind": "changed",
+      "from": "5c629908fbd54db913d5e6e0ba0a70952bfcbcfc",
+      "to": "baeab828ccbd1674a90415ae9da1051351390fa4",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/buildinfo/buildinfo.go",
+      "kind": "changed",
+      "from": "40a2b4ee14d43952fb6a53bcf49174c754cde832",
+      "to": "e6963157d4bf69cc7c83424dc1e4884c3cde07fa",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/buildinfo/rust_owner_product_policy_test.go",
+      "kind": "source_only",
+      "to": "71926f568285090b00a07a9e20a4c565c6b19d3d",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/buildinfo/rust_owner_test.go",
+      "kind": "source_only",
+      "to": "f030a692b897f5f9a51467a67eb5f637a34b22dd",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/canonicalnativefixture/protocol_windows.go",
+      "kind": "source_only",
+      "to": "7fa930da709db7eb780dfefeb4103d6e3bc6e5a1",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cbuild/handlers.go",
+      "kind": "changed",
+      "from": "3d4bf4c1d9ffe077579df0e91fffb232dd79bb92",
+      "to": "e2302b2eb63a160505eceae67f276f1bba5ac690",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/adopt_test.go",
+      "kind": "changed",
+      "from": "cbf5a0e603c7fb98233d275557c36b25da16abb8",
+      "to": "78cdf77fbcbf3219838b4a3faaa8d1c5a6e2d15f",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/canonicalize_product_windows.go",
+      "kind": "changed",
+      "from": "61e449e655c692ef162b75632de93072b2d28973",
+      "to": "022fd22ddba90bde72ee9972448176b01ccfe843",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/daemon.go",
+      "kind": "changed",
+      "from": "425833be632ebb4cea222112c22d56053da72af1",
+      "to": "6dd682d2d7075a82b666650af6527367b6ebdfbc",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/daemon_stdio_windows_test.go",
+      "kind": "changed",
+      "from": "6af406fca90e2ec2d3e6e8667160ec5b76278cf7",
+      "to": "3628be5222f83c59e23af39c9e227dcce197ca22",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/daemon_test.go",
+      "kind": "changed",
+      "from": "bb05b617cb005016f831d802bf33821cc09f092b",
+      "to": "acd1b33339623568eda917e811543d1156e5494f",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/gui.go",
+      "kind": "changed",
+      "from": "726ac8681eb0792573b1238ee91318d99e41c0e1",
+      "to": "ec6c3bb20ed905cf83a357b6b09ba0ce2ce0347f",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/gui_force_test.go",
+      "kind": "changed",
+      "from": "fc9de3d3e14414a2b6caa90de698cc6e238bc4dc",
+      "to": "e2fe6d9d2ae3e46ac2b59133383f503f47764590",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/gui_test.go",
+      "kind": "changed",
+      "from": "ca39ee59d769cf9b44ccc58f79aab40fcae913ac",
+      "to": "86d6befb053286c0eb78888d1afb9b8b2857112b",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/hubmcp.go",
+      "kind": "changed",
+      "from": "0d6fdb062591618b90f05c6da7b5177d306c3834",
+      "to": "2da8ef40ec4853e0f81f635c10e1feb5b250b87b",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/hubmcp_live_other.go",
+      "kind": "public_only",
+      "from": "043cb3e004b1ae2cbb85f1d5d1ffec8d3e5b2dcf",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/hubmcp_live_windows.go",
+      "kind": "public_only",
+      "from": "e793449164800a01eddc8c4778526b2897830644",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/install.go",
+      "kind": "changed",
+      "from": "a7b173e89d54c8a3e522d12c36e9cf300d736abb",
+      "to": "33263087cd981713001e1e6b48f45813428cc49e",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/install_migration_wiring_windows.go",
+      "kind": "changed",
+      "from": "7031d06460c74c979ac3cbcbdf6aa5be87cf8a49",
+      "to": "cc97ad1067d9300c47b8c417fa0d08e8b6b885be",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/install_reconcile_mcp_front_test.go",
+      "kind": "changed",
+      "from": "f2422f6b2a745a495f9cba0d7db44fe4c1e96a0b",
+      "to": "ac67f447736767a4815713f17b20ab365b28546c",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/managed_identity_proof_windows_test.go",
+      "kind": "changed",
+      "from": "8856eac9121abf940e81bd655a134c371eeee64d",
+      "to": "0c9eb64c0bb9e5be85ea7ed67cd7e37727abc9e5",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/migrate_serena.go",
+      "kind": "changed",
+      "from": "cdc126cf94d2d44ac9455c55c4375ccfa7eb6d98",
+      "to": "92b398f7ba4d21db30b93a69b21cb4b631906aec",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/migrate_serena_test.go",
+      "kind": "changed",
+      "from": "d4f46b748bdd3c6cb2a865e2c4327dd9c60ba463",
+      "to": "829d969a4464f640daa71ec57dd78d13936f608b",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/ordinary_preflight_context_oracle_windows_test.go",
+      "kind": "public_only",
+      "from": "bc1d30fb0ad5c46f85d3d021ef58a9cea0238906",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/partial_prevention_test.go",
+      "kind": "changed",
+      "from": "6ad26e95694c04eb8ca7b2ff9d961d57de368a3f",
+      "to": "d527b1198d74c094cf9573e4e96dd44e22129350",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/private_publisher_observation_windows_test.go",
+      "kind": "source_only",
+      "to": "a0c343813d1f0f4d23d101d2f5aeed39f267e78a",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/private_serena_migration_case_contract_windows_test.go",
+      "kind": "source_only",
+      "to": "a2aad2e1a23997f8efffc643464a71e253630e8a",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/private_serena_migration_case_other_test.go",
+      "kind": "source_only",
+      "to": "2a7e5ff5f4fa50d0bf8728fea52ebd2b86100f51",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/private_serena_migration_case_windows_test.go",
+      "kind": "source_only",
+      "to": "f15ebef531f2d0038d7587de03d7355f1b4b4957",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/private_serena_migration_consumer_receipt_validation_windows_test.go",
+      "kind": "source_only",
+      "to": "2b3d64d7c6d09ec3a00fb1a19eccb96f66ab065b",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/private_serena_migration_consumer_receipt_windows_test.go",
+      "kind": "source_only",
+      "to": "482386d96faefd3fe9914675780d8b5f3d10fd9b",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/private_serena_migration_consumer_windows_test.go",
+      "kind": "source_only",
+      "to": "aeb903b5aa20f3156100166865187ebdae1945e3",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/private_serena_migration_data_windows_test.go",
+      "kind": "source_only",
+      "to": "f45e8462bfe3221a11a7bca0ab3f3af564189271",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/private_serena_migration_seed_windows_test.go",
+      "kind": "source_only",
+      "to": "7868d91c46884eb59afcd88558bd74e5ac600c63",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/private_serena_publisher_namespace_windows_test.go",
+      "kind": "source_only",
+      "to": "b23b373e5a71800cd2e2c3ab3cec19d00526488e",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/retained_generation_recovery_windows_test.go",
+      "kind": "changed",
+      "from": "93aae3a15cbeb9d949839373e648a0ecec1eb3b8",
+      "to": "f5c660128f9be4cdcf38e3abe97e03dd75800e78",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/root.go",
+      "kind": "changed",
+      "from": "00b652ac60100066d56bc259bb208bfb49ce2830",
+      "to": "bf41962fecd197be6037f14873a46460aef80f96",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/route.go",
+      "kind": "changed",
+      "from": "d8f9e41ff7deb3c0584745cfa4c13f5ebcc3ce0e",
+      "to": "779398b05e1fe35f5a113e0e4f7ac59d36f16a66",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/route_session_expiry_test.go",
+      "kind": "changed",
+      "from": "b2807fabdda923ecccf78ee4dab0726f7af2ad84",
+      "to": "4c67a8f4538e5f97c36de04ecb0ed64286fa7688",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/serena_original_endpoint.go",
+      "kind": "changed",
+      "from": "c0c46e7a1c272cdfa973c84bd7c301b1cf8e0fa7",
+      "to": "49786bebcdbebe5a65e97e64dcf62bd056212b32",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/serena_original_endpoint_windows_test.go",
+      "kind": "source_only",
+      "to": "72488713751bde915d1a931a0f45bce367239357",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/serena_preparation_environment_windows_test.go",
+      "kind": "source_only",
+      "to": "3f3e760c961b6b597d0879b14d7e52260cb89583",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/serena_prepared_run.go",
+      "kind": "changed",
+      "from": "cd96d388de722f0a326816001f90daaef02fd754",
+      "to": "f49f4ca62ff0b8fcd90429c80e7916508d06242b",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/strict_mode_test.go",
+      "kind": "changed",
+      "from": "f1f4d3183fd7e0cfa7bf812c3819335287c085c5",
+      "to": "3d6006c899450857bfb90bceebabf2d789df14fc",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/supervise.go",
+      "kind": "changed",
+      "from": "d9df69454113238db400ccb52563ac018a7da765",
+      "to": "f61d5696f10cb2bae2485378eb326d1546b44a57",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/supervise_aggregate_status.go",
+      "kind": "public_only",
+      "from": "2b916fa1bd5cee107e791ea2c8fd54a31fa4742a",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/supervise_aggregate_status_windows_test.go",
+      "kind": "public_only",
+      "from": "287b7964f1739a09b7157855b3fb001a4979512e",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/supervise_cst_identity_other.go",
+      "kind": "changed",
+      "from": "a388cdfd4c7570b3a826cc85e662c5dc3ed3e348",
+      "to": "12320864d3bdd17f14096dd63aa93c81bc3fa60a",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/supervise_cst_identity_windows.go",
+      "kind": "changed",
+      "from": "8e180f3a8bbcb637ed6451d59c85a762983e7dab",
+      "to": "a23246baaab0f004d4a487d554380837f573e6a5",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/supervise_ensure_alive.go",
+      "kind": "changed",
+      "from": "51ca5cb71b95fa6d2bcbeef9d9a6f99f9106938f",
+      "to": "af0b9c687e3273ed60208187d1c042c4fcb4c281",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/supervise_ensure_alive_test.go",
+      "kind": "changed",
+      "from": "8e761545323a4a25c6397265e076b85b516f3181",
+      "to": "19d652d73ec3ef4d76dbae382cf1ebf1050136c1",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/supervise_ipc_windows_test.go",
+      "kind": "changed",
+      "from": "802b6744c1cd61ad1baada19b3366d1df3b0814c",
+      "to": "3765beeb6fc37a7c7d1254ac2d5c82fcc2a96fc8",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/supervise_liveness.go",
+      "kind": "changed",
+      "from": "95c2af7141b6f4a9cc3713468f1accb29ae3d863",
+      "to": "0bddde41d34889d79e3407754bf5b0e107dc1b39",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/supervise_lostchild_f6_f2_test.go",
+      "kind": "changed",
+      "from": "607e3dd5ce78970f5af027200718d20c350b37a8",
+      "to": "36f9d05137a0c4e979e4a2bff213d7335f9cc3cc",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/supervise_overlay_marker_spawn_test.go",
+      "kind": "changed",
+      "from": "6a233238b83bcf5c61c66f8b87b2a08753dd9ed6",
+      "to": "bb25fcb35d69f7d8983c44173c5edd4dc7bc73e2",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/supervise_quiesce_test.go",
+      "kind": "changed",
+      "from": "331c8ecf7f9b88f4fe9e8085d6e91aaf539c3d69",
+      "to": "03870c2e7addef18b9aae7acdcdbac16b54a5277",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/supervise_reconcile_ipc.go",
+      "kind": "changed",
+      "from": "65af6c787bbab9c2c48195eb98225ce7c0b8558b",
+      "to": "e9d47ea4a232127800c360bede2b6535b0338d3d",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/supervise_reconcile_ipc_test.go",
+      "kind": "changed",
+      "from": "82fcacfd60f4d51cc1efd094e391601b8a2107ce",
+      "to": "899ee7e2d2b5f2cb6d9ed2e2cd1c37df853580da",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/supervise_reconcile_serena_repair_test.go",
+      "kind": "changed",
+      "from": "6bae3b350d596246462d211e15073378a00b91db",
+      "to": "4081007f8985eb05659a6c092595993d8202a14f",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/supervise_reconcile_wiring_test.go",
+      "kind": "changed",
+      "from": "5fdff947bcd9f922275895b55b9118d0c37238d7",
+      "to": "767c0be7897fbbded2616cc8bf5adb84b9c18958",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/supervise_root_exit_test.go",
+      "kind": "source_only",
+      "to": "88cfb21ec768e5c20bccb6ad567a41756b1fb1e4",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/supervise_rust_owner_windows_test.go",
+      "kind": "source_only",
+      "to": "9a623acfc2de006802086afc7bae05370cffb50a",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/supervise_stale_exit_spawn_test.go",
+      "kind": "changed",
+      "from": "58be5ed0e55f36dc017869732ee088670b2fdbd6",
+      "to": "b3b076e77a1d4e027f86b0673faad7b5140b894e",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/supervise_stall_dump_test.go",
+      "kind": "changed",
+      "from": "253bb00a7272139124d2ee8f61236f0498cc99c3",
+      "to": "df7588f354e842a571bfc5433019c089d5446c53",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/supervise_status.go",
+      "kind": "changed",
+      "from": "1ec81b81c91ecb15b314e3412dbe5516fb39e558",
+      "to": "eb14c0e3fd7cf2854c3a0a0ea642008a37ce8565",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/supervise_status_pending_ram_test.go",
+      "kind": "public_only",
+      "from": "3aa52086ee740819b478e86bd0e5416617334abe",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/supervise_status_process_other.go",
+      "kind": "public_only",
+      "from": "7322612c6cb4e17afcb44eef24c88bfddc621de8",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/supervise_status_process_test.go",
+      "kind": "public_only",
+      "from": "5d739d3e0b5fcc4ca880b432d5a3c8c5e4a2d18f",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/supervise_status_process_windows.go",
+      "kind": "public_only",
+      "from": "6fab13d3cafb2aa3e1dec6c679a19f0da6f1bc9b",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/supervise_test.go",
+      "kind": "changed",
+      "from": "7885008429d09bdd0fbd74583b35a67eddf1f8c4",
+      "to": "c1985ab57bf2a5347547187730aef80d847fa139",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/supervisor_launch_successor_runtime_windows_test.go",
+      "kind": "changed",
+      "from": "cd49eac954ba1358d466e6ea880a5fa3178758de",
+      "to": "2ea2b1f5d07a2dccefb6da7efc7ab6b6736a7028",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/supervisor_launch_windows.go",
+      "kind": "changed",
+      "from": "fb2427b00558e7180248b4ef96c52f63d42267a7",
+      "to": "d1573ede111088e43d966ada8a358ef4e93581b7",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/supervisor_launch_windows_test.go",
+      "kind": "changed",
+      "from": "367cc534b73f43ecaed1c3d634754016e56ad2c7",
+      "to": "caf37e2dc11644cef2b5c0b03ab62c5adbc00881",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/upgrade.go",
+      "kind": "changed",
+      "from": "0a96de81efd921b2496cd7cda7f9de32acbe8034",
+      "to": "140740a54cc193c6281476aacee7654b53bd0d43",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/upgrade_committed_recovery_windows.go",
+      "kind": "changed",
+      "from": "687954202ac52033bfcfe79cf11f5c446b61062e",
+      "to": "5c9c7b93588c0addd042903451bb9a44636e11bb",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/upgrade_committed_recovery_windows_test.go",
+      "kind": "changed",
+      "from": "ef8f3182de7d47daa892767d996593da0c43ffb7",
+      "to": "9117f99ca506382ad9949b6597da1b3107a3799e",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/upgrade_gui_fence_windows_test.go",
+      "kind": "changed",
+      "from": "638ccc42dfbff11c7c9c711720388525f7b2f900",
+      "to": "5cce7e8804e16806575ba950eca551a6ee5d9836",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/upgrade_gui_qualified_fixture_windows_test.go",
+      "kind": "changed",
+      "from": "647c9568e0a5d8a82cff0ba60316cadfd5079259",
+      "to": "dcdac5b9138b1d12a32100620030abd127c1fd72",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/upgrade_pending_recovery_windows_test.go",
+      "kind": "changed",
+      "from": "a51d32df1ebc5eae47745c15f5cd3d194d7740b6",
+      "to": "96a41c7b0d64ba2789ebc2053bce8bea0403335b",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/windows_canonical_entry_gui_native_replay_windows_test.go",
+      "kind": "changed",
+      "from": "b76bf5bb84d7f13ee818405faedf24f457e5814c",
+      "to": "90019d744bbc04946a39d17474a026053f0f20b8",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/windows_canonical_entry_partial_prior_recovery_windows_test.go",
+      "kind": "changed",
+      "from": "c45c0017ec74cb01b9347e9aeed422744d355bdd",
+      "to": "842e7be08125eb09009586e55f96bb4cc1c0ccd4",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/windows_canonical_entry_pending_recovery_windows_test.go",
+      "kind": "changed",
+      "from": "eeb5daca7b04c36e1a62b1cc5df245415c1805b9",
+      "to": "01546d007b41e3d003df35a360385812267006ae",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/windows_canonical_entry_prepare_windows_test.go",
+      "kind": "changed",
+      "from": "dc83a554ab6a63fe42f38d74422be04443a35ace",
+      "to": "cdf634acd40d14ad1f226888f229843d05ece1b9",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/windows_canonical_entry_recovery_windows.go",
+      "kind": "changed",
+      "from": "abe1b0d5322d3090dd58a09f44853dfaeaf409f2",
+      "to": "8255a7da4551becf600a8eeb00db9b5643abc0f2",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/windows_canonical_entry_runtime_recovery_windows_test.go",
+      "kind": "changed",
+      "from": "c50943fc90193f3396291df301ec41cd7f5b1156",
+      "to": "9a6d89b0e4045f4c33cdfc58623b3825e85cba94",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/windows_canonical_entry_set.go",
+      "kind": "changed",
+      "from": "e4703fadcf0da03fa845bf59bba6eb38ee3c8010",
+      "to": "aac6e641944cb310401577bfab9a99088f10dd9b",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/windows_canonical_entry_set_test.go",
+      "kind": "changed",
+      "from": "652ea142e88e64a01ad30655259ae53fae61fbe9",
+      "to": "562af92aa488b5d110e9e4ba9a69e08fad3ab0bb",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/windows_canonical_journal_context_oracle_windows_test.go",
+      "kind": "public_only",
+      "from": "84ff06fcc41547f3604ca3f20940bd8a29b625e9",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/windows_canonical_native_actor_case_external_data_windows_test.go",
+      "kind": "source_only",
+      "to": "249459e11a23841611ad1af8dfa3a8d1adebba86",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/windows_canonical_native_actor_case_windows_test.go",
+      "kind": "source_only",
+      "to": "7980006ac5344136cb5b849b2cc93861139f3396",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/windows_canonical_native_actor_fixture_windows_test.go",
+      "kind": "source_only",
+      "to": "bcce27d9902c8370b3cb44f3b33c5cd93e528d2d",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/windows_pe_admission_test.go",
+      "kind": "changed",
+      "from": "d1eeeccea235af1137799bf89e2d6f8ece8d4286",
+      "to": "535082e3e12c71a257f1c15a2e9c826c5635a89d",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/windows_product_backend_hold.go",
+      "kind": "public_only",
+      "from": "d5c060bf59e979634c3a06617bd14b3cb01763ab",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/windows_product_backend_hold_windows_test.go",
+      "kind": "public_only",
+      "from": "9314a7b3b72f5e49a70d27c682d0366d843ab9b6",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/windows_product_entry_wire_test.go",
+      "kind": "public_only",
+      "from": "8b3738c3752e0b60b8277f1a293deff70f871a9d",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/windows_product_frozen_port_compatibility_windows_test.go",
+      "kind": "changed",
+      "from": "b35694616338aadfca8c2fa189cb41b30eee508d",
+      "to": "24fb4c585f85a9f802bc1d23a3e96a8f344ce3c2",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/windows_product_journal.go",
+      "kind": "public_only",
+      "from": "929460b84e7a8d8e76db1071fd7ad1e281ffdb13",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/windows_product_journal_fixture_test.go",
+      "kind": "public_only",
+      "from": "0772ad93015bd6eebac2b90f354162a25b951dea",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/windows_product_pair.go",
+      "kind": "changed",
+      "from": "a7a00dc798c63dde83e2e9652214e7335fca7950",
+      "to": "51b154002e29cd1ad362491f4d5790ff7d72617a",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/windows_product_pair_recovery_windows.go",
+      "kind": "changed",
+      "from": "be05c0fa4c35eb4ca197fabebb744cf00f367d9d",
+      "to": "8aa740e76a6b44276eb1a77c5ea4f6d220ebcf30",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/windows_product_pair_recovery_windows_test.go",
+      "kind": "changed",
+      "from": "87adec3e9e1c6d5e8e80dbad215bb4ce4a84e009",
+      "to": "c5f36f79411231ce81e09611d4254df36205236d",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/windows_product_pair_test.go",
+      "kind": "changed",
+      "from": "13f936dcaf662f8af16478ca4a180e6540d27315",
+      "to": "23416aef03f91909a66427d7552afb2298ba091c",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/windows_product_pair_wiring_windows.go",
+      "kind": "changed",
+      "from": "991b7f4834a1e45090d766528d2d4ed04407dad5",
+      "to": "eaf0b4631891f167ecd81b988c69f85e4dd95616",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/windows_product_preflight_original_windows_test.go",
+      "kind": "changed",
+      "from": "4083571410ac4f0aeaaee8a05159bbfe96f3dde8",
+      "to": "73a1296f5d77e1a2d7d5026bd5f425c79e18811c",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/windows_product_successor_quiescence_windows.go",
+      "kind": "public_only",
+      "from": "e061a8ef99db498a2ef44f18703c519929df5ad2",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/windows_product_task_store_custody_windows_test.go",
+      "kind": "changed",
+      "from": "3e574e6af6596ff2519ab0ad40245cdfa9f4abef",
+      "to": "606554676ec105b7d4c27874ce03524fd24aae21",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/windows_v2_producttxn_native_windows_test.go",
+      "kind": "public_only",
+      "from": "0023e62629f235deb2dc1a4e73dfc74b696d4860",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/workspace_cmd_test.go",
+      "kind": "changed",
+      "from": "a5c940ea6683d140ade80e72c3ceb5535990c27f",
+      "to": "7f1a27cf92e7866205813ee350a64a90e0615101",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/cli/workspace_prune_cmd.go",
+      "kind": "changed",
+      "from": "ec03d05f03c8940e1204ccdfda2f8480912236f0",
+      "to": "c7a547a51f1e433e636b8c849805496297d26d43",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/clients/codex_cli.go",
+      "kind": "changed",
+      "from": "d32f4e52abbb87b7eac2f1e356be4b37da617507",
+      "to": "6c0848b0f01c90135ad4c231fd1540c43ea49d5d",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/clients/codex_cli_install_observation_test.go",
+      "kind": "source_only",
+      "to": "a910cec687b709234aea3b02716cbe72ccc5c1d6",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/clients/codex_configured_source_windows_test.go",
+      "kind": "changed",
+      "from": "3bfc213c30040483499291fff61a0c4d320fc616",
+      "to": "6a14d812509f430e5d16252fc67a7f39f3a28ca7",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/clients/config_lock.go",
+      "kind": "changed",
+      "from": "872ee8b1943fc2f6bade77ea5bd61c0f74c19e77",
+      "to": "df27978d4be9ecacc6efb92b633849c13b54a350",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/clients/managed_registration.go",
+      "kind": "changed",
+      "from": "862ec0365ff0ae8640303d0ecc01b7ed84bba89b",
+      "to": "7bc46a567eb02693ae7ad7b93b7ef96cd29a64ff",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/config/manifest.go",
+      "kind": "changed",
+      "from": "5c27fb48ddc12f89b90f4e20443d88340a05e650",
+      "to": "698b72bb17a478eb8419c928240665fdf4232870",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/config/manifest_test.go",
+      "kind": "changed",
+      "from": "17296319f0c98af8c6f9b895e3273ce42b8d5d9f",
+      "to": "fe96c9a8bbb7c1186769644a0d2cd2cb062dc4a0",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/daemon/host.go",
+      "kind": "changed",
+      "from": "340073c8547b9c3d248b5c8c2301718d76388ae1",
+      "to": "0a1cb5e55ed9d26e1a109bb7991a4d91b142dbc7",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/daemon/host_original.go",
+      "kind": "changed",
+      "from": "8755949d2c2825c43f6a0264fca78ca3ac1acea8",
+      "to": "17228c53ff070135bc87ef45f9b0196ae340b542",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/daemon/host_original_timing_windows_test.go",
+      "kind": "source_only",
+      "to": "1be95885ce28c3ede1eb24547993257129196676",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/daemon/host_original_windows.go",
+      "kind": "changed",
+      "from": "c79bd576d25c8f573fea73ad40c11b18e9e44dc7",
+      "to": "921eaf013dd071b1d3c55acd574dc2a3e6e7302e",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/daemon/host_original_windows_test.go",
+      "kind": "changed",
+      "from": "2e16c3c3340e6f8031cc25083e1ef839677c1520",
+      "to": "632d1eca23545bb900ae325651063fd5e2da79b4",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/daemon/host_rust_original_boundaries_windows_test.go",
+      "kind": "source_only",
+      "to": "7ed8a0716dd2192174eec9e9fd080750f7ca0c67",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/daemon/host_rust_original_environment_windows_test.go",
+      "kind": "source_only",
+      "to": "fef2bde035c3e69f08f8d4dff9fc7f73ec1a0db0",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/daemon/host_rust_original_preparation_windows_test.go",
+      "kind": "source_only",
+      "to": "ec831fff40c40e46f3f2c5df21eaddb5eac65036",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/daemon/host_rust_original_windows_test.go",
+      "kind": "source_only",
+      "to": "32837e9a94b987f83281ea9e7004e5b63bf04cdc",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/daemon/host_test.go",
+      "kind": "changed",
+      "from": "30eb5371a82ef422641228c76d402a8a8c94880c",
+      "to": "11eceded8539c26c30765877b021a529bbce2802",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/daemon/http_host_endpoint_release.go",
+      "kind": "changed",
+      "from": "229f1fb246499b4d37bd357a93d7d7501d3db0bf",
+      "to": "c717242e09a9a7897914fa9e0746d0605273fec4",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/daemon/http_host_endpoint_release_windows_test.go",
+      "kind": "source_only",
+      "to": "45e872d21b48dd4e389c5d7101530c78c7391a1f",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/daemon/http_host_prepared.go",
+      "kind": "changed",
+      "from": "c6f68df8a14d2ab22db5015ee048d29723409a36",
+      "to": "981834bfd95345fc66eda41b83634448ac1e8c95",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/daemon/isolated_stdio.go",
+      "kind": "public_only",
+      "from": "247b00d6e1e50ad76cf8cb8e10bfc7a9004664ef",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/daemon/isolated_stdio_windows_test.go",
+      "kind": "public_only",
+      "from": "7f1cc7bd34cb207effe4777392e0b0ec7a602c2e",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/daemon/isolated_stdio_write.go",
+      "kind": "public_only",
+      "from": "d1f9373da4f6257e8f38858007498214feefcbce",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/daemon/lazy_proxy_readiness_test.go",
+      "kind": "changed",
+      "from": "860f38c51af8548a71e0211da3efda9f59de0752",
+      "to": "dbbb9f02522d4da07e624cd49e3902eee99f55d1",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/daemon/lazy_proxy_test.go",
+      "kind": "changed",
+      "from": "f02eebcf9090ec3d7f0f43f5ba9f58bd7b2b484e",
+      "to": "12fb2ff609f83a098c5d53d1dd46bddf6fc4d0ae",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/daemon/main_dispatch_test.go",
+      "kind": "public_only",
+      "from": "2146ff844d14b19e65e08520dcea2efabf01b4c7",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/daemon/main_test.go",
+      "kind": "public_only",
+      "from": "f9ce99733688bb630efe144f06a18ad5892d76a8",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/daemon/relay_qualification.go",
+      "kind": "changed",
+      "from": "6cdf53546921796c437f3e3f2306c0a042f2b4ed",
+      "to": "f58f0689794488d7f1dc5d98c771ea0e72c69c26",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/daemon/relay_qualification_connection_close_test.go",
+      "kind": "source_only",
+      "to": "687f22f38b3acefe67ebe14a7f0b8cdb2fbd5202",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/daemon/relay_qualification_test.go",
+      "kind": "changed",
+      "from": "783d38b5244e241fd8e91c4444311b6cf1463190",
+      "to": "790952d1484fbb81d5546d1bc1aadb0cdfc09712",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/daemon/relay_qualification_transport_test.go",
+      "kind": "source_only",
+      "to": "dc825b9f62deb047c3655bf00738bba81b18d671",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/daemon/stdio_child_stderr.go",
+      "kind": "public_only",
+      "from": "b375c456682c01b2d899778702e1b4802b0798a9",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/daemon/stdio_launch_preparation.go",
+      "kind": "changed",
+      "from": "ff2fd146fdb1d09478cc0afeec459a7447d95cc0",
+      "to": "d40c9fe9c105da2805d69365e032d38584f0a2f6",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/daemonrecovery/recovery_test.go",
+      "kind": "changed",
+      "from": "f9a05012c078d8d5410a68048c6daf134d0329f8",
+      "to": "169bc817692a16f60887afaa1a617be6019c2960",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/gdb/server.go",
+      "kind": "changed",
+      "from": "956f29685b4485e61734738b91031ae8134b2333",
+      "to": "ae2a006d84710e5f1d0c84e2827ae3e3ef7fe9e3",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/gui/audit_lock_state_test.go",
+      "kind": "changed",
+      "from": "0017ef479320833ca8bfd555c3990769da5ba520",
+      "to": "1256595a84ff77fbe07de1def6a0ad86f56bba18",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/gui/csrf.go",
+      "kind": "changed",
+      "from": "35f9f9a57ee81b0dce9d78df2c2dbde780d8e232",
+      "to": "08cfc55601db2152573936c4d76f0ce066fbf38b",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/gui/hub_listener.go",
+      "kind": "changed",
+      "from": "8ad65316ba372a58f58f7df247e2c5e73f14c357",
+      "to": "c79dd0ab36523d630fc80fa6e5a23be965fef58a",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/gui/hub_listener_restart_test.go",
+      "kind": "changed",
+      "from": "55c7489e2bb5eb7d44255c520e8eb210dbf51486",
+      "to": "05179251ef3dfeb8db8205fe0e57898d769cde4a",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/gui/hub_listener_test.go",
+      "kind": "changed",
+      "from": "1e2f27f9b1ff449b1b2696ca924f83218d956294",
+      "to": "6948c785abde66cb081b9ac31090a2d30b7cf3dd",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/gui/lsp_router.go",
+      "kind": "source_only",
+      "to": "94d64d6bd5c92f87097cecfb0f688ecfdf5338cc",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/gui/lsp_router_test.go",
+      "kind": "source_only",
+      "to": "e88fc8ba44fb5cd0a4aa35ccae498569b5445e79",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/gui/poller_test.go",
+      "kind": "changed",
+      "from": "2c3fa2a3f4e86f58633df9bcfc1dff02e50cc5b5",
+      "to": "c9b207a0fc435aa97e14e1fd9e8052cae8960ed7",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/gui/projects_test.go",
+      "kind": "changed",
+      "from": "c53b519e191ef781a9abedef636647d55ad09887",
+      "to": "798f6321228794ba4848a357cfea7c3acf7b5997",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/gui/projects_toggle_test.go",
+      "kind": "changed",
+      "from": "3fe7a3bf220fce3776735094b4f17024565db46c",
+      "to": "ab6af062252118019398ee01fdb6e5307fa92f1e",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/gui/route_adapter.go",
+      "kind": "changed",
+      "from": "5e89fce2d676a6a4610c8dd6d4eab6116e6763a9",
+      "to": "d4ae3ec96b1ecd6832b9df70581240d53b94c86b",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/gui/route_adapter_test.go",
+      "kind": "changed",
+      "from": "f3b43eaa422386a604d5c946e2d0d85ccfc0fd28",
+      "to": "3a9c91d023e8ce7febec05985441cf681b209bc3",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/gui/route_readonly_audit.go",
+      "kind": "source_only",
+      "to": "418647dafafedd80e96469d0f82a132e9f5ecd9b",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/gui/route_readonly_test.go",
+      "kind": "source_only",
+      "to": "9cd085a01fc3f7235a12b5a1e9a5a3380d8d6d48",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/gui/scan.go",
+      "kind": "changed",
+      "from": "8c2eb8391cec5a1a525fb07c713ff4356df27bca",
+      "to": "51a0fcb07e413099fba6bea573ed6d36ffbed10a",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/gui/serena_idle_reconcile_test.go",
+      "kind": "source_only",
+      "to": "add53da97e603a0fa433d27161469814732cd238",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/gui/serena_idle_sweeper.go",
+      "kind": "source_only",
+      "to": "c706c89330144fff7c8a431d6f43740f756df95a",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/gui/serena_idle_sweeper_test.go",
+      "kind": "source_only",
+      "to": "ea6c891fccadd89d0d01581d992f051620bf701f",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/gui/serena_router.go",
+      "kind": "source_only",
+      "to": "c710333c9938a3e400d04e4f00606ceb2829ff7c",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/gui/serena_router_daemon_session_cap_test.go",
+      "kind": "source_only",
+      "to": "4e2ce551d676ca940ec88a92bebed65498a7684a",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/gui/serena_router_default_workspace_test.go",
+      "kind": "source_only",
+      "to": "9e9dc65ef7d3fbf02c701c7967b4c2d0f5418ccb",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/gui/serena_router_findings_test.go",
+      "kind": "source_only",
+      "to": "4c36116b792c5d141ea9731e14dcb745b013c013",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/gui/serena_router_handshake.go",
+      "kind": "source_only",
+      "to": "fdb7522e89d372347b13e53476d7d484317f6f6b",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/gui/serena_router_invariant_d_test.go",
+      "kind": "source_only",
+      "to": "5b622ef15857c776f3d873013880c7a9ac032f67",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/gui/serena_router_lifecycle.go",
+      "kind": "source_only",
+      "to": "a6a710b51ce9bf0f9ed4267757404fd60a4513a0",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/gui/serena_router_lifecycle_test.go",
+      "kind": "source_only",
+      "to": "3f4f59f1884cceb5675b09b38f4a76abf09812c9",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/gui/serena_router_operator_stop_tools_list_test.go",
+      "kind": "source_only",
+      "to": "733d0b8bcf2fe544e4f6562809f6c265ae6c4ee0",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/gui/serena_router_postpass_test.go",
+      "kind": "source_only",
+      "to": "d7c148bcd75a967363a71e11e183211fd54beab8",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/gui/serena_router_pr249_findings_test.go",
+      "kind": "source_only",
+      "to": "733520c2e353dc805ebb8fcee8867a88f6d16f31",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/gui/serena_router_pr249_round2_findings_test.go",
+      "kind": "source_only",
+      "to": "e92ed207d681190df6a701a584d718d3c05f293f",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/gui/serena_router_r6_gate_edges_test.go",
+      "kind": "source_only",
+      "to": "e28664ba833f2406075c97a76b0e8d0c3645a1d2",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/gui/serena_router_round12_findings_test.go",
+      "kind": "source_only",
+      "to": "f9d321f6daa8683fa0e4f95db920e4f02630a41a",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/gui/serena_router_session.go",
+      "kind": "source_only",
+      "to": "eb0a6e1ce5fee3fdd254a07c92c15669459aea99",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/gui/serena_router_test.go",
+      "kind": "source_only",
+      "to": "9047a67bef3c366845ad2595f8d5e5ea643537ac",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/gui/server.go",
+      "kind": "changed",
+      "from": "78b8783cfa34a86dcfd653e19add88e5d905f0de",
+      "to": "18eb88cce76da745b22b4ec8c15e2dcf5f2beeee",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/gui/supervisor_restart_spawn_windows_test.go",
+      "kind": "changed",
+      "from": "e3c007ba06618d6860845eeb43b7bb0fded4f666",
+      "to": "4e52459db70d54d679f90f3f0f519bba23e975be",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/gui/test_seams.go",
+      "kind": "changed",
+      "from": "63d148b8b8a3657d994e00e83521d5a17a6da2c9",
+      "to": "995a412d124a33248af002f67fc948b673fc3671",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/gui/workspace_prune_sweeper.go",
+      "kind": "changed",
+      "from": "df9da7a0969578c56c1c839e0fd15eb524ea3325",
+      "to": "c55c9d8d824cf96961e4e46bdc707095bfa35291",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/gui/workspace_prune_sweeper_test.go",
+      "kind": "changed",
+      "from": "e30928e26ec201b14a3675b4cb31c5922281b5b7",
+      "to": "66d2c271cb6cf06556039707eda80f4e084f7251",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/mcproute/hub_listener.go",
+      "kind": "public_only",
+      "from": "337351d2de15e9667fb738a1384edb4a90bf49db",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/hub_listener_test.go",
+      "kind": "public_only",
+      "from": "f1c430c1824f58ba92635bdc2a16ea22dc298ef2",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/lsp_router.go",
+      "kind": "public_only",
+      "from": "0dd7686753dd466785b97e1d3635b7fd9b2bfcbb",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/lsp_router_test.go",
+      "kind": "public_only",
+      "from": "36906a1513c1721a4a3dd392673919a3298738b1",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/main_test.go",
+      "kind": "public_only",
+      "from": "f1dbefc44ae7ede79d4e65fb966a8ecad75f0331",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/originguard.go",
+      "kind": "changed",
+      "from": "ac86710935b61c68c03f85642e3d148c4c3e2e65",
+      "to": "d6cf1d85b6d6865736e06cef0ce63dcac6ac9d45",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/mcproute/route_readonly_audit.go",
+      "kind": "public_only",
+      "from": "4a564db898f027c9a43d35409db5c86c5db2174b",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/route_readonly_test.go",
+      "kind": "public_only",
+      "from": "91bae8b32565f293c3cda6177db2e9da431c5c25",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/serena_idle_reconcile_test.go",
+      "kind": "public_only",
+      "from": "eaed28492d5f1a4bca020bacb05aa6bc15f3a7f0",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/serena_idle_sweeper.go",
+      "kind": "public_only",
+      "from": "77f14bba7949313bae2210a3b943b24c685a3e8a",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/serena_idle_sweeper_test.go",
+      "kind": "public_only",
+      "from": "00e41e34176c6263f8eb5a17f4f953cdbac65457",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/serena_router.go",
+      "kind": "public_only",
+      "from": "e54d46c3f0cf2effe4f9f96f4a6fea35e3076b41",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/serena_router_daemon_session_cap_test.go",
+      "kind": "public_only",
+      "from": "04f6d260a21b47133c6d05c4cc774181d6efe125",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/serena_router_default_workspace_test.go",
+      "kind": "public_only",
+      "from": "c52e6f7c39523bdec3ab28c7ba38f3b5b2290900",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/serena_router_findings_test.go",
+      "kind": "public_only",
+      "from": "1a0b66e37468d07dfee463bed77a2898d6c2aec5",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/serena_router_handshake.go",
+      "kind": "public_only",
+      "from": "78d706404b88ae808e088d50e37541eac6f08342",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/serena_router_invariant_d_test.go",
+      "kind": "public_only",
+      "from": "08d196e3bd95ce8b09b42334bc2ff5243f77bda7",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/serena_router_lifecycle.go",
+      "kind": "public_only",
+      "from": "7617d1a5044f94eed6159de350d5a5f7df4612eb",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/serena_router_lifecycle_test.go",
+      "kind": "public_only",
+      "from": "2e2fd7631b6c5143097f0f5abc0e76215483771b",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/serena_router_operator_stop_tools_list_test.go",
+      "kind": "public_only",
+      "from": "04db0d3f628e13f5f12f386c20c7cc432b9fa0fb",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/serena_router_postpass_test.go",
+      "kind": "public_only",
+      "from": "e41a472c4ee32c8d6bd8d940f1bc1bafc536fa73",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/serena_router_pr249_findings_test.go",
+      "kind": "public_only",
+      "from": "f391b6f8b5b7a792d5089c88f4ffcb00241ecbbe",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/serena_router_pr249_round2_findings_test.go",
+      "kind": "public_only",
+      "from": "63bd5e339518a0bd3bc68ec2789db7efba61817c",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/serena_router_r6_gate_edges_test.go",
+      "kind": "public_only",
+      "from": "43cac08026bf59129776afd6595ec1228347d4e6",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/serena_router_round12_findings_test.go",
+      "kind": "public_only",
+      "from": "09f0e402fc6de777ed493084af3055e31c08940e",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/serena_router_session.go",
+      "kind": "public_only",
+      "from": "ca622c1a1e07856f88d4954dffa369c4e5400d88",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/serena_router_test.go",
+      "kind": "public_only",
+      "from": "b5993939a26d60c0594eabea0ff09f94dd72bc9f",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/workspace_routes.go",
+      "kind": "public_only",
+      "from": "f1f3828b3c98373b144bc9a2385bac4f8e86e501",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/mcproute/workspace_routes_test.go",
+      "kind": "public_only",
+      "from": "69039320ffc61b65ed21de8d27faac9e1b8d5178",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/oneapirun/async.go",
+      "kind": "changed",
+      "from": "758ff2e64f24bc1afb7ffe90778a13193fc387bc",
+      "to": "f1ff9f6020581a9c0a6d2e0a49dbfe66a89d84c3",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/oneapirun/async_cleanup_test.go",
+      "kind": "source_only",
+      "to": "a2e97f8dc9bd6b759ac0de8cbf27977f03165be1",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/oneapirun/async_owner_test.go",
+      "kind": "changed",
+      "from": "b3f8c23f860f27ee4e1b3b7b9314005eb479adfe",
+      "to": "b56ca7673732e932b36d888c37e00c56f93d30b3",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/oneapirun/async_test.go",
+      "kind": "changed",
+      "from": "aa340ab93e65289798ace2b647469e5a9c93923e",
+      "to": "090e31811d3b557ff0e14c6e452b040aa5f83eb9",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/oneapirun/handlers.go",
+      "kind": "changed",
+      "from": "04333e9da8a658e7a6b4642f1c155abdca08e9c7",
+      "to": "51e5785d981d6b443657bfd942416098f34c7ebb",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/oneapirun/main_test.go",
+      "kind": "public_only",
+      "from": "f4161edc5af2ad1d8e0b12016d04e11492f76cef",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/perftools/exec.go",
+      "kind": "changed",
+      "from": "773aef160423b5f33582067abbbd129e9705d66c",
+      "to": "340b5c6b7cbe46fff31d89c96fc0de6805d4a0ef",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/perftools/handlers_test.go",
+      "kind": "changed",
+      "from": "c4a2c43afee3718ad3083316f805685adeb5542a",
+      "to": "d34e2c688a8b4c1e6c627bc5ec9f3fa6441285d9",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/perftools/hyperfine.go",
+      "kind": "changed",
+      "from": "6ba763f1eee449a6f5db5fc429b0064cf7dc0619",
+      "to": "eba48760596da187784da23cbd2fccbf6ac51457",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/perftools/llvmnm_size_test.go",
+      "kind": "changed",
+      "from": "80e4ce3f64bd6d45933ba3e2df273df29ee6440f",
+      "to": "19f05ec2ed33905c44dd222b19855481690ab360",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/process/background_console_native_windows_test.go",
+      "kind": "changed",
+      "from": "79aa2763b6e46c6fef7338f9142a3faa930c5489",
+      "to": "e0618753360b3cd7fee9d9190bd0862113d3f9a1",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/process/contained_stream.go",
+      "kind": "changed",
+      "from": "6f8594dfd4cc0ab0a2750246800fcf6f19aa49c7",
+      "to": "8631516b2a33b1216efe64a28701579a86bfe8b5",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/process/contained_stream_linux_test.go",
+      "kind": "changed",
+      "from": "e6f6bed1a92f460ddc1b9d62def5fead5824e382",
+      "to": "179928b32b53273decaee7639f9902845184de3b",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/process/contained_stream_observed.go",
+      "kind": "changed",
+      "from": "3a416c8abf2dc235bbfc11dd0488806333f23c2f",
+      "to": "b72ea16bcdaed9407fc7e81f34650d168b8458c0",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/process/contained_stream_product.go",
+      "kind": "source_only",
+      "to": "8b6ff87814bff5fa8356691914d720db4622dd32",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/contained_stream_start_failure_test.go",
+      "kind": "source_only",
+      "to": "d6cf7136dd7f6a6d59d7893d674f88ac892e10d1",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/contained_stream_windows.go",
+      "kind": "changed",
+      "from": "66c982c2b16c04669b0fbcff19c51aa21b18c084",
+      "to": "7614e1f36a5280e2aa269fc906a1e29eeca55221",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/process/contained_stream_windows_test.go",
+      "kind": "changed",
+      "from": "bef728b55e8886bfc91e684ee66a9cae7850333d",
+      "to": "1053530302ed282889f5900b2181fcda6faf66fa",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/process/creator_identity.go",
+      "kind": "changed",
+      "from": "b7b414ecc515ee283e28179528f9e43e665f0c13",
+      "to": "7f32d596c8a8f44139430e2dacaccc567e92f01a",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/process/creator_identity_windows_test.go",
+      "kind": "source_only",
+      "to": "444b40002661c6557eb8ab6f5ec63f8553d378b1",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/facade_custody_test.go",
+      "kind": "source_only",
+      "to": "cadf114ca7f4b2ec9e3059ee638d790fce22f106",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/foreground_conpty_actor_windows_test.go",
+      "kind": "source_only",
+      "to": "6477c0c804931a30e32b2851cece881a28151109",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/foreground_conpty_native_windows_test.go",
+      "kind": "source_only",
+      "to": "6feb41dd44c16ebd59097c64006ac0e4bafa1c01",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/foreground_console_native_windows_test.go",
+      "kind": "source_only",
+      "to": "aaf66015b4873ddd6a028311d3014fad5115cf4f",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/foreground_console_policy_windows_test.go",
+      "kind": "source_only",
+      "to": "e9266536737135e8e2434ab45a7519fe9fa930c5",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/foreground_outcome_windows.go",
+      "kind": "changed",
+      "from": "b6633768d29da1933c582d284361e2b3dd91d89c",
+      "to": "44fa9ce6621d28ab71c8b972a7e2a4999119dd3e",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/process/foreground_outcome_windows_test.go",
+      "kind": "changed",
+      "from": "1de1d4116b8b0069eb2f58dff50ab7e76ce6b76d",
+      "to": "5727dd0773d2f4a5a318db83b3a8c205ece7274b",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/process/foreground_windows.go",
+      "kind": "changed",
+      "from": "77298962323d6bbbe26d6693d972611b3f8e3092",
+      "to": "c9771d2adaad1af63a32dfddd7edc145a1d1ffb3",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/process/foreground_windows_test.go",
+      "kind": "changed",
+      "from": "82755d675a7f13a2c6781367cbd7474bc18bfd8c",
+      "to": "52504da53b66b78d1375bad0336104ad1be4338b",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/process/jobobject_windows_test.go",
+      "kind": "changed",
+      "from": "1d2cd7ae38db2d1d5a5d2e1ef5df114166f7a202",
+      "to": "b079fc962fae048d8e6e72234f3247bcfc019550",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/process/native_observation_benchmark_windows_test.go",
+      "kind": "public_only",
+      "from": "018d761fefa50bf5eba59e32052b9593c3724646",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/original_job_member_batch_close_test.go",
+      "kind": "source_only",
+      "to": "0de1f556a3dd933f13e0e058821d1a454e4f0a8b",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/original_job_member_close_test.go",
+      "kind": "source_only",
+      "to": "15a352191d6141103aeb70df4ba1d4e6a106165b",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/original_job_members.go",
+      "kind": "changed",
+      "from": "3df77b63bc1cf19b17f4a122900e83dd925360fd",
+      "to": "44e67ca72783c10663775ad3371aa3f3bb08a08f",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/process/original_member_custody.go",
+      "kind": "changed",
+      "from": "6857bd21487f5ec21e2426aac14da40c8499ae67",
+      "to": "67d8f294a0139a9571c3572dcf884ef7688130f9",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/process/original_member_custody_batch_test.go",
+      "kind": "source_only",
+      "to": "d920f9033711bb559da46467aaf0b4d2053fed32",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/original_member_provisional.go",
+      "kind": "changed",
+      "from": "cddd44afee76f231e9adb8baafdb3a975a9d9d8b",
+      "to": "93aea7fb5db3e1c100c38d7d84e11fc23872c7bd",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/process/pid_identity_windows.go",
+      "kind": "changed",
+      "from": "c34253e79b1bb857878bef6ac497a36b7272762b",
+      "to": "d218efe3f6f4d52d1d48c201ad4b8590148bb4de",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/process/pid_identity_windows_test.go",
+      "kind": "changed",
+      "from": "647d4aa7eb8e72bdc91178bbec164ecd66c6cb5a",
+      "to": "19115335c10368990c0f3fda892ecd37023fb451",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/process/pid_status.go",
+      "kind": "public_only",
+      "from": "27376d22a0a4a0b5281c38670be808fc7f75fd08",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/pid_status_windows.go",
+      "kind": "public_only",
+      "from": "183f5bb89554ee4c8cbc6b5099f15d12c3075884",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/pid_status_windows_test.go",
+      "kind": "public_only",
+      "from": "c90e1819319908a46a3fc63ef63ec9ee4ed9ecad",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/process_rss_windows.go",
+      "kind": "changed",
+      "from": "21d66c654db67cc963dab7e50a6a0d2f8da176be",
+      "to": "91dfdfd50657a50dd9b2f83ca6ec7f2e68caa3bd",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/process/provisional.go",
+      "kind": "changed",
+      "from": "ddbf3bd129c67a8c7ff1e9a1282b61a3cb3154a3",
+      "to": "1f3fb0acf16655d26d9ef568356606d0b8c8c7e4",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/process/provisional_no_spawn_review_test.go",
+      "kind": "changed",
+      "from": "4d47d2a7ddcd40048d8d94a8e543aa2c7c075392",
+      "to": "ebd04e77d2facacb7a605bb519e67207f9db357e",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/process/rust_owner_abi_windows.go",
+      "kind": "source_only",
+      "to": "b3c8e3f346214dcad27f5d52424e0642e32fb378",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_abi_windows_test.go",
+      "kind": "source_only",
+      "to": "b8ada87de7608fa7276431c076dc8866aeea5767",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_argv0_native_windows_test.go",
+      "kind": "source_only",
+      "to": "9c7ec56aaaea399e2cab1e8dc05477dc51fc7e26",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_argv0_windows_test.go",
+      "kind": "source_only",
+      "to": "c2144230dbd34263fe93f1363164e341c2ca64e0",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_command_windows.go",
+      "kind": "source_only",
+      "to": "b99171980f1fd52a2c53914fa467ab40283f40f6",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_command_windows_test.go",
+      "kind": "source_only",
+      "to": "0b090285564440e3f74882f45448dd171dbb1eea",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_contained_native_windows_test.go",
+      "kind": "source_only",
+      "to": "a67d5d1c6842fcb5cae1455f50590568e126bec6",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_contained_other.go",
+      "kind": "source_only",
+      "to": "c5e6235bded16796c48e272a50a000a7b757466e",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_contained_paths_windows_test.go",
+      "kind": "source_only",
+      "to": "de197cae37c9fc643ea6c5de95ca7a4e043d211b",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_contained_windows.go",
+      "kind": "source_only",
+      "to": "71b0716dc0a5c38552291c4fb20a771debb87ea7",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_contained_windows_test.go",
+      "kind": "source_only",
+      "to": "6fcbf1497eae44a0f30ab8c9540846b9d3b3752e",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_creator_identity_windows.go",
+      "kind": "source_only",
+      "to": "d031f366ca7593301b5f8c383ba89e89072911e8",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_creator_identity_windows_test.go",
+      "kind": "source_only",
+      "to": "2c14c24c3507fc03c16f2132f5c872037bb8c540",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_environment_windows.go",
+      "kind": "source_only",
+      "to": "a9c3aeedbeaf6626e14002654d6f3e4a270ed043",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_environment_windows_test.go",
+      "kind": "source_only",
+      "to": "1331ef609fe0c0fd76edb6dce88999dd465a08b7",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_facade_native_windows_test.go",
+      "kind": "source_only",
+      "to": "12f9f7c101330059a70980ec32e9f604de76c6bb",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_facade_start_windows.go",
+      "kind": "source_only",
+      "to": "13e551d307e177ef8083c9bd3a6aa4ec45c71a39",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_facade_windows.go",
+      "kind": "source_only",
+      "to": "bd1c14cf60aa5f548037726603ae5b939b490cff",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_facade_windows_test.go",
+      "kind": "source_only",
+      "to": "f2fc97bfd98b9b9da17f4a507ec78bf8dd8af4b9",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_foreground_cache_windows_test.go",
+      "kind": "source_only",
+      "to": "dae28dc48130b620ee9808991a1b72d3b4a9daeb",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_foreground_console_windows_test.go",
+      "kind": "source_only",
+      "to": "40fb044e0e51f749efaa4761a6c3c30b18f2bf17",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_foreground_native_windows_test.go",
+      "kind": "source_only",
+      "to": "04a4ee08d0f85651b673ece87a4962badfcb6df1",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_foreground_policy_windows_test.go",
+      "kind": "source_only",
+      "to": "2795c4b8f0a01caa934ed322821cb7277638e39d",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_foreground_unsupported_windows.go",
+      "kind": "source_only",
+      "to": "4af0bd69994ddc9d9b3c1a6d08acbb8b96d5ebc2",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_foreground_windows.go",
+      "kind": "source_only",
+      "to": "cd0120e8b1dda116dba05311244d608ed1fcf883",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_foreground_windows_test.go",
+      "kind": "source_only",
+      "to": "58cc84ca14fd26b277a63b47017aa100a2d99e48",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_identity_windows.go",
+      "kind": "source_only",
+      "to": "ceffd4bfbd079c095eb44da2bf2f24ccb2d375c9",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_identity_windows_test.go",
+      "kind": "source_only",
+      "to": "fb3bc5186d3bb420d62bcdc68310a3742fa3d0d9",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_io_abi_windows_test.go",
+      "kind": "source_only",
+      "to": "86c2ceb3ee591456140c2a62e10658cb52baa662",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_io_fault_windows_test.go",
+      "kind": "source_only",
+      "to": "5b77a0c278c0651c6dde48217242fe7138745e0b",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_io_native_windows_test.go",
+      "kind": "source_only",
+      "to": "98a508bef6ff77aae9d5ee7b93bb9ff5d25406a1",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_library_borrow_windows_test.go",
+      "kind": "source_only",
+      "to": "9f79e2d5f89274612d4c6152df2cb64485b3d5e2",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_library_integration_windows_test.go",
+      "kind": "source_only",
+      "to": "618f5b93dd28e4e7ab0185bc909db34560cbd5ab",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_library_members_windows_test.go",
+      "kind": "source_only",
+      "to": "d2e3558a87b121bace72e1b9004c68a01c90399a",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_library_product_windows_test.go",
+      "kind": "source_only",
+      "to": "025c59c2eb1d032b2c1014f42de2c3241a612259",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_library_trust_windows_test.go",
+      "kind": "source_only",
+      "to": "476291c89c47f3384c894210d3f1ca13f8faf9bd",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_library_windows.go",
+      "kind": "source_only",
+      "to": "66b5866eeaf7b5ef92763eef2a13e3aeba8dced1",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_library_windows_test.go",
+      "kind": "source_only",
+      "to": "edc008357999132e383c350adcdcb2bac913923d",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_members_abi_windows.go",
+      "kind": "source_only",
+      "to": "e02a26cef53a98ebf219974fbcebe56462f650aa",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_members_native_windows_test.go",
+      "kind": "source_only",
+      "to": "aef89e2b1285048b49c96dc81637963253f9b616",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_members_windows.go",
+      "kind": "source_only",
+      "to": "56794711c710a7265fac1e3d1bc89ee3b35a4cc5",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_members_windows_test.go",
+      "kind": "source_only",
+      "to": "f01f94ff79252c18712fad548583cd7be518efa5",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_native_windows.go",
+      "kind": "source_only",
+      "to": "a9c1d75d964a560abffdd531e4597ee0375d1a90",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_native_windows_test.go",
+      "kind": "source_only",
+      "to": "b9455e3ea54769162d47221df2c4f5e697dad879",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_process_borrow_windows.go",
+      "kind": "source_only",
+      "to": "d74d96b17144510451fdca4b825b664f27bb1e19",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_process_borrow_windows_test.go",
+      "kind": "source_only",
+      "to": "314cf463804d625e339c8fd61e3ccf4aca0ebda6",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_product_module_windows_test.go",
+      "kind": "source_only",
+      "to": "83d32eef1de4ebe8edc5b900bda03d44bc7fcc67",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_product_native_windows_test.go",
+      "kind": "source_only",
+      "to": "a0b7210dd5b7c4f69a03f0e332ea840b6751e666",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_product_other.go",
+      "kind": "source_only",
+      "to": "ae2ed44f2e73d570483cccc2228df632f82a2b49",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_product_policy_windows.go",
+      "kind": "source_only",
+      "to": "6b12384f74d31e32d5d4b7b74ca04fd3fc7d2d05",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_product_policy_windows_test.go",
+      "kind": "source_only",
+      "to": "c5f5b8dd65a95fb2d7da25a07047614bc140feaa",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_product_provisional_windows_test.go",
+      "kind": "source_only",
+      "to": "ec4e93e2a37115e64b9f091e95f8dda0faf42511",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_product_unsupported_windows.go",
+      "kind": "source_only",
+      "to": "d9f4c3af65f5caf27a151c5049d09bcdd3841b95",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_product_windows.go",
+      "kind": "source_only",
+      "to": "9bb34d9d3926dc7227b90a2ecb751740256edd09",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_product_windows_test.go",
+      "kind": "source_only",
+      "to": "60f39bee053bfea86746a85ab8a4230930dfc40c",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_retention_windows.go",
+      "kind": "source_only",
+      "to": "9bd0ca0b00769a1b8a98e9a1bf867f653a8d7b97",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_retention_windows_test.go",
+      "kind": "source_only",
+      "to": "82aff70f2cc364d50651acf0f815bb26fe3a8de4",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_root_wait_windows.go",
+      "kind": "source_only",
+      "to": "e22296cb2dc8b32d8262f6304653ae028b5f2142",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_root_wait_windows_test.go",
+      "kind": "source_only",
+      "to": "04c5d1f6f63df41330981daad9e95422eba80f7e",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_sid_windows.go",
+      "kind": "source_only",
+      "to": "6f87e02c93632ddfbd42d26c18a15b7ed3cf6b42",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_split_order_windows_test.go",
+      "kind": "source_only",
+      "to": "303d0ca0795283ffd2d680597c4c0e11ad8f6e1e",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_start_admission_windows_test.go",
+      "kind": "source_only",
+      "to": "151531b16b3872e6f4db70dfa16ad7ecd26b0ff9",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_start_return_windows_test.go",
+      "kind": "source_only",
+      "to": "f56042b37d9210f9958902a7d6bdde6660ab6c21",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_stdio_windows.go",
+      "kind": "source_only",
+      "to": "87316686cbfe50c7b3e758973f907fc4caaea973",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_stdio_windows_test.go",
+      "kind": "source_only",
+      "to": "f19953f34fe18696bb563a2da9d2d5125a41cb18",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_synthetic_callback_windows_test.go",
+      "kind": "source_only",
+      "to": "ca797f348d8a6523e117b2015520160e468ed6de",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/rust_owner_wait_windows.go",
+      "kind": "source_only",
+      "to": "6eff50e88c5bf8ca73041d074dd5a29c3247c37a",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/start_with_job_original.go",
+      "kind": "changed",
+      "from": "ff2062559f4b6460d61d8816228fa1eaf6b2e7cf",
+      "to": "25d8032068154d0e3e2f167a858436980363efec",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/process/start_with_job_original_windows.go",
+      "kind": "changed",
+      "from": "e749c5e208efe45ca87d2be489b7dad92b06bed1",
+      "to": "8a8083ea43163936a7f7ad29692916ff2f2cd984",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/process/start_with_job_windows.go",
+      "kind": "changed",
+      "from": "9ef261b972ddb4fba44490e36b9bd91691519c18",
+      "to": "f13509a0aa374a009b9909de3012d68d09b332aa",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/process/testdata/foreground_console_child/main_windows.go",
+      "kind": "source_only",
+      "to": "fc1821024a9580f057803632ceafc224a605cb3a",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/token_integrity_windows.go",
+      "kind": "source_only",
+      "to": "1f9e98d7ccc19deec497140d58a52d8dbe4be4ff",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/process/token_integrity_windows_test.go",
+      "kind": "source_only",
+      "to": "e795fc76b5e596bd9e6dc3061581d4c22b3a51c5",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/releasegen/serena/main.go",
+      "kind": "changed",
+      "from": "5fa4d935189ee94899bf121281b59f96c0b352bc",
+      "to": "406f9e6de1a42e176a2a986ebd47380a955b81dc",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/releasegen/serena/sequential_descriptor_test.go",
+      "kind": "public_only",
+      "from": "6cc8a90159ef67743eb72c74cfc492cef3cde31b",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/releasegen/serena/serena_test.go",
+      "kind": "changed",
+      "from": "e12fb035cef82fc092876f51f68187a102e6c3fd",
+      "to": "ff306e607955c2dc2482a0f48d1f6257e5312f96",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/runtimeidentity/library.go",
+      "kind": "source_only",
+      "to": "e86285df4dee1babfb645334218db2af88d251c6",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/runtimeidentity/library_borrow_test.go",
+      "kind": "source_only",
+      "to": "280addc081dac67df8463cd42d8723076a119700",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/runtimeidentity/library_test.go",
+      "kind": "source_only",
+      "to": "fcf668b03153e0e67179fb8e8e0ffdaa24bbb38e",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/testkit/filesystem.go",
+      "kind": "public_only",
+      "from": "3d0621fb99a82f70b0b762addb5e028e22fa7c17",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/testkit/hub_log.go",
+      "kind": "public_only",
+      "from": "256403247a6038c80da46a3f748dcaf0d2d5d928",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/tray/tray.go",
+      "kind": "changed",
+      "from": "9601a10dc1e0400f7d79bcb71e6b66dda153a421",
+      "to": "553be7250c2d3822e35b284eda5edb995826de9c",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/tray/tray_event_reader_cancel_test.go",
+      "kind": "public_only",
+      "from": "5c02bd371578dd953d32e0a505d3e7793ea97608",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/tray/tray_lifecycle_test.go",
+      "kind": "changed",
+      "from": "2d18d7a3e5f3b819dacced270fcee3631a333f21",
+      "to": "f0c1a60fd5ecd02f39d7b71fcd8d26abf3be0127",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/vcpkgmcp/vcpkgserver/reverse_dependencies_test.go",
+      "kind": "changed",
+      "from": "079ab997a66449ebbc7d96b38e7fc37ebc0389b9",
+      "to": "d1ef655ab6f2e58d695e6f7099997751f6777a96",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "internal/vtune/run_owner_test.go",
+      "kind": "changed",
+      "from": "1e38b692b1c9b58f1c8b1917f18d6cfd098b6c19",
+      "to": "593e84545bd7c9e3542b3248c406c1f19f575c9d",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "marketplace/v1/catalog.json",
+      "kind": "changed",
+      "from": "4fa3e11657b7399a258b911784d9ddda6c9c2190",
+      "to": "b8b769e85eb75bcf8cc38a2b99154fd77cd304c1",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "marketplace/v2/catalog.json",
+      "kind": "changed",
+      "from": "aa8f928970f5c0b1cc3db502200c25cf589e5063",
+      "to": "bdd0894a4b7bda07fb3e6906257bfb86ace1b060",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "npm/generate-platform-packages.js",
+      "kind": "changed",
+      "from": "fdbdc7c41dc4977d919622016762739cfa0de1a4",
+      "to": "41f49046ffe333ec1f46576a72f3809145d380a9",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "npm/package.json",
+      "kind": "changed",
+      "from": "1b9d123daa31dcd05ecd5fe9bb3d5e22201b41a1",
+      "to": "64b7dd58f633368a42eb0b8a02674256cd27b4ab",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "npm/packages/win32-x64/README.md",
+      "kind": "changed",
+      "from": "1ed2dca32579c8496ce77460019306fb1ee1bc97",
+      "to": "230463dff28a3ba39066f4bb6035eef3f2e1c40d",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "npm/packages/win32-x64/package.json",
+      "kind": "changed",
+      "from": "a77f35f3802075afd5e61e721986228c26441a32",
+      "to": "f92fb27a5d419fd011ab5b752848ccfc047b6a5f",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "npm/platform-packages.test.js",
+      "kind": "changed",
+      "from": "86253dded04ba9eab3bec4c3c063bda2119d9426",
+      "to": "68f72b5be2b0ee07bd14cbd00187d8b179fa761e",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "npm/postinstall.test.js",
+      "kind": "changed",
+      "from": "019d5f25726ffc2ac161c2eeec55db473d8dfa51",
+      "to": "8d785c43f9acc95e5b1bf8f26bdfc01076401b2f",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "scripts/test-recovery-namespace/helper.ps1",
+      "kind": "changed",
+      "from": "72a86d959bf2740f38a4053b36e3a98adf5b1ead",
+      "to": "a8d79d8b0fafeb32995ecaae87006c52cec03645",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "scripts/test-windows-product-build.ps1",
+      "kind": "changed",
+      "from": "78d3d63e04b8821ac4f9cef3ef9259370f22bb11",
+      "to": "ef82e1646336179c11e5bb3712b01318b4fd56df",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "servers/fetch/README.md",
+      "kind": "changed",
+      "from": "f2e71e088e35d19979d2df06125abc26b28be307",
+      "to": "d78dd543a68952b124fa931a4391d9f7daa8ab20",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "servers/fetch/manifest.yaml",
+      "kind": "changed",
+      "from": "df2b26f921acb52237b23c5dad638711e36f7641",
+      "to": "9aee11bdf9438089a71b01f5680d54b052b0c3a4",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "servers/fetch/release.yaml",
+      "kind": "changed",
+      "from": "4717b184d6f6d83fdf02c12ee2ae03c007a18a7a",
+      "to": "b450cbb3efad5d4c0853b2ce0925b25e022381a6",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "servers/sequential-thinking/README.md",
+      "kind": "changed",
+      "from": "c8470c9cb60f9e015bcc2a50bbb342e22d8294b5",
+      "to": "12c9f2a21f6d5b3e15391e0e571a40ff1b2e9bf5",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "servers/sequential-thinking/manifest.yaml",
+      "kind": "changed",
+      "from": "6e327d2a398a707a38bed1d6e049bfd962d04386",
+      "to": "babe7b5860599c3be3a874d629bacd884022e9df",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "servers/sequential-thinking/release.yaml",
+      "kind": "changed",
+      "from": "bd9b31f070957c5905a879c7518839c6945d1cb1",
+      "to": "66c4bff49daec451b21fa357c832ad3671e214a2",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "servers/serena/manifest.yaml",
+      "kind": "changed",
+      "from": "dae2f3c3bb3a350729eba030f46ef2d7142d0ce3",
+      "to": "5a1133c4a010f1bb8ac14096a58445ddc117caa0",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "servers/serena/release.yaml",
+      "kind": "changed",
+      "from": "a4cfcb67680b50cbb0effc9f3d5c5154d13b586e",
+      "to": "eddf2e6d0d6d9c682ea7c6368ffecee0ec863e5b",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "third_party/gofrs-flock/flock_observed.go",
+      "kind": "changed",
+      "from": "5c2759ef99ad8238b252f19ff1d2ce0a2986a5a7",
+      "to": "80894d845b3ae0eaa3ed71a8ab5603472aaedf52",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "third_party/gofrs-flock/flock_windows.go",
+      "kind": "changed",
+      "from": "e2707267378cac5e601a299864b3c2054d7b8563",
+      "to": "c6c324f7e1e96cecbd782d7f4778cc679dfc639f",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "tools/codex/.gitignore",
+      "kind": "public_only",
+      "from": "77ac75498fba8af48ba35bda27fca8ff915cdff3",
+      "mode": "100644"
+    },
+    {
+      "path": "tools/codex/README.md",
+      "kind": "public_only",
+      "from": "c89dbef365bcc068b9c8130532045cab5e7e6ce9",
+      "mode": "100644"
+    },
+    {
+      "path": "tools/codex/hub_discovery.py",
+      "kind": "public_only",
+      "from": "9e8377e55c6514949cdd41e923d96b9b4ae16f68",
+      "mode": "100644"
+    },
+    {
+      "path": "tools/codex/pyproject.toml",
+      "kind": "public_only",
+      "from": "3f685b6bcb3077a0c1d799e875c28a47217bd44d",
+      "mode": "100644"
+    },
+    {
+      "path": "tools/codex/tests/test_hub_discovery.py",
+      "kind": "public_only",
+      "from": "908fb8acee91de3087c7571e35fe90ce7aea2c98",
+      "mode": "100644"
+    },
+    {
+      "path": "tools/codex/uv.lock",
+      "kind": "public_only",
+      "from": "3d1923ca7f30c99928763b7e3836305c63f867b3",
+      "mode": "100644"
+    },
+    {
+      "path": "tools/test-job-entry/main_windows.go",
+      "kind": "changed",
+      "from": "06e339266dda0efba44f953e8c8878ab49b15f15",
+      "to": "34cfe4a3477745f05fcdc8060d5b37a576d9f544",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "tools/test-job-entry/main_windows_test.go",
+      "kind": "changed",
+      "from": "4b61d794bd0e029601c0a8e629339cafc7e84b1e",
+      "to": "3a7b16d1ae81739800ae76a450eb485ed5b9e8f2",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "tools/test-recovery-namespace/main_windows.go",
+      "kind": "changed",
+      "from": "a4087c475d16226e30d37bbff2c0482f2ea75e9b",
+      "to": "558a99c683b6d67a78ed6132ad36b1411035bb4e",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "tools/test-recovery-namespace/prebuilt_windows.go",
+      "kind": "source_only",
+      "to": "2899f095b9614293ad997a0b7192129ca459bd62",
+      "mode": "100644"
+    },
+    {
+      "path": "tools/test-recovery-namespace/prebuilt_windows_test.go",
+      "kind": "source_only",
+      "to": "238b0057677dacd348cfb0fd9f3dbc9acd861009",
+      "mode": "100644"
+    },
+    {
+      "path": "tools/test-recovery-namespace/prechild_refusal_windows_test.go",
+      "kind": "source_only",
+      "to": "950066ad50e7a656bf13c9f5b37747481eb6d719",
+      "mode": "100644"
+    },
+    {
+      "path": "tools/testshards/main.go",
+      "kind": "public_only",
+      "from": "a0c3b0bc5456ac84c8f6bc01c0f324cf215c9ca9",
+      "mode": "100644"
+    },
+    {
+      "path": "tools/testshards/main_test.go",
+      "kind": "public_only",
+      "from": "a3f4a789512c33b7ec25bc85e6c0b8f8485d8f9a",
+      "mode": "100644"
+    },
+    {
+      "path": "tools/windows-product-validate/main.go",
+      "kind": "changed",
+      "from": "cd4ae79a167328881648d466100f1fed51ac4636",
+      "to": "819d117c780115e884979356b331c41fe92603a6",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    },
+    {
+      "path": "tools/windows-product-validate/runtime_library_borrow_test.go",
+      "kind": "source_only",
+      "to": "b4f445265234addd28e30962ebce0b3b4f5d8089",
+      "mode": "100644"
+    },
+    {
+      "path": "tools/windows-product-validate/runtime_library_test.go",
+      "kind": "source_only",
+      "to": "2d23b55c374d55e99b9302dc3fcb72129f322405",
+      "mode": "100644"
+    },
+    {
+      "path": "windows-product-artifacts.json",
+      "kind": "changed",
+      "from": "354c765c8a1ed862e61ef0c005dabd7a32523184",
+      "to": "9ba392d333e203d1709c2d9dfc0a0cb96fd31984",
+      "mode": [
+        "100644",
+        "100644"
+      ]
+    }
+  ]
+}

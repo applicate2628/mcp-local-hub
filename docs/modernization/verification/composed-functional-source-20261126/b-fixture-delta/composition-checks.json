@@ -1,0 +1,296 @@
+{
+  "schema": "B-composition-static-checks-v1",
+  "candidate_tree": "10d889f005efafa8e0a9f273b1f3cc4fd2ac6be2",
+  "A_census_27_postimages_unchanged": true,
+  "all_49_selected_hunk_postimages_present": true,
+  "note": "Two Codex plan contexts become identical after dynamic-port substitution; exact file postimage and reverse-apply check preserve positional mapping. Context occurrence count alone is not the admission test.",
+  "selected_hunk_postimages": [
+    {
+      "path": "internal/api/adopt_codex_transport_test.go",
+      "header": "-1,6 +1,7 @@",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_codex_transport_test.go",
+      "header": "-23,7 +24,7 @@ tool_timeout_sec = 900",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_codex_transport_test.go",
+      "header": "-163,7 +164,7 @@ url = \"http://127.0.0.1:9999/mcp\"",
+      "postimage_context_occurrences": 2
+    },
+    {
+      "path": "internal/api/adopt_codex_transport_test.go",
+      "header": "-211,7 +212,7 @@ url = \"http://127.0.0.1:9999/mcp\"",
+      "postimage_context_occurrences": 2
+    },
+    {
+      "path": "internal/api/adopt_codex_transport_test.go",
+      "header": "-226,7 +227,7 @@ url = \"http://127.0.0.1:9999/mcp\"",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_codex_transport_test.go",
+      "header": "-243,7 +244,7 @@ url = \"http://127.0.0.1:9999/mcp\"",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_deadopt_lifecycle_test.go",
+      "header": "-50,7 +50,7 @@ args = [\"version\"]",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_h4_summary_signal_test.go",
+      "header": "-33,7 +33,7 @@ url = \"http://127.0.0.1:9999/mcp\"",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_h4_summary_signal_test.go",
+      "header": "-77,7 +77,7 @@ url = \"http://127.0.0.1:9999/mcp\"",
+      "postimage_context_occurrences": 2
+    },
+    {
+      "path": "internal/api/adopt_h4_summary_signal_test.go",
+      "header": "-110,7 +110,7 @@ url = \"http://127.0.0.1:9999/mcp\"",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_h4_summary_signal_test.go",
+      "header": "-165,7 +165,7 @@ url = \"http://127.0.0.1:9999/mcp\"",
+      "postimage_context_occurrences": 2
+    },
+    {
+      "path": "internal/api/adopt_h4_summary_signal_test.go",
+      "header": "-210,7 +210,7 @@ url = \"http://127.0.0.1:9999/mcp\"",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_h4_summary_signal_test.go",
+      "header": "-255,7 +255,7 @@ url = \"http://127.0.0.1:9999/mcp\"",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_h4_summary_signal_test.go",
+      "header": "-289,7 +289,7 @@ url = \"http://127.0.0.1:9999/mcp\"",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_h4_summary_signal_test.go",
+      "header": "-307,7 +307,7 @@ args = [\"version\"]",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "header": "-84,7 +84,7 @@ args = [\"version\"]",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "header": "-108,7 +108,7 @@ args = [\"version\"]",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "header": "-139,7 +139,7 @@ command = \"go\"",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "header": "-172,7 +172,7 @@ command = \"go\"",
+      "postimage_context_occurrences": 3
+    },
+    {
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "header": "-207,7 +207,7 @@ command = \"go\"",
+      "postimage_context_occurrences": 3
+    },
+    {
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "header": "-240,7 +240,7 @@ command = \"go\"",
+      "postimage_context_occurrences": 3
+    },
+    {
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "header": "-276,7 +276,7 @@ args = [\"version\"]",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "header": "-298,7 +298,7 @@ args = [\"version\"]",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "header": "-332,7 +332,7 @@ args = [\"version\"]",
+      "postimage_context_occurrences": 2
+    },
+    {
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "header": "-381,7 +381,7 @@ args = [\"version\"]",
+      "postimage_context_occurrences": 2
+    },
+    {
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "header": "-480,7 +480,7 @@ args = [\"version\"]",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_lease_owner_test.go",
+      "header": "-503,7 +503,7 @@ func TestAdoptExecutedEventRequiresLeaseSettlement(t *testing.T) {",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_mcpcompat_test.go",
+      "header": "-23,7 +23,7 @@ args = [\"version\"]",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_mcpcompat_test.go",
+      "header": "-118,7 +118,7 @@ func TestAdoptWithoutLegacyProfileRemainsStrict(t *testing.T) {",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_project_plan_test.go",
+      "header": "-203,7 +203,7 @@ MODE = \"project\"",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_project_plan_test.go",
+      "header": "-234,11 +234,11 @@ func TestBuildAdoptPlanProjectSourceDerivesDistinctSameNameIdentities(t *testing",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_project_plan_test.go",
+      "header": "-308,7 +308,7 @@ func TestBuildAdoptPlanGlobalLegacyBehaviorRemainsUnchanged(t *testing.T) {",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_provider_working_directory_windows_test.go",
+      "header": "-15,6 +15,7 @@ import (",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_provider_working_directory_windows_test.go",
+      "header": "-598,19 +599,42 @@ type ownedProviderWorkingDirectoryHelper struct {",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_test.go",
+      "header": "-182,7 +182,7 @@ args = [\"version\"]",
+      "postimage_context_occurrences": 2
+    },
+    {
+      "path": "internal/api/adopt_test.go",
+      "header": "-200,8 +200,8 @@ args = [\"version\"]",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_test.go",
+      "header": "-234,8 +234,8 @@ args = [\"version\"]",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_test.go",
+      "header": "-261,7 +261,7 @@ args = [\"version\"]",
+      "postimage_context_occurrences": 3
+    },
+    {
+      "path": "internal/api/adopt_test.go",
+      "header": "-296,7 +296,7 @@ command = \"go\"",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_test.go",
+      "header": "-364,7 +364,7 @@ args = [\"version\"]",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_test.go",
+      "header": "-511,7 +511,7 @@ VISIBLE = \"not-secret\"",
+      "postimage_context_occurrences": 2
+    },
+    {
+      "path": "internal/api/adopt_test.go",
+      "header": "-958,7 +958,7 @@ args = [\"version\"]",
+      "postimage_context_occurrences": 3
+    },
+    {
+      "path": "internal/api/adopt_test.go",
+      "header": "-978,7 +978,7 @@ args = [\"version\"]",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/adopt_test.go",
+      "header": "-1541,7 +1541,7 @@ args = [\"version\"]",
+      "postimage_context_occurrences": 3
+    },
+    {
+      "path": "internal/api/main_test.go",
+      "header": "-12,6 +12,10 @@ import (",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/api/main_test.go",
+      "header": "-268,7 +272,9 @@ func TestMain(m *testing.M) {",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/cli/adopt_mcpcompat_test.go",
+      "header": "-42,7 +42,7 @@ func TestAdoptCLIProfilePersistsAndBuildsLegacyHost(t *testing.T) {",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/cli/adopt_test.go",
+      "header": "-338,7 +338,7 @@ args = [\"version\"]",
+      "postimage_context_occurrences": 1
+    },
+    {
+      "path": "internal/cli/adopt_test.go",
+      "header": "-414,7 +414,7 @@ func TestAdoptCLI_GlobalCodexSameNamePathHasNoHSettlement(t *testing.T) {",
+      "postimage_context_occurrences": 1
+    }
+  ],
+  "retained_functions": [
+    {
+      "path": "internal/api/adopt_test.go",
+      "function": "func TestExecuteAdoptRollbackRestoresDirectStdioPriorFromBackupOnSecondClientFailure(t *testing.T) {",
+      "unchanged": true,
+      "text_sha256": "2d38579b6610238d8e3dc4f18a65e22c46af79a8de9bffb96e7e86da90e0b45f"
+    },
+    {
+      "path": "internal/api/adopt_test.go",
+      "function": "func TestExecuteAdoptRefusesUnavailableVaultBeforeManifestWrite(t *testing.T) {",
+      "unchanged": true,
+      "text_sha256": "9c95b4f6946214903717295d9f663a4bbec1f1ba5909f537291c76d1e149c7e0"
+    },
+    {
+      "path": "internal/cli/adopt_test.go",
+      "function": "func TestAdoptCmdDryRunRefusesStateRootBeforeOfferingPlan(t *testing.T) {",
+      "unchanged": true,
+      "text_sha256": "2b890e32af8181a4580d7023cee4efa4468a0fa82a193d7c8cf7adaa929cc94d"
+    },
+    {
+      "path": "internal/cli/adopt_test.go",
+      "function": "func TestAdoptCmdDryRunByDefaultMutatesNothingAndRedactsSecrets(t *testing.T) {",
+      "unchanged": true,
+      "text_sha256": "65167f9276cba62a44eaef2b98633a9905c4b3feb855490f4c07a89d3fc729bf"
+    },
+    {
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "function": "func setNamespaceFixtureCurrentUserOwner(t *testing.T, path string, directory bool) {",
+      "unchanged": true,
+      "text_sha256": "574633a9d8d576c8f4c522e680e500623cad6b9c012aa48670900a4c728e9adf"
+    }
+  ],
+  "gui_force_full_file_unchanged": true,
+  "main_helper_dispatch_unchanged": true,
+  "PR659_save_seal_restore_retained": true,
+  "paired_TestMain_root_lifetime_present": true,
+  "selected_patch_reverse_check": "PASS",
+  "git_diff_check": "PASS",
+  "unmerged": 0,
+  "unstaged": 0,
+  "Go_commands": "NOT_RUN",
+  "native_commands": "NOT_RUN"
+}

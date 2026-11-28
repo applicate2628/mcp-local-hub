@@ -1,0 +1,125 @@
+{
+  "run": "runs/p02-functional-focused-v3",
+  "source": "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02",
+  "head": "e66f5c6fab7da2a2eff16ff1f0891991ca1a839c",
+  "environment": {
+    "GOMODCACHE": "D:\\dev\\ChatGPT\\functional-route-20261126\\go-mod",
+    "GOPROXY": "file:///D:/dev/ChatGPT/cache-continuation-20261123-8e223f22/imports/go-proxy",
+    "GOENV": "off",
+    "GOWORK": "off",
+    "GOTELEMETRY": "off"
+  },
+  "observed_files": [
+    "go.mod",
+    "go.sum",
+    "internal/api/adopt_codex_transport_test.go",
+    "internal/api/adopt_deadopt_lifecycle_test.go",
+    "internal/api/adopt_h4_summary_signal_test.go",
+    "internal/api/adopt_lease_namespace_windows_test.go",
+    "internal/api/adopt_lease_owner_test.go",
+    "internal/api/adopt_mcpcompat_test.go",
+    "internal/api/adopt_project_plan_test.go",
+    "internal/api/adopt_provider_working_directory_windows_test.go",
+    "internal/api/adopt_test.go",
+    "internal/api/install_legacy_scheduler_test.go",
+    "internal/api/install_parsed_manifest.go",
+    "internal/api/install_parsed_manifest_test.go",
+    "internal/api/liveness_task.go",
+    "internal/api/liveness_task_test.go",
+    "internal/api/main_test.go",
+    "internal/api/phase_f_lifecycle_test.go",
+    "internal/api/r36_lane_a2_fixes_test.go",
+    "internal/api/scheduler_mgmt.go",
+    "internal/api/scheduler_replacement.go",
+    "internal/api/scheduler_replacement_test.go",
+    "internal/api/supervisor_intent_lock_ownership_test.go",
+    "internal/api/supervisor_lock_test.go",
+    "internal/autostart/autostart.go",
+    "internal/autostart/windows.go",
+    "internal/autostart/windows_native_roundtrip_test.go",
+    "internal/autostart/windows_test.go",
+    "internal/cli/adopt_mcpcompat_test.go",
+    "internal/cli/adopt_test.go",
+    "internal/cli/autostart.go",
+    "internal/cli/scheduler_cmd.go",
+    "internal/cli/setup.go",
+    "internal/cli/setup_watchdog_test.go",
+    "internal/cli/strict_mode.go",
+    "internal/cli/strict_mode_test.go",
+    "internal/process/contained_stream_observed.go",
+    "internal/scheduler/scheduler.go",
+    "internal/scheduler/task_xml_match.go",
+    "internal/scheduler/task_xml_match_test.go",
+    "internal/scheduler/task_xml_match_windows.go",
+    "internal/scheduler/task_xml_match_windows_test.go",
+    "internal/vcpkgmcp/cmaketrace/parse.go",
+    "internal/vcpkgmcp/cmaketrace/projection.go",
+    "internal/vcpkgmcp/cmaketrace/r22_bot_regressions_test.go",
+    "internal/vcpkgmcp/cmaketrace/r32_bot_regressions_test.go"
+  ],
+  "steps": [
+    {
+      "name": "composition-owner-inventory-default",
+      "argv": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "-timeout",
+        "5m",
+        "-run",
+        "^(TestSupervisorIntentLockOwnershipProductionInventory|TestSupervisorIntentLockOwnershipFixtureMatrix|TestAppliedReleaseClassifierFixtureRejectsSibling)$",
+        "./internal/api/"
+      ],
+      "timeout": 360
+    },
+    {
+      "name": "composition-functional-tagged",
+      "argv": [
+        "go",
+        "test",
+        "-tags=test_state_path_env",
+        "-json",
+        "-count=1",
+        "-timeout",
+        "5m",
+        "-run",
+        "^(TestInstallPlanCore_GlobalDryRunPrintsSupervisorMutationPlan|TestInstallPlanCore_GlobalDryRunSerenaDoesNotRequirePreparedSelection|TestInstallPlanCore_GlobalDryRunDoesNotCreateMissingStateDir|TestInstallPlanCore_GlobalDryRunCorruptIntentStillPrintsPlan|TestInstallPlanCore_GlobalFullReinstall_RemovesSupervisorDaemon|TestInstallPlanCore_WindowsFullReinstallRetainsLegacyGeneration|TestInstallPlanCore_RemovedTargetKillDependsOnNudgeOutcome|TestInstallPlanCore_GlobalInstall_HeldSupervisorLockAfterIPCFailureSkipsRemovedTargetKill|TestRemoveServerFromSupervisorIntentBestEffort_KillsRemovedDaemonsAfterNudge|TestInstallParsedManifest_MissingSerenaAssemblyPreservesWorkspaceRowsBeforeCleanup|TestInstallParsedManifest_MissingSerenaAssemblyPreservesStopsBeforeCleanup|TestCleanupLegacySchedulerTasksRetainsObservedGeneration|TestLegacySchedulerFilteredPreviewUsesListedScopeWithoutWriting|TestWeeklyRefreshSetPreservesExistingTaskAndCreatesOnlyAbsent|TestInstallPlanCoreGlobalDryRunReportsUnknownLegacyInventory|TestSupervisorIntentLockOwnershipProductionInventory|TestSecretsInitRecoveryLockSettlement|TestSecretsInitRecoveryLockAcquireFailure|TestSecretsInitRecoveryLockReleasesOnPanic|TestStrictModeWindowsExplicitAutorunOffSurvivesMutationAndRecovery|TestStrictModeWindowsExistingTaskRefusalPreservesRecovery|TestAutostartWindowsExplicitEnablePreservesQuitAndAppliedProjectionFailure|TestSetup_InstallsLivenessBeforeObservingLegacyWatchdog|TestSetup_LegacyWatchdogObservationErrorIsNonFatal|TestSetup_RunsTwice_Idempotent|TestUninstall_LastServer_RemovesWatchdog|TestUninstall_LastServer_RemovesLivenessTask|TestUninstall_OrderingDisableWatchdogFirst)$",
+        "./internal/api/",
+        "./internal/cli/"
+      ],
+      "timeout": 360
+    },
+    {
+      "name": "current-cmake-contracts",
+      "argv": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "-timeout",
+        "5m",
+        "./internal/vcpkgmcp/cmaketrace/"
+      ],
+      "timeout": 360
+    },
+    {
+      "name": "composed-source-build",
+      "argv": [
+        "go",
+        "build",
+        "./..."
+      ],
+      "timeout": 360
+    },
+    {
+      "name": "composed-source-vet",
+      "argv": [
+        "go",
+        "vet",
+        "./..."
+      ],
+      "timeout": 360
+    }
+  ]
+}

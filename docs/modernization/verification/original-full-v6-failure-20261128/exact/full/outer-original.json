@@ -1,0 +1,15 @@
+{
+    "schema":  "original-literal-full-original-parent-v6",
+    "runtime_manifest_sha256":  "cdce3127e6237f5157500acbf206d0fced239ef60b208744278a0059758e692d",
+    "launcher_sha256":  "adf9f26a647aa6e869bc3dc25a6c13b5b913b2295f2629e77d10f36058e7493f",
+    "same_process_start_object":  true,
+    "original_pid":  534744,
+    "exit_code":  1,
+    "wait_returned":  true,
+    "original_process_object_disposed":  true,
+    "new_job_or_tree_wait":  false,
+    "create_no_window":  true,
+    "wait_errors":  [
+
+                    ]
+}

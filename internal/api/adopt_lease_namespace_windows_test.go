@@ -706,6 +706,7 @@ func TestAdoptLeaseNamespaceMigrationRefusesExplicitBroadDACLAndBusyNamespace(t 
 			t.Fatal(err)
 		}
 		applyFileDACLWithAuthUsersReadACE(t, namespace)
+		setNamespaceFixtureCurrentUserOwner(t, namespace, true)
 		before := windowsSDDLForTest(t, namespace)
 		report, err := MigrateLegacyAdoptLeaseNamespace(AdoptLeaseNamespaceMigrationOpts{Yes: true})
 		if err == nil || report.State != AdoptLeaseNamespaceRefused || report.ReasonID != AdoptLeaseReasonNamespaceDACLRefused {
@@ -732,6 +733,7 @@ func TestAdoptLeaseNamespaceMigrationRefusesExplicitBroadDACLAndBusyNamespace(t 
 }
 
 func seedRecognizedLegacyLeaseNamespace(t *testing.T, leaves []string, safeSnapshot bool) (string, string, string) {
+	t.Helper()
 	statePathsHelper(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 	if err := os.Mkdir(stateDir, 0o700); err != nil {
@@ -763,6 +765,7 @@ func seedRecognizedLegacyLeaseNamespace(t *testing.T, leaves []string, safeSnaps
 		},
 	}
 	applyProtectedDACLFromEntries(t, stateDir, entries)
+	setNamespaceFixtureCurrentUserOwner(t, stateDir, true)
 	root := openDirHandleNoReparseForTest(t, stateDir)
 	if err := verifyWindowsDACLFromHandle(root); err != nil {
 		_ = windows.CloseHandle(root)
@@ -774,12 +777,14 @@ func seedRecognizedLegacyLeaseNamespace(t *testing.T, leaves []string, safeSnaps
 	if err := os.Mkdir(namespace, 0o700); err != nil {
 		t.Fatalf("create inherited namespace: %v", err)
 	}
+	setNamespaceFixtureCurrentUserOwner(t, namespace, true)
 	var firstLease string
 	for _, leaf := range leaves {
 		path := filepath.Join(namespace, leaf)
 		if err := os.WriteFile(path, nil, 0o600); err != nil {
 			t.Fatalf("create inherited lease %s: %v", leaf, err)
 		}
+		setNamespaceFixtureCurrentUserOwner(t, path, false)
 		if firstLease == "" {
 			firstLease = path
 		}
@@ -789,6 +794,7 @@ func seedRecognizedLegacyLeaseNamespace(t *testing.T, leaves []string, safeSnaps
 		if err := os.Mkdir(snapshot, 0o700); err != nil {
 			t.Fatalf("create snapshot sibling: %v", err)
 		}
+		setNamespaceFixtureCurrentUserOwner(t, snapshot, true)
 		h := openWindowsPathForNamespaceTest(t, snapshot, windows.READ_CONTROL|windows.WRITE_DAC, true)
 		if err := setRestrictiveDACL(h); err != nil {
 			_ = windows.CloseHandle(h)
@@ -824,10 +830,12 @@ func seedRecognizedLegacyStateRoot(t *testing.T, leaves []string) (string, strin
 			Trustee: windows.TRUSTEE{TrusteeForm: windows.TRUSTEE_IS_SID, TrusteeType: windows.TRUSTEE_IS_WELL_KNOWN_GROUP, TrusteeValue: windows.TrusteeValueFromSID(authUsers)}},
 	}
 	applyProtectedDACLFromEntries(t, parent, entries)
+	setNamespaceFixtureCurrentUserOwner(t, parent, true)
 	stateRoot := filepath.Join(parent, "state")
 	if err := os.Mkdir(stateRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	setNamespaceFixtureCurrentUserOwner(t, stateRoot, true)
 	daemonStateRootOverride = stateRoot
 	root := openDirHandleNoReparseForTest(t, stateRoot)
 	legacy, err := windowsDACLIsRecognizedInheritedLegacy(root)
@@ -839,17 +847,58 @@ func seedRecognizedLegacyStateRoot(t *testing.T, leaves []string) (string, strin
 	if err := os.Mkdir(namespace, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	setNamespaceFixtureCurrentUserOwner(t, namespace, true)
 	var firstLease string
 	for _, leaf := range leaves {
 		path := filepath.Join(namespace, leaf)
 		if err := os.WriteFile(path, nil, 0o600); err != nil {
 			t.Fatal(err)
 		}
+		setNamespaceFixtureCurrentUserOwner(t, path, false)
 		if firstLease == "" {
 			firstLease = path
 		}
 	}
 	return stateRoot, namespace, firstLease
+}
+
+// Legacy admission requires the process token's user as owner, independently
+// of the DACL grantees. Set only the owner of an object just created by this
+// fixture; receive its actual owner and unchanged DACL through the same handle.
+func setNamespaceFixtureCurrentUserOwner(t *testing.T, path string, directory bool) {
+	t.Helper()
+	current, err := currentUserSID()
+	if err != nil {
+		t.Fatalf("fixture current user SID: %v", err)
+	}
+	h := openWindowsPathForNamespaceTest(t, path, windows.READ_CONTROL|windows.WRITE_OWNER, directory)
+	defer func() {
+		if err := windows.CloseHandle(h); err != nil {
+			t.Errorf("close fixture owner handle for %s: %v", filepath.Base(path), err)
+		}
+	}()
+	before, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		t.Fatalf("read fixture DACL before owner setup: %v", err)
+	}
+	beforeSDDL := before.String()
+	if beforeSDDL == "" {
+		t.Fatal("fixture DACL before owner setup has no SDDL representation")
+	}
+	if err := windows.SetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION, current, nil, nil, nil); err != nil {
+		t.Fatalf("set current user as fixture owner for %s: %v", filepath.Base(path), err)
+	}
+	owned, err := stateFileOwnerIsCurrentUser(h)
+	if err != nil || !owned {
+		t.Fatalf("fixture owner for %s must be the current process user: owned=%t err=%v", filepath.Base(path), owned, err)
+	}
+	after, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		t.Fatalf("read fixture DACL after owner setup: %v", err)
+	}
+	if after.String() != beforeSDDL {
+		t.Fatalf("setting fixture owner changed DACL for %s", filepath.Base(path))
+	}
 }
 
 func openDirHandleNoReparseForTest(t *testing.T, path string) windows.Handle {

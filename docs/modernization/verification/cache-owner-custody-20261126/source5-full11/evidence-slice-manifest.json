@@ -1,0 +1,140 @@
+{
+  "schema": "source5-publication-draft-manifest-v2",
+  "status": "LOCAL_DRAFT_FULL11_FAIL_CUSTODY_UNRESOLVED",
+  "intended_existing_PR": 664,
+  "product_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+  "private_test_source_commit": "001648f44bf6ef0191f1e21d92f1aecf2a2a3022",
+  "document_pair_count": 5,
+  "publication_document_count_including_excerpt": 11,
+  "document_pairs": [
+    {
+      "slice": "source5-materialization",
+      "accepted_scope_status": "PASS_SOURCE_MATERIALIZATION_ONLY",
+      "per_file_size_limit_bytes": 15000,
+      "files": {
+        "md": {
+          "path": "recovery/source5-publication-draft/source5-materialization-evidence.md",
+          "bytes": 12383,
+          "sha256": "8edebd68211817e584e99f489ec06e9452e9baba6ac462f57111bcf4fa45f294"
+        },
+        "json": {
+          "path": "recovery/source5-publication-draft/source5-materialization-evidence.json",
+          "bytes": 11437,
+          "sha256": "6d3797fcc210494c4576a5dfdde14577d882aa73cbbebd2406fd1541b33cfbe4"
+        }
+      }
+    },
+    {
+      "slice": "test-source-update2",
+      "accepted_scope_status": "PASS_SOURCE_UPDATE_ONLY",
+      "per_file_size_limit_bytes": 15000,
+      "files": {
+        "md": {
+          "path": "recovery/source5-publication-draft/update2-source-evidence.md",
+          "bytes": 11613,
+          "sha256": "91af6dff58237e465cf42ad065c462bfc361c33b1bd29f69d28fab301c05b71c"
+        },
+        "json": {
+          "path": "recovery/source5-publication-draft/update2-source-evidence.json",
+          "bytes": 11491,
+          "sha256": "c0a04cfd2dbe8cb4f517bf148469053aab55debf028ac169ef39ac4afea986b2"
+        }
+      }
+    },
+    {
+      "slice": "data-and-composition",
+      "accepted_scope_status": "DATA_AND_TWO_CASE_COMPOSITION_PASS_PRELAUNCH_RECEIVED",
+      "per_file_size_limit_bytes": 15000,
+      "files": {
+        "md": {
+          "path": "recovery/source5-publication-draft/data-composition-evidence.md",
+          "bytes": 12517,
+          "sha256": "efcd9b5630ceb57226a62767586d0916bc3e138fe42ba264fc4c8dcb14098ef1"
+        },
+        "json": {
+          "path": "recovery/source5-publication-draft/data-composition-evidence.json",
+          "bytes": 9654,
+          "sha256": "c6c8e7dd0d6283f6591f3df838b5e4539ff68eba4672adeee52a34a0d28632bc"
+        }
+      }
+    },
+    {
+      "slice": "five-resource-retirement",
+      "accepted_scope_status": "PASS_TRASH_MOVE_SCOPE_ONLY",
+      "per_file_size_limit_bytes": 10000,
+      "files": {
+        "md": {
+          "path": "recovery/source5-publication-draft/resource-retirement-evidence.md",
+          "bytes": 9041,
+          "sha256": "24e31fcd04347b54020370af883ff912ecf21996cacadd901acb0f0b39c2700f"
+        },
+        "json": {
+          "path": "recovery/source5-publication-draft/resource-retirement-evidence.json",
+          "bytes": 9954,
+          "sha256": "a314120c169116c805e28b50ac34503b8a7f2bc590976f1d557fd284a44a3fee"
+        }
+      }
+    },
+    {
+      "slice": "full11-failed-open-custody",
+      "accepted_scope_status": "FAIL_WITH_UNRESOLVED_ORIGINAL_CUSTODY_PARENT_NOT_TERMINAL",
+      "per_file_size_limit_bytes": 15000,
+      "files": {
+        "md": {
+          "path": "recovery/source5-publication-draft/full11-unknown-evidence.md",
+          "bytes": 14020,
+          "sha256": "a795f8f1788847f64284800a32bfe930cf0ed8defb4930b703d2bc85c700858c"
+        },
+        "json": {
+          "path": "recovery/source5-publication-draft/full11-unknown-evidence.json",
+          "bytes": 14945,
+          "sha256": "8bdeda861b58a75d3bdcb54327f55a6059ecc5a74fe9625e9a95cc4cbe626fbd"
+        }
+      }
+    }
+  ],
+  "additional_excerpts": [
+    {
+      "path": "recovery/source5-publication-draft/update2-main-plan-excerpt.md",
+      "bytes": 2868,
+      "sha256": "1db11651dbcf0c3b94838450a586face12a8b5482b0de094a5255d9cdbda0df6"
+    }
+  ],
+  "supporting_reviews": [
+    {
+      "path": "recovery/runtime-v14-preparation-v1/independent-actual-handoff-review.json",
+      "bytes": 8377,
+      "sha256": "51785e887eb11808bf5814f354da5c3d6ab006a95c2dc3a9a2e20a60852e4a12"
+    },
+    {
+      "path": "recovery/runtime-v14-preparation-v1/independent-native-prelaunch-supplement.json",
+      "bytes": 4938,
+      "sha256": "045fef79b41cf0aa24768c97fd0e624027fd77c59c5a816f0830e025eec49834"
+    }
+  ],
+  "historical_slice_rule": "Earlier PENDING fields describe their original evidence cut; later sibling documents add actual receiving without rewriting earlier files.",
+  "limits": {
+    "full_regression_result_included": true,
+    "full_regression_PASS_claimed": false,
+    "public_PR_head_PASS_transferred": false,
+    "current_full_progress_inferred_from_retirement": false,
+    "GitHub_publication_performed_by_this_task": false,
+    "original_receipts_or_operative_files_modified": false,
+    "full_regression_result_scope": "FAIL control received; parent terminal/native/IO closure unresolved; tagged NOT_RUN.",
+    "prior_nine_publication_files_and_v1_manifest_unchanged": true
+  },
+  "excluded_working_files": [
+    {
+      "path": "recovery/source5-publication-draft/pr664-body-before.md",
+      "reason": "Separate PR-body/history preparation owned by root; not an evidence pair and not asserted here as the exact historical body."
+    }
+  ],
+  "verification": "All eleven publication raw sizes and SHA-256 values checked; five scoped JSON statuses checked. Earlier four pairs and excerpt match the frozen v1 manifest; full11 does not issue source/cache/capture access or full PASS.",
+  "previous_manifest": {
+    "path": "recovery/source5-publication-draft/publication-manifest.json",
+    "bytes": 4700,
+    "sha256": "1ad194bff9933e8b01da9c584ae3fb0b98adbbe999a7497d200875d0bcc71648"
+  },
+  "evidence_cut_utc": "2026-11-26T00:51:33.375662+00:00",
+  "later_parent_metadata_recorded_utc": "2026-11-26 00:53:25 UTC"
+}

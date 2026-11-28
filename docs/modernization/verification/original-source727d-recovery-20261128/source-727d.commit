@@ -1,0 +1,9 @@
+tree d959ed0a4f8ab02947aec7569f3c0535a3cff533
+parent 0145a2547a3025cc518cf3e2fa89d2e22cb73c08
+author applicate2628 <dima_den@inbox.ru> 1795745916 +0300
+committer applicate2628 <dima_den@inbox.ru> 1795745916 +0300
+
+Fix namespace admission and receive pre-stage refusal
+
+Receive the canonical source epoch at its typed native fixture boundary.
+Preserve original pre-stage failures with exact invocation data and retained ownership.

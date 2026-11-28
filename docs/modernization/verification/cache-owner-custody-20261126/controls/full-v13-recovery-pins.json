@@ -1,0 +1,154 @@
+{
+  "schema": "exact-readonly-recovery-v1",
+  "manifest_sha256": "efd14d898b2e6032dfb77c914b49a9114083c7eb29235ca8f6f893daacd4ee02",
+  "source_commit": "aca81a1743ccfbf3e10902769a9b071eb911919e",
+  "files": [
+    {
+      "path": "<RECOVERY>/recovery/runtime-v13/literal_go_exec_adapter_ready_v1.py",
+      "remote_path": "<TASK>\\final-gates-v13-root\\literal_go_exec_adapter_ready_v1.py",
+      "bytes": 58244,
+      "sha256": "83b0f13017a65d4a2753d10b26c04c9e0b44f3d301ba638b5c8f4fabd0d84dba",
+      "transport_normalization_recovered_only_by_exact_sha": true
+    },
+    {
+      "path": "<RECOVERY>/recovery/runtime-v13/literal_migration_receiving_seed_v1.py",
+      "remote_path": "<TASK>\\final-gates-v13-root\\literal_migration_receiving_seed_v1.py",
+      "bytes": 50650,
+      "sha256": "af4577ab669b42710f59b8323c9933aa8926a38e929e4583f5179322fdb2438e",
+      "transport_normalization_recovered_only_by_exact_sha": true
+    },
+    {
+      "path": "<RECOVERY>/recovery/runtime-v13/private_run_scope.py",
+      "remote_path": "<TASK>\\final-gates-v13-root\\private_run_scope.py",
+      "bytes": 12572,
+      "sha256": "e1796e716f457af234dfc1061c917ce7d177852da537210d76d66bbf8936949a",
+      "transport_normalization_recovered_only_by_exact_sha": true
+    },
+    {
+      "path": "<RECOVERY>/recovery/runtime-v13/qualified_windows_products_consumer_v1.py",
+      "remote_path": "<TASK>\\final-gates-v13-root\\qualified_windows_products_consumer_v1.py",
+      "bytes": 126487,
+      "sha256": "a19fde2ae8ee6a79f8afff37fd669707bd4ba1258edd779bfb1fb9d201d9db69",
+      "transport_normalization_recovered_only_by_exact_sha": true
+    },
+    {
+      "path": "<RECOVERY>/recovery/runtime-v13/receive_fresh_full_inputs_v1.py",
+      "remote_path": "<TASK>\\final-gates-v13-root\\receive_fresh_full_inputs_v1.py",
+      "bytes": 48578,
+      "sha256": "d1f22787c5241a9972289e707e620fdb06729144c87f784062e79a6d3ea8890a",
+      "transport_normalization_recovered_only_by_exact_sha": true
+    },
+    {
+      "path": "<RECOVERY>/recovery/runtime-v13/retained-input-access.json",
+      "remote_path": "<TASK>\\final-gates-v13-root\\retained-input-access.json",
+      "bytes": 16178,
+      "sha256": "6a28ce3b3f245044a4dcc0e6e518139773eae59e1001e99298b84c7e9d231b18",
+      "transport_normalization_recovered_only_by_exact_sha": true
+    },
+    {
+      "path": "<RECOVERY>/recovery/runtime-v13/run_literal_go_gate_ready_v1.py",
+      "remote_path": "<TASK>\\final-gates-v13-root\\run_literal_go_gate_ready_v1.py",
+      "bytes": 50292,
+      "sha256": "43822b4ac69464505819f1c5719b844b1b1c0f0a2a702ad3accff5137aa6a450",
+      "transport_normalization_recovered_only_by_exact_sha": true
+    },
+    {
+      "path": "<RECOVERY>/recovery/runtime-v13/run_partitioned_go_gate_full_v1.py",
+      "remote_path": "<TASK>\\final-gates-v13-root\\run_partitioned_go_gate_full_v1.py",
+      "bytes": 35949,
+      "sha256": "83cb6329605039e6cee517d9a530881030f6d614ce568e03c96dad2655ea82bd",
+      "transport_normalization_recovered_only_by_exact_sha": true
+    },
+    {
+      "path": "<RECOVERY>/recovery/runtime-v13/test-staging-supplement-v13.json",
+      "remote_path": "<TASK>\\final-gates-v13-root\\test-staging-supplement-v13.json",
+      "bytes": 2039,
+      "sha256": "5945ef5898033e27cd5b073021b86ee712529630144d3d69e65f75b90f194774",
+      "transport_normalization_recovered_only_by_exact_sha": true
+    },
+    {
+      "path": "<RECOVERY>/recovery/actual-go-source/contained_stream.go",
+      "remote_path": "<TASK>\\native-consumer-source-v3\\internal\\process\\contained_stream.go",
+      "bytes": 22282,
+      "sha256": "f7d44dc938bac585f8d96c378382ea5fa305bbe96984629bf08c919ace5d34a7",
+      "transport_normalization_recovered_only_by_exact_sha": true
+    },
+    {
+      "path": "<RECOVERY>/recovery/actual-go-source/contained_stream_observed.go",
+      "remote_path": "<TASK>\\native-consumer-source-v3\\internal\\process\\contained_stream_observed.go",
+      "bytes": 5120,
+      "sha256": "f4455aba32901dd231dc1dcb8bdd76fa161571798023c98e429f308de4c69d45",
+      "transport_normalization_recovered_only_by_exact_sha": true
+    },
+    {
+      "path": "<RECOVERY>/recovery/actual-go-source/contained_stream_product.go",
+      "remote_path": "<TASK>\\native-consumer-source-v3\\internal\\process\\contained_stream_product.go",
+      "bytes": 479,
+      "sha256": "4de61a663d86bac19223402fe14aca121b09565103cd4f4b44cb295fe037b359",
+      "transport_normalization_recovered_only_by_exact_sha": true
+    },
+    {
+      "path": "<RECOVERY>/recovery/actual-go-source/contained_stream_windows.go",
+      "remote_path": "<TASK>\\native-consumer-source-v3\\internal\\process\\contained_stream_windows.go",
+      "bytes": 15199,
+      "sha256": "ed10d1f87a304a923b2c73cbfd77aa80926ad6ea2b1de0ae792213e8dd3c78c4",
+      "transport_normalization_recovered_only_by_exact_sha": true
+    },
+    {
+      "path": "<RECOVERY>/recovery/actual-go-source/literal_contained_test_receiver_v4.go",
+      "remote_path": "<TASK>\\final-gates-v8\\literal_contained_test_receiver_v4.go",
+      "bytes": 17008,
+      "sha256": "93c7a6f1128d677491d085e4fa59f023364ee5509ff9e006049788c95f6707e7",
+      "transport_normalization_recovered_only_by_exact_sha": true
+    },
+    {
+      "path": "<RECOVERY>/recovery/actual-go-source/rust_owner_contained_windows.go",
+      "remote_path": "<TASK>\\native-consumer-source-v3\\internal\\process\\rust_owner_contained_windows.go",
+      "bytes": 3635,
+      "sha256": "88392c8fa4f21cec0aa6a6ed303c98e032a049fd92fb8af75133504072de8ea0",
+      "transport_normalization_recovered_only_by_exact_sha": true
+    },
+    {
+      "path": "<RECOVERY>/recovery/actual-go-source/rust_owner_product_windows.go",
+      "remote_path": "<TASK>\\native-consumer-source-v3\\internal\\process\\rust_owner_product_windows.go",
+      "bytes": 5882,
+      "sha256": "9cef5e6b7b471af41936eb44265488ded874b54cd5b64f50e1e9cdd0a01c3285",
+      "transport_normalization_recovered_only_by_exact_sha": true
+    },
+    {
+      "path": "<RECOVERY>/recovery/actual-go-source/rust_owner_product_policy_windows.go",
+      "remote_path": "<TASK>\\native-consumer-source-v3\\internal\\process\\rust_owner_product_policy_windows.go",
+      "bytes": 929,
+      "sha256": "9468c47e726ef0b85b5fc5261976015ab5769c6fd8c1c870887923f7adcaa200",
+      "transport_normalization_recovered_only_by_exact_sha": true
+    },
+    {
+      "path": "<RECOVERY>/recovery/actual-go-source/buildinfo.go",
+      "remote_path": "<TASK>\\native-consumer-source-v3\\internal\\buildinfo\\buildinfo.go",
+      "bytes": 4440,
+      "sha256": "f11bb11a7d7307e4308c636948bf7f4c784de60252ddfeaba025c4da0d8ca28c",
+      "transport_normalization_recovered_only_by_exact_sha": true
+    },
+    {
+      "path": "<RECOVERY>/recovery/actual-go-source/start_with_job_windows.go",
+      "remote_path": "<TASK>\\native-consumer-source-v3\\internal\\process\\start_with_job_windows.go",
+      "bytes": 29357,
+      "sha256": "ee0059843199f0b1063a6af9523f6fdd5cd5b811515a5011c6c6ffcbfd24da8c",
+      "transport_normalization_recovered_only_by_exact_sha": true
+    },
+    {
+      "path": "<RECOVERY>/recovery/actual-go-source/jobobject_windows.go",
+      "remote_path": "<TASK>\\native-consumer-source-v3\\internal\\process\\jobobject_windows.go",
+      "bytes": 37104,
+      "sha256": "a9224c66fc46c9083b4a16d65d4227d24d3fd60b54249c546db7878167d75163",
+      "transport_normalization_recovered_only_by_exact_sha": true
+    },
+    {
+      "path": "<RECOVERY>/recovery/actual-go-source/proc_thread_attribute_observed_windows.go",
+      "remote_path": "<TASK>\\native-consumer-source-v3\\internal\\process\\proc_thread_attribute_observed_windows.go",
+      "bytes": 2966,
+      "sha256": "bba3d1675eb0feb7be222c34fc592c8ba89ce8b29d955065aaff6f9f0df89275",
+      "transport_normalization_recovered_only_by_exact_sha": true
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "schema": "native-rename-qualification-v2",
+  "status": "PASS",
+  "events": [
+    {
+      "form": "relative_root_handle",
+      "error": "OSError(87, 'rename original directory without replacement: The parameter is incorrect.')"
+    },
+    {
+      "form": "absolute_existing_target",
+      "error": "OSError(183, 'absolute original-directory rename: Cannot create a file when that file already exists.')",
+      "both_unchanged": true
+    },
+    {
+      "form": "absolute_new_target",
+      "same_original_identity": true,
+      "source_absent": true
+    }
+  ],
+  "old_resources_accessed": false,
+  "deletion_copy_replacement_acl_mutation": false,
+  "original_identity": {
+    "native": {
+      "volume_serial": 275429471,
+      "file_index": 281474984982726
+    },
+    "stat": {
+      "device": 15424946169900087391,
+      "inode": 281474984982726
+    }
+  },
+  "original_handles_closed": true
+}
