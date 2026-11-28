@@ -348,18 +348,9 @@ func projectServiceProviderInputs(service api.ProjectServiceKind, profile daemon
 	}
 	switch service {
 	case api.ProjectServiceGraphify:
-		zipStart := bytes.Index(selected, []byte{'P', 'K', 3, 4})
-		if zipStart < 0 {
-			return nil, errors.New("PROJECT_SERVICE_GRAPHIFY_SELECTED_SHIM_UNAVAILABLE")
-		}
-		shebang := bytes.LastIndex(selected[:zipStart], []byte("#!"))
-		if shebang < 0 {
-			return nil, errors.New("PROJECT_SERVICE_GRAPHIFY_SELECTED_INTERPRETER_UNAVAILABLE")
-		}
-		line := strings.SplitN(string(selected[shebang+2:zipStart]), "\n", 2)[0]
-		interpreter := strings.Trim(strings.TrimSpace(line), "\"")
-		if !filepath.IsAbs(interpreter) {
-			return nil, errors.New("PROJECT_SERVICE_GRAPHIFY_SELECTED_INTERPRETER_UNAVAILABLE")
+		interpreter, err := api.GraphifyOriginalLauncherInterpreter(selected)
+		if err != nil {
+			return nil, err
 		}
 		venv := filepath.Dir(filepath.Dir(interpreter))
 		packages := filepath.Join(venv, "Lib", "site-packages")

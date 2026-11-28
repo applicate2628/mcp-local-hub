@@ -13,23 +13,14 @@ import (
 
 // These are acquisition-DATA fixtures, not original native/provider receipts.
 // The API still has to qualify every actual selected file and module meaning.
-func TestProjectServiceGraphifyProjectionUsesSelectedShim(t *testing.T) {
+func TestProjectServiceGraphifyProjectionRefusesUnpinnedSelectedShim(t *testing.T) {
 	root := t.TempDir()
 	interpreter := filepath.Join(root, "venv", "Scripts", "python.exe")
 	profile := daemon.StdioLaunchExecutionProfile{CommandPath: filepath.Join(root, "graphify-mcp.exe")}
 	selected := []byte("synthetic PE prefix#!\"" + interpreter + "\"\nPK\x03\x04synthetic archive")
 	files, err := projectServiceProviderInputs(api.ProjectServiceGraphify, profile, selected)
-	if err != nil || len(files) != 7 {
-		t.Fatalf("declared shim edge = %v", err)
-	}
-	if files[0].Path != profile.CommandPath || files[1].Path != interpreter || files[2].Path != filepath.Join(root, "venv", "pyvenv.cfg") {
-		t.Fatal("projection replaced the actual selected shim/interpreter")
-	}
-	if files[5].Role != api.ProjectServiceProviderEntry || files[5].Path != filepath.Join(root, "venv", "Lib", "site-packages", "graphify", "serve.py") {
-		t.Fatal("projection did not retain the declared package edge")
-	}
-	if _, err := projectServiceProviderInputs(api.ProjectServiceGraphify, profile, []byte("unjoined executable")); err == nil {
-		t.Fatal("missing original selected shim became a provider")
+	if err == nil || err.Error() != "PROJECT_SERVICE_GRAPHIFY_SOURCE_CUT_CHANGED" || len(files) != 0 {
+		t.Fatal("unqualified selected shim exposed interpreter acquisition paths")
 	}
 }
 
