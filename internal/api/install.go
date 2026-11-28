@@ -11,12 +11,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"os/user"
 	"path/filepath"
 	"reflect"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1911,6 +1909,9 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 	if err != nil {
 		return nil, err
 	}
+	removalScope := supervisorIntentOwnershipScopeForManifest(m, nil, "")
+	removalCaptures := prepareUninstallSupervisorCaptures(m.Name, removalScope, report)
+	defer closeUninstallSupervisorCaptures(removalCaptures, report)
 	// Task 10 plan §65: BEFORE deleting tasks, mark each as
 	// Desired=stopped + Reason=uninstalled and append a
 	// server-uninstalled audit entry. Audit / intent failures are
@@ -1938,7 +1939,8 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 	// supervisor to reconcile so the now-descriptorless daemon is terminated
 	// promptly instead of being respawned forever. Best-effort: a cleanup
 	// failure is a warning, never a hard error — uninstall is idempotent.
-	a.removeServerFromSupervisorIntentBestEffortForManifest(m, report)
+	changed, removed, _, removeErr := a.removeServerFromSupervisorIntentCore(context.Background(), m.Name, removalScope, false)
+	a.finishRemovedSupervisorTargets(m.Name, changed, removed, removalCaptures, removeErr, report)
 	// Remove client entries — but ONLY entries that are unambiguously
 	// hub-managed. PR #94's check was too permissive: it treated any
 	// loopback HTTP URL as hub-managed, so a user's own MCP server
@@ -2159,6 +2161,9 @@ func (a *API) uninstallWithoutManifest(server string) (*UninstallReport, error) 
 	if err != nil {
 		return nil, err
 	}
+	removalScope := retiredManifestUninstallScope()
+	removalCaptures := prepareUninstallSupervisorCaptures(server, removalScope, report)
+	defer closeUninstallSupervisorCaptures(removalCaptures, report)
 	// Task 10 plan §65: same uninstall intent + audit recording as
 	// the manifest-backed path.
 	retiredTaskNames := make([]string, 0, len(tasks))
@@ -2178,7 +2183,8 @@ func (a *API) uninstallWithoutManifest(server string) (*UninstallReport, error) 
 	// v0.6 Phase F (bot PR #288 F1): also clear any supervisor-intent
 	// descriptor rows / timer / stops a retired server still owns and nudge
 	// reconcile — same symmetric cleanup as the manifest-backed path.
-	a.removeServerFromSupervisorIntentBestEffort(server, report)
+	changed, removed, _, removeErr := a.removeServerFromSupervisorIntentCore(context.Background(), server, removalScope, false)
+	a.finishRemovedSupervisorTargets(server, changed, removed, removalCaptures, removeErr, report)
 	for name, client := range clients.AllClients() {
 		if client == nil || !client.Exists() {
 			continue
@@ -2850,7 +2856,7 @@ func checkSecretRefs(env map[string]string) error {
 //  3. scheduler task `\mcp-local-hub-<server>-<daemon>` exists and
 //     is in State == "Running"
 //
-// Test seam: lookupProcess, processIdentityByPID, and
+// Test seam: lookupPortPID, processIdentityByPID, and
 // schedulerStatusForOwnPort are package vars in production wired to
 // the processes.go init helper, the wmic-or-PowerShell identity
 // lookup, and scheduler.New().Status respectively. Tests assign
@@ -2863,11 +2869,11 @@ func portHeldByOurDaemonForPortArm(port int, server, daemon string, allowSupervi
 	if portHeldBySupervisorIntentDaemonForPortArm(port, server, daemon, allowSupervisorInternalPortMatch) {
 		return true
 	}
-	if lookupProcess == nil {
+	if lookupPortPID == nil {
 		return false
 	}
-	pid, _, _, ok := lookupProcess(port)
-	if !ok || pid == 0 {
+	pid, found, err := lookupPortPID(port)
+	if err != nil || !found || pid <= 0 {
 		return false
 	}
 	// Image-identity gate. Accept ownership when EITHER the port-
@@ -3132,16 +3138,16 @@ const (
 // supervisorOwnedPortPIDOutcome is the single owner of "who listens on this
 // port", reporting WHY it could not answer rather than only that it could not.
 //
-// A non-nil lookupProcess that returns !ok is classified probeUnknown, not
+// A wired lookupPortPID that fails or finds no owner is probeUnknown, not
 // probeSurfaceUnavailable: the ownership gate is only consulted for a port that
 // is already bound (fixedPortStatus gates on !portAvailable), so "bound, yet no
 // resolvable owner" is an unresolved probe — never a reason to claim the port.
 func supervisorOwnedPortPIDOutcome(port int) (int, probeOutcome) {
-	if lookupProcess == nil {
+	if lookupPortPID == nil {
 		return 0, probeSurfaceUnavailable
 	}
-	pid, _, _, ok := lookupProcess(port)
-	if !ok || pid == 0 {
+	pid, found, err := lookupPortPID(port)
+	if err != nil || !found || pid <= 0 {
 		return 0, probeUnknown
 	}
 	return pid, probeResolved
@@ -3236,14 +3242,10 @@ func isMcphubProcessImage(image string) bool {
 	return strings.EqualFold(strings.TrimSpace(image), mcphubProcessImageName)
 }
 
-// mcphubPIDImageVerified probes the identity of pid. The identity gate is
-// BEST-EFFORT hardening only when the lookup surface is structurally
-// unavailable (nil seam, e.g. non-Windows hosts where no PID-image probe is
-// wired): the caller may proceed in that case to preserve stop --force on
-// hosts without the lookup. Once a probe is wired, however, an ok=false result
-// means verification was attempted and failed (lookup/parsing failure, exited
-// process, PID reuse race, etc.) and must fail closed rather than authorize a
-// kill without a positive mcphub image verdict.
+// mcphubPIDImageVerified classifies a PID observation. A wired probe failure
+// remains unknown; an absent probe is reported separately for compatibility.
+// Neither a positive image/SID result nor a missing lookup grants termination
+// authority: the numerical termination leaves require the original creator.
 func mcphubPIDImageVerified(pid int) (image, parentImage string, verified, lookupAvailable, lookupOK bool) {
 	if processIdentityByPID == nil {
 		return "", "", false, false, false
@@ -4898,6 +4900,7 @@ const (
 	portKillNoListener
 	portKillKilled
 	portKillIdentityMismatch
+	portKillProbeUnknown
 )
 
 var forceKillByPortFn = killDaemonByPortOutcome
@@ -4905,23 +4908,13 @@ var forceKillByPortFn = killDaemonByPortOutcome
 var taskkillProcessTreeByPIDFn = taskkillProcessTreeByPID
 
 func taskkillProcessTreeByPID(pid int) error {
-	cmd := exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/F", "/T")
-	process.NoConsole(cmd)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("taskkill %d: %w: %s", pid, err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	return &OriginalProcessOwnerRequiredError{PID: pid}
 }
 
-// killDaemonByPort finds the process listening on 127.0.0.1:port, kills
-// its whole tree with taskkill /F /T, and polls until the port is free.
-// Returns nil when nothing is listening (nothing to kill), or when the host has
-// no process-lookup hook for port-owner discovery.
-//
-// /T is critical: our hub.exe spawns npx/uvx which spawn node/python.
-// Killing only hub.exe leaves the grandchildren running and occupying
-// the child-stdin side of the pipe.
+// killDaemonByPort retains the legacy observation/error adapter. A listener
+// found by port cannot be terminated by its numeric PID: the production leaf
+// returns ErrOriginalProcessOwnerRequired. Historical absent/unsupported
+// observations remain distinct outcomes, not native tree-closure receipts.
 func killDaemonByPort(port int, timeout time.Duration) error {
 	_, err := killDaemonByPortOutcome(port, timeout)
 	return err
@@ -4931,17 +4924,20 @@ func killDaemonByPortOutcome(port int, timeout time.Duration) (portKillOutcome, 
 	if port == 0 {
 		return portKillNoPort, nil
 	}
-	if lookupProcess == nil {
+	if lookupPortPID == nil {
 		return portKillLookupUnavailable, nil
 	}
-	pid, _, _, ok := lookupProcess(port)
-	if !ok {
+	pid, found, err := lookupPortPID(port)
+	if err != nil {
+		return portKillProbeUnknown, fmt.Errorf("query port %d before kill: %w", port, err)
+	}
+	if !found {
 		return portKillNoListener, nil
 	}
 	if err := requireMcphubPortOwnerPID(port, pid); err != nil {
 		if errors.Is(err, process.ErrProcessAlreadyExited) {
 			// pr301 r5 Finding 2: the PID owning this port exited between
-			// lookupProcess and the owner-SID gate's OpenProcess (a TOCTOU
+			// lookupPortPID and the owner-SID gate's OpenProcess (a TOCTOU
 			// window). The owner-SID arm surfaces the canonical
 			// ErrProcessAlreadyExited sentinel. A gone port owner is the
 			// already-released SUCCESS condition — there is nothing left to
@@ -4954,11 +4950,17 @@ func killDaemonByPortOutcome(port int, timeout time.Duration) (portKillOutcome, 
 		return portKillIdentityMismatch, err
 	}
 	if err := taskkillProcessTreeByPIDFn(pid); err != nil {
-		return portKillNoListener, err
+		// A refused operation is not a no-listener observation. The original
+		// creator must perform termination; this API holds only a numeric PID.
+		return portKillProbeUnknown, err
 	}
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if _, _, _, stillUp := lookupProcess(port); !stillUp {
+		_, stillUp, err := lookupPortPID(port)
+		if err != nil {
+			return portKillProbeUnknown, fmt.Errorf("killed pid %d; port %d release unknown: %w", pid, port, err)
+		}
+		if !stillUp {
 			return portKillKilled, nil
 		}
 		time.Sleep(daemonPortReleasePollInterval)

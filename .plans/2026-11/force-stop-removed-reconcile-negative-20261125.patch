@@ -1,0 +1,11 @@
+--- a/internal/cli/supervise_force_stop.go
++++ b/internal/cli/supervise_force_stop.go
+@@ -342,7 +342,7 @@
+ 				matches := expected.Valid && candidate.pid == expected.PID && candidate.generation == expected.PIDGeneration && candidate.startedAt.UTC().Format(time.RFC3339Nano) == expected.StartedAt
+ 				if candidate.forceStopRequested && (!expected.Valid || matches) {
+ 					operation = candidate
+-				} else if matches && candidate.removalRetainers > 0 {
++				} else if matches && candidate.removalRetainers < 0 {
+ 					// A removal caller retained this exact original before its
+ 					// descriptor commit. Reconcile uses the same original stop
+ 					// owner; it must not reopen the observed PID in the legacy path.

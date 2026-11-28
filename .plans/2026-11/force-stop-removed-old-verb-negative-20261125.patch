@@ -1,0 +1,11 @@
+--- a/internal/api/supervisor_ipc_force_stop_client.go
++++ b/internal/api/supervisor_ipc_force_stop_client.go
+@@ -245,7 +245,7 @@
+ 	if command.RemovalPhase != "" {
+ 		// An older force_stop v1 server ignores unknown command fields. A
+ 		// distinct verb makes it refuse preparation before any destructive work.
+-		request.Cmd = "force_stop_removed"
++		request.Cmd = "force_stop"
+ 	}
+ 	response, err := exchangeForceStopRequest(ctx, conn, request)
+ 	if err != nil {

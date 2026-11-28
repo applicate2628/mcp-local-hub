@@ -349,6 +349,7 @@ type supervisorIPCStatusDaemon struct {
 	State         string   `json:"state"`
 	CurrentPID    int      `json:"current_pid"`
 	StartedAt     string   `json:"started_at"`
+	PIDGeneration int      `json:"pid_generation"`
 	IsMaintenance bool     `json:"is_maintenance"`
 	// CrashesInWindow is the supervisor's current in-memory crash count for the
 	// canonical respawn failure window. Zero is a valid observation and remains

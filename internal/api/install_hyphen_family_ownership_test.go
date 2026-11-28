@@ -311,7 +311,7 @@ func TestStop_ServerDaemon_DoesNotKillSiblingPort(t *testing.T) {
 // beta, never sibling demo-alpha-beta.
 //
 // The Restart legacy loop calls killDaemonByPort directly (not killByPortFn);
-// killDaemonByPort calls lookupProcess(port). We record every port lookupProcess
+// killDaemonByPort calls lookupPortPID(port). We record every port lookupPortPID
 // is asked about and assert 9402 is never queried, and that sch.Run/sch.Stop
 // never touch the sibling task name.
 func TestRestart_ServerDaemon_DoesNotKillSiblingPort(t *testing.T) {
@@ -334,12 +334,12 @@ func TestRestart_ServerDaemon_DoesNotKillSiblingPort(t *testing.T) {
 	t.Cleanup(func() { restartSchedulerFactory = origRestart })
 
 	var queriedPorts []int
-	origLookup := lookupProcess
-	lookupProcess = func(port int) (int, uint64, int64, bool) {
+	origLookup := lookupPortPID
+	lookupPortPID = func(port int) (int, bool, error) {
 		queriedPorts = append(queriedPorts, port)
-		return 0, 0, 0, false // no listener → killDaemonByPort is a no-op
+		return 0, false, nil // no listener → killDaemonByPort is a no-op
 	}
-	t.Cleanup(func() { lookupProcess = origLookup })
+	t.Cleanup(func() { lookupPortPID = origLookup })
 
 	if _, err := NewAPI().Restart("demo", "beta"); err != nil {
 		t.Fatalf("Restart(demo, beta): %v", err)
@@ -386,12 +386,12 @@ func TestRestart_Server_DoesNotKillSiblingDaemon(t *testing.T) {
 	t.Cleanup(func() { restartSchedulerFactory = origRestart })
 
 	var queriedPorts []int
-	origLookup := lookupProcess
-	lookupProcess = func(port int) (int, uint64, int64, bool) {
+	origLookup := lookupPortPID
+	lookupPortPID = func(port int) (int, bool, error) {
 		queriedPorts = append(queriedPorts, port)
-		return 0, 0, 0, false
+		return 0, false, nil
 	}
-	t.Cleanup(func() { lookupProcess = origLookup })
+	t.Cleanup(func() { lookupPortPID = origLookup })
 
 	if _, err := NewAPI().Restart("demo", ""); err != nil {
 		t.Fatalf("Restart(demo): %v", err)

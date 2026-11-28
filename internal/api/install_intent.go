@@ -171,9 +171,9 @@ type StopOpts struct {
 //     audit must succeed before kill — for --force the only "intent"
 //     surface is the audit, so audit-fail still fail-closes.
 //
-// On success the function delegates to the existing Stop() kill
-// path; the order is preserved (kill-by-port, then sch.Stop) so
-// retro-tests of Stop's existing behavior keep passing.
+// Normal stop retains its existing supervisor/scheduler dispatch. Force-stop
+// requires an authenticated operation on the retained original creator and
+// refuses legacy PID/port-only targets without changing their desired intent.
 //
 // Stop(server, daemonFilter) is the back-compatible wrapper; it
 // always uses Force=false. New callers (Task 11 CLI, future GUI
@@ -194,35 +194,23 @@ func (a *API) StopWithOpts(opts StopOpts) ([]RestartResult, error) {
 	if err := a.recordStopIntent(taskNames, opts.Force); err != nil {
 		return nil, err
 	}
-	// Force skips the supervisor RECONCILE pass on purpose: --force records
-	// NO Desired=stopped intent (that is its documented contract — the daemon
-	// auto-revives), so a reconcile would read desired=running, post nothing,
-	// and the stop would silently no-op. Instead the force branch DIRECTLY
-	// kills both the supervisor-owned daemons (Phase F: no scheduler task —
-	// stopForceKillSupervisorOwned resolves them from supervisor-intent.json
-	// and kills by descriptor port / live PID; bot PR #288 F3) AND the legacy
-	// scheduler-task rows (stopKillCore). Both kills are non-clean exits the
-	// supervisor reaper observes and auto-revives — the documented force
-	// semantic. The supervisor-owned task names are passed to stopKillCore as
-	// the handled set so a row reached by both paths is never double-killed.
+	// Force preserves running intent and the normal restart policy. Only the
+	// Supervisor retaining the original creator can perform this operation;
+	// legacy scheduler rows receive a refusal, never a PID/port kill fallback.
 	if opts.Force {
-		supResults, supervisorHandled, err := stopForceKillSupervisorOwned(context.Background(), opts.Server, opts.DaemonFilter)
+		supResults, _, err := stopForceKillSupervisorOwned(context.Background(), opts.Server, opts.DaemonFilter)
 		if err != nil {
 			return nil, err
 		}
 		handledTasks := schedulerBlockedRestartTaskNames(supResults)
-		killResults, err := a.stopKillCore(opts.Server, opts.DaemonFilter, handledTasks)
-		if err != nil {
-			// All-supervisor-owned install on a host with no usable scheduler
-			// (POSIX beta): the supervisor-owned kills already ran, so a
-			// scheduler-unavailable error is non-fatal — mirror the no-force
-			// stopSupervisorAwareKill tolerance.
-			if supervisorHandled && schedulerUnavailableError(err) {
-				return supResults, nil
+		for _, taskName := range taskNames {
+			if _, handled := handledTasks[strings.TrimPrefix(taskName, `\`)]; handled {
+				continue
 			}
-			return nil, err
+			supResults = append(supResults, RestartResult{TaskName: canonicalIntentTaskKey(taskName), Code: ForceStopOwnerUnavailable,
+				Err: "force_stop refused: no original Supervisor creator is retained for this task"})
 		}
-		return append(supResults, killResults...), nil
+		return supResults, nil
 	}
 	// stopSupervisorAwareKill runs the supervisor reconcile pass (spec
 	// §4 Phase A.1; the stop intent recorded above is on disk for it to

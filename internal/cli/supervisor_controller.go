@@ -45,9 +45,11 @@ import (
 // supervisorController is the long-lived runtime owner.
 type supervisorController struct {
 	intentCache *IntentCache
-	eventLoop   *api.EventLoop
-	tracker     *DaemonRuntimeTracker
-	smStates    sync.Map // taskName -> api.SMState
+	// Original production creators only. Hydrated PIDs cannot populate this.
+	daemonCreators *daemonCreatorRecords
+	eventLoop      *api.EventLoop
+	tracker        *DaemonRuntimeTracker
+	smStates       sync.Map // taskName -> api.SMState
 	// respawnArmEpoch is a single controller-wide, monotonic, never-reset backoff-arm
 	// epoch. respawnArmGen maps each task -> the LATEST epoch it armed at, for the
 	// fire-time compare. armRespawnBackoffTimer takes the next epoch
@@ -750,6 +752,7 @@ const (
 	// by reconcile IPC and processes its full transaction on the controller FIFO
 	// before any per-daemon intent transition can interleave.
 	evStopBatch api.SMEvent = "stop-batch"
+	evForceStop api.SMEvent = "force-stop"
 	// evStopSettlementRecovery is the controller-owned retry command. Timers and
 	// observers may only post it; resume/terminate decisions run on this FIFO.
 	evStopSettlementRecovery api.SMEvent = "stop-settlement-recovery"
@@ -2894,6 +2897,11 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	case evStopBatch:
 		if request, ok := ev.Body[stopBatchRequestBodyKey].(stopBatchLoopRequest); ok {
 			c.handleStopBatchOnLoop(request)
+		}
+		return
+	case evForceStop:
+		if request, ok := ev.Body[forceStopRequestBodyKey].(forceStopLoopRequest); ok {
+			request.reply <- c.forceStopWithRemovalOnLoop(request.ctx, request.command, request.removal)
 		}
 		return
 	case evStopSettlementRecovery:

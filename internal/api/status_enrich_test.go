@@ -223,6 +223,63 @@ func TestEnrichStatusWithRegistry_ForeignPIDIsAlive(t *testing.T) {
 	}
 }
 
+func TestEnrichStatusWithRegistry_ScalarFallbackPreservesMetricsAndExcludesSelf(t *testing.T) {
+	const (
+		port      = 33173
+		selfPID   = 81001
+		daemonPID = 81002
+	)
+	dir := t.TempDir()
+	origLookup, origBatch := lookupProcess, lookupProcessBatch
+	origPortPID, origSelfPID := lookupPortPID, selfPIDFn
+	t.Cleanup(func() {
+		lookupProcess, lookupProcessBatch = origLookup, origBatch
+		lookupPortPID, selfPIDFn = origPortPID, origSelfPID
+	})
+	lookupProcessBatch = nil
+	selfPIDFn = func() int { return selfPID }
+
+	cases := []struct {
+		name       string
+		pid        int
+		ram        uint64
+		uptime     int64
+		wantPID    int
+		wantRAM    uint64
+		wantUptime int64
+		wantState  string
+	}{
+		{"known metrics", daemonPID, 50_000_000, 3600, daemonPID, 50_000_000, 3600, "Running"},
+		{"unknown metrics retain the observed PID", daemonPID, 0, 0, daemonPID, 0, 0, "Running"},
+		{"self PID does not describe the daemon", selfPID, 50_000_000, 3600, 0, 0, 0, "Starting"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			lookupPortPID = func(int) (int, bool, error) {
+				t.Fatal("status scalar fallback must retain its metric-bearing lookupProcess contract")
+				return 0, false, nil
+			}
+			lookupProcess = func(gotPort int) (int, uint64, int64, bool) {
+				if gotPort != port {
+					t.Fatalf("lookupProcess port = %d, want %d", gotPort, port)
+				}
+				return tc.pid, tc.ram, tc.uptime, true
+			}
+			rows := []DaemonStatus{{
+				TaskName: `\mcp-local-hub-scalar-default`, State: "Running", Port: port,
+			}}
+			if err := enrichStatusWithRegistry(rows, dir, ""); err != nil {
+				t.Fatal(err)
+			}
+			got := rows[0]
+			if got.PID != tc.wantPID || got.RAMBytes != tc.wantRAM || got.UptimeSec != tc.wantUptime || got.State != tc.wantState {
+				t.Fatalf("scalar status = (PID %d, RAM %d, uptime %d, state %q), want (%d, %d, %d, %q)",
+					got.PID, got.RAMBytes, got.UptimeSec, got.State, tc.wantPID, tc.wantRAM, tc.wantUptime, tc.wantState)
+			}
+		})
+	}
+}
+
 // TestEnrichStatusWithRegistry_MaintenanceRowsBypassPortGuard guards the
 // Codex r1 P2 finding on PR #21 (DM-1 narrowing): the hub-wide
 // `mcp-local-hub-weekly-refresh` task is intentionally portless, and

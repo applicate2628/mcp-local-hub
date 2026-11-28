@@ -63,6 +63,8 @@ import (
 // os.Exit-safety: defers do NOT run after os.Exit, so cleanup is performed
 // explicitly after capturing m.Run()'s exit code.
 func TestMain(m *testing.M) {
+	runPortProbeTestChild()
+
 	// caller_start_time oracle child fast-path. Sentinel-gated, short-circuits
 	// BEFORE m.Run() so the child never runs the suite. It emits one
 	// intent-audit row into a parent-chosen state dir after a deliberate delay,
@@ -108,7 +110,7 @@ func TestMain(m *testing.M) {
 	readPidportFn = testReadLegacyPidport
 
 	// ── PRIMARY seal: the process-lookup / wmic family ──────────────────────
-	// lookupProcess + lookupProcessBatch are wired at processes.go init() to real
+	// lookupPortPID + lookupProcess + lookupProcessBatch are wired at processes.go init() to real
 	// `netstat -ano` + `wmic` shell-outs on Windows (~31s per wmic call on Win11
 	// 24H2). killByPortFn / forceKillByPortFn / status enrichment all funnel
 	// through them, so a test that seeds a real manifest port and reaches a
@@ -119,8 +121,10 @@ func TestMain(m *testing.M) {
 	// makes every port-kill seam short-circuit to portKillLookupUnavailable/nil
 	// (install.go ~3461). This is the dominant timeout cost; several tests already
 	// nil lookupProcess manually (restart_supervisor_test.go, status_workspace_test.go).
+	prevLookupPortPID := lookupPortPID
 	prevLookupProcess := lookupProcess
 	prevLookupProcessBatch := lookupProcessBatch
+	lookupPortPID = nil
 	lookupProcess = nil
 	lookupProcessBatch = nil
 
@@ -187,6 +191,8 @@ func TestMain(m *testing.M) {
 	prevAutoRegisterReadiness := autoRegisterReadinessFn
 	prevTaskkillTree := taskkillProcessTreeByPIDFn
 	prevStopForceKillPID := stopForceKillPIDFn
+	prevSupervisorForceStop := supervisorForceStopFn
+	prevPrepareSupervisorRemovedStop := prepareSupervisorRemovedStopFn
 	prevSnapshotProcesses := snapshotProcessesFn
 	prevFrozenStdioBridgeAdmission := frozenStdioBridgeAdmissionFn
 	serenaWakeReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
@@ -225,6 +231,12 @@ func TestMain(m *testing.M) {
 	stopForceKillPIDFn = func(int) error {
 		return errors.New("force-kill PID sealed by TestMain default-stub")
 	}
+	supervisorForceStopFn = func(context.Context, string, int) (ForceStopResultV1, error) {
+		return ForceStopResultV1{}, ErrSupervisorIPCUnavailable
+	}
+	prepareSupervisorRemovedStopFn = func(context.Context, string, int) (supervisorRemovedStop, error) {
+		return nil, ErrSupervisorIPCUnavailable
+	}
 	// CleanupLogWatchers shells out to wmic/ps through snapshotProcessesFn, then
 	// kills matched PIDs via killOnePID (not the taskkill seams) — seal to an empty
 	// snapshot so the default test path scans nothing and kills nothing.
@@ -260,6 +272,7 @@ func TestMain(m *testing.M) {
 		_ = os.Unsetenv("MIMOCODE_DISABLE_CLAUDE_CODE_MCP")
 	}
 	daemonStateRootOverride = prevOverride
+	lookupPortPID = prevLookupPortPID
 	lookupProcess = prevLookupProcess
 	lookupProcessBatch = prevLookupProcessBatch
 	registerSupervisorReconcileFn = prevRegisterReconcile
@@ -277,6 +290,8 @@ func TestMain(m *testing.M) {
 	autoRegisterReadinessFn = prevAutoRegisterReadiness
 	taskkillProcessTreeByPIDFn = prevTaskkillTree
 	stopForceKillPIDFn = prevStopForceKillPID
+	supervisorForceStopFn = prevSupervisorForceStop
+	prepareSupervisorRemovedStopFn = prevPrepareSupervisorRemovedStop
 	snapshotProcessesFn = prevSnapshotProcesses
 	frozenStdioBridgeAdmissionFn = prevFrozenStdioBridgeAdmission
 	if cleanupErr := apitest.RemoveTestMainRoot(tmp); cleanupErr != nil {

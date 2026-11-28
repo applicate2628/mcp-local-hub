@@ -138,7 +138,7 @@ func TestForceKillOneSupervisorTarget_OwnerSIDLiveUnverifiable_StillFailsClosed(
 
 // TestKillDaemonByPortOutcome_OwnerSIDSentinel_ReportsNoListener pins Finding 2
 // for the port-owner taskkill path. The PID owning the port vanished between
-// lookupProcess and the owner-SID gate; killDaemonByPortOutcome must return the
+// lookupPortPID and the owner-SID gate; killDaemonByPortOutcome must return the
 // benign portKillNoListener outcome with NO error (the listener is gone),
 // instead of the pre-fix portKillIdentityMismatch FAILURE.
 func TestKillDaemonByPortOutcome_OwnerSIDSentinel_ReportsNoListener(t *testing.T) {
@@ -147,19 +147,19 @@ func TestKillDaemonByPortOutcome_OwnerSIDSentinel_ReportsNoListener(t *testing.T
 		pid  = 51012
 	)
 
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	origIdent := processIdentityByPID
 	origSID := processOwnerSIDMatchesCurrentFn
 	origTaskkill := taskkillProcessTreeByPIDFn
 	t.Cleanup(func() {
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 		processIdentityByPID = origIdent
 		processOwnerSIDMatchesCurrentFn = origSID
 		taskkillProcessTreeByPIDFn = origTaskkill
 	})
 
 	// A listener exists at probe time.
-	lookupProcess = func(int) (int, uint64, int64, bool) { return pid, 0, 0, true }
+	lookupPortPID = func(int) (int, bool, error) { return pid, true, nil }
 	// Image gate passes so the owner-SID arm is reached.
 	processIdentityByPID = func(int) (string, string, bool) {
 		return mcphubProcessImageName, "svchost.exe", true
@@ -195,18 +195,18 @@ func TestKillDaemonByPortOutcome_OwnerSIDLiveUnverifiable_StillFailsClosed(t *te
 		pid  = 51013
 	)
 
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	origIdent := processIdentityByPID
 	origSID := processOwnerSIDMatchesCurrentFn
 	origTaskkill := taskkillProcessTreeByPIDFn
 	t.Cleanup(func() {
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 		processIdentityByPID = origIdent
 		processOwnerSIDMatchesCurrentFn = origSID
 		taskkillProcessTreeByPIDFn = origTaskkill
 	})
 
-	lookupProcess = func(int) (int, uint64, int64, bool) { return pid, 0, 0, true }
+	lookupPortPID = func(int) (int, bool, error) { return pid, true, nil }
 	processIdentityByPID = func(int) (string, string, bool) {
 		return mcphubProcessImageName, "svchost.exe", true
 	}
