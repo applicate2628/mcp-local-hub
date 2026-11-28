@@ -1,0 +1,2 @@
+From https://github.com/applicate2628/mcp-local-hub
+ * branch              5a15e4f4bbf64442677e3443054a1bdb277505bd -> FETCH_HEAD

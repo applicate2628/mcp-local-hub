@@ -1,0 +1,60 @@
+$ErrorActionPreference='Stop'
+$Root='@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1'
+$Source='@@RECOVERY_APPROVED_WORK_AREA@@\pub666-acceptance-20261128-v2'
+$Top=$Root+'\inputs-successor33-v1'
+$Build=$Root+'\namespace-admission-diagnostic-build-v1'
+$TempRoot='@@RECOVERY_APPROVED_WORK_AREA@@\nt9'
+$Temp=$TempRoot+'\b'
+$Config='@@RECOVERY_APPROVED_WORK_AREA@@\functional-route-20261126\cache-acceptance-stage-20261128-v27.json'
+function SHA([string]$p){$h=[Security.Cryptography.SHA256]::Create();try{[BitConverter]::ToString($h.ComputeHash([IO.File]::ReadAllBytes($p))).Replace('-','').ToLowerInvariant()}finally{$h.Dispose()}}
+function Require($ok,[string]$why){if(-not$ok){throw $why}}
+$MapPath=$Top+'\source-binding\source59f-input-sha256.json'
+Require ((SHA $MapPath)-ceq'e8c3fc2f577a130f92ba4eee7f8eee7153afc032dee909557cf1156890917c06') 'Source map pin'
+$Map=[IO.File]::ReadAllText($MapPath)|ConvertFrom-Json
+$Observed=New-Object System.Collections.Generic.List[string]
+foreach($p in $Map.files.PSObject.Properties){
+ $Path=$Source+'\'+$p.Name
+ Require ((SHA $Path)-ceq$p.Value) 'safe Source exact'
+ Require ((SHA ('@@RECOVERY_APPROVED_WORK_AREA@@\pub666-cli-fixtures-20261128\'+$p.Name))-ceq$p.Value) 'new CLI Source exact'
+ $Observed.Add($Path)
+}
+Require ($Observed.Count-eq3369) 'exact Source count'
+$Pins=[ordered]@{
+ ($Top+'\namespace-admission-diagnostic-driver-v1\namespace-timing-overlay.json')='3a8eb56d4f22609eabdd36c50a17987c4bbee2ccd06caba11c00a4ad4e127188'
+ ($Top+'\namespace-admission-timing-candidate-v1\main_windows.go')='41e7cda8cf174a27a0380a93ad3c89881692d9055d771dae872793f6726ef96d'
+ ($Top+'\namespace-admission-timing-candidate-v1\prebuilt_windows.go')='60556af6afce055f7ab3aaea3819d919abeafc6d11b5a88e0fb06a94eedc83a6'
+ '@@RECOVERY_APPROVED_WORK_AREA@@\functional-route-20261126\runs\cache-acceptance-stage-20261128-v24\independent-root-data-audit.json'='266aade257bc8c7cb52e8b681d739d8d27b47115fbce3143218513ca354b533b'
+ ($Top+'\cli-focused59f-baseline-v2-inputs\baseline-composition.json')='a16daba37834840d98f7fbf64ac773804bceaee8cc9a41bc6ef54dcf56ed2415'
+ '@@RECOVERY_GO_DISTRIBUTION_ROOT@@\ucrt64\lib\go\bin\go.exe'='0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113'
+ '@@RECOVERY_GO_DISTRIBUTION_ROOT@@\ucrt64\bin\gcc.exe'='f6ff9378c1edb591131304518eac6456708d28720284105930d0d687136bcdd3'
+}
+foreach($p in $Pins.Keys){Require ((SHA $p)-ceq$Pins[$p]) 'compile input pin';$Observed.Add($p)}
+foreach($p in @($Build,$TempRoot,$Config)){Require (-not(Test-Path -LiteralPath $p)) 'fresh build scope'}
+foreach($p in @($Root,'@@RECOVERY_APPROVED_WORK_AREA@@')){
+ $i=Get-Item -LiteralPath $p -Force
+ while($null-ne$i){Require (($i -is [IO.DirectoryInfo])-and-not($i.Attributes-band[IO.FileAttributes]::ReparsePoint)) 'ordinary scope ancestors';$i=$i.Parent}
+}
+[IO.Directory]::CreateDirectory($Build)|Out-Null
+[IO.Directory]::CreateDirectory($Temp)|Out-Null
+foreach($rel in @('home','home\AppData\Local','home\AppData\Roaming')){[IO.Directory]::CreateDirectory($Build+'\'+$rel)|Out-Null}
+$C=[IO.File]::ReadAllText($Top+'\cli-focused59f-baseline-v2-inputs\baseline-composition.json')|ConvertFrom-Json
+$Env=[ordered]@{}
+foreach($p in $C.environment.PSObject.Properties){$Env[$p.Name]=$p.Value}
+foreach($name in @('TEMP','TMP','TMPDIR','GOTMPDIR')){$Env[$name]=$Temp}
+foreach($name in @('HOME','USERPROFILE')){$Env[$name]=$Build+'\home'}
+$Env['APPDATA']=$Build+'\home\AppData\Roaming';$Env['LOCALAPPDATA']=$Build+'\home\AppData\Local'
+$Env['GIT_OPTIONAL_LOCKS']='0'
+$Plan=[ordered]@{
+ run='runs/cache-acceptance-stage-20261128-v27'
+ source=$Source
+ head='59f618ebfbf6d9f52c6994d68586e3c2ebc202a8'
+ environment=$Env
+ observed_files=@($Observed)
+ steps=@(
+  [ordered]@{name='build-timing-only-namespace-owner';argv=@('go','build','-p=1','-mod=readonly','-trimpath=false','-ldflags=-H=windowsgui','-overlay',($Top+'\namespace-admission-diagnostic-driver-v1\namespace-timing-overlay.json'),'-o',($Build+'\namespace-timing-owner.exe'),'./tools/test-recovery-namespace');timeout=300},
+  [ordered]@{name='safe-source-still-clean';argv=@('git','status','--porcelain=v1','--untracked-files=all');timeout=30}
+ )
+ root_review=[ordered]@{scope='Compile timing-only auxiliary through Go overlay; no API test execution';source_files_unchanged=$true;baseline24_cache_original_closure_received=$true;cache_reuse='Exclusive successor use after PASS/CLOSED; the mutable build cache may change during this compile';ambient_environment='Existing runner inherits non-MCPHUB ambient variables and applies explicit overrides';new_cli_source3369_pins_verified=$true}
+}
+[IO.File]::WriteAllText($Config,($Plan|ConvertTo-Json -Depth 10)+[char]10,[Text.UTF8Encoding]::new($false))
+[ordered]@{config=$Config;sha256=(SHA $Config);observed_files=$Observed.Count;source_files=3369;new_cli_source_exact=$true;output=$Build;temporary=$Temp}|ConvertTo-Json

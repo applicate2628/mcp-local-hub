@@ -1,0 +1,28 @@
+{
+  "repository": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-acceptance-20261128-v2",
+  "selected_source_sha256": {
+    "go.mod": "805a7dd76431a24ebd6ce346682e7bc321e4dae0e37488448811bfa624122edd",
+    "go.sum": "61f4a30f006f3bc99b1d2500646d9fd381c3c8d72050ca76dce2f9321c3ecae2",
+    "internal/api/attach_client_public_cli_receiving_windows_test.go": "ee6ad604b53d188b513e5d4783d7741b4760f66594129faafbd1762b542a7123",
+    "internal/api/main_test.go": "a34d3b8e14f610945662a7aeee122068641b931af19ffd9535ba6e24b186d869",
+    "internal/api/secrets_init_recovery_directory_windows.go": "1cc107051a94646a4bd93bfaca2e06120ef4b2b7c5d37237d1c02dd1062c9fd4",
+    "internal/api/secrets_init_recovery_test.go": "350eb3cfb95248e58ac89ba737a03caf93fac5d29067ce9df79e45c305f64965",
+    "internal/api/supervisor_ipc_peer_transport_windows_test.go": "d3b23fe403d74d0648c2860d1bda95ce8a343a3a2e8ed7e078dc860d730d6e3a",
+    "internal/api/supervisor_stderr_sink_test.go": "43943d1f99ccd8b46ca6b48dedd7e885629096a140c6d617c4e0145c863f22fd",
+    "scripts/test-recovery-namespace/helper.ps1": "ce20de6a117350681b9db5979a67285b1d8d07ea7937ea912680b4e3d6a6fa32",
+    "tools/test-recovery-namespace/main_windows.go": "9a731af9334f4015aee2abacce19a5616f3de600f1ed2815c581fb6c35aeaf6b"
+  },
+  "go": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe",
+  "powershell": "@@RECOVERY_NATIVE_POWERSHELL_WORK_AREA_JSON@@\\bns26\\pwsh7\\pwsh.exe",
+  "tests": "",
+  "test_state_path_env": false,
+  "build_argv": null,
+  "prebuilt_full_suite": true,
+  "source_dir": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-acceptance-20261128-v2\\internal\\api",
+  "test_argv": [
+    "-test.paniconexit0",
+    "-test.v=test2json",
+    "-test.count=1",
+    "-test.timeout=5m0s"
+  ]
+}

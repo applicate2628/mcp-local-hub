@@ -1,0 +1,7 @@
+commit 264a0601b7d027652c12ec88ae4debd6c3bfb69f
+tree f7fbccfb8cfc5d1c33b986591675d07847af929c
+parent 27d90e626465dc9a3a012e50785d62785d4c5e7e
+author applicate2628 <dima_den@inbox.ru> 1795881704 +0300
+committer applicate2628 <dima_den@inbox.ru> 1795881704 +0300
+
+    docs: preserve complete acceptance evidence and current blockers

@@ -1,0 +1,114 @@
+{
+    "schema":  "publication-original-root-data-audit-v1",
+    "status":  "PASS",
+    "physical_complete":  true,
+    "scope":  "cache-acceptance-stage-20261128-v22",
+    "config_sha256":  "15bdd94c30a5c6c198db5002ccfc69710fbb3c0901ef3de95b4547694ed71da6",
+    "receipt_sha256":  "5ba351a931486875873eec998fc3222e9175ab0730c1da8a29c6cb06f4d89c28",
+    "root_sha256":  "a59fbc8374e82f3abc0205fa430166407c97cdb898a8f51591eaa2874d2a1d1c",
+    "outer_sha256":  "da934c2f5fdae586c4c64f081e340ede1d4a653cfb348d1ac5c2ceb0a1ebb286",
+    "commands_verified":  6,
+    "captures_verified":  12,
+    "results":  [
+                    {
+                        "name":  "head.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rev-parse",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.03189480002038181,
+                        "exit_code":  0,
+                        "stdout_sha256":  "73aa24f699b6c06ce27e215551c8b246f45f00183a079260aed1401b22a07bb0",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "27d90e626465dc9a3a012e50785d62785d4c5e7e\n"
+                    },
+                    {
+                        "name":  "stage-reviewed-checkpoint-artifacts.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "add",
+                                     "--force",
+                                     "--",
+                                     ".plans/2026-11/open-pr-integration-20261117.md",
+                                     "docs/modernization/verification/successor-publication-trail-20261128",
+                                     "docs/modernization/verification/successor59f-preparation-20261128",
+                                     "docs/modernization/verification/original-full-v6-complete-captures-20261128",
+                                     "docs/modernization/verification/original-full-v6-owner-replay-20261128",
+                                     "docs/modernization/verification/old-cli-budget-analysis-20261128",
+                                     "docs/modernization/verification/cli-shared-image-candidate-20261128",
+                                     "docs/modernization/verification/old-cli-budget-parser-v2-20261128"
+                                 ],
+                        "seconds":  1.0643152999691665,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "check-reviewed-human-docs.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "diff",
+                                     "--cached",
+                                     "--check",
+                                     "--",
+                                     ".plans/2026-11/open-pr-integration-20261117.md",
+                                     "docs/modernization/verification/successor-publication-trail-20261128/README.md",
+                                     "docs/modernization/verification/successor59f-preparation-20261128/README.md",
+                                     "docs/modernization/verification/original-full-v6-complete-captures-20261128/README.md",
+                                     "docs/modernization/verification/original-full-v6-owner-replay-20261128/README.md",
+                                     "docs/modernization/verification/old-cli-budget-analysis-20261128/README.md",
+                                     "docs/modernization/verification/cli-shared-image-candidate-20261128/README.md",
+                                     "docs/modernization/verification/old-cli-budget-parser-v2-20261128/README.md"
+                                 ],
+                        "seconds":  0.04416859999764711,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "reviewed-checkpoint-staged-names.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "diff",
+                                     "--cached",
+                                     "--name-only"
+                                 ],
+                        "seconds":  0.04335799999535084,
+                        "exit_code":  0,
+                        "stdout_sha256":  "48bd369c6234cf9f698045f95f0fd88fe5edf5d8eaec4e602abf5bb0e9951ac0",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ".plans/2026-11/open-pr-integration-20261117.md\ndocs/modernization/verification/cli-shared-image-candidate-20261128/.gitattributes\ndocs/modernization/verification/cli-shared-image-candidate-20261128/README.md\ndocs/modernization/verification/cli-shared-image-candidate-20261128/afterimages/internal/cli/process_identity_match_windows_test.go\ndocs/modernization/verification/cli-shared-image-candidate-20261128/afterimages/internal/cli/settings_registry_test.go\ndocs/modernization/verification/cli-shared-image-candidate-20261128/artifact-manifest.json\ndocs/modernization/verification/cli-shared-image-candidate-20261128/evidence.json\ndocs/modernization/verification/cli-shared-image-candidate-20261128/share-foreign-test-image.patch\ndocs/modernization/verification/old-cli-budget-analysis-20261128/.gitattributes\ndocs/modernization/verification/old-cli-budget-analysis-20261128/README.md\ndocs/modernization/verification/old-cli-budget-analysis-20261128/analysis.json\ndocs/modernization/verification/old-cli-budget-analysis-20261128/artifact-manifest.json\ndocs/modernization/verification/old-cli-budget-analysis-20261128/not-started-or-paused.json\ndocs/modernization/verification/old-cli-budget-analysis-20261128/parse_closed_cli_durations.py\ndocs/modernization/verification/old-cli-budget-analysis-20261128/source-correspondence.json\ndocs/modernization/verification/old-cli-budget-analysis-20261128/top-level-terminal-ledger.json\ndocs/modernization/verification/old-cli-budget-parser-v2-20261128/.gitattributes\ndocs/modernization/verification/old-cli-budget-parser-v2-20261128/README.md\ndocs/modernization/verification/old-cli-budget-parser-v2-20261128/artifact-manifest.json\ndocs/modernization/verification/old-cli-budget-parser-v2-20261128/ascii-to-utf8.patch\ndocs/modernization/verification/old-cli-budget-parser-v2-20261128/evidence.json\ndocs/modernization/verification/old-cli-budget-parser-v2-20261128/original-data-failure.json\ndocs/modernization/verification/old-cli-budget-parser-v2-20261128/parse_closed_cli_durations_v2.py\ndocs/modernization/verification/original-full-v6-complete-captures-20261128/.gitattributes\ndocs/modernization/verification/original-full-v6-complete-captures-20261128/README.md\ndocs/modernization/verification/original-full-v6-complete-captures-20261128/artifact-manifest.json\ndocs/modernization/verification/original-full-v6-complete-captures-20261128/capture-index.json\ndocs/modernization/verification/original-full-v6-complete-captures-20261128/closed-source-map.jso"
+                    },
+                    {
+                        "name":  "reviewed-checkpoint-staged-stat.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "diff",
+                                     "--cached",
+                                     "--stat"
+                                 ],
+                        "seconds":  0.1741391000105068,
+                        "exit_code":  0,
+                        "stdout_sha256":  "19970112e0fa3b6cfd82d60ee3213e906b95f51753e9a38147c196fb82ac919e",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  " .plans/2026-11/open-pr-integration-20261117.md     |    98 +-\n .../.gitattributes                                 |     1 +\n .../cli-shared-image-candidate-20261128/README.md  |    43 +\n .../cli/process_identity_match_windows_test.go     |   163 +\n .../internal/cli/settings_registry_test.go         |   685 +\n .../artifact-manifest.json                         |    30 +\n .../evidence.json                                  |    82 +\n .../share-foreign-test-image.patch                 |   139 +\n .../.gitattributes                                 |     1 +\n .../old-cli-budget-analysis-20261128/README.md     |   133 +\n .../old-cli-budget-analysis-20261128/analysis.json |   373 +\n .../artifact-manifest.json                         |    34 +\n .../not-started-or-paused.json                     |   399 +\n .../parse_closed_cli_durations.py                  |   193 +\n .../source-correspondence.json                     |   107 +\n .../top-level-terminal-ledger.json                 | 15997 ++++\n .../.gitattributes                                 |     1 +\n .../old-cli-budget-parser-v2-20261128/README.md    |    31 +\n .../artifact-manifest.json                         |    29 +\n .../ascii-to-utf8.patch                            |    22 +\n .../evidence.json                                  |    42 +\n .../original-data-failure.json                     |    12 +\n .../parse_closed_cli_durations_v2.py               |   193 +\n .../.gitattributes                                 |     1 +\n .../README.md                                      |   108 +\n .../artifact-manifest.json                         |  1738 +\n .../capture-index.json                             | 10498 +++\n .../closed-source-map.json                         |   340 +\n .../data-reconstruction-proof.json                 |    48 +\n .../disclosure-review.json                         |    17 +\n .../materialize_from_closed_files.py               |   193 +\n .../receipts/x09eee20a643d/receipt.json.template   |  1469 +\n .../receipts/x0c62f40291d7/receipt.json.template   |  1737 +\n .../receipts/x0db327d6b7fe/receipt.json.template   |  2294 +\n .../receipts/x1004ff5c54b6/receipt.json.template   |  1504 +\n .../receipts/x1109af6646ad/receipt.json.template   | 20196 ++++++\n .../receipts/x116ebc9d191a/receipt.json.template   |  1737 +\n .../receipts/x1838bdf9b947/receipt.json.template   |  1484 +\n .../receipts/x1b202119690a/receipt.json.template   |  1596 +\n .../receipts/x228772319a3d/receipt.json.template   |  2062 +\n .../rece"
+                    },
+                    {
+                        "name":  "reviewed-checkpoint-tree.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "write-tree"
+                                 ],
+                        "seconds":  0.16568150010425597,
+                        "exit_code":  0,
+                        "stdout_sha256":  "65569e446f5eaa26793678f7e9955d88d71567750a2e84f18456ff635e2eab8b",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "f7fbccfb8cfc5d1c33b986591675d07847af929c\n"
+                    }
+                ],
+    "tests_executed":  false,
+    "reviewed_utc":  "2026-11-28T15:59:03.2853915Z"
+}

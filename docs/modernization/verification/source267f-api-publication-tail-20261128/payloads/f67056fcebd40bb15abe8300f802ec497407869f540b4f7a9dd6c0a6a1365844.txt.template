@@ -1,0 +1,24 @@
+$ErrorActionPreference='Stop'
+function Need($ok,[string]$why){if(-not$ok){throw $why}}
+function SHA([string]$p){$h=[Security.Cryptography.SHA256]::Create();try{[BitConverter]::ToString($h.ComputeHash([IO.File]::ReadAllBytes($p))).Replace('-','').ToLowerInvariant()}finally{$h.Dispose()}}
+$RootData='@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\inputs-successor33-v1\namespace-diagnostic-v2-root-data.json'
+Need ((SHA $RootData)-ceq'a57f37f1f9c831c34eb3679d15856e9bee3b06f7b02ebc736bad1bf78494a341') 'exact CLOSED receiving'
+$R=[IO.File]::ReadAllText($RootData)|ConvertFrom-Json
+Need ($R.data_verification-ceq'PASS' -and $R.physical_complete-eq$true -and $R.diagnostic_capture_access-eq$true) 'closed capture access'
+$Log='@@RECOVERY_APPROVED_WORK_AREA@@\nt9\api2\n\r\proof\tests.stdout.log'
+Need ((SHA $Log)-ceq'8bbcfd601e1d1e0f4ea688fe3e11dc5b6bed4a6a0a89a5da6100d181c8b1437c') 'exact original capture'
+$Text=[IO.File]::ReadAllText($Log).Replace([string][char]22,'')
+$Terminals=@();$Starts=@();$Pauses=@();$Continues=@()
+foreach($Line in $Text.Split([char]10)){
+ if($Line-match'^\s*--- (PASS|FAIL|SKIP): (\S+) \(([0-9.]+)s\)\s*$'){$Terminals+=[ordered]@{test=$Matches[2];outcome=$Matches[1];seconds=[double]::Parse($Matches[3],[Globalization.CultureInfo]::InvariantCulture)}}
+ elseif($Line-match'^=== RUN\s+(\S+)\s*$'){$Starts+=$Matches[1]}
+ elseif($Line-match'^=== PAUSE\s+(\S+)\s*$'){$Pauses+=$Matches[1]}
+ elseif($Line-match'^=== CONT\s+(\S+)\s*$'){$Continues+=$Matches[1]}
+}
+$Roots=@($Terminals|Where-Object {$_.test-notlike'*/*'})
+$RootStarts=@($Starts|Where-Object {$_-notlike'*/*'})
+$Finished=@($Terminals.test);$Unfinished=@($Starts|Where-Object {$_-notin$Finished})
+$Result=[ordered]@{schema='closed-api-diagnostic-duration-analysis-v1';scope='exact59f API diagnostic; partial timed-out suite; not repository PASS';root_receiving_sha256=(SHA $RootData);capture_sha256=(SHA $Log);original_status='FAIL/CLOSED';root_exit_code=2;admission_seconds=3.3395298;native_owner_seconds=304.177;top_level_started=$RootStarts.Count;top_level_terminal=$Roots.Count;top_level_pass=@($Roots|Where-Object {$_.outcome-ceq'PASS'}).Count;top_level_fail=@($Roots|Where-Object {$_.outcome-ceq'FAIL'}).Count;top_level_skip=@($Roots|Where-Object {$_.outcome-ceq'SKIP'}).Count;top_level_duration_sum=($Roots.seconds|Measure-Object -Sum).Sum;all_terminal=$Terminals.Count;paused=$Pauses.Count;continued=$Continues.Count;started_without_terminal=$Unfinished;top_level_ledger=$Roots;all_terminal_ledger=$Terminals;analysis_limits='Printed test durations include concurrent child work and must not be summed as wall time except for confirmed serial roots. The test active at deadline is not by itself the cause.'}
+$Out='@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\recovery-inputs-v1\closed-api-diagnostic-duration-analysis-v1.json';Need (-not(Test-Path -LiteralPath $Out)) 'fresh analysis'
+[IO.File]::WriteAllText($Out,($Result|ConvertTo-Json -Depth 9)+[char]10,[Text.UTF8Encoding]::new($false))
+[ordered]@{analysis_sha256=(SHA $Out);root_started=$RootStarts.Count;root_terminal=$Roots.Count;pass=$Result.top_level_pass;fail=$Result.top_level_fail;skip=$Result.top_level_skip;duration_sum=$Result.top_level_duration_sum;paused=$Pauses.Count;continued=$Continues.Count;unfinished_count=$Unfinished.Count;top30=@($Roots|Sort-Object {[double]$_.seconds} -Descending|Select-Object -First 30)}|ConvertTo-Json -Depth 8

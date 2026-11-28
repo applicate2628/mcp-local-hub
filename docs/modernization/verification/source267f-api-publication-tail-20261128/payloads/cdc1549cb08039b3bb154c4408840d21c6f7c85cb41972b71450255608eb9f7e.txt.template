@@ -1,0 +1,60 @@
+--- references/private_producer_scope.py
++++ private_scope.py
+@@ -30,8 +30,8 @@
+     raise RuntimeError("disabled task-bound draft: actual source admission and root review are pending")
+ import re
+ 
+-RUNS = Path("@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\runs")
++RUNS = Path("@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9")
+-ARTIFACTS = Path("@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch")
++ARTIFACTS = Path("@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-acceptance-20261128-v2\\.scratch")
+ PARTS = ("tmp", "profile", "appdata", "localappdata", "go-path")
+ SYSTEM_SID = "S-1-5-18"
+ ADMIN_SID = "S-1-5-32-544"
+
+--- references/launch_successor_product_helper_v1.ps1
++++ launch_namespace_diagnostic_original.ps1
+@@ -1,27 +1,27 @@
+ param([Parameter(Mandatory=$true)][ValidatePattern('^[0-9a-f]{64}$')][string]$PlanSHA)
+ $ErrorActionPreference = 'Stop'
+ $TaskRoot = '@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1'
+-$TaskPlanFile = $TaskRoot + '\inputs-successor33-v1\producer-candidate\successor-product-helper-inputs-v1-plan-v2.json'
++$TaskPlanFile = $TaskRoot + '\inputs-successor33-v1\namespace-admission-diagnostic-driver-v1\runtime-inputs.json'
+-$TaskRecord = $TaskRoot + '\inputs-successor33-v1\producer-candidate\successor-product-helper-inputs-v1-outer-original.json'
++$TaskRecord = $TaskRoot + '\inputs-successor33-v1\namespace-admission-diagnostic-driver-v1\namespace-diagnostic-outer-original.json'
+-$TaskRunner = $TaskRoot + '\inputs-error-dword-v4\run_owned_commands.py'
++$TaskRunner = $TaskRoot + '\inputs-successor33-v1\namespace-admission-diagnostic-driver-v1\run_namespace_diagnostic.py'
+ function Get-TaskSHA([string]$TaskPath) {
+     $TaskHasher = [Security.Cryptography.SHA256]::Create()
+     try { return [BitConverter]::ToString($TaskHasher.ComputeHash([IO.File]::ReadAllBytes($TaskPath))).Replace('-','').ToLowerInvariant() }
+     finally { $TaskHasher.Dispose() }
+ }
+ $TaskRequired = [ordered]@{
+-    $TaskRunner = '6d16652d4893273b7e9d584920892ce5f5917622e7e242a62eb78ec824bcfb93'
++    $TaskRunner = 'bc21860fc9258de002a5e038b805f71e05ba7df1cb3dff6bcb899c88f14e20ac'
+     ($TaskRoot + '\inputs-error-dword-v4\guard-custody.py') = 'e7c663f4ba2fd558005bc110173609cb19465ff33d3f4678aeb53b5ba00e0924'
+     ($TaskRoot + '\inputs-error-dword-v4\windows_job.py') = 'd94583001a33ef34adb67feec34b4f4b0bf3626df9f63da3c7a7c85bf3e0b552'
+     '@@RECOVERY_NATIVE_USER_PROFILE@@\AppData\Local\Python\pythoncore-3.15-64\python.exe' = 'd4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd'
+     $TaskPlanFile = $PlanSHA
+ }
+ foreach ($TaskPath in $TaskRequired.Keys) {
+-    if ((Get-TaskSHA $TaskPath) -cne $TaskRequired[$TaskPath]) { throw 'Pinned helper build input changed' }
++    if ((Get-TaskSHA $TaskPath) -cne $TaskRequired[$TaskPath]) { throw 'Pinned namespace diagnostic input changed' }
+ }
+ $TaskPlan = [IO.File]::ReadAllText($TaskPlanFile) | ConvertFrom-Json
+-if ($TaskPlan.output -cne ($TaskRoot + '\successor-product-helper-inputs-v1')) { throw 'Unexpected owned output' }
++if ($TaskPlan.output -cne ($TaskRoot + '\namespace-admission-diagnostic-run-v1')) { throw 'Unexpected owned output' }
+-if ([IO.File]::Exists($TaskRecord) -or [IO.Directory]::Exists($TaskPlan.output)) { throw 'Original helper build scope already has state' }
++if ([IO.File]::Exists($TaskRecord) -or [IO.Directory]::Exists($TaskPlan.output)) { throw 'Original namespace diagnostic scope already has state' }
+ $TaskStart = New-Object System.Diagnostics.ProcessStartInfo
+ $TaskStart.FileName = '@@RECOVERY_NATIVE_USER_PROFILE@@\AppData\Local\Python\pythoncore-3.15-64\python.exe'
+ $TaskStart.Arguments = '-I -S -B "' + $TaskRunner + '" "' + $TaskPlanFile + '" ' + $PlanSHA
+@@ -44,7 +44,7 @@
+ $TaskExitCode = $TaskOriginal.ExitCode
+ $TaskOriginal.Dispose()
+ $TaskFacts = [ordered]@{
+-    schema = 'successor-product-helper-original-parent-v1'
++    schema = 'namespace-diagnostic-original-parent-v1'
+     plan_sha256 = $PlanSHA
+     same_process_start_object = $true
+     original_pid = $TaskOriginalPID

@@ -1,0 +1,43 @@
+$ErrorActionPreference='Stop'
+$Root='@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\recovery-inputs-v1'
+$Base=$Root+'\source59f-closed-api-diagnostics-evidence-v1'
+$Out=$Root+'\source59f-closed-api-diagnostics-root-replay-v1'
+$Python='@@RECOVERY_NATIVE_USER_PROFILE@@\AppData\Local\Python\pythoncore-3.15-64\python.exe'
+function SHA([string]$p){$h=[Security.Cryptography.SHA256]::Create();try{[BitConverter]::ToString($h.ComputeHash([IO.File]::ReadAllBytes($p))).Replace('-','').ToLowerInvariant()}finally{$h.Dispose()}}
+function Require($ok,[string]$why){if(-not $ok){throw $why}}
+Require ((SHA $Python)-ceq'd4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd') 'Python pin'
+Require (-not(Test-Path -LiteralPath $Out)) 'fresh reconstruction'
+$Manifest=$Base+'\artifact-manifest.json'
+Require ((SHA $Manifest)-ceq'606fae7b90c1c18c37adff72aa73410e0c3668fb945ee21f44e196ce0aedeed6') 'manifest pin'
+$m=[IO.File]::ReadAllText($Manifest)|ConvertFrom-Json
+Require ($m.original_files-eq136 -and $m.UNKNOWN_payload_included-eq$false -and $m.full_or_CLI_qualification_claimed-eq$false) 'scope boundary'
+$seen=@{};$bytes=(Get-Item -LiteralPath $Manifest).Length
+foreach($row in $m.files){
+ Require ($row.path -and -not$row.path.Contains('..') -and -not$row.path.Contains(':') -and -not[IO.Path]::IsPathRooted($row.path)) 'plain relative path'
+ $p=$Base+'\'+$row.path;$i=Get-Item -LiteralPath $p -Force
+ Require (-not($i -is [IO.DirectoryInfo]) -and -not($i.Attributes-band[IO.FileAttributes]::ReparsePoint)) 'ordinary file'
+ Require ($i.Length-eq$row.bytes -and (SHA $p)-ceq$row.sha256) 'artifact byte match'
+ Require (-not$seen.ContainsKey($row.path)) 'unique artifact path'
+ $seen[$row.path]=$true;$bytes+=$i.Length
+}
+$files=@(Get-ChildItem -LiteralPath $Base -File -Force -Recurse)
+Require ($files.Count-eq96 -and @($m.files).Count-eq95) 'exact96artifact files'
+foreach($f in $files){$rel=$f.FullName.Substring($Base.Length+1).Replace('\','/');Require ($rel-ceq'artifact-manifest.json' -or $seen.ContainsKey($rel)) 'all files manifest bound'}
+$Renderer=$Base+'\reconstruct_sources.py'
+Require ((SHA $Renderer)-ceq'acee9433439e4b261bb148dd9df05cc2bec781cc2d55294dcf70feeada68466a') 'renderer pin'
+$Roles=$Root+'\source59f-closed-api-diagnostics-private-v1\roles.json'
+Require ((SHA $Roles)-ceq'ab49585b31f1e3fca7edb38edc7b57e64cf85c8401bea3ed3703f132d0ca50e0') 'roles pin'
+& $Python -I -S -B $Renderer --roles-json $Roles --output $Out
+Require ($LASTEXITCODE-eq0) 'DATA reconstruction succeeded'
+$Receipt=$Out+'\reconstruction-receipt.json'
+$r=[IO.File]::ReadAllText($Receipt)|ConvertFrom-Json
+Require ($r.status-ceq'EXACT_DATA_RECONSTRUCTED' -and @($r.files).Count-eq136 -and $r.sources_imported_or_executed-eq$false -and $r.qualification_inherited-eq$false) 'reconstruction scope'
+$originalBytes=0
+foreach($row in $r.files){$p=$Out+'\'+$row.path;Require ((SHA $p)-ceq$row.sha256 -and (Get-Item -LiteralPath $p).Length-eq$row.bytes) 'original bytes readback';$originalBytes+=$row.bytes}
+Require ($originalBytes-eq2293303) 'exact original byte count'
+$result=[ordered]@{schema='root-source59f-closed-api-diagnostics-data-v1';status='PASS';artifact_files=96;artifact_bytes=$bytes;original_files=136;original_bytes=$originalBytes;manifest_sha256=(SHA $Manifest);bindings_sha256=(SHA ($Base+'\source-bindings.json'));renderer_sha256=(SHA $Renderer);reconstruction_sha256=(SHA $Receipt);api_qualification='FAIL/CLOSED_PRECHILD';api_suite_started=$false;full_or_CLI_qualification_claimed=$false;UNKNOWN_payload_read=$false;native_or_test_execution=$false}
+$Target=$Root+'\source59f-closed-api-diagnostics-root-data-v1.json'
+Require (-not(Test-Path -LiteralPath $Target)) 'fresh root audit'
+[IO.File]::WriteAllText($Target,($result|ConvertTo-Json -Depth 6)+[char]10,[Text.UTF8Encoding]::new($false))
+$result|ConvertTo-Json -Depth 6
+[pscustomobject]@{root_receipt_sha256=(SHA $Target)}|ConvertTo-Json

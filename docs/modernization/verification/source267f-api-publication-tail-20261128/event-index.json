@@ -1,0 +1,815 @@
+{
+  "schema": "closed-native-stages29-31-and-commit12-13-push9-index-v1",
+  "events": [
+    {
+      "event": "stage-20261128-v29",
+      "status": "PASS",
+      "physical_classification": "CLOSED",
+      "original_receipt": {
+        "role": "events/stage-20261128-v29/receipt.json",
+        "bytes": 1121059,
+        "sha256": "22addce02465bd8aefc76a0c4e270309ae381be382a85c4b8b9b5130625c2555"
+      },
+      "config": {
+        "role": "events/stage-20261128-v29/config.json",
+        "bytes": 148102,
+        "sha256": "240624ac9e3dbee30722c037e45e029e982b5a39a31a5c5c8ad40be4a8214eb9"
+      },
+      "root": {
+        "role": "events/stage-20261128-v29/root-receiving.json",
+        "bytes": 242,
+        "sha256": "5bdf509c1df6b5b63c3a356882b32dfa911f24295b45af28f5eba4590d711472"
+      },
+      "outer": {
+        "role": "events/stage-20261128-v29/outer-original.json",
+        "bytes": 481,
+        "sha256": "6ab939f565e9a72bcb406d3e4cbdc6beedb150aadaea9a6c4afbdb44dad36284"
+      },
+      "independent_root_audit": {
+        "role": "events/stage-20261128-v29/independent-root-data-audit.json",
+        "bytes": 10806,
+        "sha256": "a9cb55416e545eff91f5df7a286a3d4b3ead855cd16e82829ce5a203d0076a98"
+      },
+      "expected_start_head": "264a0601b7d027652c12ec88ae4debd6c3bfb69f",
+      "controller_exit_code": 0,
+      "controller_seconds": 2.102071199915372,
+      "original_controls_verified": true,
+      "commands": [
+        {
+          "name": "head",
+          "exit_code": 0,
+          "seconds": 0.042082699947059155,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v29/captures/head.stdout.txt",
+            "bytes": 41,
+            "sha256": "f665546f0d1211b43018ecd17c352657643c26cfea06b729ca0ac3bfac68a795"
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v29/captures/head.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "retain-rejected-local-commit",
+          "exit_code": 0,
+          "seconds": 0.039821699960157275,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v29/captures/retain-rejected-local-commit.stdout.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v29/captures/retain-rejected-local-commit.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "rebuild-unpublished-history-from-public-parent",
+          "exit_code": 0,
+          "seconds": 0.42523549997713417,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v29/captures/rebuild-unpublished-history-from-public-parent.stdout.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v29/captures/rebuild-unpublished-history-from-public-parent.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "stage-corrected715-and-report",
+          "exit_code": 0,
+          "seconds": 0.2272811000002548,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v29/captures/stage-corrected715-and-report.stdout.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v29/captures/stage-corrected715-and-report.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "review-human-markdown-whitespace",
+          "exit_code": 0,
+          "seconds": 0.05411230004392564,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v29/captures/review-human-markdown-whitespace.stdout.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v29/captures/review-human-markdown-whitespace.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "exact716-staged-paths",
+          "exit_code": 0,
+          "seconds": 0.04478350002318621,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v29/captures/exact716-staged-paths.stdout.txt",
+            "bytes": 98173,
+            "sha256": "fd27ff615cb8fca6b2f8b645be09afd153a113d626ef37f83fea37aeb221c64a"
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v29/captures/exact716-staged-paths.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "corrected-index-tree",
+          "exit_code": 0,
+          "seconds": 0.08725929993670434,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v29/captures/corrected-index-tree.stdout.txt",
+            "bytes": 41,
+            "sha256": "178d398bb9f1433de8e4840f53797e7c29dcbd2b6abc9dbc23a3cd1e2d7b39d0"
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v29/captures/corrected-index-tree.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      ]
+    },
+    {
+      "event": "stage-20261128-v30",
+      "status": "PASS",
+      "physical_classification": "CLOSED",
+      "original_receipt": {
+        "role": "events/stage-20261128-v30/receipt.json",
+        "bytes": 17778,
+        "sha256": "f972663a310be80a899087080d48b20ec4ceb9a0306cfbb8fda8d4cf2b8a0adf"
+      },
+      "config": {
+        "role": "events/stage-20261128-v30/config.json",
+        "bytes": 3692,
+        "sha256": "f466c2027e5d538a6c6e3a76cdf206983f4e8aebec6b1942c49101a7732328ce"
+      },
+      "root": {
+        "role": "events/stage-20261128-v30/root-receiving.json",
+        "bytes": 243,
+        "sha256": "c06ceb24cf1953b9ab8567b81011aaecb01cc67808a32e8798441df23ccc4dad"
+      },
+      "outer": {
+        "role": "events/stage-20261128-v30/outer-original.json",
+        "bytes": 482,
+        "sha256": "8d242c89f8be4d57992d1594b70dbd4b7a26d64de8f664cf471718f7ebd54a49"
+      },
+      "independent_root_audit": {
+        "role": "events/stage-20261128-v30/independent-root-data-audit.json",
+        "bytes": 2797,
+        "sha256": "ecf4d61902b48e49e2a0b9b0035b5343b97a8c2c2ebd4cd0b94606fe6c7ae563"
+      },
+      "expected_start_head": "267f076500b982475b57be45e8a7d8a03edcc2a6",
+      "controller_exit_code": 0,
+      "controller_seconds": 2.0888200999470428,
+      "original_controls_verified": true,
+      "commands": [
+        {
+          "name": "head",
+          "exit_code": 0,
+          "seconds": 0.05207700002938509,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v30/captures/head.stdout.txt",
+            "bytes": 41,
+            "sha256": "d8bcae82382fb00452a889974cd74d7a29a6830e349fc38502d06dccd717956a"
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v30/captures/head.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "verify-exact-predicate-slice-composition",
+          "exit_code": 0,
+          "seconds": 1.0800439999438822,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v30/captures/verify-exact-predicate-slice-composition.stdout.txt",
+            "bytes": 280,
+            "sha256": "23e7b762494c32113a087ecfbba23ad09ac0d300293bd8c7506fb4b8d3ded6b2"
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v30/captures/verify-exact-predicate-slice-composition.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      ]
+    },
+    {
+      "event": "stage-20261128-v31",
+      "status": "PASS",
+      "physical_classification": "CLOSED",
+      "original_receipt": {
+        "role": "events/stage-20261128-v31/receipt.json",
+        "bytes": 1311086,
+        "sha256": "85a33bf56687ce589f8e1aa1c631ae68d55800435d901e83d4b6dabbddb8c58f"
+      },
+      "config": {
+        "role": "events/stage-20261128-v31/config.json",
+        "bytes": 125145,
+        "sha256": "9283946441e814d8f876431f9c414ed68af41972317782c756590980172b4a70"
+      },
+      "root": {
+        "role": "events/stage-20261128-v31/root-receiving.json",
+        "bytes": 242,
+        "sha256": "00ea80dbe24f9365c8c3460ec4c76f77107f2a90a7725786f8a3f2bfab327b72"
+      },
+      "outer": {
+        "role": "events/stage-20261128-v31/outer-original.json",
+        "bytes": 481,
+        "sha256": "209b67e3ff8727578b5a2846feffb67540b368c7c8197b4d18616eba8056f06d"
+      },
+      "independent_root_audit": {
+        "role": "events/stage-20261128-v31/independent-root-data-audit.json",
+        "bytes": 14911,
+        "sha256": "bbdecd6b4198399a49ea4269c34ffba93aeae0a9c90854bb04fcaa9bdf75bad0"
+      },
+      "expected_start_head": "e2c0785baad9620dcc3f8232dff452191b6cae4c",
+      "controller_exit_code": 0,
+      "controller_seconds": 79.28682789998129,
+      "original_controls_verified": true,
+      "commands": [
+        {
+          "name": "head",
+          "exit_code": 0,
+          "seconds": 0.09383689996320754,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v31/captures/head.stdout.txt",
+            "bytes": 41,
+            "sha256": "94a7b15c7566e6e079c655109af8e947f8a0bbdea1b1eea8331b05b24f6c4e1e"
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v31/captures/head.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "retain-clean-unpublished-checkpoint",
+          "exit_code": 0,
+          "seconds": 0.04005840001627803,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v31/captures/retain-clean-unpublished-checkpoint.stdout.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v31/captures/retain-clean-unpublished-checkpoint.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "fetch-exact-current-public-parent",
+          "exit_code": 0,
+          "seconds": 0.5100027000298724,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v31/captures/fetch-exact-current-public-parent.stdout.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v31/captures/fetch-exact-current-public-parent.stderr.txt",
+            "bytes": 130,
+            "sha256": "3635e87a05121281a08ce7ca96d008f717147e51d56cd2e4761ef609c411aff0"
+          }
+        },
+        {
+          "name": "verify-fetched-public-parent",
+          "exit_code": 0,
+          "seconds": 0.03615900001022965,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v31/captures/verify-fetched-public-parent.stdout.txt",
+            "bytes": 41,
+            "sha256": "df703b42e4c0c6b7f359b2ddfefc98bcf10f80e9bbcec21bfc6905223185760d"
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v31/captures/verify-fetched-public-parent.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "rebase-own-unpublished-checkpoint",
+          "exit_code": 0,
+          "seconds": 75.43402980000246,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v31/captures/rebase-own-unpublished-checkpoint.stdout.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v31/captures/rebase-own-unpublished-checkpoint.stderr.txt",
+            "bytes": 95,
+            "sha256": "1c1c72bda9c04a24e7621304e0dfcef603233ea2511a06fe58988629629d0f74"
+          }
+        },
+        {
+          "name": "rebased-checkpoint-identity",
+          "exit_code": 0,
+          "seconds": 0.05101559998001903,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v31/captures/rebased-checkpoint-identity.stdout.txt",
+            "bytes": 324,
+            "sha256": "eb3c4bef6ac14deccdf19ea4dc27651ccf20ac9047d27f2118c25fdc31cb33be"
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v31/captures/rebased-checkpoint-identity.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "preserved-public-report",
+          "exit_code": 0,
+          "seconds": 0.07037139998283237,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v31/captures/preserved-public-report.stdout.txt",
+            "bytes": 267922,
+            "sha256": "82c5236b4ed4d1d0313ec3529298aa80564a72fdbd618163bd3c8111ddded382"
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v31/captures/preserved-public-report.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "rebased-change-summary",
+          "exit_code": 0,
+          "seconds": 0.475414999993518,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v31/captures/rebased-change-summary.stdout.txt",
+            "bytes": 44543,
+            "sha256": "f5c1e1df40c0395589b1f8453a3a6794b7b137d4608657fee7258e34cf7029de"
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v31/captures/rebased-change-summary.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "rebased-status",
+          "exit_code": 0,
+          "seconds": 0.1139365000417456,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v31/captures/rebased-status.stdout.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v31/captures/rebased-status.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      ]
+    },
+    {
+      "event": "commit-20261128-v12",
+      "status": "PASS",
+      "physical_classification": "CLOSED",
+      "original_receipt": {
+        "role": "events/commit-20261128-v12/receipt.json",
+        "bytes": 985565,
+        "sha256": "47c934b2adb932b278ed1aff31fdf1c139b3d5ac0c258914d8d86d404e971cc4"
+      },
+      "config": {
+        "role": "events/commit-20261128-v12/config.json",
+        "bytes": 294962,
+        "sha256": "e9cfc3d37661cc211c8a1ec41658b766c4f98eae1af0fd30961ff8ca5f98cf39"
+      },
+      "root": {
+        "role": "events/commit-20261128-v12/root-receiving.json",
+        "bytes": 243,
+        "sha256": "eabb976b48a7583f687b2e6e057f5830b445e701c05421508be93eb2f5886b5a"
+      },
+      "outer": {
+        "role": "events/commit-20261128-v12/outer-original.json",
+        "bytes": 483,
+        "sha256": "ad3e083e22edd2f33c41ef3c4c52645ffa5119ba4b6f14322ae9acfc6bc77a06"
+      },
+      "independent_root_audit": {
+        "role": "events/commit-20261128-v12/independent-root-data-audit.json",
+        "bytes": 12663,
+        "sha256": "4ef328a8e4cc7e7acdb0ba363995bc6eb3a5ef34410aa311adc1c423087f5db8"
+      },
+      "expected_start_head": "27d90e626465dc9a3a012e50785d62785d4c5e7e",
+      "controller_exit_code": 0,
+      "controller_seconds": 2.0756786999991164,
+      "original_controls_verified": true,
+      "commands": [
+        {
+          "name": "head",
+          "exit_code": 0,
+          "seconds": 0.03921079996507615,
+          "command_success": true,
+          "stdout": {
+            "role": "events/commit-20261128-v12/captures/head.stdout.txt",
+            "bytes": 41,
+            "sha256": "73aa24f699b6c06ce27e215551c8b246f45f00183a079260aed1401b22a07bb0"
+          },
+          "stderr": {
+            "role": "events/commit-20261128-v12/captures/head.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "bind-reviewed-index-blobs",
+          "exit_code": 0,
+          "seconds": 0.03795259993057698,
+          "command_success": true,
+          "stdout": {
+            "role": "events/commit-20261128-v12/captures/bind-reviewed-index-blobs.stdout.txt",
+            "bytes": 133973,
+            "sha256": "8d349ac4caf93e85fffa313bcda642f7a14d89eb10a478ddf37bbf91530a7608"
+          },
+          "stderr": {
+            "role": "events/commit-20261128-v12/captures/bind-reviewed-index-blobs.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "commit-reviewed-complete-evidence",
+          "exit_code": 0,
+          "seconds": 0.32070819998625666,
+          "command_success": true,
+          "stdout": {
+            "role": "events/commit-20261128-v12/captures/commit-reviewed-complete-evidence.stdout.txt",
+            "bytes": 112588,
+            "sha256": "6f68d80c4c4145641feec58ec644e6e7072249694345d362322a3e53db1f918f"
+          },
+          "stderr": {
+            "role": "events/commit-20261128-v12/captures/commit-reviewed-complete-evidence.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "committed-head",
+          "exit_code": 0,
+          "seconds": 0.039235000032931566,
+          "command_success": true,
+          "stdout": {
+            "role": "events/commit-20261128-v12/captures/committed-head.stdout.txt",
+            "bytes": 41,
+            "sha256": "94a7b15c7566e6e079c655109af8e947f8a0bbdea1b1eea8331b05b24f6c4e1e"
+          },
+          "stderr": {
+            "role": "events/commit-20261128-v12/captures/committed-head.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "committed-exact-tree",
+          "exit_code": 0,
+          "seconds": 0.04579749994445592,
+          "command_success": true,
+          "stdout": {
+            "role": "events/commit-20261128-v12/captures/committed-exact-tree.stdout.txt",
+            "bytes": 41,
+            "sha256": "178d398bb9f1433de8e4840f53797e7c29dcbd2b6abc9dbc23a3cd1e2d7b39d0"
+          },
+          "stderr": {
+            "role": "events/commit-20261128-v12/captures/committed-exact-tree.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "committed-identity",
+          "exit_code": 0,
+          "seconds": 0.06654040003195405,
+          "command_success": true,
+          "stdout": {
+            "role": "events/commit-20261128-v12/captures/committed-identity.stdout.txt",
+            "bytes": 324,
+            "sha256": "45b195394d04db0e3dff99bd944c3da84b8e36f2202195ac6f43313d2229cf57"
+          },
+          "stderr": {
+            "role": "events/commit-20261128-v12/captures/committed-identity.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "post-commit-status",
+          "exit_code": 0,
+          "seconds": 0.05392019997816533,
+          "command_success": true,
+          "stdout": {
+            "role": "events/commit-20261128-v12/captures/post-commit-status.stdout.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "role": "events/commit-20261128-v12/captures/post-commit-status.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      ]
+    },
+    {
+      "event": "commit-20261128-v13",
+      "status": "PASS",
+      "physical_classification": "CLOSED",
+      "original_receipt": {
+        "role": "events/commit-20261128-v13/receipt.json",
+        "bytes": 5332902,
+        "sha256": "5b2e72e8c7b92b1727dd16341027e095ab651ff349f12d46de8219e9e67a1881"
+      },
+      "config": {
+        "role": "events/commit-20261128-v13/config.json",
+        "bytes": 424364,
+        "sha256": "d5a7fc4b7bf1eda363e35dc00c37e75508ee58420a63d4a5e575bcca1b40612d"
+      },
+      "root": {
+        "role": "events/commit-20261128-v13/root-receiving.json",
+        "bytes": 242,
+        "sha256": "3b721b86cef9e85a3124d3630c4a00406f51592a320ac4d34b35858f146e9673"
+      },
+      "outer": {
+        "role": "events/commit-20261128-v13/outer-original.json",
+        "bytes": 482,
+        "sha256": "f27d80cb69d365239c3106ec05d2fe09a81bfe330a3b4d0f09e277752a28ca17"
+      },
+      "independent_root_audit": {
+        "role": "events/commit-20261128-v13/independent-root-data-audit.json",
+        "bytes": 13083,
+        "sha256": "47b426367142434f9f7d983c9bd8ac3beedcd9b3ed9c7ca4fde06eb37f793f07"
+      },
+      "expected_start_head": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+      "controller_exit_code": 0,
+      "controller_seconds": 4.310606300015934,
+      "original_controls_verified": true,
+      "commands": [
+        {
+          "name": "head",
+          "exit_code": 0,
+          "seconds": 0.04464989993721247,
+          "command_success": true,
+          "stdout": {
+            "role": "events/commit-20261128-v13/captures/head.stdout.txt",
+            "bytes": 41,
+            "sha256": "fe69bf89766a772b8e2c0910d80842e23bd30ae77fd518c0ffa9240c0f12083d"
+          },
+          "stderr": {
+            "role": "events/commit-20261128-v13/captures/head.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "review-working-state",
+          "exit_code": 0,
+          "seconds": 0.07905539998319,
+          "command_success": true,
+          "stdout": {
+            "role": "events/commit-20261128-v13/captures/review-working-state.stdout.txt",
+            "bytes": 152,
+            "sha256": "70148fabee8af310590210047eec280cafb9f805020c7168b85a4c05e4513b1b"
+          },
+          "stderr": {
+            "role": "events/commit-20261128-v13/captures/review-working-state.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "require-empty-index",
+          "exit_code": 0,
+          "seconds": 0.04857749992515892,
+          "command_success": true,
+          "stdout": {
+            "role": "events/commit-20261128-v13/captures/require-empty-index.stdout.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "role": "events/commit-20261128-v13/captures/require-empty-index.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "review-three-file-whitespace",
+          "exit_code": 0,
+          "seconds": 0.0502072999952361,
+          "command_success": true,
+          "stdout": {
+            "role": "events/commit-20261128-v13/captures/review-three-file-whitespace.stdout.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "role": "events/commit-20261128-v13/captures/review-three-file-whitespace.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "commit-shared-foreign-image",
+          "exit_code": 0,
+          "seconds": 0.5068954000016674,
+          "command_success": true,
+          "stdout": {
+            "role": "events/commit-20261128-v13/captures/commit-shared-foreign-image.stdout.txt",
+            "bytes": 149,
+            "sha256": "417e341a16b3f4b4e6e1d60b22ea62e1abad6a32075ec164b75be650592d35a4"
+          },
+          "stderr": {
+            "role": "events/commit-20261128-v13/captures/commit-shared-foreign-image.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "shared-commit-identity",
+          "exit_code": 0,
+          "seconds": 0.05012299993541092,
+          "command_success": true,
+          "stdout": {
+            "role": "events/commit-20261128-v13/captures/shared-commit-identity.stdout.txt",
+            "bytes": 317,
+            "sha256": "dc47cd7de0e076f88645ce9694f0e9b0157a1c2804ad4278489936706b4d385e"
+          },
+          "stderr": {
+            "role": "events/commit-20261128-v13/captures/shared-commit-identity.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "commit-prespawn-barrier",
+          "exit_code": 0,
+          "seconds": 0.10234119999222457,
+          "command_success": true,
+          "stdout": {
+            "role": "events/commit-20261128-v13/captures/commit-prespawn-barrier.stdout.txt",
+            "bytes": 142,
+            "sha256": "ae630a656eb9ee5ded982d45a022e90fe4f6ac9a60efc55aedf598ecdb90645d"
+          },
+          "stderr": {
+            "role": "events/commit-20261128-v13/captures/commit-prespawn-barrier.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "final-source-identity",
+          "exit_code": 0,
+          "seconds": 0.05882429995108396,
+          "command_success": true,
+          "stdout": {
+            "role": "events/commit-20261128-v13/captures/final-source-identity.stdout.txt",
+            "bytes": 312,
+            "sha256": "5ed903cb121f72f412488ef36e4a9b1624ef61f2ed9e9537ee4a4844baf851ae"
+          },
+          "stderr": {
+            "role": "events/commit-20261128-v13/captures/final-source-identity.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "final-source-index",
+          "exit_code": 0,
+          "seconds": 0.05549019994214177,
+          "command_success": true,
+          "stdout": {
+            "role": "events/commit-20261128-v13/captures/final-source-index.stdout.txt",
+            "bytes": 321221,
+            "sha256": "d4249bff349de9ec7cd147c19e2d7041bb3532a5bb66c20593556d02dae4de12"
+          },
+          "stderr": {
+            "role": "events/commit-20261128-v13/captures/final-source-index.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "final-source-status",
+          "exit_code": 0,
+          "seconds": 0.05908939999062568,
+          "command_success": true,
+          "stdout": {
+            "role": "events/commit-20261128-v13/captures/final-source-status.stdout.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "role": "events/commit-20261128-v13/captures/final-source-status.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      ]
+    },
+    {
+      "event": "push-20261128-v9",
+      "status": "FAIL",
+      "physical_classification": "CLOSED",
+      "original_receipt": {
+        "role": "events/push-20261128-v9/receipt.json",
+        "bytes": 171558,
+        "sha256": "1b29db56ba8ad6f7ed83209fd690ad5cf7c434a7aa4c0850f1640cdc1b5e1628"
+      },
+      "config": {
+        "role": "events/push-20261128-v9/config.json",
+        "bytes": 123019,
+        "sha256": "556874f82eee45393a9e1cf4237dc8955c65e4c1481544e4b56b8646d7187f9b"
+      },
+      "root": {
+        "role": "events/push-20261128-v9/root-receiving.json",
+        "bytes": 243,
+        "sha256": "c796bbab651e7821969e44caf0abab70a964b05208241d58cefd9b0f2698b6a5"
+      },
+      "outer": {
+        "role": "events/push-20261128-v9/outer-original.json",
+        "bytes": 480,
+        "sha256": "8a9441c9ee36db90ddd559cb763efc07127c27ce4bf340754492650ed387f526"
+      },
+      "independent_root_audit": null,
+      "expected_start_head": "e2c0785baad9620dcc3f8232dff452191b6cae4c",
+      "controller_exit_code": 1,
+      "controller_seconds": 115.12838999996893,
+      "original_controls_verified": true,
+      "commands": [
+        {
+          "name": "head",
+          "exit_code": 0,
+          "seconds": 0.03574530000332743,
+          "command_success": true,
+          "stdout": {
+            "role": "events/push-20261128-v9/captures/head.stdout.txt",
+            "bytes": 41,
+            "sha256": "94a7b15c7566e6e079c655109af8e947f8a0bbdea1b1eea8331b05b24f6c4e1e"
+          },
+          "stderr": {
+            "role": "events/push-20261128-v9/captures/head.stderr.txt",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "name": "native-complete-acceptance-evidence-publication",
+          "exit_code": 1,
+          "seconds": 114.90489179990254,
+          "command_success": false,
+          "stdout": {
+            "role": "events/push-20261128-v9/captures/native-complete-acceptance-evidence-publication.stdout.txt",
+            "bytes": 1938,
+            "sha256": "ce40dede081bcd856cac5e463896ef82ff0fc50b1dc6f94b9ebd85e97852e4b3"
+          },
+          "stderr": {
+            "role": "events/push-20261128-v9/captures/native-complete-acceptance-evidence-publication.stderr.txt",
+            "bytes": 414,
+            "sha256": "503caa043dc0ad1d21977f17001ce5412b548617b6bb46db7225d0196e4a7fde"
+          }
+        }
+      ]
+    }
+  ],
+  "original_command_count": 37,
+  "command_capture_paths": 74,
+  "controller_capture_paths": 12,
+  "controller_streams_all_empty": true,
+  "new_execution_by_preservation_author": false,
+  "UNKNOWN_payload_read": false
+}

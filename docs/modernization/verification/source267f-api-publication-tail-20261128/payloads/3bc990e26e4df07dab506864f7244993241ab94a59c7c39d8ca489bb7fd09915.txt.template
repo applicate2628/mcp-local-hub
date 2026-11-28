@@ -1,0 +1,46 @@
+$ErrorActionPreference='Stop'
+$Top='@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\inputs-successor33-v1'
+$Driver=$Top+'\namespace-admission-diagnostic-driver-v2'
+$Run='@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\namespace-admission-diagnostic-run-v2'
+$Output=$Top+'\namespace-diagnostic-v2-root-data.json'
+function Need($ok,[string]$why){if(-not$ok){throw $why}}
+function SHA([string]$p){$h=[Security.Cryptography.SHA256]::Create();try{[BitConverter]::ToString($h.ComputeHash([IO.File]::ReadAllBytes($p))).Replace('-','').ToLowerInvariant()}finally{$h.Dispose()}}
+function Same($a,$b){return (($a|ConvertTo-Json -Depth 60 -Compress)-ceq($b|ConvertTo-Json -Depth 60 -Compress))}
+Need (-not(Test-Path -LiteralPath $Output)) 'fresh independent receiving'
+$CfgPath=$Driver+'\runtime-inputs.json';Need ((SHA $CfgPath)-ceq'80ec6a8bca0c0a7a8ff75ca5e1d9b8ddef1876289fb458b3cb3c7fa7e591ac2c') 'exact runtime config'
+$Cfg=[IO.File]::ReadAllText($CfgPath)|ConvertFrom-Json
+$OuterPath=$Driver+'\namespace-diagnostic-outer-original.json';$Outer=[IO.File]::ReadAllText($OuterPath)|ConvertFrom-Json
+Need ($Outer.schema-ceq'namespace-diagnostic-original-parent-v2' -and $Outer.plan_sha256-ceq(SHA $CfgPath) -and $Outer.exit_code-eq2 -and $Outer.same_process_start_object-eq$true -and $Outer.wait_returned-eq$true -and $Outer.original_process_object_disposed-eq$true -and $Outer.new_job_or_tree_wait-eq$false -and @($Outer.wait_errors).Count-eq0) 'original outer closure'
+$ReceiptPath=$Run+'\execution.json';$R=[IO.File]::ReadAllText($ReceiptPath)|ConvertFrom-Json
+Need ($R.schema-ceq'namespace-single-invocation-result-v1' -and $R.status-ceq'FAIL' -and $R.classification-ceq'FAIL/CLOSED' -and $R.physical_complete-eq$true -and $R.native_custody_settled-eq$true -and $R.commands_quiescent-eq$true -and $R.command_quiescence.complete-eq$true -and @($R.commands).Count-eq1 -and @($R.command_quiescence.commands).Count-eq1) 'original invocation closure'
+Need ($R.inputs_sha256-ceq(SHA $CfgPath) -and $R.source_commit-ceq$Cfg.source_commit -and $R.source_tree-ceq$Cfg.source_tree -and $R.outside_job-eq$true -and $R.full_api_inventory_qualified-eq$false -and $R.literal_repository_gate_passed-eq$false -and $R.namespace_suite_contract_passed-eq$false -and $R.api_tests_started-eq$true -and $R.terminal_kind-ceq'suite') 'exact diagnostic scope'
+$Command=$R.commands[0]
+Need ($Command.exit_code-eq2 -and $Command.quiescence_state-ceq'complete' -and $Command.captures_measured-eq$true -and $Command.original_pid-gt0 -and $Command.phases_elapsed_seconds.wait_returned-gt$Command.phases_elapsed_seconds.wait_entered -and $R.command_quiescence.commands[0].state-ceq'complete') 'original named command closure'
+$RequestPath=$Run+'\request.json';Need ((SHA $RequestPath)-ceq$R.request_sha256) 'original request bytes'
+$Q=[IO.File]::ReadAllText($RequestPath)|ConvertFrom-Json
+Need ($Q.nonce-ceq$R.request_nonce -and $Q.inputs_sha256-ceq(SHA $CfgPath) -and $Q.binary-ceq$Cfg.image -and $Q.binary_sha256-ceq$Cfg.origin_image.sha256 -and $Q.source_dir-ceq($Cfg.source_dir+'\internal\api') -and (Same $Q.args $Cfg.args) -and $Q.parent-ceq$Cfg.namespace_parent) 'request operands'
+$B=$R.namespace_request
+Need ($B.request_sha256-ceq(SHA $RequestPath) -and $B.request_nonce-ceq$Q.nonce -and $B.binary-ceq$Q.binary -and $B.expected_sha256-ceq$Q.binary_sha256 -and $B.source_dir-ceq$Q.source_dir -and $B.parent-ceq$Q.parent -and (Same $B.args $Q.args) -and $B.test_state_path_env-eq$false -and (Same $B.controller_argv $Command.argv) -and $Command.cwd-ceq$Q.source_dir) 'exact prebound owner'
+$ExpectedArgv=@($Cfg.helper.path,'--test-binary',$Cfg.image,'--expected-sha256',$Q.binary_sha256,'--source-dir',$Q.source_dir,'--repo',$Cfg.source_dir,'--go',$Cfg.tools.go.path,'--pwsh',$Cfg.tools.pwsh.path,'--parent',$Cfg.namespace_parent,'--test-timeout','5m','--request-sha256',$R.request_sha256,'--request-nonce',$R.request_nonce,'--')+@($Cfg.args)
+Need (Same $Command.argv $ExpectedArgv) 'literal original argv'
+$ProofPath=$Cfg.namespace_parent+'\namespace-suite-receipt.json';Need ((SHA $ProofPath)-ceq'096931575c367a1d388911f233ab560047172347a65c00f460305dcf215a792a') 'original namespace proof bytes'
+$P=[IO.File]::ReadAllText($ProofPath)|ConvertFrom-Json
+Need ($R.owner.kind-ceq'namespace' -and $R.owner.receipt-ceq$ProofPath -and $R.owner.sha256-ceq(SHA $ProofPath) -and (Same $P $R.owner.proof) -and (Same $P $Command.completion_receiving)) 'same original received proof'
+Need ($P.schema-ceq'api-namespace-full-suite-v2' -and $P.mode-ceq'incoming-go-image-copy' -and $P.binary-ceq$Q.binary -and $P.binary_sha256-ceq$Q.binary_sha256 -and $P.expected_sha256-ceq$Q.binary_sha256 -and $P.execution_sha256-ceq$Q.binary_sha256 -and $P.source_dir-ceq$Q.source_dir -and (Same $P.args $Q.args) -and @($P.compiled_tags).Count-eq0 -and $P.evidence_root-ceq($Cfg.namespace_parent+'\r') -and $P.execution_binary-ceq($Cfg.namespace_parent+'\r\bin\api.test.exe')) 'namespace image/source binding'
+foreach($Key in @('root_wait_known','settlement_complete','native_complete','io_complete','execution_binary_unchanged','binary_unchanged')){Need ($P.$Key-eq$true) ('namespace complete flag '+$Key)}
+Need ($P.custody_retained-eq$false -and $P.root_exit_code-eq2) 'namespace exit/retention'
+foreach($Key in @('RootWaitKnown','MembersExited','AccountingKnown','HandlesClosed')){Need ($P.native.$Key-eq$true) ('native closure '+$Key)}
+Need ($P.native.FinalActive-eq0 -and $P.native.RootExitCode-eq2 -and -not$P.native.Error -and $P.native.TerminalAction-ceq'not-requested' -and (Same $P.root $P.native.RootIdentity)) 'original native terminal'
+foreach($Key in @('Stdin','StdoutRead','StdoutWrite','StderrRead','StderrWrite')){$IO=$P.io.$Key;Need ($IO.Acquired-eq$true -and $IO.CloseAttempted-eq$true -and $IO.Closed-eq$true -and -not$IO.CloseError) ('native pipe '+$Key)}
+foreach($Key in @('Stdout','Stderr')){$IO=$P.io.$Key;Need ($IO.WorkerStarted-eq$true -and $IO.WorkerComplete-eq$true -and $IO.EOF-eq$true -and $IO.LimitExceeded-eq$false -and -not$IO.Error) ('native reader '+$Key)}
+$Measures=@()
+foreach($Side in @('stdout','stderr')){Need ($Command.$Side-ceq($Run+'\namespace-owner.'+$Side+'.txt')) 'outer capture role';Need ($P.($Side+'_path')-ceq($Cfg.namespace_parent+'\r\proof\tests.'+$Side+'.log')) 'inner capture role';foreach($Pair in @(@($Command.$Side,$Command.($Side+'_sha256')),@($P.($Side+'_path'),$P.($Side+'_sha256')))){Need ((SHA $Pair[0])-ceq$Pair[1]) 'closed capture SHA';$Measures+=[ordered]@{path=$Pair[0];bytes=(Get-Item -LiteralPath $Pair[0]).Length;sha256=$Pair[1]}};Need ((Get-Item -LiteralPath $P.($Side+'_path')).Length-eq$P.io.([Globalization.CultureInfo]::InvariantCulture.TextInfo.ToTitleCase($Side)).Bytes) 'native stored bytes'}
+Need ((SHA $Cfg.image)-ceq$Q.binary_sha256 -and (SHA $P.execution_binary)-ceq$Q.binary_sha256 -and $R.input_image_unchanged-eq$true) 'actual incoming/execution bytes'
+Need ((SHA $Cfg.source_map.path)-ceq$Cfg.source_map.sha256) 'Source map pin'
+$SourceMap=[IO.File]::ReadAllText($Cfg.source_map.path)|ConvertFrom-Json
+Need ($SourceMap.commit-ceq$Cfg.source_commit -and $SourceMap.tree-ceq$Cfg.source_tree -and @($SourceMap.files.PSObject.Properties).Count-eq3369) 'exact Source map'
+foreach($File in $SourceMap.files.PSObject.Properties){Need ((SHA ($Cfg.source_dir+'\'+$File.Name))-ceq$File.Value) ('actual Source unchanged: '+$File.Name)}
+Need ($R.source_before.all_matched-eq$true -and $R.source_after.all_matched-eq$true -and $R.source_before.count-eq3369 -and $R.source_after.count-eq3369 -and $R.source_before.source_map_sha256-ceq$Cfg.source_map.sha256 -and $R.source_after.source_map_sha256-ceq$Cfg.source_map.sha256) 'original source before/after observations'
+$Result=[ordered]@{schema='namespace-diagnostic-independent-root-data-v1';scope='namespace-admission-diagnostic-v2';status='PASS';data_verification='PASS';classification='FAIL/CLOSED';original_test_status='FAIL';original_test_exit_code=2;physical_complete=$true;commands_verified=1;captures_verified=4;diagnostic_capture_access=$true;source_files_verified=3369;source_commit=$Cfg.source_commit;source_tree=$Cfg.source_tree;cache_handoff_eligible=$true;cache_handoff_scope='closed diagnostic consumer only, not final CLI acceptance';literal_repository_gate_passed=$false;full_api_inventory_qualified=$false;config_sha256=(SHA $CfgPath);execution_sha256=(SHA $ReceiptPath);outer_sha256=(SHA $OuterPath);owner_proof_sha256=(SHA $ProofPath);request_sha256=(SHA $RequestPath);capture_measurements=$Measures;admission_marks=$P.admission_marks;mandatory_tests=$P.mandatory_tests;original_failure=$P.failure;reviewed_utc=[DateTime]::UtcNow.ToString('o')}
+[IO.File]::WriteAllText($Output,($Result|ConvertTo-Json -Depth 20)+[char]10,[Text.UTF8Encoding]::new($false))
+[ordered]@{data_verification='PASS';classification='FAIL/CLOSED';physical_complete=$true;captures=4;source_files=3369;cache_handoff_eligible=$true;root_data_sha256=(SHA $Output);owner_proof_sha256=$Result.owner_proof_sha256;execution_sha256=$Result.execution_sha256;outer_sha256=$Result.outer_sha256;admission_ready_ns=@($P.admission_marks|Where-Object {$_.stage-ceq'admission-ready'})[0].elapsed_ns;stdout_tail=@([IO.File]::ReadAllLines($P.stdout_path)|Select-Object -Last 14);stderr=[IO.File]::ReadAllText($P.stderr_path)}|ConvertTo-Json -Depth 8

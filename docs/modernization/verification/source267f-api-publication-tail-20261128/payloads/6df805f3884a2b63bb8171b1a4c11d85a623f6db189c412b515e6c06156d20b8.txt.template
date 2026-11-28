@@ -1,0 +1,31 @@
+$ErrorActionPreference='Stop'
+function Need($ok,[string]$why){if(-not$ok){throw $why}}
+function SHA([string]$p){$h=[Security.Cryptography.SHA256]::Create();try{[BitConverter]::ToString($h.ComputeHash([IO.File]::ReadAllBytes($p))).Replace('-','').ToLowerInvariant()}finally{$h.Dispose()}}
+$Rec='@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\recovery-inputs-v1'
+$Preflight=$Rec+'\replay-duplicates-preflight-v1.json'
+Need ((SHA $Preflight)-ceq'7d7df92a5cd7e5898c3eca400199884528f017a940e6b7efb2aedc610d15beaf') 'Exact original preflight'
+$Input=[IO.File]::ReadAllText($Preflight)|ConvertFrom-Json
+Need ($Input.source_file_count-eq972 -and $Input.source_bytes-eq141722570 -and $Input.moves_performed-eq$false) 'Preflight scope'
+$Moves=@()
+foreach($Group in $Input.candidates){
+ Need (-not(Test-Path -LiteralPath $Group.source)) 'Original duplicate directory still exists'
+ $Root=$Group.proposed_destination
+ Need ($Root.StartsWith('@@RECOVERY_REPLAY_TRASH_BASE@@\mcp-acceptance-e2c0785b-replay-duplicates-20261128\')) 'Exact trash area'
+ $All=@(Get-ChildItem -LiteralPath $Root -Recurse -Force)
+ Need (@($All|Where-Object{($_.Attributes-band[IO.FileAttributes]::ReparsePoint)-ne0}).Count-eq0) 'Trash reparse entry'
+ $Files=@($All|Where-Object{-not$_.PSIsContainer})
+ Need ($Files.Count-eq$Group.file_count) 'Moved file count'
+ foreach($File in $Group.files){
+  $Path=Join-Path $Root $File.path
+  Need ((Get-Item -LiteralPath $Path).Length-eq$File.bytes -and (SHA $Path)-ceq$File.sha256) 'Moved exact bytes'
+ }
+ $Moves+=[pscustomobject]@{source=$Group.source;destination=$Root;source_absent=$true;file_count=$Group.file_count;bytes=$Group.bytes;all_bytes_verified=$true}
+}
+foreach($Copy in $Input.preserved_receipts){Need ((Get-Item -LiteralPath $Copy.retained_copy).Length-eq$Copy.bytes -and (SHA $Copy.retained_copy)-ceq$Copy.sha256) 'Unique retained receipt'}
+$Result=[ordered]@{schema='closed-replay-duplicate-trash-receipt-v1';status='MOVED_AND_VERIFIED';observed_at_utc=[DateTime]::UtcNow.ToString('o');preflight_sha256=(SHA $Preflight);moves=$Moves;total_files=972;total_bytes=141722570;unique_receipts_preserved=6;preserved_receipts=$Input.preserved_receipts;purpose_built_move_tool_used=$true;trash='@@RECOVERY_REPLAY_TRASH_BASE@@\mcp-acceptance-e2c0785b-replay-duplicates-20261128';native_or_test_execution=$false;permanent_deletion_performed=$false;trash_emptied=$false;UNKNOWN_source_or_cache_touched=$false;remote_publication_proven=$false;local_capsule_counterparts_verified_by_preflight=$true;note='Only unused reconstructed duplicates moved; original closed evidence, public capsule candidates and six unique reconstruction receipts remain outside trash.'}
+$Out=$Rec+'\replay-duplicates-trash-receipt-v1.json'
+Need (-not(Test-Path -LiteralPath $Out)) 'Fresh receipt output'
+$Raw=[Text.UTF8Encoding]::new($false).GetBytes(($Result|ConvertTo-Json -Depth 10)+[char]10)
+$Stream=[IO.File]::Open($Out,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+try{$Stream.Write($Raw,0,$Raw.Length);$Stream.Flush($true)}finally{$Stream.Dispose()}
+[ordered]@{status=$Result.status;files=972;bytes=141722570;preserved_unique_receipts=6;receipt=$Out;sha256=(SHA $Out)}|ConvertTo-Json

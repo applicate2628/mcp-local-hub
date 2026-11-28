@@ -1,0 +1,138 @@
+{
+    "schema":  "focused-cli-original-root-data-audit-v1",
+    "status":  "PASS",
+    "physical_complete":  true,
+    "scope":  "cache-acceptance-stage-20261128-v24",
+    "config_sha256":  "26aa3574a15f33ff8965c2d2b73541beae0feef60207826206b182b9e0d0ad75",
+    "receipt_sha256":  "2555fbc338249c157f9326aafa22dd8a5b31a17c06baff72ce0182a1dcd5ae46",
+    "root_sha256":  "c5137facc30c403ffd940ab5467f9521fb1b4e0c32a870ddd9dee638263fee7f",
+    "outer_sha256":  "aa6a0b9f8aaba5e0f07f0b4d7db6a0d0fbba95f15eabb1ad8c481a987180a539",
+    "commands_verified":  5,
+    "captures_verified":  10,
+    "results":  [
+                    {
+                        "name":  "head.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rev-parse",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.03401030006352812,
+                        "exit_code":  0,
+                        "stdout_sha256":  "fe69bf89766a772b8e2c0910d80842e23bd30ae77fd518c0ffa9240c0f12083d",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8\n"
+                    },
+                    {
+                        "name":  "copy-closed-product-caches-for-baseline.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+                                     "-I",
+                                     "-S",
+                                     "-B",
+                                     "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\cli-focused59f-baseline-v2-inputs\\copy_closed_product_caches.py",
+                                     "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\cli-focused59f-baseline-v2",
+                                     "bbc353fe6ac620ddf190ba9712d0048a6a60bbc0e1d59bb4644fdcee4d521daf"
+                                 ],
+                        "seconds":  167.4893217999488,
+                        "exit_code":  0,
+                        "stdout_sha256":  "5aafc7a0388e03c59b0e926d287311aba3af8a75c06c9044939dd286b7ba1ff8",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "{\"status\": \"COPIED\", \"caches\": {\"GOCACHE\": {\"source\": \"@@RECOVERY_APPROVED_WORK_AREA_JSON2@@\\\\mcp-acceptance-rebuild-20261127-v1\\\\successor-product-only-inputs-v2\\\\private\\\\go-build\", \"destination\": \"@@RECOVERY_APPROVED_WORK_AREA_JSON2@@\\\\mcp-acceptance-rebuild-20261127-v1\\\\cli-focused59f-baseline-v2\\\\private\\\\go-build\", \"files\": 7628, \"bytes\": 1414063554}, \"GOMODCACHE\": {\"source\": \"@@RECOVERY_APPROVED_WORK_AREA_JSON2@@\\\\mcp-acceptance-rebuild-20261127-v1\\\\successor-product-only-inputs-v2\\\\private\\\\go-mod\", \"destination\": \"@@RECOVERY_APPROVED_WORK_AREA_JSON2@@\\\\mcp-acceptance-rebuild-20261127-v1\\\\cli-focused59f-baseline-v2\\\\private\\\\go-mod\", \"files\": 3778, \"bytes\": 105167881}}, \"inventory_sha256\": \"c73c248601c33e2126c4586389405d559500c247a43660f2523e984b59a86aac\"}\r\n"
+                    },
+                    {
+                        "name":  "focused-cli-identity-default.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe",
+                                     "test",
+                                     "-v",
+                                     "-count=1",
+                                     "-timeout",
+                                     "5m",
+                                     "-run",
+                                     "^(TestPidMatchesMcphub_(CurrentProcess|RejectsForeignPathSameBasename)|TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID)$",
+                                     "./internal/cli/"
+                                 ],
+                        "seconds":  193.593260499998,
+                        "exit_code":  0,
+                        "stdout_sha256":  "5bbe498786e6f9b604379ad8cc4a0ebd289e403bd02a3eb24716d43f7ef3f0e2",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "=== RUN   TestPidMatchesMcphub_CurrentProcess\n--- PASS: TestPidMatchesMcphub_CurrentProcess (0.00s)\n=== RUN   TestPidMatchesMcphub_RejectsForeignPathSameBasename\n--- PASS: TestPidMatchesMcphub_RejectsForeignPathSameBasename (4.59s)\n=== RUN   TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID\n--- PASS: TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID (2.99s)\nPASS\nok  \tmcp-local-hub/internal/cli\t7.784s\n"
+                    },
+                    {
+                        "name":  "focused-cli-identity-test-state-path-env.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe",
+                                     "test",
+                                     "-tags=test_state_path_env",
+                                     "-v",
+                                     "-count=1",
+                                     "-timeout",
+                                     "5m",
+                                     "-run",
+                                     "^(TestPidMatchesMcphub_(CurrentProcess|RejectsForeignPathSameBasename)|TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID)$",
+                                     "./internal/cli/"
+                                 ],
+                        "seconds":  123.30344160005916,
+                        "exit_code":  0,
+                        "stdout_sha256":  "0fa5d572a9566a3afefdff40a1aae8f0e802c71c651d8cb9263e09aad19d197c",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "=== RUN   TestPidMatchesMcphub_CurrentProcess\n--- PASS: TestPidMatchesMcphub_CurrentProcess (0.00s)\n=== RUN   TestPidMatchesMcphub_RejectsForeignPathSameBasename\n--- PASS: TestPidMatchesMcphub_RejectsForeignPathSameBasename (8.39s)\n=== RUN   TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID\n--- PASS: TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID (8.75s)\nPASS\nok  \tmcp-local-hub/internal/cli\t17.744s\n"
+                    },
+                    {
+                        "name":  "isolated-source-still-clean.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "status",
+                                     "--porcelain=v1",
+                                     "--untracked-files=all"
+                                 ],
+                        "seconds":  0.13677899993490428,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    }
+                ],
+    "tests_executed":  true,
+    "selected_test_observations":  [
+                                       {
+                                           "mode":  "default",
+                                           "name":  "TestPidMatchesMcphub_CurrentProcess",
+                                           "seconds":  0,
+                                           "status":  "PASS"
+                                       },
+                                       {
+                                           "mode":  "default",
+                                           "name":  "TestPidMatchesMcphub_RejectsForeignPathSameBasename",
+                                           "seconds":  4.59,
+                                           "status":  "PASS"
+                                       },
+                                       {
+                                           "mode":  "default",
+                                           "name":  "TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID",
+                                           "seconds":  2.99,
+                                           "status":  "PASS"
+                                       },
+                                       {
+                                           "mode":  "test-state-path-env",
+                                           "name":  "TestPidMatchesMcphub_CurrentProcess",
+                                           "seconds":  0,
+                                           "status":  "PASS"
+                                       },
+                                       {
+                                           "mode":  "test-state-path-env",
+                                           "name":  "TestPidMatchesMcphub_RejectsForeignPathSameBasename",
+                                           "seconds":  8.39,
+                                           "status":  "PASS"
+                                       },
+                                       {
+                                           "mode":  "test-state-path-env",
+                                           "name":  "TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID",
+                                           "seconds":  8.75,
+                                           "status":  "PASS"
+                                       }
+                                   ],
+    "source_input_count":  3369,
+    "reviewed_utc":  "2026-11-28T16:26:30.8686416Z"
+}

@@ -1,0 +1,16 @@
+{
+  "schema": "closed-tail-disclosure-review-v1",
+  "actual_host_values_embedded": false,
+  "explicit_role_count": 14,
+  "role_values_in_public_capsule": false,
+  "encoded_or_hidden_role_defaults": false,
+  "unhandled_machine_path_pattern_findings": 0,
+  "secret_token_format_findings": 0,
+  "native_ephemeral_process_and_handle_numbers_preserved": true,
+  "synthetic_fixture_roles": [
+    "synthetic_fixture_cursor_root",
+    "synthetic_fixture_profile_root"
+  ],
+  "synthetic_fixture_value_source": "Reused explicit preservation roles from the historical complete-capture package; values are supplied by the operator, not embedded here.",
+  "canonical_scanner_or_publication_PASS_claimed_for_this_capsule": false
+}

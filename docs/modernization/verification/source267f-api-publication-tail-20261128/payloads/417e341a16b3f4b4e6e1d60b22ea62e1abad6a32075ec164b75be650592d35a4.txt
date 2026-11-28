@@ -1,0 +1,2 @@
+[work/cli-fixture-reuse-20261128-v1 3c412291] test(cli): reuse the foreign process fixture image
+ 2 files changed, 60 insertions(+), 24 deletions(-)

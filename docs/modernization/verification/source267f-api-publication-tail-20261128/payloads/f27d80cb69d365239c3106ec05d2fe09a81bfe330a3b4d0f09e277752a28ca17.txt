@@ -1,0 +1,14 @@
+{
+    "mode":  "cache-acceptance-commit-20261128-v13.json",
+    "config_sha256":  "d5a7fc4b7bf1eda363e35dc00c37e75508ee58420a63d4a5e575bcca1b40612d",
+    "expected_start_head":  "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+    "same_process_start_object":  true,
+    "original_pid":  90476,
+    "exit_code":  0,
+    "wait_returned":  true,
+    "original_process_object_disposed":  true,
+    "new_job_or_tree_wait":  false,
+    "wait_errors":  [
+
+                    ]
+}

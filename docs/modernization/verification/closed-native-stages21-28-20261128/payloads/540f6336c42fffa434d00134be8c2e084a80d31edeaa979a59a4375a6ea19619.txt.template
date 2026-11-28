@@ -1,0 +1,74 @@
+param([Parameter(Mandatory=$true)][string]$Stem,[Parameter(Mandatory=$true)][int]$ExpectedCount,[Parameter(Mandatory=$true)][string]$ExpectedConfigSHA)
+$ErrorActionPreference='Stop'
+$Route='@@RECOVERY_APPROVED_WORK_AREA@@\functional-route-20261126'
+function SHA([string]$Path){$h=[Security.Cryptography.SHA256]::Create();try{[BitConverter]::ToString($h.ComputeHash([IO.File]::ReadAllBytes($Path))).Replace('-','').ToLowerInvariant()}finally{$h.Dispose()}}
+function Require($Value,[string]$Message){if(-not $Value){throw $Message}}
+Require ($Stem-match'^cache-acceptance-(stage|commit|push)-20261128-v[0-9]+$') 'scope name'
+$Out=$Route+'\runs\'+$Stem
+$ConfigPath=$Route+'\'+$Stem+'.json'
+$ReceiptPath=$Out+'\receipt.json'
+$RootPath=$Out+'\root-receiving.json'
+$OuterPath=$Route+'\'+$Stem+'-outer-original.json'
+Require ((SHA $ConfigPath)-ceq$ExpectedConfigSHA) 'config hash'
+$r=[IO.File]::ReadAllText($ReceiptPath)|ConvertFrom-Json
+$c=[IO.File]::ReadAllText($ConfigPath)|ConvertFrom-Json
+$root=[IO.File]::ReadAllText($RootPath)|ConvertFrom-Json
+$outer=[IO.File]::ReadAllText($OuterPath)|ConvertFrom-Json
+Require ($root.controller_exit_code-eq0 -and $root.original_controller_reaped-eq$true -and $root.controller_capture_handles_closed-eq$true -and $root.receipt_sha256-ceq(SHA $ReceiptPath)) 'original root receipt'
+Require ($outer.same_process_start_object-eq$true -and $outer.exit_code-eq0 -and $outer.wait_returned-eq$true -and $outer.original_process_object_disposed-eq$true -and $outer.new_job_or_tree_wait-eq$false -and @($outer.wait_errors).Count-eq0 -and $outer.config_sha256-ceq$ExpectedConfigSHA) 'original outer'
+Require ($r.status-ceq'PASS' -and $r.config_sha256-ceq$ExpectedConfigSHA -and @($r.commands).Count-eq$ExpectedCount -and @($r.steps_received).Count-eq@($c.steps).Count) 'full receipt'
+$results=@()
+foreach($row in $r.commands){
+ Require ($row.command_success-eq$true -and $row.exit_code-eq0 -and $row.quiescence_state-eq'complete' -and $row.timed_out-eq$false -and $row.work_deadline_exceeded-eq$false -and $row.cleanup_deadline_exceeded-eq$false) 'command status'
+ Require ($row.native.direct_exit_code-eq0 -and $row.native.direct_reaped-eq$true -and $row.native.active_zero-eq$true -and $row.native.handles_closed-eq$true -and $row.native.job_terminated-eq$false -and @($row.native.issues).Count-eq0) 'native closure'
+ Require ($row.original_readers_joined-eq$true -and $row.completion_receiving.lifecycle_state-ceq'CLOSED' -and @($row.worker_join_observations).Count-eq2) 'original readers'
+ foreach($join in $row.worker_join_observations){Require ($join.joined-eq$true -and $join.alive_after-eq$false -and $join.join_error_count-eq0) 'worker join'}
+ foreach($stream in @('stdout','stderr')){
+  $io=$row.io.$stream
+  Require ($io.acquired-eq$true -and $io.worker_complete-eq$true -and $io.eof-eq$true -and $io.pipe_close_returned-eq$true -and $io.capture_close_returned-eq$true -and -not $io.error -and $io.limit_exceeded-eq$false) 'IO closure'
+  Require ((SHA $row.$stream)-ceq$row.($stream+'_sha256') -and ([IO.FileInfo]$row.$stream).Length-eq$io.bytes_stored) 'actual capture bytes'
+ }
+ $output=[IO.File]::ReadAllText($row.stdout)
+ $results+=[pscustomobject]@{name=[IO.Path]::GetFileName($row.stdout);argv=$row.argv;seconds=$row.seconds;exit_code=$row.exit_code;stdout_sha256=$row.stdout_sha256;stderr_sha256=$row.stderr_sha256;stdout_preview=$output.Substring(0,[Math]::Min(2500,$output.Length))}
+}
+
+Require ($Stem-ceq'cache-acceptance-stage-20261128-v28' -and $ExpectedCount-eq10) 'exact focused scope'
+$Names=@('TestPidMatchesMcphub_CurrentProcess','TestPidMatchesMcphub_RejectsForeignPathSameBasename','TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID','TestPreSpawnBinaryGate_MissingBinaryNeverBurnsBudget','TestPreSpawnBinaryGate_AutoRecoversWhenBinaryAppears','TestPreSpawnBinaryGate_EmitsActionableOperatorMessage','TestPreSpawnBinaryGate_MissingWorkspaceHolds','TestPreSpawnBinaryGate_PresentBinarySpawns','TestPreSpawnBinaryGate_EmptyCommandSpawns')
+$SelectedRows=@()
+foreach($Mode in @('default','tagged')){
+ $Row=@($results|Where-Object {$_.name-ceq('focused-fixtures-'+$Mode+'.stdout.txt')})
+ Require ($Row.Count-eq1) 'one focused mode'
+ $Body=[IO.File]::ReadAllText($Out+'\focused-fixtures-'+$Mode+'.stdout.txt')
+ Require ($Body-match'(?m)^PASS\r?$' -and $Body-notmatch'(?m)^(FAIL|--- FAIL:|--- SKIP:|panic:)') 'focused package passed without skip'
+ foreach($Name in $Names){
+  $Pattern='(?m)^--- PASS: '+[Regex]::Escape($Name)+' \(([0-9.]+)s\)\r?$'
+  $MatchesHere=[Regex]::Matches($Body,$Pattern)
+  Require ($MatchesHere.Count-eq1) 'exact selected PASS once'
+  $SelectedRows+=[pscustomobject]@{mode=$Mode;name=$Name;seconds=[double]::Parse($MatchesHere[0].Groups[1].Value,[Globalization.CultureInfo]::InvariantCulture);status='PASS'}
+ }
+ Require ([Regex]::Matches($Body,'(?m)^=== RUN   ').Count-eq9) 'exact nine selected roots'
+}
+Require ($SelectedRows.Count-eq18) 'eighteen root observations'
+$SourceMapPath='@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\inputs-successor33-v1\source-binding\source59f-input-sha256.json'
+Require ((SHA $SourceMapPath)-ceq'e8c3fc2f577a130f92ba4eee7f8eee7153afc032dee909557cf1156890917c06') 'Source binding pin'
+$Map=[IO.File]::ReadAllText($SourceMapPath)|ConvertFrom-Json
+$Source='@@RECOVERY_APPROVED_WORK_AREA@@\pub666-cli-fixtures-20261128'
+$SourceCount=0
+$ExpectedEdits=@{
+ 'internal/cli/process_identity_match_windows_test.go'='e97fd7cc9cc9d9dfe09643c8e03334bd6f7f3e663b07a7f0fe711f0ef974708f'
+ 'internal/cli/settings_registry_test.go'='40de5fd188c8c94ec67e4fd852d89b0122aee602c3dde91fd8f8ceb2e4c7854a'
+ 'internal/cli/supervise_prespawn_binary_gate_test.go'='5e3a6517a9fed3a329cea60d12915965720b37c2bb6a865880d3c0c05ed48feb'
+}
+foreach($p in $Map.files.PSObject.Properties){$Wanted=if($ExpectedEdits.ContainsKey($p.Name)){$ExpectedEdits[$p.Name]}else{$p.Value};Require ((SHA ($Source+'\'+$p.Name))-ceq$Wanted) 'Source after exact three reviewed edits';$SourceCount++}
+Require ($SourceCount-eq3369) 'Source input count'
+$Changed=[IO.File]::ReadAllLines($Out+'\changed-test-files.stdout.txt')
+Require ($Changed.Count-eq3) 'only three changed test files'
+foreach($Line in $Changed){$Fields=$Line-split "\t";Require ($Fields.Count-eq3 -and $ExpectedEdits.ContainsKey($Fields[2])) 'exact changed paths'}
+
+
+$result=[ordered]@{schema='focused-cli-original-root-data-audit-v1';status='PASS';physical_complete=$true;scope=$Stem;config_sha256=$ExpectedConfigSHA;receipt_sha256=(SHA $ReceiptPath);root_sha256=(SHA $RootPath);outer_sha256=(SHA $OuterPath);commands_verified=$ExpectedCount;captures_verified=2*$ExpectedCount;results=$results;tests_executed=$true;selected_test_observations=$SelectedRows;source_input_count=$SourceCount;expected_test_only_edits=$ExpectedEdits;production_edits=0;full_cli_qualification_claimed=$false;ordinary_go_test_layout=$true;reviewed_utc=[DateTime]::UtcNow.ToString('o')}
+$Target=$Out+'\independent-root-data-audit.json'
+Require (-not [IO.File]::Exists($Target)) 'fresh audit file'
+[IO.File]::WriteAllText($Target,($result|ConvertTo-Json -Depth 12)+[char]10,[Text.UTF8Encoding]::new($false))
+$result|ConvertTo-Json -Depth 12
+[pscustomobject]@{audit_sha256=(SHA $Target)}|ConvertTo-Json

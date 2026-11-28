@@ -23,7 +23,7 @@
       "original_sha256": "8e38f2cfd816c86be0d440d56aeaf27b6ee42d0a61b9ab6c20e0386fcca53a6c"
     },
     "last_afterimage": {
-      "artifact": "sources/source/wait-fix/afterimages/internal/cli/supervisor_spawn_breakaway_windows_test.go",
+      "artifact": "sources/source/wait-fix/afterimages/internal/cli/supervisor_spawn_breakaway_windows_test.go.txt",
       "original_bytes": 7527,
       "original_sha256": "d42abb3c6fef077397949e80fa74eebc264fa2e3e112a9830236fc196e02e95b"
     },
@@ -122,7 +122,7 @@
     "status": "PASS",
     "seconds": 5.578471900080331,
     "source": {
-      "artifact": "sources/inputs/foreground/main_windows_test.go",
+      "artifact": "sources/inputs/foreground/main_windows_test.go.txt",
       "original_bytes": 2772,
       "original_sha256": "9712a445ce383ce89ec3a6051d7eb11dee5cf29a08ba93854d0c85fa8c142a0b"
     },
@@ -219,7 +219,7 @@
     "unique_capture_payloads": 9,
     "templates": 74,
     "exact": 59,
-    "source_bindings_sha256": "f6291141e747d821f22f174a0b4db38e808fb6bd9b8ed53eabee7f87f5e56090",
+    "source_bindings_sha256": "10d3bf78697f030801188f08600ecb9c076e5053ca6788c09c5316a63ff70849",
     "transparent_role_substitution_only": true,
     "original_role_values_included": false,
     "original_file_size_and_sha256_checked": true,

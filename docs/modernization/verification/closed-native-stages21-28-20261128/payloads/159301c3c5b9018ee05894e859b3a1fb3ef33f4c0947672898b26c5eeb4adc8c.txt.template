@@ -1,0 +1,282 @@
+{
+    "schema":  "focused-cli-original-root-data-audit-v1",
+    "status":  "PASS",
+    "physical_complete":  true,
+    "scope":  "cache-acceptance-stage-20261128-v28",
+    "config_sha256":  "372a23a3c23a57bb16a734527d0f82abef84a9893b3c7396594836e938809081",
+    "receipt_sha256":  "766ba5e9662eb1fa51314537ca0bd5cd4c209997c33f228b5037eb8fed8d567c",
+    "root_sha256":  "9b58debadb83e344f498feeaf3464cd54f8e08ebc2906e01cf4235ea31a10684",
+    "outer_sha256":  "9a54f09d9bc3d74a5c4ba84052709b0aadec9c89f0cf827782a0d84f4a2bfc10",
+    "commands_verified":  10,
+    "captures_verified":  20,
+    "results":  [
+                    {
+                        "name":  "head.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rev-parse",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.03855429997202009,
+                        "exit_code":  0,
+                        "stdout_sha256":  "fe69bf89766a772b8e2c0910d80842e23bd30ae77fd518c0ffa9240c0f12083d",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8\n"
+                    },
+                    {
+                        "name":  "check-shared-image-patch.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "apply",
+                                     "--check",
+                                     "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\cli-shared-image-candidate-v1\\share-foreign-test-image.patch"
+                                 ],
+                        "seconds":  0.03844060003757477,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "check-prespawn-barrier-patch.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "apply",
+                                     "--check",
+                                     "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\cli-prespawn-barrier-candidate-v1\\prespawn-barrier.patch"
+                                 ],
+                        "seconds":  0.03690790000837296,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "apply-shared-image-patch.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "apply",
+                                     "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\cli-shared-image-candidate-v1\\share-foreign-test-image.patch"
+                                 ],
+                        "seconds":  0.04479750001337379,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "apply-prespawn-barrier-patch.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "apply",
+                                     "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\cli-prespawn-barrier-candidate-v1\\prespawn-barrier.patch"
+                                 ],
+                        "seconds":  0.041626400081440806,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "format-three-test-files.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\gofmt.exe",
+                                     "-w",
+                                     "internal/cli/process_identity_match_windows_test.go",
+                                     "internal/cli/settings_registry_test.go",
+                                     "internal/cli/supervise_prespawn_binary_gate_test.go"
+                                 ],
+                        "seconds":  0.13900640001520514,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "check-three-test-file-diff.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "diff",
+                                     "--check"
+                                 ],
+                        "seconds":  0.10019279993139207,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "focused-fixtures-default.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe",
+                                     "test",
+                                     "-v",
+                                     "-count=1",
+                                     "-timeout",
+                                     "5m",
+                                     "-run",
+                                     "^(TestPidMatchesMcphub_(CurrentProcess|RejectsForeignPathSameBasename)|TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID|TestPreSpawnBinaryGate_(MissingBinaryNeverBurnsBudget|AutoRecoversWhenBinaryAppears|EmitsActionableOperatorMessage|MissingWorkspaceHolds|PresentBinarySpawns|EmptyCommandSpawns))$",
+                                     "./internal/cli/"
+                                 ],
+                        "seconds":  72.8688110000221,
+                        "exit_code":  0,
+                        "stdout_sha256":  "74b32ce578b514a5bd27ac8ae67d4ddc1dd069a40e3d34a6667c2b3c2e748dc7",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "=== RUN   TestPidMatchesMcphub_CurrentProcess\n--- PASS: TestPidMatchesMcphub_CurrentProcess (0.00s)\n=== RUN   TestPidMatchesMcphub_RejectsForeignPathSameBasename\n--- PASS: TestPidMatchesMcphub_RejectsForeignPathSameBasename (6.59s)\n=== RUN   TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID\n--- PASS: TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID (0.30s)\n=== RUN   TestPreSpawnBinaryGate_MissingBinaryNeverBurnsBudget\n--- PASS: TestPreSpawnBinaryGate_MissingBinaryNeverBurnsBudget (0.77s)\n=== RUN   TestPreSpawnBinaryGate_AutoRecoversWhenBinaryAppears\n--- PASS: TestPreSpawnBinaryGate_AutoRecoversWhenBinaryAppears (0.04s)\n=== RUN   TestPreSpawnBinaryGate_PresentBinarySpawns\n--- PASS: TestPreSpawnBinaryGate_PresentBinarySpawns (0.01s)\n=== RUN   TestPreSpawnBinaryGate_EmptyCommandSpawns\n--- PASS: TestPreSpawnBinaryGate_EmptyCommandSpawns (0.66s)\n=== RUN   TestPreSpawnBinaryGate_EmitsActionableOperatorMessage\n--- PASS: TestPreSpawnBinaryGate_EmitsActionableOperatorMessage (0.02s)\n=== RUN   TestPreSpawnBinaryGate_MissingWorkspaceHolds\n--- PASS: TestPreSpawnBinaryGate_MissingWorkspaceHolds (0.02s)\nPASS\nok  \tmcp-local-hub/internal/cli\t8.548s\n"
+                    },
+                    {
+                        "name":  "focused-fixtures-tagged.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe",
+                                     "test",
+                                     "-tags=test_state_path_env",
+                                     "-v",
+                                     "-count=1",
+                                     "-timeout",
+                                     "5m",
+                                     "-run",
+                                     "^(TestPidMatchesMcphub_(CurrentProcess|RejectsForeignPathSameBasename)|TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID|TestPreSpawnBinaryGate_(MissingBinaryNeverBurnsBudget|AutoRecoversWhenBinaryAppears|EmitsActionableOperatorMessage|MissingWorkspaceHolds|PresentBinarySpawns|EmptyCommandSpawns))$",
+                                     "./internal/cli/"
+                                 ],
+                        "seconds":  50.01528689998668,
+                        "exit_code":  0,
+                        "stdout_sha256":  "8473935f6b4b852a87f30992d32c17fe19075d170f59388e3e5d427b6fb162b9",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "=== RUN   TestPidMatchesMcphub_CurrentProcess\n--- PASS: TestPidMatchesMcphub_CurrentProcess (0.00s)\n=== RUN   TestPidMatchesMcphub_RejectsForeignPathSameBasename\n--- PASS: TestPidMatchesMcphub_RejectsForeignPathSameBasename (4.61s)\n=== RUN   TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID\n--- PASS: TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID (0.26s)\n=== RUN   TestPreSpawnBinaryGate_MissingBinaryNeverBurnsBudget\n--- PASS: TestPreSpawnBinaryGate_MissingBinaryNeverBurnsBudget (0.33s)\n=== RUN   TestPreSpawnBinaryGate_AutoRecoversWhenBinaryAppears\n--- PASS: TestPreSpawnBinaryGate_AutoRecoversWhenBinaryAppears (0.04s)\n=== RUN   TestPreSpawnBinaryGate_PresentBinarySpawns\n--- PASS: TestPreSpawnBinaryGate_PresentBinarySpawns (0.02s)\n=== RUN   TestPreSpawnBinaryGate_EmptyCommandSpawns\n--- PASS: TestPreSpawnBinaryGate_EmptyCommandSpawns (0.01s)\n=== RUN   TestPreSpawnBinaryGate_EmitsActionableOperatorMessage\n--- PASS: TestPreSpawnBinaryGate_EmitsActionableOperatorMessage (0.02s)\n=== RUN   TestPreSpawnBinaryGate_MissingWorkspaceHolds\n--- PASS: TestPreSpawnBinaryGate_MissingWorkspaceHolds (0.02s)\nPASS\nok  \tmcp-local-hub/internal/cli\t5.476s\n"
+                    },
+                    {
+                        "name":  "changed-test-files.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "diff",
+                                     "--numstat"
+                                 ],
+                        "seconds":  0.11534210003446788,
+                        "exit_code":  0,
+                        "stdout_sha256":  "d54a2f1b9d0ec5d3e99bea53258a288aa6760a3e9c4ddeff7ca5a10bdafe545b",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "55\t24\tinternal/cli/process_identity_match_windows_test.go\n5\t0\tinternal/cli/settings_registry_test.go\n13\t6\tinternal/cli/supervise_prespawn_binary_gate_test.go\n"
+                    }
+                ],
+    "tests_executed":  true,
+    "selected_test_observations":  [
+                                       {
+                                           "mode":  "default",
+                                           "name":  "TestPidMatchesMcphub_CurrentProcess",
+                                           "seconds":  0,
+                                           "status":  "PASS"
+                                       },
+                                       {
+                                           "mode":  "default",
+                                           "name":  "TestPidMatchesMcphub_RejectsForeignPathSameBasename",
+                                           "seconds":  6.59,
+                                           "status":  "PASS"
+                                       },
+                                       {
+                                           "mode":  "default",
+                                           "name":  "TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID",
+                                           "seconds":  0.3,
+                                           "status":  "PASS"
+                                       },
+                                       {
+                                           "mode":  "default",
+                                           "name":  "TestPreSpawnBinaryGate_MissingBinaryNeverBurnsBudget",
+                                           "seconds":  0.77,
+                                           "status":  "PASS"
+                                       },
+                                       {
+                                           "mode":  "default",
+                                           "name":  "TestPreSpawnBinaryGate_AutoRecoversWhenBinaryAppears",
+                                           "seconds":  0.04,
+                                           "status":  "PASS"
+                                       },
+                                       {
+                                           "mode":  "default",
+                                           "name":  "TestPreSpawnBinaryGate_EmitsActionableOperatorMessage",
+                                           "seconds":  0.02,
+                                           "status":  "PASS"
+                                       },
+                                       {
+                                           "mode":  "default",
+                                           "name":  "TestPreSpawnBinaryGate_MissingWorkspaceHolds",
+                                           "seconds":  0.02,
+                                           "status":  "PASS"
+                                       },
+                                       {
+                                           "mode":  "default",
+                                           "name":  "TestPreSpawnBinaryGate_PresentBinarySpawns",
+                                           "seconds":  0.01,
+                                           "status":  "PASS"
+                                       },
+                                       {
+                                           "mode":  "default",
+                                           "name":  "TestPreSpawnBinaryGate_EmptyCommandSpawns",
+                                           "seconds":  0.66,
+                                           "status":  "PASS"
+                                       },
+                                       {
+                                           "mode":  "tagged",
+                                           "name":  "TestPidMatchesMcphub_CurrentProcess",
+                                           "seconds":  0,
+                                           "status":  "PASS"
+                                       },
+                                       {
+                                           "mode":  "tagged",
+                                           "name":  "TestPidMatchesMcphub_RejectsForeignPathSameBasename",
+                                           "seconds":  4.61,
+                                           "status":  "PASS"
+                                       },
+                                       {
+                                           "mode":  "tagged",
+                                           "name":  "TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID",
+                                           "seconds":  0.26,
+                                           "status":  "PASS"
+                                       },
+                                       {
+                                           "mode":  "tagged",
+                                           "name":  "TestPreSpawnBinaryGate_MissingBinaryNeverBurnsBudget",
+                                           "seconds":  0.33,
+                                           "status":  "PASS"
+                                       },
+                                       {
+                                           "mode":  "tagged",
+                                           "name":  "TestPreSpawnBinaryGate_AutoRecoversWhenBinaryAppears",
+                                           "seconds":  0.04,
+                                           "status":  "PASS"
+                                       },
+                                       {
+                                           "mode":  "tagged",
+                                           "name":  "TestPreSpawnBinaryGate_EmitsActionableOperatorMessage",
+                                           "seconds":  0.02,
+                                           "status":  "PASS"
+                                       },
+                                       {
+                                           "mode":  "tagged",
+                                           "name":  "TestPreSpawnBinaryGate_MissingWorkspaceHolds",
+                                           "seconds":  0.02,
+                                           "status":  "PASS"
+                                       },
+                                       {
+                                           "mode":  "tagged",
+                                           "name":  "TestPreSpawnBinaryGate_PresentBinarySpawns",
+                                           "seconds":  0.02,
+                                           "status":  "PASS"
+                                       },
+                                       {
+                                           "mode":  "tagged",
+                                           "name":  "TestPreSpawnBinaryGate_EmptyCommandSpawns",
+                                           "seconds":  0.01,
+                                           "status":  "PASS"
+                                       }
+                                   ],
+    "source_input_count":  3369,
+    "expected_test_only_edits":  {
+                                     "internal/cli/supervise_prespawn_binary_gate_test.go":  "5e3a6517a9fed3a329cea60d12915965720b37c2bb6a865880d3c0c05ed48feb",
+                                     "internal/cli/settings_registry_test.go":  "40de5fd188c8c94ec67e4fd852d89b0122aee602c3dde91fd8f8ceb2e4c7854a",
+                                     "internal/cli/process_identity_match_windows_test.go":  "e97fd7cc9cc9d9dfe09643c8e03334bd6f7f3e663b07a7f0fe711f0ef974708f"
+                                 },
+    "production_edits":  0,
+    "full_cli_qualification_claimed":  false,
+    "ordinary_go_test_layout":  true,
+    "reviewed_utc":  "2026-11-28T16:55:29.5489930Z"
+}

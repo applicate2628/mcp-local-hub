@@ -1,0 +1,47 @@
+{
+    "run":  "runs/cache-acceptance-stage-20261128-v30",
+    "source":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-cli-fixtures-20261128",
+    "head":  "267f076500b982475b57be45e8a7d8a03edcc2a6",
+    "environment":  {
+                        "TEMP":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1",
+                        "TMP":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1",
+                        "PYTHONDONTWRITEBYTECODE":  "1",
+                        "GIT_OPTIONAL_LOCKS":  "0",
+                        "GIT_TERMINAL_PROMPT":  "0",
+                        "GIT_NO_REPLACE_OBJECTS":  "1",
+                        "GIT_NO_LAZY_FETCH":  "1"
+                    },
+    "observed_files":  [
+                           "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-admission-diagnostic-driver-v2\\artifact-manifest.json",
+                           "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-admission-diagnostic-driver-v2\\run_namespace_diagnostic.py",
+                           "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-admission-diagnostic-driver-v2\\runtime-inputs.json",
+                           "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-admission-diagnostic-driver-v2\\launch_namespace_diagnostic_original.ps1",
+                           "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-admission-diagnostic-driver-v2\\verify_slice_composition.py",
+                           "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-admission-diagnostic-driver-v2\\v1-to-v2.patch",
+                           "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-admission-diagnostic-driver-v2\\README.md",
+                           "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-admission-diagnostic-driver-v1\\run_namespace_diagnostic.py",
+                           "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-candidate\\adapter_successor.py.in",
+                           "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+                           "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-admission-diagnostic-driver-v1\\namespace-diagnostic-outer-original.json"
+                       ],
+    "steps":  [
+                  {
+                      "name":  "verify-exact-predicate-slice-composition",
+                      "argv":  [
+                                   "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+                                   "-I",
+                                   "-S",
+                                   "-B",
+                                   "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-admission-diagnostic-driver-v2\\verify_slice_composition.py"
+                               ],
+                      "timeout":  30
+                  }
+              ],
+    "root_review":  {
+                        "scope":  "DATA syntax and structure reproduction only",
+                        "native_test_commands_started":  0,
+                        "original_v1_stderr_available":  false,
+                        "original_v1_outer_sha256":  "d29fa66e89ff7e766ae9332b96c43a430d217dc586e6fd59866f4410c6642ec1",
+                        "original_v1_run_absent":  true
+                    }
+}

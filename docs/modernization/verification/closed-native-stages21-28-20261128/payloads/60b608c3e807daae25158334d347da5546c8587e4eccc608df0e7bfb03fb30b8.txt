@@ -1,0 +1,29 @@
+diff --git a/internal/cli/supervise_prespawn_binary_gate_test.go b/internal/cli/supervise_prespawn_binary_gate_test.go
+--- a/internal/cli/supervise_prespawn_binary_gate_test.go
++++ b/internal/cli/supervise_prespawn_binary_gate_test.go
+@@ -107,12 +107,19 @@ func driveRespawnAttempts(t *testing.T, ctrl *supervisorController, loop *api.EventLoop, task string, n int) {
+ 			return
+ 		}
+ 	}
+-	deadline := time.Now().Add(2 * time.Second)
+-	for time.Now().Before(deadline) {
+-		if st, _ := ctrl.GetSMState(task); st == api.StQuarantined {
+-			return
+-		}
+-		time.Sleep(10 * time.Millisecond)
++	ctx, cancel := context.WithTimeout(ctrl.ctx, 2*time.Second)
++	defer cancel()
++	done := make(chan struct{})
++	if err := loop.PostCtx(ctx, api.LoopEvent{
++		Kind: evControllerBarrier,
++		Body: map[string]any{controllerBarrierResultBodyKey: done},
++	}); err != nil {
++		t.Fatalf("enqueue respawn-attempt barrier: %v", err)
++	}
++	select {
++	case <-done:
++	case <-ctx.Done():
++		t.Fatalf("respawn-attempt barrier did not complete: %v", ctx.Err())
+ 	}
+ }
+ 

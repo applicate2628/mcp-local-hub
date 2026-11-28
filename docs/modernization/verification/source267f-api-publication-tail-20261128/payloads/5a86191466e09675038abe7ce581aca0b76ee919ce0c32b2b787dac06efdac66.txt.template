@@ -1,0 +1,228 @@
+--- source59f/prepare_successor_inputs_v2.py
++++ source267f/prepare_successor267f_inputs.py
+@@ -13,11 +13,11 @@
+ import types
+ 
+ TASK = Path(r"@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1")
+-CANDIDATE = TASK / "inputs-successor33-v1" / "producer-candidate"
+-SOURCE = Path(r"@@RECOVERY_APPROVED_WORK_AREA@@\pub666-recovered-20261128")
+-OUTPUT = TASK / "successor-product-helper-inputs-v1"
+-COMMIT = "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8"
+-TREE = "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1"
++CANDIDATE = TASK / "inputs-successor33-v1" / "producer267f-candidate-v1"
++SOURCE = Path("@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-cli-fixtures-20261128")
++OUTPUT = TASK / "successor267f-product-helper-inputs-v1"
++COMMIT = "267f076500b982475b57be45e8a7d8a03edcc2a6"
++TREE = "d9636aa81dbcb995934a5ee1e51331b0a10af55f"
+ SCOPES = {"job": "qualified-successor-job", "contained": "qualified-successor-contained",
+           "namespace": "qualified-successor-namespace", "cli": "qualified-successor-cli",
+           "native_product": "qualified-successor-native-product"}
+@@ -73,7 +73,7 @@
+ 
+ 
+ def load_bindings(path, expected):
+-    need(path == CANDIDATE / "helper-build-bindings-v2.json", "fixed helper binding path required")
++    need(path == CANDIDATE / "helper-build-bindings.json", "fixed helper binding path required")
+     cfg = json.loads(pinned({"path": str(path), "sha256": expected}))
+     need(cfg.get("schema") == "successor-helper-build-bindings-v1"
+          and cfg.get("source_root") == str(SOURCE) and cfg.get("source_commit") == COMMIT
+@@ -89,12 +89,18 @@
+          "Product roles and helper source differ")
+     source = json.loads(pinned(cfg["source_map"]))
+     git = json.loads(pinned(cfg["source_git_map"]))
+-    need(source.get("schema") == "source59f-actual-byte-inputs-v1"
++    freeze = json.loads(pinned(cfg["source_context"]))
++    need(freeze.get("schema") == "root-committed-source-freeze-v1" and freeze.get("status") == "PASS"
++         and freeze.get("source_root") == str(SOURCE) and freeze.get("source") == COMMIT
++         and freeze.get("tree") == TREE and freeze.get("tracked_files") == 3369
++         and freeze.get("source_map_sha256") == cfg["source_map"]["sha256"]
++         and freeze.get("git_map_sha256") == cfg["source_git_map"]["sha256"],
++         "original root Source receiving differs")
++    need(source.get("schema") == "source-input-sha256-v1"
+          and source.get("source_root") == str(SOURCE) and source.get("commit") == COMMIT
+          and source.get("tree") == TREE and source.get("tracked_files") == 3369
+-         and source.get("git_map_sha256") == cfg["source_git_map"]["sha256"]
+-         and git.get("schema") == "exact-source-git-map-v1"
+-         and git.get("commit") == COMMIT and git.get("tree") == TREE
++         and git.get("schema") == "source-git-blob-sha256-map-v1"
++         and git.get("commit") == COMMIT and git.get("tree") == TREE and git.get("tracked_files") == 3369
+          and len(source.get("files", {})) == 3369 and set(source["files"]) == set(git["files"]),
+          "complete original Source maps differ")
+     runtime = json.loads(pinned(cfg["runtime_snapshot"]))
+@@ -117,7 +123,8 @@
+         path = ordinary(SOURCE / name)
+         raw = path.read_bytes()
+         blob = hashlib.sha1(b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw).hexdigest()
+-        need(digest(raw) == sha and blob == git["files"][relative]["git_blob"],
++        need(digest(raw) == sha == git["files"][relative]["sha256"]
++             and blob == git["files"][relative]["blob_sha1"] and len(raw) == git["files"][relative]["bytes"],
+              "tracked Source byte/blob mismatch: " + relative)
+         result[relative] = raw
+     return result
+
+--- source59f/private_producer_scope.py
++++ source267f/private_producer_scope.py
+@@ -30,8 +30,8 @@
+     raise RuntimeError("disabled task-bound draft: actual source admission and root review are pending")
+ import re
+ 
+-RUNS = Path("@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\runs")
+-ARTIFACTS = Path("@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch")
++RUNS = Path("@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\runs")
++ARTIFACTS = Path("@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-cli-fixtures-20261128\\.scratch")
+ PARTS = ("tmp", "profile", "appdata", "localappdata", "go-path")
+ SYSTEM_SID = "S-1-5-18"
+ ADMIN_SID = "S-1-5-32-544"
+
+--- source59f/product-build-config-v2.json
++++ source267f/product-build-config.json
+@@ -1,25 +1,25 @@
+ {
+   "schema": "successor-product-build-config-v1",
+-  "source_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128",
+-  "source_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+-  "source_tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
++  "source_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-cli-fixtures-20261128",
++  "source_commit": "267f076500b982475b57be45e8a7d8a03edcc2a6",
++  "source_tree": "d9636aa81dbcb995934a5ee1e51331b0a10af55f",
+   "source_file_count": 3369,
+   "source_map": {
+-    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\source-binding\\source59f-input-sha256.json",
+-    "sha256": "e8c3fc2f577a130f92ba4eee7f8eee7153afc032dee909557cf1156890917c06"
++    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\source267f-binding\\source267f-input-sha256.json",
++    "sha256": "41c4d0a1ac1eb1919e3ece91df43722770f9e184abcff770eecb1b35414979cc"
+   },
+-  "export_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\source",
++  "export_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\source",
+   "source_snapshot": {
+-    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer-candidate\\publisher-source-snapshot.json",
+-    "sha256": "0249af1149b94877e011186a92ee05f104a9bd7afd0e1d676755ee190e64356e"
++    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer267f-candidate-v1\\publisher-source-snapshot.json",
++    "sha256": "2da73b9edd326a1d76dc2d920d1143ac19e06cb0c36b2d3d0acbeb6eccf2cb6c"
+   },
+-  "output_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2",
+-  "marked_output": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\marked-bundle",
+-  "native_output": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-native-product\\bundle",
+-  "marked_receipt_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\marked-inputs",
+-  "native_receipt_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\native-inputs",
++  "output_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1",
++  "marked_output": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\marked-bundle",
++  "native_output": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-cli-fixtures-20261128\\.scratch\\qualified-successor-native-product\\bundle",
++  "marked_receipt_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\marked-inputs",
++  "native_receipt_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\native-inputs",
+   "release_version": "0.4.65",
+-  "release_build_date": "2026-11-28T13:33:34Z",
++  "release_build_date": "2026-11-28T17:17:14Z",
+   "windows_target_arch": "amd64",
+   "build_script_sha256": "92be70f504bb3ee6a6a78c0bb979c7112147f2ce4dc6c43c0635cc7eebaec86d",
+   "tools": {
+
+--- source59f/helper-build-bindings-v2.json
++++ source267f/helper-build-bindings.json
+@@ -1,9 +1,9 @@
+ {
+   "schema": "successor-helper-build-bindings-v1",
+-  "source_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128",
+-  "source_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+-  "source_tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+-  "output_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1",
++  "source_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-cli-fixtures-20261128",
++  "source_commit": "267f076500b982475b57be45e8a7d8a03edcc2a6",
++  "source_tree": "d9636aa81dbcb995934a5ee1e51331b0a10af55f",
++  "output_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1",
+   "scope_names": {
+     "job": "qualified-successor-job",
+     "contained": "qualified-successor-contained",
+@@ -12,24 +12,24 @@
+     "native_product": "qualified-successor-native-product"
+   },
+   "source_map": {
+-    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\source-binding\\source59f-input-sha256.json",
+-    "sha256": "e8c3fc2f577a130f92ba4eee7f8eee7153afc032dee909557cf1156890917c06"
++    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\source267f-binding\\source267f-input-sha256.json",
++    "sha256": "41c4d0a1ac1eb1919e3ece91df43722770f9e184abcff770eecb1b35414979cc"
+   },
+   "source_git_map": {
+-    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\source-binding\\source59f-git-map.json",
+-    "sha256": "2f85b5e27243da8c853f20600df576b51fd60fea2fa420509a331b538dc8c547"
++    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\source267f-binding\\source267f-git-map.json",
++    "sha256": "bde89c9df4b93c1e1082711f4a25986431bae6d02c973f8da6cea87a4707dd10"
+   },
+   "product_config": {
+-    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer-candidate\\product-build-config.json",
+-    "sha256": "e60e717eeb3727acad953c54df08fa0fb1da893f48dcc2d0d5e0d1782c5580bb"
++    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer267f-candidate-v1\\product-build-config.json",
++    "sha256": "80d3d2b1872146b2fe025990b8bf4d7275a485c946ec47cb39c9195a82bf22b5"
+   },
+   "runtime_snapshot": {
+-    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer-candidate\\runtime-source-snapshot.json",
+-    "sha256": "894f8279e51f2c3fa81e404b37be71f3ff9bad26c39ab1afd382d5814a9382a3"
++    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer267f-candidate-v1\\runtime-source-snapshot.json",
++    "sha256": "09476d477b96d8232407dd1749d34cbac3f05505625737f2ac3e8ba6a6b43b95"
+   },
+   "scope_helper": {
+-    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer-candidate\\private_producer_scope.py",
+-    "sha256": "60a63b06447b9e836db5be06a534aa3d00ae518e041aeef91750fdd044590108"
++    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer267f-candidate-v1\\private_producer_scope.py",
++    "sha256": "22aa8257d2445d0d9d0741cd3cc698e230765f63a85b90af142044072b76c295"
+   },
+   "auxiliary_sources": {
+     "job": {
+@@ -38,7 +38,7 @@
+         "sha256": "74c4cebbc91337eacabc113cb1f772589e0c823777c5f2ed734757647fc05977"
+       },
+       "owner_windows.go": {
+-        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\tools\\test-job-entry\\owner_windows.go",
++        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-cli-fixtures-20261128\\tools\\test-job-entry\\owner_windows.go",
+         "sha256": "7200935baff50c05b5f1893e87aac01768ee1d98ca85fcad5e655ca016b2264e"
+       }
+     },
+@@ -50,12 +50,12 @@
+     },
+     "namespace": {
+       "main_windows.go": {
+-        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-candidate\\main_windows.go",
+-        "sha256": "4e91b8ce877400a91a4f315b68a166ae3d2c7c19d4963d52ade521f03f2ac4b4"
++        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-admission-timing-candidate-v1\\main_windows.go",
++        "sha256": "41e7cda8cf174a27a0380a93ad3c89881692d9055d771dae872793f6726ef96d"
+       },
+       "prebuilt_windows.go": {
+-        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-candidate\\prebuilt_windows.go",
+-        "sha256": "2fc1016b4eff51c77a3c0e342de14d938b3f39b6a67c438b04ef262e09d8eeed"
++        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-admission-timing-candidate-v1\\prebuilt_windows.go",
++        "sha256": "60556af6afce055f7ab3aaea3819d919abeafc6d11b5a88e0fb06a94eedc83a6"
+       }
+     },
+     "cli": {
+@@ -70,19 +70,23 @@
+     }
+   },
+   "binaries": {
+-    "validator": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\windows-product-validate.exe",
+-    "test2json": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\test2json.exe",
+-    "job": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\test-job-entry.exe",
+-    "contained": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\literal-contained.exe",
+-    "namespace": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\test-recovery-namespace.exe",
+-    "cli": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\literal-foreground-cli.exe"
++    "validator": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\windows-product-validate.exe",
++    "test2json": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\test2json.exe",
++    "job": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\test-job-entry.exe",
++    "contained": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\literal-contained.exe",
++    "namespace": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\test-recovery-namespace.exe",
++    "cli": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\literal-foreground-cli.exe"
+   },
+   "capability": {
+-    "native_source_scope": "exact successor Source59f production",
++    "native_source_scope": "exact committed Source267f production; no historical runtime qualification inherited",
+     "job_auxiliary": "unchanged existing whole-suite entry auxiliary recompiled against current Source",
+     "contained_auxiliary": "unchanged existing RunContainedStreamObserved receiver",
+-    "namespace_auxiliary": "same incoming API Go image copied to exact original helper protected namespace",
++    "namespace_auxiliary": "same incoming API image and exact original namespace predicates, with previously reviewed timing-only marks; runtime qualification pending",
+     "cli_auxiliary": "supported RunForeground; original root/Job and IO plus source-pinned test-owned escaped cleanup; no universal escaped-tree claim",
+     "qualification_passed": false
++  },
++  "source_context": {
++    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\source267f-binding\\root-source267f-freeze.json",
++    "sha256": "ec56fbd6526b3f7f36d2818fca0ab4d7c000d493ce065d02044bdc7fa7d22bdd"
+   }
+ }

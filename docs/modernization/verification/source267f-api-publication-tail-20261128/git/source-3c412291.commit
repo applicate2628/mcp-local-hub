@@ -1,0 +1,6 @@
+tree 5be2e2ef1f006da03a8ff7ed993b5e649d619116
+parent 59f618ebfbf6d9f52c6994d68586e3c2ebc202a8
+author applicate2628 <dima_den@inbox.ru> 1795885756 +0300
+committer applicate2628 <dima_den@inbox.ru> 1795885756 +0300
+
+test(cli): reuse the foreign process fixture image
