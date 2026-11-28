@@ -1,0 +1,265 @@
+{
+  "schema": "closed-preparation-phase-observations-v1",
+  "source_commit": "727d66753814dc218e26d699e57402db2d13190a",
+  "private_publisher_source_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+  "phases": [
+    {
+      "phase": "original-product-inputs-v6",
+      "status": "FAIL",
+      "elapsed_parent_seconds": 72.68212140002288,
+      "parent": {
+        "role_path": "original-product-inputs-v6/parent.json",
+        "sha256": "584ff6d8f816fb07c63ae78e0d299d67fb90ba083c6b1678c8a24ab5ba1946c1"
+      },
+      "execution": {
+        "role_path": "original-product-inputs-v6/commands/execution.json",
+        "sha256": "0d62de08b4493ffc1a707f939f85355fffb1b08d03bf690439263d5022b04ca6",
+        "bytes": 4381765
+      },
+      "projection_role_path": "execution-projections/original-product-inputs-v6.json",
+      "input_files_before_after_each": 3544,
+      "all_input_maps_equal_original_plan": true,
+      "exact_execution_data_roundtrip": true,
+      "commands": [
+        {
+          "name": "copy-current-closed-build-caches",
+          "exit_code": 0,
+          "elapsed_seconds": 63.93878530000802,
+          "deadline_seconds": 600,
+          "state": "CLOSED",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "captures": {
+            "stdout": {
+              "role_path": "original-product-inputs-v6/commands/copy-current-closed-build-caches.stdout.txt",
+              "bytes": 675,
+              "sha256": "75b62d60e914e0f6bee2515e33f847a03e03014e624c2b2b47d23a4584a38595"
+            },
+            "stderr": {
+              "role_path": "original-product-inputs-v6/commands/copy-current-closed-build-caches.stderr.txt",
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          },
+          "original_readers_joined": true
+        },
+        {
+          "name": "copy-original-immutable-artifacts",
+          "exit_code": 0,
+          "elapsed_seconds": 5.743219800060615,
+          "deadline_seconds": 180,
+          "state": "CLOSED",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "captures": {
+            "stdout": {
+              "role_path": "original-product-inputs-v6/commands/copy-original-immutable-artifacts.stdout.txt",
+              "bytes": 159,
+              "sha256": "c0ef3ccd7434b3c75d3a4bf0c4788b3cda99eaf1f88b75b62a9a44b54da65cbc"
+            },
+            "stderr": {
+              "role_path": "original-product-inputs-v6/commands/copy-original-immutable-artifacts.stderr.txt",
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          },
+          "original_readers_joined": true
+        },
+        {
+          "name": "issue-and-compile-original-private-inputs",
+          "exit_code": 1,
+          "elapsed_seconds": 1.111742899985984,
+          "deadline_seconds": 600,
+          "state": "CLOSED",
+          "native": {
+            "direct_exit_code": 1,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "captures": {
+            "stdout": {
+              "role_path": "original-product-inputs-v6/commands/issue-and-compile-original-private-inputs.stdout.txt",
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "stderr": {
+              "role_path": "original-product-inputs-v6/commands/issue-and-compile-original-private-inputs.stderr.txt",
+              "bytes": 463,
+              "sha256": "61675179865119af12ddce7c3d84ddc6461d94ccea00b9d0ebd9fedcd4fc5cb8"
+            }
+          },
+          "original_readers_joined": true
+        }
+      ]
+    },
+    {
+      "phase": "original-private-compile-v7",
+      "status": "PASS",
+      "elapsed_parent_seconds": 568.6791257000295,
+      "parent": {
+        "role_path": "original-private-compile-v7/parent.json",
+        "sha256": "0cb7e027c9ed6f5e17662e6adedebb4f3c669b93e81feff730a6153f50bce7e3"
+      },
+      "execution": {
+        "role_path": "original-private-compile-v7/commands/execution.json",
+        "sha256": "b1c4a3d3f5e4ca1a65227f05bb648487cad8dfd43af49927e1cd3e6d1f0e780a",
+        "bytes": 4404692
+      },
+      "projection_role_path": "execution-projections/original-private-compile-v7.json",
+      "input_files_before_after_each": 3562,
+      "all_input_maps_equal_original_plan": true,
+      "exact_execution_data_roundtrip": true,
+      "commands": [
+        {
+          "name": "receive-private-date-parser-defect",
+          "exit_code": 0,
+          "elapsed_seconds": 0.7710286999354139,
+          "deadline_seconds": 30,
+          "state": "CLOSED",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "captures": {
+            "stdout": {
+              "role_path": "original-private-compile-v7/commands/receive-private-date-parser-defect.stdout.txt",
+              "bytes": 541,
+              "sha256": "950ebc37f29a83e0b8275791e8c11b5158644472964008311fa99e024a1bdba5"
+            },
+            "stderr": {
+              "role_path": "original-private-compile-v7/commands/receive-private-date-parser-defect.stderr.txt",
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          },
+          "original_readers_joined": true
+        },
+        {
+          "name": "copy-current-closed-build-caches",
+          "exit_code": 0,
+          "elapsed_seconds": 73.00711960007902,
+          "deadline_seconds": 600,
+          "state": "CLOSED",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "captures": {
+            "stdout": {
+              "role_path": "original-private-compile-v7/commands/copy-current-closed-build-caches.stdout.txt",
+              "bytes": 677,
+              "sha256": "ca19dfa91f86a1ad3d890befb9d7ba9ac36ecb35f8b89fcc339b10ab9d6756b0"
+            },
+            "stderr": {
+              "role_path": "original-private-compile-v7/commands/copy-current-closed-build-caches.stderr.txt",
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          },
+          "original_readers_joined": true
+        },
+        {
+          "name": "issue-and-compile-original-private-inputs",
+          "exit_code": 0,
+          "elapsed_seconds": 487.30907720001414,
+          "deadline_seconds": 600,
+          "state": "CLOSED",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "captures": {
+            "stdout": {
+              "role_path": "original-private-compile-v7/commands/issue-and-compile-original-private-inputs.stdout.txt",
+              "bytes": 5727,
+              "sha256": "abc90a4e91ae2c1f6d4212d70c13cab2ea886b928a6a19fb537b986f713aab1a"
+            },
+            "stderr": {
+              "role_path": "original-private-compile-v7/commands/issue-and-compile-original-private-inputs.stderr.txt",
+              "bytes": 53,
+              "sha256": "6a19eaf3a9431d6d8e0fa675a44df0df271ebc655f9a9f5eb6aec89e9d1b316d"
+            }
+          },
+          "original_readers_joined": true
+        }
+      ]
+    },
+    {
+      "phase": "original-runtime-compose-v6",
+      "status": "PASS",
+      "elapsed_parent_seconds": 1.420816499972716,
+      "parent": {
+        "role_path": "original-runtime-compose-v6/parent.json",
+        "sha256": "bbe51cb1fad1415f24c997dd7fdc3510f3b11853635da1d11359d6acb7f01019"
+      },
+      "execution": {
+        "role_path": "original-runtime-compose-v6/commands/execution.json",
+        "sha256": "eac444852333c7b2891fe2cd856098df14398291b45d755636b4f99f3b1fbd39",
+        "bytes": 47978
+      },
+      "projection_role_path": "execution-projections/original-runtime-compose-v6.json",
+      "input_files_before_after_each": 107,
+      "all_input_maps_equal_original_plan": true,
+      "exact_execution_data_roundtrip": true,
+      "commands": [
+        {
+          "name": "compose-reviewed-original-literal-runtime",
+          "exit_code": 0,
+          "elapsed_seconds": 0.4422919999342412,
+          "deadline_seconds": 120,
+          "state": "CLOSED",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "captures": {
+            "stdout": {
+              "role_path": "original-runtime-compose-v6/commands/compose-reviewed-original-literal-runtime.stdout.txt",
+              "bytes": 940,
+              "sha256": "ec671059824a34bdb83f7c7d245a4d88f08540fc6dc3a615199cc09a5738eb52"
+            },
+            "stderr": {
+              "role_path": "original-runtime-compose-v6/commands/compose-reviewed-original-literal-runtime.stderr.txt",
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          },
+          "original_readers_joined": true
+        }
+      ]
+    }
+  ],
+  "full_acceptance_verdict": "NOT_RECEIVED",
+  "scope": "Original closed preparation and DATA composition only; full gates remain separate."
+}

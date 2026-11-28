@@ -1,0 +1,13 @@
+{
+  "schema": "closed-preparation-source-dependencies-v1",
+  "source_capsule": "../original-v6-sources-20261128",
+  "source_capsule_manifest_sha256": "dd0afe0ee27c9faf5d54ffb218a1b8fd39bf525f2a1da3d7659e9f25eafe750f",
+  "source_bindings_sha256": "6aa4972cdb658c70c39eafcce74da671ede759b3fa0c78a29773834fec20d55d",
+  "renderer_base_sha256": "7441c4f529fda6fc87141ec96442a25145e5ff459ba3a2af82763e38a63905e4",
+  "renderer_change": "Only BINDINGS_SHA256 changed for this capsule.",
+  "frozen_templates_manifest": {
+    "path": "../original-v6-sources-20261128/metadata/templates-manifest.json",
+    "sha256": "573b788670b38cc6675fa1e9fc100cda95385049cc9d744363bca1cc87caa89b"
+  },
+  "new_native_or_test_authority": false
+}

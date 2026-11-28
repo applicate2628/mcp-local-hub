@@ -1,0 +1,22 @@
+{
+  "schema": "literal-original-preparation-v6",
+  "status": "PREPARED_NOT_EXECUTED",
+  "manifest": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\runtime-original-v6\\runtime-manifest.json",
+    "sha256": "cdce3127e6237f5157500acbf206d0fced239ef60b208744278a0059758e692d"
+  },
+  "launch_argv": [
+    "@@RECOVERY_CONTROLLER_PYTHON_HOME_ESCAPED@@\\python.exe",
+    "-I",
+    "-S",
+    "-B",
+    "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\runtime-original-v6\\launch_literal_v6.py",
+    "--manifest",
+    "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\runtime-original-v6\\runtime-manifest.json",
+    "--manifest-sha256",
+    "cdce3127e6237f5157500acbf206d0fced239ef60b208744278a0059758e692d"
+  ],
+  "reviewed": true,
+  "source_mutation_performed": false,
+  "native_or_test_commands_started": false
+}
