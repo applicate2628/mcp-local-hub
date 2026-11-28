@@ -1,0 +1,238 @@
+"""Stage exact original ext17 helper sources, or receive their compiled DATA.
+Only the owned command plan may launch compilers. This script starts no process.
+"""
+import sys
+sys.dont_write_bytecode = True
+
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import types
+
+TASK = Path(r"@@RECOVERY_WORK_AREA_RAW@@\mcp-acceptance-rebuild-20261127-v1")
+INPUTS = TASK / "inputs-original-v6"
+CANDIDATE = INPUTS / "external-prepare-candidate"
+SOURCE = TASK / "source-original727d-v2"
+OUTPUT = TASK / "original-external-helper-inputs-v6"
+CANONICAL_SCOPE = "qualified-original-external-v6-canonical"
+CONTAINED_SCOPE = "qualified-original-external-v6-receiver"
+TOKEN = b"__CANONICAL_EXTERNAL_STAGE__"
+REPARSE = 0x400
+
+
+def need(ok, message):
+    if not ok:
+        raise RuntimeError(message)
+
+
+def ordinary(path, directory=False):
+    path = Path(path)
+    need(path.is_absolute() and ".." not in path.parts, "clean absolute path required")
+    for item in (*reversed(path.parents), path):
+        info = item.lstat()
+        need(not info.st_file_attributes & REPARSE and not stat.S_ISLNK(info.st_mode),
+             "reparse input refused")
+        want_directory = item != path or directory
+        need(stat.S_ISDIR(info.st_mode) if want_directory else stat.S_ISREG(info.st_mode),
+             "ordinary input type differs")
+    return path
+
+
+def digest(raw):
+    return hashlib.sha256(raw).hexdigest()
+
+
+def pinned(pair):
+    need(isinstance(pair, dict) and re.fullmatch(r"[0-9a-f]{64}", pair.get("sha256", "")),
+         "explicit input pin required")
+    raw = ordinary(pair["path"]).read_bytes()
+    need(digest(raw) == pair["sha256"], "input bytes changed: " + pair["path"])
+    return raw
+
+
+def write_new(path, raw):
+    ordinary(path.parent, True)
+    with path.open("xb") as stream:
+        stream.write(raw)
+        stream.flush()
+        os.fsync(stream.fileno())
+    need(path.read_bytes() == raw, "new output bytes differ")
+
+
+def write_json(path, value):
+    write_new(path, (json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8"))
+
+
+def artifact(path):
+    path = ordinary(path)
+    raw = path.read_bytes()
+    return {"path": str(path), "sha256": digest(raw), "bytes": len(raw)}
+
+
+def load_bindings(path, sha):
+    need(path == CANDIDATE / "external-build-bindings.json", "fixed candidate bindings required")
+    cfg = json.loads(pinned({"path": str(path), "sha256": sha}))
+    need(cfg.get("schema") == "original-external-helper-build-bindings-v6"
+         and cfg.get("source_root") == str(SOURCE) and cfg.get("output") == str(OUTPUT)
+         and cfg.get("source_commit") == "727d66753814dc218e26d699e57402db2d13190a"
+         and cfg.get("source_tree") == "d959ed0a4f8ab02947aec7569f3c0535a3cff533"
+         and cfg.get("scope_names") == {"contained": CONTAINED_SCOPE, "canonical": CANONICAL_SCOPE}
+         and cfg.get("binaries") == {"contained": str(OUTPUT / "literal-contained.exe"),
+                                    "canonical": str(OUTPUT / "literal-canonical.exe")},
+         "fixed original ext17 scope differs")
+    # Actual closed parent metadata precedes source or compiled artifact reading.
+    need(len(cfg["closed_parents"]) == 2, "both closed source/helper parents required")
+    for pair in cfg["closed_parents"]:
+        parent = json.loads(pinned(pair))
+        need(parent.get("schema") == "fresh-owned-commands-v1-parent"
+             and parent.get("status") == "PASS" and parent.get("child_status") == "PASS"
+             and type(parent.get("exit_code")) is int and parent["exit_code"] == 0
+             and parent.get("deadline_exceeded") is False
+             and all(parent.get(key) is True for key in
+                     ("terminal_exit_received", "parent_capture_files_closed", "physical_complete")),
+             "original parent physical completion is unreceived")
+    received = json.loads(pinned(cfg["source_receiving"]))
+    need(received.get("status") == "PASS" and received.get("commit") == cfg["source_commit"]
+         and received.get("tree") == cfg["source_tree"] and len(received.get("files", {})) == 3509,
+         "exact restored original source map differs")
+    ordinary(SOURCE, True)
+    ordinary(OUTPUT, True)
+    return cfg
+
+
+def source_rows(cfg):
+    manifest = json.loads(pinned(cfg["canonical_manifest"]))
+    native_names = {name + "_windows_amd64.go" for name in ("owner", "native", "events", "capture")}
+    controller_names = {"main_windows.go", "inputs_windows.go", "cases_windows.go"}
+    expected = {**{"owner/canonicalcaseowner/" + name: "canonicalcaseowner/" + name for name in native_names},
+                **{"controller/" + name: name for name in controller_names}}
+    need(manifest.get("schema") == "canonical-external-source-inputs-v1"
+         and set(manifest.get("files", {})) == set(expected) == set(cfg["canonical_files"]),
+         "fixed seven-file original source inventory differs")
+    rows = {}
+    for key, relative in sorted(expected.items()):
+        pair = cfg["canonical_files"][key]
+        need(pair["path"] == str(INPUTS / "external-source-original" / key)
+             and pair["sha256"] == manifest["files"][key] and pair["relative_target"] == relative,
+             "original source/target role differs")
+        raw = pinned(pair)
+        need(raw.count(TOKEN) == (1 if key == "controller/cases_windows.go" else 0),
+             "canonical native import substitution count differs")
+        staged = raw.replace(TOKEN, CANONICAL_SCOPE.encode("ascii"))
+        need(digest(staged) == pair["staged_sha256"] and len(raw) == pair["bytes"]
+             and len(staged) == pair["staged_bytes"], "expected staged source bytes differ")
+        rows[SOURCE / ".scratch" / CANONICAL_SCOPE / relative] = staged
+    need(cfg["contained_source"]["path"] == str(INPUTS / "external-source-original" / "literal_contained_test_receiver_v4.go")
+         and cfg["contained_source"]["sha256"] == "59fa2cc432b887114497c3c6625731d4dcde207e38b412371eb5fa83b39ed8a9",
+         "original contained source role differs")
+    rows[SOURCE / ".scratch" / CONTAINED_SCOPE / "main.go"] = pinned(cfg["contained_source"])
+    return rows
+
+
+def expected_artifacts(rows):
+    return {str(path): {"sha256": digest(raw), "bytes": len(raw)} for path, raw in rows.items()}
+
+
+def verify_staged(rows):
+    actual_paths = set()
+    for name in (CONTAINED_SCOPE, CANONICAL_SCOPE):
+        root = ordinary(SOURCE / ".scratch" / name, True)
+        for path in root.rglob("*"):
+            if path.is_dir():
+                ordinary(path, True)
+            else:
+                ordinary(path)
+                actual_paths.add(path)
+    need(actual_paths == set(rows), "staged source inventory changed")
+    for path, raw in rows.items():
+        need(ordinary(path).read_bytes() == raw, "staged original source changed")
+    return expected_artifacts(rows)
+
+
+def stage(cfg, bindings):
+    rows = source_rows(cfg)
+    helper_raw = pinned(cfg["scope_helper"])
+    need(cfg["scope_helper"]["path"] == str(CANDIDATE / "private_external_scope_v6.py"),
+         "fixed original private scope helper required")
+    need(not (SOURCE / ".scratch").exists(), "fresh private artifact parent already exists")
+    need(not (OUTPUT / "external-source-preparation.json").exists(), "fresh preparation output required")
+    helper = types.ModuleType("original_private_external_scope_v6")
+    helper.__file__ = cfg["scope_helper"]["path"]
+    exec(compile(helper_raw, helper.__file__, "exec"), helper.__dict__)
+    need(helper.ARTIFACTS == SOURCE / ".scratch", "private artifact parent binding differs")
+    security = {"parent": helper.create_private_artifact_parent()}
+    write_json(OUTPUT / "external-source-parent-security.json", security["parent"])
+    for role, name in (("contained", CONTAINED_SCOPE), ("canonical", CANONICAL_SCOPE)):
+        security[role] = helper.create_private_artifact_scope(SOURCE / ".scratch" / name)
+        write_json(OUTPUT / ("external-source-" + role + "-security.json"), security[role])
+    # This subdirectory inherits the original private scope descriptor.
+    (SOURCE / ".scratch" / CANONICAL_SCOPE / "canonicalcaseowner").mkdir()
+    for path, raw in rows.items():
+        write_new(path, raw)
+    staged = verify_staged(rows)
+    # Re-read each original auxiliary input after the independent byte copies.
+    need(source_rows(cfg) == rows, "original auxiliary input changed while staging")
+    write_json(OUTPUT / "external-source-preparation.json", {
+        "schema": "original-external-helper-source-preparation-v6", "status": "STAGED_ONLY",
+        "source_commit": cfg["source_commit"], "source_tree": cfg["source_tree"],
+        "bindings": bindings, "source_receiving": cfg["source_receiving"],
+        "staged_sources": staged, "scope_security": security,
+        "substitution": {"source": "controller/cases_windows.go",
+                         "token": TOKEN.decode("ascii"), "replacement": CANONICAL_SCOPE, "count": 1},
+        "producer_capability": cfg["producer_capability"],
+        "tracked_source_mutated": False, "native_commands_launched": False,
+        "tests_executed": False, "qualification_passed": False
+    })
+    return {"status": "STAGED_ONLY", "staged_source_count": len(rows)}
+
+
+def receive(cfg, bindings):
+    rows = source_rows(cfg)
+    staged = verify_staged(rows)
+    preparation_path = ordinary(OUTPUT / "external-source-preparation.json")
+    preparation = json.loads(preparation_path.read_bytes())
+    need(preparation.get("schema") == "original-external-helper-source-preparation-v6"
+         and preparation.get("status") == "STAGED_ONLY"
+         and preparation.get("bindings") == bindings
+         and preparation.get("source_commit") == cfg["source_commit"]
+         and preparation.get("source_tree") == cfg["source_tree"]
+         and preparation.get("staged_sources") == staged,
+         "actual original staging receipt differs")
+    binaries = {}
+    for role, path in cfg["binaries"].items():
+        row = artifact(Path(path))
+        need(row["bytes"] > 0, "compiled helper is empty")
+        binaries[role] = row
+    result = {
+        "schema": "original-external-helper-compiled-inputs-v6", "status": "COMPILED_DATA_ONLY",
+        "source_commit": cfg["source_commit"], "source_tree": cfg["source_tree"],
+        "source_receiving": cfg["source_receiving"], "bindings": bindings,
+        "preparation": artifact(preparation_path), "staged_sources": staged, "binaries": binaries,
+        "producer_capability": cfg["producer_capability"],
+        "native_build_exit_receiving": "separate original owned-command execution and parent receipts",
+        "tests_executed": False, "qualification_passed": False, "native_authority_transferred": False
+    }
+    write_json(OUTPUT / "external-helper-inputs.json", result)
+    return {"status": "COMPILED_DATA_ONLY", "binaries": binaries}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("mode", choices=("stage", "receive"))
+    parser.add_argument("--bindings", type=Path, required=True)
+    parser.add_argument("--bindings-sha256", required=True)
+    args = parser.parse_args()
+    need(os.name == "nt", "native Windows preparation required")
+    cfg = load_bindings(args.bindings, args.bindings_sha256)
+    binding = {"path": str(args.bindings), "sha256": args.bindings_sha256}
+    result = stage(cfg, binding) if args.mode == "stage" else receive(cfg, binding)
+    pinned(binding)
+    print(json.dumps(result, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()

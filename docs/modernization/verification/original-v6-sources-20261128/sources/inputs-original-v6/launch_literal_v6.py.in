@@ -1,0 +1,128 @@
+"""Original outside-Job parent for the current literal driver.
+Preserves full-v13 retained Popen/stream lifetime and never kills by image or PID.
+"""
+import sys
+sys.dont_write_bytecode=True
+import argparse,ctypes,hashlib,json,os,re,stat,subprocess,time
+from pathlib import Path
+
+def sha(path):
+    with Path(path).open("rb") as stream:
+        return hashlib.file_digest(stream,"sha256").hexdigest()
+def require(ok,message):
+    if not ok: raise RuntimeError(message)
+def ordinary(path):
+    path=Path(path)
+    require(path.is_absolute() and ".." not in path.parts,"absolute ordinary path required")
+    for value in (*reversed(path.parents),path):
+        info=value.lstat()
+        require(not stat.S_ISLNK(info.st_mode) and not getattr(info,"st_file_attributes",0)&0x400,
+                "reparse path refused")
+    return path
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--manifest",required=True)
+    parser.add_argument("--manifest-sha256",required=True)
+    args=parser.parse_args()
+    manifest_path=ordinary(args.manifest)
+    require(sha(manifest_path)==args.manifest_sha256,"runtime manifest changed")
+    manifest=json.loads(manifest_path.read_text(encoding="utf-8"))
+    require(manifest["schema"]=="literal-original-runtime-v6" and manifest["reviewed"] is True,
+            "current reviewed runtime composition required")
+    for relative,pin in manifest["files"].items():
+        require(Path(relative).name==relative and sha(ordinary(manifest_path.parent/relative))==pin,
+                "runtime helper bytes differ")
+    config_pin=manifest["configuration"]
+    require(sha(ordinary(config_pin["path"]))==config_pin["sha256"],"current input configuration changed")
+    cfg=json.loads(Path(config_pin["path"]).read_text(encoding="utf-8"))
+    python=cfg["tools"]["python"]
+    require(os.name=="nt" and sys.flags.isolated and sys.flags.no_site and sys.dont_write_bytecode
+            and os.path.normcase(sys.executable)==os.path.normcase(python["path"])
+            and sha(ordinary(sys.executable))==python["sha256"],"exact Windows Python -I -S -B required")
+    kernel=ctypes.WinDLL("kernel32",use_last_error=True)
+    kernel.GetCurrentProcess.restype=ctypes.c_void_p
+    kernel.IsProcessInJob.argtypes=[ctypes.c_void_p,ctypes.c_void_p,ctypes.POINTER(ctypes.c_int)]
+    kernel.IsProcessInJob.restype=ctypes.c_int
+    in_job=ctypes.c_int()
+    require(kernel.IsProcessInJob(kernel.GetCurrentProcess(),None,ctypes.byref(in_job))
+            and in_job.value==0,"literal issuer parent must be outside an enclosing Job")
+    runs=Path(cfg["runs_root"]); runs.mkdir(exist_ok=True)
+    ordinary(runs)
+    root=runs/cfg["run_name"]
+    parent=Path(cfg["task_root"])/(cfg["run_name"]+"-parent.json")
+    pending=parent.with_name(parent.name+".pending")
+    stdout=parent.with_name(parent.stem+".stdout.txt")
+    stderr=parent.with_name(parent.stem+".stderr.txt")
+    require(all(not os.path.lexists(p) for p in (root,parent,pending,stdout,stderr)),
+            "literal launcher refuses existing output")
+    driver=manifest_path.parent/"run_literal_go_gate_v6.py"
+    argv=[python["path"],"-I","-S","-B",str(driver),"--name",cfg["run_name"],"--commit",cfg["source_commit"]]
+    record={"schema":"original-literal-original-parent-v6","state":"before-launch",
+            "source_commit":cfg["source_commit"],"runtime_manifest":{"path":str(manifest_path),"sha256":args.manifest_sha256},
+            "configuration":config_pin,"argv":argv,"cwd":cfg["task_root"],
+            "outside_enclosing_job":True,"terminal_exit_received":False,"deadline_exceeded":False,
+            "parent_capture_files_closed":False,"physical_complete":False,
+            "stdout":str(stdout),"stderr":str(stderr),"original_failure_reclassified":False}
+    def save():
+        with pending.open("w",encoding="utf-8",newline="\n") as stream:
+            json.dump(record,stream,indent=2);stream.write("\n");stream.flush();os.fsync(stream.fileno())
+        os.replace(pending,parent)
+    startup=subprocess.STARTUPINFO()
+    startup.dwFlags=subprocess.STARTF_USESHOWWINDOW;startup.wShowWindow=subprocess.SW_HIDE
+    original=out=err=None
+    code=None
+    started=time.monotonic()
+    save()
+    try:
+        with stdout.open("xb") as out,stderr.open("xb") as err:
+            original=subprocess.Popen(argv,cwd=cfg["task_root"],env=dict(os.environ),
+                stdin=subprocess.DEVNULL,stdout=out,stderr=err,startupinfo=startup,
+                creationflags=subprocess.CREATE_NEW_CONSOLE)
+            try:
+                record.update(state="running",original_pid=original.pid);save()
+                try:
+                    code=original.wait(timeout=max(0,started+cfg["outer_seconds"]-time.monotonic()))
+                except subprocess.TimeoutExpired:
+                    record.update(state="deadline-exceeded-original-retained",deadline_exceeded=True);save()
+                    print(json.dumps(record),flush=True)
+            except BaseException as error:
+                record["launcher_error"]=type(error).__name__+": "+str(error)
+            finally:
+                while code is None:
+                    try: code=original.wait()
+                    except BaseException as error:
+                        record["launcher_error"]=type(error).__name__+": "+str(error)
+                elapsed=time.monotonic()-started
+                record.update(state="direct-reaped",exit_code=code,seconds=elapsed,terminal_exit_received=True,
+                    deadline_exceeded=record["deadline_exceeded"] or elapsed>cfg["outer_seconds"])
+    except BaseException as error:
+        record["launcher_error"]=type(error).__name__+": "+str(error)
+    record["parent_capture_files_closed"]=bool(out is not None and err is not None and out.closed and err.closed)
+    report_path=root/"receipt.json"
+    if record["terminal_exit_received"] and report_path.is_file():
+        try:
+            raw=report_path.read_bytes()
+            require(len(raw)<=32<<20,"bounded original driver control required")
+            report=json.loads(raw)
+            record.update(child_status=report.get("status"),commands_quiescent=report.get("commands_quiescent"),
+                child_schema=report.get("schema"),candidate_commit=report.get("source_before",{}).get("head"),
+                literal_pre_push_commands_passed=report.get("literal_pre_push_commands_passed"),
+                original_receipt={"path":str(report_path),"sha256":hashlib.sha256(raw).hexdigest()})
+            record["physical_complete"]=bool(report.get("commands_quiescent") is True
+                and report.get("original_invocation_issuer",{}).get("worker_joined") is True
+                and not report.get("original_invocation_issuer",{}).get("failure")
+                and record["parent_capture_files_closed"])
+        except BaseException as error:
+            record["receiving_error"]=type(error).__name__+": "+str(error)
+    passed=(code==0 and not record["deadline_exceeded"] and "launcher_error" not in record
+            and "receiving_error" not in record and record["physical_complete"] is True
+            and record.get("child_status")=="PASS" and record.get("candidate_commit")==cfg["source_commit"]
+            and record.get("child_schema")=="literal-go-prepush-gate-v1"
+            and record.get("literal_pre_push_commands_passed") is True)
+    record.update(state="received",status="PASS" if passed else "FAIL")
+    save()
+    print(json.dumps({"parent":str(parent),"sha256":sha(parent),"status":record["status"],
+                      "physical_complete":record["physical_complete"]}),flush=True)
+    return 0 if passed else 1
+if __name__=="__main__":
+    raise SystemExit(main())

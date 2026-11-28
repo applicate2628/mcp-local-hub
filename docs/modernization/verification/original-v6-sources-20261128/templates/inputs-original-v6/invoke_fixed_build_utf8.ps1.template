@@ -1,0 +1,104 @@
+#Requires -Version 5.1
+# The caller pins the source, this loader, the host, and the exact parameter tail.
+# This is the admitted private-build route, not a general replacement for -File.
+param(
+    [string]$SourcePath,
+    [string]$SourceSHA256,
+    [switch]$PrepareCLIPrivatePreparationInputs,
+    [ValidateSet("default", "test_state_path_env")]
+    [string]$PrivateCLIPreparationLane,
+    [ValidateSet("amd64", "arm64")]
+    [string]$WindowsTargetArch,
+    [string]$OutputDirectory,
+    [string]$ReleaseVersion,
+    [string]$ReleaseCommit,
+    [string]$ReleaseBuildDate,
+    [string]$SourceSnapshotPath
+)
+
+$REVIEW_COMPLETE = $true
+if (-not $REVIEW_COMPLETE) { throw "Disabled fixed-source UTF8 loader: root review is pending" }
+$ErrorActionPreference = "Stop"
+if ($PSVersionTable.PSVersion -lt [Version]"5.1") { throw "The fixed source requires PowerShell 5.1 or newer" }
+if ($ExecutionContext.SessionState.LanguageMode -ne "FullLanguage") { throw "The fixed source requires the existing FullLanguage host" }
+if ([string]::IsNullOrWhiteSpace($SourcePath) -or $SourcePath -notmatch '^[A-Za-z]:[\\/]') {
+    throw "The original source path must be an absolute drive path"
+}
+if ($SourceSHA256 -cnotmatch '^[0-9a-f]{64}$') { throw "The original source SHA256 is required" }
+if (-not $PrepareCLIPrivatePreparationInputs -or $PSBoundParameters.Count -ne 10) {
+    throw "Only the explicit private-build parameter set is admitted"
+}
+$forward = @{}
+foreach ($name in @("PrepareCLIPrivatePreparationInputs", "PrivateCLIPreparationLane", "WindowsTargetArch",
+                    "OutputDirectory", "ReleaseVersion", "ReleaseCommit", "ReleaseBuildDate", "SourceSnapshotPath")) {
+    if (-not $PSBoundParameters.ContainsKey($name)) { throw "Missing original private-build parameter: $name" }
+    $forward[$name] = $PSBoundParameters[$name]
+}
+$sourceFullPath = [IO.Path]::GetFullPath($SourcePath)
+if (-not [IO.File]::Exists($sourceFullPath)) { throw "The original source file is missing" }
+if (([IO.File]::GetAttributes($sourceFullPath) -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+    throw "A redirected source file is not admitted"
+}
+$sourceBytes = [IO.File]::ReadAllBytes($sourceFullPath)
+$sourceHasher = [Security.Cryptography.SHA256]::Create()
+try { $sourceDigest = [BitConverter]::ToString($sourceHasher.ComputeHash($sourceBytes)).Replace("-", "").ToLowerInvariant() }
+finally { $sourceHasher.Dispose() }
+if ($sourceDigest -cne $SourceSHA256) { throw "The original source bytes changed" }
+$sourceText = [Text.UTF8Encoding]::new($false, $true).GetString($sourceBytes)
+$requiresLines = [regex]::Matches($sourceText, '(?im)^[ \t]*#requires[^\r\n]*')
+if ($requiresLines.Count -ne 1 -or $requiresLines[0].Value -notmatch '^[ \t]*#Requires[ \t]+-Version[ \t]+5\.1[ \t]*$') {
+    throw "Only the reviewed single #Requires -Version 5.1 source contract is admitted"
+}
+[System.Management.Automation.Language.Token[]]$sourceTokens = $null
+[System.Management.Automation.Language.ParseError[]]$sourceErrors = $null
+$sourceAst = [System.Management.Automation.Language.Parser]::ParseInput(
+    $sourceText, $sourceFullPath, [ref]$sourceTokens, [ref]$sourceErrors)
+if ($null -ne $sourceErrors -and $sourceErrors.Count -ne 0) {
+    throw [System.Management.Automation.ParseException]::new($sourceErrors)
+}
+if (-not [string]::Equals($sourceAst.Extent.File, $sourceFullPath, [StringComparison]::OrdinalIgnoreCase) -or
+    $sourceAst.ScriptRequirements.RequiredPSVersion -ne [Version]"5.1") {
+    throw "The original source filename or version requirement was not preserved"
+}
+$sourceBlock = $sourceAst.GetScriptBlock()
+if (-not [string]::Equals($sourceBlock.File, $sourceFullPath, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "The invoked script block lost its original source filename"
+}
+# Resolve module commands through native modules in this process only.
+$nativePSHome = "@@RECOVERY_WINDOWS_POWERSHELL_HOME@@"
+if (-not [string]::Equals([IO.Path]::GetFullPath($PSHOME), $nativePSHome, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "The admitted native Windows PowerShell home differs"
+}
+$env:PSModulePath = [IO.Path]::Combine($nativePSHome, "Modules")
+$utilityBase = [IO.Path]::Combine($nativePSHome, "Modules", "Microsoft.PowerShell.Utility")
+$utilityManifest = [IO.Path]::Combine($utilityBase, "Microsoft.PowerShell.Utility.psd1")
+$utilityScript = [IO.Path]::Combine($utilityBase, "Microsoft.PowerShell.Utility.psm1")
+$utilityPins = @{
+    $utilityManifest = "c09df190addc67f7c6c38e7ea1dca719fd87807107f688c3f60ed8816e1c48a6"
+    $utilityScript = "f9232f3de3c94dd03caf40f54b22876c9d810c657c41e54ab2d10469b45f26b5"
+}
+foreach ($utilityPath in $utilityPins.Keys) {
+    if (-not [IO.File]::Exists($utilityPath) -or
+        ([IO.File]::GetAttributes($utilityPath) -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "The pinned native Utility module file is missing or redirected"
+    }
+    $utilityHasher = [Security.Cryptography.SHA256]::Create()
+    try { $utilityDigest = [BitConverter]::ToString($utilityHasher.ComputeHash([IO.File]::ReadAllBytes($utilityPath))).Replace("-", "").ToLowerInvariant() }
+    finally { $utilityHasher.Dispose() }
+    if ($utilityDigest -cne $utilityPins[$utilityPath]) { throw "The native Utility module bytes changed" }
+}
+$utilityModules = @(Import-Module -Name $utilityManifest -Force -PassThru -ErrorAction Stop)
+if ($utilityModules.Count -ne 1 -or $utilityModules[0].Name -cne "Microsoft.PowerShell.Utility" -or
+    $utilityModules[0].Version -ne [Version]"3.1.0.0" -or
+    @($utilityManifest, $utilityScript) -inotcontains $utilityModules[0].Path) {
+    throw "The explicitly imported native Utility manifest differs"
+}
+$hashCommand = Get-Command -Name Get-FileHash -CommandType Function -ErrorAction Stop
+if ($hashCommand.ModuleName -cne "Microsoft.PowerShell.Utility" -or
+    @($utilityManifest, $utilityScript) -inotcontains $hashCommand.Module.Path -or
+    -not [string]::Equals($hashCommand.ScriptBlock.File, $utilityScript, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Get-FileHash did not resolve to the pinned native Utility module"
+}
+# No AST rewrite, source rewrite, execution-policy override, or ExitException catch.
+# Original source-after receiving belongs to the caller after native/IO closure.
+& $sourceBlock @forward
