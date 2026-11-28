@@ -11,9 +11,10 @@
 5. [Native failure paths](#native-failure-paths)
 6. [Original-process observations](#original-process-observations)
 7. [Evidence and negative controls](#evidence-and-negative-controls)
-8. [Reproduction](#reproduction)
-9. [Remaining gates](#remaining-gates)
-10. [Decision and sources](#decision-and-sources)
+8. [Console startup followup — 25 November 2026](#console-startup-followup--25-november-2026)
+9. [Reproduction](#reproduction)
+10. [Remaining gates](#remaining-gates)
+11. [Decision and sources](#decision-and-sources)
 
 ## Process and settlement contract
 
@@ -181,6 +182,47 @@ The initial stdio-ignoring stub compiled and failed eight behavioral cases. Temp
 **Handle-count qualification:** a first missing-image failure showed a one-time count rise on the preexisting no-stdio route too. In a fresh diagnostic, the sequence was `66, 74, 74, 74, 74, 74, 74`; the stdio route then stayed at 74 for all six failures. The exact process-global allocation source was not identified. The final failure test verifies source preservation on the first attempt and stable repeated-failure counts after that attempt. It does **not** claim first failure allocates no process-global resources.
 
 `clippy --all-targets -- -D warnings` and formatting checks passed. These are actual scenario results, not proof over all schedules, resource-exhaustion states, native APIs or operating systems. No performance comparison or speedup is claimed.
+
+## Console startup followup — 25 November 2026
+
+The console policy from [#625 at `a6815e62fa3159a766fb357fa483e9ca5e6b8990`](https://github.com/applicate2628/mcp-local-hub/commit/a6815e62fa3159a766fb357fa483e9ca5e6b8990) is now carried into the native identity branch's existing creation path. The tested runtime basis is #644 commit `1cf5754b81c850a3569be269642b49605895eeb2` plus the four file postimages in Table 7. These runs preceded this documentation addition; they are qualification of the pinned runtime inputs, not a claim that a later publication commit was executed.
+
+The creator adds `STARTF_USESHOWWINDOW` with a hidden show state to its original startup information. The existing suspended process, at-create Job, admission, identity queries and borrowed streams keep their owners and interfaces. Two additional features of the existing pinned `windows-sys` dependency expose console/window observations; no dependency version or lockfile changes.
+
+The new `background_startup_hides_two_later_console_allocations` case receives the original owner's completed result and checks the child-reported startup flags, original process identity and two later console allocation/free cycles. Its existing three-second deadline remains unchanged. Rust 1.100's Clippy rejected the donor decoder's `chunks_exact(5)`; the test-only followup uses `as_chunks::<5>().0`. The preceding 14-field assertion leaves exactly two five-field records, so the change preserves the oracle without suppressing a warning or changing production behavior.
+
+**Table 7. Exact runtime postimages received by the followup.**
+
+| File in this crate | SHA-256 |
+|---|---|
+| `Cargo.toml` | `6825aaf98858d1eab0c00c0c0717c49f5eea77bdab785704897bedca7cba7cce` |
+| `src/bin/owner_child.rs` | `7fc460b9e0b0f3318ae7985a0e93ee46099e72dc1a5c3f21a7f8d02d6616d869` |
+| `src/windows.rs` | `527a626d4cb641d8fbce812759a58dca53b535b515d4dc70c5d8c728022e5f15` |
+| `tests/stdio.rs` | `f983ad00cc24a5d4ff2f874893721fadc70207bee166a6ef20e48e458ca3a275` |
+
+The source transfer patch is `b01fae2ff9efbf1a951ffb96570edb46a316b464f08e9ca7ce2486c96f95be2c`; its test-only Clippy followup is `4c68b111e7b8e93a61ea0481d4d10589b41ea71d52480df709d45e02e4b683cb`. The import adaptation preserves this branch's identity/query imports and changes only the four native files listed above. The latter followup changes only the final `stdio.rs` digest from the first attempt.
+
+**Table 8. Distinct original runs; failures remain part of the result.**
+
+| Run | Command/assertion result | Original owner result |
+|---|---|---|
+| `p03-pr644-native-1` | Rust/Cargo version, locked metadata and formatting passed. Clippy failed with exit 101 for `chunks_exact_to_as_chunks` under the existing `-D warnings`. Native tests did not run. | CLOSED **FAIL**; all six commands physically received. Parent elapsed 15.632193 s. |
+| `p03-pr644-native-2` | After the one-line decoder correction, formatting and Clippy passed. Native debug reported 77 passed, zero failed/ignored/filtered, and Cargo exited 0. The build reported 10.74 s for its test profile. | CLOSED **FAIL**: the outer Job required termination after the root's exit. Work elapsed 20.818145 s; command settlement elapsed 30.581454 s; parent elapsed 32.005905 s. Original active-zero, handles and both output streams were then received. Successful assertions did not make this an accepted owner result. |
+| `p03-pr644-native-3` | The same Cargo command against the already compiled target reported 77 passed, zero failed/ignored/filtered. The cached test profile reported 0.01 s. The new two-console case passed. | CLOSED **PASS** for this cached native debug execution: Cargo 0, original root reaped, active-zero and handles closed, both output readers reached EOF and joined, and `job_terminated=false`. Command elapsed 9.324452 s; parent elapsed 10.271927 s. |
+
+The 77 checks comprise 30 unit, 10 launch-context, 17 lifecycle, five creator-crash, 12 stdio and three compile-fail documentation checks. The second and third runs used identical Cargo argv and identical 305 recorded input hashes, including 13 source files. The first run had 303 input hashes; the two added inputs are the decoder followup patch and its DATA record. All 305 inputs of the second and third runs still matched at independent readback. The third run used fresh fixture, temporary and private profile directories with the same target cache and pinned MSVC toolchain: `rustc 1.100.0 (0ef1bc386 2026-11-09)`, `cargo 1.100.0 (3acc79c0c 2026-11-05)`. The 360-second native command bound and ten-second cleanup bound were unchanged.
+
+The original second-run receipt does not identify the remaining member or establish its cause. A build-side descendant is a hypothesis, not an attribution to a particular process, console host, linker service or operating-system component. The third run establishes its own cached execution result; it does not erase the second run or prove that a fresh compile-and-test workflow always settles without intervention.
+
+**Table 9. Original receipt digests.**
+
+| Run | Controller receipt SHA-256 | Root receiving SHA-256 |
+|---|---|---|
+| `p03-pr644-native-1` | `9bc0b7633331183a7dde9f0eb5d360d3a1b914f801c9b4e0c7ac9632a9b82546` | `54d94629cab7772557ff05ac78b204adf6a65b5462e17f4515aafc48d291ddbd` |
+| `p03-pr644-native-2` | `38612019a45493e94bf59f16f232e8a17368725c81657938bd97c59fd0933f8a` | `109de46bb4cabe7e51fbfb87154f28fafe8c9f6128cfb7f8230fb5f5df88815c` |
+| `p03-pr644-native-3` | `cfea832ddeed1618aed63b90e16d90aacf6add9bfd87cc318ad4c385b63fed03` | `69d64da77845c9879de4c883c0a3fbace7969290f7da1cb49e97b1b792d16aa3` |
+
+This followup has no new native release-profile, FFI/Go caller, installed Product, full Hub gate, non-Windows or broader console qualification. The historical reports above keep their own exact source and scope. #644 remains the parent owner of these four native files. Existing #631 must incorporate the exact published parent result while preserving its unique ABI/FFI files, then qualify its own newly built DLL/child and Go callers; this native result does not supply that foreign-call qualification.
 
 ## Reproduction
 
