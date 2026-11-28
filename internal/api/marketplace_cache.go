@@ -260,8 +260,16 @@ func readMarketplaceCache() (*marketplaceCacheFile, error) {
 		return nil, fmt.Errorf("parse cache: %w", err)
 	}
 	if !marketplaceSchemaVersionAccepted(cf.SchemaVersion) {
-		return nil, fmt.Errorf("validate cache schema_version %q: this build only accepts %q or %q",
-			cf.SchemaVersion, MarketplaceCatalogSchemaVersion, MarketplaceCatalogSchemaVersionV2)
+		return nil, fmt.Errorf("validate cache schema_version %q: this build only accepts %q, %q, or %q",
+			cf.SchemaVersion, MarketplaceCatalogSchemaVersion, MarketplaceCatalogSchemaVersionV2, MarketplaceCatalogSchemaVersionV3)
+	}
+	// The value struct matches marketplaceCacheFile.Catalog, including the way
+	// duplicate catalog objects merge into it.
+	var managedPresence struct {
+		Catalog managedRecipeCatalogPresence `json:"catalog"`
+	}
+	if err := json.Unmarshal(raw, &managedPresence); err != nil {
+		return nil, fmt.Errorf("validate cache catalog: observe managed recipe members: %w", err)
 	}
 	// Extract the nested `catalog` sub-object's raw bytes so the forward-compat
 	// gate can reject on raw KEY PRESENCE (codex r7 P2) even on the cache path —
@@ -280,7 +288,7 @@ func readMarketplaceCache() (*marketplaceCacheFile, error) {
 	if err != nil {
 		return nil, fmt.Errorf("validate cache catalog: %w", err)
 	}
-	if err := validateMarketplaceCatalog(&cf.Catalog, presence, docsOnlyPresent); err != nil {
+	if err := validateMarketplaceCatalog(&cf.Catalog, presence, docsOnlyPresent, managedPresence.Catalog); err != nil {
 		return nil, fmt.Errorf("validate cache catalog: %w", err)
 	}
 	if cf.SourceURL != "" {

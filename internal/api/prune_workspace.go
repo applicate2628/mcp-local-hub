@@ -1,40 +1,6 @@
-// internal/api/prune_workspace.go
-//
-// PruneWorkspace — the shared two-phase (LSP + serena) workspace teardown
-// owner. Phase 1 of the workspace-daemon auto-prune feature (auto-prune the
-// structural cases; no new persisted state).
-//
-// Before this file the two-phase composition lived ONLY in the CLI
-// `runWorkspaceUnregister` (internal/cli/workspace_cmd.go). That made the CLI
-// the sole home of the teardown ordering + the paired-descriptor invariants,
-// so the new in-GUI auto-prune sweeper could not reuse it without duplicating
-// the logic. This file LIFTS that composition into one exported owner both the
-// CLI and the sweeper call. The CLI re-points at it so there is a single
-// maintained owner of the teardown ordering (no logic duplication).
-//
-// Ordering invariants preserved EXACTLY from the CLI (do not reorder):
-//   - LSP teardown (unregisterWithManifest) runs BEFORE the serena registry-row
-//     delete — the CLI's two-phase split.
-//   - Within the serena phase, the supervisor-descriptor teardown
-//     (RemoveSerenaSupervisorIntentForWorkspace) runs BEFORE the registry-row
-//     delete (bot r32 P2 teardown-before-delete): on a live-supervisor
-//     reconcile failure the teardown restores the descriptor and returns a
-//     retry-asking error, so the durable registry row that drives the next
-//     retry's paired teardown must outlive a failed teardown.
-//
-// Locking: PruneWorkspace takes NO new locks. The LSP teardown
-// (unregisterWithManifest) and the serena registry delete each acquire their
-// OWN brief registry lock; the serena descriptor teardown fails closed on a
-// wedged supervisor via RemoveSerenaSupervisorIntentForWorkspace. It does NOT
-// take supervisor.lock. This is the same lock posture the CLI uses.
-//
-// Existence tolerance: a backend whose rows are already gone is a no-op success
-// (mirrors the CLI unregister contract). The owner reads the registry once up
-// front to learn which backends actually have rows, so a workspace with only a
-// serena row (or only LSP rows, or nothing at all) prunes cleanly without the
-// "is not registered" hard error unregisterWithManifest raises on an empty LSP
-// set. A pruned workspace re-registers on next open (EnsureLSPRegistered /
-// AutoRegisterSerenaWorkspace) — prune is non-destructive.
+// The workspace-prune API owns purpose admission and coordinates explicit
+// LSP-before-Serena teardown through the shared phase sequencer. Automatic
+// maintenance preserves registrations and saved intent.
 
 package api
 
@@ -44,16 +10,30 @@ import (
 	"path/filepath"
 )
 
+// PrunePurpose distinguishes automatic observation from explicit retirement.
+type PrunePurpose string
+
+const (
+	PrunePurposeAutomatic PrunePurpose = "automatic"
+	PrunePurposeExplicit  PrunePurpose = "explicit"
+)
+
+// PrunePreservedReason describes why a candidate was retained.
+type PrunePreservedReason string
+
+const PrunePreservedAutomatic PrunePreservedReason = "automatic_maintenance"
+
 // PruneReport summarizes what PruneWorkspace removed. It mirrors the
 // UnregisterReport shape (per-backend outcome + warnings) so callers and logs
 // can treat the two surfaces uniformly.
 type PruneReport struct {
-	Workspace     string   `json:"workspace"`
-	WorkspaceKey  string   `json:"workspace_key"`
-	Backend       string   `json:"backend"`            // the requested filter: "lsp" | "serena" | "all"
-	LSPRemoved    []string `json:"lsp_removed"`        // LSP language rows actually torn down
-	SerenaRemoved int      `json:"serena_removed"`     // count of serena (sentinel) rows removed
-	Warnings      []string `json:"warnings,omitempty"` // best-effort failures (descriptor teardown notes, etc.)
+	Workspace       string               `json:"workspace"`
+	WorkspaceKey    string               `json:"workspace_key"`
+	Backend         string               `json:"backend"`        // the requested filter: "lsp" | "serena" | "all"
+	LSPRemoved      []string             `json:"lsp_removed"`    // LSP language rows actually torn down
+	SerenaRemoved   int                  `json:"serena_removed"` // count of serena (sentinel) rows removed
+	PreservedReason PrunePreservedReason `json:"preserved_reason,omitempty"`
+	Warnings        []string             `json:"warnings,omitempty"` // best-effort failures (descriptor teardown notes, etc.)
 }
 
 // PruneWorkspaceTeardown carries the two teardown closures the two-phase
@@ -103,7 +83,8 @@ type PruneSerenaDeleteResult struct {
 	ReleaseErr    error
 }
 
-// PruneWorkspace tears down a workspace's daemon rows in the SAME order the CLI
+// PruneWorkspace preserves automatic candidates or tears down an explicitly
+// selected workspace in the SAME order the CLI
 // `mcphub workspace unregister` uses, composing the LSP and serena teardown
 // owners. It is the shared owner the CLI and the GUI auto-prune sweeper both
 // call.
@@ -118,7 +99,12 @@ type PruneSerenaDeleteResult struct {
 // CanonicalWorkspacePathForCleanup so a deleted/moved workspace still prunes.
 //
 // Existence-tolerant: a backend with no matching rows is a no-op success.
-func (a *API) PruneWorkspace(workspacePath string, backend string) (*PruneReport, error) {
+func (a *API) PruneWorkspace(workspacePath string, backend string, purpose PrunePurpose) (*PruneReport, error) {
+	switch purpose {
+	case PrunePurposeAutomatic, PrunePurposeExplicit:
+	default:
+		return nil, fmt.Errorf("PruneWorkspace: invalid purpose %q", purpose)
+	}
 	switch backend {
 	case "lsp", "serena", "all":
 	default:
@@ -155,6 +141,10 @@ func (a *API) PruneWorkspace(workspacePath string, backend string) (*PruneReport
 	}
 
 	report := &PruneReport{Workspace: canonical, WorkspaceKey: wsKey, Backend: backend}
+	if purpose == PrunePurposeAutomatic {
+		report.PreservedReason = PrunePreservedAutomatic
+		return report, nil
+	}
 
 	wantLSP := (backend == "lsp" || backend == "all") && hasLSP
 	wantSerena := (backend == "serena" || backend == "all") && hasSerena

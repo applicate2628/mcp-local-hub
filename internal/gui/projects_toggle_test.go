@@ -35,10 +35,11 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/testkit"
 )
 
 func TestProjectsToggleRegistrationErrorUsesFixedProjector(t *testing.T) {
-	const rawSentinel = `D:\secret\toggle --password=hunter2`
+	const rawSentinel = `synthetic registration fixture envelope: private details include GUI_TOGGLE_FIXTURE_DETAIL and additional opaque context`
 	root := t.TempDir()
 	server := NewServer(Config{})
 	originalRegister := projectsToggleRegister
@@ -54,7 +55,7 @@ func TestProjectsToggleRegistrationErrorUsesFixedProjector(t *testing.T) {
 		t.Fatalf("status=%d want=500 body=%s", recorder.Code, recorder.Body.String())
 	}
 	wire := recorder.Body.String()
-	if strings.Contains(wire, rawSentinel) || strings.Contains(wire, "hunter2") {
+	if strings.Contains(wire, rawSentinel) || strings.Contains(wire, "GUI_TOGGLE_FIXTURE_DETAIL") {
 		t.Fatalf("wire response leaked registration cause: %s", wire)
 	}
 	if !strings.Contains(wire, registrationUnknownErrorPublic) {
@@ -172,13 +173,13 @@ func TestProjectsToggle_ObjectMember_EnableRequiresValue(t *testing.T) {
 	root := t.TempDir()
 	s := NewServer(Config{})
 
-	before := snapshotTree(t, root)
+	before := testkit.SnapshotTree(t, root)
 	body := `{"root":"` + jsonEscPath(root) + `","client":"cursor","scope":"project-object-member","server":"beta","enable":true}`
 	rec := postToggle(t, s, body)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d, want 400; body=%s", rec.Code, rec.Body.String())
 	}
-	after := snapshotTree(t, root)
+	after := testkit.SnapshotTree(t, root)
 	if len(after) != len(before) {
 		t.Errorf("invalid enable wrote files: before=%v after=%v", before, after)
 	}
@@ -320,7 +321,7 @@ func TestProjectsToggle_Unsupported(t *testing.T) {
 	root := t.TempDir()
 	s := NewServer(Config{})
 
-	before := snapshotTree(t, root)
+	before := testkit.SnapshotTree(t, root)
 	// claude-local-membership is claude-only; cursor here → unsupported.
 	body := `{"root":"` + jsonEscPath(root) + `","client":"cursor","scope":"claude-local-membership","server":"x","enable":true}`
 	rec := postToggle(t, s, body)
@@ -332,7 +333,7 @@ func TestProjectsToggle_Unsupported(t *testing.T) {
 	if env.Code != "PROJECT_TOGGLE_UNSUPPORTED" {
 		t.Errorf("code=%q, want PROJECT_TOGGLE_UNSUPPORTED", env.Code)
 	}
-	after := snapshotTree(t, root)
+	after := testkit.SnapshotTree(t, root)
 	if len(after) != len(before) {
 		t.Errorf("unsupported toggle wrote files: %v", after)
 	}
@@ -488,13 +489,13 @@ func TestProjectsToggle_MissingServer(t *testing.T) {
 	t.Cleanup(api.SetClientWriteFallbackForTest())
 	root := t.TempDir()
 	s := NewServer(Config{})
-	before := snapshotTree(t, root)
+	before := testkit.SnapshotTree(t, root)
 	body := `{"root":"` + jsonEscPath(root) + `","client":"cursor","scope":"project-object-member","enable":true,"value":{}}`
 	rec := postToggle(t, s, body)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d, want 400; body=%s", rec.Code, rec.Body.String())
 	}
-	if after := snapshotTree(t, root); len(after) != len(before) {
+	if after := testkit.SnapshotTree(t, root); len(after) != len(before) {
 		t.Errorf("missing-server toggle wrote files: %v", after)
 	}
 }

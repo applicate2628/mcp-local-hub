@@ -997,6 +997,9 @@ func prepareScopedSupervisorIntentRemoval(prior, desired *SupervisorIntentFile, 
 		return nil, false, false, errors.New("SERENA_PREPARED_INTENT_MISSING")
 	}
 	proposal := cloneSupervisorIntentFile(desired)
+	if err := preserveSupervisorBackendRunHold(prior.BackendRunHold, proposal); err != nil {
+		return nil, false, false, err
+	}
 	// This publisher never owns consumer retirement. Keep every current,
 	// pending and rollback row byte-equivalent; their ticket owner settles them.
 	if !reflect.DeepEqual(prior.SerenaPreparedConsumers, proposal.SerenaPreparedConsumers) {
@@ -1010,6 +1013,7 @@ func prepareScopedSupervisorIntentRemoval(prior, desired *SupervisorIntentFile, 
 	if remove && proposal.SerenaPreparedConsumers != nil && len(proposal.SerenaPreparedConsumers.Bindings) != 0 {
 		return nil, false, false, errors.New("SERENA_PREPARED_PRIOR_CONSUMER_PENDING")
 	}
+	remove = remove && proposal.BackendRunHold.IsZero()
 	observed := remove && (prior.Version == 2 || proposal.Version == 2)
 	before := make(map[string]SupervisorDaemon, len(prior.Daemons))
 	after := make(map[string]SupervisorDaemon, len(proposal.Daemons))
@@ -1071,6 +1075,7 @@ func cloneSupervisorIntentFile(in *SupervisorIntentFile) *SupervisorIntentFile {
 		return &SupervisorIntentFile{Version: 1}
 	}
 	out := *in
+	out.BackendRunHold = in.BackendRunHold.clone()
 	out.SerenaPreparedConsumers = clonePreparedSerenaConsumers(in.SerenaPreparedConsumers)
 	out.Daemons = slices.Clone(in.Daemons)
 	for i := range out.Daemons {
