@@ -33,13 +33,13 @@
       "name": "Fetch MCP server",
       "summary": "Fetch arbitrary HTTP URLs and return content.",
       "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch",
-      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/c799c8552b0f27b7a33a7b9233773da144dddcf5/src/fetch/README.md",
+      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/b502fd9fc711de7285977396db3b8a732d1c9f64/src/fetch/README.md",
       "transport": "stdio",
       "command": "uvx",
       "args": [
         "--with",
         "mcp==2.3.0",
-        "mcp-server-fetch@2026.11.18"
+        "mcp-server-fetch@2026.11.27"
       ],
       "env": {},
       "categories": ["http", "io"],
