@@ -1,0 +1,130 @@
+{
+    "utc":  "2026-11-14T20:31:01.8182135Z",
+    "quiescence":  "All owned runners returned; subsequent process-path observation found zero executables under this task root. No test/build restarted afterwards.",
+    "verifiedCopies":  [
+                           {
+                               "copy":  "copies-native-identity-final/any-job",
+                               "manifest":  "history.zip:native-identity-final/any-job-hashes.json",
+                               "files":  12
+                           },
+                           {
+                               "copy":  "copies-native-identity-final/failed-wait",
+                               "manifest":  "history.zip:native-identity-final/failed-wait-hashes.json",
+                               "files":  12
+                           },
+                           {
+                               "copy":  "copies-native-identity-final/recapture",
+                               "manifest":  "history.zip:native-identity-final/recapture-hashes.json",
+                               "files":  12
+                           },
+                           {
+                               "copy":  "copies-native-identity-qualified/any-job",
+                               "manifest":  "history.zip:native-identity-qualified/any-job-hashes.json",
+                               "files":  12
+                           },
+                           {
+                               "copy":  "copies-native-identity-qualified/failed-wait",
+                               "manifest":  "history.zip:native-identity-qualified/failed-wait-hashes.json",
+                               "files":  12
+                           },
+                           {
+                               "copy":  "copies-native-identity-qualified/native-capture",
+                               "manifest":  "history.zip:native-identity-qualified/native-capture-hashes.json",
+                               "files":  12
+                           },
+                           {
+                               "copy":  "copies-native-identity-qualified/ownerless-capture",
+                               "manifest":  "history.zip:native-identity-qualified/ownerless-capture-hashes.json",
+                               "files":  12
+                           },
+                           {
+                               "copy":  "copies-native-identity-qualified/recapture",
+                               "manifest":  "history.zip:native-identity-qualified/recapture-hashes.json",
+                               "files":  12
+                           },
+                           {
+                               "copy":  "copies-native-identity-qualified/signaled-alive",
+                               "manifest":  "history.zip:native-identity-qualified/signaled-alive-hashes.json",
+                               "files":  12
+                           },
+                           {
+                               "copy":  "copies-native-identity-reviewed/any-job",
+                               "manifest":  "history.zip:native-identity-reviewed/any-job-hashes.json",
+                               "files":  12
+                           },
+                           {
+                               "copy":  "copies-native-identity-reviewed/failed-wait",
+                               "manifest":  "history.zip:native-identity-reviewed/failed-wait-hashes.json",
+                               "files":  12
+                           },
+                           {
+                               "copy":  "copies-native-identity-reviewed/native-capture",
+                               "manifest":  "history.zip:native-identity-reviewed/native-capture-hashes.json",
+                               "files":  12
+                           },
+                           {
+                               "copy":  "copies-native-identity-reviewed/ownerless-capture",
+                               "manifest":  "history.zip:native-identity-reviewed/ownerless-capture-hashes.json",
+                               "files":  12
+                           },
+                           {
+                               "copy":  "copies-native-identity-reviewed/recapture",
+                               "manifest":  "history.zip:native-identity-reviewed/recapture-hashes.json",
+                               "files":  12
+                           },
+                           {
+                               "copy":  "copies-native-identity-reviewed/signaled-alive",
+                               "manifest":  "history.zip:native-identity-reviewed/signaled-alive-hashes.json",
+                               "files":  12
+                           },
+                           {
+                               "copy":  "consumer-frozen-ffi-consumer",
+                               "manifest":  "history.zip:frozen-ffi-consumer/source-hashes.json",
+                               "files":  35
+                           }
+                       ],
+    "moves":  [
+                  {
+                      "source":  "copies-native-identity-final",
+                      "destination":  "approved-trash/mcphub-rust-identity-20261114/copies-native-identity-final",
+                      "confirmed":  true
+                  },
+                  {
+                      "source":  "copies-native-identity-qualified",
+                      "destination":  "approved-trash/mcphub-rust-identity-20261114/copies-native-identity-qualified",
+                      "confirmed":  true
+                  },
+                  {
+                      "source":  "copies-native-identity-reviewed",
+                      "destination":  "approved-trash/mcphub-rust-identity-20261114/copies-native-identity-reviewed",
+                      "confirmed":  true
+                  },
+                  {
+                      "source":  "consumer-frozen-ffi-consumer",
+                      "destination":  "approved-trash/mcphub-rust-identity-20261114/consumer-frozen-ffi-consumer",
+                      "confirmed":  true
+                  },
+                  {
+                      "source":  "target-controls",
+                      "destination":  "approved-trash/mcphub-rust-identity-20261114/target-controls",
+                      "confirmed":  true
+                  },
+                  {
+                      "source":  "target-consumer",
+                      "destination":  "approved-trash/mcphub-rust-identity-20261114/target-consumer",
+                      "confirmed":  true
+                  },
+                  {
+                      "source":  "publication-evidence-v1",
+                      "destination":  "approved-trash/mcphub-rust-identity-20261114/publication-evidence-v1",
+                      "confirmed":  true
+                  }
+              ],
+    "preserved":  [
+                      "source and commits",
+                      "normal native target/cache",
+                      "original evidence and fixture observations",
+                      "verified archive and reproduction scripts"
+                  ],
+    "trashEmptied":  false
+}

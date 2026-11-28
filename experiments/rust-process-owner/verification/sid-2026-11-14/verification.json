@@ -1,0 +1,937 @@
+{
+  "schemaVersion": 1,
+  "scope": "Native Windows TokenUser observation and unchanged ABI1 consumer compatibility; no foreign SID export or product admission",
+  "nativeCodeCommit": "3ef24b3473900384d8fc34204d4555a9bb30a5db",
+  "nativeRun": {
+    "environment": {
+      "sourceGitHead": "8e80fad662ef20bd5cbc2d1ca4808a9494d6f30e",
+      "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+      "cargo": "cargo 1.99.1 (5f94df478 2026-08-27)",
+      "system": "Microsoft Windows NT 10.0.26100.0",
+      "architecture": "AMD64",
+      "sourceIdentity": "git head plus exact source hashes; working overlay is permitted and explicit"
+    },
+    "sourceIdentityNote": "Run started at 8e80fad6 with explicit working overlay; all 13 recorded source/manifests hashes equal the subsequent native code commit 3ef24b34. Documentation changes are outside this manifest.",
+    "runnerPath": "run.ps1",
+    "runnerSha256": "f944da1db0437281136cc354edad12781ea2cfddca1484119400b6499bb1fc4f",
+    "sourceHashes": [
+      {
+        "path": "Cargo.lock",
+        "sha256": "4198fa4fdbc041142493b86b1183f3446b1e5c24236cfab1020a888bbb46c63c"
+      },
+      {
+        "path": "Cargo.toml",
+        "sha256": "24fab44254b52380042697c7050aa24905d1d1e7ea3f8bcbeef49bd81637169b"
+      },
+      {
+        "path": "src/bin/owner_child.rs",
+        "sha256": "0a9931d3e3a441e068b093036b2973c8f616884b83932a0d1b10349bbdf47b24"
+      },
+      {
+        "path": "src/bin/owner_crash_fixture.rs",
+        "sha256": "12b12ec814778c6de86eb7cf959c4d5f24f94bad785437f878862e4bb073323e"
+      },
+      {
+        "path": "src/launch_context.rs",
+        "sha256": "be4874f76d694b9cada9aceb31c3e77954cdbff4b1af408b30cce60f5fe4c207"
+      },
+      {
+        "path": "src/lib.rs",
+        "sha256": "2866937f43f9ae35bb6b7743e0d1c92a4b669fad009baf9604e8666d0a9f855f"
+      },
+      {
+        "path": "src/native_failure_tests.rs",
+        "sha256": "4c2e03f67491c289e6b74f4a8ec959a5dccf42eafd8468fd599225056d6cc83c"
+      },
+      {
+        "path": "src/token_user.rs",
+        "sha256": "e42eb6063b51e7b8e7284c460548b3f182ff4f9097880e379370e989cb44f839"
+      },
+      {
+        "path": "src/windows.rs",
+        "sha256": "b7279ff2ceea4be02b10a46bb7217098ec0b1eff6e0d348c10ac1e9fc3749a41"
+      },
+      {
+        "path": "tests/launch_context.rs",
+        "sha256": "c612f64485f5d40aedc89bd08c2fc562d0d038e4efd50d8241178db68ec1e1f0"
+      },
+      {
+        "path": "tests/lifecycle.rs",
+        "sha256": "d1e1e65e4021a219aa434da880a8e0548df5209a414fe0c43bb523fa6e19d7a2"
+      },
+      {
+        "path": "tests/owner_crash.rs",
+        "sha256": "0e37033ec3845a6fd0d881b4ab5ee12edc60a4a011406e1d9b189ce6d386cd8e"
+      },
+      {
+        "path": "tests/stdio.rs",
+        "sha256": "7470d645cb058d84103ae1131c63557e89f17a13a9a58f166cbb75ef7b7c636d"
+      }
+    ],
+    "steps": [
+      {
+        "name": "fmt",
+        "command": [
+          "cargo",
+          "fmt",
+          "--all",
+          "--",
+          "--check"
+        ],
+        "expected": 0,
+        "actual": 0,
+        "semanticOracle": "",
+        "failurePattern": "",
+        "oracleMatched": true,
+        "startedUtc": "2026-11-14T21:01:17.9348872Z",
+        "finishedUtc": "2026-11-14T21:01:18.1111516Z"
+      },
+      {
+        "name": "debug",
+        "command": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--",
+          "--test-threads=1"
+        ],
+        "expected": 0,
+        "actual": 0,
+        "semanticOracle": "",
+        "failurePattern": "",
+        "oracleMatched": true,
+        "startedUtc": "2026-11-14T21:01:18.1231892Z",
+        "finishedUtc": "2026-11-14T21:01:21.7245346Z"
+      },
+      {
+        "name": "release",
+        "command": [
+          "cargo",
+          "test",
+          "--release",
+          "--offline",
+          "--locked",
+          "--",
+          "--test-threads=1"
+        ],
+        "expected": 0,
+        "actual": 0,
+        "semanticOracle": "",
+        "failurePattern": "",
+        "oracleMatched": true,
+        "startedUtc": "2026-11-14T21:01:21.7280392Z",
+        "finishedUtc": "2026-11-14T21:01:26.6271475Z"
+      },
+      {
+        "name": "clippy",
+        "command": [
+          "cargo",
+          "clippy",
+          "--offline",
+          "--locked",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "expected": 0,
+        "actual": 0,
+        "semanticOracle": "",
+        "failurePattern": "",
+        "oracleMatched": true,
+        "startedUtc": "2026-11-14T21:01:26.6316600Z",
+        "finishedUtc": "2026-11-14T21:01:27.1427472Z"
+      },
+      {
+        "name": "ambient-process",
+        "command": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--lib",
+          "token_user_open_failure_uses_original_process_and_keeps_owner",
+          "--",
+          "--test-threads=1"
+        ],
+        "expected": 101,
+        "actual": 101,
+        "semanticOracle": "test .*token_user_open_failure_uses_original_process_and_keeps_owner .*FAILED",
+        "failurePattern": "token lookup ignored retained process handle",
+        "oracleMatched": true,
+        "startedUtc": "2026-11-14T21:01:27.2160813Z",
+        "finishedUtc": "2026-11-14T21:01:28.8441421Z"
+      },
+      {
+        "name": "ignore-close",
+        "command": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--lib",
+          "token_user_protected_close_preserves_both_outcomes",
+          "--",
+          "--test-threads=1"
+        ],
+        "expected": 101,
+        "actual": 101,
+        "semanticOracle": "test .*token_user_protected_close_preserves_both_outcomes .*FAILED",
+        "failurePattern": "protected token close became success or lost its receipt",
+        "oracleMatched": true,
+        "startedUtc": "2026-11-14T21:01:28.8725557Z",
+        "finishedUtc": "2026-11-14T21:01:29.7063608Z"
+      },
+      {
+        "name": "erase-query-error",
+        "command": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--lib",
+          "token_user_protected_close_preserves_both_outcomes",
+          "--",
+          "--test-threads=1"
+        ],
+        "expected": 101,
+        "actual": 101,
+        "semanticOracle": "test .*token_user_protected_close_preserves_both_outcomes .*FAILED",
+        "failurePattern": "token cleanup erased the query error",
+        "oracleMatched": true,
+        "startedUtc": "2026-11-14T21:01:29.7304133Z",
+        "finishedUtc": "2026-11-14T21:01:30.4418088Z"
+      },
+      {
+        "name": "wrong-close-code",
+        "command": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--lib",
+          "token_user_protected_close_preserves_both_outcomes",
+          "--",
+          "--test-threads=1"
+        ],
+        "expected": 101,
+        "actual": 101,
+        "semanticOracle": "test .*token_user_protected_close_preserves_both_outcomes .*FAILED",
+        "failurePattern": "token close changed native error",
+        "oracleMatched": true,
+        "startedUtc": "2026-11-14T21:01:30.4710918Z",
+        "finishedUtc": "2026-11-14T21:01:31.2426372Z"
+      },
+      {
+        "name": "ignore-returned-length",
+        "command": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--lib",
+          "rejects_short_headers_and_lengths_outside_returned_storage",
+          "--",
+          "--test-threads=1"
+        ],
+        "expected": 101,
+        "actual": 101,
+        "semanticOracle": "test .*rejects_short_headers_and_lengths_outside_returned_storage .*FAILED",
+        "failurePattern": "called .*unwrap_err.* on an .*Ok.* value",
+        "oracleMatched": true,
+        "startedUtc": "2026-11-14T21:01:31.2677002Z",
+        "finishedUtc": "2026-11-14T21:01:31.9734029Z"
+      },
+      {
+        "name": "accept-invalid-sid",
+        "command": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--lib",
+          "rejects_invalid_revision_excessive_count_and_truncated_subauthorities",
+          "--",
+          "--test-threads=1"
+        ],
+        "expected": 101,
+        "actual": 101,
+        "semanticOracle": "test .*rejects_invalid_revision_excessive_count_and_truncated_subauthorities .*FAILED",
+        "failurePattern": "called .*unwrap_err.* on an .*Ok.* value",
+        "oracleMatched": true,
+        "startedUtc": "2026-11-14T21:01:31.9985149Z",
+        "finishedUtc": "2026-11-14T21:01:32.6842738Z"
+      }
+    ],
+    "debugCounts": {
+      "unit": 28,
+      "integration": 41,
+      "doctest": 2,
+      "total": 71,
+      "failed": 0,
+      "ignored": 0,
+      "filtered": 0
+    },
+    "releaseCounts": {
+      "unit": 28,
+      "integration": 41,
+      "doctest": 2,
+      "total": 71,
+      "failed": 0,
+      "ignored": 0,
+      "filtered": 0
+    },
+    "negativeControls": [
+      {
+        "test": "token_user_open_failure_uses_original_process_and_keeps_owner",
+        "before": "process.as_raw_handle()",
+        "name": "ambient-process",
+        "failure": "token lookup ignored retained process handle",
+        "after": "windows_sys::Win32::System::Threading::GetCurrentProcess()",
+        "sourceHashes": [
+          {
+            "path": "Cargo.lock",
+            "sha256": "4198fa4fdbc041142493b86b1183f3446b1e5c24236cfab1020a888bbb46c63c"
+          },
+          {
+            "path": "Cargo.toml",
+            "sha256": "24fab44254b52380042697c7050aa24905d1d1e7ea3f8bcbeef49bd81637169b"
+          },
+          {
+            "path": "src/bin/owner_child.rs",
+            "sha256": "0a9931d3e3a441e068b093036b2973c8f616884b83932a0d1b10349bbdf47b24"
+          },
+          {
+            "path": "src/bin/owner_crash_fixture.rs",
+            "sha256": "12b12ec814778c6de86eb7cf959c4d5f24f94bad785437f878862e4bb073323e"
+          },
+          {
+            "path": "src/launch_context.rs",
+            "sha256": "be4874f76d694b9cada9aceb31c3e77954cdbff4b1af408b30cce60f5fe4c207"
+          },
+          {
+            "path": "src/lib.rs",
+            "sha256": "2866937f43f9ae35bb6b7743e0d1c92a4b669fad009baf9604e8666d0a9f855f"
+          },
+          {
+            "path": "src/native_failure_tests.rs",
+            "sha256": "4c2e03f67491c289e6b74f4a8ec959a5dccf42eafd8468fd599225056d6cc83c"
+          },
+          {
+            "path": "src/token_user.rs",
+            "sha256": "437388f47576cd0995f70755bab55591a942da9b8939803a251a8e752b2a68e6"
+          },
+          {
+            "path": "src/windows.rs",
+            "sha256": "b7279ff2ceea4be02b10a46bb7217098ec0b1eff6e0d348c10ac1e9fc3749a41"
+          },
+          {
+            "path": "tests/launch_context.rs",
+            "sha256": "c612f64485f5d40aedc89bd08c2fc562d0d038e4efd50d8241178db68ec1e1f0"
+          },
+          {
+            "path": "tests/lifecycle.rs",
+            "sha256": "d1e1e65e4021a219aa434da880a8e0548df5209a414fe0c43bb523fa6e19d7a2"
+          },
+          {
+            "path": "tests/owner_crash.rs",
+            "sha256": "0e37033ec3845a6fd0d881b4ab5ee12edc60a4a011406e1d9b189ce6d386cd8e"
+          },
+          {
+            "path": "tests/stdio.rs",
+            "sha256": "7470d645cb058d84103ae1131c63557e89f17a13a9a58f166cbb75ef7b7c636d"
+          }
+        ]
+      },
+      {
+        "test": "token_user_protected_close_preserves_both_outcomes",
+        "before": "CloseHandle(raw_token) } == 0",
+        "name": "ignore-close",
+        "failure": "protected token close became success or lost its receipt",
+        "after": "CloseHandle(raw_token) } == 0 && false",
+        "sourceHashes": [
+          {
+            "path": "Cargo.lock",
+            "sha256": "4198fa4fdbc041142493b86b1183f3446b1e5c24236cfab1020a888bbb46c63c"
+          },
+          {
+            "path": "Cargo.toml",
+            "sha256": "24fab44254b52380042697c7050aa24905d1d1e7ea3f8bcbeef49bd81637169b"
+          },
+          {
+            "path": "src/bin/owner_child.rs",
+            "sha256": "0a9931d3e3a441e068b093036b2973c8f616884b83932a0d1b10349bbdf47b24"
+          },
+          {
+            "path": "src/bin/owner_crash_fixture.rs",
+            "sha256": "12b12ec814778c6de86eb7cf959c4d5f24f94bad785437f878862e4bb073323e"
+          },
+          {
+            "path": "src/launch_context.rs",
+            "sha256": "be4874f76d694b9cada9aceb31c3e77954cdbff4b1af408b30cce60f5fe4c207"
+          },
+          {
+            "path": "src/lib.rs",
+            "sha256": "2866937f43f9ae35bb6b7743e0d1c92a4b669fad009baf9604e8666d0a9f855f"
+          },
+          {
+            "path": "src/native_failure_tests.rs",
+            "sha256": "4c2e03f67491c289e6b74f4a8ec959a5dccf42eafd8468fd599225056d6cc83c"
+          },
+          {
+            "path": "src/token_user.rs",
+            "sha256": "d551fe96ca4da3d3622b142f393ffefb79214b133ffdb46b68d49c698e20ad09"
+          },
+          {
+            "path": "src/windows.rs",
+            "sha256": "b7279ff2ceea4be02b10a46bb7217098ec0b1eff6e0d348c10ac1e9fc3749a41"
+          },
+          {
+            "path": "tests/launch_context.rs",
+            "sha256": "c612f64485f5d40aedc89bd08c2fc562d0d038e4efd50d8241178db68ec1e1f0"
+          },
+          {
+            "path": "tests/lifecycle.rs",
+            "sha256": "d1e1e65e4021a219aa434da880a8e0548df5209a414fe0c43bb523fa6e19d7a2"
+          },
+          {
+            "path": "tests/owner_crash.rs",
+            "sha256": "0e37033ec3845a6fd0d881b4ab5ee12edc60a4a011406e1d9b189ce6d386cd8e"
+          },
+          {
+            "path": "tests/stdio.rs",
+            "sha256": "7470d645cb058d84103ae1131c63557e89f17a13a9a58f166cbb75ef7b7c636d"
+          }
+        ]
+      },
+      {
+        "test": "token_user_protected_close_preserves_both_outcomes",
+        "before": "observation: result.err(),",
+        "name": "erase-query-error",
+        "failure": "token cleanup erased the query error",
+        "after": "observation: None,",
+        "sourceHashes": [
+          {
+            "path": "Cargo.lock",
+            "sha256": "4198fa4fdbc041142493b86b1183f3446b1e5c24236cfab1020a888bbb46c63c"
+          },
+          {
+            "path": "Cargo.toml",
+            "sha256": "24fab44254b52380042697c7050aa24905d1d1e7ea3f8bcbeef49bd81637169b"
+          },
+          {
+            "path": "src/bin/owner_child.rs",
+            "sha256": "0a9931d3e3a441e068b093036b2973c8f616884b83932a0d1b10349bbdf47b24"
+          },
+          {
+            "path": "src/bin/owner_crash_fixture.rs",
+            "sha256": "12b12ec814778c6de86eb7cf959c4d5f24f94bad785437f878862e4bb073323e"
+          },
+          {
+            "path": "src/launch_context.rs",
+            "sha256": "be4874f76d694b9cada9aceb31c3e77954cdbff4b1af408b30cce60f5fe4c207"
+          },
+          {
+            "path": "src/lib.rs",
+            "sha256": "2866937f43f9ae35bb6b7743e0d1c92a4b669fad009baf9604e8666d0a9f855f"
+          },
+          {
+            "path": "src/native_failure_tests.rs",
+            "sha256": "4c2e03f67491c289e6b74f4a8ec959a5dccf42eafd8468fd599225056d6cc83c"
+          },
+          {
+            "path": "src/token_user.rs",
+            "sha256": "747847b74efaa336d80f565974727ba24b519f5f5e6aafa6d867752d99aee396"
+          },
+          {
+            "path": "src/windows.rs",
+            "sha256": "b7279ff2ceea4be02b10a46bb7217098ec0b1eff6e0d348c10ac1e9fc3749a41"
+          },
+          {
+            "path": "tests/launch_context.rs",
+            "sha256": "c612f64485f5d40aedc89bd08c2fc562d0d038e4efd50d8241178db68ec1e1f0"
+          },
+          {
+            "path": "tests/lifecycle.rs",
+            "sha256": "d1e1e65e4021a219aa434da880a8e0548df5209a414fe0c43bb523fa6e19d7a2"
+          },
+          {
+            "path": "tests/owner_crash.rs",
+            "sha256": "0e37033ec3845a6fd0d881b4ab5ee12edc60a4a011406e1d9b189ce6d386cd8e"
+          },
+          {
+            "path": "tests/stdio.rs",
+            "sha256": "7470d645cb058d84103ae1131c63557e89f17a13a9a58f166cbb75ef7b7c636d"
+          }
+        ]
+      },
+      {
+        "test": "token_user_protected_close_preserves_both_outcomes",
+        "before": "let code = unsafe { GetLastError() } as i32;",
+        "name": "wrong-close-code",
+        "failure": "token close changed native error",
+        "after": "let code = unsafe { GetLastError() } as i32 + 1;",
+        "sourceHashes": [
+          {
+            "path": "Cargo.lock",
+            "sha256": "4198fa4fdbc041142493b86b1183f3446b1e5c24236cfab1020a888bbb46c63c"
+          },
+          {
+            "path": "Cargo.toml",
+            "sha256": "24fab44254b52380042697c7050aa24905d1d1e7ea3f8bcbeef49bd81637169b"
+          },
+          {
+            "path": "src/bin/owner_child.rs",
+            "sha256": "0a9931d3e3a441e068b093036b2973c8f616884b83932a0d1b10349bbdf47b24"
+          },
+          {
+            "path": "src/bin/owner_crash_fixture.rs",
+            "sha256": "12b12ec814778c6de86eb7cf959c4d5f24f94bad785437f878862e4bb073323e"
+          },
+          {
+            "path": "src/launch_context.rs",
+            "sha256": "be4874f76d694b9cada9aceb31c3e77954cdbff4b1af408b30cce60f5fe4c207"
+          },
+          {
+            "path": "src/lib.rs",
+            "sha256": "2866937f43f9ae35bb6b7743e0d1c92a4b669fad009baf9604e8666d0a9f855f"
+          },
+          {
+            "path": "src/native_failure_tests.rs",
+            "sha256": "4c2e03f67491c289e6b74f4a8ec959a5dccf42eafd8468fd599225056d6cc83c"
+          },
+          {
+            "path": "src/token_user.rs",
+            "sha256": "a91c1dd5cb87c9299200826d39017226a575c9846e45cbe2dffaa129cc9ad1a5"
+          },
+          {
+            "path": "src/windows.rs",
+            "sha256": "b7279ff2ceea4be02b10a46bb7217098ec0b1eff6e0d348c10ac1e9fc3749a41"
+          },
+          {
+            "path": "tests/launch_context.rs",
+            "sha256": "c612f64485f5d40aedc89bd08c2fc562d0d038e4efd50d8241178db68ec1e1f0"
+          },
+          {
+            "path": "tests/lifecycle.rs",
+            "sha256": "d1e1e65e4021a219aa434da880a8e0548df5209a414fe0c43bb523fa6e19d7a2"
+          },
+          {
+            "path": "tests/owner_crash.rs",
+            "sha256": "0e37033ec3845a6fd0d881b4ab5ee12edc60a4a011406e1d9b189ce6d386cd8e"
+          },
+          {
+            "path": "tests/stdio.rs",
+            "sha256": "7470d645cb058d84103ae1131c63557e89f17a13a9a58f166cbb75ef7b7c636d"
+          }
+        ]
+      },
+      {
+        "test": "rejects_short_headers_and_lengths_outside_returned_storage",
+        "before": "let header_length = size_of::<TOKEN_USER>();",
+        "name": "ignore-returned-length",
+        "failure": "called .*unwrap_err.* on an .*Ok.* value",
+        "after": "let returned = size_of_val(buffer); let header_length = size_of::<TOKEN_USER>();",
+        "sourceHashes": [
+          {
+            "path": "Cargo.lock",
+            "sha256": "4198fa4fdbc041142493b86b1183f3446b1e5c24236cfab1020a888bbb46c63c"
+          },
+          {
+            "path": "Cargo.toml",
+            "sha256": "24fab44254b52380042697c7050aa24905d1d1e7ea3f8bcbeef49bd81637169b"
+          },
+          {
+            "path": "src/bin/owner_child.rs",
+            "sha256": "0a9931d3e3a441e068b093036b2973c8f616884b83932a0d1b10349bbdf47b24"
+          },
+          {
+            "path": "src/bin/owner_crash_fixture.rs",
+            "sha256": "12b12ec814778c6de86eb7cf959c4d5f24f94bad785437f878862e4bb073323e"
+          },
+          {
+            "path": "src/launch_context.rs",
+            "sha256": "be4874f76d694b9cada9aceb31c3e77954cdbff4b1af408b30cce60f5fe4c207"
+          },
+          {
+            "path": "src/lib.rs",
+            "sha256": "2866937f43f9ae35bb6b7743e0d1c92a4b669fad009baf9604e8666d0a9f855f"
+          },
+          {
+            "path": "src/native_failure_tests.rs",
+            "sha256": "4c2e03f67491c289e6b74f4a8ec959a5dccf42eafd8468fd599225056d6cc83c"
+          },
+          {
+            "path": "src/token_user.rs",
+            "sha256": "85e27ad83d60e2890abbaf665715488ca06c52c6d30e6fee6c68b5aa00319bac"
+          },
+          {
+            "path": "src/windows.rs",
+            "sha256": "b7279ff2ceea4be02b10a46bb7217098ec0b1eff6e0d348c10ac1e9fc3749a41"
+          },
+          {
+            "path": "tests/launch_context.rs",
+            "sha256": "c612f64485f5d40aedc89bd08c2fc562d0d038e4efd50d8241178db68ec1e1f0"
+          },
+          {
+            "path": "tests/lifecycle.rs",
+            "sha256": "d1e1e65e4021a219aa434da880a8e0548df5209a414fe0c43bb523fa6e19d7a2"
+          },
+          {
+            "path": "tests/owner_crash.rs",
+            "sha256": "0e37033ec3845a6fd0d881b4ab5ee12edc60a4a011406e1d9b189ce6d386cd8e"
+          },
+          {
+            "path": "tests/stdio.rs",
+            "sha256": "7470d645cb058d84103ae1131c63557e89f17a13a9a58f166cbb75ef7b7c636d"
+          }
+        ]
+      },
+      {
+        "test": "rejects_invalid_revision_excessive_count_and_truncated_subauthorities",
+        "before": "if valid == 0 {",
+        "name": "accept-invalid-sid",
+        "failure": "called .*unwrap_err.* on an .*Ok.* value",
+        "after": "if false {",
+        "sourceHashes": [
+          {
+            "path": "Cargo.lock",
+            "sha256": "4198fa4fdbc041142493b86b1183f3446b1e5c24236cfab1020a888bbb46c63c"
+          },
+          {
+            "path": "Cargo.toml",
+            "sha256": "24fab44254b52380042697c7050aa24905d1d1e7ea3f8bcbeef49bd81637169b"
+          },
+          {
+            "path": "src/bin/owner_child.rs",
+            "sha256": "0a9931d3e3a441e068b093036b2973c8f616884b83932a0d1b10349bbdf47b24"
+          },
+          {
+            "path": "src/bin/owner_crash_fixture.rs",
+            "sha256": "12b12ec814778c6de86eb7cf959c4d5f24f94bad785437f878862e4bb073323e"
+          },
+          {
+            "path": "src/launch_context.rs",
+            "sha256": "be4874f76d694b9cada9aceb31c3e77954cdbff4b1af408b30cce60f5fe4c207"
+          },
+          {
+            "path": "src/lib.rs",
+            "sha256": "2866937f43f9ae35bb6b7743e0d1c92a4b669fad009baf9604e8666d0a9f855f"
+          },
+          {
+            "path": "src/native_failure_tests.rs",
+            "sha256": "4c2e03f67491c289e6b74f4a8ec959a5dccf42eafd8468fd599225056d6cc83c"
+          },
+          {
+            "path": "src/token_user.rs",
+            "sha256": "25367f2cdd85535c77225d270f22dfd9f035c78150ffe8091dd87c1f5ce434f0"
+          },
+          {
+            "path": "src/windows.rs",
+            "sha256": "b7279ff2ceea4be02b10a46bb7217098ec0b1eff6e0d348c10ac1e9fc3749a41"
+          },
+          {
+            "path": "tests/launch_context.rs",
+            "sha256": "c612f64485f5d40aedc89bd08c2fc562d0d038e4efd50d8241178db68ec1e1f0"
+          },
+          {
+            "path": "tests/lifecycle.rs",
+            "sha256": "d1e1e65e4021a219aa434da880a8e0548df5209a414fe0c43bb523fa6e19d7a2"
+          },
+          {
+            "path": "tests/owner_crash.rs",
+            "sha256": "0e37033ec3845a6fd0d881b4ab5ee12edc60a4a011406e1d9b189ce6d386cd8e"
+          },
+          {
+            "path": "tests/stdio.rs",
+            "sha256": "7470d645cb058d84103ae1131c63557e89f17a13a9a58f166cbb75ef7b7c636d"
+          }
+        ]
+      }
+    ]
+  },
+  "consumerRun": {
+    "inputs": {
+      "ffiCommit": "eb4ca1d40244ba1915638b76c3e30b2a684d9b07",
+      "archiveSha256": "ce5621839e52264fc931e4c93fc7d7ad70127226160bddc8dd7d8d02935df234",
+      "nativeGitHead": "3ef24b3473900384d8fc34204d4555a9bb30a5db",
+      "go": "go version go1.27.4 windows/amd64",
+      "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+      "runnerSha256": "ab1f380d88bdf1ba03dced8d49f75fde1e7cf20827808647229211cc1467e10d"
+    },
+    "runnerPath": "../identity-2026-11-14/consumer.ps1",
+    "sourceHashes": [
+      {
+        "path": "Cargo.lock",
+        "sha256": "4198fa4fdbc041142493b86b1183f3446b1e5c24236cfab1020a888bbb46c63c"
+      },
+      {
+        "path": "Cargo.toml",
+        "sha256": "24fab44254b52380042697c7050aa24905d1d1e7ea3f8bcbeef49bd81637169b"
+      },
+      {
+        "path": "ffi/Cargo.lock",
+        "sha256": "76b59b101ff09d63eca5fe56751167ef2dab1cbf1dfded80c771e0f7c475e30d"
+      },
+      {
+        "path": "ffi/Cargo.toml",
+        "sha256": "2fde14f2248eeed1aaebe61bceabe9324bbc53ed63bcc887496e4b849f7e8659"
+      },
+      {
+        "path": "ffi/go/admission_windows.go",
+        "sha256": "4a3185d4edd221e943ffae73192c7a4b75501c9a80624426612ce88078e939c2"
+      },
+      {
+        "path": "ffi/go/admission_windows_test.go",
+        "sha256": "650c67c78d4a69d999493735a05e6203859f8805c5f64b95d2d41e8226da9575"
+      },
+      {
+        "path": "ffi/go/bridge_windows.go",
+        "sha256": "5360c63a2af0bf3f44465b823e61d5303300957c944e639322bb545650d8a791"
+      },
+      {
+        "path": "ffi/go/bridge_windows_test.go",
+        "sha256": "6dff0a3d8d8bbdd8e7e61e827347dc9ffbcb256c15aa4c6ddf32761532c59bef"
+      },
+      {
+        "path": "ffi/go/environment_windows.go",
+        "sha256": "668c882783b0a9120a6e706652bd2fce25e435be846a2f03ef6319abc17b011f"
+      },
+      {
+        "path": "ffi/go/environment_windows_test.go",
+        "sha256": "b09048f7ce6fb84430c91dc27211fefbd514ca89404893bc1ae30e8f341b2860"
+      },
+      {
+        "path": "ffi/go/faults_windows_test.go",
+        "sha256": "34419e6249fcc08b4a2fd7a0db022ec6cd14ad039afcd60c68af3497b0f5b3fc"
+      },
+      {
+        "path": "ffi/go/finish_context_windows.go",
+        "sha256": "64046068cab96d7a0e587091a3e0b2a7909a8870ddc7ccbfa28d1bdbe43a271d"
+      },
+      {
+        "path": "ffi/go/finish_context_windows_test.go",
+        "sha256": "aadfaccf34fe5b69a7b7f2e3f9e600544a843ca0dbdcdaeb0777722c6dcc1cad"
+      },
+      {
+        "path": "ffi/go/go.mod",
+        "sha256": "99502c9ced07df2ba8052a397081e34f6254cd91c7f0d3d47388a060538bef93"
+      },
+      {
+        "path": "ffi/go/io_lifecycle_windows_test.go",
+        "sha256": "797fdd4b33b40e14264d8e107d488a649e14cad500f9002f60803d21a970f74b"
+      },
+      {
+        "path": "ffi/go/loader_windows_test.go",
+        "sha256": "41a0450e6d0096f95b1514af3807deb0ace9474f7bb749c58cf04af7cd1e9263"
+      },
+      {
+        "path": "ffi/go/native_cleanup_windows_test.go",
+        "sha256": "69be43ea2c6e56fc0dad4f9ff0aea314830c571f2f0f5885a9a954f11f5eb58d"
+      },
+      {
+        "path": "ffi/go/outcome_faults_windows_test.go",
+        "sha256": "85d7340070eb96c24ee9406484c57dc0e338b57b9d12912de0425a996a58cfea"
+      },
+      {
+        "path": "ffi/go/outcome_windows.go",
+        "sha256": "6ce7b2f82c52f163b6a17e93fef66cf65e76f2ee41cfdaa619e045cca0cb0448"
+      },
+      {
+        "path": "ffi/go/outcome_windows_test.go",
+        "sha256": "0627df97b50054cc9382e35e461b8e28a6d5dbcb5407a35a56b2fccf78f41f18"
+      },
+      {
+        "path": "ffi/go/stdio_windows.go",
+        "sha256": "d1fada91384230ff84d68dd3359ce5f066637cf0ca6448976d078f37bd11a2d9"
+      },
+      {
+        "path": "ffi/go/stdio_windows_test.go",
+        "sha256": "5c1d333eabd8c700c343f2c415d859e022add6a91db1494a737858946837c68f"
+      },
+      {
+        "path": "ffi/include/owner_v1.h",
+        "sha256": "f688e8372bf6290f9b411e52bef9a07c9650ef389b6d361a0107ea0be4fe7ded"
+      },
+      {
+        "path": "ffi/src/lib.rs",
+        "sha256": "ce214b7c7384b42c820784a9085369e555aefdd25d8f0fb416ca16eb24bb2f7d"
+      },
+      {
+        "path": "ffi/src/tests.rs",
+        "sha256": "ef9429d63295c50f93b44cc11c3be2b7350df3c0d7d69b646cd36ddca9c355bd"
+      },
+      {
+        "path": "src/bin/owner_child.rs",
+        "sha256": "0a9931d3e3a441e068b093036b2973c8f616884b83932a0d1b10349bbdf47b24"
+      },
+      {
+        "path": "src/bin/owner_crash_fixture.rs",
+        "sha256": "12b12ec814778c6de86eb7cf959c4d5f24f94bad785437f878862e4bb073323e"
+      },
+      {
+        "path": "src/launch_context.rs",
+        "sha256": "be4874f76d694b9cada9aceb31c3e77954cdbff4b1af408b30cce60f5fe4c207"
+      },
+      {
+        "path": "src/lib.rs",
+        "sha256": "2866937f43f9ae35bb6b7743e0d1c92a4b669fad009baf9604e8666d0a9f855f"
+      },
+      {
+        "path": "src/native_failure_tests.rs",
+        "sha256": "4c2e03f67491c289e6b74f4a8ec959a5dccf42eafd8468fd599225056d6cc83c"
+      },
+      {
+        "path": "src/token_user.rs",
+        "sha256": "e42eb6063b51e7b8e7284c460548b3f182ff4f9097880e379370e989cb44f839"
+      },
+      {
+        "path": "src/windows.rs",
+        "sha256": "b7279ff2ceea4be02b10a46bb7217098ec0b1eff6e0d348c10ac1e9fc3749a41"
+      },
+      {
+        "path": "tests/launch_context.rs",
+        "sha256": "c612f64485f5d40aedc89bd08c2fc562d0d038e4efd50d8241178db68ec1e1f0"
+      },
+      {
+        "path": "tests/lifecycle.rs",
+        "sha256": "d1e1e65e4021a219aa434da880a8e0548df5209a414fe0c43bb523fa6e19d7a2"
+      },
+      {
+        "path": "tests/owner_crash.rs",
+        "sha256": "0e37033ec3845a6fd0d881b4ab5ee12edc60a4a011406e1d9b189ce6d386cd8e"
+      },
+      {
+        "path": "tests/stdio.rs",
+        "sha256": "7470d645cb058d84103ae1131c63557e89f17a13a9a58f166cbb75ef7b7c636d"
+      }
+    ],
+    "steps": [
+      {
+        "name": "child",
+        "command": [
+          "cargo",
+          "build",
+          "--offline",
+          "--locked",
+          "--bin",
+          "owner_child"
+        ],
+        "actual": 0,
+        "utc": "2026-11-14T21:02:31.4836952Z"
+      },
+      {
+        "name": "abi",
+        "command": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked"
+        ],
+        "actual": 0,
+        "utc": "2026-11-14T21:02:32.3394551Z"
+      },
+      {
+        "name": "debug-dll",
+        "command": [
+          "cargo",
+          "build",
+          "--offline",
+          "--locked"
+        ],
+        "actual": 0,
+        "utc": "2026-11-14T21:02:33.8414086Z"
+      },
+      {
+        "name": "release-dll",
+        "command": [
+          "cargo",
+          "build",
+          "--release",
+          "--offline",
+          "--locked"
+        ],
+        "actual": 0,
+        "utc": "2026-11-14T21:02:35.8894914Z"
+      },
+      {
+        "name": "go-debug-race",
+        "command": [
+          "go",
+          "test",
+          "-v",
+          "-race",
+          ".",
+          "-count=1",
+          "-timeout=90s"
+        ],
+        "actual": 0,
+        "utc": "2026-11-14T21:02:44.2281310Z"
+      },
+      {
+        "name": "go-release-race",
+        "command": [
+          "go",
+          "test",
+          "-v",
+          "-race",
+          ".",
+          "-count=1",
+          "-timeout=90s"
+        ],
+        "actual": 0,
+        "utc": "2026-11-14T21:02:47.7738957Z"
+      },
+      {
+        "name": "go-cgocheck2",
+        "command": [
+          "go",
+          "test",
+          ".",
+          "-count=1",
+          "-timeout=90s"
+        ],
+        "actual": 0,
+        "utc": "2026-11-14T21:02:53.9117078Z"
+      },
+      {
+        "name": "go-vet",
+        "command": [
+          "go",
+          "vet",
+          "."
+        ],
+        "actual": 0,
+        "utc": "2026-11-14T21:02:57.9147091Z"
+      }
+    ],
+    "rustAbiCounts": {
+      "passed": 14,
+      "failed": 0,
+      "ignored": 0,
+      "filtered": 0
+    },
+    "goDebugRaceCounts": {
+      "topLevel": 49,
+      "nested": 63,
+      "skipped": 0
+    },
+    "goReleaseRaceCounts": {
+      "topLevel": 49,
+      "nested": 63,
+      "skipped": 0
+    }
+  },
+  "historyNote": "history.zip contains final native/consumer raw evidence files and sid-first.log only. The focused first run predates the exact native-close-code assertion; final qualification uses the final runs.",
+  "artifactPrivacy": "No actual account SID marker, fixture tree or binary is included.",
+  "limits": [
+    "Windows AMD64 only",
+    "No native Linux/macOS qualification",
+    "Existing ABI1 exports PID/image, not new observations",
+    "No Go capability or SID formatting receipt implemented",
+    "No exhaustive resource exhaustion/crash/I/O schedule proof",
+    "No repository-wide or installed/release acceptance",
+    "No performance claim"
+  ]
+}

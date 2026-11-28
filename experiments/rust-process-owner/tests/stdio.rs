@@ -474,7 +474,7 @@ fn background_startup_hides_two_later_console_allocations() {
     );
     assert_eq!(fields[2], 0); // SW_HIDE
     assert_eq!(fields[3], 0); // no initial console window
-    for allocation in fields[4..].chunks_exact(5) {
+    for allocation in fields[4..].as_chunks::<5>().0 {
         assert_ne!(allocation[0], 0, "AllocConsole: {report}");
         assert_ne!(allocation[1], 0, "GetConsoleWindow: {report}");
         assert_eq!(allocation[2], 0, "IsWindowVisible: {report}");

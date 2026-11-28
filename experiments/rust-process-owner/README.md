@@ -9,10 +9,12 @@
 3. [Explicit environment and working directory](#explicit-environment-and-working-directory)
 4. [Creator-crash qualification](#creator-crash-qualification)
 5. [Native failure paths](#native-failure-paths)
-6. [Evidence and negative controls](#evidence-and-negative-controls)
-7. [Reproduction](#reproduction)
-8. [Remaining gates](#remaining-gates)
-9. [Decision and sources](#decision-and-sources)
+6. [Original-process observations](#original-process-observations)
+7. [Evidence and negative controls](#evidence-and-negative-controls)
+8. [Console startup followup — 25 November 2026](#console-startup-followup--25-november-2026)
+9. [Reproduction](#reproduction)
+10. [Remaining gates](#remaining-gates)
+11. [Decision and sources](#decision-and-sources)
 
 ## Process and settlement contract
 
@@ -118,13 +120,40 @@ A real defect was reproduced at `AttributeList::new`: the OS returned error 87 i
 
 Negative controls deliberately changed `WAIT_FAILED` into timeout and changed failed cleanup into Complete. Both tests failed for the intended semantic reason, all mutations were restored, and the full crate suite was repeated. No allocator, Job creation/security setup, second attribute initialization/update, or already-blocked native I/O failure is implied to be exhaustively covered. Native close protection is tested under the ordinary non-debugger runner, not arbitrary debugger/Application Verifier exception settings.
 
+## Original-process observations
+
+`NativeOwner::process_view()` borrows the retained original process and Job without consuming admission, resuming the child or changing lifecycle state. Repeated observations are allowed before admission, after successful or denied admission, and after root exit. A pending `finish` alone keeps this access available. A recorded stop attempt (including a failed stop) or terminal settlement rejects new views; neither a cached PID nor a surviving numeric handle recreates access. The Rust borrow prevents mutation, settlement or dropping the owner while the view is still used. Admission uses the same view construction after consuming its single attempt, preserving its existing failure semantics.
+
+The same borrowed `ProcessView` exposes the original creation-time binding, exact Job membership, zero-time process wait state and a copied binary TokenUser SID. No raw handle or new close/termination authority is exported. These are individual observations, not an atomic snapshot or a complete product admission decision.
+
+**Table 5. Additive Windows observations.**
+
+| Method | Value and failure contract |
+|---|---|
+| `creation_time_100ns()` | Unsigned 64-bit Windows creation time: 100 ns intervals since 1601-01-01 UTC [15]. A fresh query on the retained process must match the value captured after creation; zero/mismatch is InvalidData. An initial query error remains the original native error and is never replaced by a later successful query |
+| `is_in_original_job()` | Query the retained process against the retained, non-null original Job [16]. Known non-membership is false; a native query error is not a false value |
+| `wait_state()` | `RootWait::NotSignaled` or `RootWait::Signaled` from a zero-time wait [17]. NotSignaled includes suspended processes. Native wait failure is an error; exit code 259 is never used as liveness |
+| `token_user_sid()` | An independent binary SID copy from the retained process's primary-token user [18–20]. Success requires successful token close. `TokenUserError` preserves an observation error, a close failure, or both; no SID value accompanies cleanup failure |
+
+`create_suspended_impl` captures the creation result only after the original process/thread handles are owned. A failed capture is stored in the returned owner. It must not introduce an ownerless error return after successful process creation. Callers that require the binding propagate `creation_time_100ns()` failure from their one-shot admission callback; the original owner remains available for explicit stop and settlement. Existing callbacks may omit these new observations and are not thereby qualified as product admission.
+
+Eight unit functions and one child-observed integration function qualify the earlier creation-time/Job/wait increment. The child independently writes its own PID and creation time after admission. A copy-only constructor experiment triggers actual GetProcessTimes error 6 at initial capture, verifies owner retention/settlement, and rejects an early-return mutation. The ordinary artifact has no fault hook. Five semantic negative controls also reject recapture, any-Job substitution, failed-wait success, false liveness and owner loss. See the [creation-time/Job/wait results, reproduction and exact scope](verification/identity-2026-11-14/RESULTS.md).
+
+The TokenUser increment adds another eight unit functions and one child-observed integration function. A fixed aligned buffer uses the maximum storage documented for TokenUser [20]; returned length, pointer location/alignment, SID header, subauthority count and complete extent are checked before native validation [21–22]. The validator receives a pointer derived from the owned buffer. The result owns its bytes and remains usable after process settlement. No token/process handle is exported.
+
+The token is opened with only query access from the retained process handle [18]. All ordinary query outcomes flow through one explicit close attempt. A close failure retains its immediate native error and any preceding query error, discards an otherwise successful SID copy, and does not leave a second owner to retry the same numeric handle. Best-effort unwind cleanup is separate. The real protected-token tests verify both outcome combinations; source review, not close protection alone, establishes the one-attempt control flow. Six copy-only semantic controls reject ambient-process substitution, ignored close failure, lost query error, changed native close code, ignored returned length and invalid SID acceptance. See the [TokenUser results, exact source identities and reproduction](verification/sid-2026-11-14/RESULTS.md).
+
+The accepted Go contract still requires SID formatting/resource evidence, the original Go capability and real consumer integration. Binary SID bytes provide an observation, not that capability or formatting receipt. A copied timestamp, PID or digest cannot grant process ownership.
+
 ## Evidence and negative controls
 
 Native Windows x86_64, Rust 1.99.1, pinned cached `windows-sys = 0.61.2` and `windows-link = 0.2.1`. FileSystem/Pipes/Globalization features use the same dependency; `Cargo.lock` and dependency versions are unchanged.
 
-**39 native integration tests, 12 unit tests (nine native-failure and three encoding/validation), and two compile-fail doctests passed** in the current iteration. The original 13 lifecycle tests still cover at-create suspension/membership, one-shot admission, retained pending owners, descendants, root outcomes, UTF-16 argument quoting and repeated lifecycle handle counts.
+**41 native integration tests, 28 unit tests and two compile-fail doctests passed: 71 in each of debug and release** for the TokenUser increment. The unit count comprises nine earlier native-failure, eight creation-time/Job/wait, three encoding/validation and eight TokenUser tests. The original 13 lifecycle tests still cover at-create suspension/membership, one-shot admission, retained pending owners, descendants, root outcomes, UTF-16 argument quoting and repeated lifecycle handle counts; the fourteenth compares creation identity with the child and the fifteenth compares its independently queried TokenUser SID. Earlier qualification records retain their original counts and source identities.
 
-**Table 5. Ten original native stdio cases (plus explicit-context composition).**
+The later read-only `process_view()` increment has a separate [query qualification report](verification/query-2026-11-15/RESULTS.md): **30 unit + 43 integration + 3 compile-fail = 76 checks in debug**, with an independent repeat. The complete native release suite was not repeated for that increment. These are preserved results on the report's pinned source, not a new execution triggered by this documentation update.
+
+**Table 6. Ten original native stdio cases (plus explicit-context composition).**
 
 | Tested behavior | Evidence |
 |---|---|
@@ -152,6 +181,47 @@ The initial stdio-ignoring stub compiled and failed eight behavioral cases. Temp
 
 `clippy --all-targets -- -D warnings` and formatting checks passed. These are actual scenario results, not proof over all schedules, resource-exhaustion states, native APIs or operating systems. No performance comparison or speedup is claimed.
 
+## Console startup followup — 25 November 2026
+
+The console policy from [#625 at `a6815e62fa3159a766fb357fa483e9ca5e6b8990`](https://github.com/applicate2628/mcp-local-hub/commit/a6815e62fa3159a766fb357fa483e9ca5e6b8990) is now carried into the native identity branch's existing creation path. The tested runtime basis is #644 commit `1cf5754b81c850a3569be269642b49605895eeb2` plus the four file postimages in Table 7. These runs preceded this documentation addition; they are qualification of the pinned runtime inputs, not a claim that a later publication commit was executed.
+
+The creator adds `STARTF_USESHOWWINDOW` with a hidden show state to its original startup information. The existing suspended process, at-create Job, admission, identity queries and borrowed streams keep their owners and interfaces. Two additional features of the existing pinned `windows-sys` dependency expose console/window observations; no dependency version or lockfile changes.
+
+The new `background_startup_hides_two_later_console_allocations` case receives the original owner's completed result and checks the child-reported startup flags, original process identity and two later console allocation/free cycles. Its existing three-second deadline remains unchanged. Rust 1.100's Clippy rejected the donor decoder's `chunks_exact(5)`; the test-only followup uses `as_chunks::<5>().0`. The preceding 14-field assertion leaves exactly two five-field records, so the change preserves the oracle without suppressing a warning or changing production behavior.
+
+**Table 7. Exact runtime postimages received by the followup.**
+
+| File in this crate | SHA-256 |
+|---|---|
+| `Cargo.toml` | `6825aaf98858d1eab0c00c0c0717c49f5eea77bdab785704897bedca7cba7cce` |
+| `src/bin/owner_child.rs` | `7fc460b9e0b0f3318ae7985a0e93ee46099e72dc1a5c3f21a7f8d02d6616d869` |
+| `src/windows.rs` | `527a626d4cb641d8fbce812759a58dca53b535b515d4dc70c5d8c728022e5f15` |
+| `tests/stdio.rs` | `f983ad00cc24a5d4ff2f874893721fadc70207bee166a6ef20e48e458ca3a275` |
+
+The source transfer patch is `b01fae2ff9efbf1a951ffb96570edb46a316b464f08e9ca7ce2486c96f95be2c`; its test-only Clippy followup is `4c68b111e7b8e93a61ea0481d4d10589b41ea71d52480df709d45e02e4b683cb`. The import adaptation preserves this branch's identity/query imports and changes only the four native files listed above. The latter followup changes only the final `stdio.rs` digest from the first attempt.
+
+**Table 8. Distinct original runs; failures remain part of the result.**
+
+| Run | Command/assertion result | Original owner result |
+|---|---|---|
+| `p03-pr644-native-1` | Rust/Cargo version, locked metadata and formatting passed. Clippy failed with exit 101 for `chunks_exact_to_as_chunks` under the existing `-D warnings`. Native tests did not run. | CLOSED **FAIL**; all six commands physically received. Parent elapsed 15.632193 s. |
+| `p03-pr644-native-2` | After the one-line decoder correction, formatting and Clippy passed. Native debug reported 77 passed, zero failed/ignored/filtered, and Cargo exited 0. The build reported 10.74 s for its test profile. | CLOSED **FAIL**: the outer Job required termination after the root's exit. Work elapsed 20.818145 s; command settlement elapsed 30.581454 s; parent elapsed 32.005905 s. Original active-zero, handles and both output streams were then received. Successful assertions did not make this an accepted owner result. |
+| `p03-pr644-native-3` | The same Cargo command against the already compiled target reported 77 passed, zero failed/ignored/filtered. The cached test profile reported 0.01 s. The new two-console case passed. | CLOSED **PASS** for this cached native debug execution: Cargo 0, original root reaped, active-zero and handles closed, both output readers reached EOF and joined, and `job_terminated=false`. Command elapsed 9.324452 s; parent elapsed 10.271927 s. |
+
+The 77 checks comprise 30 unit, 10 launch-context, 17 lifecycle, five creator-crash, 12 stdio and three compile-fail documentation checks. The second and third runs used identical Cargo argv and identical 305 recorded input hashes, including 13 source files. The first run had 303 input hashes; the two added inputs are the decoder followup patch and its DATA record. All 305 inputs of the second and third runs still matched at independent readback. The third run used fresh fixture, temporary and private profile directories with the same target cache and pinned MSVC toolchain: `rustc 1.100.0 (0ef1bc386 2026-11-09)`, `cargo 1.100.0 (3acc79c0c 2026-11-05)`. The 360-second native command bound and ten-second cleanup bound were unchanged.
+
+The original second-run receipt does not identify the remaining member or establish its cause. A build-side descendant is a hypothesis, not an attribution to a particular process, console host, linker service or operating-system component. The third run establishes its own cached execution result; it does not erase the second run or prove that a fresh compile-and-test workflow always settles without intervention.
+
+**Table 9. Original receipt digests.**
+
+| Run | Controller receipt SHA-256 | Root receiving SHA-256 |
+|---|---|---|
+| `p03-pr644-native-1` | `9bc0b7633331183a7dde9f0eb5d360d3a1b914f801c9b4e0c7ac9632a9b82546` | `54d94629cab7772557ff05ac78b204adf6a65b5462e17f4515aafc48d291ddbd` |
+| `p03-pr644-native-2` | `38612019a45493e94bf59f16f232e8a17368725c81657938bd97c59fd0933f8a` | `109de46bb4cabe7e51fbfb87154f28fafe8c9f6128cfb7f8230fb5f5df88815c` |
+| `p03-pr644-native-3` | `cfea832ddeed1618aed63b90e16d90aacf6add9bfd87cc318ad4c385b63fed03` | `69d64da77845c9879de4c883c0a3fbace7969290f7da1cb49e97b1b792d16aa3` |
+
+This followup has no new native release-profile, FFI/Go caller, installed Product, full Hub gate, non-Windows or broader console qualification. The historical reports above keep their own exact source and scope. #644 remains the parent owner of these four native files. Existing #631 must incorporate the exact published parent result while preserving its unique ABI/FFI files, then qualify its own newly built DLL/child and Go callers; this native result does not supply that foreign-call qualification.
+
 ## Reproduction
 
 Use already available toolchains and cached pinned dependencies. All new build/cache/temp/evidence paths should be in the approved work area; do not install missing packages silently. Set a new owned fixture root for each invocation; tests deliberately retain fixture files for review and trash-first disposition.
@@ -169,13 +239,13 @@ cargo clippy --offline --locked --all-targets -- -D warnings
 cargo fmt --all -- --check
 ```
 
-Tests run serially because process handle counts are not meaningful if unrelated tests concurrently acquire resources. Only the locally built finite `owner_child` and `owner_crash_fixture` programs are launched with no console window. The stdio fixture reads at most 4096 bytes; production streams are not implicitly capped by that test-fixture choice. A bounded owner wait protects the test; a failed assertion still has the owner's Job-close fallback.
+Tests run serially because process handle counts are not meaningful if unrelated tests concurrently acquire resources. Children are the locally built finite `owner_child`, `owner_crash_fixture` and the unit-test executable invoked with `--list`; they are launched with no console window. The stdio fixture reads at most 4096 bytes; production streams are not implicitly capped by that test-fixture choice. A bounded owner wait protects the test; a failed assertion still has the owner's Job-close fallback.
 
 ## Remaining gates
 
 1. Exact accepted Go-contract comparison, including non-inheritable source conversion, caller environment preparation/sorting, required SDK keys, directory identity requirements and selected-activation identity. No production caller is wired here.
 2. Remaining acquisition/setup/allocation/attribute-update failure classes; already-blocked native I/O cancellation; crash timing inside acquisition/native create and broader recovery qualification. The real failure cases and post-create crash points above are exercised, not all native failures/schedules. A successful stdio test is not a complete I/O pump or recovery contract.
-3. Reviewed Go/Rust application binary interface (ABI) and real foreign-caller tests. Safe Rust borrowing does not prove Go/Python callers obey it.
+3. Full product admission mapping and qualification of foreign callers. The versioned experimental identity admission and independent read-only query are already implemented in [#631 at `2fd3f017`](https://github.com/applicate2628/mcp-local-hub/blob/2fd3f017a9e5ccd0460293d71ea34aceb62f245e/experiments/rust-process-owner/ffi/verification/query-2026-11-15/RESULTS.md), including creation time, original-Job membership, wait state and binary TokenUser SID. They do not create the product's Go `CreatorIdentity`, SID-formatting/resource receipt or context/custody/retirement contract. The PID/image-only compatibility run against `eb4ca1d40244ba1915638b76c3e30b2a684d9b07` remains historical evidence for that frozen consumer. Safe Rust borrowing does not prove arbitrary foreign callers obey it.
 4. Native Linux/macOS implementations and tests. The borrowed-handle and explicit-context APIs are intentionally Windows-only; non-Windows strict creation remains explicitly unsupported. No Unix runtime or cross-build qualification is claimed by this iteration.
 5. Independent lifecycle/security review and the repository's integration/version/release gates. This branch remains a draft experiment; no installation or merge is included.
 
@@ -200,8 +270,18 @@ The underlying creation, admission and settlement code is shared with `create_su
 9. [Microsoft: Job lifetime, last-handle-close and membership](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects).
 10. [Microsoft: TerminateProcess is asynchronous; wait for the retained process](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess).
 
-**Terms:** stdio — standard input/output/error; EOF — end of file/stream; Job — Windows process-group resource object with its configured policies; handle — operating-system resource descriptor; ABI — application binary interface; FFI — foreign-function interface. No property of one OS mechanism is transferred to another by naming it alike.
 11. [Microsoft: DuplicateHandle access masks and same-object identity](https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-duplicatehandle).
 12. [Microsoft: SetHandleInformation and protection from close](https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-sethandleinformation).
 13. [Microsoft: InitializeProcThreadAttributeList size-query contract](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-initializeprocthreadattributelist).
 14. [Microsoft: Job access rights](https://learn.microsoft.com/en-us/windows/win32/procthread/job-object-security-and-access-rights), [process rights](https://learn.microsoft.com/en-us/windows/win32/procthread/process-security-and-access-rights), and [thread rights](https://learn.microsoft.com/en-us/windows/win32/procthread/thread-security-and-access-rights).
+15. [Microsoft: GetProcessTimes, original process handle rights and FILETIME units](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocesstimes).
+16. [Microsoft: IsProcessInJob and the distinction between a specific Job and any Job](https://learn.microsoft.com/en-us/windows/win32/api/jobapi/nf-jobapi-isprocessinjob).
+17. [Microsoft: WaitForSingleObject results and SYNCHRONIZE access](https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-waitforsingleobject).
+
+18. [Microsoft: OpenProcessToken, query rights and token handle lifetime](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openprocesstoken).
+19. [Microsoft: GetTokenInformation and TOKEN_USER](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-gettokeninformation), [TOKEN_USER layout](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-token_user).
+20. [Microsoft: SE_TOKEN_USER documents bounded maximum TokenUser storage](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_se_token_user).
+21. [Microsoft: GetSidLengthRequired and the subauthority-count length](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-getsidlengthrequired).
+22. [Microsoft: IsValidSid has no extended error information](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-isvalidsid).
+
+**Terms:** stdio — standard input/output/error; EOF — end of file/stream; Job — Windows process-group resource object with its configured policies; handle — operating-system resource descriptor; ABI — application binary interface; FFI — foreign-function interface; PID — process identifier; SID — Windows security identifier. No property of one OS mechanism is transferred to another by naming it alike.

@@ -1,0 +1,763 @@
+{
+  "schema": 1,
+  "codeCommit": "628890dec7e9e1f52be487fa4533b4bdfedeb71c",
+  "native": {
+    "environment": {
+      "sourceGitHead": "628890dec7e9e1f52be487fa4533b4bdfedeb71c",
+      "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+      "cargo": "cargo 1.99.1 (5f94df478 2026-08-27)",
+      "system": "Microsoft Windows NT 10.0.26100.0",
+      "architecture": "AMD64",
+      "sourceIdentity": "git head plus exact source hashes; working overlay is permitted and explicit"
+    },
+    "steps": [
+      {
+        "name": "fmt",
+        "command": [
+          "cargo",
+          "fmt",
+          "--all",
+          "--",
+          "--check"
+        ],
+        "expected": 0,
+        "actual": 0,
+        "semanticOracle": "",
+        "failurePattern": "",
+        "oracleMatched": true,
+        "startedUtc": "2026-11-14T20:18:38.5303881Z",
+        "finishedUtc": "2026-11-14T20:18:38.7157259Z"
+      },
+      {
+        "name": "debug",
+        "command": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--",
+          "--test-threads=1"
+        ],
+        "expected": 0,
+        "actual": 0,
+        "semanticOracle": "",
+        "failurePattern": "",
+        "oracleMatched": true,
+        "startedUtc": "2026-11-14T20:18:38.7343624Z",
+        "finishedUtc": "2026-11-14T20:18:42.7752938Z"
+      },
+      {
+        "name": "release",
+        "command": [
+          "cargo",
+          "test",
+          "--release",
+          "--offline",
+          "--locked",
+          "--",
+          "--test-threads=1"
+        ],
+        "expected": 0,
+        "actual": 0,
+        "semanticOracle": "",
+        "failurePattern": "",
+        "oracleMatched": true,
+        "startedUtc": "2026-11-14T20:18:42.7798100Z",
+        "finishedUtc": "2026-11-14T20:18:46.4621581Z"
+      },
+      {
+        "name": "clippy",
+        "command": [
+          "cargo",
+          "clippy",
+          "--offline",
+          "--locked",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "expected": 0,
+        "actual": 0,
+        "semanticOracle": "",
+        "failurePattern": "",
+        "oracleMatched": true,
+        "startedUtc": "2026-11-14T20:18:46.4666740Z",
+        "finishedUtc": "2026-11-14T20:18:46.7044127Z"
+      },
+      {
+        "name": "recapture",
+        "command": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--lib",
+          "identity_initial_capture_error_is_not_repaired_by_later_success",
+          "--",
+          "--test-threads=1"
+        ],
+        "expected": 101,
+        "actual": 101,
+        "semanticOracle": "test .*identity_initial_capture_error_is_not_repaired_by_later_success .*FAILED",
+        "failurePattern": "called .*unwrap_err.* on an .*Ok.* value",
+        "oracleMatched": true,
+        "startedUtc": "2026-11-14T20:18:46.7795708Z",
+        "finishedUtc": "2026-11-14T20:18:47.7400240Z"
+      },
+      {
+        "name": "any-job",
+        "command": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--lib",
+          "identity_membership_checks_exact_job_instead_of_any_job",
+          "--",
+          "--test-threads=1"
+        ],
+        "expected": 101,
+        "actual": 101,
+        "semanticOracle": "test .*identity_membership_checks_exact_job_instead_of_any_job .*FAILED",
+        "failurePattern": "membership in another Job was accepted",
+        "oracleMatched": true,
+        "startedUtc": "2026-11-14T20:18:47.7710036Z",
+        "finishedUtc": "2026-11-14T20:18:48.4622791Z"
+      },
+      {
+        "name": "failed-wait",
+        "command": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--lib",
+          "identity_wait_failure_is_not_a_liveness_result",
+          "--",
+          "--test-threads=1"
+        ],
+        "expected": 101,
+        "actual": 101,
+        "semanticOracle": "test .*identity_wait_failure_is_not_a_liveness_result .*FAILED",
+        "failurePattern": "failed observation became a liveness value: NotSignaled",
+        "oracleMatched": true,
+        "startedUtc": "2026-11-14T20:18:48.4928944Z",
+        "finishedUtc": "2026-11-14T20:18:49.2162803Z"
+      },
+      {
+        "name": "signaled-alive",
+        "command": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--lib",
+          "identity_signaled_process_with_exit_259_is_not_alive_or_resumed",
+          "--",
+          "--test-threads=1"
+        ],
+        "expected": 101,
+        "actual": 101,
+        "semanticOracle": "test .*identity_signaled_process_with_exit_259_is_not_alive_or_resumed .*FAILED",
+        "failurePattern": "(?s)left: NotSignaled\\s+right: Signaled",
+        "oracleMatched": true,
+        "startedUtc": "2026-11-14T20:18:49.2465160Z",
+        "finishedUtc": "2026-11-14T20:18:49.9426348Z"
+      },
+      {
+        "name": "native-capture",
+        "command": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--lib",
+          "identity_real_capture_failure_keeps_owner",
+          "--",
+          "--test-threads=1",
+          "--nocapture"
+        ],
+        "expected": 0,
+        "actual": 0,
+        "semanticOracle": "",
+        "failurePattern": "",
+        "oracleMatched": true,
+        "startedUtc": "2026-11-14T20:18:49.9798265Z",
+        "finishedUtc": "2026-11-14T20:18:50.6665042Z"
+      },
+      {
+        "name": "ownerless-capture",
+        "command": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--lib",
+          "identity_real_capture_failure_keeps_owner",
+          "--",
+          "--test-threads=1"
+        ],
+        "expected": 101,
+        "actual": 101,
+        "semanticOracle": "test .*identity_real_capture_failure_keeps_owner .*FAILED",
+        "failurePattern": "(?s)negative control reached initial capture after successful CreateProcessW.*called .*unwrap.* on an .*Err.* value: Os \\{ code: 6,",
+        "oracleMatched": true,
+        "startedUtc": "2026-11-14T20:18:50.6948331Z",
+        "finishedUtc": "2026-11-14T20:18:51.4029127Z"
+      }
+    ],
+    "sourceHashes": [
+      {
+        "path": "Cargo.lock",
+        "sha256": "4198fa4fdbc041142493b86b1183f3446b1e5c24236cfab1020a888bbb46c63c"
+      },
+      {
+        "path": "Cargo.toml",
+        "sha256": "24fab44254b52380042697c7050aa24905d1d1e7ea3f8bcbeef49bd81637169b"
+      },
+      {
+        "path": "src/bin/owner_child.rs",
+        "sha256": "7474a8951903f14aa5117950cf51200c578618a8c81c34f600674397f363145a"
+      },
+      {
+        "path": "src/bin/owner_crash_fixture.rs",
+        "sha256": "12b12ec814778c6de86eb7cf959c4d5f24f94bad785437f878862e4bb073323e"
+      },
+      {
+        "path": "src/launch_context.rs",
+        "sha256": "be4874f76d694b9cada9aceb31c3e77954cdbff4b1af408b30cce60f5fe4c207"
+      },
+      {
+        "path": "src/lib.rs",
+        "sha256": "280b06f4d12c9ad4211758f2decf5317ad989541336235412fb0e1d3303936d3"
+      },
+      {
+        "path": "src/native_failure_tests.rs",
+        "sha256": "1ba53380a0e84b7a4ffb67deb42fa47a18692d9d275eb96efeb48a8a22d278cb"
+      },
+      {
+        "path": "src/windows.rs",
+        "sha256": "41cf56661b5e160b66df212d56a848dfc7bc741a266b7be2e6b3be181b70eb48"
+      },
+      {
+        "path": "tests/launch_context.rs",
+        "sha256": "c612f64485f5d40aedc89bd08c2fc562d0d038e4efd50d8241178db68ec1e1f0"
+      },
+      {
+        "path": "tests/lifecycle.rs",
+        "sha256": "6f63d7504dd40ebe37d4032d2422b8417543e06e732b0a579c9d05063eb14bd1"
+      },
+      {
+        "path": "tests/owner_crash.rs",
+        "sha256": "0e37033ec3845a6fd0d881b4ab5ee12edc60a4a011406e1d9b189ce6d386cd8e"
+      },
+      {
+        "path": "tests/stdio.rs",
+        "sha256": "7470d645cb058d84103ae1131c63557e89f17a13a9a58f166cbb75ef7b7c636d"
+      }
+    ],
+    "runnerSha256": "2f418d1f1978ef9249e8e3827d51e6e9cf1e31a93fa4b47600dfa13e4ec632a4"
+  },
+  "consumer": {
+    "inputs": {
+      "ffiCommit": "a7a4c2d19c5a572ae771ab9b9a1511ae2cf9a718",
+      "archiveSha256": "14b9bcb2e6ec1cc15d880e28c5e95eb31b4ae552e1987a1b9809eab5eeba7661",
+      "nativeGitHead": "628890dec7e9e1f52be487fa4533b4bdfedeb71c",
+      "go": "go version go1.27.4 windows/amd64",
+      "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+      "runnerSha256": "ab1f380d88bdf1ba03dced8d49f75fde1e7cf20827808647229211cc1467e10d"
+    },
+    "steps": [
+      {
+        "name": "child",
+        "command": [
+          "cargo",
+          "build",
+          "--offline",
+          "--locked",
+          "--bin",
+          "owner_child"
+        ],
+        "actual": 0,
+        "utc": "2026-11-14T20:20:20.9297349Z"
+      },
+      {
+        "name": "abi",
+        "command": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked"
+        ],
+        "actual": 0,
+        "utc": "2026-11-14T20:20:21.8157943Z"
+      },
+      {
+        "name": "debug-dll",
+        "command": [
+          "cargo",
+          "build",
+          "--offline",
+          "--locked"
+        ],
+        "actual": 0,
+        "utc": "2026-11-14T20:20:23.2697475Z"
+      },
+      {
+        "name": "release-dll",
+        "command": [
+          "cargo",
+          "build",
+          "--release",
+          "--offline",
+          "--locked"
+        ],
+        "actual": 0,
+        "utc": "2026-11-14T20:20:24.7969698Z"
+      },
+      {
+        "name": "go-debug-race",
+        "command": [
+          "go",
+          "test",
+          "-v",
+          "-race",
+          ".",
+          "-count=1",
+          "-timeout=90s"
+        ],
+        "actual": 0,
+        "utc": "2026-11-14T20:20:42.5723139Z"
+      },
+      {
+        "name": "go-release-race",
+        "command": [
+          "go",
+          "test",
+          "-v",
+          "-race",
+          ".",
+          "-count=1",
+          "-timeout=90s"
+        ],
+        "actual": 0,
+        "utc": "2026-11-14T20:20:46.5380891Z"
+      },
+      {
+        "name": "go-cgocheck2",
+        "command": [
+          "go",
+          "test",
+          ".",
+          "-count=1",
+          "-timeout=90s"
+        ],
+        "actual": 0,
+        "utc": "2026-11-14T20:20:59.1527148Z"
+      },
+      {
+        "name": "go-vet",
+        "command": [
+          "go",
+          "vet",
+          "."
+        ],
+        "actual": 0,
+        "utc": "2026-11-14T20:21:07.9320860Z"
+      }
+    ],
+    "sourceHashes": [
+      {
+        "path": "Cargo.lock",
+        "sha256": "4198fa4fdbc041142493b86b1183f3446b1e5c24236cfab1020a888bbb46c63c"
+      },
+      {
+        "path": "Cargo.toml",
+        "sha256": "24fab44254b52380042697c7050aa24905d1d1e7ea3f8bcbeef49bd81637169b"
+      },
+      {
+        "path": "ffi/Cargo.lock",
+        "sha256": "76b59b101ff09d63eca5fe56751167ef2dab1cbf1dfded80c771e0f7c475e30d"
+      },
+      {
+        "path": "ffi/Cargo.toml",
+        "sha256": "2fde14f2248eeed1aaebe61bceabe9324bbc53ed63bcc887496e4b849f7e8659"
+      },
+      {
+        "path": "ffi/go/admission_windows.go",
+        "sha256": "4a3185d4edd221e943ffae73192c7a4b75501c9a80624426612ce88078e939c2"
+      },
+      {
+        "path": "ffi/go/admission_windows_test.go",
+        "sha256": "650c67c78d4a69d999493735a05e6203859f8805c5f64b95d2d41e8226da9575"
+      },
+      {
+        "path": "ffi/go/bridge_windows.go",
+        "sha256": "5360c63a2af0bf3f44465b823e61d5303300957c944e639322bb545650d8a791"
+      },
+      {
+        "path": "ffi/go/bridge_windows_test.go",
+        "sha256": "6dff0a3d8d8bbdd8e7e61e827347dc9ffbcb256c15aa4c6ddf32761532c59bef"
+      },
+      {
+        "path": "ffi/go/environment_windows.go",
+        "sha256": "668c882783b0a9120a6e706652bd2fce25e435be846a2f03ef6319abc17b011f"
+      },
+      {
+        "path": "ffi/go/environment_windows_test.go",
+        "sha256": "b09048f7ce6fb84430c91dc27211fefbd514ca89404893bc1ae30e8f341b2860"
+      },
+      {
+        "path": "ffi/go/faults_windows_test.go",
+        "sha256": "34419e6249fcc08b4a2fd7a0db022ec6cd14ad039afcd60c68af3497b0f5b3fc"
+      },
+      {
+        "path": "ffi/go/finish_context_windows.go",
+        "sha256": "64046068cab96d7a0e587091a3e0b2a7909a8870ddc7ccbfa28d1bdbe43a271d"
+      },
+      {
+        "path": "ffi/go/finish_context_windows_test.go",
+        "sha256": "aadfaccf34fe5b69a7b7f2e3f9e600544a843ca0dbdcdaeb0777722c6dcc1cad"
+      },
+      {
+        "path": "ffi/go/go.mod",
+        "sha256": "99502c9ced07df2ba8052a397081e34f6254cd91c7f0d3d47388a060538bef93"
+      },
+      {
+        "path": "ffi/go/io_lifecycle_windows_test.go",
+        "sha256": "797fdd4b33b40e14264d8e107d488a649e14cad500f9002f60803d21a970f74b"
+      },
+      {
+        "path": "ffi/go/loader_windows_test.go",
+        "sha256": "41a0450e6d0096f95b1514af3807deb0ace9474f7bb749c58cf04af7cd1e9263"
+      },
+      {
+        "path": "ffi/go/native_cleanup_windows_test.go",
+        "sha256": "69be43ea2c6e56fc0dad4f9ff0aea314830c571f2f0f5885a9a954f11f5eb58d"
+      },
+      {
+        "path": "ffi/go/outcome_faults_windows_test.go",
+        "sha256": "85d7340070eb96c24ee9406484c57dc0e338b57b9d12912de0425a996a58cfea"
+      },
+      {
+        "path": "ffi/go/outcome_windows.go",
+        "sha256": "6ce7b2f82c52f163b6a17e93fef66cf65e76f2ee41cfdaa619e045cca0cb0448"
+      },
+      {
+        "path": "ffi/go/outcome_windows_test.go",
+        "sha256": "0627df97b50054cc9382e35e461b8e28a6d5dbcb5407a35a56b2fccf78f41f18"
+      },
+      {
+        "path": "ffi/go/stdio_windows.go",
+        "sha256": "d1fada91384230ff84d68dd3359ce5f066637cf0ca6448976d078f37bd11a2d9"
+      },
+      {
+        "path": "ffi/go/stdio_windows_test.go",
+        "sha256": "5c1d333eabd8c700c343f2c415d859e022add6a91db1494a737858946837c68f"
+      },
+      {
+        "path": "ffi/include/owner_v1.h",
+        "sha256": "f688e8372bf6290f9b411e52bef9a07c9650ef389b6d361a0107ea0be4fe7ded"
+      },
+      {
+        "path": "ffi/src/lib.rs",
+        "sha256": "ce214b7c7384b42c820784a9085369e555aefdd25d8f0fb416ca16eb24bb2f7d"
+      },
+      {
+        "path": "ffi/src/tests.rs",
+        "sha256": "ef9429d63295c50f93b44cc11c3be2b7350df3c0d7d69b646cd36ddca9c355bd"
+      },
+      {
+        "path": "src/bin/owner_child.rs",
+        "sha256": "7474a8951903f14aa5117950cf51200c578618a8c81c34f600674397f363145a"
+      },
+      {
+        "path": "src/bin/owner_crash_fixture.rs",
+        "sha256": "12b12ec814778c6de86eb7cf959c4d5f24f94bad785437f878862e4bb073323e"
+      },
+      {
+        "path": "src/launch_context.rs",
+        "sha256": "be4874f76d694b9cada9aceb31c3e77954cdbff4b1af408b30cce60f5fe4c207"
+      },
+      {
+        "path": "src/lib.rs",
+        "sha256": "280b06f4d12c9ad4211758f2decf5317ad989541336235412fb0e1d3303936d3"
+      },
+      {
+        "path": "src/native_failure_tests.rs",
+        "sha256": "1ba53380a0e84b7a4ffb67deb42fa47a18692d9d275eb96efeb48a8a22d278cb"
+      },
+      {
+        "path": "src/windows.rs",
+        "sha256": "41cf56661b5e160b66df212d56a848dfc7bc741a266b7be2e6b3be181b70eb48"
+      },
+      {
+        "path": "tests/launch_context.rs",
+        "sha256": "c612f64485f5d40aedc89bd08c2fc562d0d038e4efd50d8241178db68ec1e1f0"
+      },
+      {
+        "path": "tests/lifecycle.rs",
+        "sha256": "6f63d7504dd40ebe37d4032d2422b8417543e06e732b0a579c9d05063eb14bd1"
+      },
+      {
+        "path": "tests/owner_crash.rs",
+        "sha256": "0e37033ec3845a6fd0d881b4ab5ee12edc60a4a011406e1d9b189ce6d386cd8e"
+      },
+      {
+        "path": "tests/stdio.rs",
+        "sha256": "7470d645cb058d84103ae1131c63557e89f17a13a9a58f166cbb75ef7b7c636d"
+      }
+    ],
+    "debugCounts": {
+      "topLevel": 49,
+      "nested": 63,
+      "skipped": 0
+    },
+    "releaseCounts": {
+      "topLevel": 49,
+      "nested": 63,
+      "skipped": 0
+    }
+  },
+  "history": {
+    "archive": "history.zip",
+    "sha256": "95a8b99abfa840d8e73076bfd77896fb99a23a405df3c4f244f46719dc4accd0",
+    "entries": [
+      {
+        "path": "identity-first-tests.log",
+        "originalSha256": "8f24d8edee364bcdcda07da7b89e04472d8efaf0f6107fa536839961bf5027eb",
+        "publishedSha256": "2208b031cc5c82d164e1ea8f9b4984a9e52c6cd20100f29b7fa2dbc6c245e6d2"
+      },
+      {
+        "path": "identity-initial.log",
+        "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "publishedSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+      },
+      {
+        "path": "frozen-ffi-consumer/COMPLETED",
+        "originalSha256": "0537b02e87a6938cff2680c9f97517033782092e95a4b439918de18408d671b2",
+        "publishedSha256": "0537b02e87a6938cff2680c9f97517033782092e95a4b439918de18408d671b2"
+      },
+      {
+        "path": "frozen-ffi-consumer/go-debug-race-counts.json",
+        "originalSha256": "8a2a8a1a0a49015664d255b66ccc33556a5678c5cfa1041ce9582d9f9ef185e7",
+        "publishedSha256": "8a2a8a1a0a49015664d255b66ccc33556a5678c5cfa1041ce9582d9f9ef185e7"
+      },
+      {
+        "path": "frozen-ffi-consumer/go-release-race-counts.json",
+        "originalSha256": "8a2a8a1a0a49015664d255b66ccc33556a5678c5cfa1041ce9582d9f9ef185e7",
+        "publishedSha256": "8a2a8a1a0a49015664d255b66ccc33556a5678c5cfa1041ce9582d9f9ef185e7"
+      },
+      {
+        "path": "frozen-ffi-consumer/inputs.json",
+        "originalSha256": "9fcd4cd9e1e3b569e89e6d1fa0798558f663ae8790d1d30d2c5f3b23a0539de9",
+        "publishedSha256": "9fcd4cd9e1e3b569e89e6d1fa0798558f663ae8790d1d30d2c5f3b23a0539de9"
+      },
+      {
+        "path": "frozen-ffi-consumer/run.log",
+        "originalSha256": "7d5a0e896f2792644e8aae93a77c1d31940ae19bbd587b7c09985403114a4dd3",
+        "publishedSha256": "7d5a0e896f2792644e8aae93a77c1d31940ae19bbd587b7c09985403114a4dd3"
+      },
+      {
+        "path": "frozen-ffi-consumer/source-hashes.json",
+        "originalSha256": "246625032fd2dec6e8ab15cf5111b30f09d879bdf8d3b5fbf93f7f0648c2edab",
+        "publishedSha256": "246625032fd2dec6e8ab15cf5111b30f09d879bdf8d3b5fbf93f7f0648c2edab"
+      },
+      {
+        "path": "frozen-ffi-consumer/steps.json",
+        "originalSha256": "60d9248282969b8405eaaea5b869ef82576afdf3863c32e402d3f0f419ce4d72",
+        "publishedSha256": "60d9248282969b8405eaaea5b869ef82576afdf3863c32e402d3f0f419ce4d72"
+      },
+      {
+        "path": "native-identity-final/any-job-hashes.json",
+        "originalSha256": "6f934c7545f5e1f7e5cc492be1aeef693e95bc7620714cd62d142829daaddc91",
+        "publishedSha256": "6f934c7545f5e1f7e5cc492be1aeef693e95bc7620714cd62d142829daaddc91"
+      },
+      {
+        "path": "native-identity-final/environment.json",
+        "originalSha256": "163b37cbaff8c4e778505b1cfc50a4ca7747eb808c1d90dd065090775c44534b",
+        "publishedSha256": "163b37cbaff8c4e778505b1cfc50a4ca7747eb808c1d90dd065090775c44534b"
+      },
+      {
+        "path": "native-identity-final/failed-wait-hashes.json",
+        "originalSha256": "e537052b26c5bc76649101a3a1154f185a10cad80eadedbfae778b0541a0c5f7",
+        "publishedSha256": "e537052b26c5bc76649101a3a1154f185a10cad80eadedbfae778b0541a0c5f7"
+      },
+      {
+        "path": "native-identity-final/recapture-hashes.json",
+        "originalSha256": "29e8ed938216f9dcae023fe964c877172dfb217a65e5f623dcf80c73872871a1",
+        "publishedSha256": "29e8ed938216f9dcae023fe964c877172dfb217a65e5f623dcf80c73872871a1"
+      },
+      {
+        "path": "native-identity-final/run.log",
+        "originalSha256": "1588ef378c0cfd069468572e35343f606748bd550aa56d445d10f4ce9a9bca0e",
+        "publishedSha256": "1588ef378c0cfd069468572e35343f606748bd550aa56d445d10f4ce9a9bca0e"
+      },
+      {
+        "path": "native-identity-final/runner.sha256",
+        "originalSha256": "6778142c022326d37b959eabed82d2dddf5f911908bc4af83789dac7dcd615d7",
+        "publishedSha256": "6778142c022326d37b959eabed82d2dddf5f911908bc4af83789dac7dcd615d7"
+      },
+      {
+        "path": "native-identity-final/source-hashes.json",
+        "originalSha256": "75241411828c249c57277f0e95d78f393d900db8b30ec36e29d9200bfe8cd239",
+        "publishedSha256": "75241411828c249c57277f0e95d78f393d900db8b30ec36e29d9200bfe8cd239"
+      },
+      {
+        "path": "native-identity-final/steps.json",
+        "originalSha256": "4181dcb18a2367d676ec4f7a2c468e3f6fdb84def1f01d38eefa4da021e53e76",
+        "publishedSha256": "4181dcb18a2367d676ec4f7a2c468e3f6fdb84def1f01d38eefa4da021e53e76"
+      },
+      {
+        "path": "native-identity-qualified/any-job-hashes.json",
+        "originalSha256": "2585d4211287e1ba0218cf4b5fcc748ad72cb48e4b08592a52018fae91f75beb",
+        "publishedSha256": "2585d4211287e1ba0218cf4b5fcc748ad72cb48e4b08592a52018fae91f75beb"
+      },
+      {
+        "path": "native-identity-qualified/COMPLETED",
+        "originalSha256": "187dc734e53c4efc57969ccf8776251c66cd8db265350130320de3a689df5ed7",
+        "publishedSha256": "187dc734e53c4efc57969ccf8776251c66cd8db265350130320de3a689df5ed7"
+      },
+      {
+        "path": "native-identity-qualified/environment.json",
+        "originalSha256": "163b37cbaff8c4e778505b1cfc50a4ca7747eb808c1d90dd065090775c44534b",
+        "publishedSha256": "163b37cbaff8c4e778505b1cfc50a4ca7747eb808c1d90dd065090775c44534b"
+      },
+      {
+        "path": "native-identity-qualified/failed-wait-hashes.json",
+        "originalSha256": "9c3d0bb65f0e93966d6592b9e84db64f4e7c83eb62229f3e488a78e730a44f94",
+        "publishedSha256": "9c3d0bb65f0e93966d6592b9e84db64f4e7c83eb62229f3e488a78e730a44f94"
+      },
+      {
+        "path": "native-identity-qualified/mutations.json",
+        "originalSha256": "8c490476a3d5ac26b44e3c381a255b22ce76571ff1eabbe964a5a3fae80338f6",
+        "publishedSha256": "8c490476a3d5ac26b44e3c381a255b22ce76571ff1eabbe964a5a3fae80338f6"
+      },
+      {
+        "path": "native-identity-qualified/native-capture-hashes.json",
+        "originalSha256": "eac7ccddf52e71ce2cfc408843a6e94beb74178cc372a8aef6be138d69e5d98a",
+        "publishedSha256": "eac7ccddf52e71ce2cfc408843a6e94beb74178cc372a8aef6be138d69e5d98a"
+      },
+      {
+        "path": "native-identity-qualified/ownerless-capture-hashes.json",
+        "originalSha256": "f476a2f78d0f07b98a69697c6195e9e624adc4cac8a8c9bb383e3341ab3f07e0",
+        "publishedSha256": "f476a2f78d0f07b98a69697c6195e9e624adc4cac8a8c9bb383e3341ab3f07e0"
+      },
+      {
+        "path": "native-identity-qualified/recapture-hashes.json",
+        "originalSha256": "f4c96df75bd764031dd32d63866917d9df52a36eb97e1b7ce22b0605df474d6c",
+        "publishedSha256": "f4c96df75bd764031dd32d63866917d9df52a36eb97e1b7ce22b0605df474d6c"
+      },
+      {
+        "path": "native-identity-qualified/run.log",
+        "originalSha256": "8eb6f1819f6079c691efc3eaa5e2733f116c79a95d12d6954d2e5bcceba27660",
+        "publishedSha256": "8eb6f1819f6079c691efc3eaa5e2733f116c79a95d12d6954d2e5bcceba27660"
+      },
+      {
+        "path": "native-identity-qualified/runner.sha256",
+        "originalSha256": "6778142c022326d37b959eabed82d2dddf5f911908bc4af83789dac7dcd615d7",
+        "publishedSha256": "6778142c022326d37b959eabed82d2dddf5f911908bc4af83789dac7dcd615d7"
+      },
+      {
+        "path": "native-identity-qualified/signaled-alive-hashes.json",
+        "originalSha256": "d3c4d7d3c1a324b3df47926596155d83747053bc18c923dc49b7f027a069cf73",
+        "publishedSha256": "d3c4d7d3c1a324b3df47926596155d83747053bc18c923dc49b7f027a069cf73"
+      },
+      {
+        "path": "native-identity-qualified/source-hashes.json",
+        "originalSha256": "42c3fbbde59672cb6c9ddc05fb09d84ef638700368dfbba4ecb82e973cd3e0e5",
+        "publishedSha256": "42c3fbbde59672cb6c9ddc05fb09d84ef638700368dfbba4ecb82e973cd3e0e5"
+      },
+      {
+        "path": "native-identity-qualified/steps.json",
+        "originalSha256": "b523eba6902c0045667c0cae190d04f5fe7b91d437b0184501ddcf675d8aceb9",
+        "publishedSha256": "b523eba6902c0045667c0cae190d04f5fe7b91d437b0184501ddcf675d8aceb9"
+      },
+      {
+        "path": "native-identity-reviewed/any-job-hashes.json",
+        "originalSha256": "2585d4211287e1ba0218cf4b5fcc748ad72cb48e4b08592a52018fae91f75beb",
+        "publishedSha256": "2585d4211287e1ba0218cf4b5fcc748ad72cb48e4b08592a52018fae91f75beb"
+      },
+      {
+        "path": "native-identity-reviewed/COMPLETED",
+        "originalSha256": "187dc734e53c4efc57969ccf8776251c66cd8db265350130320de3a689df5ed7",
+        "publishedSha256": "187dc734e53c4efc57969ccf8776251c66cd8db265350130320de3a689df5ed7"
+      },
+      {
+        "path": "native-identity-reviewed/environment.json",
+        "originalSha256": "07cdf116103d9ca00432e098b255b90a3893de930b2003cfb4e63da600c5a582",
+        "publishedSha256": "07cdf116103d9ca00432e098b255b90a3893de930b2003cfb4e63da600c5a582"
+      },
+      {
+        "path": "native-identity-reviewed/failed-wait-hashes.json",
+        "originalSha256": "9c3d0bb65f0e93966d6592b9e84db64f4e7c83eb62229f3e488a78e730a44f94",
+        "publishedSha256": "9c3d0bb65f0e93966d6592b9e84db64f4e7c83eb62229f3e488a78e730a44f94"
+      },
+      {
+        "path": "native-identity-reviewed/mutations.json",
+        "originalSha256": "0f9b704fb144e62ed6f9191cfdbd1fc8f027801cf6aba82a24a70bb18cc3d315",
+        "publishedSha256": "0f9b704fb144e62ed6f9191cfdbd1fc8f027801cf6aba82a24a70bb18cc3d315"
+      },
+      {
+        "path": "native-identity-reviewed/native-capture-hashes.json",
+        "originalSha256": "eac7ccddf52e71ce2cfc408843a6e94beb74178cc372a8aef6be138d69e5d98a",
+        "publishedSha256": "eac7ccddf52e71ce2cfc408843a6e94beb74178cc372a8aef6be138d69e5d98a"
+      },
+      {
+        "path": "native-identity-reviewed/ownerless-capture-hashes.json",
+        "originalSha256": "23593840c7aede7f716e946479a0f3f931ec7bcf0f6e917dcb2124ced503dd06",
+        "publishedSha256": "23593840c7aede7f716e946479a0f3f931ec7bcf0f6e917dcb2124ced503dd06"
+      },
+      {
+        "path": "native-identity-reviewed/recapture-hashes.json",
+        "originalSha256": "f4c96df75bd764031dd32d63866917d9df52a36eb97e1b7ce22b0605df474d6c",
+        "publishedSha256": "f4c96df75bd764031dd32d63866917d9df52a36eb97e1b7ce22b0605df474d6c"
+      },
+      {
+        "path": "native-identity-reviewed/run.log",
+        "originalSha256": "4da7274af72967fea3400681c11cb314913071ad87c7c1d2e0f7e2808f78b4f1",
+        "publishedSha256": "4da7274af72967fea3400681c11cb314913071ad87c7c1d2e0f7e2808f78b4f1"
+      },
+      {
+        "path": "native-identity-reviewed/runner.sha256",
+        "originalSha256": "0670f476840b8c2355f4fc61e3be2a3f6fcb7f5b0d5c8dfbdceebaa7e643e331",
+        "publishedSha256": "0670f476840b8c2355f4fc61e3be2a3f6fcb7f5b0d5c8dfbdceebaa7e643e331"
+      },
+      {
+        "path": "native-identity-reviewed/signaled-alive-hashes.json",
+        "originalSha256": "d3c4d7d3c1a324b3df47926596155d83747053bc18c923dc49b7f027a069cf73",
+        "publishedSha256": "d3c4d7d3c1a324b3df47926596155d83747053bc18c923dc49b7f027a069cf73"
+      },
+      {
+        "path": "native-identity-reviewed/source-hashes.json",
+        "originalSha256": "42c3fbbde59672cb6c9ddc05fb09d84ef638700368dfbba4ecb82e973cd3e0e5",
+        "publishedSha256": "42c3fbbde59672cb6c9ddc05fb09d84ef638700368dfbba4ecb82e973cd3e0e5"
+      },
+      {
+        "path": "native-identity-reviewed/steps.json",
+        "originalSha256": "4616dd5aae8b11260c033413e16af01be42936f212de2db89370deb753078b03",
+        "publishedSha256": "4616dd5aae8b11260c033413e16af01be42936f212de2db89370deb753078b03"
+      },
+      {
+        "path": "initial-oracle-test.rs",
+        "originalSha256": "6a73b7f2317377c06e60c62ec5f695c5e143febfc9c2b6dd677bb2b0d8cddbbc",
+        "publishedSha256": "6a73b7f2317377c06e60c62ec5f695c5e143febfc9c2b6dd677bb2b0d8cddbbc"
+      }
+    ],
+    "normalization": "UTF-8/LF; trailing whitespace normalized; task/cache/user-profile path placeholders; test outcomes unchanged"
+  },
+  "packagingNote": "The first prepublication check rejected PowerShell pipeline array wrappers in this aggregate. Collections were normalized to ordinary JSON arrays; original run manifests, outcomes and source hashes are unchanged.",
+  "publicationBase": {
+    "originalNativeParent": "7ce04f7ef2f96680ed94db1edaf77cf0358421c4",
+    "observedNativeParent": "c5672f49f65713c7555e8841e46de75b045da5f8",
+    "acceptedMaster": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+    "nativeParentTree": "7b896d4cab2315ded3f122b1aa696f33ae385f62",
+    "nativeParentTreeUnchanged": true,
+    "observedConsumerHead": "eb4ca1d40244ba1915638b76c3e30b2a684d9b07",
+    "consumerComparedFrom": "a7a4c2d19c5a572ae771ab9b9a1511ae2cf9a718",
+    "consumerChangedFileCount": 31,
+    "consumerChangesOnlyVerification": true,
+    "note": "The final runs remain attributed to their recorded code and frozen consumer commits. Parent synchronization changes no native experiment bytes; the newer consumer changes only verification documents and evidence."
+  }
+}
