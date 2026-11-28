@@ -1,0 +1,280 @@
+{
+  "schema": 1,
+  "status": "QUALIFIED_FIXED_CAMPAIGN",
+  "reviewer": "root",
+  "receipt": {
+    "bytes": 4944,
+    "sha256": "648a4044112d019530a2e190b6d8b62cc27a3018326fcc86a937583628a3c2bf"
+  },
+  "stdout": {
+    "bytes": 39747,
+    "sha256": "dd0cf53ed0cfd548e8b68978aca7facb0c18d6f32a7b6fbd8580d9aa8264c994"
+  },
+  "stderr": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "source": {
+    "head": "858812988833a84368c60fba1540ae601155fa71",
+    "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+    "scope": "preserved858 + physical oracle JSON + exactly three Go overlays",
+    "source_inventory": {
+      "files": 3282,
+      "bytes": 50595272,
+      "inventory_sha256": "60a1f70a4e901f48a5ec4a4834675152f5ca7c88a055b6d91ef2c8a039390021"
+    },
+    "input_inventory": {
+      "files": 7,
+      "bytes": 11963464,
+      "inventory_sha256": "49cc45bed6979b62ee0eff62b023a626b518e22446aeb79ac693cd6c80b52cd2"
+    }
+  },
+  "profile_root": {
+    "case_deadline_ns": 45000000000,
+    "go_version": "go1.27.4",
+    "goarch": "amd64",
+    "gogc_env": "100",
+    "gomaxprocs": 4,
+    "gomemlimit_env": "",
+    "goos": "windows",
+    "input_after_verified": true,
+    "input_bytes": 11302778,
+    "input_sha256": "a79b7793b5f384f885afb60fb513402d4523bcc0779546aa1e199e15a80fd286",
+    "limits": [
+      "CMake-generated published redacted fixture, not production load",
+      "sampled peaks include baseline and are lower bounds, not continuous maxima",
+      "private commit is not resident RAM; working set includes shared pages",
+      "default 1000-record public projection is intentional, not transport loss",
+      "sampling and response-oracle validation contribute to measured driver work; 8 calls per worker are not SLO estimates",
+      "latencies use monotonic time; negative cancellation-to-return deltas mean completion won the cancellation race",
+      "server Close precedes client Close; late canceled responses are already retired and their delivery is not promised",
+      "no subprocess, installed product, system Scheduler, HTTP/network or CMake execution",
+      "file reads are not promised hard-interruptible; outer runner owns process deadline"
+    ],
+    "num_cpu": 12,
+    "observer_handle_close_error": "",
+    "oracle_sha256": "66edc3230924cb22f31235ebdc0a607e4a1e227db117209f56c24b7d49139ace",
+    "sample_interval_ns": 5000000,
+    "schema": 1,
+    "scope": "whole current process: official SDK client + IOTransport server + measurement and semantic oracle driver; warmed file cache",
+    "sdk_module_version": "v1.6.1",
+    "state": "complete"
+  },
+  "cases": [
+    {
+      "workers": 1,
+      "cancel_on_handler_entry": false,
+      "counts": {
+        "active_handlers": 0,
+        "cancel_requested": 0,
+        "cancelled": 0,
+        "client_returned": 8,
+        "completed": 8,
+        "delivered": 8,
+        "error": 0,
+        "handler_errors": 0,
+        "handler_observation_errors": 0,
+        "max_active_handlers": 1,
+        "planned": 8,
+        "received": 8,
+        "server_canceled": 0,
+        "server_canceled_result": 0,
+        "submitted": 8,
+        "unaccounted": 0,
+        "unrecognized": 0,
+        "unreturned": 0
+      },
+      "warmup_calls": 2,
+      "raw_calls": 10,
+      "client_latency_ns_nearest_rank": {
+        "min": 48592100,
+        "p50": 53300900,
+        "p95": 57661000,
+        "max": 57661000,
+        "zero_observations": 0
+      },
+      "sampled_peak_lower_bounds": {
+        "samples": 86,
+        "heap_alloc_bytes": 22734528,
+        "working_set_bytes": 38969344,
+        "private_working_set_bytes": 30298112,
+        "private_commit_bytes": 76767232
+      },
+      "held_after_gc": {
+        "heap_alloc_bytes": 867080,
+        "heap_inuse_bytes": 2416640,
+        "total_alloc_bytes": 435636992,
+        "mallocs": 1035124,
+        "gc_cycles": 83,
+        "goroutines": 6,
+        "working_set_bytes": 35926016,
+        "private_working_set_bytes": 27234304,
+        "private_commit_bytes": 73920512
+      },
+      "released_closed_after_gc": {
+        "heap_alloc_bytes": 691232,
+        "heap_inuse_bytes": 1990656,
+        "total_alloc_bytes": 435639800,
+        "mallocs": 1035144,
+        "gc_cycles": 85,
+        "goroutines": 2,
+        "working_set_bytes": 35008512,
+        "private_working_set_bytes": 26316800,
+        "private_commit_bytes": 73003008
+      },
+      "allocated_bytes_whole_process": 346101528,
+      "cancel_to_handler_return_ns": []
+    },
+    {
+      "workers": 2,
+      "cancel_on_handler_entry": false,
+      "counts": {
+        "active_handlers": 0,
+        "cancel_requested": 0,
+        "cancelled": 0,
+        "client_returned": 16,
+        "completed": 16,
+        "delivered": 16,
+        "error": 0,
+        "handler_errors": 0,
+        "handler_observation_errors": 0,
+        "max_active_handlers": 2,
+        "planned": 16,
+        "received": 16,
+        "server_canceled": 0,
+        "server_canceled_result": 0,
+        "submitted": 16,
+        "unaccounted": 0,
+        "unrecognized": 0,
+        "unreturned": 0
+      },
+      "warmup_calls": 2,
+      "raw_calls": 18,
+      "client_latency_ns_nearest_rank": {
+        "min": 54642400,
+        "p50": 57171900,
+        "p95": 66457800,
+        "max": 66457800,
+        "zero_observations": 0
+      },
+      "sampled_peak_lower_bounds": {
+        "samples": 93,
+        "heap_alloc_bytes": 44038368,
+        "working_set_bytes": 63598592,
+        "private_working_set_bytes": 54849536,
+        "private_commit_bytes": 101548032
+      },
+      "held_after_gc": {
+        "heap_alloc_bytes": 909672,
+        "heap_inuse_bytes": 2629632,
+        "total_alloc_bytes": 1216141608,
+        "mallocs": 2869191,
+        "gc_cycles": 171,
+        "goroutines": 6,
+        "working_set_bytes": 59678720,
+        "private_working_set_bytes": 50929664,
+        "private_commit_bytes": 97624064
+      },
+      "released_closed_after_gc": {
+        "heap_alloc_bytes": 712792,
+        "heap_inuse_bytes": 2048000,
+        "total_alloc_bytes": 1216143712,
+        "mallocs": 2869208,
+        "gc_cycles": 173,
+        "goroutines": 2,
+        "working_set_bytes": 58761216,
+        "private_working_set_bytes": 50012160,
+        "private_commit_bytes": 96706560
+      },
+      "allocated_bytes_whole_process": 692080128,
+      "cancel_to_handler_return_ns": []
+    },
+    {
+      "workers": 2,
+      "cancel_on_handler_entry": true,
+      "counts": {
+        "active_handlers": 0,
+        "cancel_requested": 8,
+        "cancelled": 8,
+        "client_returned": 8,
+        "completed": 8,
+        "delivered": 0,
+        "error": 0,
+        "handler_errors": 0,
+        "handler_observation_errors": 0,
+        "max_active_handlers": 2,
+        "planned": 8,
+        "received": 8,
+        "server_canceled": 8,
+        "server_canceled_result": 8,
+        "submitted": 8,
+        "unaccounted": 0,
+        "unrecognized": 0,
+        "unreturned": 0
+      },
+      "warmup_calls": 2,
+      "raw_calls": 10,
+      "client_latency_ns_nearest_rank": {
+        "min": 0,
+        "p50": 0,
+        "p95": 1542000,
+        "max": 1542000,
+        "zero_observations": 7
+      },
+      "sampled_peak_lower_bounds": {
+        "samples": 1,
+        "heap_alloc_bytes": 877608,
+        "working_set_bytes": 43405312,
+        "private_working_set_bytes": 34648064,
+        "private_commit_bytes": 81281024
+      },
+      "held_after_gc": {
+        "heap_alloc_bytes": 968056,
+        "heap_inuse_bytes": 2613248,
+        "total_alloc_bytes": 1307712928,
+        "mallocs": 3087762,
+        "gc_cycles": 196,
+        "goroutines": 6,
+        "working_set_bytes": 42508288,
+        "private_working_set_bytes": 33738752,
+        "private_commit_bytes": 80363520
+      },
+      "released_closed_after_gc": {
+        "heap_alloc_bytes": 724864,
+        "heap_inuse_bytes": 2072576,
+        "total_alloc_bytes": 1307715032,
+        "mallocs": 3087779,
+        "gc_cycles": 198,
+        "goroutines": 2,
+        "working_set_bytes": 41590784,
+        "private_working_set_bytes": 32821248,
+        "private_commit_bytes": 79446016
+      },
+      "allocated_bytes_whole_process": 3093744,
+      "cancel_to_handler_return_ns": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        1542000,
+        0,
+        0
+      ]
+    }
+  ],
+  "totals": {
+    "measured": 32,
+    "warmup": 6,
+    "delivered_measured": 24,
+    "cancelled_measured": 8,
+    "raw_calls": 38
+  },
+  "review_notes": [
+    "Every call is accounted exactly once; all 24 measured normal responses and six warmups were delivered.",
+    "All eight cancellation calls reached the server, returned canceled to the client and produced a canceled server context/result.",
+    "Cancellation window produced one memory sample, which is the baseline. It is not a useful estimate of that window peak.",
+    "Zero duration observations remain zero measurements at the host clock resolution; they do not mean instantaneous execution.",
+    "Three cases share one process and warmed file cache; no production SLO, isolated-parser memory, leak proof or before/after improvement is inferred."
+  ]
+}

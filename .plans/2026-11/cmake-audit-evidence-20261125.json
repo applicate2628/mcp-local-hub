@@ -1,0 +1,23 @@
+{
+  "date": "2026-11-25",
+  "base": "ee20f6009a8581c8141352cdbd261e1a97a0e805",
+  "scope": "focused Windows regression; not full repository or installed Product",
+  "toolchain": "go1.27.4 windows/amd64",
+  "command": "go test -count=1 -timeout 5m ./internal/vcpkgmcp/cmaketrace",
+  "exit_code": 0,
+  "package_seconds": 1.339,
+  "all_original_commands_settled": true,
+  "inputs": {
+    "internal/vcpkgmcp/cmaketrace/parse.go": "f08b85fac50fd90ea8f50ed7eb7523c9b111a8516d0e35cce87367a80657aaf3",
+    "internal/vcpkgmcp/cmaketrace/trace_read_error_limits_test.go": "748cf7097aef11150c259ec0dcd9c6d21c7bc64c4a30d20eff7d167f411a6450"
+  },
+  "remaining": [
+    "full repository build/vet/default/tagged gates",
+    "combined-source qualification"
+  ],
+  "negative_control": {
+    "production_unchanged": true,
+    "both_limit_tests_failed_before_fix": true,
+    "new_test": "TestTraceReadErrorAtLimitIsUnknown"
+  }
+}

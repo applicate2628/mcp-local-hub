@@ -23,7 +23,7 @@ func TestR22TraceAdmissionAccountsForEscapedJSONStringBytes(t *testing.T) {
 }
 
 func TestR22EncodedJSONStringBytesMatchesJSONEncoder(t *testing.T) {
-	for _, value := range []string{"plain", "<&>", "quote\"slash\\", "\x00\b\f\n\r\t", "\u2028\u2029", string([]byte{0xff})} {
+	for _, value := range []string{"plain", "<&>", "quote\"slash\\", "\x00\b\f\n\r\t", "\u2028\u2029", string([]byte{0xff}), "a\xff\ufffd\x80b", string([]byte{0xf0, 0x9f})} {
 		raw, err := json.Marshal(value)
 		if err != nil {
 			t.Fatal(err)

@@ -1,0 +1,16 @@
+{
+  "reviewer": "root",
+  "base": "5ee707f388dbcdd448d910ab7c2c65b4cdad0424",
+  "scope": "cmake",
+  "source_paths": [
+    "internal/vcpkgmcp/vcpkgserver/cmake_trace_sdk_memory_windows_test.go",
+    "internal/vcpkgmcp/vcpkgserver/cmake_trace_sdk_profile_windows_test.go",
+    "internal/vcpkgmcp/vcpkgserver/testdata/cmake_trace_sdk_profile_oracle.json"
+  ],
+  "requirements": "Only reviewed scoped candidate changes; no base synchronization, merge or unrelated source changes.",
+  "qualification_boundary": "Exact input bytes and physical source are bound in preserved plans and results; composed Go evidence is not standalone branch qualification.",
+  "security_and_lifecycle": "Reviewed owned resources, cancellation, original-handle behavior, bounded runners and explicit unproven native/full-suite boundaries.",
+  "compatibility": "Existing published donor contracts retained. Scheduler BackendRunHold composition stays in evidence, not a partial API import into #660.",
+  "mandatory_findings": [],
+  "external_published_commit_review": "NOT_RUN"
+}

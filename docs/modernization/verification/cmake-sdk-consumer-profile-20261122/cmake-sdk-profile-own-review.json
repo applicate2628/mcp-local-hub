@@ -1,0 +1,321 @@
+{
+  "schema": 1,
+  "status": "SOURCE_REVIEWED_NOT_RUN",
+  "review_type": "author own review of full new files, real registration call graph, supplied primary SDK source, independent fixture oracle",
+  "base_commit": "5ee707f388dbcdd448d910ab7c2c65b4cdad0424",
+  "candidate_manifest": {
+    "path": "evidence/cmake-sdk-profile-manifest.json",
+    "bytes": 3199,
+    "sha256": "4acd4e1288d1ea41965d28efe6a59056df53e960e53d112e6ea83014f2e8d778",
+    "git_blob": "a2dc2b6ec1ec7540b04de8fc30c3a569ef9cb3d3"
+  },
+  "candidate_files": [
+    {
+      "path": "internal/vcpkgmcp/vcpkgserver/cmake_trace_sdk_profile_windows_test.go",
+      "bytes": 24616,
+      "sha256": "b7606aee1730a0e3e7c292cf8c6552069b44fc40bc655e82a2a93a4216311bfb",
+      "git_blob": "b83fc6c00032c9d641853fb3b0ba7fff64893052",
+      "whitespace_check": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "path": "internal/vcpkgmcp/vcpkgserver/cmake_trace_sdk_memory_windows_test.go",
+      "bytes": 2924,
+      "sha256": "5c88cd9b48acacecc9193d2e569f921cfc15cd928f74af70f074d6112bcf727d",
+      "git_blob": "2eece9387b50201190ff09f4406c6015b86b9a46",
+      "whitespace_check": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "path": "internal/vcpkgmcp/vcpkgserver/testdata/cmake_trace_sdk_profile_oracle.json",
+      "bytes": 12055,
+      "sha256": "66edc3230924cb22f31235ebdc0a607e4a1e227db117209f56c24b7d49139ace",
+      "git_blob": "5f78351ea2a17a6c1232b8c01ca1d374c97f0ae5",
+      "whitespace_check": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ],
+  "mandatory_findings_remaining": [],
+  "closed_self_review_findings": [
+    {
+      "area": "oracle serialization",
+      "condition": "Record.Defer has omitempty",
+      "consequence": "Including false would incorrectly reject the real full response",
+      "correction": "Independent derivation omits absent/false defer. All public fixture records lack defer."
+    },
+    {
+      "area": "SDK cancellation error ownership",
+      "condition": "SDK call joins context.Canceled with notification failure",
+      "consequence": "errors.Is alone would mask a second transport failure",
+      "correction": "Only cancellation leaves are accepted; other error leaves fail and are retained in call/error evidence."
+    },
+    {
+      "area": "session close",
+      "condition": "A manual bounded close returns an error or unresolved ownership",
+      "consequence": "Deferred fallback could launch a second wait for the same session",
+      "correction": "Release controller session reference after its one explicit close attempt, before error return; no second close attempt in defer."
+    },
+    {
+      "area": "timestamps",
+      "condition": "wall clock changes during observation",
+      "consequence": "Unix timestamp subtraction is not a stable latency measurement",
+      "correction": "Latencies use time.Time.Sub monotonic components; Unix values are correlation metadata only."
+    },
+    {
+      "area": "root independent finding: SDK close ordering",
+      "condition": "Client cancellation retires outgoing call before server processResult has finished response processing; concurrent client.Close may close responsesR first",
+      "consequence": "A late server write can encounter a reader closed by the profile itself; middleware settlement alone does not establish SDK session completion",
+      "correction": "Graceful server.Close begins first, with client reader alive; only after its terminal result does client.Close begin. At the shared five-second deadline, close owned pipes and start any not-yet-started client.Close, then observe both for five more seconds. Each owner is started once.",
+      "primary_source": "actual cached go-sdk@v1.6.1/internal/jsonrpc2/conn.go: updateInFlight/idle, Retire, Close/wait, handleAsync, processResult, write; all767 lines read through RDC",
+      "claim_limit": "SDK write rejects when connClosing; Close exposes closeErr only. No assertion of delivery of already-retired late cancellation responses. Normal response completeness is checked at actual client before close."
+    }
+  ],
+  "real_consumer_boundary": [
+    "newRegisteredServer(registerTools)",
+    "mcp.Server.Connect with two owned io.Pipe pairs and mcp.IOTransport",
+    "official mcp.Client.Connect + ListTools + CallTool(vcpkg_cmake_trace)",
+    "real cmakeTraceTool -> cmaketrace.Trace(DefaultDeps) -> regular file read -> publicresult -> SDK client decode"
+  ],
+  "input": {
+    "public_fixture": {
+      "path": "qualification/cmake-input/trace.jsonl",
+      "bytes": 11302778,
+      "sha256": "a79b7793b5f384f885afb60fb513402d4523bcc0779546aa1e199e15a80fd286",
+      "git_blob": "011ed25ae341ae610b2364cd62a8477f3ca154fa"
+    },
+    "provenance_commit": "b1d932ea8925ef3324d539e5de006daeae65ba2a",
+    "archive_git_blob": "e57310ea91223f43c09fe7233feb796176a52f1a",
+    "kind": "published redacted CMake-generated fixture, not production workload",
+    "json_lines": 16672,
+    "command_records": 16671,
+    "include_records": 8,
+    "files": 12,
+    "unique_file_line_pairs": 263,
+    "payload_set_commands": 16384,
+    "payload_padding_bytes": 512,
+    "max_line_bytes_excluding_newline": 685,
+    "original_trace_not_admitted": {
+      "bytes": 11827770,
+      "sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8"
+    }
+  },
+  "oracles": {
+    "derivation": "Python JSON parsing independently checks all payload sequence numbers and exact 512-byte padding; no Go/CMake execution. All first8 record fields, all includes, all indexes and file ordering retained in oracle. Current native evidence.path is bound at runtime.",
+    "warmups_per_fresh_session": [
+      "max_records=8 full body (9608 bytes without native evidence)",
+      "max_records=0 production default1000 projection with declared omissions8/1000/12/12"
+    ],
+    "normal_measured": "Every client response is exactly equal after JSON decode to the independent projected oracle, non-IsError, single TextContent, <=262144 bytes. Body SHA256 and byte count retained.",
+    "cancellation_measured": "Require at least one client-only-cancellation result, one handler context.Canceled observation, and one handler unknown/canceled result. Completed-before-cancel responses must still pass normal response oracle. Full planned/submitted/received/completed/returned counts; handler errors, observation errors, duplicate/missing completion and unknown IDs fail."
+  },
+  "campaign": {
+    "normal": [
+      {
+        "workers": 1,
+        "calls_per_worker": 8
+      },
+      {
+        "workers": 2,
+        "calls_per_worker": 8
+      }
+    ],
+    "cancel_on_handler_entry": {
+      "workers": 2,
+      "calls_per_worker": 4
+    },
+    "measured_calls": 32,
+    "warmup_calls": 6,
+    "max_total_tool_calls": 38,
+    "driver_concurrency_bound": 2,
+    "actual_handler_peak": "observed and checked <= configured workers; no claim that configured2 necessarily achieves2",
+    "case_context_deadline_seconds": 45,
+    "worker_followup_seconds": 10,
+    "close_observation_seconds": [
+      5,
+      5
+    ],
+    "command": [
+      "go",
+      "test",
+      "-json",
+      "-run",
+      "^$",
+      "-bench",
+      "^BenchmarkCMakeTraceSDKConsumer$",
+      "-benchtime=1x",
+      "-count=1",
+      "-timeout=240s",
+      "./internal/vcpkgmcp/vcpkgserver"
+    ],
+    "env": {
+      "MCPHUB_CMAKE_SDK_PROFILE_TRACE": "<root-admitted absolute D path to exact public trace>",
+      "MCPHUB_CMAKE_SDK_PROFILE_SHA256": "a79b7793b5f384f885afb60fb513402d4523bcc0779546aa1e199e15a80fd286",
+      "GOTOOLCHAIN": "local",
+      "GOPROXY": "off",
+      "GOOS": "windows",
+      "GOARCH": "amd64"
+    }
+  },
+  "memory_and_latency": {
+    "scope": "whole current process including driver, semantic verification, sampling, official SDK client and server; filesystem warmed by SHA admission and warmups",
+    "process_observer": "current PID only; PROCESS_QUERY_LIMITED_INFORMATION; K32GetProcessMemoryInfo; exact96-byte x64 PROCESS_MEMORY_COUNTERS_EX2; strict validity checks; explicit CloseHandle result",
+    "metrics": [
+      "Go TotalAlloc/Mallocs deltas",
+      "Go HeapAlloc/HeapInuse",
+      "Windows working set (shared pages included)",
+      "Windows private working set",
+      "Windows private committed bytes",
+      "per-call client/handler/cancel-to-return monotonic durations",
+      "normal/cancellation response and error counts"
+    ],
+    "snapshots": [
+      "after warmups+GC with session open",
+      "after calls before GC",
+      "after GC retaining only actual client responses",
+      "after releasing responses+GC with session open",
+      "after sessions close and owned references released+GC"
+    ],
+    "sampling": "5ms periodic samples plus baseline seed; per-field maxima are lower bounds and can occur at different times; not an exact continuous peak",
+    "retention_limit": "Snapshot deltas include runtime/session/observer effects. No leak or production RSS bound follows from a single finite campaign."
+  },
+  "lifecycle": {
+    "observer_state": "call map initialized before Connect; concurrent mutations and snapshots under mutex; full responses separate from report so release can be measured",
+    "worker_ownership": "at most two workers, disjoint response slots, buffered completion channel; cancellation watcher joined per call; next call only after real handler completion",
+    "streams": "only the four owned io.Pipe ends are closed, no stdin/stdout or foreign handles",
+    "closing": "Server SDK Close first with live client reader; client Close starts after server terminal result. Combined graceful observation five seconds; on timeout close only owned pipe ends, start any pending client Close and observe both for another five seconds. Each owner starts once. Forced/unresolved close fails. Unsettled worker data is not cleared.",
+    "sampler": "stop signal + completion channel; ticker stopped before completion is sent; process observer handle closes after sampler settled",
+    "limits": "Context cannot forcibly interrupt an arbitrary blocked regular-file read or native memory query. Root retains outer test process handle/deadline. No whole-process guarantee from source review."
+  },
+  "checks_actually_performed": [
+    "Read exact product and primary SDK source listed below",
+    "Independent Python parse, complete fixture payload semantic checks and SHA verification",
+    "Author full source review: correctness, cancellation/errors, ownership, output honesty and bounded finite campaign",
+    "git diff --no-index --check for all3 new files: no whitespace diagnostics (exit1 means content differs from /dev/null)"
+  ],
+  "not_performed": [
+    "gofmt",
+    "Go compilation",
+    "Go benchmark",
+    "native Windows memory sampling",
+    "race detector",
+    "package regression"
+  ],
+  "qualification_requirements": [
+    "Root own review",
+    "Root re-review of the narrow server-first close ordering correction",
+    "Root-admitted exact Windows/amd64 toolchain, source composition, SDK v1.6.1 module bytes, fixture ancestor/reparse policy and fixed D runtime/cache paths",
+    "gofmt plus exact formatted byte readback before final runtime manifests",
+    "Run exactly one opt-in campaign via owned runner with no other tests selected; -race must be a separate functional run if requested, never mix with primary performance comparison",
+    "Retain raw go test JSON/stdout/stderr and terminal exit; exactly one CMAKE_TRACE_SDK_PROFILE_V1 JSON object state=complete, all3 cases complete, input_after_verified=true, observer close error empty",
+    "Benchmark output can prefix the JSON line with its benchmark name; extract at unique literal marker, not by assuming it begins stdout line",
+    "Full package/system/installed product/production workloads/external published-head review remain separate"
+  ],
+  "product_source_pins": [
+    {
+      "path": "go.mod",
+      "bytes": 1045,
+      "sha256": "805a7dd76431a24ebd6ce346682e7bc321e4dae0e37488448811bfa624122edd"
+    },
+    {
+      "path": "internal/vcpkgmcp/vcpkgserver/server.go",
+      "bytes": 4322,
+      "sha256": "2b8e36a24761d7af2b7ddd6fd5218234df478d7ed1015e57bee38d01f2f64b99"
+    },
+    {
+      "path": "internal/vcpkgmcp/vcpkgserver/tools.go",
+      "bytes": 41496,
+      "sha256": "a1a27e26a34c251e729dc8d0127aa50400d472bfc703ef3efe2ff5d75e74e245"
+    },
+    {
+      "path": "internal/vcpkgmcp/vcpkgserver/helpers.go",
+      "bytes": 1345,
+      "sha256": "6f3a60679767ac82cf2dc5d1897eae0a83e7fe2a0d55d975c5727f740944eac7"
+    },
+    {
+      "path": "internal/vcpkgmcp/cmaketrace/cmaketrace.go",
+      "bytes": 24631,
+      "sha256": "d51adc76972be45cb36cf1a436c8a94a61ba1ed6e571e070697d9882601daa2a"
+    },
+    {
+      "path": "internal/vcpkgmcp/cmaketrace/parse.go",
+      "bytes": 10793,
+      "sha256": "745de466077fc554ffba6480b99675bb2aa3edd2a5de7f64753a6a2f49e07487"
+    },
+    {
+      "path": "internal/vcpkgmcp/cmaketrace/projection.go",
+      "bytes": 7155,
+      "sha256": "f77c567edf5e5f900bed732f3fc5840ba29e2a36a82617d9bd6383f66373c709"
+    },
+    {
+      "path": "internal/vcpkgmcp/publicresult/publicresult.go",
+      "bytes": 5201,
+      "sha256": "ecf61dc65c1102fdeab59b0e5b68ac44e5872ca2eae50092bd088e8c37cdde97"
+    }
+  ],
+  "primary_sdk_source_pins": [
+    {
+      "path": "qualification/reference/relay/source/go-sdk/mcp/client.go",
+      "bytes": 44920,
+      "sha256": "8ecce1c2ac2b5fca92d2b18a91e03f95fbac6dd44d926feab6024584f1e2b2d5"
+    },
+    {
+      "path": "qualification/reference/relay/source/go-sdk/mcp/server.go",
+      "bytes": 58296,
+      "sha256": "f34bf2b74cc9620cd557a9456fd2979d0806cef96853b14150b2f39512cbf201"
+    },
+    {
+      "path": "qualification/reference/relay/source/go-sdk/mcp/transport.go",
+      "bytes": 20764,
+      "sha256": "92fade725b3281b42de860cd30845a1cc47b27a118c80c8a86d0fa56c51cbeec"
+    },
+    {
+      "path": "qualification/reference/relay/source/go-sdk/mcp/protocol.go",
+      "bytes": 67075,
+      "sha256": "bdb458ab0755f7fa25c33b329556eabc8c1429c2edecd6c8248ccd52839f7acc"
+    },
+    {
+      "path": "qualification/reference/relay/source/go-sdk/mcp/shared.go",
+      "bytes": 21709,
+      "sha256": "9921546e9d5fece646e20d29e9b7b98b76c3eab565eeafeb56886b6c54e8407b"
+    }
+  ],
+  "profile_symbols": {
+    "internal/vcpkgmcp/vcpkgserver/cmake_trace_sdk_profile_windows_test.go": {
+      "add": 82,
+      "middleware": 89,
+      "snapshot": 141,
+      "closePipes": 177,
+      "close": 186,
+      "newCMakeSDKSession": 226,
+      "cmakeSDKError": 246,
+      "cmakeSDKOnlyCancellation": 253,
+      "verifyCMakeSDKInput": 265,
+      "cmakeSDKExpected": 288,
+      "verifyCMakeSDKResponse": 303,
+      "callCMakeSDK": 315,
+      "sampleCMakeSDKMemory": 379,
+      "profileCMakeSDKCase": 404,
+      "BenchmarkCMakeTraceSDKConsumer": 531
+    },
+    "internal/vcpkgmcp/vcpkgserver/cmake_trace_sdk_memory_windows_test.go": {
+      "newCMakeSDKMemoryProbe": 44,
+      "sample": 59
+    }
+  },
+  "primary_sdk_additional_readback": {
+    "path": "evidence/cmake-sdk-jsonrpc2-conn-readback.json",
+    "bytes": 28972,
+    "sha256": "a56545202bf763b2e02b409c23975e77d8ccac1745aae54374a007e1a7232e3a",
+    "git_blob": "11b4decff2496712d9ebf1987ce074fca6d4387e",
+    "kind": "raw textual read-file receipt, not a remote file byte digest"
+  }
+}

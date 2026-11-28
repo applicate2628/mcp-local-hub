@@ -1,0 +1,105 @@
+{
+  "schema": 1,
+  "pr": 624,
+  "branch": "perf/rx01-cmaketrace-benchmark-20261112",
+  "observed_head": "5a948076bad4b9b7aa409f2aa46562b9cbe323fd",
+  "observed_tree": "70c10faecc30f0869214af5ca12fe2ce49844bd3",
+  "code_commit": "074f8232731cffa7fb39e7defbaf7e20ee5e5be6",
+  "code_tree": "e4ef93c843ec3342c4a6d564e7f5ad88e9b3b021",
+  "parent": "81dcf67db013ba2879878c2ee6fe07aa0bb4aec3",
+  "increment_files": [
+    {
+      "path": "internal/vcpkgmcp/cmaketrace/cmaketrace.go",
+      "sha": "d85745df93fbbb285960adf7cb248a8ec3846eb4"
+    },
+    {
+      "path": "internal/vcpkgmcp/cmaketrace/trace_terminal_cancellation_test.go",
+      "sha": "8da0a111d3453b033423931ce78f859b9ee0179a"
+    },
+    {
+      "path": "docs/modernization/verification/cmaketrace-terminal-cancellation-2026-11-22/evidence.zip",
+      "sha": "e7e2e6e5f736259e89b0c966ebac1319f7f50768"
+    },
+    {
+      "path": "docs/modernization/verification/cmaketrace-terminal-cancellation-2026-11-22/archive.json",
+      "sha": "f0a93f1a8da86bf1fd89e4f440590e3ddc6b91d1"
+    },
+    {
+      "path": "docs/modernization/verification/cmaketrace-terminal-cancellation-2026-11-22/source-composition-proof.json",
+      "sha": "39c9051cd1277a9c71509de9ac65fb4dd23451d9"
+    },
+    {
+      "path": "docs/modernization/verification/cmaketrace-terminal-cancellation-2026-11-22/qualification.json",
+      "sha": "ff55a12569ebf770bea807fa16f622144415f1ec"
+    },
+    {
+      "path": "docs/modernization/verification/cmaketrace-terminal-cancellation-2026-11-22/README.md",
+      "sha": "d29f2993888a3d7dec106ed1f90cb5766bffc21b"
+    }
+  ],
+  "full_pr_path_count": 15,
+  "published_tree_entries": 3406,
+  "published_tree_truncated": false,
+  "text_readbacks": [
+    {
+      "path": "docs/modernization/verification/cmaketrace-terminal-cancellation-2026-11-22/archive.json",
+      "sha": "f0a93f1a8da86bf1fd89e4f440590e3ddc6b91d1",
+      "content_equal": true
+    },
+    {
+      "path": "docs/modernization/verification/cmaketrace-terminal-cancellation-2026-11-22/source-composition-proof.json",
+      "sha": "39c9051cd1277a9c71509de9ac65fb4dd23451d9",
+      "content_equal": true
+    },
+    {
+      "path": "docs/modernization/verification/cmaketrace-terminal-cancellation-2026-11-22/qualification.json",
+      "sha": "ff55a12569ebf770bea807fa16f622144415f1ec",
+      "content_equal": true
+    },
+    {
+      "path": "docs/modernization/verification/cmaketrace-terminal-cancellation-2026-11-22/README.md",
+      "sha": "d29f2993888a3d7dec106ed1f90cb5766bffc21b",
+      "content_equal": true
+    },
+    {
+      "path": "internal/vcpkgmcp/cmaketrace/cmaketrace.go",
+      "sha": "d85745df93fbbb285960adf7cb248a8ec3846eb4",
+      "content_equal": true
+    },
+    {
+      "path": "internal/vcpkgmcp/cmaketrace/parse_benchmark_test.go",
+      "sha": "622e4769f63e6577062a9edb9e7614dffc571358",
+      "content_equal": true
+    },
+    {
+      "path": "internal/vcpkgmcp/cmaketrace/trace_benchmark_contract_test.go",
+      "sha": "fd0291bfa558ef7562f315d9a2412296e86aaef4",
+      "content_equal": true
+    },
+    {
+      "path": "internal/vcpkgmcp/cmaketrace/trace_retained_records_test.go",
+      "sha": "07cd515ba4edb7d88d48db871742bf65e784c757",
+      "content_equal": true
+    },
+    {
+      "path": "internal/vcpkgmcp/cmaketrace/trace_terminal_cancellation_test.go",
+      "sha": "8da0a111d3453b033423931ce78f859b9ee0179a",
+      "content_equal": true
+    }
+  ],
+  "package_composition": {
+    "master_go_paths": 17,
+    "qualified_overlays": 5,
+    "published_go_paths": 21,
+    "all_published_package_go_blobs_equal_master_plus_qualified_overlays": true
+  },
+  "archive": {
+    "path": "docs/modernization/verification/cmaketrace-terminal-cancellation-2026-11-22/evidence.zip",
+    "bytes": 647455,
+    "sha256": "5444b8c4825034fa8a0fa2936a20a1f9a98d12a75698b89772a8c03238021e67",
+    "git_blob": "e7e2e6e5f736259e89b0c966ebac1319f7f50768",
+    "local_blob_equals_create_blob_and_published_tree": true,
+    "second_binary_download": false
+  },
+  "claim_scope": "The executed environment is physical master75 plus five overlays. Published package Go blobs match that selection; full standalone PR head execution is not claimed."
+}

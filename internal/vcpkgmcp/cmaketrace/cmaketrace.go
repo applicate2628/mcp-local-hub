@@ -405,6 +405,11 @@ func Trace(ctx context.Context, args Args, deps Deps) Result {
 
 	limits := deps.Limits.normalized()
 	parsed, parseErr := parseTraceStream(ctx, f, limits)
+	if parseErr == nil {
+		// A final read can return EOF after the request was canceled. Check
+		// the phase handoff before deriving indexes or publishing evidence.
+		parseErr = ctx.Err()
+	}
 	if parseErr != nil {
 		reason := ReasonTraceUnreadable
 		if errors.Is(parseErr, context.Canceled) || errors.Is(parseErr, context.DeadlineExceeded) {
@@ -456,6 +461,11 @@ func Trace(ctx context.Context, args Args, deps Deps) Result {
 		records = records[:maxRecords]
 		truncated = true
 	}
+
+	// Filtering and the returned-record cap reuse the parsed backing array.
+	// Clear discarded records only after deriving the unfiltered indexes so
+	// a retained Result does not keep their argument payloads reachable.
+	clear(parsed.records[len(records):])
 
 	base := Result{
 		IncludeChain:           includeChain,

@@ -1,0 +1,67 @@
+{
+  "schema": 1,
+  "scope": "cmake",
+  "pr": 624,
+  "base": "5ee707f388dbcdd448d910ab7c2c65b4cdad0424",
+  "source": {
+    "internal/vcpkgmcp/vcpkgserver/cmake_trace_sdk_memory_windows_test.go": {
+      "bytes": 2922,
+      "sha256": "fd57c6c28f638191ad0370ee2cc36b10335468e441fbfcc81cd98a2dbcd929d4",
+      "git_blob": "53e0f81b24f5f3b67928a0548774e38c4ebe4ee7"
+    },
+    "internal/vcpkgmcp/vcpkgserver/cmake_trace_sdk_profile_windows_test.go": {
+      "bytes": 25003,
+      "sha256": "2e70941f8db24106fcca787577f81978fa86a7e155ae0e55c3cf4d990376ea8f",
+      "git_blob": "e5368052d94985085f257accc222bf07e31abe10"
+    },
+    "internal/vcpkgmcp/vcpkgserver/testdata/cmake_trace_sdk_profile_oracle.json": {
+      "bytes": 12055,
+      "sha256": "66edc3230924cb22f31235ebdc0a607e4a1e227db117209f56c24b7d49139ace",
+      "git_blob": "5f78351ea2a17a6c1232b8c01ca1d374c97f0ae5"
+    }
+  },
+  "artifacts": {
+    "README.md": {
+      "bytes": 19597,
+      "sha256": "05db0c05a2568e939a4e0fb8e5b5e9ca9640548b0131e918d862410b567f7144",
+      "git_blob": "fefbb025a90e565590f31f637e57c5c1207328e0"
+    },
+    "cmake-sdk-profile-independent-doc-review.json": {
+      "bytes": 6238,
+      "sha256": "4d7f0289d52a7c227ed3e284158b105eb59dfd94778d7bb5fd1116ba599e5610",
+      "git_blob": "d61e3a7caea4ea977f023c12e2de77e645463cff"
+    },
+    "cmake-sdk-profile-own-review.json": {
+      "bytes": 15369,
+      "sha256": "dccbdd0abcfc5888fd3a453a476fa0f1fa9eb1b2c8911bcc2ad5dace4f234063",
+      "git_blob": "b90945de6ba34958e0dcdaf66f8abc985930f3ec"
+    },
+    "cmake-sdk-profile-postformat-review.json": {
+      "bytes": 5221,
+      "sha256": "f97e027cda91988d403282c17c4c1f35f0b59bf7045621c4f15f320cd2230abe",
+      "git_blob": "057b42cf2dbc1f36ce03c68d5fd1b0c88e4e8b4d"
+    },
+    "cmake-sdk-profile-results.json": {
+      "bytes": 9173,
+      "sha256": "dcc74b26913cdada9409113f06535b3817397415ddb30603a0c8ca863a08a70b",
+      "git_blob": "5809918777f25cd82f028b4f81e96c3228fcb040"
+    },
+    "doc-review-resolution.json": {
+      "bytes": 474,
+      "sha256": "5aa4e1ce5f7ee83de27a8ee0c4008af12a2ac05bf0108d0f540c755d2a798af8",
+      "git_blob": "1efc415b1c7593167a324a598b52803e41ffc79f"
+    },
+    "raw-evidence.tar.gz": {
+      "bytes": 1125242,
+      "sha256": "f04ff1c2e162ba86e883fef190218771e932b19ee45e31df65cac55239d6b73c",
+      "git_blob": "c98209600f0c5e64a02b6323ce2b30378acebdc7"
+    },
+    "root-review.json": {
+      "bytes": 1052,
+      "sha256": "5104bad02a3a7aad227590f6be9734aaff56cfd00c3afeec1da1c5f2bca98086",
+      "git_blob": "94fa4ce20f6267114fe38fb7e4ae09d4cb43901b"
+    }
+  },
+  "archive_members": 59,
+  "archive_bytes_uncompressed": 14839038
+}

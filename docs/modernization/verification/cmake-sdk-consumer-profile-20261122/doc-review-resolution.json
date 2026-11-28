@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "reviewer": "root",
+  "finding": "CMAKE-DOC-01",
+  "status": "CORRECTED",
+  "scope": "Publication wording only; no source or primary-data changes and no rerun.",
+  "readme_sha256": "05db0c05a2568e939a4e0fb8e5b5e9ca9640548b0131e918d862410b567f7144",
+  "correction": "Unexpected errors are absent. Expected context canceled errors are counted as cancellation.",
+  "review": "cmake-sdk-profile-independent-doc-review.json",
+  "mandatory_open_findings": []
+}

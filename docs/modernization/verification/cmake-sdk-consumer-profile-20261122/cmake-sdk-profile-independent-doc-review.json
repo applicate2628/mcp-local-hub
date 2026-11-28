@@ -1,0 +1,136 @@
+{
+  "schema": 1,
+  "status": "DOC_REVIEW_ONE_REQUIRED_WORDING_CORRECTION",
+  "reviewer": "relay_residual independent source/data-only review",
+  "reviewed_utc": "2026-11-22T13:39:09.112452+00:00",
+  "inputs": [
+    {
+      "path": "evidence/cmake-sdk-profile-publication-README.md",
+      "bytes": 19487,
+      "sha256": "7320628f072d953017d4a641c28f986c3d19958bcd8035c13460c0e055c59058"
+    },
+    {
+      "path": "evidence/cmake-sdk-profile-results.json",
+      "bytes": 9173,
+      "sha256": "dcc74b26913cdada9409113f06535b3817397415ddb30603a0c8ca863a08a70b"
+    },
+    {
+      "path": "qualification/results/cmake/profile.json",
+      "bytes": 42010,
+      "sha256": "903bb43306f90b945de28187d5643930932e755fd524e540bc3d54ea2226fd99"
+    },
+    {
+      "path": "qualification/results/cmake/receipt.json",
+      "bytes": 4944,
+      "sha256": "648a4044112d019530a2e190b6d8b62cc27a3018326fcc86a937583628a3c2bf"
+    },
+    {
+      "path": "qualification/results/cmake/sdk-profile.stdout.log",
+      "bytes": 39747,
+      "sha256": "dd0cf53ed0cfd548e8b68978aca7facb0c18d6f32a7b6fbd8580d9aa8264c994"
+    }
+  ],
+  "findings": [
+    {
+      "id": "CMAKE-DOC-01",
+      "severity": "required wording precision; no runtime/code defect",
+      "location": {
+        "path": "evidence/cmake-sdk-profile-publication-README.md",
+        "section": "3.1",
+        "line": 64
+      },
+      "quote": "Ошибки клиента, обработчика, наблюдения, неизвестные идентификаторы, неучтённые и не вернувшиеся вызовы отсутствуют.",
+      "condition": "All eight measured cancellation calls carry nonempty client_error=\"context canceled\" and handler_context_error=\"context canceled\" in the primary profile. They are expected cancellation outcomes; the unexpected error counters remain zero.",
+      "consequence": "The unqualified statement that client/handler errors are absent is literally stronger than the preserved per-call fields and obscures expected cancellation classification.",
+      "minimum_change": "Say unexpected/other client or handler errors are absent; explicitly retain context canceled as the eight expected cancellation outcomes. No rerun or data edit is needed.",
+      "status": "OPEN_FOR_PARENT_WORDING_EDIT"
+    }
+  ],
+  "verified": {
+    "all_table3_numbers_match_primary": true,
+    "percentiles_recomputed_nearest_rank": true,
+    "allocation_deltas_recomputed_from_primary_counters": true,
+    "profile_json_equals_object_embedded_in_raw_go_stdout": true,
+    "actual_go_version": "go1.27.4",
+    "actual_sdk_version": "v1.6.1",
+    "actual_platform": "windows/amd64",
+    "command_seconds": 2.9419579999521375,
+    "command_finished_utc": "2026-11-22T13:21:27.538853+00:00",
+    "package_pass_events": 1,
+    "package_fail_or_skip_events": 0,
+    "source_inputs_before_after_match": true,
+    "source_files": 3282,
+    "input_files": 7,
+    "case_recomputations": [
+      {
+        "case_index": 0,
+        "workers": 1,
+        "measured": 8,
+        "warmup": 2,
+        "client_p50_ns_nearest_rank": 53300900,
+        "client_p95_ns_nearest_rank": 57661000,
+        "client_max_ns": 57661000,
+        "zero_duration_observations": 0,
+        "samples": 86,
+        "heap_peak_lower_bound": 22734528,
+        "private_working_set_peak_lower_bound": 30298112,
+        "held_heap": 867080,
+        "closed_heap": 691232,
+        "allocated_bytes": 346101528,
+        "unexpected_error_count": 0,
+        "expected_client_context_cancelled_fields": 0,
+        "expected_handler_context_cancelled_fields": 0
+      },
+      {
+        "case_index": 1,
+        "workers": 2,
+        "measured": 16,
+        "warmup": 2,
+        "client_p50_ns_nearest_rank": 57171900,
+        "client_p95_ns_nearest_rank": 66457800,
+        "client_max_ns": 66457800,
+        "zero_duration_observations": 0,
+        "samples": 93,
+        "heap_peak_lower_bound": 44038368,
+        "private_working_set_peak_lower_bound": 54849536,
+        "held_heap": 909672,
+        "closed_heap": 712792,
+        "allocated_bytes": 692080128,
+        "unexpected_error_count": 0,
+        "expected_client_context_cancelled_fields": 0,
+        "expected_handler_context_cancelled_fields": 0
+      },
+      {
+        "case_index": 2,
+        "workers": 2,
+        "measured": 8,
+        "warmup": 2,
+        "client_p50_ns_nearest_rank": 0,
+        "client_p95_ns_nearest_rank": 1542000,
+        "client_max_ns": 1542000,
+        "zero_duration_observations": 7,
+        "samples": 1,
+        "heap_peak_lower_bound": 877608,
+        "private_working_set_peak_lower_bound": 34648064,
+        "held_heap": 968056,
+        "closed_heap": 724864,
+        "allocated_bytes": 3093744,
+        "unexpected_error_count": 0,
+        "expected_client_context_cancelled_fields": 8,
+        "expected_handler_context_cancelled_fields": 8
+      }
+    ],
+    "cancel_window_ns": 1542000,
+    "sample_interval_ns": 5000000,
+    "cancel_single_sample_equals_baseline": true,
+    "all_cases_complete_settled_no_forced_close": true,
+    "measurement_scope": "Whole process, warmed cache; no isolated-parser memory, no peak estimate from the cancellation baseline sample, no leak/causal improvement/full-suite/standalone-branch claim."
+  },
+  "remaining_review_limits": [
+    "This review reread the complete README and compared claimed numbers/version/timing/composition with the exact primary profile, stdout and Q receipt. It did not repeat root payload/call-ID qualification or run any benchmark.",
+    "Thirty-eight calls are distinct invocations within their case context; per-case IDs can recur across cases. No claim of globally unique bare ID strings is needed.",
+    "Historical fixture-generation/publication and every helper implementation were not independently requalified by executing them. This is a publication-claim review.",
+    "Direct Go child receipt is settled without timeout; this does not prove a whole compiler/runtime process-tree deadline. README does not claim that property."
+  ],
+  "mutations": "Only this independent review report was written. Reviewed README, results, raw files and source were not changed; no remote/Go/Rust/native execution."
+}

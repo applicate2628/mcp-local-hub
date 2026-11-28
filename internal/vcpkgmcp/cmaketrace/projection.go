@@ -1,6 +1,7 @@
 package cmaketrace
 
 import (
+	"encoding/json"
 	"strconv"
 	"unicode/utf8"
 
@@ -123,6 +124,7 @@ func (r Result) PublicResultRequiresProjection(limit int) bool {
 // not decoded source bytes.
 func encodedJSONStringBytes(value string) int {
 	encoded := 2 // opening and closing quote
+	replacementBytes := 0
 	for i := 0; i < len(value); {
 		b := value[i]
 		if b < utf8.RuneSelf {
@@ -144,7 +146,13 @@ func encodedJSONStringBytes(value string) int {
 		r, size := utf8.DecodeRuneInString(value[i:])
 		switch {
 		case r == utf8.RuneError && size == 1:
-			encoded += utf8.RuneLen(r)
+			if replacementBytes == 0 {
+				// Go versions can encode an invalid byte as a literal
+				// replacement rune or as an escape. Ask the actual encoder.
+				raw, _ := json.Marshal(value[i : i+1]) // A single-byte string always encodes.
+				replacementBytes = len(raw) - 2        // exclude the surrounding quotes
+			}
+			encoded += replacementBytes
 		case r == '\u2028' || r == '\u2029':
 			encoded += 6
 		default:
