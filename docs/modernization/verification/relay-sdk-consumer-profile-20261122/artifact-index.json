@@ -1,0 +1,52 @@
+{
+  "schema": 1,
+  "scope": "relay",
+  "pr": 626,
+  "base": "04e1e19650318725850225ebadc521cbf97dadd9",
+  "source": {
+    "internal/daemon/relay_load_test.go": {
+      "bytes": 10917,
+      "sha256": "717164eccc8dfbf4a76d18450ce8add18dd623b1bdfe214d9835a02ee26c683a",
+      "git_blob": "bb033cc77ba144fd96410a8ac520537f843d9927"
+    },
+    "internal/daemon/relay_sdk_profile_windows_test.go": {
+      "bytes": 13000,
+      "sha256": "21137730f81bc6aec205440067a36d402d40974fc35db7c359a9dda9d8cea145",
+      "git_blob": "6d936ae9f19053b45e5d94e27ab05186b3b4540e"
+    }
+  },
+  "artifacts": {
+    "README.md": {
+      "bytes": 16066,
+      "sha256": "af7b1d89201b934dcd0574445601f653a68cd7f5f20481b6a4766b94653962b5",
+      "git_blob": "f0746378eac26f5c9850d3fbc1f5814621cb0439"
+    },
+    "raw-evidence.tar.gz": {
+      "bytes": 1237576,
+      "sha256": "cc25e07ea4721cbf604dd437148f2f457993baa6fce0d84b3081fb4cc9681f26",
+      "git_blob": "c824629fb245329f251cc4fb58503549ff8e7e85"
+    },
+    "relay-sdk-profile-independent-review.json": {
+      "bytes": 8569,
+      "sha256": "4d5743e8170fe8b63018d6ab772390df308c45bb85ec038363b3c2147e7d734c",
+      "git_blob": "8e6d1b2e2735455bb42afa150f61be7b644461ce"
+    },
+    "relay-sdk-profile-results-review.json": {
+      "bytes": 2387,
+      "sha256": "89ee5fb4ea3e58116d0b8a3e464f5eb3353cf86e659f87fb009de13f8582386a",
+      "git_blob": "584c40a0f50f0a430a43cd3c19c7cbb2824629ea"
+    },
+    "relay-sdk-profile-results.json": {
+      "bytes": 56826,
+      "sha256": "d13dc9ea4dc8190632eeb55b938fb5fe00461c670636b09ae5ac6b30f58f1a64",
+      "git_blob": "98ead01d016fd39f61f9e700c477aebe66475ce3"
+    },
+    "root-review.json": {
+      "bytes": 916,
+      "sha256": "0d3e31f5575b3994ca1e4e81f16a49b6676af296ba00f8530f571ede285d96b0",
+      "git_blob": "bba7ba2f2b99b4afa016f27cd66e997a8bba7957"
+    }
+  },
+  "archive_members": 87,
+  "archive_bytes_uncompressed": 4306674
+}

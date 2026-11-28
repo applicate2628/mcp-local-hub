@@ -1,0 +1,15 @@
+{
+  "reviewer": "root",
+  "base": "04e1e19650318725850225ebadc521cbf97dadd9",
+  "scope": "relay",
+  "source_paths": [
+    "internal/daemon/relay_load_test.go",
+    "internal/daemon/relay_sdk_profile_windows_test.go"
+  ],
+  "requirements": "Only reviewed scoped candidate changes; no base synchronization, merge or unrelated source changes.",
+  "qualification_boundary": "Exact input bytes and physical source are bound in preserved plans and results; composed Go evidence is not standalone branch qualification.",
+  "security_and_lifecycle": "Reviewed owned resources, cancellation, original-handle behavior, bounded runners and explicit unproven native/full-suite boundaries.",
+  "compatibility": "Existing published donor contracts retained. Scheduler BackendRunHold composition stays in evidence, not a partial API import into #660.",
+  "mandatory_findings": [],
+  "external_published_commit_review": "NOT_RUN"
+}
