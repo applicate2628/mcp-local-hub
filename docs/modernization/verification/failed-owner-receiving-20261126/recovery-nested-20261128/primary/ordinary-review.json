@@ -1,0 +1,60 @@
+{
+  "status": "SCOPED_STATIC_PASS_NO_BLOCKER",
+  "package_sha256": "ddcba8dddee43bfc2a0d0f410142a954c2780c2bab2dac07e97f1c0df020ec11",
+  "package_files_verified": 12,
+  "external_pins_verified": 3,
+  "preimage_sha256": "4cdb508e655527b0372a5726f2753f6163ee50ed25b52546ff86e85682a6185a",
+  "postimage_sha256": "1f45b3ef0e9184cc66be002cb918eb38dad0560e86e0a4a2d5c31658f44c2891",
+  "patch_sha256": "e724dc749ac82517d2af3553fa558388f59371a0a2c0330af4a0db60738a31d5",
+  "complete_patch_and_changed_functions_read": true,
+  "exact_two_replacements_reproduce_complete_after_bytes": true,
+  "changed_functions": [
+    "ordinary",
+    "pinned"
+  ],
+  "other_functions_source_byte_identical": 20,
+  "module_data_AST_identical": true,
+  "ordinary_call_sites": [
+    {
+      "function": "pinned",
+      "line": 334,
+      "expression": "ordinary(path)"
+    },
+    {
+      "function": "receive_worktree_controls",
+      "line": 940,
+      "expression": "ordinary(path)"
+    },
+    {
+      "function": "receive_worktree_controls",
+      "line": 926,
+      "expression": "ordinary(directory)"
+    },
+    {
+      "function": "receive_worktree_controls",
+      "line": 938,
+      "expression": "ordinary(root)"
+    }
+  ],
+  "pinned_remains_explicit_regular_file_before_open": true,
+  "ancestor_and_target_no_symlink_no_reparse_checks_unchanged": true,
+  "special_types_rejected_by_file_or_directory_predicate": true,
+  "worktree_ref_layout_scope_and_budgets_unchanged": true,
+  "five_test_paths_and_bindings_unchanged": true,
+  "REVIEW_COMPLETE": false,
+  "candidate_whole_module_imported_or_executed": false,
+  "candidate_files_mutated": false,
+  "local_test_evidence_reviewed": {
+    "harness_full_read": true,
+    "recorded_cases": 27,
+    "recorded_PASS": 27,
+    "rerun_by_independent_reviewer": false,
+    "exact_unchanged_refs_loop_extracted": true,
+    "reparse_evidence": "Injected Windows attribute on actual local lstat mode; not native Windows proof",
+    "first_optional_socket_fixture_error_preserved": true,
+    "socket_coverage": false
+  },
+  "native_windows_or_process_actions": "NOT_RUN",
+  "runtime_or_full_source_qualification_issued": false,
+  "review_is_not_new_mandatory_gate": true
+}

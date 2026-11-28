@@ -1,0 +1,370 @@
+{
+  "input_status": [
+    {
+      "outer_pin_verified": true,
+      "resolved_path_sha256": "ce141e8ff94ba5dd1cbbc978a3f849ad94dc9133ab58835881e0a037bac672aa",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\gui-original-owner-2026-11-22\\gui-owner-evidence.zip",
+      "status": "checked_declared_scope"
+    },
+    {
+      "outer_pin_verified": true,
+      "resolved_path_sha256": "3524965b387b0eb1a01ce8f4afd3e43be2344131b14eb7b1a12928e947194652",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\p0-safe-test-gates-2026-11-21\\p0-gates-evidence.zip",
+      "status": "checked_declared_scope"
+    },
+    {
+      "outer_pin_verified": true,
+      "resolved_path_sha256": "24df65ed135f89228563bf4a232adeea20e0e2bc59f9af57283cb5d3c30d1c40",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\serena-owner-composition-2026-11-22\\serena-composition-evidence.zip",
+      "status": "checked_declared_scope"
+    },
+    {
+      "outer_pin_verified": true,
+      "resolved_path_sha256": "caf976986337c477034aab16b802c77e5cdbb56ff7a1193a3d154cbce63b48db",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\qualification\\scheduler-generation-error-origins-20261123\\scheduler-error-origins-20261123-57604a3a.zip",
+      "status": "checked_declared_scope"
+    },
+    {
+      "outer_pin_verified": true,
+      "resolved_path_sha256": "5c23b35b73d210331bd07c1c2103d1932b45437f1b0cd284f6f0b16464f9b8bc",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr668-verify-141552fcc73c\\source.zip",
+      "status": "checked_declared_scope"
+    },
+    {
+      "outer_pin_verified": true,
+      "resolved_path_sha256": "a19af615f486c745cc263ba589e1729297746cd1a730b2c81f373b629976acf7",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\cmake-sdk-consumer-profile-20261122\\raw-evidence.tar.gz",
+      "status": "partial"
+    },
+    {
+      "outer_pin_verified": true,
+      "resolved_path_sha256": "33863270f41dd1c7db8af22b914586eb45787595bb322f37a152c314eff54930",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\qualification\\known-folder-census-20261124\\census-qualification-20261124-57604a3a.zip",
+      "status": "partial"
+    }
+  ],
+  "archives": [
+    {
+      "depth": 0,
+      "directory_entries": 28,
+      "found_requested_members": [
+        "gui-final/received/gui-evidence.zip"
+      ],
+      "kind": "zip",
+      "members_read": 1,
+      "prior_seen_container_index_reopened": true,
+      "requested_members": [
+        "gui-final/received/gui-evidence.zip"
+      ],
+      "scope": "requested_members",
+      "sha256": "7b5cb19644e66910e4dd69e077c361c79845b8087e2d9771f0545c9c08788010",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\gui-original-owner-2026-11-22\\gui-owner-evidence.zip",
+      "status": "checked_declared_scope"
+    },
+    {
+      "depth": 1,
+      "directory_entries": 1346,
+      "kind": "zip",
+      "members_read": 1346,
+      "scope": "all_members",
+      "sha256": "52879c23549f17d6aeaa622f702bc61c7417131441b1e3c3b7eb3b261101a335",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\gui-original-owner-2026-11-22\\gui-owner-evidence.zip::gui-final/received/gui-evidence.zip",
+      "status": "checked_declared_scope"
+    },
+    {
+      "depth": 0,
+      "directory_entries": 394,
+      "found_requested_members": [
+        "recorded-runs/canonical-evidence.zip"
+      ],
+      "kind": "zip",
+      "members_read": 1,
+      "prior_seen_container_index_reopened": true,
+      "requested_members": [
+        "recorded-runs/canonical-evidence.zip"
+      ],
+      "scope": "requested_members",
+      "sha256": "8f20dc494b9566c8b3113dabceca6c73f3c8ed06b80ffa27808467d7ecd1a0c0",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\p0-safe-test-gates-2026-11-21\\p0-gates-evidence.zip",
+      "status": "checked_declared_scope"
+    },
+    {
+      "depth": 1,
+      "directory_entries": 1381,
+      "kind": "zip",
+      "members_read": 1381,
+      "scope": "all_members",
+      "sha256": "049089bb350e4822833002a117edc1e7912d784f45a992344da2cc3c0cb90075",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\p0-safe-test-gates-2026-11-21\\p0-gates-evidence.zip::recorded-runs/canonical-evidence.zip",
+      "status": "checked_declared_scope"
+    },
+    {
+      "depth": 0,
+      "directory_entries": 205,
+      "found_requested_members": [
+        "serena-next/received/serena-evidence.zip"
+      ],
+      "kind": "zip",
+      "members_read": 1,
+      "prior_seen_container_index_reopened": true,
+      "requested_members": [
+        "serena-next/received/serena-evidence.zip"
+      ],
+      "scope": "requested_members",
+      "sha256": "5fa49f768a4bd8856bea9775109989c896b437a77b3f88292d5e26322e0bb844",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\serena-owner-composition-2026-11-22\\serena-composition-evidence.zip",
+      "status": "checked_declared_scope"
+    },
+    {
+      "depth": 1,
+      "directory_entries": 1593,
+      "kind": "zip",
+      "members_read": 1593,
+      "scope": "all_members",
+      "sha256": "0fcbed980fbba1cccfe0b3debe567e2d4344a1de5271a0a1f900a223cd136a28",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\serena-owner-composition-2026-11-22\\serena-composition-evidence.zip::serena-next/received/serena-evidence.zip",
+      "status": "checked_declared_scope"
+    },
+    {
+      "depth": 0,
+      "directory_entries": 107,
+      "found_requested_members": [
+        "error-origin-inputs-20261123-v3/installed-error-sources.zip",
+        "error-origin-inputs-20261123-v4/installed-error-sources.zip",
+        "error-origin-inputs-20261123/installed-error-sources.zip"
+      ],
+      "kind": "zip",
+      "members_read": 3,
+      "prior_seen_container_index_reopened": true,
+      "requested_members": [
+        "error-origin-inputs-20261123-v3/installed-error-sources.zip",
+        "error-origin-inputs-20261123-v4/installed-error-sources.zip",
+        "error-origin-inputs-20261123/installed-error-sources.zip"
+      ],
+      "scope": "requested_members",
+      "sha256": "26501be50a4ba36c136963fd4e68f42984d1df12af49233b079fdee6540b9102",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\qualification\\scheduler-generation-error-origins-20261123\\scheduler-error-origins-20261123-57604a3a.zip",
+      "status": "checked_declared_scope"
+    },
+    {
+      "depth": 1,
+      "directory_entries": 15,
+      "kind": "zip",
+      "members_read": 15,
+      "scope": "all_members",
+      "sha256": "29c9151fe7d375137887ecb6e76162828a83fa12399b437a575a47c02735c861",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\qualification\\scheduler-generation-error-origins-20261123\\scheduler-error-origins-20261123-57604a3a.zip::error-origin-inputs-20261123-v3/installed-error-sources.zip",
+      "status": "checked_declared_scope"
+    },
+    {
+      "depth": 1,
+      "directory_entries": 4,
+      "kind": "zip",
+      "members_read": 4,
+      "scope": "all_members",
+      "sha256": "b9a70b78a244ee19ff8c00e8d19c0d21922b67485553271272a608649771030f",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\qualification\\scheduler-generation-error-origins-20261123\\scheduler-error-origins-20261123-57604a3a.zip::error-origin-inputs-20261123-v4/installed-error-sources.zip",
+      "status": "checked_declared_scope"
+    },
+    {
+      "depth": 1,
+      "directory_entries": 11,
+      "kind": "zip",
+      "members_read": 11,
+      "scope": "all_members",
+      "sha256": "98c04d00b489f7c9339d5982046945144ff27c74974c35a819073f2579fe2cda",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\qualification\\scheduler-generation-error-origins-20261123\\scheduler-error-origins-20261123-57604a3a.zip::error-origin-inputs-20261123/installed-error-sources.zip",
+      "status": "checked_declared_scope"
+    },
+    {
+      "depth": 0,
+      "directory_entries": 3467,
+      "found_requested_members": [
+        "docs/assets/hero-gui.gif"
+      ],
+      "kind": "zip",
+      "members_read": 1,
+      "prior_seen_container_index_reopened": true,
+      "requested_members": [
+        "docs/assets/hero-gui.gif"
+      ],
+      "scope": "requested_members",
+      "sha256": "922da876b826579a632438bb31d794d14ffb9e02178b24530451984cbbe99ab1",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr668-verify-141552fcc73c\\source.zip",
+      "status": "checked_declared_scope"
+    },
+    {
+      "depth": 0,
+      "kind": "gzip",
+      "prior_seen_container_index_reopened": true,
+      "scope": "requested_members",
+      "sha256": "f04ff1c2e162ba86e883fef190218771e932b19ee45e31df65cac55239d6b73c",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\cmake-sdk-consumer-profile-20261122\\raw-evidence.tar.gz",
+      "status": "partial"
+    },
+    {
+      "depth": 1,
+      "found_requested_members": [
+        "qualification/inputs/cmake-input/trace.jsonl"
+      ],
+      "kind": "tar",
+      "members_read": 1,
+      "requested_members": [
+        "qualification/inputs/cmake-input/trace.jsonl"
+      ],
+      "scope": "requested_members",
+      "sha256": "a95080b3167bb5c619686fa29595e500a0cc7852c58ca2c550cbc41b1a0f53e2",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\cmake-sdk-consumer-profile-20261122\\raw-evidence.tar.gz::gzip-decoded",
+      "status": "partial"
+    },
+    {
+      "depth": 0,
+      "kind": "zip",
+      "reason": "BadZipFile: File is not a zip file",
+      "scope": "all_members",
+      "sha256": "a63f32c994b1f6e301a3e78e24cc4e1bbee9e21b6cb91710724d9911843041a3",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\qualification\\known-folder-census-20261124\\census-qualification-20261124-57604a3a.zip",
+      "status": "error"
+    }
+  ],
+  "limitations": [
+    {
+      "reason": "JSON per-document node budget before parsing",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\cmake-sdk-consumer-profile-20261122\\raw-evidence.tar.gz::gzip-decoded::qualification/inputs/cmake-input/trace.jsonl::line:1180"
+    },
+    {
+      "reason": "JSONL partial: parsed 1179 records; physical lines 16672; whole raw bytes were hash/cue checked",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\cmake-sdk-consumer-profile-20261122\\raw-evidence.tar.gz::gzip-decoded::qualification/inputs/cmake-input/trace.jsonl"
+    }
+  ],
+  "errors": [
+    {
+      "reason": "BadZipFile: File is not a zip file",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\qualification\\known-folder-census-20261124\\census-qualification-20261124-57604a3a.zip"
+    }
+  ],
+  "hits": [
+    {
+      "artifact": "candidate-sha256-9315f5fdd56a4f17f3946a5a1281bab1a5a6032be0d8687492f7ba3af84c0037.bin",
+      "bytes": 47,
+      "classification": "text_or_binary",
+      "prefix9315": true,
+      "qualification": "unqualified_hash_prefix_only",
+      "sha256": "9315f5fdd56a4f17f3946a5a1281bab1a5a6032be0d8687492f7ba3af84c0037",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\gui-original-owner-2026-11-22\\gui-owner-evidence.zip::gui-final/received/gui-evidence.zip::MANIFEST.json::$[\"files\";pair=4][506][\"path\";pair=1]::utf8-string",
+      "targets": [],
+      "whole_bytes_checked": true
+    },
+    {
+      "artifact": "candidate-sha256-9315c0660a628387b7627477b4e21003c9babc9996c97bad7d344a0bedbb9197.bin",
+      "bytes": 32,
+      "classification": "text_or_binary",
+      "prefix9315": true,
+      "qualification": "unqualified_hash_prefix_only",
+      "sha256": "9315c0660a628387b7627477b4e21003c9babc9996c97bad7d344a0bedbb9197",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\p0-safe-test-gates-2026-11-21\\p0-gates-evidence.zip::recorded-runs/canonical-evidence.zip::evidence/preserved/composed-build-vet/observation-0021.receipt.json::$[\"stderr\";pair=18][\"captured_utc\";pair=2]::utf8-string",
+      "targets": [],
+      "whole_bytes_checked": true
+    },
+    {
+      "artifact": "candidate-sha256-9315c0660a628387b7627477b4e21003c9babc9996c97bad7d344a0bedbb9197.bin",
+      "bytes": 32,
+      "classification": "text_or_binary",
+      "prefix9315": true,
+      "qualification": "unqualified_hash_prefix_only",
+      "sha256": "9315c0660a628387b7627477b4e21003c9babc9996c97bad7d344a0bedbb9197",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\p0-safe-test-gates-2026-11-21\\p0-gates-evidence.zip::recorded-runs/canonical-evidence.zip::evidence/preserved/composed-build-vet/receipt.json::$[\"observations\";pair=14][20][\"stderr\";pair=18][\"captured_utc\";pair=2]::utf8-string",
+      "targets": [],
+      "whole_bytes_checked": true
+    }
+  ],
+  "cues": [],
+  "budget_used": {
+    "expanded_bytes": 48084451,
+    "items": 9742
+  },
+  "complete_for_declared_scope": false,
+  "limits": {
+    "archive_depth": 6,
+    "expanded_total_bytes": 268435456,
+    "input_bytes": 67108864,
+    "items": 20000,
+    "json_depth": 12,
+    "member_bytes": 33554432,
+    "seconds": 45
+  },
+  "json_policy": "all decoded string values are SHA-256 checked; short metadata values without a hit are counted rather than individually listed; long/structured/explicit-base64 values and actual hits are candidates; at most 1000 value candidates per document",
+  "summary": {
+    "archive_status_counts": {
+      "checked_declared_scope": 11,
+      "error": 1,
+      "partial": 2
+    },
+    "budget_used": {
+      "expanded_bytes": 48084451,
+      "items": 9742
+    },
+    "candidate_artifacts": [
+      {
+        "bytes": 32,
+        "file": "candidate-sha256-9315c0660a628387b7627477b4e21003c9babc9996c97bad7d344a0bedbb9197.bin",
+        "fsynced_and_readback_verified": true,
+        "sha256": "9315c0660a628387b7627477b4e21003c9babc9996c97bad7d344a0bedbb9197"
+      },
+      {
+        "bytes": 47,
+        "file": "candidate-sha256-9315f5fdd56a4f17f3946a5a1281bab1a5a6032be0d8687492f7ba3af84c0037.bin",
+        "fsynced_and_readback_verified": true,
+        "sha256": "9315f5fdd56a4f17f3946a5a1281bab1a5a6032be0d8687492f7ba3af84c0037"
+      }
+    ],
+    "complete_for_declared_scope": false,
+    "error_count": 1,
+    "exact_target_hits": [],
+    "input_count": 7,
+    "limitation_count": 2,
+    "report_artifact": {
+      "bytes": 3964823,
+      "file": "report.json",
+      "fsynced_and_readback_verified": true,
+      "sha256": "5314754261d3b4036c1330fa7dad38d9a4ea3f05305165c689eef1d911e8b535"
+    },
+    "schema": "receiver-nested-archive-summary-v1",
+    "unqualified_prefix9315_hits": [
+      {
+        "artifact": "candidate-sha256-9315f5fdd56a4f17f3946a5a1281bab1a5a6032be0d8687492f7ba3af84c0037.bin",
+        "bytes": 47,
+        "classification": "text_or_binary",
+        "prefix9315": true,
+        "qualification": "unqualified_hash_prefix_only",
+        "sha256": "9315f5fdd56a4f17f3946a5a1281bab1a5a6032be0d8687492f7ba3af84c0037",
+        "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\gui-original-owner-2026-11-22\\gui-owner-evidence.zip::gui-final/received/gui-evidence.zip::MANIFEST.json::$[\"files\";pair=4][506][\"path\";pair=1]::utf8-string",
+        "targets": [],
+        "whole_bytes_checked": true
+      },
+      {
+        "artifact": "candidate-sha256-9315c0660a628387b7627477b4e21003c9babc9996c97bad7d344a0bedbb9197.bin",
+        "bytes": 32,
+        "classification": "text_or_binary",
+        "prefix9315": true,
+        "qualification": "unqualified_hash_prefix_only",
+        "sha256": "9315c0660a628387b7627477b4e21003c9babc9996c97bad7d344a0bedbb9197",
+        "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\p0-safe-test-gates-2026-11-21\\p0-gates-evidence.zip::recorded-runs/canonical-evidence.zip::evidence/preserved/composed-build-vet/observation-0021.receipt.json::$[\"stderr\";pair=18][\"captured_utc\";pair=2]::utf8-string",
+        "targets": [],
+        "whole_bytes_checked": true
+      },
+      {
+        "artifact": "candidate-sha256-9315c0660a628387b7627477b4e21003c9babc9996c97bad7d344a0bedbb9197.bin",
+        "bytes": 32,
+        "classification": "text_or_binary",
+        "prefix9315": true,
+        "qualification": "unqualified_hash_prefix_only",
+        "sha256": "9315c0660a628387b7627477b4e21003c9babc9996c97bad7d344a0bedbb9197",
+        "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\p0-safe-test-gates-2026-11-21\\p0-gates-evidence.zip::recorded-runs/canonical-evidence.zip::evidence/preserved/composed-build-vet/receipt.json::$[\"observations\";pair=14][20][\"stderr\";pair=18][\"captured_utc\";pair=2]::utf8-string",
+        "targets": [],
+        "whole_bytes_checked": true
+      }
+    ],
+    "whole_byte_candidates": 5384
+  }
+}

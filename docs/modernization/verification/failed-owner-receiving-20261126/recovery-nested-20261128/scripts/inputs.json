@@ -1,0 +1,244 @@
+{
+  "schema": "receiver-nested-archive-inputs-v1",
+  "targets": {
+    "receiver_current": "1f45b3ef0e9184cc66be002cb918eb38dad0560e86e0a4a2d5c31658f44c2891",
+    "receiver_preimage": "4cdb508e655527b0372a5726f2753f6163ee50ed25b52546ff86e85682a6185a",
+    "receiver_patch": "e724dc749ac82517d2af3553fa558388f59371a0a2c0330af4a0db60738a31d5",
+    "canonical_manifest": "e74ff2ed872591e32b5fdd948d90959b9a564843534f1c46621dc6a409bf47c3"
+  },
+  "roots": {
+    "{D_REPOSITORY_ROOT}": "{D_REPOSITORY_ROOT}",
+    "{E_IMPORTED_TASK_ROOT}": "{E_IMPORTED_TASK_ROOT}"
+  },
+  "inputs": [
+    {
+      "path": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-continuation-evidence-20261122.zip",
+      "bytes": 1004421,
+      "sha256": "44b13007507ae4cac5b0e6631f171a9d950a420c77e1c4258f597dba0e9338ac",
+      "members": [
+        {
+          "name": "cleanup/architecture-cleanup-evidence.zip",
+          "bytes": 394387,
+          "sha256": "8cfe54a30b9d89c6a3232c9793ed9269e4e4715977ad6895c5e17b4ebc9fc042"
+        },
+        {
+          "name": "cleanup/control-asus/control-payload-backup.zip",
+          "bytes": 59590,
+          "sha256": "45850a83c60fac8019093e93c4d8f000ec815d099be30e33304794a8f96ff85c"
+        },
+        {
+          "name": "cleanup/control-comet/comet-control-closeout-evidence.zip",
+          "bytes": 31847,
+          "sha256": "ca5c0c4be469f1ca0b77252446fd3e5864555cda89eec8836db96cb5f4eec34d"
+        },
+        {
+          "name": "cleanup/encoding-cleanup-raw.zip",
+          "bytes": 12363,
+          "sha256": "3326b6cce714decd0e463120f548de5eb0e9d32dc8670a8c58b2cdb7dd4de054"
+        },
+        {
+          "name": "cleanup/scheduler-cleanup-evidence.zip",
+          "bytes": 395993,
+          "sha256": "527bbcb6fa7765bebdb157d86f04b7f78c5e5065fc83a5d6137b9172eb0ac9d7"
+        }
+      ]
+    },
+    {
+      "path": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-next-evidence-20261122.zip",
+      "bytes": 4193069,
+      "sha256": "34544fab2529666fdd59d258834a979bd60bfaadd0ba990951c7e2c77bba4d97",
+      "members": [
+        {
+          "name": "local-inventory-after.json.gz",
+          "bytes": 81830,
+          "sha256": "286475bff1719270e5aa7db3d01de4f6cdce93cdfc9ee5eef15afa6c6261ec2f"
+        },
+        {
+          "name": "windows-preserved-workspace.zip",
+          "prior_skip": "member_size"
+        }
+      ]
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\archguard-migration-2026-11-21\\migration-audit.zip",
+      "bytes": 1728063,
+      "sha256": "954083dcaad3036d3f2758e14c89136c679975f269306c7e6afa9e3e9d8cc8a9",
+      "members": [
+        {
+          "name": "mcphub-p0/verification/received/architecture-evidence.zip",
+          "bytes": 770237,
+          "sha256": "ffb6130b84d4e1c5f6ea3a2f91d9442aba3d28cd62fc784ef727d4d2c1db547c"
+        }
+      ]
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\cmaketrace-terminal-cancellation-2026-11-22\\evidence.zip",
+      "bytes": 647455,
+      "sha256": "5444b8c4825034fa8a0fa2936a20a1f9a98d12a75698b89772a8c03238021e67",
+      "members": [
+        {
+          "name": "native/cmake-evidence.zip",
+          "bytes": 825432,
+          "sha256": "b224a0ab9423d47e91c3fe3f39660c6ad6c15b2ad361b67cff4c6ff4c7c02bc4"
+        }
+      ]
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\gui-original-owner-2026-11-22\\gui-owner-evidence.zip",
+      "bytes": 766200,
+      "sha256": "7b5cb19644e66910e4dd69e077c361c79845b8087e2d9771f0545c9c08788010",
+      "members": [
+        {
+          "name": "gui-final/received/gui-evidence.zip",
+          "bytes": 986320,
+          "sha256": "52879c23549f17d6aeaa622f702bc61c7417131441b1e3c3b7eb3b261101a335"
+        }
+      ]
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\p0-safe-test-gates-2026-11-21\\p0-gates-evidence.zip",
+      "bytes": 2883474,
+      "sha256": "8f20dc494b9566c8b3113dabceca6c73f3c8ed06b80ffa27808467d7ecd1a0c0",
+      "members": [
+        {
+          "name": "recorded-runs/canonical-evidence.zip",
+          "bytes": 1023730,
+          "sha256": "049089bb350e4822833002a117edc1e7912d784f45a992344da2cc3c0cb90075"
+        }
+      ]
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\serena-owner-composition-2026-11-22\\serena-composition-evidence.zip",
+      "bytes": 2293451,
+      "sha256": "5fa49f768a4bd8856bea9775109989c896b437a77b3f88292d5e26322e0bb844",
+      "members": [
+        {
+          "name": "serena-next/received/serena-evidence.zip",
+          "bytes": 1304071,
+          "sha256": "0fcbed980fbba1cccfe0b3debe567e2d4344a1de5271a0a1f900a223cd136a28"
+        }
+      ]
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\qualification\\scheduler-generation-error-origins-20261123\\scheduler-error-origins-20261123-57604a3a.zip",
+      "bytes": 1315359,
+      "sha256": "26501be50a4ba36c136963fd4e68f42984d1df12af49233b079fdee6540b9102",
+      "members": [
+        {
+          "name": "error-origin-inputs-20261123-v3/installed-error-sources.zip",
+          "bytes": 120518,
+          "sha256": "29c9151fe7d375137887ecb6e76162828a83fa12399b437a575a47c02735c861"
+        },
+        {
+          "name": "error-origin-inputs-20261123-v4/installed-error-sources.zip",
+          "bytes": 10398,
+          "sha256": "b9a70b78a244ee19ff8c00e8d19c0d21922b67485553271272a608649771030f"
+        },
+        {
+          "name": "error-origin-inputs-20261123/installed-error-sources.zip",
+          "bytes": 71094,
+          "sha256": "98c04d00b489f7c9339d5982046945144ff27c74974c35a819073f2579fe2cda"
+        }
+      ]
+    },
+    {
+      "path": "{D_REPOSITORY_ROOT}\\.scratch\\pr668-verify-141552fcc73c\\source.zip",
+      "bytes": 19192827,
+      "sha256": "922da876b826579a632438bb31d794d14ffb9e02178b24530451984cbbe99ab1",
+      "members": [
+        {
+          "name": "docs/assets/hero-gui.gif",
+          "prior_skip": "member_size"
+        }
+      ]
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\cmake-sdk-consumer-profile-20261122\\raw-evidence.tar.gz",
+      "bytes": 1125242,
+      "sha256": "f04ff1c2e162ba86e883fef190218771e932b19ee45e31df65cac55239d6b73c",
+      "members": [
+        {
+          "name": "qualification/inputs/cmake-input/trace.jsonl",
+          "prior_skip": "member_size"
+        }
+      ]
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\qualification\\known-folder-census-20261124\\census-qualification-20261124-57604a3a.zip",
+      "bytes": 786444,
+      "sha256": "a63f32c994b1f6e301a3e78e24cc4e1bbee9e21b6cb91710724d9911843041a3",
+      "inspect_root": true,
+      "prior_error": "BadZipFile: File is not a zip file",
+      "members": []
+    }
+  ],
+  "seen_archive_sha256": [
+    "4152e635d9b380e267c4140521390eb4597b73457aaad2ed790bc2e9602d6e09",
+    "44b13007507ae4cac5b0e6631f171a9d950a420c77e1c4258f597dba0e9338ac",
+    "34544fab2529666fdd59d258834a979bd60bfaadd0ba990951c7e2c77bba4d97",
+    "9da4b677c1ed02af71bb949005c4c06411400530079ede5938d6b6a3c67c35fe",
+    "922da876b826579a632438bb31d794d14ffb9e02178b24530451984cbbe99ab1",
+    "b2705a7b575eb448ce19d53e3f5a31d889ea2272835751fb384ae890e9aa0d81",
+    "1db4027c688d889080ef920a31f5e51662f457e3d0adcf357de4eecb304e4e25",
+    "57f0c7deb8671aa16a0bd7725fa2a58e1ff6eda2d02b42a73a01c4cece4a0ca1",
+    "77484fec2a404ab0d294e8066a087f06b2de50a5a4449ec61299ed4fd430b796",
+    "ea632b0f5ef9c6b83c28683da5a4ca1531e88a3d4c406d51dca8637258d0c0c1",
+    "02f86bd092328434aa26d1753027d23cbc991efb9b61ca869097296388ac7e07",
+    "2a156f8af09d6d0db31353540520e3e0f57cce5765c9103073b12fd04ad61fdb",
+    "954083dcaad3036d3f2758e14c89136c679975f269306c7e6afa9e3e9d8cc8a9",
+    "1066444ea05979beef6ab3eeb268a56b1c4fa9c1cb0cafa6f71dd4a5c1287b45",
+    "43eb0e795b1a51eba75435f4bc697acb9994f1aa513dcc1a6c2721409fabced8",
+    "f04ff1c2e162ba86e883fef190218771e932b19ee45e31df65cac55239d6b73c",
+    "3ab9c0ccd2d69bc6e6fa6606457b5f8e9a5d5b42bf81e4d9107570f291ea7f02",
+    "5444b8c4825034fa8a0fa2936a20a1f9a98d12a75698b89772a8c03238021e67",
+    "36667a5b1f1ebe90d274779a285f31114412f2af75a3f852d16c6e9cec4dbabf",
+    "7b5cb19644e66910e4dd69e077c361c79845b8087e2d9771f0545c9c08788010",
+    "d4a7a6196cad98e658c676adbb77c4d6bf3e3cf75cee9572cffff3c8d0abeb77",
+    "3c9d3ca51b131b15fd828c2410faf052d8a8cb684ff3a34f2b51ab584f292534",
+    "5f1e0c3221aae6cd9bac45e84560dbb4733f02134c49b82cf53438eb90f03c05",
+    "5691d2fc6e077c241ea76d198a018e50c5e23d8c6358e3b1633e43129e0961e3",
+    "8f20dc494b9566c8b3113dabceca6c73f3c8ed06b80ffa27808467d7ecd1a0c0",
+    "e11cfb6d56941b3f5628bda6f1a2a39062499c97edcecf2bcf00585c3a8bf74d",
+    "4e4ac9ed77107ca156405e09238a3b2b48ced4f6af1359719488e09430b8c3a8",
+    "0c8d6dc6524be1e5a58a63047aebcc26c09655df63f950caa14956c10cad8361",
+    "1e874e5bc0914394848850ddec10afb6cf4ac585265a77a890f0f26a6d232174",
+    "464b2f1ced2a63c8d1e4b8eab9d2a9d4c844b726723352628be159b7350c9f8c",
+    "b58362201753892911c53c115ef7c5e329c1f15f5ef9bdb4e8f9b92f7fd6652c",
+    "b991e776d834d655e42a25d72da9d98e46d66e85946cee36d2a2b29ec250d150",
+    "58e91f427ed92e02dbbaca74d5fdca07eeed3e84a002da01f9934415d622fae3",
+    "cc25e07ea4721cbf604dd437148f2f457993baa6fce0d84b3081fb4cc9681f26",
+    "beb16c79c122f7dd0e9e3f754dda80048bfc0ff7ce8e56b617cc55b639367e55",
+    "7176c8987e29f409c57bd26e88f6228af8b5a77eef39bc48c928b87d2fb8c3e0",
+    "51ef6e1423373613cf3904bea18a13528a32956a7b12e82a15d2b995329df52d",
+    "a092d2516200b5a2f39d85dedbbbd820b3ae2727e5a78be3007010a130060b4d",
+    "52c1c863b1438c380d0c8c808a18a0f136c37765127bd48de6cc43f84a240728",
+    "3183efb75ffcd4b6786d131faccc233fc9b728939a27edfe198330a65cf3dacc",
+    "e83f6bf65a3610a5867d4f4995acedeca5af3c614b4ac519e1a5996e2c24c122",
+    "858912769a69d45fd6fdd8e422ed169fd7bbc69c9a125e7fab8c2a0fe584bd29",
+    "37fa99c64880d4aef5bfa4ff1cf5c19ce0fef6a6c8022b590d1215c18b0db120",
+    "89951300f1df94eb73f8a04c8f834af327106120f33b478bafb52f65f3824f3f",
+    "5fa49f768a4bd8856bea9775109989c896b437a77b3f88292d5e26322e0bb844",
+    "86fd4be6bf6fef814dc703f1ae02ccf3a558b528d61e5f825948cf501a35897a",
+    "ff5bafb6681cf4e9dfc68dfcf17e4e5a995e321a918f6c14526be7dfc07c2213",
+    "90299ea0aff680c148c340213dd802adfb7c8c94996877b8eec702f0bd9a442c",
+    "e56160d239212d200dc9c358bc1277e6148c5620580d6d63012e431ab554cc1b",
+    "1e95d5b473a2da7dbddf174d2ac4fd5bf8f0ee62415dc05c55c4e00fc8938cfb",
+    "e7e8e190650319780d6adc7396238e8c1d0fef9f4c583a2b175faf8374fd8d77",
+    "7853ede2b4a9ec41ad6deed62f34344a85dc83600352c3f5be8e1079d2003107",
+    "26501be50a4ba36c136963fd4e68f42984d1df12af49233b079fdee6540b9102",
+    "52c8ac806a5153927bd7f5c0f583cc7cb91b5ad1942a36097254b6bc398b2de3",
+    "616c2e2e4920f32b23744349d2c9178e2adefc4ffa4230d509351090b04a9810",
+    "f5090531bb172ed2d8626c2fed5ea9adc1bae7c1081236d060011add8dd63212",
+    "20d1e704ea17a1ab79f84d4828a9260e583cbcf08cd64c98acc4dc70a79ab4c1"
+  ],
+  "limits": {
+    "input_bytes": 67108864,
+    "member_bytes": 33554432,
+    "expanded_total_bytes": 268435456,
+    "archive_depth": 6,
+    "items": 20000,
+    "seconds": 45,
+    "json_depth": 12
+  },
+  "prior_deduplication_note": "Only successful prior archive-content inputs; all error hashes excluded even where a later duplicate row had no error. Single-member gzip separately parsed by v2 included."
+}

@@ -1,0 +1,16 @@
+--- inspect_nested.py
++++ inspect_nested.py
+@@ -54 +54 @@
+-def snapshot(st):
++def snapshot(st, include_ctime=True):
+@@ -56 +56 @@
+-            st.st_ctime_ns, getattr(st, "st_file_attributes", 0))
++            st.st_ctime_ns if include_ctime else None, getattr(st, "st_file_attributes", 0))
+@@ -84 +84,3 @@
+-        if snapshot(os.fstat(fd)) != snapshot(before):
++        before_fd = os.fstat(fd)
++        # Windows path-stat and fd-stat may report different ctime semantics.
++        if snapshot(before_fd, include_ctime=False) != snapshot(before, include_ctime=False):
+@@ -96 +98 @@
+-        if snapshot(after_fd) != snapshot(before) or snapshot(after_path) != snapshot(before):
++        if snapshot(after_fd) != snapshot(before_fd) or snapshot(after_path) != snapshot(before):
