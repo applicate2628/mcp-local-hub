@@ -349,9 +349,11 @@ func readStateFileInodeAnchoredObservedWithLeafCapture(ctx context.Context, path
 	if err := b.checkContext(); err != nil {
 		return b.finish(nil, err)
 	}
-	maximum := int64(int(^uint(0) >> 1))
-	if b.view.PathIdentitySHA256 == "" || maxBytes <= 0 || maxBytes > maximum-4096 {
-		return b.finish(nil, errors.New("positive non-overflowing observed read path/cap required"))
+	if b.view.PathIdentitySHA256 == "" {
+		return b.finish(nil, errors.New(stateFileReadPathCapacityError))
+	}
+	if err := ValidateStateFileReadCapacity(maxBytes); err != nil {
+		return b.finish(nil, err)
 	}
 	policy, policyErr := ResolveStateReadPolicyObserved(ctx)
 	b.policy = policy

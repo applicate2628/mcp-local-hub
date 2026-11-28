@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os/exec"
 	"time"
 
@@ -91,6 +90,15 @@ func runProbeCommand(timeout time.Duration, name string, args ...string) ([]byte
 	return runProbeCommandCtx(ctx, name, args...)
 }
 
+type probeCommandTimeoutError struct {
+	name  string
+	cause error
+}
+
+func (e *probeCommandTimeoutError) Error() string { return e.name + ": " + ErrProbeTimeout.Error() }
+
+func (e *probeCommandTimeoutError) Unwrap() []error { return []error{ErrProbeTimeout, e.cause} }
+
 // runProbeCommandCtx runs one OS-fact probe under a CALLER-OWNED deadline, so a
 // fallback chain (wmic then PowerShell) can share one budget across both
 // attempts instead of granting each attempt a fresh full timeout.
@@ -102,7 +110,7 @@ func runProbeCommandCtx(ctx context.Context, name string, args ...string) ([]byt
 	if err := ctx.Err(); err != nil {
 		// Budget already spent by an earlier attempt in the chain: do not spawn
 		// a child that cannot finish in time.
-		return nil, fmt.Errorf("%s: %w", name, ErrProbeTimeout)
+		return nil, &probeCommandTimeoutError{name: name, cause: err}
 	}
 	cmdCtx, cancel := context.WithTimeout(ctx, probeCommandTimeout)
 	defer cancel()
@@ -117,8 +125,8 @@ func runProbeCommandCtx(ctx context.Context, name string, args ...string) ([]byt
 		// Distinguish "we ran out of time" from "the tool answered with a
 		// failure" (e.g. wmic.exe absent on Windows 11 24H2+, which must still
 		// fall through to the PowerShell path immediately).
-		if cmdCtx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-			return nil, fmt.Errorf("%s: %w", name, ErrProbeTimeout)
+		if contextErr := cmdCtx.Err(); contextErr != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return nil, &probeCommandTimeoutError{name: name, cause: errors.Join(contextErr, err)}
 		}
 		return nil, err
 	}

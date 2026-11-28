@@ -461,8 +461,8 @@ func TestSweepPruneWorkspaces_InFlightForwardSkipsPruneAction(t *testing.T) {
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	path := "d:/dev/x/.claude/worktrees/agent-prune-busy/sub"
 	pruneEnabledFn = func() bool { return true }
-	pruneBeginFn = func(s *Server, key string) bool { return s.beginSerenaPrune(key) }
-	pruneEndFn = func(s *Server, key string) { s.endSerenaPrune(key) }
+	pruneBeginFn = func(s *Server, key string) bool { return s.BeginSerenaPrune(key) }
+	pruneEndFn = func(s *Server, key string) { s.EndSerenaPrune(key) }
 	pruneWorkspaceRowsFn = func(*Server) []*api.WorkspaceEntry {
 		return []*api.WorkspaceEntry{mkPruneEntry(path, "kbusy-real", api.SerenaLanguageSentinel)}
 	}
@@ -472,8 +472,8 @@ func TestSweepPruneWorkspaces_InFlightForwardSkipsPruneAction(t *testing.T) {
 		return &api.PruneReport{Workspace: path}, nil
 	}
 
-	s.enterSerenaForward("kbusy-real")
-	defer s.exitSerenaForward("kbusy-real")
+	s.EnterSerenaForward("kbusy-real")
+	defer s.ExitSerenaForward("kbusy-real")
 
 	if n := s.SweepPruneWorkspaces(context.Background(), time.Now()); n != 0 {
 		t.Fatalf("in-flight serena forward must skip prune, got %d", n)
@@ -498,8 +498,8 @@ func TestSweepPruneWorkspaces_ForwardEnteringDuringPruneWaitsForGate(t *testing.
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	path := "d:/dev/x/.claude/worktrees/agent-prune-claim/sub"
 	pruneEnabledFn = func() bool { return true }
-	pruneBeginFn = func(s *Server, key string) bool { return s.beginSerenaPrune(key) }
-	pruneEndFn = func(s *Server, key string) { s.endSerenaPrune(key) }
+	pruneBeginFn = func(s *Server, key string) bool { return s.BeginSerenaPrune(key) }
+	pruneEndFn = func(s *Server, key string) { s.EndSerenaPrune(key) }
 	pruneWorkspaceRowsFn = func(*Server) []*api.WorkspaceEntry {
 		return []*api.WorkspaceEntry{mkPruneEntry(path, "kclaim", api.SerenaLanguageSentinel)}
 	}
@@ -528,9 +528,9 @@ func TestSweepPruneWorkspaces_ForwardEnteringDuringPruneWaitsForGate(t *testing.
 	enteredForward := make(chan struct{})
 	forwardDone := make(chan struct{})
 	go func() {
-		s.enterSerenaForward("kclaim")
+		s.EnterSerenaForward("kclaim")
 		close(enteredForward)
-		s.exitSerenaForward("kclaim")
+		s.ExitSerenaForward("kclaim")
 		close(forwardDone)
 	}()
 
@@ -703,5 +703,36 @@ func TestSweepPruneWorkspaces_PreservedClientWarningVisible(t *testing.T) {
 	}
 	if event["lsp_removed"] != float64(1) || event["serena_removed"] != float64(0) {
 		t.Errorf("event row counts=%v/%v, want one LSP and zero Serena rows", event["lsp_removed"], event["serena_removed"])
+	}
+}
+
+func TestSweepPruneWorkspaces_RetainedIsNotRemoval(t *testing.T) {
+	restoreState := api.SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	t.Cleanup(restoreState)
+	oe, orw, ob, oend, oa, oi, oc := pruneEnabledFn, pruneWorkspaceRowsFn, pruneBeginFn, pruneEndFn, pruneActionFn, pruneIdleThresholdFn, pruneClearDefaultFn
+	t.Cleanup(func() {
+		pruneEnabledFn, pruneWorkspaceRowsFn, pruneBeginFn, pruneEndFn, pruneActionFn, pruneIdleThresholdFn, pruneClearDefaultFn = oe, orw, ob, oend, oa, oi, oc
+	})
+	path := t.TempDir()
+	now := time.Now()
+	row := mkPruneEntry(path, "key", api.SerenaLanguageSentinel)
+	row.LastToolsCallAt = now.Add(-72 * time.Hour)
+	pruneEnabledFn = func() bool { return true }
+	pruneWorkspaceRowsFn = func(*Server) []*api.WorkspaceEntry { return []*api.WorkspaceEntry{row} }
+	pruneBeginFn = func(*Server, string) bool { return true }
+	pruneEndFn = func(*Server, string) {}
+	pruneIdleThresholdFn = func() time.Duration { return 48 * time.Hour }
+	cleared := 0
+	pruneClearDefaultFn = func(string) error { cleared++; return nil }
+	pruneActionFn = func(_ *Server, path string) (*api.PruneReport, error) {
+		return &api.PruneReport{Workspace: path, PreservedReason: api.PrunePreservedAutomatic}, nil
+	}
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	if got := s.SweepPruneWorkspaces(context.Background(), now); got != 0 || cleared != 0 {
+		t.Fatalf("retained count=%d marker clears=%d", got, cleared)
+	}
+	events, err := api.RecentHubMcpEvents(1)
+	if err != nil || len(events) != 1 || events[0]["event"] != "workspace-prune-retained" || events[0]["preserved_reason"] != string(api.PrunePreservedAutomatic) {
+		t.Fatalf("retained event=%v err=%v", events, err)
 	}
 }

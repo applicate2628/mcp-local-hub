@@ -8,6 +8,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"mcp-local-hub/internal/process"
 )
 
 type platformProcess struct {
@@ -32,6 +34,7 @@ func startPlatformProcess(command *exec.Cmd) (*platformProcess, error) {
 		return nil, err
 	}
 	command.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NEW_PROCESS_GROUP}
+	process.NoConsole(command)
 	if err = command.Start(); err != nil {
 		_ = windows.CloseHandle(job)
 		return nil, err
