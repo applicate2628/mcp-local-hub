@@ -174,14 +174,14 @@
     {
       "id": "memory",
       "name": "Memory MCP server",
-      "summary": "Persistent knowledge-graph memory — store and recall entities, relations, and observations across sessions.",
+      "summary": "Persistent knowledge-graph memory — store and recall entities, relations, and observations across sessions. Requires Node.js 24+ for Memory.",
       "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/memory",
       "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/memory/README.md",
       "transport": "stdio",
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-memory@2026.1.26"
+        "@modelcontextprotocol/server-memory@2.2.2"
       ],
       "env": {
         "MEMORY_FILE_PATH": "${HOME}/.local/share/mcp-memory/memory.jsonl"

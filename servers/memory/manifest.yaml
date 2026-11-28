@@ -5,7 +5,7 @@ transport: stdio-bridge
 command: npx
 base_args:
   - "-y"
-  - "@modelcontextprotocol/server-memory"
+  - "@modelcontextprotocol/server-memory@2.2.2"
 # MEMORY_FILE_PATH defaults to a per-user location under the home dir.
 # Override at install time by exporting the env var (or by editing this
 # manifest before install) if you keep memory data elsewhere.

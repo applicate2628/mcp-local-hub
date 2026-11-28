@@ -359,7 +359,10 @@ Phase 2 added 6 global daemons. Each has its own manifest in `servers/<name>/man
 
 ### memory (port 9123)
 
-Runs `npx -y @modelcontextprotocol/server-memory`. Stores data at
+Runs `npx -y @modelcontextprotocol/server-memory@2.2.2`. Memory requires Node.js 24+
+on the PATH used to launch the provider. Check `node --version` there and
+upgrade that runtime before enabling Memory if needed. This does not change
+Hub's own Node.js requirement. Stores data at
 `${HOME}/.local/share/mcp-memory/memory.jsonl` by default. Override the
 `MEMORY_FILE_PATH` env var in the manifest (or export it in the shell
 that launches `mcphub install`) to relocate. This is the critical
