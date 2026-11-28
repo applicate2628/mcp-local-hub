@@ -1,0 +1,253 @@
+{
+  "schema": "receiver-producer-chain-analysis-v1",
+  "date": "2026-11-28",
+  "read_only": true,
+  "source_or_runtime_executed": false,
+  "scope": "Retained original tool records from prior read-only producer analysis; no repeated native/Git calls.",
+  "primary_sources": [
+    {
+      "kind": "native_rendered_text_capture",
+      "path": "{E_IMPORTED_TASK_ROOT}\\functional-route-20261126\\b-go-main-hold-current5e-stage-v1.py",
+      "lines_reported": 38,
+      "remaining_lines": 0,
+      "saved_capture": "{CURRENT_WORKSPACE}/library-recovery-next/producer-stage-captured.py.txt",
+      "capture_bytes": 7416,
+      "capture_sha256": "469d739e61498f65a99c6fd14d6af219b65a04668918ba1a648302fb4c0e17ee",
+      "capture_rule": "Original tool text omitted final newline; local text copy adds one LF. Full native stage-file bytes were not independently byte-qualified. Raw tool record is preserved."
+    },
+    {
+      "kind": "text_capture_matched_to_published_full_byte_pin",
+      "path": "{E_IMPORTED_TASK_ROOT}\\functional-route-20261126\\b-go-main-hold-current5e-v1\\inputs\\go-fixtures\\manifest.json",
+      "bytes": 13691,
+      "sha256": "079e7c6f035c9708115d46b11e0f16de77a232c39df36c08823dfc531cb18a3b",
+      "saved_capture": "{CURRENT_WORKSPACE}/library-recovery-next/producer-current5e-manifest-captured.json",
+      "published_record": "https://github.com/applicate2628/mcp-local-hub/blob/27d90e626465dc9a3a012e50785d62785d4c5e7e/docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/transport-inputs-v2.json",
+      "container": "original-inputs-transfer-v1.json",
+      "member": "files[29] current5e/manifest.json",
+      "capture_rule": "One terminal LF restored; resulting complete bytes match published length and SHA-256."
+    },
+    {
+      "kind": "text_capture_matched_to_published_full_byte_pin",
+      "path": "{E_IMPORTED_TASK_ROOT}\\functional-route-20261126\\b-go-main-hold-current5e-v1\\inputs\\go-fixtures\\issuer-local\\run_go_branch_qualification.py",
+      "bytes": 21645,
+      "sha256": "a6ed2a68a4fa03ac44f355cd47f0ef696d7b8d108389b2787214bc0081b372df",
+      "saved_capture": "{CURRENT_WORKSPACE}/library-recovery-next/producer-current5e-runner-captured.py.txt",
+      "published_record": "https://github.com/applicate2628/mcp-local-hub/blob/27d90e626465dc9a3a012e50785d62785d4c5e7e/docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/transport-inputs-v2.json",
+      "container": "original-inputs-transfer-v1.json",
+      "member": "files[27] current5e/run_go_branch_qualification.py",
+      "capture_rule": "One terminal LF restored; resulting complete bytes match published length and SHA-256."
+    }
+  ],
+  "producer": {
+    "name": "b-go-main-hold-current5e-stage-v1.py",
+    "input_root": "{TASK_ROOT}\\cache-continuation-20261126-named-custody-v1",
+    "output_root": "{TASK_ROOT}\\functional-route-20261126\\b-go-main-hold-current5e-v1",
+    "serialization": {
+      "source_literal": "Python AST Constant str passed to base64.b64decode then lzma.decompress; inspected as data only",
+      "base64_characters": 4304,
+      "compressed_format": "XZ",
+      "compressed_bytes": 3228,
+      "compressed_sha256": "7950f243de60838f18b8ad8964f6b0c6414cd29c59231be77aafbef3bf03e697",
+      "decoded_format": "JSON array of byte-offset edit rows with UTF-8 replacement strings",
+      "decoded_bytes": 10620,
+      "decoded_sha256": "c2d458d191a16e2383032742c1e9519700b83e7beb489de2de64a459cc28da4a",
+      "decoded_file": "{CURRENT_WORKSPACE}/library-recovery-next/producer-stage-decoded-edits.json",
+      "rows": 11,
+      "target_tokens_present": [],
+      "public_projection": {
+        "path": "producer-stage-decoded-edits.json",
+        "original_decoded_bytes": 10620,
+        "original_decoded_sha256": "c2d458d191a16e2383032742c1e9519700b83e7beb489de2de64a459cc28da4a",
+        "transformation": "Role-tokenized machine path prefixes and indented JSON; exact original retained separately; byte edits cannot be applied from this projection without original input bytes",
+        "bytes": 12540,
+        "sha256": "3431205cb1cd70a7dd79248bda3f5482b836662b1b610b5c0da876390e4e77d7"
+      }
+    },
+    "algorithm_observed": "Before bytes/lengths are pinned; edits are nonoverlapping [start,end,replacement string] rows; untouched byte spans and UTF-8 replacement text concatenate into outputs; after lengths and hashes are asserted. Code then creates new paths, writes, closes and reads back. Analysis executed none of those producer operations.",
+    "row_pins": [
+      {
+        "relative": "inputs/go-fixtures/canonical/candidate_main_test.go",
+        "before_bytes": 1245,
+        "before_sha256": "339d6a9f775ad3453f2a56dc244a55ea9b2c9ac8253a5f16b93c8b6ab9c7a71e",
+        "after_bytes": 1821,
+        "after_sha256": "1f8d5bf440f0764a39303cb633552279ce76ec824b5d431b41354f7f40c9978c",
+        "edit_count": 8
+      },
+      {
+        "relative": "inputs/go-fixtures/canonical/fixture_test.go",
+        "before_bytes": 2607,
+        "before_sha256": "d1e46f773bb7f526f34aa66e3476e23e4fca01a929048174aaaf406d8f4e00ea",
+        "after_bytes": 3354,
+        "after_sha256": "6de7f5df2c8dee483ef71d354430c4a477e914ce6feedc7f410a214f54568002",
+        "edit_count": 5
+      },
+      {
+        "relative": "inputs/go-fixtures/canonical/support_test.go",
+        "before_bytes": 5624,
+        "before_sha256": "9646201207b97f421059f47d8b5a9f4830ab398bb77a24ca663c48e0a6bbd82a",
+        "after_bytes": 5621,
+        "after_sha256": "d1924b4f43d67359d347bc4a20eeef458ca1e1e68304c7677e9f4b0b424d6fde",
+        "edit_count": 1
+      },
+      {
+        "relative": "inputs/go-fixtures/contained/candidate_main_test.go",
+        "before_bytes": 2810,
+        "before_sha256": "9e75b7560a8208c4e151fe789413ae48c52b380047520cc24bf17d829799daa1",
+        "after_bytes": 2810,
+        "after_sha256": "9e75b7560a8208c4e151fe789413ae48c52b380047520cc24bf17d829799daa1",
+        "edit_count": 0
+      },
+      {
+        "relative": "inputs/go-fixtures/contained/fixture_test.go",
+        "before_bytes": 2553,
+        "before_sha256": "03a68d19f29070de2102032f991767277cf9b40efc64236e6a80f3ffe4ee8c44",
+        "after_bytes": 2553,
+        "after_sha256": "03a68d19f29070de2102032f991767277cf9b40efc64236e6a80f3ffe4ee8c44",
+        "edit_count": 0
+      },
+      {
+        "relative": "inputs/go-fixtures/contained/support_test.go",
+        "before_bytes": 5624,
+        "before_sha256": "9646201207b97f421059f47d8b5a9f4830ab398bb77a24ca663c48e0a6bbd82a",
+        "after_bytes": 5624,
+        "after_sha256": "9646201207b97f421059f47d8b5a9f4830ab398bb77a24ca663c48e0a6bbd82a",
+        "edit_count": 0
+      },
+      {
+        "relative": "inputs/go-fixtures/go.mod",
+        "before_bytes": 53,
+        "before_sha256": "ba5f34f69597f132a96d09e811c23706c666e7220ddc4b0c4f1072775ec8acf4",
+        "after_bytes": 53,
+        "after_sha256": "ba5f34f69597f132a96d09e811c23706c666e7220ddc4b0c4f1072775ec8acf4",
+        "edit_count": 0
+      },
+      {
+        "relative": "inputs/go-fixtures/issuer-local/go-qualification-plan.json",
+        "before_bytes": 5527,
+        "before_sha256": "3fabbfccd59230c27ae960bfa0f3edfb441bff0f03dca55079c03122ed37656c",
+        "after_bytes": 5588,
+        "after_sha256": "44d273487806e44c91c9a1bf11aa6449956377b77792119e73c959edd7571e70",
+        "edit_count": 5
+      },
+      {
+        "relative": "inputs/go-fixtures/issuer-local/launch_go_branch_qualification.py",
+        "before_bytes": 10906,
+        "before_sha256": "5343f04104b8f3d6533e6cbe3db4e6c7e4d6f5329bd0775bd4d8edf0e153ca8a",
+        "after_bytes": 10915,
+        "after_sha256": "262e618e366b24101a3ec56f6028ae44a4558994a8c108db1fe0c183926f81b3",
+        "edit_count": 2
+      },
+      {
+        "relative": "inputs/go-fixtures/issuer-local/run_go_branch_qualification.py",
+        "before_bytes": 21636,
+        "before_sha256": "414dec579e9154c4c6f67cb870c36a5784ba8c23b31fe4ed8f93300b9720a850",
+        "after_bytes": 21645,
+        "after_sha256": "a6ed2a68a4fa03ac44f355cd47f0ef696d7b8d108389b2787214bc0081b372df",
+        "edit_count": 2
+      },
+      {
+        "relative": "inputs/go-fixtures/manifest.json",
+        "before_bytes": 13163,
+        "before_sha256": "77ab1fac563e733f86e5e9d4f80a399270d43aaafcf645e07e7a7f18c6bd9fc3",
+        "after_bytes": 13691,
+        "after_sha256": "079e7c6f035c9708115d46b11e0f16de77a232c39df36c08823dfc531cb18a3b",
+        "edit_count": 15
+      }
+    ]
+  },
+  "manifest_distinction": {
+    "fixture_manifest_schema": "named-owner-go-branch-fixtures-v1",
+    "fixture_manifest_bytes": 13691,
+    "fixture_manifest_sha256": "079e7c6f035c9708115d46b11e0f16de77a232c39df36c08823dfc531cb18a3b",
+    "canonical_manifest_target_sha256": "e74ff2ed872591e32b5fdd948d90959b9a564843534f1c46621dc6a409bf47c3",
+    "fixture_manifest_is_canonical_manifest": false,
+    "production_physical_receiver_executed": false,
+    "production_run_executed": false,
+    "synthetic_current_methods": [
+      "session.receiveFailedPhysical",
+      "session.publishTestOnlyLateGate"
+    ],
+    "canonical_candidate_source": {
+      "path": "{DONOR_WORKSPACE}/b-full-route-successor-candidate-v1/candidate/canonical-source/controller/main_windows.go",
+      "sha256": "5e0768342e22728205ee2e6f7ab052d005bb278377c985240579ec499212e53c"
+    },
+    "canonical_hold_source": {
+      "path": "{DONOR_WORKSPACE}/b-full-route-successor-candidate-v1/candidate/canonical-source/controller/physical_windows.go",
+      "sha256": "2b36397be3d45ebf0bb378eb89ba8a8086ff8d17b4c76d58b474f78fb5d63429"
+    },
+    "contained_candidate_source": {
+      "path": "{RECOVERY_WORKSPACE}/recovery/named-owner-custody-fix-v1/candidate/literal_contained_test_receiver_v4.go",
+      "sha256": "59fa2cc432b887114497c3c6625731d4dcde207e38b412371eb5fa83b39ed8a9"
+    },
+    "interpretation": "Embedded XZ JSON is a fixture-staging edit producer, not a producer of canonical-source-manifest-v5 or the full production receiver."
+  },
+  "negative_scope": {
+    "terminal_observation_retained_in_task_record": {
+      "status": "incomplete after about 3 seconds",
+      "matches": 0,
+      "complete_coverage": false,
+      "terminal_raw_snapshot_available": false
+    },
+    "meaning": "The content search timeout is not evidence that matching files are absent. No repeated remote search was made to produce this report.",
+    "already_excluded_older_sources": [
+      {
+        "name": "canonical_receiving_v4.py.txt",
+        "bytes": 48228,
+        "sha256": "6ad13e7c57e604111552fd553f10a66a174c9ba9b96dc37484dfba071a9bf2a0",
+        "scope": "Older DATA receiver; not current125176.",
+        "public_path": "docs/modernization/verification/failed-owner-receiving-20261126/sources/candidate/canonical_receiving_v4.py.txt",
+        "git_blob": "193486e52b0c504484ec7dcf1663a8ca4513b2f6"
+      },
+      {
+        "name": "canonical-external-plan-v1 adapter",
+        "scope": "Produces external plan, not canonical-source-manifest-v5."
+      },
+      {
+        "consumer": "run_literal_go_gate_ready_v1.py.txt prepare_canonical_owner",
+        "source_manifest_path": "<TASK>/final-gates-v8/canonical_external_receiving_v4/source-manifest.json",
+        "source_manifest_sha256": "7fd91728cb2186e46fb8c51c6f9c77ae9e58406c28891033e6f018713c0bb93f",
+        "schema": "canonical-external-source-inputs-v1",
+        "source_files": 7,
+        "owner_files": 4,
+        "controller_files": 3,
+        "scope": "Reads pinned existing manifest and stages sources. Does not establish current manifest-v5 producer, serialization, or12-file composition."
+      }
+    ]
+  },
+  "new_library_checkpoint_scope": "See checkpoint-summary.json and primary records; reference pins do not supply target bytes.",
+  "conclusion": "No exact receiver, template or canonical manifest bytes recovered by this producer analysis. B remains open.",
+  "retained_prior_public_source_pins": [
+    {
+      "path": "docs/modernization/verification/cache-owner-custody-20261126/sources/full-v13/literal_go_exec_adapter_ready_v1.py.txt",
+      "bytes": 58107,
+      "sha256": "ec52d2f74122901d0d78817b2d32a61d381199c302d04332e86153a58c9db633",
+      "git_blob": "796e3b47e029cd6e92a460445a78546fcee46cb3",
+      "tree_size_matches": true,
+      "url": "https://github.com/applicate2628/mcp-local-hub/blob/27d90e626465dc9a3a012e50785d62785d4c5e7e/docs/modernization/verification/cache-owner-custody-20261126/sources/full-v13/literal_go_exec_adapter_ready_v1.py.txt"
+    },
+    {
+      "path": "docs/modernization/verification/cache-owner-custody-20261126/sources/full-v13/run_literal_go_gate_ready_v1.py.txt",
+      "bytes": 50114,
+      "sha256": "343786290706dba6122616da6645b512c3ff7501ff0010779a1e5e4de3770eb2",
+      "git_blob": "29fc23ad61de4dfed5d21d9f47a817bac6ac3bc1",
+      "tree_size_matches": true,
+      "url": "https://github.com/applicate2628/mcp-local-hub/blob/27d90e626465dc9a3a012e50785d62785d4c5e7e/docs/modernization/verification/cache-owner-custody-20261126/sources/full-v13/run_literal_go_gate_ready_v1.py.txt"
+    },
+    {
+      "path": "docs/modernization/verification/cache-owner-custody-20261126/sources/owner-v3/literal_go_exec_adapter_ready_v1.py.txt",
+      "bytes": 57582,
+      "sha256": "5583ebdf73da6f144ca5be68e561ab7a9919b4680f6e0a221423dee3204a8e5f",
+      "git_blob": "6db40d22729c839762f2a0649e34111ce1de2a9e",
+      "tree_size_matches": true,
+      "url": "https://github.com/applicate2628/mcp-local-hub/blob/27d90e626465dc9a3a012e50785d62785d4c5e7e/docs/modernization/verification/cache-owner-custody-20261126/sources/owner-v3/literal_go_exec_adapter_ready_v1.py.txt"
+    },
+    {
+      "path": "docs/modernization/verification/cache-owner-custody-20261126/sources/owner-v3/run_literal_go_gate_ready_v1.py.txt",
+      "bytes": 48829,
+      "sha256": "e425a27cbcf9c21792292f2c8a1d497f4e497937b89805a7a67ec3adbed82147",
+      "git_blob": "e8738562bf7c6409594b1cd81454a2f39363c220",
+      "tree_size_matches": true,
+      "url": "https://github.com/applicate2628/mcp-local-hub/blob/27d90e626465dc9a3a012e50785d62785d4c5e7e/docs/modernization/verification/cache-owner-custody-20261126/sources/owner-v3/run_literal_go_gate_ready_v1.py.txt"
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+import pathlib,json,zipfile,hashlib,re,collections
+root=pathlib.Path("{CURRENT_WORKSPACE}/library-recovery-next")
+r=json.loads((root/"checkpoint-scan-report.json").read_text())
+selected={h["path"].split("!",1)[1].split("#",1)[0] for h in r["text_hits"] if "!" in h["path"]}
+selected.update([
+"CHECKPOINT.md","CHECKPOINT-MANIFEST.json",
+"b-five-test-source-ordinary-type-independent-review-v1/README.md",
+"b-five-test-source-ordinary-type-independent-review-v1/PACKAGE.json",
+"b-functional-product-materialization-execution-v1/bind_receiver.py",
+"b-functional-product-materialization-execution-v1/local-control-preimages/bind_receiver_zlib_v1.py",
+"b-functional-product-materialization-execution-v1/local-control-preimages/receive_transfer_zlib_v1.py"])
+evidence=[]
+with zipfile.ZipFile(root/"checkpoint-original/mcp-residual-ad-checkpoint-363b-v1.zip") as z:
+ names=set(z.namelist())
+ selected.update(n for n in names if n.startswith("checkpoint-plan-363b-v1/") and n.endswith(".md"))
+ for name in sorted(selected):
+  if name not in names: continue
+  b=z.read(name)
+  dest=root/"selected-checkpoint-evidence"/name
+  assert dest.resolve().is_relative_to((root/"selected-checkpoint-evidence").resolve())
+  dest.parent.mkdir(parents=True,exist_ok=True);dest.write_bytes(b)
+  evidence.append({"archive_member":name,"bytes":len(b),"sha256":hashlib.sha256(b).hexdigest(),"local_path":str(dest)})
+ manifest=json.loads(z.read("CHECKPOINT-MANIFEST.json"))
+ received={x["path"]:x for x in r["root_members"]}
+ mismatches=[]
+ for m in manifest["files"]:
+  a=received.get(m["path"])
+  if not a or (a["bytes"],a["sha256"])!=(m["bytes"],m["sha256"]):mismatches.append({"manifest":m,"actual":a})
+ validation={"manifest_entries":len(manifest["files"]),"archive_entries":len(received),"mismatches":mismatches,"archive_members_not_in_manifest":sorted(set(received)-{m["path"] for m in manifest["files"]})}
+ errors=[]
+ for error in r["errors"]:
+  member=error["path"].split("!",1)[1].split("#",1)[0]
+  o=json.loads(z.read(member))
+  s=o["poll"]["content"][0]["text"]
+  errors.append({"member":member,"text_bytes":len(s.encode()),"head":s[:200],"tail":s[-180:],"metadata_keys":list(o),"poll_keys":list(o["poll"]),"error":error})
+ (root/"checkpoint-selected-evidence.json").write_text(json.dumps({"files":evidence,"manifest_validation":validation,"stream_error_context":errors},ensure_ascii=False,indent=2)+"\n")
+ print(json.dumps({"extracted_files":len(evidence),"manifest_validation":validation,"stream_error_context":errors},ensure_ascii=False,indent=2))
+ for name in ["b-five-test-source-ordinary-type-independent-review-v1/README.md","b-five-test-source-ordinary-type-independent-review-v1/review.json","b-functional-product-materialization-execution-v1/bind_receiver.py"]:
+  print(json.dumps({"name":name,"text":z.read(name).decode()},ensure_ascii=False))

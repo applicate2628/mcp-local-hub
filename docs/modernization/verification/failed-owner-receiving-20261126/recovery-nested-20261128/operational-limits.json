@@ -1,0 +1,53 @@
+{
+  "schema": "recovery-operational-limits-v1",
+  "rdc_filename_search": {
+    "starts": 10,
+    "followups": 10,
+    "direct_path_probes": 8,
+    "raw_records": 28,
+    "incomplete_3second_responses": 9,
+    "session_unavailable": 1,
+    "complete_native_root_walk": false,
+    "source_raw_sha256": "020719e989f90c5857b6c777a3b5665e39a8069fcc3448adbcad939175117e3f",
+    "source_summary_sha256": "729464f1e68e05b5fe61be0bc18da27abed9e1382f43970cd90b02089610efa9",
+    "meaning": "No matches before bounded cutoffs does not establish absence. Direct ENOENT applies only to exact paths."
+  },
+  "native_filename_search": {
+    "deadline_seconds": 90,
+    "status": "FAIL/CLOSED",
+    "captures_bytes": 0,
+    "full_walk_completed": false
+  },
+  "large_text_transport": [
+    {
+      "file": "archive-report-v3.json.gz.base64.txt",
+      "kind": "read-only RDC large-file request",
+      "status": "pending response was not collected",
+      "known_call_id_prefix": "546db8c0-0a32-496a-8701-3eafe2a057",
+      "note": "No result bytes from this attempt are used. Native original and packaged outputs retained. Publication uses pinned native source copy; Git readback will verify exact bytes."
+    }
+  ],
+  "earlier_launcher": {
+    "status": "terminal/closure UNKNOWN",
+    "unchanged": true,
+    "action": "Retain original artifacts; no PID-only cleanup"
+  },
+  "product_qualification": {
+    "performed": false,
+    "accepted_tests_repeated": false
+  },
+  "first_publication_attempt": {
+    "local_commit": "b1bb971cf02c7a990426916741e05546367f3fa2",
+    "status": "FAIL/CLOSED",
+    "remote_destination_before": "5a15e4f4bbf64442677e3443054a1bdb277505bd",
+    "remote_update_accepted": false,
+    "gate_failure": "PGG-SCAN-FINDING",
+    "gate_stage": "range-coverage",
+    "original_commands": 3,
+    "readers": 6,
+    "diagnostic_receipt_sha256": "58b85437595329f89e40b8caf812d00dff26e913bb7d25f71b820af48d6d1e08",
+    "diagnostic_result": "Two complete machine-path findings; none in commit messages; 3 diagnostic commands/6 readers CLOSED",
+    "correction": "Two DATA metadata projections have only machine path prefixes role-tokenized; originals/pins retained, same native gate remains required",
+    "native_gate_operation": "--target-local-push owns a real git push with mandatory pre-push checks; rejection prevented remote ref update"
+  }
+}
