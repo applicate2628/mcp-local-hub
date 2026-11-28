@@ -30,6 +30,9 @@ var (
 	ErrStdioLaunchPartial  = errors.New("STDIO_LAUNCH_PREPARATION_UNAVAILABLE")
 )
 
+// ErrIsolatedStdioUnavailable reports that protected stdio session isolation is unavailable.
+var ErrIsolatedStdioUnavailable = errors.New("protected stdio session isolation unavailable")
+
 // StdioLaunchContext is one operation's actual parent context, not a supplied
 // environment or a credential. No process-wide environment is changed.
 type StdioLaunchContext struct {
@@ -95,6 +98,19 @@ func (s *StdioLaunchContext) ParseManifest(r io.Reader) (*config.ServerManifest,
 		return nil, err
 	}
 	return config.ParseManifestWithEnvironment(r, s.LookupEnvironment)
+}
+
+// ParseFixedDaemonLaunchManifest keeps descriptor refusal ahead of expansion
+// for the ordinary fixed-daemon wrapper. The generic manifest path is unchanged.
+func (s *StdioLaunchContext) ParseFixedDaemonLaunchManifest(r io.Reader, server, daemonName string) (*config.ServerManifest, *config.DaemonSpec, error) {
+	if err := s.valid(); err != nil {
+		return nil, nil, err
+	}
+	m, spec, err := config.ParseFixedDaemonLaunchManifestWithEnvironment(r, s.LookupEnvironment, server, daemonName)
+	if errors.Is(err, config.ErrSessionLocalDaemonSelection) {
+		return nil, nil, ErrIsolatedStdioUnavailable
+	}
+	return m, spec, err
 }
 
 func (s *StdioLaunchContext) BindResolver(r *secrets.Resolver) (*secrets.Resolver, error) {

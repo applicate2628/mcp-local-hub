@@ -179,7 +179,7 @@ func secureParentDirAnywhereModeObserved(ctx context.Context, dir string, skipPa
 			nextHandle, created, err = mkdirOrVerifyRealDirWindowsObserved(curHandle, comp, nextPath, sd, false, b, nextSlot)
 		} else {
 			nextHandle, err = openExistingRealDirAtObserved(curHandle, comp, b, nextSlot)
-			if errors.Is(err, windows.ERROR_FILE_NOT_FOUND) || errors.Is(err, windows.ERROR_PATH_NOT_FOUND) {
+			if windowsAnchoredReadErrIsNotExist(err) {
 				return false, nil
 			}
 		}
