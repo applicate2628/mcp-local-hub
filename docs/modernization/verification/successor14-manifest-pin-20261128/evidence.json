@@ -1,0 +1,245 @@
+{
+  "schema": "successor14-manifest-pin-review-v1",
+  "status": "STATIC_DRAFT_NOT_APPLIED_OR_EXECUTED",
+  "base_commit": "04e5b4eadd6407cbff4e04ba453546d278314bd7",
+  "base_tree": "f68f7584dba7744e7607b07f615758f3ff633f54",
+  "expected_tree_after_patch": "bcf1bd3539a8ba5ab54cff123adbb4bc071276d3",
+  "changed_test_files": 1,
+  "production_changes": 0,
+  "changes": 2,
+  "source_contract": {
+    "path": "servers/serena/manifest.yaml",
+    "git_blob": "dae2f3c3bb3a350729eba030f46ef2d7142d0ce3",
+    "sha256": "23642ba8a966672eed5643512899ed0d7c14ef2c98e94a632b7113e088a54a6d",
+    "requirement": "git+https://github.com/oraios/serena@5e4f5cd173c7ff3eed37ee3f1de6c266b937c5dc"
+  },
+  "test_file": {
+    "path": "internal/cli/migrate_serena_test.go",
+    "before_git_blob": "d4f46b748bdd3c6cb2a865e2c4327dd9c60ba463",
+    "before_sha256": "2d209f5feee08a50ec4389c95306b0299c62a08adf1695bf17397d54d6468774",
+    "after_git_blob": "65125425358b2377ebd59f92c83818ecb93faf21",
+    "after_sha256": "2f0b41dbb97b01288f8f1871f6482e9fa80a3962a706d1e3d0872728175dd6b1"
+  },
+  "literal_commands": [
+    "go build ./... && go vet ./... && go test -count=1 -timeout 5m ./...",
+    "go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/"
+  ],
+  "removed_blocker": "Both test constants omitted the @40-hex source required by the real preparation environment source.",
+  "qualification": {
+    "source_predicate_preserved": true,
+    "preparation_skipped": false,
+    "private727_protocol_imported": false,
+    "full_acceptance_pass": false,
+    "two_line_fix_sufficient_for_full_acceptance": false
+  },
+  "remaining_contracts": [
+    "Buildinfo publisherSourceEpoch and PE resource must come from verified final Source and agree with current incoming image metadata.",
+    "Explicit SYSTEMROOT/WINDIR/COMSPEC/PATH bootstrap; UV >=0.13.4; an existing Python >=3.11 selected offline without downloads.",
+    "Each real package preparation owns an isolated attempt/generation; UV_CACHE_DIR is set internally to that attempt/cache. An ambient cache override does not seed it.",
+    "Package source download/install, installed-tool receipt, actual interpreter/launcher provenance, original listener/MCP qualification and physical resource closure all remain real.",
+    "Per-package original Go timeout remains 5m; elapsed time for all real preparations is unmeasured.",
+    "One caller fixture explicitly chooses its inert canonical path; other13 preserve runtime Product selection. Later consumer behavior still needs native receiving."
+  ],
+  "roots": [
+    {
+      "name": "TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds",
+      "source_line": 749,
+      "fixture": [
+        "stateDir, manifestDir := migrateSerenaTestEnv(t)",
+        "seedSerenaManifest(t, manifestDir, alreadyMigratedManifestYAML)",
+        "seedSerenaWorkspace(t, ws)"
+      ],
+      "mandatory_in": [
+        "default",
+        "test_state_path_env"
+      ],
+      "executed_by_this_review": false
+    },
+    {
+      "name": "TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite",
+      "source_line": 924,
+      "fixture": [
+        "stateDir, manifestDir := migrateSerenaTestEnv(t, migrateSerenaTestEnvOptions{canonicalRuntimeFixture: true})",
+        "manifestPath := seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)",
+        "seedSerenaWorkspace(t, ws)"
+      ],
+      "mandatory_in": [
+        "default",
+        "test_state_path_env"
+      ],
+      "executed_by_this_review": false
+    },
+    {
+      "name": "TestMigrateSerena_DrivesSupervisorRestart",
+      "source_line": 1277,
+      "fixture": [
+        "stateDir, manifestDir := migrateSerenaTestEnv(t)",
+        "seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)",
+        "seedSerenaWorkspace(t, ws)",
+        "restoreInstall := stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {"
+      ],
+      "mandatory_in": [
+        "default",
+        "test_state_path_env"
+      ],
+      "executed_by_this_review": false
+    },
+    {
+      "name": "TestMigrateSerena_NilSpecRowsHealedBeforeSpawn",
+      "source_line": 1532,
+      "fixture": [
+        "stateDir, manifestDir := migrateSerenaTestEnv(t)",
+        "seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)",
+        "seedSerenaWorkspace(t, ws)"
+      ],
+      "mandatory_in": [
+        "default",
+        "test_state_path_env"
+      ],
+      "executed_by_this_review": false
+    },
+    {
+      "name": "TestMigrateSerena_LiveSupervisor_ReapClearsTheGateBeforeWrite",
+      "source_line": 1634,
+      "fixture": [
+        "stateDir, manifestDir := migrateSerenaTestEnv(t)",
+        "seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)",
+        "seedSerenaWorkspace(t, ws)"
+      ],
+      "mandatory_in": [
+        "default",
+        "test_state_path_env"
+      ],
+      "executed_by_this_review": false
+    },
+    {
+      "name": "TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry",
+      "source_line": 2021,
+      "fixture": [
+        "stateDir, manifestDir := migrateSerenaTestEnv(t)",
+        "seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)",
+        "seedSerenaWorkspaceNoPort(t, ws)"
+      ],
+      "mandatory_in": [
+        "default",
+        "test_state_path_env"
+      ],
+      "executed_by_this_review": false
+    },
+    {
+      "name": "TestMigrateSerena_PostCommitReconcileReadyTimeout_ExitsZeroWithWarning",
+      "source_line": 2093,
+      "fixture": [
+        "stateDir, manifestDir := migrateSerenaTestEnv(t)",
+        "seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)",
+        "seedSerenaWorkspaceNoPort(t, ws)"
+      ],
+      "mandatory_in": [
+        "default",
+        "test_state_path_env"
+      ],
+      "executed_by_this_review": false
+    },
+    {
+      "name": "TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud",
+      "source_line": 2223,
+      "fixture": [
+        "stateDir, manifestDir := migrateSerenaTestEnv(t)",
+        "seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)",
+        "seedSerenaWorkspaceNoPort(t, ws)"
+      ],
+      "mandatory_in": [
+        "default",
+        "test_state_path_env"
+      ],
+      "executed_by_this_review": false
+    },
+    {
+      "name": "TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts",
+      "source_line": 2416,
+      "fixture": [
+        "stateDir, manifestDir := migrateSerenaTestEnv(t)",
+        "seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)",
+        "seedSerenaWorkspace(t, ws)"
+      ],
+      "mandatory_in": [
+        "default",
+        "test_state_path_env"
+      ],
+      "executed_by_this_review": false
+    },
+    {
+      "name": "TestMigrateSerena_ConcurrentRegisterInWindow_AppearsInCommittedIntent",
+      "source_line": 2478,
+      "fixture": [
+        "stateDir, manifestDir := migrateSerenaTestEnv(t)",
+        "seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)",
+        "seedSerenaWorkspace(t, wsBefore)",
+        "seedSerenaWorkspaceNoPort(t, wsConcurrent)"
+      ],
+      "mandatory_in": [
+        "default",
+        "test_state_path_env"
+      ],
+      "executed_by_this_review": false
+    },
+    {
+      "name": "TestMigrateSerena_EmptyFirstSnapshot_WorkspaceRegisteredInWindow_RecomputesStart",
+      "source_line": 2693,
+      "fixture": [
+        "stateDir, manifestDir := migrateSerenaTestEnv(t)",
+        "seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)",
+        "seedSerenaWorkspaceNoPort(t, wsConcurrent)"
+      ],
+      "mandatory_in": [
+        "default",
+        "test_state_path_env"
+      ],
+      "executed_by_this_review": false
+    },
+    {
+      "name": "TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut",
+      "source_line": 2791,
+      "fixture": [
+        "stateDir, manifestDir := migrateSerenaTestEnv(t)",
+        "seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)",
+        "seedSerenaWorkspace(t, wsCovered)",
+        "seedSerenaWorkspace(t, wsDrifted)"
+      ],
+      "mandatory_in": [
+        "default",
+        "test_state_path_env"
+      ],
+      "executed_by_this_review": false
+    },
+    {
+      "name": "TestMigrateSerena_EmptyFirstSnapshot_SupervisorRunning_LateReapClearsGate",
+      "source_line": 3193,
+      "fixture": [
+        "stateDir, manifestDir := migrateSerenaTestEnv(t)",
+        "seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)",
+        "seedSerenaWorkspaceNoPort(t, wsConcurrent)"
+      ],
+      "mandatory_in": [
+        "default",
+        "test_state_path_env"
+      ],
+      "executed_by_this_review": false
+    },
+    {
+      "name": "TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow",
+      "source_line": 3407,
+      "fixture": [
+        "stateDir, manifestDir := migrateSerenaTestEnv(t)",
+        "seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)",
+        "seedSerenaWorkspace(t, ws)",
+        "restoreInstall := stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {"
+      ],
+      "mandatory_in": [
+        "default",
+        "test_state_path_env"
+      ],
+      "executed_by_this_review": false
+    }
+  ]
+}

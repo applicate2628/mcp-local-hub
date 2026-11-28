@@ -1,0 +1,37 @@
+{
+  "schema": "original-full-v6-disclosure-review-v1",
+  "host_role_values_found_in_public_files": 0,
+  "real_owner_sid_found_in_public_files": 0,
+  "encoded_host_value_payloads_added": false,
+  "default_operator_role_values_added": false,
+  "ephemeral_native_numeric_identifiers_preserved": true,
+  "source_test_and_native_execution_during_preparation": false,
+  "remaining_source_defined_literal_path_cases": [
+    {
+      "role": "language-server path subtest",
+      "location": "full receipt / TestIsLanguageServerBinary",
+      "classification": "source-defined fixture test name"
+    },
+    {
+      "role": "three application wildcard path subtests",
+      "location": "full receipt / TestValidate_InstallProbe_CrossPlatformFilePathAccepted",
+      "classification": "source-defined glob acceptance examples"
+    },
+    {
+      "role": "marker path subtest",
+      "location": "full receipt / TestValidate_InstallProbe_CrossPlatformFilePathAccepted",
+      "classification": "source-defined path acceptance example"
+    },
+    {
+      "role": "synthetic shim command",
+      "location": "default CLI stdout / shim failure fixture output",
+      "classification": "test-owned synthetic command string"
+    }
+  ],
+  "loopback_private_and_documentation_addresses": "Retained in test names, URL-refusal cases and local closed test requests; not claims about external private services.",
+  "native_scope_nonces": "Original closed test/controller nonce fields retained for evidence matching; no credential lookup or new authentication value was added.",
+  "root_only_role_file": "Kept outside this public candidate; required for exact original byte reconstruction.",
+  "all_566_original_raw_captures_included": false,
+  "keep_original_run_required_until_independent_retention_review": true,
+  "review_scope": "Twenty original closed evidence files plus the tagged CLI compiler excerpt, new DATA verifier and source-bound documentation."
+}

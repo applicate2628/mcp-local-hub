@@ -1,0 +1,241 @@
+2026/11/28 14:57:51 /api/supervisor/restart owner: supervisor startup decision is pending
+2026/11/28 14:57:51 /api/supervisor/restart owner: supervisor startup decision is pending
+2026/11/28 15:00:49 severity=warn event=unknown-maintenance-kind kind="future-monthly-thing" name=""
+2026/11/28 15:00:49 severity=warn event=maintenance-state-write-failed kind="workspace-weekly-refresh" err=synthetic disk full (test-only) in-memory-cache-engaged=true
+2026/11/28 15:00:49 severity=warn event=maintenance-state-write-failed kind="workspace-weekly-refresh" err=synthetic disk full (test-only) in-memory-cache-engaged=true
+2026/11/28 15:00:49 severity=warn event=maintenance-fire-skipped-busy kind="workspace-weekly-refresh" timer_key="workspace-weekly-refresh"
+2026/11/28 15:00:49 severity=warn event=maintenance-spawn-error kind="workspace-weekly-refresh" err=synthetic spawn failure
+2026/11/28 15:00:49 severity=error event=maintenance-claim-write-failed kind="workspace-weekly-refresh" err=synthetic claim write failure
+2026/11/28 15:00:49 severity=warn event=maintenance-spawn-error kind="workspace-weekly-refresh" err=synthetic spawn failure
+2026/11/28 15:00:49 severity=error event=maintenance-realpid-write-failed kind="workspace-weekly-refresh" pid=1000 err=synthetic real-PID write failure killing-child=true
+panic: test timed out after 5m0s
+	running tests:
+		TestRunSupervisorHeartbeat_StopsOnDone (0s)
+
+goroutine 9298 [running]:
+testing.(*M).startAlarm.func1()
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2961 +0x34a
+created by time.goFunc
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/time/sleep.go:182 +0x2d
+
+goroutine 1 [chan receive]:
+testing.(*T).Run(0x1213c0bfc200, {0x7ff69b278a9f?, 0x3a?}, 0x7ff69c51dc30)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2268 +0x4d2
+testing.runTests.func1(0x1213c0bfc200)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2744 +0x37
+testing.tRunner(0x1213c0bfc200, 0x1213c0edf848)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2195 +0xc3
+testing.runTests({0x7ff69b211b84, 0xd}, {0x7ff69b23d271, 0x1a}, 0x1213c0c04030, {0x7ff69c5bbb58, 0x7c4, 0x7c4}, {0xc2bace8d103e947c, 0x45dee92d11, ...})
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2742 +0x505
+testing.(*M).Run(0x1213c0e89180)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2602 +0x6af
+mcp-local-hub/internal/cli.TestMain(0x1213c0e89180)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/settings_registry_test.go:510 +0x93c
+main.main()
+	_testmain.go:4022 +0xa5
+
+goroutine 6164 [chan receive, 3 minutes]:
+testing.(*T).Parallel(0x1213c0f37200)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:1959 +0x225
+mcp-local-hub/internal/cli.beginPrivateSerenaMigrationCase(0x1213c0f37200)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/private_serena_migration_case_windows_test.go:369 +0x3eb
+mcp-local-hub/internal/cli.TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds(0x1213c0f37200)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/migrate_serena_test.go:764 +0x4b
+testing.tRunner(0x1213c0f37200, 0x7ff69c51cda8)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2195 +0xc3
+created by testing.(*T).Run in goroutine 1
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2260 +0x4b4
+
+goroutine 541 [syscall, 4 minutes]:
+os/signal.signal_recv()
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/runtime/sigqueue.go:152 +0x98
+os/signal.loop()
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/os/signal/signal_unix.go:23 +0x13
+created by os/signal.Notify.func2.1 in goroutine 540
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/os/signal/signal.go:164 +0x1f
+
+goroutine 972 [syscall]:
+syscall.syscalln(0x0?, 0x0?, {0x1213c0ef3f08?, 0x1213c197a7e0?, 0x0?})
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/runtime/syscall_windows.go:427 +0x48
+syscall.SyscallN(0x3e3?, {0x1213c0ef3f08?, 0x1?, 0x1213c0d0cbc8?})
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/syscall/dll_windows.go:99 +0x1e
+github.com/Microsoft/go-winio.getQueuedCompletionStatus(0x598, 0x0?, 0x0?, 0x0?, 0xffffffff)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/literal-original-runs-v6/original-literal-full-v6/private/go-mod/github.com/!microsoft/go-winio@v0.6.2/zsyscall_windows.go:327 +0xab
+github.com/Microsoft/go-winio.ioCompletionProcessor(0x598)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/literal-original-runs-v6/original-literal-full-v6/private/go-mod/github.com/!microsoft/go-winio@v0.6.2/file.go:162 +0x7f
+created by github.com/Microsoft/go-winio.initIO in goroutine 1136
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/literal-original-runs-v6/original-literal-full-v6/private/go-mod/github.com/!microsoft/go-winio@v0.6.2/file.go:58 +0x65
+
+goroutine 6154 [chan receive, 3 minutes]:
+testing.(*T).Parallel(0x1213c0f36000)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:1959 +0x225
+mcp-local-hub/internal/cli.beginPrivateSerenaMigrationCase(0x1213c0f36000)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/private_serena_migration_case_windows_test.go:369 +0x3eb
+mcp-local-hub/internal/cli.TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite(0x1213c0f36000)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/migrate_serena_test.go:943 +0x4b
+testing.tRunner(0x1213c0f36000, 0x7ff69c51cda0)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2195 +0xc3
+created by testing.(*T).Run in goroutine 1
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2260 +0x4b4
+
+goroutine 6133 [chan receive, 3 minutes]:
+testing.(*T).Parallel(0x1213c0bfc600)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:1959 +0x225
+mcp-local-hub/internal/cli.beginPrivateSerenaMigrationCase(0x1213c0bfc600)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/private_serena_migration_case_windows_test.go:369 +0x3eb
+mcp-local-hub/internal/cli.TestMigrateSerena_DrivesSupervisorRestart(0x1213c0bfc600)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/migrate_serena_test.go:1300 +0x3f
+testing.tRunner(0x1213c0bfc600, 0x7ff69c51cdb8)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2195 +0xc3
+created by testing.(*T).Run in goroutine 1
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2260 +0x4b4
+
+goroutine 9192 [select]:
+mcp-local-hub/internal/cli.(*supervisorController).armRespawnBackoffTimer.func1()
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/supervisor_controller.go:4143 +0x145
+created by mcp-local-hub/internal/cli.(*supervisorController).armRespawnBackoffTimer in goroutine 9191
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/supervisor_controller.go:4140 +0x2ce
+
+goroutine 6136 [chan receive, 3 minutes]:
+testing.(*T).Parallel(0x1213c0bfcc00)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:1959 +0x225
+mcp-local-hub/internal/cli.beginPrivateSerenaMigrationCase(0x1213c0bfcc00)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/private_serena_migration_case_windows_test.go:369 +0x3eb
+mcp-local-hub/internal/cli.TestMigrateSerena_NilSpecRowsHealedBeforeSpawn(0x1213c0bfcc00)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/migrate_serena_test.go:1559 +0x4b
+testing.tRunner(0x1213c0bfcc00, 0x7ff69c51ce18)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2195 +0xc3
+created by testing.(*T).Run in goroutine 1
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2260 +0x4b4
+
+goroutine 6122 [chan receive, 3 minutes]:
+testing.(*T).Parallel(0x1213c0f36200)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:1959 +0x225
+mcp-local-hub/internal/cli.beginPrivateSerenaMigrationCase(0x1213c0f36200)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/private_serena_migration_case_windows_test.go:369 +0x3eb
+mcp-local-hub/internal/cli.TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud(0x1213c0f36200)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/migrate_serena_test.go:2266 +0x27
+testing.tRunner(0x1213c0f36200, 0x7ff69c51ce40)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2195 +0xc3
+created by testing.(*T).Run in goroutine 1
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2260 +0x4b4
+
+goroutine 6124 [chan receive, 3 minutes]:
+testing.(*T).Parallel(0x1213c0f36600)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:1959 +0x225
+mcp-local-hub/internal/cli.beginPrivateSerenaMigrationCase(0x1213c0f36600)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/private_serena_migration_case_windows_test.go:369 +0x3eb
+mcp-local-hub/internal/cli.TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts(0x1213c0f36600)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/migrate_serena_test.go:2463 +0x4b
+testing.tRunner(0x1213c0f36600, 0x7ff69c51ce20)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2195 +0xc3
+created by testing.(*T).Run in goroutine 1
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2260 +0x4b4
+
+goroutine 6137 [chan receive, 3 minutes]:
+testing.(*T).Parallel(0x1213c0bfce00)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:1959 +0x225
+mcp-local-hub/internal/cli.beginPrivateSerenaMigrationCase(0x1213c0bfce00)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/private_serena_migration_case_windows_test.go:369 +0x3eb
+mcp-local-hub/internal/cli.TestMigrateSerena_LiveSupervisor_ReapClearsTheGateBeforeWrite(0x1213c0bfce00)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/migrate_serena_test.go:1665 +0x4b
+testing.tRunner(0x1213c0bfce00, 0x7ff69c51ce08)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2195 +0xc3
+created by testing.(*T).Run in goroutine 1
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2260 +0x4b4
+
+goroutine 6127 [chan receive, 3 minutes]:
+testing.(*T).Parallel(0x1213c0f36c00)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:1959 +0x225
+mcp-local-hub/internal/cli.beginPrivateSerenaMigrationCase(0x1213c0f36c00)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/private_serena_migration_case_windows_test.go:369 +0x3eb
+mcp-local-hub/internal/cli.TestMigrateSerena_EmptyFirstSnapshot_WorkspaceRegisteredInWindow_RecomputesStart(0x1213c0f36c00)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/migrate_serena_test.go:2748 +0x3e
+testing.tRunner(0x1213c0f36c00, 0x7ff69c51cdc8)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2195 +0xc3
+created by testing.(*T).Run in goroutine 1
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2260 +0x4b4
+
+goroutine 6142 [chan receive, 3 minutes]:
+testing.(*T).Parallel(0x1213c0bfd800)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:1959 +0x225
+mcp-local-hub/internal/cli.beginPrivateSerenaMigrationCase(0x1213c0bfd800)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/private_serena_migration_case_windows_test.go:369 +0x3eb
+mcp-local-hub/internal/cli.TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry(0x1213c0bfd800)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/migrate_serena_test.go:2056 +0x47
+testing.tRunner(0x1213c0bfd800, 0x7ff69c51ce90)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2195 +0xc3
+created by testing.(*T).Run in goroutine 1
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2260 +0x4b4
+
+goroutine 6169 [chan receive, 3 minutes]:
+testing.(*T).Parallel(0x1213c0bfc400)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:1959 +0x225
+mcp-local-hub/internal/cli.beginPrivateSerenaMigrationCase(0x1213c0bfc400)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/private_serena_migration_case_windows_test.go:369 +0x3eb
+mcp-local-hub/internal/cli.TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow(0x1213c0bfc400)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/migrate_serena_test.go:3474 +0x4a
+testing.tRunner(0x1213c0bfc400, 0x7ff69c51cdf0)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2195 +0xc3
+created by testing.(*T).Run in goroutine 1
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2260 +0x4b4
+
+goroutine 6128 [chan receive, 3 minutes]:
+testing.(*T).Parallel(0x1213c0f36e00)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:1959 +0x225
+mcp-local-hub/internal/cli.beginPrivateSerenaMigrationCase(0x1213c0f36e00)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/private_serena_migration_case_windows_test.go:369 +0x3eb
+mcp-local-hub/internal/cli.TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut(0x1213c0f36e00)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/migrate_serena_test.go:2850 +0x4a
+testing.tRunner(0x1213c0f36e00, 0x7ff69c51cd88)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2195 +0xc3
+created by testing.(*T).Run in goroutine 1
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2260 +0x4b4
+
+goroutine 6143 [chan receive, 3 minutes]:
+testing.(*T).Parallel(0x1213c0bfda00)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:1959 +0x225
+mcp-local-hub/internal/cli.beginPrivateSerenaMigrationCase(0x1213c0bfda00)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/private_serena_migration_case_windows_test.go:369 +0x3eb
+mcp-local-hub/internal/cli.TestMigrateSerena_PostCommitReconcileReadyTimeout_ExitsZeroWithWarning(0x1213c0bfda00)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/migrate_serena_test.go:2132 +0x4a
+testing.tRunner(0x1213c0bfda00, 0x7ff69c51ce30)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2195 +0xc3
+created by testing.(*T).Run in goroutine 1
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2260 +0x4b4
+
+goroutine 6125 [chan receive, 3 minutes]:
+testing.(*T).Parallel(0x1213c0f36800)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:1959 +0x225
+mcp-local-hub/internal/cli.beginPrivateSerenaMigrationCase(0x1213c0f36800)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/private_serena_migration_case_windows_test.go:369 +0x3eb
+mcp-local-hub/internal/cli.TestMigrateSerena_ConcurrentRegisterInWindow_AppearsInCommittedIntent(0x1213c0f36800)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/migrate_serena_test.go:2529 +0x4b
+testing.tRunner(0x1213c0f36800, 0x7ff69c51cdb0)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2195 +0xc3
+created by testing.(*T).Run in goroutine 1
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2260 +0x4b4
+
+goroutine 6179 [chan receive, 3 minutes]:
+testing.(*T).Parallel(0x1213c0bfd600)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:1959 +0x225
+mcp-local-hub/internal/cli.beginPrivateSerenaMigrationCase(0x1213c0bfd600)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/private_serena_migration_case_windows_test.go:369 +0x3eb
+mcp-local-hub/internal/cli.TestMigrateSerena_EmptyFirstSnapshot_SupervisorRunning_LateReapClearsGate(0x1213c0bfd600)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/migrate_serena_test.go:3256 +0x4b
+testing.tRunner(0x1213c0bfd600, 0x7ff69c51cdc0)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2195 +0xc3
+created by testing.(*T).Run in goroutine 1
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2260 +0x4b4
+
+goroutine 9280 [sleep]:
+time.Sleep(0x5f5e100)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/runtime/time.go:368 +0x167
+mcp-local-hub/internal/cli.TestRunSupervisorHeartbeat_StopsOnDone(0x1213c0f36400)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/cli/supervisor_death_forensics_test.go:888 +0x22a
+testing.tRunner(0x1213c0f36400, 0x7ff69c51dc30)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2195 +0xc3
+created by testing.(*T).Run in goroutine 1
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2260 +0x4b4
+contained process exit failed
+original whole-suite or mandatory canonical qualification did not pass

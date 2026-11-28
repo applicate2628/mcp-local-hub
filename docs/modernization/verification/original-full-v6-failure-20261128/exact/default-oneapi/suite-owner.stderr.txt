@@ -1,0 +1,2 @@
+contained process exit failed
+original test, binary measurement, or process/IO settlement is incomplete

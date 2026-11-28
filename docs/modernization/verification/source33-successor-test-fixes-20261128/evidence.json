@@ -1,0 +1,187 @@
+{
+  "schema": "source33-successor-test-fixes/v2",
+  "status": "STATIC_CANDIDATE_NOT_APPLIED_NOT_EXECUTED",
+  "base_commit": "33eaf8af8fc46cb231f48c70f4775922393245b1",
+  "base_tree": "9e46575153d8a70c98c5629fdaa4767f61401f6c",
+  "expected_tree": "f68f7584dba7744e7607b07f615758f3ff633f54",
+  "total_tracked_paths": 3369,
+  "changed_test_paths": 7,
+  "changed_production_paths": 0,
+  "files": [
+    {
+      "path": "internal/cli/upgrade_gui_qualified_fixture_windows_test.go",
+      "mode": "100644",
+      "before_git_blob": "647c9568e0a5d8a82cff0ba60316cadfd5079259",
+      "after_git_blob": "55add3dc53965a53d818e0c0cdd05f723847b4e7",
+      "before_sha256": "b64a2eb741ff522338b4e591600841a1f597f0e368d86bb22c2e14da8c6604b1",
+      "after_sha256": "71025f02841e50046c350e09f762f0f9033aaca8860299f118be29be4b4e177c",
+      "after_bytes": 19391
+    },
+    {
+      "path": "internal/cli/windows_canonical_entry_gui_native_replay_windows_test.go",
+      "mode": "100644",
+      "before_git_blob": "b76bf5bb84d7f13ee818405faedf24f457e5814c",
+      "after_git_blob": "ec46d9e40f64f2db15565296656be2a0f7375688",
+      "before_sha256": "c20608c08fdf65b9f4729393ecb18e5c109a58a4b7b1cddbf6d16f9366bcf015",
+      "after_sha256": "d3a92b53031e01c5d37117b2feb28a8135c528215934d68939220547b206aa1e",
+      "after_bytes": 16861
+    },
+    {
+      "path": "internal/cli/supervisor_launch_successor_runtime_windows_test.go",
+      "mode": "100644",
+      "before_git_blob": "cd49eac954ba1358d466e6ea880a5fa3178758de",
+      "after_git_blob": "4878f4c23771729359149e7bc88e11fa0dda4db2",
+      "before_sha256": "32e9809b39f42ba087f0d07f3e78f961d32dfb89ce0bafa1fbd2f580deb14dd8",
+      "after_sha256": "584399c8997095b10e1fe3b32ae47e352da4201734d252dec8cb0847dd9bbb59",
+      "after_bytes": 8124
+    },
+    {
+      "path": "internal/cli/windows_product_preflight_original_windows_test.go",
+      "mode": "100644",
+      "before_git_blob": "4083571410ac4f0aeaaee8a05159bbfe96f3dde8",
+      "after_git_blob": "151410a7586b9379bbf15269f5743562a21c1d1b",
+      "before_sha256": "a1c07286916e2647b190d75e6fdd26d47380cf30a6705de166099abceace6591",
+      "after_sha256": "af3332378f7e3b53369fc95ec5967633a2b119eb5aa74fe4dbe6548302e06fc8",
+      "after_bytes": 6511
+    },
+    {
+      "path": "internal/cli/attach_client_real_supervisor_windows_test.go",
+      "mode": "100644",
+      "before_git_blob": "e078843fdf2403930745f2dc3a78497ed0b984b7",
+      "after_git_blob": "673549bccf66c005c527bfabe92df5dd6f2f6528",
+      "before_sha256": "b99314ff2d8d822858fe372818252845dc8bad5af96ace4c4f0c397b47a96fd6",
+      "after_sha256": "aea69265d2fc7d7441bc63a52e9045b50f7b6211dd04698bb11e58686ab8a4f2",
+      "after_bytes": 10009
+    },
+    {
+      "path": "internal/process/run_strictly_contained_windows_test.go",
+      "mode": "100644",
+      "before_git_blob": "17e60f3fbc598c8d608180c0334ec25a2651f12c",
+      "after_git_blob": "3034a398598215aa8162a08b6884354e6408e7e3",
+      "before_sha256": "2dc43619ae8665713e2975d4dc99ab5dec47db6a74d920ad49efb410516e1132",
+      "after_sha256": "bb9a34680c414559562e38fd90342d5efb654b7222dcd2514e42c0fc2f331893",
+      "after_bytes": 23136
+    },
+    {
+      "path": "internal/process/jobobject_windows_test.go",
+      "mode": "100644",
+      "before_git_blob": "1d2cd7ae38db2d1d5a5d2e1ef5df114166f7a202",
+      "after_git_blob": "b079fc962fae048d8e6e72234f3247bcfc019550",
+      "before_sha256": "1f38e8850e96c699a7edf0b8c52eef1f39ae41f9461c94da9f6dc0c260bd3a3b",
+      "after_sha256": "43fb4e9b0a20b399038743fc24fb5ad1b3af7b61cf95b2e06e677d575a8d990f",
+      "after_bytes": 110200
+    }
+  ],
+  "history_preserved": [
+    "06f77b3856e43ec5e8e3736123aedb896ae58817",
+    "33eaf8af8fc46cb231f48c70f4775922393245b1"
+  ],
+  "includes": {
+    "fixture_role_split": {
+      "files": 4,
+      "source_capsule_manifest": "5c776675cb7a156cb05c763cd6cf0e08debdd0c1c6927a823bdc8c1d01f771c9"
+    },
+    "full_suite_entry": {
+      "files": 1,
+      "exact_existing_afterimage_blob": "b079fc962fae048d8e6e72234f3247bcfc019550",
+      "only_added_bytes": 1943,
+      "source3ebe_and_source727_sha256": "43fb4e9b0a20b399038743fc24fb5ad1b3af7b61cf95b2e06e677d575a8d990f"
+    },
+    "tagged_return_arity": {
+      "files": 1,
+      "changed_lines": 1,
+      "source_capsule_manifest": "fdd33f58a11874496559a50705d7c0959463f56edbf88957cfe3991c5637fd9f",
+      "all_callers_reconciled": 5
+    },
+    "strict_proof_window": {
+      "files": 1,
+      "version": 2,
+      "supersedes_draft_v1_only": true,
+      "native_sync_common_deadline_ms": 5000,
+      "requires_actual_original_handle_signal": true,
+      "requires_actual_original_job_accounting_zero": true,
+      "accounting_not_mocked": true,
+      "model_clock_after_native_sync": true,
+      "production_proof_ms_unchanged": 50,
+      "original_test_context_ms_unchanged": 80,
+      "modeled_observation_delays_ms_unchanged": [
+        10,
+        100
+      ]
+    }
+  },
+  "acceptance": {
+    "literal_commands": [
+      "go build ./... && go vet ./... && go test -count=1 -timeout 5m ./...",
+      "go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/"
+    ],
+    "whole_inventory_required": true,
+    "sharding": false,
+    "selectors_added": false,
+    "go_timeout_increased": false,
+    "mandatory_migration_roots_each_phase": 14,
+    "mandatory_native_canonical_roots_each_phase": 2,
+    "mandatory_api_stderr_roots_each_phase": 3,
+    "extra_cli_stderr_roots_each_phase": 3,
+    "not_a_pass_for_source33_or_source727": true,
+    "default_conjunctive_argv": [
+      [
+        "go",
+        "build",
+        "./..."
+      ],
+      [
+        "go",
+        "vet",
+        "./..."
+      ],
+      [
+        "go",
+        "test",
+        "-count=1",
+        "-timeout",
+        "5m",
+        "./..."
+      ]
+    ],
+    "tagged_argv": [
+      "go",
+      "test",
+      "-tags=test_state_path_env",
+      "-count=1",
+      "-timeout",
+      "5m",
+      "./internal/api/",
+      "./internal/cli/"
+    ]
+  },
+  "performed": {
+    "pure_data_patch_and_tree_reconstruction": true,
+    "source_writes": false,
+    "git_changes": false,
+    "formatting": false,
+    "go_compile": false,
+    "tests": false,
+    "models": false,
+    "publication": false
+  },
+  "metadata_correction": {
+    "prior_capsule": "source33-successor-test-fixes-v1",
+    "prior_manifest_sha256": "8121874f957766f05832ce33eb87181ffd8d5e3a822409ebb03519ba1e041404",
+    "superseded_fields": [
+      "README.md required command block",
+      "evidence.json acceptance.literal_commands"
+    ],
+    "code_payloads_unchanged": true,
+    "expected_tree_unchanged": true,
+    "prior_inaccurate_commands": [
+      "go test ./... -count=1 -timeout=5m",
+      "go test -tags=test_state_path_env ./... -count=1 -timeout=5m"
+    ],
+    "correct_required_commands": [
+      "go build ./... && go vet ./... && go test -count=1 -timeout 5m ./...",
+      "go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/"
+    ],
+    "prior_draft_did_not_run_or_claim_pass": true
+  }
+}

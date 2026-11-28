@@ -1,0 +1,66 @@
+diff --git a/internal/process/jobobject_windows_test.go b/internal/process/jobobject_windows_test.go
+index 1d2cd7ae38db2d1d5a5d2e1ef5df114166f7a202..b079fc962fae048d8e6e72234f3247bcfc019550 100644
+--- a/internal/process/jobobject_windows_test.go
++++ b/internal/process/jobobject_windows_test.go
+@@ -509,6 +509,7 @@
+ 
+ const jobFixtureEntryPrefix = "WJOB-ENTRY-V1 "
+ const jobFixtureEntryConfigEnv = "MCPHUB_JOB_FIXTURE_ENTRY_CONFIG"
++const jobFixtureFullSuiteEnv = "MCPHUB_JOB_FIXTURE_FULL_SUITE"
+ const jobFixtureFrameLimit = 8192
+ 
+ type jobFixtureEntryBind struct {
+@@ -575,6 +576,53 @@
+ 	attempted bool
+ }
+ 
++// The explicit full-suite controller needs the original grant before any test
++// can create another process. The fixed two-test entry remains demand-driven.
++func TestMain(m *testing.M) {
++	if os.Getenv(jobFixtureFullSuiteEnv) == "" {
++		os.Exit(m.Run())
++	}
++	if os.Getenv(jobFixtureFullSuiteEnv) != "1" {
++		fmt.Fprintln(os.Stderr, "invalid full-suite Job entry mode")
++		os.Exit(2)
++	}
++	jobFixtureEntryLease.Lock()
++	jobFixtureEntryLease.attempted = true
++	jobFixtureEntryLease.token, jobFixtureEntryLease.err = receiveJobFixtureEntry()
++	token, err := jobFixtureEntryLease.token, jobFixtureEntryLease.err
++	jobFixtureEntryLease.Unlock()
++	if err != nil || token == nil || token.Ready.PID != uint32(os.Getpid()) {
++		fmt.Fprintln(os.Stderr, "qualified full-suite original entry refused:", err)
++		os.Exit(2)
++	}
++	// Self helper children must not start a second entry handshake.
++	if err := errors.Join(os.Unsetenv(jobFixtureEntryConfigEnv), os.Unsetenv(jobFixtureFullSuiteEnv)); err != nil {
++		fmt.Fprintln(os.Stderr, "clear consumed full-suite entry environment:", err)
++		os.Exit(2)
++	}
++	// receiveJobFixtureEntry received EOF and closed its control pipe. Restore
++	// the actual NUL input used by the ordinary noninteractive Go test driver,
++	// both for os.Stdin readers and native GetStdHandle consumers.
++	input, err := os.Open(os.DevNull)
++	if err != nil {
++		fmt.Fprintln(os.Stderr, "open full-suite NUL stdin:", err)
++		os.Exit(2)
++	}
++	if err := windows.SetStdHandle(windows.STD_INPUT_HANDLE, windows.Handle(input.Fd())); err != nil {
++		fmt.Fprintln(os.Stderr, "set full-suite NUL stdin:", errors.Join(err, input.Close()))
++		os.Exit(2)
++	}
++	os.Stdin = input
++	code := m.Run()
++	if err := errors.Join(windows.SetStdHandle(windows.STD_INPUT_HANDLE, 0), input.Close()); err != nil {
++		fmt.Fprintln(os.Stderr, "close full-suite NUL stdin:", err)
++		if code == 0 {
++			code = 1
++		}
++	}
++	os.Exit(code)
++}
++
+ func jobFixtureHex(value string, size int) bool {
+ 	if len(value) != size || strings.ToLower(value) != value {
+ 		return false
