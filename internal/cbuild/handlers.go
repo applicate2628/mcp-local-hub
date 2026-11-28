@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -209,17 +210,6 @@ func (b *builder) runTool(ctx context.Context, timeout time.Duration, dir, bin s
 	return res, nil
 }
 
-// sortedKeys returns the keys of m in deterministic (sorted) order so argv is
-// reproducible across calls.
-func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
 // validateTargets rejects empty and flag-shaped build targets. A value like
 // "--clean-first" or "--" must never reach cmake as a positional target, or
 // cmake would reinterpret it as a flag (argument injection). No shell is used,
@@ -350,7 +340,7 @@ func (b *builder) cmakeConfigure() mcp.Tool {
 			if a.Fresh {
 				argv = append(argv, "--fresh")
 			}
-			for _, k := range sortedKeys(a.Defines) {
+			for _, k := range slices.Sorted(maps.Keys(a.Defines)) {
 				if err := validateDefineKey(k); err != nil {
 					return nil, err
 				}
