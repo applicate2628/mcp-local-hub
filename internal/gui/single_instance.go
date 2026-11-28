@@ -1795,6 +1795,7 @@ func checkIdentityGateInternal(v Verdict) ProcessIdentityResult {
 // argv[1] == "gui" OR len(argv) == 1 (no-arg auto-gui: Explorer
 // double-click OR a bare `mcphub` typed at a terminal).
 func cmdlineIsGui(argv []string) bool {
+	_, argv = process.NormalizeWindowsConsoleArgv(argv)
 	if len(argv) == 1 {
 		return true
 	}

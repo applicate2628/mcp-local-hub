@@ -66,17 +66,24 @@ func TestWindowsSingleConsoleControlStaticGate(t *testing.T) {
 				`.Bool("debug-console"`, `.BoolVar("debug-console"`, `.String("debug-console"`, `.StringVar("debug-console"`,
 			} {
 				if n := strings.Count(text, shape); n > 0 {
-					allowedOwnerLiteral := rel == "internal/cli/windows_console_policy.go" && shape == `"debug-console"`
+					allowedOwnerLiteral := rel == "internal/process/windows_console_argv.go" && shape == `"debug-console"`
 					if !allowedOwnerLiteral {
 						alternateControls += n
 						findings = append(findings, fmt.Sprintf("alternate control %q x%d in %s", shape, n, rel))
 					}
 				}
 			}
+			if strings.Contains(text, "NormalizeWindowsConsoleArgv") &&
+				rel != "internal/process/windows_console_argv.go" &&
+				rel != "internal/cli/windows_console_policy_windows.go" &&
+				rel != "internal/gui/single_instance.go" {
+				childPropagations++
+				findings = append(findings, "console normalization propagated into "+rel)
+			}
 			if strings.Contains(text, "WindowsDebugConsolePrefix") &&
 				rel != "internal/cli/windows_console_policy.go" &&
 				rel != "internal/cli/windows_console_policy_windows.go" &&
-				rel != "internal/cli/windows_console_policy_other.go" {
+				rel != "internal/cli/windows_console_policy_other.go" && rel != "internal/process/windows_console_argv.go" {
 				childPropagations++
 				findings = append(findings, "console token propagated into "+rel)
 			}
