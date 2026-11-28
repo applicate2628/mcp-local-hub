@@ -1,0 +1,9 @@
+{"Time":"2026-11-28T21:24:26.6383777+03:00","Action":"start","Package":"mcp-local-hub/internal/api"}
+{"Time":"2026-11-28T21:24:26.6602867+03:00","Action":"run","Package":"mcp-local-hub/internal/api","Test":"TestEnsureLivenessTaskResolved_NativeXMLRoundTrip"}
+{"Time":"2026-11-28T21:24:26.6608135+03:00","Action":"output","Package":"mcp-local-hub/internal/api","Test":"TestEnsureLivenessTaskResolved_NativeXMLRoundTrip","Output":"=== RUN   TestEnsureLivenessTaskResolved_NativeXMLRoundTrip\n","OutputType":"frame"}
+{"Time":"2026-11-28T21:24:26.6608135+03:00","Action":"output","Package":"mcp-local-hub/internal/api","Test":"TestEnsureLivenessTaskResolved_NativeXMLRoundTrip","Output":"    liveness_task_native_windows_test.go:25: set MCPHUB_TARGET_LIVENESS_QA=1 for the authorized native liveness round trip\n"}
+{"Time":"2026-11-28T21:24:26.6608135+03:00","Action":"output","Package":"mcp-local-hub/internal/api","Test":"TestEnsureLivenessTaskResolved_NativeXMLRoundTrip","Output":"--- SKIP: TestEnsureLivenessTaskResolved_NativeXMLRoundTrip (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T21:24:26.6608135+03:00","Action":"skip","Package":"mcp-local-hub/internal/api","Test":"TestEnsureLivenessTaskResolved_NativeXMLRoundTrip","Elapsed":0}
+{"Time":"2026-11-28T21:24:26.6608135+03:00","Action":"output","Package":"mcp-local-hub/internal/api","Output":"PASS\n","OutputType":"frame"}
+{"Time":"2026-11-28T21:24:26.7893762+03:00","Action":"output","Package":"mcp-local-hub/internal/api","Output":"ok  \tmcp-local-hub/internal/api\t0.150s\n"}
+{"Time":"2026-11-28T21:24:26.7893762+03:00","Action":"pass","Package":"mcp-local-hub/internal/api","Elapsed":0.151}

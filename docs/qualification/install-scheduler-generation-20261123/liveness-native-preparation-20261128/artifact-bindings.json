@@ -1,0 +1,74 @@
+{
+  "schema": "liveness-native-preparation-public-artifacts-v1",
+  "source_base": "8204d3400cbfde401850d3acd3479fb8b1450fd3",
+  "test_sha256": "867eed75fb4c6fa0f4d94d9c6a096da0a15395752a92b9143b2d6486fe8e6d3b",
+  "native_registration_executed": false,
+  "files": [
+    {
+      "path": "docs/qualification/install-scheduler-generation-20261123/liveness-native-preparation-20261128/README.md",
+      "bytes": 15409,
+      "sha256": "ffdf6312dc41494860495030916b09e577703d8740402f5293db13e4acbd2e8d",
+      "git_blob": "08edd47e458828737551065e0f60f37d1ebeb094"
+    },
+    {
+      "path": "docs/qualification/install-scheduler-generation-20261123/liveness-native-preparation-20261128/execution-receipt.json",
+      "bytes": 172120,
+      "sha256": "5bfeea8950d0fb2938872a1f05a4e4e8685bf990fa7cda25f8dd77813ba7cab3",
+      "git_blob": "e88075ceb963cec93ae1d548ed9b8a612ce40958"
+    },
+    {
+      "path": "docs/qualification/install-scheduler-generation-20261123/liveness-native-preparation-20261128/native-run-plan.json",
+      "bytes": 3647,
+      "sha256": "93cfd528bd194ce66cca2e5e058b8f24593cbd295440504712b694f1129e5cf4",
+      "git_blob": "0382e0e1fe4f5840034be24fad43e8adca3870ac"
+    },
+    {
+      "path": "docs/qualification/install-scheduler-generation-20261123/liveness-native-preparation-20261128/trace-summary.json",
+      "bytes": 1706,
+      "sha256": "3b9f0ec3dd3f54f47b2764794b4177da59c5c3fc8ded6d0fce043b32aaec7820",
+      "git_blob": "b877d43d699fdb1b2f9a786e603fe27ec290b392"
+    },
+    {
+      "path": "docs/qualification/install-scheduler-generation-20261123/liveness-native-preparation-20261128/default-off.jsonl",
+      "bytes": 1658,
+      "sha256": "56ba839cf2e76fc37844b58b8bc53bbe2daaa070370b9af1416dceed8694e867",
+      "git_blob": "60aa3daf14facc126dd9df359e37720c5a9d5d70"
+    },
+    {
+      "path": "docs/qualification/install-scheduler-generation-20261123/liveness-native-preparation-20261128/tagged-default-off.jsonl",
+      "bytes": 1658,
+      "sha256": "2229ae8c7b092a220a02e51ae4c7ed7dffd0d50fa8fd905cf83694ff40189550",
+      "git_blob": "235352f98a74f8859026c46cbaef7ee6c9b64883"
+    },
+    {
+      "path": "docs/qualification/install-scheduler-generation-20261123/liveness-native-preparation-20261128/offline-dependencies-failure.jsonl",
+      "bytes": 3786,
+      "sha256": "105941c7a2bbbd44565796780a22cfdd23a8948fc1ffa9dd9ad7289b3ff5521e",
+      "git_blob": "4a2612d58e41189b4be675d7776a9ed9423ef983"
+    },
+    {
+      "path": "docs/qualification/install-scheduler-generation-20261123/liveness-native-preparation-20261128/offline-dependencies-failure.stderr.txt",
+      "bytes": 436,
+      "sha256": "f035e9ea60e324642ab0f8d68399d00112a00da0e204507a9b38d49f08593d69",
+      "git_blob": "3beed1ffb63718534d70f81b4ce5482dc47df0e4"
+    },
+    {
+      "path": "docs/qualification/install-scheduler-generation-20261123/liveness-native-preparation-20261128/go-version.txt",
+      "bytes": 34,
+      "sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14",
+      "git_blob": "37e970da9354526d75fc946a3260992550176ef6"
+    },
+    {
+      "path": "docs/qualification/install-scheduler-generation-20261123/liveness-native-preparation-20261128/.gitattributes",
+      "bytes": 8,
+      "sha256": "705fd4d6451a31d36b3df7de96f83f30ac976c9b4a6d1e51671d8e2f33e2d0da",
+      "git_blob": "fa1385d99a319b43c06f5309d1aae9fdd3adea46"
+    },
+    {
+      "path": "internal/api/liveness_task_native_windows_test.go",
+      "bytes": 6426,
+      "sha256": "867eed75fb4c6fa0f4d94d9c6a096da0a15395752a92b9143b2d6486fe8e6d3b",
+      "git_blob": "27565a3d7547b1a65e98535a633a866b552e791e"
+    }
+  ]
+}
