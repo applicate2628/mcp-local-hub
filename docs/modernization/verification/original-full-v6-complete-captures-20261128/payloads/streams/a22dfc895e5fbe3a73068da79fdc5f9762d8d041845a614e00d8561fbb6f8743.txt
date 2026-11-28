@@ -1,0 +1,3 @@
+TestClosedInitializeCancellationAndOneWayRelease
+TestOpenSessionLifecycleAndBoundedEvents
+TestEventLogRetainsNewest64RecordedLifecycleEvents

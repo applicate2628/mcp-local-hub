@@ -1,0 +1,109 @@
+=== RUN   TestStartTool
+--- PASS: TestStartTool (0.00s)
+=== NAME  
+=== RUN   TestStartVersionProbeWired
+--- PASS: TestStartVersionProbeWired (0.00s)
+=== NAME  
+=== RUN   TestStartTool_HonorsGdbPathOverride
+--- PASS: TestStartTool_HonorsGdbPathOverride (0.00s)
+=== NAME  
+=== RUN   TestCommandTool
+--- PASS: TestCommandTool (0.00s)
+=== NAME  
+=== RUN   TestCommandTool_UnknownSession
+--- PASS: TestCommandTool_UnknownSession (0.00s)
+=== NAME  
+=== RUN   TestCommandTool_GdbError
+--- PASS: TestCommandTool_GdbError (0.00s)
+=== NAME  
+=== RUN   TestListAndTerminate
+--- PASS: TestListAndTerminate (0.00s)
+=== NAME  
+=== RUN   TestStatusTool_Available
+--- PASS: TestStatusTool_Available (0.00s)
+=== NAME  
+=== RUN   TestStatusTool_Unavailable
+--- PASS: TestStatusTool_Unavailable (0.00s)
+=== NAME  
+=== RUN   TestStartTool_StartFailureSurfaced
+--- PASS: TestStartTool_StartFailureSurfaced (0.00s)
+=== NAME  
+=== RUN   TestUnescapeMIString
+=== RUN   TestUnescapeMIString/plain_quoted
+--- PASS: TestUnescapeMIString/plain_quoted (0.00s)
+=== NAME  TestUnescapeMIString
+=== RUN   TestUnescapeMIString/newline
+--- PASS: TestUnescapeMIString/newline (0.00s)
+=== NAME  TestUnescapeMIString
+=== RUN   TestUnescapeMIString/tab
+--- PASS: TestUnescapeMIString/tab (0.00s)
+=== NAME  TestUnescapeMIString
+=== RUN   TestUnescapeMIString/escaped_quote
+--- PASS: TestUnescapeMIString/escaped_quote (0.00s)
+=== NAME  TestUnescapeMIString
+=== RUN   TestUnescapeMIString/backslash
+--- PASS: TestUnescapeMIString/backslash (0.00s)
+=== NAME  TestUnescapeMIString
+=== RUN   TestUnescapeMIString/esc_octal
+--- PASS: TestUnescapeMIString/esc_octal (0.00s)
+=== NAME  TestUnescapeMIString
+=== RUN   TestUnescapeMIString/carriage_return
+--- PASS: TestUnescapeMIString/carriage_return (0.00s)
+=== NAME  TestUnescapeMIString
+=== RUN   TestUnescapeMIString/unknown_escape_passes_byte
+--- PASS: TestUnescapeMIString/unknown_escape_passes_byte (0.00s)
+=== NAME  TestUnescapeMIString
+=== RUN   TestUnescapeMIString/no_surrounding_quotes
+--- PASS: TestUnescapeMIString/no_surrounding_quotes (0.00s)
+=== NAME  TestUnescapeMIString
+=== RUN   TestUnescapeMIString/missing_closing_quote
+--- PASS: TestUnescapeMIString/missing_closing_quote (0.00s)
+=== NAME  TestUnescapeMIString
+=== RUN   TestUnescapeMIString/empty_quotes
+--- PASS: TestUnescapeMIString/empty_quotes (0.00s)
+=== NAME  TestUnescapeMIString
+=== RUN   TestUnescapeMIString/bell+backspace
+--- PASS: TestUnescapeMIString/bell+backspace (0.00s)
+=== NAME  TestUnescapeMIString
+=== RUN   TestUnescapeMIString/stops_at_field_boundary_in_record
+--- PASS: TestUnescapeMIString/stops_at_field_boundary_in_record (0.00s)
+=== NAME  TestUnescapeMIString
+=== RUN   TestUnescapeMIString/escaped_quote_then_field_boundary
+--- PASS: TestUnescapeMIString/escaped_quote_then_field_boundary (0.00s)
+=== NAME  TestUnescapeMIString
+--- PASS: TestUnescapeMIString (0.00s)
+=== NAME  
+=== RUN   TestCommand_ConsoleThenDone
+--- PASS: TestCommand_ConsoleThenDone (0.00s)
+=== NAME  
+=== RUN   TestCommand_StreamKinds
+--- PASS: TestCommand_StreamKinds (0.00s)
+=== NAME  
+=== RUN   TestCommand_Error
+--- PASS: TestCommand_Error (0.00s)
+=== NAME  
+=== RUN   TestCommand_RunningThenStopped
+--- PASS: TestCommand_RunningThenStopped (0.00s)
+=== NAME  
+=== RUN   TestCommand_RunningThenExit
+--- PASS: TestCommand_RunningThenExit (0.00s)
+=== NAME  
+=== RUN   TestReadUntilPrompt
+--- PASS: TestReadUntilPrompt (0.00s)
+=== NAME  
+=== RUN   TestCommand_EOFBeforeResult
+--- PASS: TestCommand_EOFBeforeResult (0.00s)
+=== NAME  
+=== RUN   TestAsyncSummary
+--- PASS: TestAsyncSummary (0.00s)
+=== NAME  
+=== RUN   TestDefaultStartVersion_ProbeFailureReturnsEmpty
+--- PASS: TestDefaultStartVersion_ProbeFailureReturnsEmpty (0.00s)
+=== NAME  
+=== RUN   TestGdbStartArgs_ProgramUsesArgsTerminator
+--- PASS: TestGdbStartArgs_ProgramUsesArgsTerminator (0.00s)
+=== NAME  
+=== RUN   TestGdbStartArgs_NoProgramKeepsOriginalStartupArgs
+--- PASS: TestGdbStartArgs_NoProgramKeepsOriginalStartupArgs (0.00s)
+=== NAME  
+PASS

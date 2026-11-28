@@ -1,0 +1,59 @@
+$ErrorActionPreference='Stop'
+$Python='@@RECOVERY_NATIVE_USER_PROFILE@@\AppData\Local\Python\pythoncore-3.15-64\python.exe'
+$Root='@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\recovery-inputs-v1'
+$Out='@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\recovery-inputs-v1\root-checkpoint-data-20261128-v1'
+function SHA([string]$p){$h=[Security.Cryptography.SHA256]::Create();try{[BitConverter]::ToString($h.ComputeHash([IO.File]::ReadAllBytes($p))).Replace('-','').ToLowerInvariant()}finally{$h.Dispose()}}
+function Require($ok,[string]$why){if(-not $ok){throw $why}}
+Require ((SHA $Python) -eq 'd4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd') 'Python pin changed'
+Require (-not (Test-Path -LiteralPath $Out)) 'Fresh DATA output already exists'
+[IO.Directory]::CreateDirectory($Out) | Out-Null
+$checks=@(
+@('successor-publication-trail-evidence-v1','06d5fbade7858982647e71fd48a0780219c575856834f89c15aa005bd968cfe3',120),
+@('successor59f-preparation-evidence-v1\publication','ca61ea6352390bd9d2fd946bf2ece66c42e6741b0d1629e0f7f012f121f21029',121),
+@('original-full-v6-complete-captures-evidence-v1','957bd9669689fa1d7aef5efebe7e97758b040a34ccfbd72aa366d5dfc6fb99a9',346),
+@('original-full-v6-owner-replay-evidence-v1','686aa8b03f461bb5f7c80f0deeafc8cfa2c0e0118c3a98678a30bd74e1734046',6),
+@('old-cli-budget-analysis-v1','bcfeae39f1c96fc4656e5f0490497649545919dbc437e6577d464dd6b5df8252',8),
+@('cli-shared-image-candidate-v1','74ef1f32f87f005ac265e07199f67c2e76931d000936e43107a1c3a02a3484af',7))
+$verified=@()
+foreach($c in $checks){
+ $base=Join-Path $Root $c[0]
+ $manifest=Join-Path $base 'artifact-manifest.json'
+ Require ((SHA $manifest) -eq $c[1]) ('Manifest changed: '+$c[0])
+ $m=Get-Content -Raw -LiteralPath $manifest | ConvertFrom-Json
+ $rows=if($m.files -is [array]){@($m.files)}else{@($m.files.PSObject.Properties | ForEach-Object{[pscustomobject]@{path=$_.Name;bytes=$_.Value.bytes;sha256=$_.Value.sha256}})}
+ $seen=@{}; $total=0
+ foreach($row in $rows){
+  Require ($row.path -and -not $row.path.Contains('..') -and -not $row.path.Contains(':') -and -not [IO.Path]::IsPathRooted($row.path)) 'Unclean capsule path'
+  $file=Join-Path $base $row.path
+  $item=Get-Item -LiteralPath $file -Force
+  Require (-not $item.PSIsContainer -and -not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) 'Nonordinary artifact'
+  Require ($item.Length -eq $row.bytes -and (SHA $file) -eq $row.sha256) ('Artifact mismatch '+$c[0]+'/'+$row.path)
+  Require (-not $seen.ContainsKey($row.path)) 'Duplicate capsule path'
+  $seen[$row.path]=$true; $total+=$item.Length
+ }
+ $actual=@(Get-ChildItem -LiteralPath $base -File -Force -Recurse)
+ Require ($actual.Count -eq $c[2] -and $rows.Count+1 -eq $c[2]) ('Complete file count differs: '+$c[0])
+ foreach($f in $actual){
+  $relative=$f.FullName.Substring($base.Length+1).Replace('\','/')
+  Require ($relative -eq 'artifact-manifest.json' -or $seen.ContainsKey($relative)) 'Unmanifested artifact'
+ }
+ $verified += [pscustomobject]@{capsule=$c[0];manifest_sha256=$c[1];files=$actual.Count;payload_bytes=$total;every_file_size_and_sha256_matched=$true}
+}
+$artifactReceipt=[pscustomobject]@{schema='root-checkpoint-artifact-byte-verification-v1';status='PASS';capsules=$verified;native_or_test_execution=$false;qualification_inherited=$false}
+$utf8=New-Object Text.UTF8Encoding($false)
+[IO.File]::WriteAllText(($Out+'\root-artifact-verification.json'),($artifactReceipt|ConvertTo-Json -Depth 12)+[Environment]::NewLine,$utf8)
+function RunData([string]$code,[string]$pin,[string[]]$dataArgs){
+ Require ((SHA $code) -eq $pin) ('DATA program changed: '+$code)
+ & $Python -E -S -B $code @dataArgs
+ Require ($LASTEXITCODE -eq 0) ('DATA program failed: '+$code)
+}
+RunData ($Root+'\successor59f-preparation-evidence-v1\publication\reconstruct_sources.py') '7f053ae4756d735bb74c3c476a130697c440fcf4c42f7b99c32bd83344bf9c12' @('--roles-json',($Root+'\successor59f-preparation-evidence-v1\private-role-values.json'),'--output',($Out+'\preparation133'))
+RunData ($Root+'\original-full-v6-complete-captures-evidence-v1\reconstruct_sources.py') '38f9f0cdf9837f71eb0a673be3241ffc697f73165dc7be184b32dc43ec3bf4dc' @('--roles-json',($Root+'\original-full-v6-complete-captures-private-v1\roles.json'),'--output',($Out+'\captures333'))
+RunData '@@RECOVERY_APPROVED_WORK_AREA@@\pub664-363b\docs\modernization\verification\original-full-v6-failure-20261128\reconstruct_sources.py' 'a5b731a7221770b2d511ade8f7508697a526a9dceb28576260318aeaed7fa624' @('--roles-json',($Root+'\original-full-v6-failure-private-v1\roles.json'),'--output',($Out+'\prior-full20'))
+RunData '@@RECOVERY_APPROVED_WORK_AREA@@\pub664-363b\docs\modernization\verification\closed-api-failure-20261128\reconstruct_sources.py' 'e1c7a931a22071418f5895c5e23d8f6f62cea1431a3823bb1c297e7e71e14392' @('--roles-json',($Root+'\closed-api-failure-private-v1\roles.json'),'--output',($Out+'\prior-api4'))
+RunData ($Root+'\original-full-v6-complete-captures-evidence-v1\verify_all_captures.py') '619833bad46f773887647cbee947b889344bc78d893b2a5138bc967359811836' @('--new-root',($Out+'\captures333'),'--prior-full-root',($Out+'\prior-full20'),'--prior-api-root',($Out+'\prior-api4'),'--receipt',($Out+'\root-full566-verification.json'))
+RunData ($Root+'\original-full-v6-owner-replay-evidence-v1\reconstruct_owner_receipts.py') 'c6ad1a7205c68671ab25b41969c762f44f6a13a12dc0e69253691a598754ab38' @('--captures-root',($Out+'\captures333'),'--prior-full-root',($Out+'\prior-full20'),'--prior-api-root',($Out+'\prior-api4'),'--receipt',($Out+'\root-full130-owner-verification.json'))
+$summary=[pscustomobject]@{schema='root-checkpoint-data-replay-v1';status='PASS';capsules_verified=$verified.Count;artifact_files_verified=($verified | Measure-Object files -Sum).Sum;preparation_originals=133;new_capture_originals=333;prior_full_originals=20;prior_api_originals=4;historical_commands=283;historical_captures=566;historical_package_receipts=65;historical_native_owner_receipts=130;historical_qualification='FAIL/CLOSED';native_or_test_execution=$false;qualification_inherited=$false;receipt_files=@(Get-ChildItem -LiteralPath $Out -File | ForEach-Object{[pscustomobject]@{file=$_.Name;bytes=$_.Length;sha256=(SHA $_.FullName)}})}
+[IO.File]::WriteAllText(($Out+'\root-data-verification.json'),($summary|ConvertTo-Json -Depth 12)+[Environment]::NewLine,$utf8)
+$summary | ConvertTo-Json -Depth 12
+[pscustomobject]@{summary_sha256=(SHA ($Out+'\root-data-verification.json'))}|ConvertTo-Json

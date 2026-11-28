@@ -1,0 +1,97 @@
+{
+    "schema":  "publication-original-root-data-audit-v1",
+    "status":  "PASS",
+    "physical_complete":  true,
+    "scope":  "cache-acceptance-commit-20261128-v9",
+    "config_sha256":  "10a8e14d049aa675cf01b3bfc51a204722802c27d8b83881796ed88159d4d80c",
+    "receipt_sha256":  "e91c35780b63e7db1cb3d153031efe53e886750399d32b916d252fdf15af7a89",
+    "root_sha256":  "8110e1c72921fd06ab933ae993e7a33d6ee90bcb8d7958d99bb2377ada500c4d",
+    "outer_sha256":  "665fb5de424358b042828516726907df5a2011b37a7cf06d2b6cd5648367c849",
+    "commands_verified":  6,
+    "captures_verified":  12,
+    "results":  [
+                    {
+                        "name":  "head.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rev-parse",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.03579690004698932,
+                        "exit_code":  0,
+                        "stdout_sha256":  "83b2c611d123badeb08a5271c7cbc11965324004ef7c5c71fb69a4a30c3f9736",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "01b4e915af6439e4c5e7c5c880a6d4885a2dbd3a\n"
+                    },
+                    {
+                        "name":  "reviewed-parent.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "show",
+                                     "-s",
+                                     "--format=%H%n%P"
+                                 ],
+                        "seconds":  0.04309039993677288,
+                        "exit_code":  0,
+                        "stdout_sha256":  "21486923ea5eaf5ae592b722dbc9c0ae8ddd2f65750a2d00d698a13ce9ecd15c",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "01b4e915af6439e4c5e7c5c880a6d4885a2dbd3a\n443c558b6a8a94e7bd30b3455ed1288e1be7f9c8\n"
+                    },
+                    {
+                        "name":  "reviewed-staged-tree.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "write-tree"
+                                 ],
+                        "seconds":  0.04295609996188432,
+                        "exit_code":  0,
+                        "stdout_sha256":  "113ddfdf87626cefed901e40fe38dfe70d5cb603b351aa06db53a4c1a84b83c9",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "89f3c5715356ff424d8538c1409cb91e58b1977c\n"
+                    },
+                    {
+                        "name":  "commit-full-failure-and-reviewed-successor-inputs.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "commit",
+                                     "-m",
+                                     "docs: preserve complete failing acceptance and reviewed successor inputs"
+                                 ],
+                        "seconds":  0.12478910002391785,
+                        "exit_code":  0,
+                        "stdout_sha256":  "4e34d77a9f99bab1ed3b68823d85afa2afa9b649a5a183294d1d77a9f624f06f",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "[work/ab664-text-source-bd7-363b-v1 05fbffa3] docs: preserve complete failing acceptance and reviewed successor inputs\n 52 files changed, 368131 insertions(+), 5 deletions(-)\n create mode 100644 docs/modernization/verification/original-full-v6-failure-20261128/.gitattributes\n create mode 100644 docs/modernization/verification/original-full-v6-failure-20261128/README.md\n create mode 100644 docs/modernization/verification/original-full-v6-failure-20261128/artifact-manifest.json\n create mode 100644 docs/modernization/verification/original-full-v6-failure-20261128/data-reconstruction-proof.json\n create mode 100644 docs/modernization/verification/original-full-v6-failure-20261128/disclosure-review.json\n create mode 100644 docs/modernization/verification/original-full-v6-failure-20261128/exact/default-daemon/suite-owner.stderr.txt\n create mode 100644 docs/modernization/verification/original-full-v6-failure-20261128/exact/default-oneapi/suite-owner.stderr.txt\n create mode 100644 docs/modernization/verification/original-full-v6-failure-20261128/exact/default-process/suite-owner.stderr.txt\n create mode 100644 docs/modernization/verification/original-full-v6-failure-20261128/exact/default-process/suite-owner.stdout.txt\n create mode 100644 docs/modernization/verification/original-full-v6-failure-20261128/exact/full/outer-original.json\n create mode 100644 docs/modernization/verification/original-full-v6-failure-20261128/excerpts/provenance.json\n create mode 100644 docs/modernization/verification/original-full-v6-failure-20261128/excerpts/tagged-cli-build-failure.jsonl\n create mode 100644 docs/modernization/verification/original-full-v6-failure-20261128/full-failure-evidence.json\n create mode 100644 docs/modernization/verification/original-full-v6-failure-20261128/reconstruct_sources.py\n create mode 100644 docs/modernization/verification/original-full-v6-failure-20261128/source-bindings.json\n create mode 100644 docs/modernization/verification/original-full-v6-failure-20261128/templates/default-cli/receipt.json.template\n create mode 100644 docs/modernization/verification/original-full-v6-failure-20261128/templates/default-cli/suite-owner.stderr.txt.template\n create mode 100644 docs/modernization/verification/original-full-v6-failure-20261128/templates/default-cli/suite-owner.stdout.txt.template\n create mode 100644 docs/modernization/verification/original-full-v6-failure-20261128/templates/default-daemon/receipt.json.template\n create mode 100644 docs/modernization/verifi"
+                    },
+                    {
+                        "name":  "committed-identity.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "show",
+                                     "-s",
+                                     "--format=%H%n%T%n%P"
+                                 ],
+                        "seconds":  0.23408590001054108,
+                        "exit_code":  0,
+                        "stdout_sha256":  "3252407a960d81b758170a36a7cc96e6af8ffcc84198339ea5029f8dc6868a48",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "05fbffa30f99914c8174966525a70bc9984e7038\n89f3c5715356ff424d8538c1409cb91e58b1977c\n01b4e915af6439e4c5e7c5c880a6d4885a2dbd3a\n"
+                    },
+                    {
+                        "name":  "committed-worktree-state.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "status",
+                                     "--porcelain=v1",
+                                     "--untracked-files=all"
+                                 ],
+                        "seconds":  0.046640400076285005,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    }
+                ],
+    "tests_executed":  false,
+    "reviewed_utc":  "2026-11-28T13:25:23.1273431Z"
+}

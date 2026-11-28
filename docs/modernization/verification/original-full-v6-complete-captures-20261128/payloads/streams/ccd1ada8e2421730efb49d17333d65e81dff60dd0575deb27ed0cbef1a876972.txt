@@ -1,0 +1,31 @@
+{"Action":"start","Package":"mcp-local-hub/internal/cbuild/mcp"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestParseErrorVsInvalidRequest"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestParseErrorVsInvalidRequest","Output":"=== RUN   TestParseErrorVsInvalidRequest\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestParseErrorVsInvalidRequest","Output":"--- PASS: TestParseErrorVsInvalidRequest (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestParseErrorVsInvalidRequest"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestPresentButInvalidIdIsInvalidRequest"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestPresentButInvalidIdIsInvalidRequest","Output":"=== RUN   TestPresentButInvalidIdIsInvalidRequest\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestPresentButInvalidIdIsInvalidRequest","Output":"--- PASS: TestPresentButInvalidIdIsInvalidRequest (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestPresentButInvalidIdIsInvalidRequest"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestNotificationVsRequestForLifecycleNames"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestNotificationVsRequestForLifecycleNames","Output":"=== RUN   TestNotificationVsRequestForLifecycleNames\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestNotificationVsRequestForLifecycleNames","Output":"--- PASS: TestNotificationVsRequestForLifecycleNames (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestNotificationVsRequestForLifecycleNames"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestUnknownToolIsInvalidParams"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestUnknownToolIsInvalidParams","Output":"=== RUN   TestUnknownToolIsInvalidParams\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestUnknownToolIsInvalidParams","Output":"--- PASS: TestUnknownToolIsInvalidParams (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestUnknownToolIsInvalidParams"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestToolPanicRecovered"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestToolPanicRecovered","Output":"=== RUN   TestToolPanicRecovered\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestToolPanicRecovered","Output":"--- PASS: TestToolPanicRecovered (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestToolPanicRecovered"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestServeDrainsInFlightOnEOF"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestServeDrainsInFlightOnEOF","Output":"=== RUN   TestServeDrainsInFlightOnEOF\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestServeDrainsInFlightOnEOF","Output":"--- PASS: TestServeDrainsInFlightOnEOF (0.05s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestServeDrainsInFlightOnEOF"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestServeCancellationUnblocksReadAndDrains"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestServeCancellationUnblocksReadAndDrains","Output":"=== RUN   TestServeCancellationUnblocksReadAndDrains\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestServeCancellationUnblocksReadAndDrains","Output":"--- PASS: TestServeCancellationUnblocksReadAndDrains (0.05s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild/mcp","Test":"TestServeCancellationUnblocksReadAndDrains"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild/mcp","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild/mcp"}

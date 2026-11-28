@@ -1,0 +1,6 @@
+tree f68f7584dba7744e7607b07f615758f3ff633f54
+parent 33eaf8af8fc46cb231f48c70f4775922393245b1
+author applicate2628 <dima_den@inbox.ru> 1795870366 +0300
+committer applicate2628 <dima_den@inbox.ru> 1795870366 +0300
+
+test: repair full-suite fixture contracts and tagged CLI build

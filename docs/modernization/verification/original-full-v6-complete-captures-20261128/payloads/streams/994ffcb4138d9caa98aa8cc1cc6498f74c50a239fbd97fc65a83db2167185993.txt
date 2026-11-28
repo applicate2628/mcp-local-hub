@@ -1,0 +1,73 @@
+=== RUN   TestRunWorkersUnclassifiedTreatsBaselineWorkerAsClassified
+--- PASS: TestRunWorkersUnclassifiedTreatsBaselineWorkerAsClassified (0.00s)
+=== NAME  
+=== RUN   TestRunRejectsCollidingReportOutputPathsBeforeWriting
+--- PASS: TestRunRejectsCollidingReportOutputPathsBeforeWriting (0.00s)
+=== NAME  
+=== RUN   TestRunPropagatesStdoutWriteFailures
+=== RUN   TestRunPropagatesStdoutWriteFailures/writer_error
+--- PASS: TestRunPropagatesStdoutWriteFailures/writer_error (0.00s)
+=== NAME  TestRunPropagatesStdoutWriteFailures
+=== RUN   TestRunPropagatesStdoutWriteFailures/short_write
+--- PASS: TestRunPropagatesStdoutWriteFailures/short_write (0.00s)
+=== NAME  TestRunPropagatesStdoutWriteFailures
+--- PASS: TestRunPropagatesStdoutWriteFailures (0.00s)
+=== NAME  
+=== RUN   TestRunBaselineRejectsOutputCollisionsBeforeWriting
+=== RUN   TestRunBaselineRejectsOutputCollisionsBeforeWriting/--report-json
+--- PASS: TestRunBaselineRejectsOutputCollisionsBeforeWriting/--report-json (0.00s)
+=== NAME  TestRunBaselineRejectsOutputCollisionsBeforeWriting
+=== RUN   TestRunBaselineRejectsOutputCollisionsBeforeWriting/--report-md
+--- PASS: TestRunBaselineRejectsOutputCollisionsBeforeWriting/--report-md (0.00s)
+=== NAME  TestRunBaselineRejectsOutputCollisionsBeforeWriting
+--- PASS: TestRunBaselineRejectsOutputCollisionsBeforeWriting (0.00s)
+=== NAME  
+=== RUN   TestRunRejectsOutputCollisionsWithInputFiles
+--- PASS: TestRunRejectsOutputCollisionsWithInputFiles (0.00s)
+=== NAME  
+=== RUN   TestValidateDistinctNamedPathsDetectsHardLinks
+--- PASS: TestValidateDistinctNamedPathsDetectsHardLinks (0.00s)
+=== NAME  
+=== RUN   TestPathMatchesAnySupportsRecursiveDoubleStar
+--- PASS: TestPathMatchesAnySupportsRecursiveDoubleStar (0.00s)
+=== NAME  
+=== RUN   TestRunBaselineWritesRequestedReports
+--- PASS: TestRunBaselineWritesRequestedReports (0.00s)
+=== NAME  
+=== RUN   TestRunRequiresExplicitPolicyPath
+--- PASS: TestRunRequiresExplicitPolicyPath (0.00s)
+=== NAME  
+=== RUN   TestRunRejectsUnknownKindFilter
+--- PASS: TestRunRejectsUnknownKindFilter (0.00s)
+=== NAME  
+=== RUN   TestRunAcceptsCanonicalKindFilter
+--- PASS: TestRunAcceptsCanonicalKindFilter (0.00s)
+=== NAME  
+=== RUN   TestRunRejectsMalformedPathFilter
+--- PASS: TestRunRejectsMalformedPathFilter (0.00s)
+=== NAME  
+=== RUN   TestRunRejectsEmptyPathFilter
+--- PASS: TestRunRejectsEmptyPathFilter (0.00s)
+=== NAME  
+=== RUN   TestRunScanDotPathMatchesRepositoryRoot
+--- PASS: TestRunScanDotPathMatchesRepositoryRoot (0.00s)
+=== NAME  
+=== RUN   TestRunScanReturnsZeroWhenViolationsExist
+--- PASS: TestRunScanReturnsZeroWhenViolationsExist (0.00s)
+=== NAME  
+=== RUN   TestRunVerifyReturnsOneForArchitectureViolation
+--- PASS: TestRunVerifyReturnsOneForArchitectureViolation (0.00s)
+=== NAME  
+=== RUN   TestRunVerifyRejectsPresentationFilters
+--- PASS: TestRunVerifyRejectsPresentationFilters (0.00s)
+=== NAME  
+=== RUN   TestRunBaselineRequiresOwnerForEveryViolation
+--- PASS: TestRunBaselineRequiresOwnerForEveryViolation (0.00s)
+=== NAME  
+=== RUN   TestRunBaselineRequiresGeneratedFrom
+--- PASS: TestRunBaselineRequiresGeneratedFrom (0.00s)
+=== NAME  
+=== RUN   TestRunScanPathFilterSupportsRecursiveGlob
+--- PASS: TestRunScanPathFilterSupportsRecursiveGlob (0.00s)
+=== NAME  
+PASS

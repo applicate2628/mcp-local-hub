@@ -1,0 +1,6 @@
+[31;1mException: [0m@@RECOVERY_APPROVED_WORK_AREA_RAW@@\mcp-acceptance-rebuild-20261127-v1\inputs-successor33-v1\producer-candidate\build_successor_products.ps1:99
+[36;1mLine |[0m
+[36;1m[36;1m  99 | [0m         [36;1mthrow 'Builder PATH does not resolve the pinned tool'[0m
+[36;1m     | [31;1m         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+[36;1m[31;1m[31;1m[36;1m     | [31;1mBuilder PATH does not resolve the pinned tool[0m
+[36;1m[31;1m[31;1m[36;1m[31;1m[0m

@@ -1,0 +1,51 @@
+#Requires -Version 7.5
+param([Parameter(Mandatory=$true)][string]$Output)
+$ErrorActionPreference='Stop'
+$PlanPath='@@RECOVERY_APPROVED_WORK_AREA_RAW@@\mcp-acceptance-rebuild-20261127-v1\inputs-successor33-v1\producer-candidate\successor-product-helper-inputs-v1-plan-v2.json'
+$PlanSHA='99333ab4cb43f9a01720c70e567782475065b0f7077d70a3f157dca475c9c15a'
+$ConfigPath='@@RECOVERY_APPROVED_WORK_AREA_RAW@@\mcp-acceptance-rebuild-20261127-v1\inputs-successor33-v1\producer-candidate\product-build-config.json'
+$ConfigSHA='e60e717eeb3727acad953c54df08fa0fb1da893f48dcc2d0d5e0d1782c5580bb'
+function SHA([string]$Path){$h=[Security.Cryptography.SHA256]::Create();try{[Convert]::ToHexString($h.ComputeHash([IO.File]::ReadAllBytes($Path))).ToLowerInvariant()}finally{$h.Dispose()}}
+if((SHA $PlanPath)-cne$PlanSHA -or (SHA $ConfigPath)-cne$ConfigSHA){throw 'Original declared DATA binding changed'}
+$ProbePlan=[IO.File]::ReadAllText($PlanPath)|ConvertFrom-Json -AsHashtable -DateKind String
+$ProbeConfig=[IO.File]::ReadAllText($ConfigPath)|ConvertFrom-Json -AsHashtable -DateKind String
+foreach($key in @([Environment]::GetEnvironmentVariables('Process').Keys)){
+ if(-not $ProbePlan.environment.Contains([string]$key)){[Environment]::SetEnvironmentVariable([string]$key,$null,'Process')}
+}
+foreach($key in $ProbePlan.environment.Keys){[Environment]::SetEnvironmentVariable($key,[string]$ProbePlan.environment[$key],'Process')}
+Set-Location -LiteralPath $ProbeConfig.source_root
+$ProbeGo=[string]$ProbeConfig.tools.go.path
+$ProbeGit=[string]$ProbeConfig.tools.git.path
+$Rows=@()
+foreach($ProbePair in @(@('go',$ProbeGo),@('git',$ProbeGit))){
+ $ProbeName=$ProbePair[0]
+ $Expected=$ProbePair[1]
+ $Applications=@(Get-Command $ProbeName -CommandType Application -ErrorAction Stop)
+ $OriginalSource=(Get-Command $ProbeName -CommandType Application -ErrorAction Stop).Source
+ $Plain=@(Get-Command $ProbeName -ErrorAction Stop)
+ $Resolved=$ExecutionContext.InvokeCommand.GetCommand($ProbeName,[Management.Automation.CommandTypes]::Application)
+ $OriginalConversion=$null
+ $OriginalConversionError=$null
+ try{$OriginalConversion=[IO.Path]::GetFullPath([string]$OriginalSource)}catch{$OriginalConversionError=$_.Exception.Message}
+ $Rows += [ordered]@{
+  name=$ProbeName;pair_type=$ProbePair.GetType().FullName;pair_count=$ProbePair.Count
+  name_type=$ProbeName.GetType().FullName;expected_type=$Expected.GetType().FullName
+  expected=$Expected;expected_full_path=[IO.Path]::GetFullPath($Expected)
+  application_count=$Applications.Count;source_value_type=$OriginalSource.GetType().FullName
+  sources=@($OriginalSource);original_string_conversion=[string]$OriginalSource
+  original_full_path_conversion=$OriginalConversion;original_conversion_error=$OriginalConversionError
+  applications=@($Applications|ForEach-Object{[ordered]@{name=$_.Name;command_type=[string]$_.CommandType;source=$_.Source;definition=$_.Definition;path=$_.Path}})
+  plain_command_count=$Plain.Count;plain_types=@($Plain|ForEach-Object{[string]$_.CommandType})
+  invocation_resolver=[ordered]@{name=$Resolved.Name;command_type=[string]$Resolved.CommandType;source=$Resolved.Source;definition=$Resolved.Definition;path=$Resolved.Path}
+ }
+}
+$Result=[ordered]@{
+ schema='successor-product-command-resolution-data-v1';original_plan_sha256=$PlanSHA;original_config_sha256=$ConfigSHA
+ cwd=[string](Get-Location);PATH=$env:PATH;PATHEXT=$env:PATHEXT;pwsh_version=$PSVersionTable.PSVersion.ToString()
+ result=$Rows;go_git_or_product_invoked=$false;source_or_cache_modified=$false;acceptance_qualification_granted=$false
+}
+$Bytes=[Text.UTF8Encoding]::new($false).GetBytes(($Result|ConvertTo-Json -Depth 12)+[char]10)
+$Stream=[IO.File]::Open($Output,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+try{$Stream.Write($Bytes,0,$Bytes.Length);$Stream.Flush($true)}finally{$Stream.Dispose()}
+$Result|ConvertTo-Json -Depth 12
+[ordered]@{output_sha256=(SHA $Output);bytes=$Bytes.Length}|ConvertTo-Json -Compress

@@ -1,0 +1,231 @@
+{
+  "schema": "successor-product-only-root-receiving-v2",
+  "status": "PASS",
+  "closure": "CLOSED",
+  "physical_complete": true,
+  "original_parent_status": "PASS",
+  "original_execution_status": "PASS",
+  "original_exit_code": 0,
+  "source_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+  "source_tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+  "plan_sha256": "f6fd52b9a3d653b87bae7e51c1264ee27bb2a5b692219b36c9213a59a8b7fca5",
+  "parent_sha256": "bbc353fe6ac620ddf190ba9712d0048a6a60bbc0e1d59bb4644fdcee4d521daf",
+  "outer_sha256": "922e93e5bd893aefbe56fa0ceeca346bb8ecd8337d7ae87eb4ca9322807dfc41",
+  "execution_sha256": "a5992a80253c4e3f14de1f1ccecf37d8c24b897652b78a5c56598027ba054c12",
+  "actual_commands": 4,
+  "planned_commands": 4,
+  "input_files_verified": 3397,
+  "step_maps_verified": 8,
+  "command_captures_verified": 8,
+  "parent_captures": {
+    "stdout": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\controller.stdout.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "stderr": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\controller.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "commands": [
+    {
+      "name": "copy-original-warm-pass-caches",
+      "seconds": 71.6729945000261,
+      "exit_code": 0,
+      "closure": "CLOSED",
+      "command_passed": true,
+      "captures": {
+        "stdout": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\commands\\copy-original-warm-pass-caches.stdout.txt",
+          "bytes": 698,
+          "sha256": "39281ecd86e3c3c5a77da78cba0a8309c6dfe95d65b537ad417ca8485d9b1b80"
+        },
+        "stderr": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\commands\\copy-original-warm-pass-caches.stderr.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "name": "export-exact-product-source",
+      "seconds": 72.67300119996071,
+      "exit_code": 0,
+      "closure": "CLOSED",
+      "command_passed": true,
+      "captures": {
+        "stdout": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\commands\\export-exact-product-source.stdout.txt",
+          "bytes": 155,
+          "sha256": "bd0e612b2bd2e2fac61869ee24c20f4e846d7a4eaab7b51d9bdd2a75c53375e1"
+        },
+        "stderr": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\commands\\export-exact-product-source.stderr.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "name": "build-marked-product",
+      "seconds": 165.36129559995607,
+      "exit_code": 0,
+      "closure": "CLOSED",
+      "command_passed": true,
+      "captures": {
+        "stdout": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\commands\\build-marked-product.stdout.txt",
+          "bytes": 1331,
+          "sha256": "ad596a6faa5049f3183870a8bf1a8dd7762c3abaa631f5f68ff61fdbb1954a79"
+        },
+        "stderr": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\commands\\build-marked-product.stderr.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "name": "build-native-product",
+      "seconds": 148.69072229997255,
+      "exit_code": 0,
+      "closure": "CLOSED",
+      "command_passed": true,
+      "captures": {
+        "stdout": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\commands\\build-native-product.stdout.txt",
+          "bytes": 1105,
+          "sha256": "e584b6fdba48f4a9e65ff3525e54bdd87c890656a780b22fd8a155f71e2362a8"
+        },
+        "stderr": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\commands\\build-native-product.stderr.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    }
+  ],
+  "input_issues": [],
+  "compiled_outputs": {
+    "source_export": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\product-source-export.json",
+      "bytes": 4147,
+      "sha256": "9c0bcb57c80ea466a8940bb13de4f508d1b83a32f1cf970985908521fbe82d77"
+    },
+    "export_source_files_verified": 3369,
+    "products": {
+      "product": {
+        "inputs": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\marked-inputs\\product-inputs.json",
+          "bytes": 7147,
+          "sha256": "60f9308d92756d75961a47af9272bcef95ac64cdc1d65bc9d2d90f8a6b37d7ac"
+        },
+        "build_plan": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\marked-inputs\\actual-build-plan.json",
+          "bytes": 5183,
+          "sha256": "6f62dd9c5883e761db19e2c1a23b99c9a6c1561eb6781a24e4eacc723cf79929"
+        },
+        "files": {
+          "mcphub.exe": {
+            "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\marked-bundle\\mcphub.exe",
+            "bytes": 10280448,
+            "sha256": "f1be7e81c0d82e6d61b8f636c9c3632073e33221cc251a5936bc51890aa1805e"
+          },
+          "windows-product-identity.json": {
+            "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\marked-bundle\\windows-product-identity.json",
+            "bytes": 295,
+            "sha256": "f7efd7f6388ec8b74b57eeaa2af5afd9094c65affcc82eff57ca86a9157905bc"
+          },
+          "mcphub-product/mcphub.exe": {
+            "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\marked-bundle\\mcphub-product\\mcphub.exe",
+            "bytes": 46520320,
+            "sha256": "87754b24016dc201e178fb37ecec0a5af52db70e55ed46c0436d219814e0a7a2"
+          }
+        },
+        "fixture": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\marked-inputs\\product-fixture.json",
+          "bytes": 616,
+          "sha256": "90c0b9181d2806bed6135cb57c6feb16485dcd2585405a2d2f9269bdc09d5e1e"
+        },
+        "source_epoch": "861852f807c36673755014ef4657bf10252b4e75505bc8b73819bcf8cded7a3a",
+        "entry_observation": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\marked-inputs\\actual-entry-observation.json",
+          "bytes": 580,
+          "sha256": "5211717ccd51b64b9e3220432ef3579be61398a016aee1d5606225a3aacfa007"
+        },
+        "scope": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\marked-inputs\\preparation-scope.json",
+          "bytes": 1371,
+          "sha256": "3a41729d9b80a3af1619ce22dc58758540281d14990f6e4590badc7f574098d0"
+        },
+        "qualification": "COMPILED_INPUT_DATA_ONLY"
+      },
+      "native_product": {
+        "inputs": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\native-inputs\\product-inputs.json",
+          "bytes": 5904,
+          "sha256": "0e0da8b092a1a8ece718ff283ba8fccedb6eeeed1f788832143f064045dece05"
+        },
+        "build_plan": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\native-inputs\\actual-build-plan.json",
+          "bytes": 4516,
+          "sha256": "579a06abc87434b78b0d05e118e7dd36286e602584752dd0ebddfa7ebab83c7c"
+        },
+        "files": {
+          "mcphub.exe": {
+            "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-native-product\\bundle\\mcphub.exe",
+            "bytes": 10280448,
+            "sha256": "c8785e92541f041a4bce1d1abf62fbc2dae87e7682f119e675e4a599902dd40d"
+          },
+          "windows-product-identity.json": {
+            "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-native-product\\bundle\\windows-product-identity.json",
+            "bytes": 295,
+            "sha256": "868f33dedef8bc1a4f9083f40710d9f5ab35423d34ada364f25c79cdb70a953f"
+          },
+          "mcphub-product/mcphub.exe": {
+            "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-native-product\\bundle\\mcphub-product\\mcphub.exe",
+            "bytes": 46527488,
+            "sha256": "bc73231cfde8d390f2e95f6b6adfdd718df5db0f8ca5643126d8772e7e73578d"
+          }
+        },
+        "fixture": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\native-inputs\\product-fixture.json",
+          "bytes": 548,
+          "sha256": "485a85adfc59257ba62918270f5d9787aa5a9a0e055be14e3130c778e1394cbe"
+        },
+        "source_epoch": "",
+        "entry_observation": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\native-inputs\\actual-entry-observation.json",
+          "bytes": 516,
+          "sha256": "d0a444d1205c59c71d0a19347783d4c14add6bae2668b1214c687e699c0518c1"
+        },
+        "scope": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\native-inputs\\preparation-scope.json",
+          "bytes": 1371,
+          "sha256": "f8695061a831c4667af5daa143d836d4d48867b9c26e1a1bf5d4fd20f2a4ed78"
+        },
+        "qualification": "COMPILED_INPUT_DATA_ONLY"
+      }
+    },
+    "resource": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\marked-inputs\\captured-product-versioninfo.syso",
+      "bytes": 4558,
+      "sha256": "01b7cbe350e811495e5fe8f38c94a0398201d2d564e0592aca6f9905c515ef69"
+    },
+    "cache_copy_receipt": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\cache-copy-receipt.json",
+      "bytes": 2458,
+      "sha256": "ee016e7cbe3398b17c996865862a45dd232784c26d6f8871f4648e1f7541e0bd"
+    }
+  },
+  "output_receiving_errors": [],
+  "helper_rebuilds": 0,
+  "auxiliary_parser_tests_executed": false,
+  "full_acceptance_executed": false,
+  "full_acceptance_pass": false,
+  "original_status_changed": false,
+  "receiving_scope": "Original ordinary CLOSED commands and actual same-source Product compiler DATA. No full runtime acceptance or previous FAIL reclassification.",
+  "reviewed_utc": "2026-11-28T14:23:40.1548078Z"
+}

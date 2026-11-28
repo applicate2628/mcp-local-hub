@@ -1,0 +1,318 @@
+{
+  "schema": "source59f-closed-api-diagnostics-preservation-v1",
+  "source_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+  "source_tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+  "original_files": 136,
+  "original_bytes": 2293303,
+  "source_bindings_sha256": "6ddea5ed1c12036094b7d667e9c7868d5e0633384a9c02b2da2e6aa77bff2d47",
+  "api": {
+    "classification": "FAIL/CLOSED",
+    "original_receipt_sha256": "e1cba7d99294f4e18816ebc91a8fd137c3533be5d9ed433071de4c89b66fc709",
+    "original_error": "RuntimeError: original namespace admission refused before a contained stage: context deadline exceeded",
+    "command_count": 3,
+    "capture_files": 6,
+    "capture_bytes": 186990,
+    "inventory_count": 3460,
+    "top_level_counts": {
+      "NOT_RUN": 3460
+    },
+    "contained_full_suite_entered": false,
+    "original_suite_coverage_received": false,
+    "failed_test_cases": 0,
+    "mandatory_checks": [
+      {
+        "test": "TestSecretsInit_RecoveryNamespaceBoundary",
+        "runs": 0,
+        "outcome": "NOT_RUN"
+      },
+      {
+        "test": "TestSecretsInit_RecoveryNamespaceRetainedDirectory",
+        "runs": 0,
+        "outcome": "NOT_RUN"
+      },
+      {
+        "test": "TestSecretsInit_RecoveryNamespaceFailurePaths",
+        "runs": 0,
+        "outcome": "NOT_RUN"
+      },
+      {
+        "test": "TestSupervisorPeerStrictControlConnections",
+        "runs": 0,
+        "outcome": "NOT_RUN"
+      },
+      {
+        "test": "TestRotateSupervisorStderrSinkIfOversize_AtBoundary",
+        "runs": 0,
+        "outcome": "NOT_RUN"
+      },
+      {
+        "test": "TestRotateSupervisorStderrSinkIfOversize_ReplacesExistingBackup",
+        "runs": 0,
+        "outcome": "NOT_RUN"
+      },
+      {
+        "test": "TestSupervisorStderrSinkOversize_MatchesRotationThreshold",
+        "runs": 0,
+        "outcome": "NOT_RUN"
+      }
+    ],
+    "receiver_history": [
+      {
+        "receiver_version": 1,
+        "classification": "UNKNOWN",
+        "data_verification": "NOT_RECEIVED",
+        "physical_complete": false,
+        "api_qualification_passed": false,
+        "issues": [
+          "KeyError: 'kind'"
+        ],
+        "receipt_sha256": "db41dfca53c11b9abe7ddc67710faf8292b1a31a750835353d42596b9794cd37"
+      },
+      {
+        "receiver_version": 2,
+        "classification": "FAIL/CLOSED",
+        "data_verification": "FAIL",
+        "physical_complete": true,
+        "api_qualification_passed": false,
+        "issues": [
+          "RuntimeError: original closed test2json conversion absent or differs"
+        ],
+        "receipt_sha256": "6edab3ca05cf7deb5d8250c09e33a5e94e7243ddcf8f38b158f55a858920297b"
+      },
+      {
+        "receiver_version": 3,
+        "classification": "FAIL/CLOSED",
+        "data_verification": "PASS",
+        "physical_complete": true,
+        "api_qualification_passed": false,
+        "issues": [],
+        "receipt_sha256": "703394309664fda84d940eeb2b0a3c091f2355453836d9907f38d0dad91aa494"
+      }
+    ],
+    "api_namespace_inputs_sha256": "4279192e1bfb3fd2e6b14aa0fbac5891189ec1c4cebe19691a1eaacd1507578e",
+    "api_namespace_binary_metadata_absent": true,
+    "original_api_total_seconds": 34.677347199991345,
+    "original_api_preparation_seconds": 12.505174800055102,
+    "original_suite_owner_call_seconds": 18.394,
+    "root_cause_confirmed": false
+  },
+  "native_stages": [
+    {
+      "stage": 16,
+      "classification": "FAIL/CLOSED",
+      "commands": 1,
+      "captures": 2,
+      "seconds": 0.15245369996409863,
+      "receipt_sha256": "bba8de5a07ad4184d12d7d003cd54ff6a9b7531f128df78023c8d311acc9010d",
+      "parent_sha256": "d207de0878e38847c4a5a70316c888d6be96852d5724b319a71805582ef2bed3",
+      "outer_sha256": "3f7341c4f7a4c343e2afddf11e4606e6a1e38783ee8e4022451ebca7a98e97ce",
+      "root_data_sha256": "cba50df36fb6a8cecf08934a7cf9d854b0b75104e156e2588609d3848825fbdc",
+      "error": "RuntimeError: source head changed",
+      "all_original_native_and_IO_closure_checked": true,
+      "new_qualification_from_preservation": false
+    },
+    {
+      "stage": 17,
+      "classification": "PASS/CLOSED",
+      "commands": 7,
+      "captures": 14,
+      "seconds": 14.250944300089031,
+      "receipt_sha256": "3306b225d524cc8ebdb474de1aefe30f090fa40752dcc6e7a364a677a50496bb",
+      "parent_sha256": "aa6a0b94818c89aaa9eb8f9649f54e8dbee436c62c42e5d84563d575f09dd8a0",
+      "outer_sha256": "8f58aa96f10144a102c02138943023031e4ac5e777e71d7a2473ff32f111d7ef",
+      "root_data_sha256": "35d30f6f922709f872916e392322e5be391f4b0699e9fdab40a3d78bde4a4095",
+      "error": null,
+      "all_original_native_and_IO_closure_checked": true,
+      "new_qualification_from_preservation": false
+    },
+    {
+      "stage": 18,
+      "classification": "PASS/CLOSED",
+      "commands": 7,
+      "captures": 14,
+      "seconds": 22.59147210000083,
+      "receipt_sha256": "4b5aa01821cfb7b650ee8df12426035f259f71e4e07b6422ab6636d48fca18a2",
+      "parent_sha256": "46e4e0e991cad8e78621117db8c30b81184ea9911ee7727b19d0891f89e28787",
+      "outer_sha256": "91f4bb7dc633df96d0dea8424ed8ef1498d89c66ef817c107a78c8fafca24d1d",
+      "root_data_sha256": "ac8b7976948f92fc15836b8e4d85075eb25c8b4b18528568b52fefee2dd83282",
+      "error": null,
+      "all_original_native_and_IO_closure_checked": true,
+      "new_qualification_from_preservation": false
+    },
+    {
+      "stage": 19,
+      "classification": "PASS/CLOSED",
+      "commands": 3,
+      "captures": 6,
+      "seconds": 0.8521306999027729,
+      "receipt_sha256": "46ad49a9a3fcacefe01ab2bed7ae2f65ad185c8e6b62021893445e5b970c79ab",
+      "parent_sha256": "e8009e230d5ac02921a82d85a290fc096a26de84cdedd6a3a1f006d0e21498a9",
+      "outer_sha256": "98512462cbf03bbac16e3fcd5e29f2ab22f04989e88609c30302bb6be0e6024c",
+      "root_data_sha256": "864c15a6ae4018d4ce7ede69c5be1a621b5fa58add1ad21b58947a982c33d809",
+      "error": null,
+      "all_original_native_and_IO_closure_checked": true,
+      "new_qualification_from_preservation": false
+    },
+    {
+      "stage": 20,
+      "classification": "PASS/CLOSED",
+      "commands": 6,
+      "captures": 12,
+      "seconds": 1.2053508999524638,
+      "receipt_sha256": "2ba4f760ea9aedaeeea2de4accc6946ad2933d782f95b680f9f29605b66758bb",
+      "parent_sha256": "4fc8196e910ccef6d7c9d2b6cd0e22e7cbe276190a90a269830d242d865f711c",
+      "outer_sha256": "24269b97fe609e0f071592e542a3c8c998b520d3f60e3aa4859a51acf2b56dc4",
+      "root_data_sha256": "c9dd6d438013c1bd5b57b0eef17036d6e5bd9960785647910ac1f71f24833953",
+      "error": null,
+      "all_original_native_and_IO_closure_checked": true,
+      "new_qualification_from_preservation": false
+    }
+  ],
+  "copy_sync_probe": {
+    "receipt_sha256": "b6c58b89f636960f2d23b55472ed8c647e42a3aa9855a3cad9c060101d35a400",
+    "source_image_sha256": "d237704913484fe2931860793badbfdaadb3bb216f5c436b8d01bdf2301d3e60",
+    "source_bytes": 38868992,
+    "source_same_file": true,
+    "source_before_and_after_SHA256_match": true,
+    "go_version": "go1.27.4",
+    "samples": [
+      {
+        "mode": "with-sync",
+        "bytes": 38868992,
+        "copy_ns": 36357600,
+        "sync_ns": 255927800,
+        "destination_close_ns": 463100,
+        "source_close_ns": 0,
+        "readback_ns": 22227200,
+        "total_ns": 314975700,
+        "data_checks_passed": true,
+        "errors": []
+      },
+      {
+        "mode": "without-sync",
+        "bytes": 38868992,
+        "copy_ns": 35418200,
+        "sync_ns": 0,
+        "destination_close_ns": 0,
+        "source_close_ns": 0,
+        "readback_ns": 133373500,
+        "total_ns": 168791700,
+        "data_checks_passed": true,
+        "errors": []
+      }
+    ],
+    "single_observation_per_mode": true,
+    "order_randomized": false,
+    "test_images_executed": false,
+    "namespace_qualification_claimed": false,
+    "causal_budget_explanation_established": false,
+    "source_fix_applied_by_this_preservation": false
+  },
+  "git_commits": [
+    {
+      "original_role_path": "stage18/captures/raw-source04e-commit.stdout.txt",
+      "bytes": 277,
+      "sha256": "f2235c70f5fa0ad25d7885074957db09acf11f8cfa83cb42daf38812c4ddd4dc",
+      "commit": "04e5b4eadd6407cbff4e04ba453546d278314bd7",
+      "tree": "f68f7584dba7744e7607b07f615758f3ff633f54",
+      "parent": "33eaf8af8fc46cb231f48c70f4775922393245b1",
+      "git_object_SHA1_verified_as_DATA": true
+    },
+    {
+      "original_role_path": "stage18/captures/raw-source74e-commit.stdout.txt",
+      "bytes": 280,
+      "sha256": "634cf46e5c32deabd9a328172bb3a441de991e63a296c8c2793b1179a5b76a60",
+      "commit": "74e7563db244ede5984834233ce8d59072e92c0a",
+      "tree": "bcf1bd3539a8ba5ab54cff123adbb4bc071276d3",
+      "parent": "04e5b4eadd6407cbff4e04ba453546d278314bd7",
+      "git_object_SHA1_verified_as_DATA": true
+    },
+    {
+      "original_role_path": "stage18/captures/raw-source59f-commit.stdout.txt",
+      "bytes": 270,
+      "sha256": "c4fe2c8f2673d678916f965987549a31cdba593a47305973514c105f577a6e68",
+      "commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+      "tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+      "parent": "74e7563db244ede5984834233ce8d59072e92c0a",
+      "git_object_SHA1_verified_as_DATA": true
+    }
+  ],
+  "supplemental_DATA_receipts": [
+    {
+      "original_role_path": "supplements/checkpoint/root-artifact-verification.json",
+      "bytes": 2651,
+      "sha256": "268eb39883be5c649c2a43f919ce8ebc6f59ddb07d16c6991043bb110ff9e275"
+    },
+    {
+      "original_role_path": "supplements/checkpoint/root-data-verification.json",
+      "bytes": 1495,
+      "sha256": "d3c3ee6042e87c05d1cfb2ea0ce99186b409850c3f60b4bdf4b7cea0f329702b"
+    },
+    {
+      "original_role_path": "supplements/checkpoint/root-full130-owner-verification.json",
+      "bytes": 42351,
+      "sha256": "dc3659fbbafea76b3df8cb672d33b5323e19a37a399774a9da87e82e2de48f9c"
+    },
+    {
+      "original_role_path": "supplements/checkpoint/root-full566-verification.json",
+      "bytes": 778,
+      "sha256": "2297a5b987c60244bd1c2c82f7d4253c1301637ee7e4359c8e24a06e75c78a55"
+    },
+    {
+      "original_role_path": "supplements/trail/root-data-verification.json",
+      "bytes": 500,
+      "sha256": "e6e4de27dc865c829e3fd913f28fb1166b9bff72bae62183e54e53f9c62804d7"
+    },
+    {
+      "original_role_path": "supplements/trail/root-artifact-verification.json",
+      "bytes": 32564,
+      "sha256": "a00a11ffe686b2169d06afb344e4c28762a76131ae67b73678ff8c28e6b40345"
+    },
+    {
+      "original_role_path": "supplements/budget-v2/root-old-cli-parser-v2.json",
+      "bytes": 567,
+      "sha256": "e1cfd647a23b02da9a8a893027e6da645143bc0098a4cbbb8b0da4551f4d8e19"
+    },
+    {
+      "original_role_path": "supplements/budget-v2/summary.json",
+      "bytes": 31076,
+      "sha256": "5d43ab87593f292636ff377996d17b2e5e7f3bb73d363a4484a7da8159511acb"
+    }
+  ],
+  "unknown_scope_observation": {
+    "basis": "Parent report during this preservation task; no new UNKNOWN payload or Source/cache read by the author.",
+    "raw_control_snapshot_included": false,
+    "main_status": "FAIL",
+    "main_reason": "retained UNKNOWN custody",
+    "parent_still_running": true,
+    "full_physical_complete": false,
+    "default_invocation_markers": {
+      "started": 14,
+      "completed": 14
+    },
+    "CLI_unsettled": true,
+    "API_subtree_closed": true,
+    "state_invocations": 0,
+    "qualification_inherited": false
+  },
+  "author_activity": {
+    "new_native_processes": 0,
+    "new_test_commands": 0,
+    "Source_or_cache_payloads_read": false,
+    "UNKNOWN_payloads_read": false,
+    "Git_or_index_or_policy_mutations": false,
+    "original_files_modified": false,
+    "originals_reconstructed_as_in_memory_DATA": 136,
+    "all_original_SHA256_matches": true,
+    "all_three_raw_Git_commit_SHA1_matches": true,
+    "private_role_values_required": 10,
+    "published_reconstructor_executed_by_author": false
+  },
+  "preserved_limitations": [
+    "Original API FAIL and receiver v1 UNKNOWN/v2 DATA failure remain immutable historical artifacts.",
+    "The probe preserves one ordered observation per mode and does not prove the cause of original namespace deadline refusal.",
+    "Stage16 source-head refusal remains FAIL/CLOSED; stage17 successful isolation does not close the original UNKNOWN run.",
+    "Root verification supplements assert exact DATA preservation, not current-source test acceptance.",
+    "Stage21 and later diagnostics are outside this frozen snapshot."
+  ]
+}

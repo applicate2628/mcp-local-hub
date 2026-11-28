@@ -1,0 +1,195 @@
+{"Action":"start","Package":"mcp-local-hub/internal/autostart"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestState_String_AllStates"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestState_String_AllStates","Output":"=== RUN   TestState_String_AllStates\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestState_String_AllStates","Output":"--- PASS: TestState_String_AllStates (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestState_String_AllStates"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestState_String_Unknown"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestState_String_Unknown","Output":"=== RUN   TestState_String_Unknown\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestState_String_Unknown","Output":"--- PASS: TestState_String_Unknown (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestState_String_Unknown"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestNew_ReturnsBackendForCurrentOS"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestNew_ReturnsBackendForCurrentOS","Output":"=== RUN   TestNew_ReturnsBackendForCurrentOS\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestNew_ReturnsBackendForCurrentOS","Output":"--- PASS: TestNew_ReturnsBackendForCurrentOS (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestNew_ReturnsBackendForCurrentOS"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestStartOwnerForExpectedProductAdmission"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestStartOwnerForExpectedProductAdmission","Output":"=== RUN   TestStartOwnerForExpectedProductAdmission\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestStartOwnerForExpectedProductAdmission/nil-context"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestStartOwnerForExpectedProductAdmission/nil-context","Output":"=== RUN   TestStartOwnerForExpectedProductAdmission/nil-context\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestStartOwnerForExpectedProductAdmission/nil-context","Output":"--- PASS: TestStartOwnerForExpectedProductAdmission/nil-context (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestStartOwnerForExpectedProductAdmission/nil-context"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestStartOwnerForExpectedProductAdmission/canceled"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestStartOwnerForExpectedProductAdmission/canceled","Output":"=== RUN   TestStartOwnerForExpectedProductAdmission/canceled\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestStartOwnerForExpectedProductAdmission/canceled","Output":"--- PASS: TestStartOwnerForExpectedProductAdmission/canceled (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestStartOwnerForExpectedProductAdmission/canceled"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestStartOwnerForExpectedProductAdmission/empty"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestStartOwnerForExpectedProductAdmission/empty","Output":"=== RUN   TestStartOwnerForExpectedProductAdmission/empty\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestStartOwnerForExpectedProductAdmission/empty","Output":"--- PASS: TestStartOwnerForExpectedProductAdmission/empty (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestStartOwnerForExpectedProductAdmission/empty"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestStartOwnerForExpectedProductAdmission/relative"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestStartOwnerForExpectedProductAdmission/relative","Output":"=== RUN   TestStartOwnerForExpectedProductAdmission/relative\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestStartOwnerForExpectedProductAdmission/relative","Output":"--- PASS: TestStartOwnerForExpectedProductAdmission/relative (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestStartOwnerForExpectedProductAdmission/relative"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestStartOwnerForExpectedProductAdmission/missing"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestStartOwnerForExpectedProductAdmission/missing","Output":"=== RUN   TestStartOwnerForExpectedProductAdmission/missing\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestStartOwnerForExpectedProductAdmission/missing","Output":"--- PASS: TestStartOwnerForExpectedProductAdmission/missing (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestStartOwnerForExpectedProductAdmission/missing"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestStartOwnerForExpectedProductAdmission","Output":"--- PASS: TestStartOwnerForExpectedProductAdmission (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestStartOwnerForExpectedProductAdmission"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel","Output":"=== RUN   TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel/factory"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel/factory","Output":"=== RUN   TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel/factory\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel/factory","Output":"--- PASS: TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel/factory (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel/factory"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel/status"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel/status","Output":"=== RUN   TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel/status\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel/status","Output":"--- PASS: TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel/status (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel/status"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel","Output":"--- PASS: TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSnapshotSchedulerUnavailableRemainsFailClosed"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSnapshotSchedulerUnavailableRemainsFailClosed","Output":"=== RUN   TestWindowsBackend_StatusSnapshotSchedulerUnavailableRemainsFailClosed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSnapshotSchedulerUnavailableRemainsFailClosed","Output":"--- PASS: TestWindowsBackend_StatusSnapshotSchedulerUnavailableRemainsFailClosed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSnapshotSchedulerUnavailableRemainsFailClosed"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableCreatesTask"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableCreatesTask","Output":"=== RUN   TestWindowsBackend_EnableCreatesTask\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableCreatesTask","Output":"--- PASS: TestWindowsBackend_EnableCreatesTask (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableCreatesTask"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_DefaultExecutableRoutesOwnedLogonThroughCanonicalProduct"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_DefaultExecutableRoutesOwnedLogonThroughCanonicalProduct","Output":"=== RUN   TestWindowsBackend_DefaultExecutableRoutesOwnedLogonThroughCanonicalProduct\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_DefaultExecutableRoutesOwnedLogonThroughCanonicalProduct","Output":"--- PASS: TestWindowsBackend_DefaultExecutableRoutesOwnedLogonThroughCanonicalProduct (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_DefaultExecutableRoutesOwnedLogonThroughCanonicalProduct"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableStrictModeAddsFlag"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableStrictModeAddsFlag","Output":"=== RUN   TestWindowsBackend_EnableStrictModeAddsFlag\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableStrictModeAddsFlag","Output":"--- PASS: TestWindowsBackend_EnableStrictModeAddsFlag (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableStrictModeAddsFlag"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand","Output":"=== RUN   TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/gui_non-strict"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/gui_non-strict","Output":"=== RUN   TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/gui_non-strict\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/gui_non-strict","Output":"--- PASS: TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/gui_non-strict (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/gui_non-strict"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/gui_strict"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/gui_strict","Output":"=== RUN   TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/gui_strict\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/gui_strict","Output":"--- PASS: TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/gui_strict (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/gui_strict"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/supervise_non-strict"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/supervise_non-strict","Output":"=== RUN   TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/supervise_non-strict\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/supervise_non-strict","Output":"--- PASS: TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/supervise_non-strict (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/supervise_non-strict"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/supervise_strict"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/supervise_strict","Output":"=== RUN   TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/supervise_strict\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/supervise_strict","Output":"--- PASS: TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/supervise_strict (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/supervise_strict"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand","Output":"--- PASS: TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableRejectsInvalidOwnerBeforeMutatingTask"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableRejectsInvalidOwnerBeforeMutatingTask","Output":"=== RUN   TestWindowsBackend_EnableRejectsInvalidOwnerBeforeMutatingTask\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableRejectsInvalidOwnerBeforeMutatingTask","Output":"--- PASS: TestWindowsBackend_EnableRejectsInvalidOwnerBeforeMutatingTask (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableRejectsInvalidOwnerBeforeMutatingTask"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableReplacesExistingTask"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableReplacesExistingTask","Output":"=== RUN   TestWindowsBackend_EnableReplacesExistingTask\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableReplacesExistingTask","Output":"--- PASS: TestWindowsBackend_EnableReplacesExistingTask (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_EnableReplacesExistingTask"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_DisableDeletesTask"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_DisableDeletesTask","Output":"=== RUN   TestWindowsBackend_DisableDeletesTask\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_DisableDeletesTask","Output":"--- PASS: TestWindowsBackend_DisableDeletesTask (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_DisableDeletesTask"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_DisableIdempotent"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_DisableIdempotent","Output":"=== RUN   TestWindowsBackend_DisableIdempotent\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_DisableIdempotent","Output":"--- PASS: TestWindowsBackend_DisableIdempotent (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_DisableIdempotent"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusAbsent"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusAbsent","Output":"=== RUN   TestWindowsBackend_StatusAbsent\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusAbsent","Output":"--- PASS: TestWindowsBackend_StatusAbsent (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusAbsent"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusEnabledRunning"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusEnabledRunning","Output":"=== RUN   TestWindowsBackend_StatusEnabledRunning\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusEnabledRunning","Output":"--- PASS: TestWindowsBackend_StatusEnabledRunning (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusEnabledRunning"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusEnabledStopped"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusEnabledStopped","Output":"=== RUN   TestWindowsBackend_StatusEnabledStopped\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusEnabledStopped","Output":"--- PASS: TestWindowsBackend_StatusEnabledStopped (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusEnabledStopped"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusDrifted_StrictModeMissing"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusDrifted_StrictModeMissing","Output":"=== RUN   TestWindowsBackend_StatusDrifted_StrictModeMissing\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusDrifted_StrictModeMissing","Output":"--- PASS: TestWindowsBackend_StatusDrifted_StrictModeMissing (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusDrifted_StrictModeMissing"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusDrifted_StrictModeUnwanted"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusDrifted_StrictModeUnwanted","Output":"=== RUN   TestWindowsBackend_StatusDrifted_StrictModeUnwanted\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusDrifted_StrictModeUnwanted","Output":"--- PASS: TestWindowsBackend_StatusDrifted_StrictModeUnwanted (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusDrifted_StrictModeUnwanted"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusDrifted_LegacySupervisorSubcommand"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusDrifted_LegacySupervisorSubcommand","Output":"=== RUN   TestWindowsBackend_StatusDrifted_LegacySupervisorSubcommand\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusDrifted_LegacySupervisorSubcommand","Output":"--- PASS: TestWindowsBackend_StatusDrifted_LegacySupervisorSubcommand (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusDrifted_LegacySupervisorSubcommand"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusDrifted_WhenOwnerModeDoesNotMatchTask"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusDrifted_WhenOwnerModeDoesNotMatchTask","Output":"=== RUN   TestWindowsBackend_StatusDrifted_WhenOwnerModeDoesNotMatchTask\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusDrifted_WhenOwnerModeDoesNotMatchTask","Output":"--- PASS: TestWindowsBackend_StatusDrifted_WhenOwnerModeDoesNotMatchTask (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusDrifted_WhenOwnerModeDoesNotMatchTask"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv","Output":"=== RUN   TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_canonical"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_canonical","Output":"=== RUN   TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_canonical\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_canonical","Output":"--- PASS: TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_canonical (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_canonical"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_missing_no-browser"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_missing_no-browser","Output":"=== RUN   TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_missing_no-browser\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_missing_no-browser","Output":"--- PASS: TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_missing_no-browser (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_missing_no-browser"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_extra_token"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_extra_token","Output":"=== RUN   TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_extra_token\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_extra_token","Output":"--- PASS: TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_extra_token (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_extra_token"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_duplicate_strict"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_duplicate_strict","Output":"=== RUN   TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_duplicate_strict\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_duplicate_strict","Output":"--- PASS: TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_duplicate_strict (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_duplicate_strict"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/supervise_canonical"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/supervise_canonical","Output":"=== RUN   TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/supervise_canonical\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/supervise_canonical","Output":"--- PASS: TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/supervise_canonical (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/supervise_canonical"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/supervise_must_not_carry_no-browser"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/supervise_must_not_carry_no-browser","Output":"=== RUN   TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/supervise_must_not_carry_no-browser\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/supervise_must_not_carry_no-browser","Output":"--- PASS: TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/supervise_must_not_carry_no-browser (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/supervise_must_not_carry_no-browser"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/supervise_extra_token"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/supervise_extra_token","Output":"=== RUN   TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/supervise_extra_token\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/supervise_extra_token","Output":"--- PASS: TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/supervise_extra_token (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/supervise_extra_token"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv","Output":"--- PASS: TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusDrifted_EmptyArguments"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusDrifted_EmptyArguments","Output":"=== RUN   TestWindowsBackend_StatusDrifted_EmptyArguments\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusDrifted_EmptyArguments","Output":"--- PASS: TestWindowsBackend_StatusDrifted_EmptyArguments (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusDrifted_EmptyArguments"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusDrifted_CommandPath"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusDrifted_CommandPath","Output":"=== RUN   TestWindowsBackend_StatusDrifted_CommandPath\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusDrifted_CommandPath","Output":"--- PASS: TestWindowsBackend_StatusDrifted_CommandPath (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusDrifted_CommandPath"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusXMLUnavailable_TreatedAsRunning"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusXMLUnavailable_TreatedAsRunning","Output":"=== RUN   TestWindowsBackend_StatusXMLUnavailable_TreatedAsRunning\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusXMLUnavailable_TreatedAsRunning","Output":"--- PASS: TestWindowsBackend_StatusXMLUnavailable_TreatedAsRunning (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusXMLUnavailable_TreatedAsRunning"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSchedulerFactoryError"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSchedulerFactoryError","Output":"=== RUN   TestWindowsBackend_StatusSchedulerFactoryError\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSchedulerFactoryError","Output":"--- PASS: TestWindowsBackend_StatusSchedulerFactoryError (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSchedulerFactoryError"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed","Output":"=== RUN   TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed/export-error"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed/export-error","Output":"=== RUN   TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed/export-error\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed/export-error","Output":"--- PASS: TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed/export-error (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed/export-error"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed/empty-xml"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed/empty-xml","Output":"=== RUN   TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed/empty-xml\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed/empty-xml","Output":"--- PASS: TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed/empty-xml (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed/empty-xml"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed","Output":"--- PASS: TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed"}
+{"Action":"run","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSnapshotSpecFingerprintTracksShimSpecOnly"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSnapshotSpecFingerprintTracksShimSpecOnly","Output":"=== RUN   TestWindowsBackend_StatusSnapshotSpecFingerprintTracksShimSpecOnly\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSnapshotSpecFingerprintTracksShimSpecOnly","Output":"--- PASS: TestWindowsBackend_StatusSnapshotSpecFingerprintTracksShimSpecOnly (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart","Test":"TestWindowsBackend_StatusSnapshotSpecFingerprintTracksShimSpecOnly"}
+{"Action":"output","Package":"mcp-local-hub/internal/autostart","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/autostart"}

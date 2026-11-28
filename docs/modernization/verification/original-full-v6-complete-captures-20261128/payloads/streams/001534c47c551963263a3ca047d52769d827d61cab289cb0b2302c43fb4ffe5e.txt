@@ -1,0 +1,185 @@
+{"Action":"start","Package":"mcp-local-hub/internal/api/serena_routing"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics","Output":"=== RUN   TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics/sink-success"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics/sink-success","Output":"=== RUN   TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics/sink-success\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics/sink-success","Output":"--- PASS: TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics/sink-success (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics/sink-success"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics/sink-error"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics/sink-error","Output":"=== RUN   TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics/sink-error\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics/sink-error","Output":"--- PASS: TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics/sink-error (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics/sink-error"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics","Output":"--- PASS: TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveDefaultWorkspaceRoutesMarkerFallbackToConfiguredAuditSink"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveDefaultWorkspaceRoutesMarkerFallbackToConfiguredAuditSink","Output":"=== RUN   TestResolveDefaultWorkspaceRoutesMarkerFallbackToConfiguredAuditSink\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveDefaultWorkspaceRoutesMarkerFallbackToConfiguredAuditSink","Output":"--- PASS: TestResolveDefaultWorkspaceRoutesMarkerFallbackToConfiguredAuditSink (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveDefaultWorkspaceRoutesMarkerFallbackToConfiguredAuditSink"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_AbsoluteMatch"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_AbsoluteMatch","Output":"=== RUN   TestResolveByPath_AbsoluteMatch\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_AbsoluteMatch","Output":"--- PASS: TestResolveByPath_AbsoluteMatch (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_AbsoluteMatch"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_RelativeMatchFirstWorkspace"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_RelativeMatchFirstWorkspace","Output":"=== RUN   TestResolveByPath_RelativeMatchFirstWorkspace\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_RelativeMatchFirstWorkspace","Output":"--- PASS: TestResolveByPath_RelativeMatchFirstWorkspace (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_RelativeMatchFirstWorkspace"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_RelativePathDotDotEscapeRejected"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_RelativePathDotDotEscapeRejected","Output":"=== RUN   TestResolveByPath_RelativePathDotDotEscapeRejected\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_RelativePathDotDotEscapeRejected","Output":"--- PASS: TestResolveByPath_RelativePathDotDotEscapeRejected (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_RelativePathDotDotEscapeRejected"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_NoMatch_ReturnsErrWorkspaceNotFound"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_NoMatch_ReturnsErrWorkspaceNotFound","Output":"=== RUN   TestResolveByPath_NoMatch_ReturnsErrWorkspaceNotFound\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_NoMatch_ReturnsErrWorkspaceNotFound","Output":"--- PASS: TestResolveByPath_NoMatch_ReturnsErrWorkspaceNotFound (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_NoMatch_ReturnsErrWorkspaceNotFound"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestAncestorWalk_FindsProjectYml"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestAncestorWalk_FindsProjectYml","Output":"=== RUN   TestAncestorWalk_FindsProjectYml\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestAncestorWalk_FindsProjectYml","Output":"--- PASS: TestAncestorWalk_FindsProjectYml (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestAncestorWalk_FindsProjectYml"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestAncestorWalk_NoMarker_ReturnsErrWorkspaceNotFound"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestAncestorWalk_NoMarker_ReturnsErrWorkspaceNotFound","Output":"=== RUN   TestAncestorWalk_NoMarker_ReturnsErrWorkspaceNotFound\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestAncestorWalk_NoMarker_ReturnsErrWorkspaceNotFound","Output":"--- PASS: TestAncestorWalk_NoMarker_ReturnsErrWorkspaceNotFound (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestAncestorWalk_NoMarker_ReturnsErrWorkspaceNotFound"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestAncestorWalk_RejectsRelativeInput"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestAncestorWalk_RejectsRelativeInput","Output":"=== RUN   TestAncestorWalk_RejectsRelativeInput\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestAncestorWalk_RejectsRelativeInput","Output":"--- PASS: TestAncestorWalk_RejectsRelativeInput (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestAncestorWalk_RejectsRelativeInput"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_EmptyPath_ReturnsErrInvalidPath"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_EmptyPath_ReturnsErrInvalidPath","Output":"=== RUN   TestResolveByPath_EmptyPath_ReturnsErrInvalidPath\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_EmptyPath_ReturnsErrInvalidPath","Output":"--- PASS: TestResolveByPath_EmptyPath_ReturnsErrInvalidPath (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_EmptyPath_ReturnsErrInvalidPath"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveDefaultWorkspace_UsesOnlyTheCurrentCanonicalSerenaRow"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveDefaultWorkspace_UsesOnlyTheCurrentCanonicalSerenaRow","Output":"=== RUN   TestResolveDefaultWorkspace_UsesOnlyTheCurrentCanonicalSerenaRow\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveDefaultWorkspace_UsesOnlyTheCurrentCanonicalSerenaRow","Output":"--- PASS: TestResolveDefaultWorkspace_UsesOnlyTheCurrentCanonicalSerenaRow (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveDefaultWorkspace_UsesOnlyTheCurrentCanonicalSerenaRow"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveDefaultWorkspace_ClassifiesAbsentEmptyAndUnreadableMarker"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveDefaultWorkspace_ClassifiesAbsentEmptyAndUnreadableMarker","Output":"=== RUN   TestResolveDefaultWorkspace_ClassifiesAbsentEmptyAndUnreadableMarker\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveDefaultWorkspace_ClassifiesAbsentEmptyAndUnreadableMarker","Output":"--- PASS: TestResolveDefaultWorkspace_ClassifiesAbsentEmptyAndUnreadableMarker (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveDefaultWorkspace_ClassifiesAbsentEmptyAndUnreadableMarker"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_RejectsUNCPath_OnWindows"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_RejectsUNCPath_OnWindows","Output":"=== RUN   TestResolveByPath_RejectsUNCPath_OnWindows\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_RejectsUNCPath_OnWindows","Output":"--- PASS: TestResolveByPath_RejectsUNCPath_OnWindows (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_RejectsUNCPath_OnWindows"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_AcceptsLocalDoubleSlash_OnNonWindows"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_AcceptsLocalDoubleSlash_OnNonWindows","Output":"=== RUN   TestResolveByPath_AcceptsLocalDoubleSlash_OnNonWindows\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_AcceptsLocalDoubleSlash_OnNonWindows","Output":"    resolver_test.go:415: double-slash absolute is Unix-only path semantics; runtime.GOOS = \"windows\"\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_AcceptsLocalDoubleSlash_OnNonWindows","Output":"--- SKIP: TestResolveByPath_AcceptsLocalDoubleSlash_OnNonWindows (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_AcceptsLocalDoubleSlash_OnNonWindows"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_EmptyRegistry_ReturnsErrWorkspaceNotFound"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_EmptyRegistry_ReturnsErrWorkspaceNotFound","Output":"=== RUN   TestResolveByPath_EmptyRegistry_ReturnsErrWorkspaceNotFound\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_EmptyRegistry_ReturnsErrWorkspaceNotFound","Output":"--- PASS: TestResolveByPath_EmptyRegistry_ReturnsErrWorkspaceNotFound (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_EmptyRegistry_ReturnsErrWorkspaceNotFound"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_TransientStatErrorPreservesCache"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_TransientStatErrorPreservesCache","Output":"=== RUN   TestResolveByPath_TransientStatErrorPreservesCache\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_TransientStatErrorPreservesCache","Output":"--- PASS: TestResolveByPath_TransientStatErrorPreservesCache (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_TransientStatErrorPreservesCache"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_FileDeletionClearsCache"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_FileDeletionClearsCache","Output":"=== RUN   TestResolveByPath_FileDeletionClearsCache\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_FileDeletionClearsCache","Output":"--- PASS: TestResolveByPath_FileDeletionClearsCache (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_FileDeletionClearsCache"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups","Output":"=== RUN   TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups","Output":"--- PASS: TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_SameIdentitySizeMtimeEditObservedWithin32Lookups"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_SameIdentitySizeMtimeEditObservedWithin32Lookups","Output":"=== RUN   TestResolveByPath_SameIdentitySizeMtimeEditObservedWithin32Lookups\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_SameIdentitySizeMtimeEditObservedWithin32Lookups","Output":"--- PASS: TestResolveByPath_SameIdentitySizeMtimeEditObservedWithin32Lookups (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_SameIdentitySizeMtimeEditObservedWithin32Lookups"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_DoesNotCloneUnrelatedNestedRows"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_DoesNotCloneUnrelatedNestedRows","Output":"=== RUN   TestResolveByPath_DoesNotCloneUnrelatedNestedRows\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_DoesNotCloneUnrelatedNestedRows","Output":"    resolver_test.go:672: allocations per lookup: one row=88; with 256 unrelated rows=88; growth=0\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_DoesNotCloneUnrelatedNestedRows","Output":"--- PASS: TestResolveByPath_DoesNotCloneUnrelatedNestedRows (0.04s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_DoesNotCloneUnrelatedNestedRows"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_IgnoresLSPEntries"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_IgnoresLSPEntries","Output":"=== RUN   TestResolveByPath_IgnoresLSPEntries\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_IgnoresLSPEntries","Output":"--- PASS: TestResolveByPath_IgnoresLSPEntries (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestResolveByPath_IgnoresLSPEntries"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestCanonicalizeWorkspacePath_WindowsDriveLetter"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestCanonicalizeWorkspacePath_WindowsDriveLetter","Output":"=== RUN   TestCanonicalizeWorkspacePath_WindowsDriveLetter\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestCanonicalizeWorkspacePath_WindowsDriveLetter","Output":"--- PASS: TestCanonicalizeWorkspacePath_WindowsDriveLetter (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestCanonicalizeWorkspacePath_WindowsDriveLetter"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestCanonicalizeWorkspacePath_EmptyReturnsEmpty"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestCanonicalizeWorkspacePath_EmptyReturnsEmpty","Output":"=== RUN   TestCanonicalizeWorkspacePath_EmptyReturnsEmpty\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestCanonicalizeWorkspacePath_EmptyReturnsEmpty","Output":"--- PASS: TestCanonicalizeWorkspacePath_EmptyReturnsEmpty (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestCanonicalizeWorkspacePath_EmptyReturnsEmpty"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock","Output":"=== RUN   TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock","Output":"--- PASS: TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock","Output":"=== RUN   TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock","Output":"--- PASS: TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock (0.31s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_BindOnPathCall"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_BindOnPathCall","Output":"=== RUN   TestSessionRouter_BindOnPathCall\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_BindOnPathCall","Output":"--- PASS: TestSessionRouter_BindOnPathCall (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_BindOnPathCall"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_LookupUnboundReturnsNil"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_LookupUnboundReturnsNil","Output":"=== RUN   TestSessionRouter_LookupUnboundReturnsNil\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_LookupUnboundReturnsNil","Output":"--- PASS: TestSessionRouter_LookupUnboundReturnsNil (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_LookupUnboundReturnsNil"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_UnbindRemovesEntry"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_UnbindRemovesEntry","Output":"=== RUN   TestSessionRouter_UnbindRemovesEntry\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_UnbindRemovesEntry","Output":"--- PASS: TestSessionRouter_UnbindRemovesEntry (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_UnbindRemovesEntry"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_CleanupExpiresOldSessions"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_CleanupExpiresOldSessions","Output":"=== RUN   TestSessionRouter_CleanupExpiresOldSessions\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_CleanupExpiresOldSessions","Output":"--- PASS: TestSessionRouter_CleanupExpiresOldSessions (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_CleanupExpiresOldSessions"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_CleanupPreservesRecentSessions"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_CleanupPreservesRecentSessions","Output":"=== RUN   TestSessionRouter_CleanupPreservesRecentSessions\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_CleanupPreservesRecentSessions","Output":"--- PASS: TestSessionRouter_CleanupPreservesRecentSessions (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_CleanupPreservesRecentSessions"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_RebindRefreshesTTL"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_RebindRefreshesTTL","Output":"=== RUN   TestSessionRouter_RebindRefreshesTTL\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_RebindRefreshesTTL","Output":"--- PASS: TestSessionRouter_RebindRefreshesTTL (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_RebindRefreshesTTL"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_LookupRefreshesLastSeen"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_LookupRefreshesLastSeen","Output":"=== RUN   TestSessionRouter_LookupRefreshesLastSeen\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_LookupRefreshesLastSeen","Output":"--- PASS: TestSessionRouter_LookupRefreshesLastSeen (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_LookupRefreshesLastSeen"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_NoLookupExpiresAtTTL"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_NoLookupExpiresAtTTL","Output":"=== RUN   TestSessionRouter_NoLookupExpiresAtTTL\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_NoLookupExpiresAtTTL","Output":"--- PASS: TestSessionRouter_NoLookupExpiresAtTTL (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_NoLookupExpiresAtTTL"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_BindNilWorkspaceIgnored"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_BindNilWorkspaceIgnored","Output":"=== RUN   TestSessionRouter_BindNilWorkspaceIgnored\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_BindNilWorkspaceIgnored","Output":"--- PASS: TestSessionRouter_BindNilWorkspaceIgnored (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_BindNilWorkspaceIgnored"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_BindEmptySessionIDIgnored"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_BindEmptySessionIDIgnored","Output":"=== RUN   TestSessionRouter_BindEmptySessionIDIgnored\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_BindEmptySessionIDIgnored","Output":"--- PASS: TestSessionRouter_BindEmptySessionIDIgnored (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_BindEmptySessionIDIgnored"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_BindOverwritesExistingBinding"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_BindOverwritesExistingBinding","Output":"=== RUN   TestSessionRouter_BindOverwritesExistingBinding\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_BindOverwritesExistingBinding","Output":"--- PASS: TestSessionRouter_BindOverwritesExistingBinding (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_BindOverwritesExistingBinding"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_UpdateSessionGenerationIfCurrent_DoesNotResurrectUnboundSession"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_UpdateSessionGenerationIfCurrent_DoesNotResurrectUnboundSession","Output":"=== RUN   TestSessionRouter_UpdateSessionGenerationIfCurrent_DoesNotResurrectUnboundSession\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_UpdateSessionGenerationIfCurrent_DoesNotResurrectUnboundSession","Output":"--- PASS: TestSessionRouter_UpdateSessionGenerationIfCurrent_DoesNotResurrectUnboundSession (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_UpdateSessionGenerationIfCurrent_DoesNotResurrectUnboundSession"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_LookupReturnsValueCopy"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_LookupReturnsValueCopy","Output":"=== RUN   TestSessionRouter_LookupReturnsValueCopy\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_LookupReturnsValueCopy","Output":"--- PASS: TestSessionRouter_LookupReturnsValueCopy (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_LookupReturnsValueCopy"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_ConcurrentAccess"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_ConcurrentAccess","Output":"=== RUN   TestSessionRouter_ConcurrentAccess\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_ConcurrentAccess","Output":"--- PASS: TestSessionRouter_ConcurrentAccess (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSessionRouter_ConcurrentAccess"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSharedRegistryObserver_GUILockedWriterAndReadersSettle"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSharedRegistryObserver_GUILockedWriterAndReadersSettle","Output":"=== RUN   TestSharedRegistryObserver_GUILockedWriterAndReadersSettle\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSharedRegistryObserver_GUILockedWriterAndReadersSettle","Output":"--- PASS: TestSharedRegistryObserver_GUILockedWriterAndReadersSettle (0.07s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSharedRegistryObserver_GUILockedWriterAndReadersSettle"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh","Output":"=== RUN   TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh/serena-then-other"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh/serena-then-other","Output":"=== RUN   TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh/serena-then-other\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh/serena-then-other","Output":"--- PASS: TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh/serena-then-other (0.11s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh/serena-then-other"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh/lsp-then-other"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh/lsp-then-other","Output":"=== RUN   TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh/lsp-then-other\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh/lsp-then-other","Output":"--- PASS: TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh/lsp-then-other (0.11s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh/lsp-then-other"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh","Output":"--- PASS: TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh (0.23s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing","Test":"TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/serena_routing","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/serena_routing"}

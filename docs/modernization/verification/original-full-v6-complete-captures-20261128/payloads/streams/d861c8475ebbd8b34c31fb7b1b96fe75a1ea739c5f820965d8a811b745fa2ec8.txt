@@ -1,0 +1,394 @@
+=== RUN   TestCurrentListDirChain_ResolvesPerFileNotPinnedToRoot
+--- PASS: TestCurrentListDirChain_ResolvesPerFileNotPinnedToRoot (0.00s)
+=== NAME  
+=== RUN   TestMutationProof_DanglingPathNeverReportedResolved
+--- PASS: TestMutationProof_DanglingPathNeverReportedResolved (0.00s)
+=== NAME  
+=== RUN   TestCycle_DetectedNotInfiniteLoop
+--- PASS: TestCycle_DetectedNotInfiniteLoop (0.00s)
+=== NAME  
+=== RUN   TestOutsideWorkspace_DotDotEscape
+--- PASS: TestOutsideWorkspace_DotDotEscape (0.00s)
+=== NAME  
+=== RUN   TestOutsideWorkspace_SymlinkEscape
+--- PASS: TestOutsideWorkspace_SymlinkEscape (0.00s)
+=== NAME  
+=== RUN   TestNonStaticVariable_UnknownAndCurrentSourceDirBothRefused
+--- PASS: TestNonStaticVariable_UnknownAndCurrentSourceDirBothRefused (0.00s)
+=== NAME  
+=== RUN   TestCmakeSourceDir_ResolvesToWorkspaceRoot
+--- PASS: TestCmakeSourceDir_ResolvesToWorkspaceRoot (0.00s)
+=== NAME  
+=== RUN   TestGeneratorExpression_NeverEvaluated
+--- PASS: TestGeneratorExpression_NeverEvaluated (0.00s)
+=== NAME  
+=== RUN   TestModuleNameNotPath_BareIncludeName
+--- PASS: TestModuleNameNotPath_BareIncludeName (0.00s)
+=== NAME  
+=== RUN   TestConditional_PathResolvedNormallyOrthogonalToStatus
+--- PASS: TestConditional_PathResolvedNormallyOrthogonalToStatus (0.00s)
+=== NAME  
+=== RUN   TestAddSubdirectory_BareRelativeName
+--- PASS: TestAddSubdirectory_BareRelativeName (0.00s)
+=== NAME  
+=== RUN   TestAddSubdirectory_MissingCMakeListsIsDangling
+--- PASS: TestAddSubdirectory_MissingCMakeListsIsDangling (0.00s)
+=== NAME  
+=== RUN   TestDepthLimit_StopsExpansionAndReportsReason
+--- PASS: TestDepthLimit_StopsExpansionAndReportsReason (0.00s)
+=== NAME  
+=== RUN   TestNodeCap_StopsExpansionAndReportsReason
+--- PASS: TestNodeCap_StopsExpansionAndReportsReason (0.00s)
+=== NAME  
+=== RUN   TestParseError_UnterminatedCall
+--- PASS: TestParseError_UnterminatedCall (0.00s)
+=== NAME  
+=== RUN   TestCommentedOutInclude_NotDiscovered
+--- PASS: TestCommentedOutInclude_NotDiscovered (0.00s)
+=== NAME  
+=== RUN   TestStringLiteralGuard_CommandNameInsideStringIsSkipped
+--- PASS: TestStringLiteralGuard_CommandNameInsideStringIsSkipped (0.00s)
+=== NAME  
+=== RUN   TestWalkTree_WildcardPatternReachesFilesNoPortfileReferences
+--- PASS: TestWalkTree_WildcardPatternReachesFilesNoPortfileReferences (0.00s)
+=== NAME  
+=== RUN   TestWalkTree_SharedFileScannedOnceNotDuplicated
+--- PASS: TestWalkTree_SharedFileScannedOnceNotDuplicated (0.01s)
+=== NAME  
+=== RUN   TestDiamondInclude_NotMisreportedAsCyclic
+--- PASS: TestDiamondInclude_NotMisreportedAsCyclic (0.00s)
+=== NAME  
+=== RUN   TestWalkTree_IndependentPortLikeUnits
+--- PASS: TestWalkTree_IndependentPortLikeUnits (0.00s)
+=== NAME  
+=== RUN   TestP1_1_RelativeIncludeResolvesAgainstCurrentSourceDirNotListDir
+--- PASS: TestP1_1_RelativeIncludeResolvesAgainstCurrentSourceDirNotListDir (0.00s)
+=== NAME  
+=== RUN   TestP1_1_TopLevelBareRelativeUnaffected
+--- PASS: TestP1_1_TopLevelBareRelativeUnaffected (0.00s)
+=== NAME  
+=== RUN   TestP1_2_CurrentListDirInsideMacroBodyRefused
+--- PASS: TestP1_2_CurrentListDirInsideMacroBodyRefused (0.00s)
+=== NAME  
+=== RUN   TestP1_2_FunctionBodyAlsoGatesAndOutsideCallUnaffected
+--- PASS: TestP1_2_FunctionBodyAlsoGatesAndOutsideCallUnaffected (0.00s)
+=== NAME  
+=== RUN   TestP1_3_StandaloneRootBareRelativeRefusedUnverified
+--- PASS: TestP1_3_StandaloneRootBareRelativeRefusedUnverified (0.00s)
+=== NAME  
+=== RUN   TestP1_3_CMakeListsRootBareRelativeStillResolves
+--- PASS: TestP1_3_CMakeListsRootBareRelativeStillResolves (0.00s)
+=== NAME  
+=== RUN   TestP1_3_AddSubdirectoryEstablishesFreshVerifiedContext
+--- PASS: TestP1_3_AddSubdirectoryEstablishesFreshVerifiedContext (0.00s)
+=== NAME  
+=== RUN   TestP1_4_CacheVariableRefused
+--- PASS: TestP1_4_CacheVariableRefused (0.00s)
+=== NAME  
+=== RUN   TestP1_4_BackslashEscapeSequenceRefused
+--- PASS: TestP1_4_BackslashEscapeSequenceRefused (0.00s)
+=== NAME  
+=== RUN   TestP1_4_BracketArgumentRefused
+--- PASS: TestP1_4_BracketArgumentRefused (0.00s)
+=== NAME  
+=== RUN   TestP1_5_NestedCommandInBalancedParensNotMisreadAsDirective
+--- PASS: TestP1_5_NestedCommandInBalancedParensNotMisreadAsDirective (0.00s)
+=== NAME  
+=== RUN   TestP1_5_FakeNestedIfDoesNotCorruptConditionalTracking
+--- PASS: TestP1_5_FakeNestedIfDoesNotCorruptConditionalTracking (0.00s)
+=== NAME  
+=== RUN   TestP1_5_EscapeParityDoesNotSwallowNextCommand
+--- PASS: TestP1_5_EscapeParityDoesNotSwallowNextCommand (0.00s)
+=== NAME  
+=== RUN   TestP1_5_BracketCommentMatchedAcrossMultipleLines
+--- PASS: TestP1_5_BracketCommentMatchedAcrossMultipleLines (0.00s)
+=== NAME  
+=== RUN   TestP1_6_NodeCapGatesRootAdmissionAndIsVisible
+--- PASS: TestP1_6_NodeCapGatesRootAdmissionAndIsVisible (0.00s)
+=== NAME  
+=== RUN   TestP2_7_ByteCapSkipIsVisibleNotSilent
+--- PASS: TestP2_7_ByteCapSkipIsVisibleNotSilent (0.00s)
+=== NAME  
+=== RUN   TestF18_UnterminatedBracketArgumentDoesNotLeakPayloadAsSyntax
+--- PASS: TestF18_UnterminatedBracketArgumentDoesNotLeakPayloadAsSyntax (0.00s)
+=== NAME  
+=== RUN   TestF18_LiteralBracketIsNotMistakenForAnUnterminatedOpener
+--- PASS: TestF18_LiteralBracketIsNotMistakenForAnUnterminatedOpener (0.00s)
+=== NAME  
+=== RUN   TestF17_NonAbsenceStatErrorIsUnresolvedNotDangling
+--- PASS: TestF17_NonAbsenceStatErrorIsUnresolvedNotDangling (0.00s)
+=== NAME  
+=== RUN   TestF17_GenuinelyAbsentTargetIsStillDangling
+--- PASS: TestF17_GenuinelyAbsentTargetIsStillDangling (0.00s)
+=== NAME  
+=== RUN   TestF16_UnenumerableSubtreeIsRecordedAsIncompleteCoverage
+--- PASS: TestF16_UnenumerableSubtreeIsRecordedAsIncompleteCoverage (0.04s)
+=== NAME  
+=== RUN   TestF16_RootEnumerationFailureTerminatesWithError
+--- PASS: TestF16_RootEnumerationFailureTerminatesWithError (0.00s)
+=== NAME  
+=== RUN   TestF22_SymlinkedRootEscapingWorkspaceIsRefusedBeforeAnyRead
+--- PASS: TestF22_SymlinkedRootEscapingWorkspaceIsRefusedBeforeAnyRead (0.00s)
+=== NAME  
+=== RUN   TestF27_RootEnumerationIsBoundedAndTheCapIsVisible
+--- PASS: TestF27_RootEnumerationIsBoundedAndTheCapIsVisible (0.00s)
+=== NAME  
+=== RUN   TestF20_WalkTreeHonoursAParentWorkspaceRoot
+--- PASS: TestF20_WalkTreeHonoursAParentWorkspaceRoot (0.01s)
+=== NAME  
+=== RUN   TestCanceledWalkReturnsErrorNotAPartialGraph
+--- PASS: TestCanceledWalkReturnsErrorNotAPartialGraph (0.00s)
+=== NAME  
+=== RUN   TestByteCapCoverageCarriesAClosedReasonAndADetail
+--- PASS: TestByteCapCoverageCarriesAClosedReasonAndADetail (0.00s)
+=== NAME  
+=== RUN   TestOversizedRootIsNotReportedAsScanned
+--- PASS: TestOversizedRootIsNotReportedAsScanned (0.00s)
+=== NAME  
+=== RUN   TestOversizedIncludeTargetIsNotReportedAsScanned
+--- PASS: TestOversizedIncludeTargetIsNotReportedAsScanned (0.00s)
+=== NAME  
+=== RUN   TestSuccessfullyReadFilesAreStillReportedAsScanned
+--- PASS: TestSuccessfullyReadFilesAreStillReportedAsScanned (0.00s)
+=== NAME  
+=== RUN   TestReadBoundedFromDetectsAFileThatGrewPastTheCap
+--- PASS: TestReadBoundedFromDetectsAFileThatGrewPastTheCap (0.00s)
+=== NAME  
+=== RUN   TestFirstArgumentSkipsCommentsBeforeTheArgument
+=== RUN   TestFirstArgumentSkipsCommentsBeforeTheArgument/line_comment_before_argument
+--- PASS: TestFirstArgumentSkipsCommentsBeforeTheArgument/line_comment_before_argument (0.00s)
+=== NAME  TestFirstArgumentSkipsCommentsBeforeTheArgument
+=== RUN   TestFirstArgumentSkipsCommentsBeforeTheArgument/bracket_comment_before_argument
+--- PASS: TestFirstArgumentSkipsCommentsBeforeTheArgument/bracket_comment_before_argument (0.00s)
+=== NAME  TestFirstArgumentSkipsCommentsBeforeTheArgument
+=== RUN   TestFirstArgumentSkipsCommentsBeforeTheArgument/comment_then_quoted_argument
+--- PASS: TestFirstArgumentSkipsCommentsBeforeTheArgument/comment_then_quoted_argument (0.00s)
+=== NAME  TestFirstArgumentSkipsCommentsBeforeTheArgument
+=== RUN   TestFirstArgumentSkipsCommentsBeforeTheArgument/no_comment_at_all
+--- PASS: TestFirstArgumentSkipsCommentsBeforeTheArgument/no_comment_at_all (0.00s)
+=== NAME  TestFirstArgumentSkipsCommentsBeforeTheArgument
+--- PASS: TestFirstArgumentSkipsCommentsBeforeTheArgument (0.00s)
+=== NAME  
+=== RUN   TestIncludeWithALeadingCommentResolves
+--- PASS: TestIncludeWithALeadingCommentResolves (0.00s)
+=== NAME  
+=== RUN   TestPR591_LoopNestedEdgesAreConditional
+--- PASS: TestPR591_LoopNestedEdgesAreConditional (0.00s)
+=== NAME  
+=== RUN   TestPR591_DirectorySymlinkIsNotDescended
+--- PASS: TestPR591_DirectorySymlinkIsNotDescended (0.00s)
+=== NAME  
+=== RUN   TestPR591_CancellationAfterFinalRootReturnsError
+--- PASS: TestPR591_CancellationAfterFinalRootReturnsError (0.00s)
+=== NAME  
+=== RUN   TestPR591_MaxInt64FileCapFailsBeforeIO
+--- PASS: TestPR591_MaxInt64FileCapFailsBeforeIO (0.00s)
+=== NAME  
+=== RUN   TestPR591_WalkTreeBoundsAllVisitedEntriesBeforeNameFiltering
+--- PASS: TestPR591_WalkTreeBoundsAllVisitedEntriesBeforeNameFiltering (0.00s)
+=== NAME  
+=== RUN   TestPR591_VisitedEntryCapPreservesSortedAdmittedRootOrder
+--- PASS: TestPR591_VisitedEntryCapPreservesSortedAdmittedRootOrder (0.00s)
+=== NAME  
+=== RUN   TestOptionsRejectEveryHardMaximumPlusOneBeforeWork
+=== RUN   TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/depth
+--- PASS: TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/depth (0.00s)
+=== NAME  TestOptionsRejectEveryHardMaximumPlusOneBeforeWork
+=== RUN   TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/nodes
+--- PASS: TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/nodes (0.00s)
+=== NAME  TestOptionsRejectEveryHardMaximumPlusOneBeforeWork
+=== RUN   TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/file-bytes
+--- PASS: TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/file-bytes (0.00s)
+=== NAME  TestOptionsRejectEveryHardMaximumPlusOneBeforeWork
+=== RUN   TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/roots
+--- PASS: TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/roots (0.00s)
+=== NAME  TestOptionsRejectEveryHardMaximumPlusOneBeforeWork
+=== RUN   TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/visited-entries
+--- PASS: TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/visited-entries (0.00s)
+=== NAME  TestOptionsRejectEveryHardMaximumPlusOneBeforeWork
+--- PASS: TestOptionsRejectEveryHardMaximumPlusOneBeforeWork (0.00s)
+=== NAME  
+=== RUN   TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir
+=== RUN   TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/count-boundary
+--- PASS: TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/count-boundary (0.00s)
+=== NAME  TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir
+=== RUN   TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/count-plus-one
+--- PASS: TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/count-plus-one (0.00s)
+=== NAME  TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir
+=== RUN   TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/byte-boundary
+--- PASS: TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/byte-boundary (0.00s)
+=== NAME  TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir
+=== RUN   TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/byte-plus-one
+--- PASS: TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/byte-plus-one (0.00s)
+=== NAME  TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir
+--- PASS: TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir (0.00s)
+=== NAME  
+=== RUN   TestCompiledEntryFiltersPreserveExactAndSuffixSemantics
+--- PASS: TestCompiledEntryFiltersPreserveExactAndSuffixSemantics (0.00s)
+=== NAME  
+=== RUN   TestR15AggregateEdgeCountCapReportsCoverage
+--- PASS: TestR15AggregateEdgeCountCapReportsCoverage (3.15s)
+=== NAME  
+=== RUN   TestR15AggregateEdgeByteCapReportsCoverage
+--- PASS: TestR15AggregateEdgeByteCapReportsCoverage (0.16s)
+=== NAME  
+=== RUN   TestR15MissingOptionalIncludeIsNotDangling
+--- PASS: TestR15MissingOptionalIncludeIsNotDangling (0.00s)
+=== NAME  
+=== RUN   TestR17CoverageAggregateIsBoundedAndSignalsOmission
+--- PASS: TestR17CoverageAggregateIsBoundedAndSignalsOmission (0.20s)
+=== NAME  
+=== RUN   TestR18WalkTreeBoundsAggregateRetainedRootPathBytes
+--- PASS: TestR18WalkTreeBoundsAggregateRetainedRootPathBytes (0.01s)
+=== NAME  
+=== RUN   TestR20PinnedRootReadRefusesRetargetOutsideWorkspace
+--- PASS: TestR20PinnedRootReadRefusesRetargetOutsideWorkspace (0.00s)
+=== NAME  
+=== RUN   TestR21LineIndexMatchesOffsetsWithoutPerEdgeRescan
+--- PASS: TestR21LineIndexMatchesOffsetsWithoutPerEdgeRescan (0.00s)
+=== NAME  
+=== RUN   TestR22AddSubdirectoryRejectsEscapingCMakeListsSymlink
+--- PASS: TestR22AddSubdirectoryRejectsEscapingCMakeListsSymlink (0.00s)
+=== NAME  
+=== RUN   TestR24DeferredCommandBodyRefusesBareRelativePath
+--- PASS: TestR24DeferredCommandBodyRefusesBareRelativePath (0.00s)
+=== NAME  
+=== RUN   TestR24ResultVariableValueNamedOptionalIsNotAnOption
+--- PASS: TestR24ResultVariableValueNamedOptionalIsNotAnOption (0.00s)
+=== NAME  
+=== RUN   TestR26WalkTreeUnreadableDiscoveredRootIsCoverageHole
+--- PASS: TestR26WalkTreeUnreadableDiscoveredRootIsCoverageHole (0.00s)
+=== NAME  
+=== RUN   TestR26CommandDiscoveryIsCappedAndReported
+--- PASS: TestR26CommandDiscoveryIsCappedAndReported (0.01s)
+=== NAME  
+=== RUN   TestR28LowercaseOptionalIsNotCMakeOption
+--- PASS: TestR28LowercaseOptionalIsNotCMakeOption (0.00s)
+=== NAME  
+=== RUN   TestR30CommandNameCannotCrossLineEnding
+--- PASS: TestR30CommandNameCannotCrossLineEnding (0.00s)
+=== NAME  
+=== RUN   TestR30MalformedIncludeTailIsUnresolved
+--- PASS: TestR30MalformedIncludeTailIsUnresolved (0.00s)
+=== NAME  
+=== RUN   TestR31InvalidControlTerminatorStopsConfidentEdgeResolution
+=== RUN   TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/unmatched_endif
+--- PASS: TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/unmatched_endif (0.00s)
+=== NAME  TestR31InvalidControlTerminatorStopsConfidentEdgeResolution
+=== RUN   TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/unmatched_endforeach
+--- PASS: TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/unmatched_endforeach (0.00s)
+=== NAME  TestR31InvalidControlTerminatorStopsConfidentEdgeResolution
+=== RUN   TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/unmatched_endwhile
+--- PASS: TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/unmatched_endwhile (0.00s)
+=== NAME  TestR31InvalidControlTerminatorStopsConfidentEdgeResolution
+=== RUN   TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/mismatched_terminator
+--- PASS: TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/mismatched_terminator (0.00s)
+=== NAME  TestR31InvalidControlTerminatorStopsConfidentEdgeResolution
+--- PASS: TestR31InvalidControlTerminatorStopsConfidentEdgeResolution (0.00s)
+=== NAME  
+=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar
+=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child)
+--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child) (0.00s)
+=== NAME  TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar
+=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build)
+--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build) (0.00s)
+=== NAME  TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar
+=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL)
+--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL) (0.00s)
+=== NAME  TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar
+=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM)
+--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM) (0.00s)
+=== NAME  TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar
+=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_EXCLUDE_FROM_ALL)
+--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_EXCLUDE_FROM_ALL) (0.00s)
+=== NAME  TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar
+=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_SYSTEM)
+--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_SYSTEM) (0.00s)
+=== NAME  TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar
+=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL_SYSTEM)
+--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL_SYSTEM) (0.00s)
+=== NAME  TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar
+=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_EXCLUDE_FROM_ALL_SYSTEM)
+--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_EXCLUDE_FROM_ALL_SYSTEM) (0.00s)
+=== NAME  TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar
+=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_[=[EXCLUDE_FROM_ALL]=])
+--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_[=[EXCLUDE_FROM_ALL]=]) (0.00s)
+=== NAME  TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar
+=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_[=[SYSTEM]=])
+--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_[=[SYSTEM]=]) (0.00s)
+=== NAME  TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar
+=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_[=[EXCLUDE_FROM_ALL]=]_[=[SYSTEM]=])
+--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_[=[EXCLUDE_FROM_ALL]=]_[=[SYSTEM]=]) (0.00s)
+=== NAME  TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar
+=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_junk)
+--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_junk) (0.00s)
+=== NAME  TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar
+=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL_build)
+--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL_build) (0.00s)
+=== NAME  TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar
+=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM_build)
+--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM_build) (0.00s)
+=== NAME  TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar
+=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM_EXCLUDE_FROM_ALL)
+--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM_EXCLUDE_FROM_ALL) (0.00s)
+=== NAME  TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar
+=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL_EXCLUDE_FROM_ALL)
+--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL_EXCLUDE_FROM_ALL) (0.00s)
+=== NAME  TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar
+=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM_SYSTEM)
+--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM_SYSTEM) (0.00s)
+=== NAME  TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar
+--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar (0.03s)
+=== NAME  
+=== RUN   TestR32CMakeListsCaseFollowsActualFilesystem
+--- PASS: TestR32CMakeListsCaseFollowsActualFilesystem (0.00s)
+=== NAME  
+=== RUN   TestR32CaseFoldAloneCannotVerifyCMakeLists
+=== RUN   TestR32CaseFoldAloneCannotVerifyCMakeLists/canonical_spelling_absent
+--- PASS: TestR32CaseFoldAloneCannotVerifyCMakeLists/canonical_spelling_absent (0.00s)
+=== NAME  TestR32CaseFoldAloneCannotVerifyCMakeLists
+=== RUN   TestR32CaseFoldAloneCannotVerifyCMakeLists/canonical_spelling_is_a_different_file
+--- PASS: TestR32CaseFoldAloneCannotVerifyCMakeLists/canonical_spelling_is_a_different_file (0.00s)
+=== NAME  TestR32CaseFoldAloneCannotVerifyCMakeLists
+=== RUN   TestR32CaseFoldAloneCannotVerifyCMakeLists/canonical_spelling_identifies_the_same_file
+--- PASS: TestR32CaseFoldAloneCannotVerifyCMakeLists/canonical_spelling_identifies_the_same_file (0.00s)
+=== NAME  TestR32CaseFoldAloneCannotVerifyCMakeLists
+--- PASS: TestR32CaseFoldAloneCannotVerifyCMakeLists (0.00s)
+=== NAME  
+=== RUN   TestR33UnterminatedControlFrameRetractsItsEdges
+=== RUN   TestR33UnterminatedControlFrameRetractsItsEdges/if
+--- PASS: TestR33UnterminatedControlFrameRetractsItsEdges/if (0.00s)
+=== NAME  TestR33UnterminatedControlFrameRetractsItsEdges
+=== RUN   TestR33UnterminatedControlFrameRetractsItsEdges/foreach
+--- PASS: TestR33UnterminatedControlFrameRetractsItsEdges/foreach (0.00s)
+=== NAME  TestR33UnterminatedControlFrameRetractsItsEdges
+=== RUN   TestR33UnterminatedControlFrameRetractsItsEdges/while
+--- PASS: TestR33UnterminatedControlFrameRetractsItsEdges/while (0.00s)
+=== NAME  TestR33UnterminatedControlFrameRetractsItsEdges
+--- PASS: TestR33UnterminatedControlFrameRetractsItsEdges (0.01s)
+=== NAME  
+=== RUN   TestR33IncludeDirectoryIsUnresolvedWrongType
+=== RUN   TestR33IncludeDirectoryIsUnresolvedWrongType/required
+--- PASS: TestR33IncludeDirectoryIsUnresolvedWrongType/required (0.00s)
+=== NAME  TestR33IncludeDirectoryIsUnresolvedWrongType
+=== RUN   TestR33IncludeDirectoryIsUnresolvedWrongType/optional
+--- PASS: TestR33IncludeDirectoryIsUnresolvedWrongType/optional (0.00s)
+=== NAME  TestR33IncludeDirectoryIsUnresolvedWrongType
+--- PASS: TestR33IncludeDirectoryIsUnresolvedWrongType (0.00s)
+=== NAME  
+=== RUN   TestR33IncludeSemicolonHonorsQuoteProvenance
+=== RUN   TestR33IncludeSemicolonHonorsQuoteProvenance/quoted_semicolon_is_literal
+--- PASS: TestR33IncludeSemicolonHonorsQuoteProvenance/quoted_semicolon_is_literal (0.00s)
+=== NAME  TestR33IncludeSemicolonHonorsQuoteProvenance
+=== RUN   TestR33IncludeSemicolonHonorsQuoteProvenance/unquoted_semicolon_expands_argument_list
+--- PASS: TestR33IncludeSemicolonHonorsQuoteProvenance/unquoted_semicolon_expands_argument_list (0.00s)
+=== NAME  TestR33IncludeSemicolonHonorsQuoteProvenance
+=== RUN   TestR33IncludeSemicolonHonorsQuoteProvenance/unquoted_second_list_element_uses_legacy_ignored_position
+--- PASS: TestR33IncludeSemicolonHonorsQuoteProvenance/unquoted_second_list_element_uses_legacy_ignored_position (0.00s)
+=== NAME  TestR33IncludeSemicolonHonorsQuoteProvenance
+--- PASS: TestR33IncludeSemicolonHonorsQuoteProvenance (0.01s)
+=== NAME  
+=== RUN   TestR35IncludeResultVariableRequiresExactCase
+--- PASS: TestR35IncludeResultVariableRequiresExactCase (0.00s)
+=== NAME  
+PASS

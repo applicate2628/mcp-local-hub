@@ -1,0 +1,36 @@
+{"Action":"start","Package":"mcp-local-hub/internal/hubtemp"}
+{"Action":"run","Package":"mcp-local-hub/internal/hubtemp","Test":"TestDir_WindowsUsesLocalAppData"}
+{"Action":"output","Package":"mcp-local-hub/internal/hubtemp","Test":"TestDir_WindowsUsesLocalAppData","Output":"=== RUN   TestDir_WindowsUsesLocalAppData\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/hubtemp","Test":"TestDir_WindowsUsesLocalAppData","Output":"--- PASS: TestDir_WindowsUsesLocalAppData (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/hubtemp","Test":"TestDir_WindowsUsesLocalAppData"}
+{"Action":"run","Package":"mcp-local-hub/internal/hubtemp","Test":"TestDir_WindowsFallsBackToHomeWhenLocalAppDataEmpty"}
+{"Action":"output","Package":"mcp-local-hub/internal/hubtemp","Test":"TestDir_WindowsFallsBackToHomeWhenLocalAppDataEmpty","Output":"=== RUN   TestDir_WindowsFallsBackToHomeWhenLocalAppDataEmpty\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/hubtemp","Test":"TestDir_WindowsFallsBackToHomeWhenLocalAppDataEmpty","Output":"--- PASS: TestDir_WindowsFallsBackToHomeWhenLocalAppDataEmpty (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/hubtemp","Test":"TestDir_WindowsFallsBackToHomeWhenLocalAppDataEmpty"}
+{"Action":"run","Package":"mcp-local-hub/internal/hubtemp","Test":"TestDir_NonWindowsUsesUserCacheDir"}
+{"Action":"output","Package":"mcp-local-hub/internal/hubtemp","Test":"TestDir_NonWindowsUsesUserCacheDir","Output":"=== RUN   TestDir_NonWindowsUsesUserCacheDir\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/hubtemp","Test":"TestDir_NonWindowsUsesUserCacheDir","Output":"    hubtemp_test.go:49: non-Windows user cache branch\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/hubtemp","Test":"TestDir_NonWindowsUsesUserCacheDir","Output":"--- SKIP: TestDir_NonWindowsUsesUserCacheDir (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/hubtemp","Test":"TestDir_NonWindowsUsesUserCacheDir"}
+{"Action":"run","Package":"mcp-local-hub/internal/hubtemp","Test":"TestEnsurePrivateDirCreatesOwnerWritableDirectory"}
+{"Action":"output","Package":"mcp-local-hub/internal/hubtemp","Test":"TestEnsurePrivateDirCreatesOwnerWritableDirectory","Output":"=== RUN   TestEnsurePrivateDirCreatesOwnerWritableDirectory\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/hubtemp","Test":"TestEnsurePrivateDirCreatesOwnerWritableDirectory","Output":"--- PASS: TestEnsurePrivateDirCreatesOwnerWritableDirectory (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/hubtemp","Test":"TestEnsurePrivateDirCreatesOwnerWritableDirectory"}
+{"Action":"run","Package":"mcp-local-hub/internal/hubtemp","Test":"TestSweepStaleSkipsActiveMarkedDirectory"}
+{"Action":"output","Package":"mcp-local-hub/internal/hubtemp","Test":"TestSweepStaleSkipsActiveMarkedDirectory","Output":"=== RUN   TestSweepStaleSkipsActiveMarkedDirectory\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/hubtemp","Test":"TestSweepStaleSkipsActiveMarkedDirectory","Output":"--- PASS: TestSweepStaleSkipsActiveMarkedDirectory (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/hubtemp","Test":"TestSweepStaleSkipsActiveMarkedDirectory"}
+{"Action":"run","Package":"mcp-local-hub/internal/hubtemp","Test":"TestMarkActiveRefreshesMarkerDuringLongRun"}
+{"Action":"output","Package":"mcp-local-hub/internal/hubtemp","Test":"TestMarkActiveRefreshesMarkerDuringLongRun","Output":"=== RUN   TestMarkActiveRefreshesMarkerDuringLongRun\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/hubtemp","Test":"TestMarkActiveRefreshesMarkerDuringLongRun","Output":"--- PASS: TestMarkActiveRefreshesMarkerDuringLongRun (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/hubtemp","Test":"TestMarkActiveRefreshesMarkerDuringLongRun"}
+{"Action":"run","Package":"mcp-local-hub/internal/hubtemp","Test":"TestSweepStaleRemovesExpiredActiveMarkedDirectory"}
+{"Action":"output","Package":"mcp-local-hub/internal/hubtemp","Test":"TestSweepStaleRemovesExpiredActiveMarkedDirectory","Output":"=== RUN   TestSweepStaleRemovesExpiredActiveMarkedDirectory\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/hubtemp","Test":"TestSweepStaleRemovesExpiredActiveMarkedDirectory","Output":"--- PASS: TestSweepStaleRemovesExpiredActiveMarkedDirectory (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/hubtemp","Test":"TestSweepStaleRemovesExpiredActiveMarkedDirectory"}
+{"Action":"run","Package":"mcp-local-hub/internal/hubtemp","Test":"TestSweepStaleRemovesUnmarkedStaleDirectory"}
+{"Action":"output","Package":"mcp-local-hub/internal/hubtemp","Test":"TestSweepStaleRemovesUnmarkedStaleDirectory","Output":"=== RUN   TestSweepStaleRemovesUnmarkedStaleDirectory\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/hubtemp","Test":"TestSweepStaleRemovesUnmarkedStaleDirectory","Output":"--- PASS: TestSweepStaleRemovesUnmarkedStaleDirectory (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/hubtemp","Test":"TestSweepStaleRemovesUnmarkedStaleDirectory"}
+{"Action":"output","Package":"mcp-local-hub/internal/hubtemp","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/hubtemp"}

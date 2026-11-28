@@ -1,0 +1,211 @@
+"""Copy only the closed fresh-owned-commands-v1 build caches into a fresh run.
+No native process creation, prior mutations, cache execution, or cleanup.
+"""
+import sys
+sys.dont_write_bytecode = True
+
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import stat
+import types
+
+TASK = Path(r"@@RECOVERY_APPROVED_WORK_AREA_RAW@@\mcp-acceptance-rebuild-20261127-v1")
+PRIOR = TASK / "original-helper-cache-warm-v7"
+PLAN = TASK / "inputs-successor33-v1" / "warm-cache" / "helper-cache-warm-v7-plan.json"
+PLAN_SHA = "bf28e617ee0e319ec4c085d13ee0c16b7536552bac92f28070138835d8286fb6"
+EXECUTION = PRIOR / "commands" / "execution.json"
+EXECUTION_SHA = "7f6cd144b02ecc796a5fa1506c19b72d50a6a65816b508a902689535c13671cd"
+RUNNER_SHA = "6d16652d4893273b7e9d584920892ce5f5917622e7e242a62eb78ec824bcfb93"
+SCHEMA = "fresh-owned-commands-v1"
+REPARSE = 0x400
+
+
+def need(ok, message):
+    if not ok:
+        raise RuntimeError(message)
+
+
+def ordinary(path, directory):
+    path = Path(path)
+    need(path.is_absolute() and ".." not in path.parts, "absolute clean path required")
+    for item in (*reversed(path.parents), path):
+        info = item.lstat()
+        need(not info.st_file_attributes & REPARSE and not stat.S_ISLNK(info.st_mode),
+             "reparse input refused: " + str(item))
+        expected_dir = item != path or directory
+        need(stat.S_ISDIR(info.st_mode) if expected_dir else stat.S_ISREG(info.st_mode),
+             "ordinary path type differs: " + str(item))
+    return path
+
+
+def digest(path):
+    with Path(path).open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def pinned(path, expected):
+    path = ordinary(path, False)
+    raw = path.read_bytes()
+    need(hashlib.sha256(raw).hexdigest() == expected, "pinned bytes differ: " + str(path))
+    return raw
+
+
+def inventory(root):
+    result, pending = {}, [root]
+    while pending:
+        directory = pending.pop()
+        current = directory.lstat()
+        need(stat.S_ISDIR(current.st_mode) and not current.st_file_attributes & REPARSE,
+             "cache directory changed: " + str(directory))
+        for path in sorted(directory.iterdir()):
+            before = path.lstat()
+            need(not before.st_file_attributes & REPARSE and not stat.S_ISLNK(before.st_mode),
+                 "cache reparse entry refused: " + str(path))
+            relative = path.relative_to(root).as_posix()
+            if stat.S_ISDIR(before.st_mode):
+                result[relative] = {"kind": "directory"}
+                pending.append(path)
+            else:
+                need(stat.S_ISREG(before.st_mode), "special cache entry refused: " + str(path))
+                sha = digest(path)
+                after = path.lstat()
+                need(stat.S_ISREG(after.st_mode) and not after.st_file_attributes & REPARSE
+                     and (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+                     == (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns),
+                     "cache file changed while reading: " + str(path))
+                result[relative] = {"kind": "file", "bytes": before.st_size, "sha256": sha}
+    return result
+
+
+def write_json(path, value):
+    raw = (json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8")
+    with path.open("xb") as stream:
+        stream.write(raw)
+        stream.flush()
+        os.fsync(stream.fileno())
+    return hashlib.sha256(raw).hexdigest()
+
+
+def copy_closed_caches(output, parent_sha, environment):
+    need(os.name == "nt", "closed cache copying requires Windows")
+    output = ordinary(output, True)
+    need(re.fullmatch(r"[0-9a-f]{64}", parent_sha) is not None, "exact prior parent pin required")
+    need(output != TASK and output.is_relative_to(TASK)
+         and not output.is_relative_to(PRIOR) and not PRIOR.is_relative_to(output),
+         "new output must be a separate fresh task run")
+    parent_path = PRIOR / "parent.json"
+    parent = json.loads(pinned(parent_path, parent_sha))
+    need(parent.get("schema") == SCHEMA + "-parent" and parent.get("status") == "PASS"
+         and parent.get("child_status") == "PASS" and parent.get("exit_code") == 0
+         and parent.get("deadline_exceeded") is False
+         and all(parent.get(k) is True for k in
+                 ("physical_complete", "terminal_exit_received", "parent_capture_files_closed"))
+         and parent.get("plan_sha256") == PLAN_SHA and parent.get("execution_sha256") == EXECUTION_SHA,
+         "prior original parent is not the bound closed PASS")
+    closes = parent.get("capture_closure", [])
+    need(len(closes) == 2 and {row.get("name") for row in closes} == {"stdout", "stderr"}
+         and all(all(row.get(k) is True for k in ("close_attempted", "close_returned", "wrapper_closed"))
+                 and "error" not in row for row in closes), "prior original parent capture close differs")
+    plan = json.loads(pinned(PLAN, PLAN_SHA))
+    execution = json.loads(pinned(EXECUTION, EXECUTION_SHA))
+    need(plan.get("schema") == SCHEMA and plan.get("reviewed") is True and Path(plan["output"]) == PRIOR
+         and plan["payload"]["runner"] == RUNNER_SHA
+         and execution.get("plan_sha256") == PLAN_SHA and execution.get("payload") == plan["payload"],
+         "prior original plan/execution binding differs")
+    argv = parent.get("argv", [])
+    need(len(argv) == 8 and argv[1:4] == ["-I", "-S", "-B"]
+         and Path(argv[5]) == PLAN and argv[6:] == [PLAN_SHA, "--worker"],
+         "prior original worker invocation differs")
+    runner_path = ordinary(argv[4], False)
+    need(runner_path.is_relative_to(TASK), "original runner escaped this task")
+    runner_raw = pinned(runner_path, RUNNER_SHA)
+    for command in plan["commands"]:
+        for side in ("stdout", "stderr"):
+            ordinary(PRIOR / "commands" / (command["name"] + "." + side + ".txt"), False)
+    receiver = types.ModuleType("closed_cache_original_data_receiver")
+    receiver.__file__ = str(runner_path)
+    exec(compile(runner_raw, str(runner_path), "exec"), receiver.__dict__)
+    need(receiver.receive_execution(plan, execution) == "PASS", "original DATA receiver refused the run")
+
+    # Receive the immutable warm producer's Source04e evidence. The currently
+    # authorized Source may have advanced; no live Source04e bytes are borrowed.
+    historical_map_path = TASK / "inputs-successor33-v1" / "warm-cache" / "source04e-input-sha256.json"
+    historical_map_sha = "0469ae9723b651dad46cc35b1e2365a3325785264c2b5d6ad8fe44d28c109697"
+    root_receiving_path = TASK / "inputs-successor33-v1" / "warm-cache" / "warm-v7-root-receiving.json"
+    root_receiving_sha = "9e418d2bcf526571331b1052b8660070e159978fcc4fddeccee9213474a1a3ce"
+    history = json.loads(pinned(historical_map_path, historical_map_sha))
+    received = json.loads(pinned(root_receiving_path, root_receiving_sha))
+    need(history.get("commit") == "04e5b4eadd6407cbff4e04ba453546d278314bd7"
+         and history.get("tree") == "f68f7584dba7744e7607b07f615758f3ff633f54"
+         and history.get("tracked_files") == 3369 and len(history.get("files", {})) == 3369,
+         "closed historical Source04e map differs")
+    need(received.get("status") == "PASS" and received.get("physical_complete") is True
+         and received.get("source_commit") == history["commit"]
+         and received.get("source_tree") == history["tree"]
+         and received.get("plan_sha256") == PLAN_SHA
+         and received.get("parent_sha256") == parent_sha
+         and received.get("execution_sha256") == EXECUTION_SHA
+         and received.get("input_files_verified") == len(plan["input_files"]),
+         "original warm root receiving differs")
+    need(all(plan["input_files"].get(str(Path(history["source_root"]) / relative)) == expected
+             for relative, expected in history["files"].items()),
+         "immutable warm plan does not bind all Source04e bytes")
+
+    own_path = ordinary(Path(__file__).absolute(), False)
+    pins = {str(PLAN): PLAN_SHA, str(EXECUTION): EXECUTION_SHA, str(parent_path): parent_sha,
+            str(runner_path): RUNNER_SHA, str(own_path): digest(own_path),
+            str(historical_map_path): historical_map_sha, str(root_receiving_path): root_receiving_sha}
+    sources, destinations = {}, {}
+    for key in ("GOCACHE", "GOMODCACHE"):
+        source = ordinary(plan["environment"][key], True)
+        destination = ordinary(environment[key], True)
+        need(source != PRIOR / "private" and source.is_relative_to(PRIOR / "private")
+             and destination != output / "private" and destination.is_relative_to(output / "private"),
+             "cache is outside its original/fresh private output: " + key)
+        need(not any(destination.iterdir()), "precreated destination cache is not empty: " + key)
+        sources[key], destinations[key] = source, destination
+    for paths in (sources, destinations):
+        left, right = paths["GOCACHE"], paths["GOMODCACHE"]
+        need(not left.is_relative_to(right) and not right.is_relative_to(left), "cache roots overlap")
+
+    inventories, copied = {}, {}
+    for key, source in sources.items():
+        destination = destinations[key]
+        before = inventory(source)
+        for relative, row in sorted(before.items()):
+            src, dst = source / relative, destination / relative
+            current = src.lstat()
+            need(not current.st_file_attributes & REPARSE and not stat.S_ISLNK(current.st_mode),
+                 "copy source became a reparse entry")
+            if row["kind"] == "directory":
+                need(stat.S_ISDIR(current.st_mode), "copy source directory changed type")
+                dst.mkdir()
+            else:
+                need(stat.S_ISREG(current.st_mode), "copy source file changed type")
+                with src.open("rb") as incoming, dst.open("xb") as outgoing:
+                    shutil.copyfileobj(incoming, outgoing, 1 << 20)
+        need(before == inventory(source) == inventory(destination), "cache byte inventory changed: " + key)
+        inventories[key] = before
+        copied[key] = {"source": str(source), "destination": str(destination),
+                       "files": sum(row["kind"] == "file" for row in before.values()),
+                       "bytes": sum(row.get("bytes", 0) for row in before.values())}
+    for path, pin in pins.items():
+        pinned(path, pin)
+    inventory_path = output / "cache-copy-inventory.json"
+    inventory_sha = write_json(inventory_path, inventories)
+    receipt = {"schema": "fresh-closed-cache-copy-v1", "status": "COPIED",
+               "prior_original_receiver": "PASS", "prior_control_pins": pins, "caches": copied,
+               "inventory": str(inventory_path), "inventory_sha256": inventory_sha,
+               "source_and_destination_byte_inventories_equal": True,
+               "prior_modified": False, "cache_consumer_execution_performed": False}
+    write_json(output / "cache-copy-receipt.json", receipt)
+    return {"status": "COPIED", "caches": copied, "inventory_sha256": inventory_sha}
+
+
+if __name__ == "__main__":
+    need(len(sys.argv)==3,"usage: copy_closed_warm_caches.py NEW_OUTPUT PRIOR_PARENT_SHA256")
+    print(json.dumps(copy_closed_caches(sys.argv[1],sys.argv[2],dict(os.environ))))

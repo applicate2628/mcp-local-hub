@@ -1,0 +1,43 @@
+=== RUN   TestFailureV1CanonicalRoundTrip
+--- PASS: TestFailureV1CanonicalRoundTrip (0.00s)
+=== NAME  
+=== RUN   TestFailureV1DiagnosticUnsupportedProtocolRoundTrip
+--- PASS: TestFailureV1DiagnosticUnsupportedProtocolRoundTrip (0.00s)
+=== NAME  
+=== RUN   TestFailureV1LegacyFallbackIsExactAndBounded
+--- PASS: TestFailureV1LegacyFallbackIsExactAndBounded (0.00s)
+=== NAME  
+=== RUN   TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent
+=== RUN   TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/status_mismatch
+--- PASS: TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/status_mismatch (0.00s)
+=== NAME  TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent
+=== RUN   TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/unknown_key
+--- PASS: TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/unknown_key (0.00s)
+=== NAME  TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent
+=== RUN   TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/duplicate_key
+--- PASS: TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/duplicate_key (0.00s)
+=== NAME  TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent
+=== RUN   TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/non_canonical_whitespace
+--- PASS: TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/non_canonical_whitespace (0.00s)
+=== NAME  TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent
+=== RUN   TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/extra_media_parameter
+--- PASS: TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/extra_media_parameter (0.00s)
+=== NAME  TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent
+=== RUN   TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/oversize
+--- PASS: TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/oversize (0.00s)
+=== NAME  TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent
+=== RUN   TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/malformed_utf8
+--- PASS: TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/malformed_utf8 (0.00s)
+=== NAME  TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent
+--- PASS: TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent (0.00s)
+=== NAME  
+=== RUN   TestFailureV1WriterRejectsUnregisteredOrUnboundedValuesBeforeCommit
+--- PASS: TestFailureV1WriterRejectsUnregisteredOrUnboundedValuesBeforeCommit (0.00s)
+=== NAME  
+=== RUN   TestFailureV1WrongContentTypeIsClassifiedWithoutReadingStreamingBody
+--- PASS: TestFailureV1WrongContentTypeIsClassifiedWithoutReadingStreamingBody (0.00s)
+=== NAME  
+=== RUN   TestIsRetryableFailureIDUsesRegistry
+--- PASS: TestIsRetryableFailureIDUsesRegistry (0.00s)
+=== NAME  
+PASS

@@ -1,0 +1,26 @@
+{
+  "schema": "successor33-namespace-static-receiving-v1",
+  "status": "DATA_ONLY_PASS",
+  "created_utc": "2026-11-28T13:01:22.740170+00:00",
+  "go_compiled": false,
+  "tests_executed": false,
+  "helper_executed": false,
+  "source_written": false,
+  "namespace_failed_receiver_byte_identical": true,
+  "required_root_names": [
+    "TestSecretsInit_RecoveryNamespaceBoundary",
+    "TestSecretsInit_RecoveryNamespaceRetainedDirectory",
+    "TestSecretsInit_RecoveryNamespaceFailurePaths",
+    "TestSupervisorPeerStrictControlConnections",
+    "TestRotateSupervisorStderrSinkIfOversize_AtBoundary",
+    "TestRotateSupervisorStderrSinkIfOversize_ReplacesExistingBackup",
+    "TestSupervisorStderrSinkOversize_MatchesRotationThreshold"
+  ],
+  "short_namespace_temp_characters": 40,
+  "short_temp_child_characters": 31,
+  "source_commit": "04e5b4eadd6407cbff4e04ba453546d278314bd7",
+  "limitations": [
+    "Go compilation/native behavior unverified",
+    "Concrete compiled helper and tagged Product bindings pending"
+  ]
+}

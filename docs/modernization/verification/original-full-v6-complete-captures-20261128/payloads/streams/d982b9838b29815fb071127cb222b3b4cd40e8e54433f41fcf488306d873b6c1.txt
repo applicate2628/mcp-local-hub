@@ -1,0 +1,441 @@
+=== RUN   TestPreparePublisherSourceCannotEmitMixedCommitTreeWhenHeadSwitchesWithinBothObservations
+--- PASS: TestPreparePublisherSourceCannotEmitMixedCommitTreeWhenHeadSwitchesWithinBothObservations (0.01s)
+=== NAME  
+=== RUN   TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes
+=== RUN   TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes/false
+--- PASS: TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes/false (0.01s)
+=== NAME  TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes
+=== RUN   TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes/true
+--- PASS: TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes/true (0.01s)
+=== NAME  TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes
+--- PASS: TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes (0.02s)
+=== NAME  
+=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess
+=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/commit
+--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/commit (0.00s)
+=== NAME  TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess
+=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/commit_mismatch
+--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/commit_mismatch (0.00s)
+=== NAME  TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess
+=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/duplicate
+--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/duplicate (0.00s)
+=== NAME  TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess
+=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/case
+--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/case (0.00s)
+=== NAME  TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess
+=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/directory
+--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/directory (0.00s)
+=== NAME  TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess
+=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/traversal
+--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/traversal (0.00s)
+=== NAME  TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess
+=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/empty
+--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/empty (0.00s)
+=== NAME  TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess
+=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/glob
+--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/glob (0.00s)
+=== NAME  TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess
+=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/overlap
+--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/overlap (0.00s)
+=== NAME  TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess
+=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/snapshot_overlap
+--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/snapshot_overlap (0.00s)
+=== NAME  TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess
+=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/existing
+--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/existing (0.00s)
+=== NAME  TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess
+=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/unmerged
+--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/unmerged (0.00s)
+=== NAME  TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess
+=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/link
+--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/link (0.00s)
+=== NAME  TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess
+=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/git_drift
+--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/git_drift (0.03s)
+=== NAME  TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess
+=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/head_drift
+--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/head_drift (0.01s)
+=== NAME  TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess
+=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/source_drift
+--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/source_drift (0.01s)
+=== NAME  TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess
+=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/cancel
+--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/cancel (0.00s)
+=== NAME  TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess
+--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess (0.05s)
+=== NAME  
+=== RUN   TestPreparePublisherSourceOutputFailureRollsBackOwnedLeaves
+--- PASS: TestPreparePublisherSourceOutputFailureRollsBackOwnedLeaves (0.03s)
+=== NAME  
+=== RUN   TestPreparePublisherSourcePreservesExecutableMode
+    source_prepare_test.go:287: Windows has no executable permission bits
+--- SKIP: TestPreparePublisherSourcePreservesExecutableMode (0.00s)
+=== NAME  
+=== RUN   TestPortableCanonicalEntryBuildObservationDataAndIndependentBinding
+--- PASS: TestPortableCanonicalEntryBuildObservationDataAndIndependentBinding (0.00s)
+=== NAME  
+=== RUN   TestPortableCanonicalEntryBuildObservationRefusesHardlinkAlias
+--- PASS: TestPortableCanonicalEntryBuildObservationRefusesHardlinkAlias (0.00s)
+=== NAME  
+=== RUN   TestPortableCanonicalEntryBuildIdentitySizeBoundary
+=== RUN   TestPortableCanonicalEntryBuildIdentitySizeBoundary/limit
+--- PASS: TestPortableCanonicalEntryBuildIdentitySizeBoundary/limit (0.00s)
+=== NAME  TestPortableCanonicalEntryBuildIdentitySizeBoundary
+=== RUN   TestPortableCanonicalEntryBuildIdentitySizeBoundary/limit_plus_one
+--- PASS: TestPortableCanonicalEntryBuildIdentitySizeBoundary/limit_plus_one (0.00s)
+=== NAME  TestPortableCanonicalEntryBuildIdentitySizeBoundary
+--- PASS: TestPortableCanonicalEntryBuildIdentitySizeBoundary (0.01s)
+=== NAME  
+=== RUN   TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch
+=== RUN   TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch/absent_no_expected_epoch
+--- PASS: TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch/absent_no_expected_epoch (0.00s)
+=== NAME  TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch
+=== RUN   TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch/malformed_present
+--- PASS: TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch/malformed_present (0.00s)
+=== NAME  TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch
+=== RUN   TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch/unknown_source_version
+--- PASS: TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch/unknown_source_version (0.00s)
+=== NAME  TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch
+--- PASS: TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch (0.01s)
+=== NAME  
+=== RUN   TestOriginalCanonicalEntrySetBuildBindingAndRetainedGuards
+--- PASS: TestOriginalCanonicalEntrySetBuildBindingAndRetainedGuards (0.00s)
+=== NAME  
+=== RUN   TestOriginalCanonicalEntryIdentitySizeBoundary
+=== RUN   TestOriginalCanonicalEntryIdentitySizeBoundary/limit
+--- PASS: TestOriginalCanonicalEntryIdentitySizeBoundary/limit (0.00s)
+=== NAME  TestOriginalCanonicalEntryIdentitySizeBoundary
+=== RUN   TestOriginalCanonicalEntryIdentitySizeBoundary/limit_plus_one
+--- PASS: TestOriginalCanonicalEntryIdentitySizeBoundary/limit_plus_one (0.00s)
+=== NAME  TestOriginalCanonicalEntryIdentitySizeBoundary
+--- PASS: TestOriginalCanonicalEntryIdentitySizeBoundary (0.01s)
+=== NAME  
+=== RUN   TestCanonicalEntryPriorIdentitySizeBoundPreservesOriginalBytes
+--- PASS: TestCanonicalEntryPriorIdentitySizeBoundPreservesOriginalBytes (0.04s)
+=== NAME  
+=== RUN   TestOriginalCanonicalEntryRefusesSubstitutedEntryAndRetainsPartialOwner
+--- PASS: TestOriginalCanonicalEntryRefusesSubstitutedEntryAndRetainsPartialOwner (0.00s)
+=== NAME  
+=== RUN   TestOriginalCanonicalEntryMissingIdentityClosesEveryPartialGuard
+--- PASS: TestOriginalCanonicalEntryMissingIdentityClosesEveryPartialGuard (0.00s)
+=== NAME  
+=== RUN   TestOriginalCanonicalEntrySetCompleteRelocationAndWrongExpectedGeneration
+--- PASS: TestOriginalCanonicalEntrySetCompleteRelocationAndWrongExpectedGeneration (0.00s)
+=== NAME  
+=== RUN   TestCanonicalEntryStageReceivesBytesAndTransfersDispositionOnlyOnce
+--- PASS: TestCanonicalEntryStageReceivesBytesAndTransfersDispositionOnlyOnce (0.03s)
+=== NAME  
+=== RUN   TestCanonicalEntryStageCloseBeforeTakeCleansOnlyOriginalStages
+--- PASS: TestCanonicalEntryStageCloseBeforeTakeCleansOnlyOriginalStages (0.02s)
+=== NAME  
+=== RUN   TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile
+=== RUN   TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile/writer-live
+--- PASS: TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile/writer-live (0.00s)
+=== NAME  TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile
+=== RUN   TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile/changed-before-seal
+--- PASS: TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile/changed-before-seal (0.00s)
+=== NAME  TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile
+=== RUN   TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile/unchanged
+--- PASS: TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile/unchanged (0.00s)
+=== NAME  TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile
+--- PASS: TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile (0.00s)
+=== NAME  
+=== RUN   TestCanonicalEntryStageRefusesRedirectedInstallationDirectory
+--- PASS: TestCanonicalEntryStageRefusesRedirectedInstallationDirectory (0.05s)
+=== NAME  
+=== RUN   TestCanonicalEntryStageOriginalMoveDeniesForeignSwapAtPromotionBarrier
+--- PASS: TestCanonicalEntryStageOriginalMoveDeniesForeignSwapAtPromotionBarrier (0.02s)
+=== NAME  
+=== RUN   TestOriginalCanonicalEntryRefusesHardlinkedObjects
+--- PASS: TestOriginalCanonicalEntryRefusesHardlinkedObjects (0.00s)
+=== NAME  
+=== RUN   TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement
+=== RUN   TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement/inverse
+--- PASS: TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement/inverse (0.02s)
+=== NAME  TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement
+=== RUN   TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement/commit
+--- PASS: TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement/commit (0.02s)
+=== NAME  TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement
+--- PASS: TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement (0.03s)
+=== NAME  
+=== RUN   TestCanonicalEntryDiscardRefusesActualShortAliasOfCanonicalProduct
+    windows_canonical_entry_native_windows_test.go:820: filesystem supplied no distinct qualified directory short alias: "mcphub-product"
+--- SKIP: TestCanonicalEntryDiscardRefusesActualShortAliasOfCanonicalProduct (0.00s)
+=== NAME  
+=== RUN   TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime
+=== RUN   TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/legacy
+--- PASS: TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/legacy (0.02s)
+=== NAME  TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime
+=== RUN   TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/complete
+--- PASS: TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/complete (0.02s)
+=== NAME  TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime
+=== RUN   TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/absent
+--- PASS: TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/absent (0.02s)
+=== NAME  TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime
+=== RUN   TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/partial
+--- PASS: TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/partial (0.02s)
+=== NAME  TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime
+--- PASS: TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime (0.06s)
+=== NAME  
+=== RUN   TestOriginalOwnerAwareImageProofUsesActualCurrentProcessHandle
+--- PASS: TestOriginalOwnerAwareImageProofUsesActualCurrentProcessHandle (0.02s)
+=== NAME  
+=== RUN   TestOriginalPayloadParentObservationRefusesAppearedDirectory
+--- PASS: TestOriginalPayloadParentObservationRefusesAppearedDirectory (0.04s)
+=== NAME  
+=== RUN   TestOriginalPayloadParentObservationDistinguishesMissingProductLeaf
+--- PASS: TestOriginalPayloadParentObservationDistinguishesMissingProductLeaf (0.01s)
+=== NAME  
+=== RUN   TestOriginalPayloadDirectoryEmptyInverseAndBorrowCustody
+--- PASS: TestOriginalPayloadDirectoryEmptyInverseAndBorrowCustody (0.02s)
+=== NAME  
+=== RUN   TestPayloadDirectoryColdReacquisitionPreservesForeignEmpty
+--- PASS: TestPayloadDirectoryColdReacquisitionPreservesForeignEmpty (0.02s)
+=== NAME  
+=== RUN   TestPayloadDirectoryColdReacquiresPriorPresentWithoutDeleteAccess
+--- PASS: TestPayloadDirectoryColdReacquiresPriorPresentWithoutDeleteAccess (0.02s)
+=== NAME  
+=== RUN   TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved
+=== RUN   TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved/prior-present
+--- PASS: TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved/prior-present (0.36s)
+=== NAME  TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved
+=== RUN   TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved/created-nonempty
+--- PASS: TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved/created-nonempty (0.02s)
+=== NAME  TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved
+--- PASS: TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved (0.38s)
+=== NAME  
+=== RUN   TestPayloadDirectoryAuthorizedAbsenceAfterDisposeCrash
+--- PASS: TestPayloadDirectoryAuthorizedAbsenceAfterDisposeCrash (0.02s)
+=== NAME  
+=== RUN   TestCanonicalRecoveryOriginalAsideRestoreAndBorrowedRuntimeFence
+--- PASS: TestCanonicalRecoveryOriginalAsideRestoreAndBorrowedRuntimeFence (0.00s)
+=== NAME  
+=== RUN   TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias
+=== RUN   TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias/missing
+--- PASS: TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias/missing (0.00s)
+=== NAME  TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias
+=== RUN   TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias/hash-mismatch
+--- PASS: TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias/hash-mismatch (0.00s)
+=== NAME  TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias
+=== RUN   TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias/cross-side-alias
+--- PASS: TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias/cross-side-alias (0.00s)
+=== NAME  TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias
+--- PASS: TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias (0.00s)
+=== NAME  
+=== RUN   TestCanonicalRecoverySelectedAbsenceDoesNotClaimFinalVacancy
+--- PASS: TestCanonicalRecoverySelectedAbsenceDoesNotClaimFinalVacancy (0.00s)
+=== NAME  
+=== RUN   TestCanonicalEntryCommentsPreservesExactPriorAndSourceEpoch
+--- PASS: TestCanonicalEntryCommentsPreservesExactPriorAndSourceEpoch (0.00s)
+=== NAME  
+=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords
+=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/missing_digest
+--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/missing_digest (0.00s)
+=== NAME  TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords
+=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/trailing_newline
+--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/trailing_newline (0.00s)
+=== NAME  TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords
+=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/trailing_document
+--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/trailing_document (0.00s)
+=== NAME  TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords
+=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/wrong_reverse
+--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/wrong_reverse (0.00s)
+=== NAME  TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords
+=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/unknown_version
+--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/unknown_version (0.00s)
+=== NAME  TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords
+=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/case_variant
+--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/case_variant (0.00s)
+=== NAME  TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords
+=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/uppercase_digest
+--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/uppercase_digest (0.00s)
+=== NAME  TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords
+=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/whitespace
+--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/whitespace (0.00s)
+=== NAME  TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords
+=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/missing_inserted_LF
+--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/missing_inserted_LF (0.00s)
+=== NAME  TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords
+=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/duplicate_marker
+--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/duplicate_marker (0.00s)
+=== NAME  TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords
+=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/unknown_key
+--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/unknown_key (0.00s)
+=== NAME  TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords
+=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/duplicate_decoded_key
+--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/duplicate_decoded_key (0.00s)
+=== NAME  TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords
+--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords (0.00s)
+=== NAME  
+=== RUN   TestCanonicalEntryIdentityV1RejectsExtensionsDuplicatesAndDefaultInputs
+--- PASS: TestCanonicalEntryIdentityV1RejectsExtensionsDuplicatesAndDefaultInputs (0.00s)
+=== NAME  
+=== RUN   TestCanonicalEntryIdentityV1SizeBoundary
+--- PASS: TestCanonicalEntryIdentityV1SizeBoundary (0.00s)
+=== NAME  
+=== RUN   TestCanonicalEntryRegistry3IsClosedAndRetainsFalseFields
+--- PASS: TestCanonicalEntryRegistry3IsClosedAndRetainsFalseFields (0.00s)
+=== NAME  
+=== RUN   TestCanonicalEntrySnapshotJSONPreservesNativeArtifactFields
+--- PASS: TestCanonicalEntrySnapshotJSONPreservesNativeArtifactFields (0.00s)
+=== NAME  
+=== RUN   TestWindowsProductRoleAdmissionBindsExactIdentityAndHash
+--- PASS: TestWindowsProductRoleAdmissionBindsExactIdentityAndHash (0.00s)
+=== NAME  
+=== RUN   TestWindowsPEAdmission
+=== RUN   TestWindowsPEAdmission/PE32
+--- PASS: TestWindowsPEAdmission/PE32 (0.00s)
+=== NAME  TestWindowsPEAdmission
+=== RUN   TestWindowsPEAdmission/PE32+
+--- PASS: TestWindowsPEAdmission/PE32+ (0.00s)
+=== NAME  TestWindowsPEAdmission
+--- PASS: TestWindowsPEAdmission (0.00s)
+=== NAME  
+=== RUN   TestValidateWindowsNativeImage
+=== RUN   TestValidateWindowsNativeImage/accepts_extensionless_PE_image
+--- PASS: TestValidateWindowsNativeImage/accepts_extensionless_PE_image (0.00s)
+=== NAME  TestValidateWindowsNativeImage
+=== RUN   TestValidateWindowsNativeImage/rejects_extensionless_shell_text
+--- PASS: TestValidateWindowsNativeImage/rejects_extensionless_shell_text (0.00s)
+=== NAME  TestValidateWindowsNativeImage
+=== RUN   TestValidateWindowsNativeImage/rejects_corrupt_PE
+--- PASS: TestValidateWindowsNativeImage/rejects_corrupt_PE (0.00s)
+=== NAME  TestValidateWindowsNativeImage
+=== RUN   TestValidateWindowsNativeImage/rejects_PE_DLL
+--- PASS: TestValidateWindowsNativeImage/rejects_PE_DLL (0.00s)
+=== NAME  TestValidateWindowsNativeImage
+--- PASS: TestValidateWindowsNativeImage (0.00s)
+=== NAME  
+=== RUN   TestWindowsUpgradePriorAdmission
+--- PASS: TestWindowsUpgradePriorAdmission (0.00s)
+=== NAME  
+=== RUN   TestWindowsProductPairAdmissionBindsRolesMetadataAndHashes
+--- PASS: TestWindowsProductPairAdmissionBindsRolesMetadataAndHashes (0.00s)
+=== NAME  
+=== RUN   TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine
+=== RUN   TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine/matching_AMD64
+--- PASS: TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine/matching_AMD64 (0.00s)
+=== NAME  TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine
+=== RUN   TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine/matching_ARM64
+--- PASS: TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine/matching_ARM64 (0.00s)
+=== NAME  TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine
+=== RUN   TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine/mixed_AMD64_and_ARM64
+--- PASS: TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine/mixed_AMD64_and_ARM64 (0.00s)
+=== NAME  TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine
+--- PASS: TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine (0.00s)
+=== NAME  
+=== RUN   TestWindowsRoleAdmissionRejectsMetadataValidDLLImages
+=== RUN   TestWindowsRoleAdmissionRejectsMetadataValidDLLImages/cli
+--- PASS: TestWindowsRoleAdmissionRejectsMetadataValidDLLImages/cli (0.00s)
+=== NAME  TestWindowsRoleAdmissionRejectsMetadataValidDLLImages
+=== RUN   TestWindowsRoleAdmissionRejectsMetadataValidDLLImages/windowless
+--- PASS: TestWindowsRoleAdmissionRejectsMetadataValidDLLImages/windowless (0.00s)
+=== NAME  TestWindowsRoleAdmissionRejectsMetadataValidDLLImages
+--- PASS: TestWindowsRoleAdmissionRejectsMetadataValidDLLImages (0.00s)
+=== NAME  
+=== RUN   TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch
+=== RUN   TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch/subsystems_swapped
+--- PASS: TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch/subsystems_swapped (0.00s)
+=== NAME  TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch
+=== RUN   TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch/metadata_differs
+--- PASS: TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch/metadata_differs (0.00s)
+=== NAME  TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch
+=== RUN   TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch/duplicate_role
+--- PASS: TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch/duplicate_role (0.00s)
+=== NAME  TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch
+--- PASS: TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch (0.00s)
+=== NAME  
+=== RUN   TestWindowsProductPairAdmissionDerivesStrictIdentityFromBothArtifacts
+--- PASS: TestWindowsProductPairAdmissionDerivesStrictIdentityFromBothArtifacts (0.00s)
+=== NAME  
+=== RUN   TestWindowsProductPairAdmissionRejectsDuplicateAndMixedArtifactIdentity
+--- PASS: TestWindowsProductPairAdmissionRejectsDuplicateAndMixedArtifactIdentity (0.00s)
+=== NAME  
+=== RUN   TestWindowsProductPairAdmissionIgnoresCallerMetadataAssertions
+--- PASS: TestWindowsProductPairAdmissionIgnoresCallerMetadataAssertions (0.00s)
+=== NAME  
+=== RUN   TestWindowsPEMalformed
+=== RUN   TestWindowsPEMalformed/truncated_DOS
+--- PASS: TestWindowsPEMalformed/truncated_DOS (0.00s)
+=== NAME  TestWindowsPEMalformed
+=== RUN   TestWindowsPEMalformed/missing_MZ
+--- PASS: TestWindowsPEMalformed/missing_MZ (0.00s)
+=== NAME  TestWindowsPEMalformed
+=== RUN   TestWindowsPEMalformed/offset_before_DOS_end
+--- PASS: TestWindowsPEMalformed/offset_before_DOS_end (0.00s)
+=== NAME  TestWindowsPEMalformed
+=== RUN   TestWindowsPEMalformed/offset_beyond_bound
+--- PASS: TestWindowsPEMalformed/offset_beyond_bound (0.00s)
+=== NAME  TestWindowsPEMalformed
+=== RUN   TestWindowsPEMalformed/truncated_PE
+--- PASS: TestWindowsPEMalformed/truncated_PE (0.00s)
+=== NAME  TestWindowsPEMalformed
+=== RUN   TestWindowsPEMalformed/missing_signature
+--- PASS: TestWindowsPEMalformed/missing_signature (0.00s)
+=== NAME  TestWindowsPEMalformed
+=== RUN   TestWindowsPEMalformed/small_optional_header
+--- PASS: TestWindowsPEMalformed/small_optional_header (0.00s)
+=== NAME  TestWindowsPEMalformed
+=== RUN   TestWindowsPEMalformed/unsupported_magic
+--- PASS: TestWindowsPEMalformed/unsupported_magic (0.00s)
+=== NAME  TestWindowsPEMalformed
+--- PASS: TestWindowsPEMalformed (0.01s)
+=== NAME  
+=== RUN   TestWindowsPEBoundedRead
+--- PASS: TestWindowsPEBoundedRead (0.00s)
+=== NAME  
+=== RUN   TestPrivatePublisherMetadataNeverAdmitsOrdinaryProduct
+--- PASS: TestPrivatePublisherMetadataNeverAdmitsOrdinaryProduct (0.00s)
+=== NAME  
+=== RUN   TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity
+=== RUN   TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/unmarked
+--- PASS: TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/unmarked (0.00s)
+=== NAME  TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity
+=== RUN   TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/malformed_epoch
+--- PASS: TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/malformed_epoch (0.00s)
+=== NAME  TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity
+=== RUN   TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/duplicate_epoch
+--- PASS: TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/duplicate_epoch (0.00s)
+=== NAME  TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity
+=== RUN   TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/wrong_entry_name
+--- PASS: TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/wrong_entry_name (0.00s)
+=== NAME  TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity
+=== RUN   TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/console_subsystem
+--- PASS: TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/console_subsystem (0.00s)
+=== NAME  TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity
+--- PASS: TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity (0.00s)
+=== NAME  
+=== RUN   TestAdmitWindowsRuntimeLibrary
+=== RUN   TestAdmitWindowsRuntimeLibrary/wrong_machine
+--- PASS: TestAdmitWindowsRuntimeLibrary/wrong_machine (0.00s)
+=== NAME  TestAdmitWindowsRuntimeLibrary
+=== RUN   TestAdmitWindowsRuntimeLibrary/not_a_DLL
+--- PASS: TestAdmitWindowsRuntimeLibrary/not_a_DLL (0.00s)
+=== NAME  TestAdmitWindowsRuntimeLibrary
+=== RUN   TestAdmitWindowsRuntimeLibrary/missing_export
+--- PASS: TestAdmitWindowsRuntimeLibrary/missing_export (0.00s)
+=== NAME  TestAdmitWindowsRuntimeLibrary
+=== RUN   TestAdmitWindowsRuntimeLibrary/extra_export
+--- PASS: TestAdmitWindowsRuntimeLibrary/extra_export (0.00s)
+=== NAME  TestAdmitWindowsRuntimeLibrary
+=== RUN   TestAdmitWindowsRuntimeLibrary/malformed_name_RVA
+--- PASS: TestAdmitWindowsRuntimeLibrary/malformed_name_RVA (0.00s)
+=== NAME  TestAdmitWindowsRuntimeLibrary
+--- PASS: TestAdmitWindowsRuntimeLibrary (0.00s)
+=== NAME  
+=== RUN   TestAdmitWindowsRuntimeLibraryRequiresAbsoluteRegularFileAndCanonicalExports
+--- PASS: TestAdmitWindowsRuntimeLibraryRequiresAbsoluteRegularFileAndCanonicalExports (0.00s)
+=== NAME  
+=== RUN   TestRustOwnerRuntimeLibraryRequiresBothSplitExports
+=== RUN   TestRustOwnerRuntimeLibraryRequiresBothSplitExports/mh_wait1
+--- PASS: TestRustOwnerRuntimeLibraryRequiresBothSplitExports/mh_wait1 (0.00s)
+=== NAME  TestRustOwnerRuntimeLibraryRequiresBothSplitExports
+=== RUN   TestRustOwnerRuntimeLibraryRequiresBothSplitExports/mh_close1
+--- PASS: TestRustOwnerRuntimeLibraryRequiresBothSplitExports/mh_close1 (0.00s)
+=== NAME  TestRustOwnerRuntimeLibraryRequiresBothSplitExports
+=== RUN   TestRustOwnerRuntimeLibraryRequiresBothSplitExports/mh_wait1+mh_close1
+--- PASS: TestRustOwnerRuntimeLibraryRequiresBothSplitExports/mh_wait1+mh_close1 (0.00s)
+=== NAME  TestRustOwnerRuntimeLibraryRequiresBothSplitExports
+--- PASS: TestRustOwnerRuntimeLibraryRequiresBothSplitExports (0.00s)
+=== NAME  
+PASS

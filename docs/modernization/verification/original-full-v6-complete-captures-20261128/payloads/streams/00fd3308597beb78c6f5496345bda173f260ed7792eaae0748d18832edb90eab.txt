@@ -1,0 +1,13 @@
+=== RUN   TestResolveProtocolCompatibilityProfile
+=== RUN   TestResolveProtocolCompatibilityProfile/zero_value_is_strict
+--- PASS: TestResolveProtocolCompatibilityProfile/zero_value_is_strict (0.00s)
+=== NAME  TestResolveProtocolCompatibilityProfile
+=== RUN   TestResolveProtocolCompatibilityProfile/legacy_stdio_profile_adds_only_2024
+--- PASS: TestResolveProtocolCompatibilityProfile/legacy_stdio_profile_adds_only_2024 (0.00s)
+=== NAME  TestResolveProtocolCompatibilityProfile
+=== RUN   TestResolveProtocolCompatibilityProfile/unknown_profile
+--- PASS: TestResolveProtocolCompatibilityProfile/unknown_profile (0.00s)
+=== NAME  TestResolveProtocolCompatibilityProfile
+--- PASS: TestResolveProtocolCompatibilityProfile (0.00s)
+=== NAME  
+PASS

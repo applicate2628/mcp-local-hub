@@ -1,0 +1,97 @@
+{
+    "schema":  "publication-original-root-data-audit-v1",
+    "status":  "PASS",
+    "physical_complete":  true,
+    "scope":  "cache-acceptance-commit-20261128-v8",
+    "config_sha256":  "7e695bab3757aa3f4384112a5f031cade81582f4bc7da789f246722221ea276b",
+    "receipt_sha256":  "3ad8230876e52e048d289b9dc97e710c9cca0ce2278f2291f6d394c8a8a5eefa",
+    "root_sha256":  "6693f63fbf509c2a759a977fe3cf19367dc06c1f9988e8760fae77e1a44556b9",
+    "outer_sha256":  "bfed9835cc2cfdb53cb489968aaf8f4f86871960f5515aaeb4a77092db10cf47",
+    "commands_verified":  6,
+    "captures_verified":  12,
+    "results":  [
+                    {
+                        "name":  "head.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rev-parse",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.13644080003723502,
+                        "exit_code":  0,
+                        "stdout_sha256":  "5ebe6358d1f36ad1c8e34db1926b80e71ec95368410d43b6a3e540a04cf4d65a",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "04e5b4eadd6407cbff4e04ba453546d278314bd7\n"
+                    },
+                    {
+                        "name":  "reviewed-parent.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "show",
+                                     "-s",
+                                     "--format=%H%n%P"
+                                 ],
+                        "seconds":  0.036562199937179685,
+                        "exit_code":  0,
+                        "stdout_sha256":  "23a9c73b061181f5bef525a08440b8c8b9f8669b963185e0699e6db820f3ef9c",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "04e5b4eadd6407cbff4e04ba453546d278314bd7\n33eaf8af8fc46cb231f48c70f4775922393245b1\n"
+                    },
+                    {
+                        "name":  "reviewed-staged-tree.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "write-tree"
+                                 ],
+                        "seconds":  0.041986500029452145,
+                        "exit_code":  0,
+                        "stdout_sha256":  "72c193aae7b6179d784a27e615a2ab5243ac24209887fdec7c2b2a61b30bf601",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "bcf1bd3539a8ba5ab54cff123adbb4bc071276d3\n"
+                    },
+                    {
+                        "name":  "commit-pinned-migration-fixtures.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "commit",
+                                     "-m",
+                                     "test: pin migration fixture source to the Serena catalog revision"
+                                 ],
+                        "seconds":  0.1768756000092253,
+                        "exit_code":  0,
+                        "stdout_sha256":  "b4fbe17de4c0c68b901863e4496470647c837c12c4b1e4735b1100ffdd019b24",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "[detached HEAD 74e7563d] test: pin migration fixture source to the Serena catalog revision\n 1 file changed, 2 insertions(+), 2 deletions(-)\n"
+                    },
+                    {
+                        "name":  "committed-identity.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "show",
+                                     "-s",
+                                     "--format=%H%n%T%n%P"
+                                 ],
+                        "seconds":  0.043757000006735325,
+                        "exit_code":  0,
+                        "stdout_sha256":  "f016875688d5e87ff8cd7bc78d753d905fb35f4292675abd3f7cb442556da1e0",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "74e7563db244ede5984834233ce8d59072e92c0a\nbcf1bd3539a8ba5ab54cff123adbb4bc071276d3\n04e5b4eadd6407cbff4e04ba453546d278314bd7\n"
+                    },
+                    {
+                        "name":  "committed-worktree-state.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "status",
+                                     "--porcelain=v1",
+                                     "--untracked-files=all"
+                                 ],
+                        "seconds":  0.05513240001164377,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    }
+                ],
+    "tests_executed":  false,
+    "reviewed_utc":  "2026-11-28T13:16:53.2529435Z"
+}

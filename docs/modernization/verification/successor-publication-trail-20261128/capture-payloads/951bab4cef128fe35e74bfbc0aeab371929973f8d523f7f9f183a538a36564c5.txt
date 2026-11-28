@@ -1,0 +1,8 @@
+ .../attach_client_real_supervisor_windows_test.go  |  2 +-
+ ...rvisor_launch_successor_runtime_windows_test.go |  2 +-
+ .../upgrade_gui_qualified_fixture_windows_test.go  |  8 +--
+ ...nonical_entry_gui_native_replay_windows_test.go |  2 +-
+ ...dows_product_preflight_original_windows_test.go |  2 +-
+ internal/process/jobobject_windows_test.go         | 48 +++++++++++++
+ .../process/run_strictly_contained_windows_test.go | 81 ++++++++++++++++++----
+ 7 files changed, 123 insertions(+), 22 deletions(-)

@@ -1,0 +1,10 @@
+=== RUN   TestRemoveTestMainRootWith_RejectsSilentResidue
+--- PASS: TestRemoveTestMainRootWith_RejectsSilentResidue (0.00s)
+=== NAME  
+=== RUN   TestRemoveTestMainRootWith_RetriesTransientResidueAndVerifiesAbsence
+--- PASS: TestRemoveTestMainRootWith_RetriesTransientResidueAndVerifiesAbsence (0.00s)
+=== NAME  
+=== RUN   TestRemoveTestMainRootWith_ReturnsRemovalCause
+--- PASS: TestRemoveTestMainRootWith_ReturnsRemovalCause (0.00s)
+=== NAME  
+PASS

@@ -1,0 +1,19 @@
+{"Action":"start","Package":"mcp-local-hub/internal/api/binary_discovery"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/binary_discovery","Test":"TestDiscover_FoundInFirstHint"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/binary_discovery","Test":"TestDiscover_FoundInFirstHint","Output":"=== RUN   TestDiscover_FoundInFirstHint\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/binary_discovery","Test":"TestDiscover_FoundInFirstHint","Output":"--- PASS: TestDiscover_FoundInFirstHint (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/binary_discovery","Test":"TestDiscover_FoundInFirstHint"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/binary_discovery","Test":"TestDiscover_Missing"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/binary_discovery","Test":"TestDiscover_Missing","Output":"=== RUN   TestDiscover_Missing\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/binary_discovery","Test":"TestDiscover_Missing","Output":"--- PASS: TestDiscover_Missing (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/binary_discovery","Test":"TestDiscover_Missing"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/binary_discovery","Test":"TestDiscover_WalksInOrder"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/binary_discovery","Test":"TestDiscover_WalksInOrder","Output":"=== RUN   TestDiscover_WalksInOrder\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/binary_discovery","Test":"TestDiscover_WalksInOrder","Output":"--- PASS: TestDiscover_WalksInOrder (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/binary_discovery","Test":"TestDiscover_WalksInOrder"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/binary_discovery","Test":"TestDefaultHints_NonEmpty"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/binary_discovery","Test":"TestDefaultHints_NonEmpty","Output":"=== RUN   TestDefaultHints_NonEmpty\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/binary_discovery","Test":"TestDefaultHints_NonEmpty","Output":"--- PASS: TestDefaultHints_NonEmpty (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/binary_discovery","Test":"TestDefaultHints_NonEmpty"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/binary_discovery","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/binary_discovery"}

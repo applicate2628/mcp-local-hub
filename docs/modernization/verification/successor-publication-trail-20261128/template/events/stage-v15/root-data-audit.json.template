@@ -1,0 +1,164 @@
+{
+    "schema":  "publication-original-root-data-audit-v1",
+    "status":  "PASS",
+    "physical_complete":  true,
+    "scope":  "cache-acceptance-stage-20261128-v15",
+    "config_sha256":  "eeae16b52a14d695d266badcaf6eace9ec29596fdf307a1db46838c3eb4037ed",
+    "receipt_sha256":  "3ae5e72a2fc79739839979305d464a4f2afe41e6448b0a4edb79dc384ed96188",
+    "root_sha256":  "722932e2f5e3ddf81b0d31da8f324cb3c086c4a58652d4cc8d122b4892bdc868",
+    "outer_sha256":  "c710fbb87f243d43a5e79be0fe8924107d2400a84ab439a5c5b8082ffe13180e",
+    "commands_verified":  11,
+    "captures_verified":  22,
+    "results":  [
+                    {
+                        "name":  "head.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rev-parse",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.039669500081799924,
+                        "exit_code":  0,
+                        "stdout_sha256":  "134925bd22595f2e4d5bdd102be956742eca330e9cb923504d5024718c1d4e34",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "74e7563db244ede5984834233ce8d59072e92c0a\n"
+                    },
+                    {
+                        "name":  "starting-worktree-state.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "status",
+                                     "--porcelain=v1",
+                                     "--untracked-files=all"
+                                 ],
+                        "seconds":  0.06238450005184859,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "reviewed-test-patch-check.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "apply",
+                                     "--check",
+                                     "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\successor-breakaway-wait-v1\\original-breakaway-wait.patch"
+                                 ],
+                        "seconds":  0.03924230008851737,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "receive-existing-original-breakaway-wait-error.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "apply",
+                                     "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\successor-breakaway-wait-v1\\original-breakaway-wait.patch"
+                                 ],
+                        "seconds":  0.17122659995220602,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "gofmt-read-only-check.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\gofmt.exe",
+                                     "-l",
+                                     "internal/cli/supervisor_spawn_breakaway_windows_test.go"
+                                 ],
+                        "seconds":  0.12399669992737472,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "test-patch-whitespace.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "diff",
+                                     "--check"
+                                 ],
+                        "seconds":  0.04715080000460148,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "stage-reviewed-test-input.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "add",
+                                     "--",
+                                     "internal/cli/supervisor_spawn_breakaway_windows_test.go"
+                                 ],
+                        "seconds":  0.39036320010200143,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "staged-name-status.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "diff",
+                                     "--cached",
+                                     "--name-status"
+                                 ],
+                        "seconds":  0.041666299919597805,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e69e59fe80f96994220a62326e7b4d1c0893fc8e19dd98b0d745ca2fac9ae39e",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "M\tinternal/cli/supervisor_spawn_breakaway_windows_test.go\n"
+                    },
+                    {
+                        "name":  "reviewed-staged-tree.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "write-tree"
+                                 ],
+                        "seconds":  0.041841600090265274,
+                        "exit_code":  0,
+                        "stdout_sha256":  "b7e1bb5295be80748d128cd67156426babc6f2543105084ced15ab44cc362761",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1\n"
+                    },
+                    {
+                        "name":  "staged-stat.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "diff",
+                                     "--cached",
+                                     "--stat"
+                                 ],
+                        "seconds":  0.0465521999867633,
+                        "exit_code":  0,
+                        "stdout_sha256":  "8ca7322545351daf081fcb6e90957c0e65caedfae298f8b8ec403d98b7f0c41d",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  " internal/cli/supervisor_spawn_breakaway_windows_test.go | 6 +++++-\n 1 file changed, 5 insertions(+), 1 deletion(-)\n"
+                    },
+                    {
+                        "name":  "staged-worktree-state.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "status",
+                                     "--porcelain=v1",
+                                     "--untracked-files=all"
+                                 ],
+                        "seconds":  0.03933050006162375,
+                        "exit_code":  0,
+                        "stdout_sha256":  "5582cad830a9bb46595887d5b28c21d830c2fd287935b12956d7ec688df44e8f",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "M  internal/cli/supervisor_spawn_breakaway_windows_test.go\n"
+                    }
+                ],
+    "tests_executed":  false,
+    "reviewed_utc":  "2026-11-28T13:30:16.4718499Z"
+}

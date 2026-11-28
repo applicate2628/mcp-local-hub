@@ -1,0 +1,575 @@
+=== RUN   TestLastFailureRejectsRelativeWrapperBeforeIO
+--- PASS: TestLastFailureRejectsRelativeWrapperBeforeIO (0.00s)
+=== NAME  
+=== RUN   TestSplitRecordedCommandLineUsesPOSIXQuoting
+--- PASS: TestSplitRecordedCommandLineUsesPOSIXQuoting (0.00s)
+=== NAME  
+=== RUN   TestWrapperMetadataUsesInjectedCommandPlatform
+--- PASS: TestWrapperMetadataUsesInjectedCommandPlatform (0.00s)
+=== NAME  
+=== RUN   TestRedactResultCommandsCoversEveryWireCommand
+--- PASS: TestRedactResultCommandsCoversEveryWireCommand (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_SpecificDriverErrorOutranksAggregateDriverError
+--- PASS: TestLastFailure_SpecificDriverErrorOutranksAggregateDriverError (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_AggregateFirstInFileOrderStillLoses
+--- PASS: TestLastFailure_AggregateFirstInFileOrderStillLoses (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_DiagnosticLogFollowsTheHeadlineAcrossLogs
+--- PASS: TestLastFailure_DiagnosticLogFollowsTheHeadlineAcrossLogs (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_LoneAggregateIsStillTheHeadline
+--- PASS: TestLastFailure_LoneAggregateIsStillTheHeadline (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_LNK2019OutranksLNK1120
+=== RUN   TestLastFailure_LNK2019OutranksLNK1120/msvc_real_order
+--- PASS: TestLastFailure_LNK2019OutranksLNK1120/msvc_real_order (0.00s)
+=== NAME  TestLastFailure_LNK2019OutranksLNK1120
+=== RUN   TestLastFailure_LNK2019OutranksLNK1120/aggregate_first
+--- PASS: TestLastFailure_LNK2019OutranksLNK1120/aggregate_first (0.00s)
+=== NAME  TestLastFailure_LNK2019OutranksLNK1120
+--- PASS: TestLastFailure_LNK2019OutranksLNK1120 (0.00s)
+=== NAME  
+=== RUN   TestMatchDiagnosticLine_TierSweep
+=== RUN   TestMatchDiagnosticLine_TierSweep/gcc/clang_error
+--- PASS: TestMatchDiagnosticLine_TierSweep/gcc/clang_error (0.00s)
+=== NAME  TestMatchDiagnosticLine_TierSweep
+=== RUN   TestMatchDiagnosticLine_TierSweep/gcc/clang_warning
+--- PASS: TestMatchDiagnosticLine_TierSweep/gcc/clang_warning (0.00s)
+=== NAME  TestMatchDiagnosticLine_TierSweep
+=== RUN   TestMatchDiagnosticLine_TierSweep/msvc_compile_w/_code
+--- PASS: TestMatchDiagnosticLine_TierSweep/msvc_compile_w/_code (0.00s)
+=== NAME  TestMatchDiagnosticLine_TierSweep
+=== RUN   TestMatchDiagnosticLine_TierSweep/clang-cl_compile_no_code
+--- PASS: TestMatchDiagnosticLine_TierSweep/clang-cl_compile_no_code (0.00s)
+=== NAME  TestMatchDiagnosticLine_TierSweep
+=== RUN   TestMatchDiagnosticLine_TierSweep/LNK1120_counts_others
+--- PASS: TestMatchDiagnosticLine_TierSweep/LNK1120_counts_others (0.00s)
+=== NAME  TestMatchDiagnosticLine_TierSweep
+=== RUN   TestMatchDiagnosticLine_TierSweep/LNK1169_follows_LNK2005
+--- PASS: TestMatchDiagnosticLine_TierSweep/LNK1169_follows_LNK2005 (0.00s)
+=== NAME  TestMatchDiagnosticLine_TierSweep
+=== RUN   TestMatchDiagnosticLine_TierSweep/LNK2019_names_the_symbol
+--- PASS: TestMatchDiagnosticLine_TierSweep/LNK2019_names_the_symbol (0.00s)
+=== NAME  TestMatchDiagnosticLine_TierSweep
+=== RUN   TestMatchDiagnosticLine_TierSweep/LNK2001_names_the_symbol
+--- PASS: TestMatchDiagnosticLine_TierSweep/LNK2001_names_the_symbol (0.00s)
+=== NAME  TestMatchDiagnosticLine_TierSweep
+=== RUN   TestMatchDiagnosticLine_TierSweep/LNK2005_names_the_symbol
+--- PASS: TestMatchDiagnosticLine_TierSweep/LNK2005_names_the_symbol (0.00s)
+=== NAME  TestMatchDiagnosticLine_TierSweep
+=== RUN   TestMatchDiagnosticLine_TierSweep/LNK1104_names_the_file
+--- PASS: TestMatchDiagnosticLine_TierSweep/LNK1104_names_the_file (0.00s)
+=== NAME  TestMatchDiagnosticLine_TierSweep
+=== RUN   TestMatchDiagnosticLine_TierSweep/LNK1181_names_the_file
+--- PASS: TestMatchDiagnosticLine_TierSweep/LNK1181_names_the_file (0.00s)
+=== NAME  TestMatchDiagnosticLine_TierSweep
+=== RUN   TestMatchDiagnosticLine_TierSweep/clang-cl_relays_exit_code
+--- PASS: TestMatchDiagnosticLine_TierSweep/clang-cl_relays_exit_code (0.00s)
+=== NAME  TestMatchDiagnosticLine_TierSweep
+=== RUN   TestMatchDiagnosticLine_TierSweep/clang++_relays_exit_code
+--- PASS: TestMatchDiagnosticLine_TierSweep/clang++_relays_exit_code (0.00s)
+=== NAME  TestMatchDiagnosticLine_TierSweep
+=== RUN   TestMatchDiagnosticLine_TierSweep/clang_relays_frontend_exit_code
+--- PASS: TestMatchDiagnosticLine_TierSweep/clang_relays_frontend_exit_code (0.00s)
+=== NAME  TestMatchDiagnosticLine_TierSweep
+=== RUN   TestMatchDiagnosticLine_TierSweep/lld-link_names_the_symbol
+--- PASS: TestMatchDiagnosticLine_TierSweep/lld-link_names_the_symbol (0.00s)
+=== NAME  TestMatchDiagnosticLine_TierSweep
+=== RUN   TestMatchDiagnosticLine_TierSweep/clang-cl_names_the_argument
+--- PASS: TestMatchDiagnosticLine_TierSweep/clang-cl_names_the_argument (0.00s)
+=== NAME  TestMatchDiagnosticLine_TierSweep
+=== RUN   TestMatchDiagnosticLine_TierSweep/clang_names_the_file
+--- PASS: TestMatchDiagnosticLine_TierSweep/clang_names_the_file (0.00s)
+=== NAME  TestMatchDiagnosticLine_TierSweep
+=== RUN   TestMatchDiagnosticLine_TierSweep/ninja_FAILED
+--- PASS: TestMatchDiagnosticLine_TierSweep/ninja_FAILED (0.00s)
+=== NAME  TestMatchDiagnosticLine_TierSweep
+--- PASS: TestMatchDiagnosticLine_TierSweep (0.00s)
+=== NAME  
+=== RUN   TestPR591_DriveQualifiedMSVCLinkerDiagnosticIsSpecific
+--- PASS: TestPR591_DriveQualifiedMSVCLinkerDiagnosticIsSpecific (0.00s)
+=== NAME  
+=== RUN   TestMatchDiagnosticLine_EveryRecognizedLineIsTiered
+--- PASS: TestMatchDiagnosticLine_EveryRecognizedLineIsTiered (0.00s)
+=== NAME  
+=== RUN   TestScanDiagnostics_ClangErrorCountTailStaysUnrecognized
+--- PASS: TestScanDiagnostics_ClangErrorCountTailStaysUnrecognized (0.00s)
+=== NAME  
+=== RUN   TestRankDiagnostics_FirstOccurrencePreservedWithinTier
+--- PASS: TestRankDiagnostics_FirstOccurrencePreservedWithinTier (0.00s)
+=== NAME  
+=== RUN   TestHeadlineErrorDiagnostic_MatchesRankedIndexZero
+--- PASS: TestHeadlineErrorDiagnostic_MatchesRankedIndexZero (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_RelativeBuildtreesRoot_Refused
+--- PASS: TestLastFailure_RelativeBuildtreesRoot_Refused (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_RelativeRootParam_Refused
+--- PASS: TestLastFailure_RelativeRootParam_Refused (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_RelativeWrapperBuildtreesRoot_Refused
+--- PASS: TestLastFailure_RelativeWrapperBuildtreesRoot_Refused (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_PortNameEscapingBuildtreesRoot_Refused
+--- PASS: TestLastFailure_PortNameEscapingBuildtreesRoot_Refused (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_BuildtreesRootUnreadable_NotReportedAsCleaned
+--- PASS: TestLastFailure_BuildtreesRootUnreadable_NotReportedAsCleaned (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_PortDirUnreadable_NotReportedAsNotFound
+--- PASS: TestLastFailure_PortDirUnreadable_NotReportedAsNotFound (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_UnreadablePhaseLog_NoConfidentVerdict
+--- PASS: TestLastFailure_UnreadablePhaseLog_NoConfidentVerdict (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_WarningOnlyLog_NotAFailure
+--- PASS: TestLastFailure_WarningOnlyLog_NotAFailure (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_ErrorOutranksLaterPhaseWarning
+--- PASS: TestLastFailure_ErrorOutranksLaterPhaseWarning (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_IncompleteWrapperList_NeverConfirmsNoFailure
+--- PASS: TestLastFailure_IncompleteWrapperList_NeverConfirmsNoFailure (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_CompleteWrapperListStillConfirms
+--- PASS: TestLastFailure_CompleteWrapperListStillConfirms (0.00s)
+=== NAME  
+=== RUN   TestWrapperInfo_FailedPortsListIsComplete
+--- PASS: TestWrapperInfo_FailedPortsListIsComplete (0.00s)
+=== NAME  
+=== RUN   TestParseWrapperContent_ScanErrorSurfaced
+--- PASS: TestParseWrapperContent_ScanErrorSurfaced (0.00s)
+=== NAME  
+=== RUN   TestSplitWindowsCommandLine_MatchesRealCommandLineToArgvW
+--- PASS: TestSplitWindowsCommandLine_MatchesRealCommandLineToArgvW (0.00s)
+=== NAME  
+=== RUN   TestParseWrapperContent_QuotedRootWithSpaces
+--- PASS: TestParseWrapperContent_QuotedRootWithSpaces (0.00s)
+=== NAME  
+=== RUN   TestDefaultDeps_GetenvReadsRealEnvironment
+--- PASS: TestDefaultDeps_GetenvReadsRealEnvironment (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_OverlayChainFromEnv
+--- PASS: TestLastFailure_OverlayChainFromEnv (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_ErrorRankedFirst_AboveWarningFlood
+--- PASS: TestLastFailure_ErrorRankedFirst_AboveWarningFlood (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_DiagnosticOrdering_SeverityThenFirstOccurrence
+--- PASS: TestLastFailure_DiagnosticOrdering_SeverityThenFirstOccurrence (0.00s)
+=== NAME  
+=== RUN   TestScanDiagnostics_LateErrorSurvivesWarningFlood
+--- PASS: TestScanDiagnostics_LateErrorSurvivesWarningFlood (0.00s)
+=== NAME  
+=== RUN   TestReadMetadataLimited_BoundsBeforeMaterializing
+--- PASS: TestReadMetadataLimited_BoundsBeforeMaterializing (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_OversizeLog_FailsClosedNotSilentlyTruncated
+--- PASS: TestLastFailure_OversizeLog_FailsClosedNotSilentlyTruncated (1.91s)
+=== NAME  
+=== RUN   TestLastFailure_ExactCommand_IsVcpkgInvocationNotMakeTrace
+--- PASS: TestLastFailure_ExactCommand_IsVcpkgInvocationNotMakeTrace (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_ExactCommand_AbsentRatherThanWrongLayer
+--- PASS: TestLastFailure_ExactCommand_AbsentRatherThanWrongLayer (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_BuildCommand_CarriesTheSubInvocation
+--- PASS: TestLastFailure_BuildCommand_CarriesTheSubInvocation (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_BuildCommand_MatchesTheDiagnosticBearingConfiguration
+--- PASS: TestLastFailure_BuildCommand_MatchesTheDiagnosticBearingConfiguration (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_OverlayChainNote_DescribesInputNotTheBuild
+--- PASS: TestLastFailure_OverlayChainNote_DescribesInputNotTheBuild (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_WrapperNotSuppliedVsNotFoundVsUnreadable
+--- PASS: TestLastFailure_WrapperNotSuppliedVsNotFoundVsUnreadable (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_OverlayChainFromConfigFile_NotLabelledExplicitParam
+--- PASS: TestLastFailure_OverlayChainFromConfigFile_NotLabelledExplicitParam (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_ExplicitRootThatIsNotAVcpkgTree_NotReportedAsUnspecified
+--- PASS: TestLastFailure_ExplicitRootThatIsNotAVcpkgTree_NotReportedAsUnspecified (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_AbsentBuildtreesRoot_DescribesAbsenceNotItsCause
+--- PASS: TestLastFailure_AbsentBuildtreesRoot_DescribesAbsenceNotItsCause (0.00s)
+=== NAME  
+=== RUN   TestDetectInterrupted_MarkerMustBeAWholeLine
+=== RUN   TestDetectInterrupted_MarkerMustBeAWholeLine/MSVC_diagnostic_whose_path_contains_the_phrase
+--- PASS: TestDetectInterrupted_MarkerMustBeAWholeLine/MSVC_diagnostic_whose_path_contains_the_phrase (0.00s)
+=== NAME  TestDetectInterrupted_MarkerMustBeAWholeLine
+=== RUN   TestDetectInterrupted_MarkerMustBeAWholeLine/ninja_-v_echo_of_a_command_line_carrying_the_phrase
+--- PASS: TestDetectInterrupted_MarkerMustBeAWholeLine/ninja_-v_echo_of_a_command_line_carrying_the_phrase (0.00s)
+=== NAME  TestDetectInterrupted_MarkerMustBeAWholeLine
+=== RUN   TestDetectInterrupted_MarkerMustBeAWholeLine/clang_echoing_the_offending_source_line
+--- PASS: TestDetectInterrupted_MarkerMustBeAWholeLine/clang_echoing_the_offending_source_line (0.00s)
+=== NAME  TestDetectInterrupted_MarkerMustBeAWholeLine
+=== RUN   TestDetectInterrupted_MarkerMustBeAWholeLine/the_project's_own_CMake_status_line
+--- PASS: TestDetectInterrupted_MarkerMustBeAWholeLine/the_project's_own_CMake_status_line (0.00s)
+=== NAME  TestDetectInterrupted_MarkerMustBeAWholeLine
+=== RUN   TestDetectInterrupted_MarkerMustBeAWholeLine/ninja's_own_narration_quoted_inside_a_longer_message
+--- PASS: TestDetectInterrupted_MarkerMustBeAWholeLine/ninja's_own_narration_quoted_inside_a_longer_message (0.00s)
+=== NAME  TestDetectInterrupted_MarkerMustBeAWholeLine
+--- PASS: TestDetectInterrupted_MarkerMustBeAWholeLine (0.00s)
+=== NAME  
+=== RUN   TestDetectInterrupted_RealProducerLinesAreStillDetected
+=== RUN   TestDetectInterrupted_RealProducerLinesAreStillDetected/the_observed_real_sequence_(scout_pass_boost-thread;_fixture_interruptedlib)
+--- PASS: TestDetectInterrupted_RealProducerLinesAreStillDetected/the_observed_real_sequence_(scout_pass_boost-thread;_fixture_interruptedlib) (0.00s)
+=== NAME  TestDetectInterrupted_RealProducerLinesAreStillDetected
+=== RUN   TestDetectInterrupted_RealProducerLinesAreStillDetected/subprocess_line_alone
+--- PASS: TestDetectInterrupted_RealProducerLinesAreStillDetected/subprocess_line_alone (0.00s)
+=== NAME  TestDetectInterrupted_RealProducerLinesAreStillDetected
+=== RUN   TestDetectInterrupted_RealProducerLinesAreStillDetected/ninja_narration_alone
+--- PASS: TestDetectInterrupted_RealProducerLinesAreStillDetected/ninja_narration_alone (0.00s)
+=== NAME  TestDetectInterrupted_RealProducerLinesAreStillDetected
+=== RUN   TestDetectInterrupted_RealProducerLinesAreStillDetected/CRLF_log
+--- PASS: TestDetectInterrupted_RealProducerLinesAreStillDetected/CRLF_log (0.00s)
+=== NAME  TestDetectInterrupted_RealProducerLinesAreStillDetected
+=== RUN   TestDetectInterrupted_RealProducerLinesAreStillDetected/indented_by_a_capture_wrapper
+--- PASS: TestDetectInterrupted_RealProducerLinesAreStillDetected/indented_by_a_capture_wrapper (0.00s)
+=== NAME  TestDetectInterrupted_RealProducerLinesAreStillDetected
+=== RUN   TestDetectInterrupted_RealProducerLinesAreStillDetected/no_trailing_newline_at_end_of_file
+--- PASS: TestDetectInterrupted_RealProducerLinesAreStillDetected/no_trailing_newline_at_end_of_file (0.00s)
+=== NAME  TestDetectInterrupted_RealProducerLinesAreStillDetected
+=== RUN   TestDetectInterrupted_RealProducerLinesAreStillDetected/carriage-return_separated_(terminal_overwrite_retained_in_a_capture)
+--- PASS: TestDetectInterrupted_RealProducerLinesAreStillDetected/carriage-return_separated_(terminal_overwrite_retained_in_a_capture) (0.00s)
+=== NAME  TestDetectInterrupted_RealProducerLinesAreStillDetected
+--- PASS: TestDetectInterrupted_RealProducerLinesAreStillDetected (0.00s)
+=== NAME  
+=== RUN   TestParseWrapperContent_RealShapedFixture
+--- PASS: TestParseWrapperContent_RealShapedFixture (0.00s)
+=== NAME  
+=== RUN   TestParseWrapperContent_Malformed
+--- PASS: TestParseWrapperContent_Malformed (0.00s)
+=== NAME  
+=== RUN   TestScanDiagnostics_FilenameTrapsNeverMatch
+--- PASS: TestScanDiagnostics_FilenameTrapsNeverMatch (0.00s)
+=== NAME  
+=== RUN   TestScanDiagnostics_MSVCCompileErrorMatches
+--- PASS: TestScanDiagnostics_MSVCCompileErrorMatches (0.00s)
+=== NAME  
+=== RUN   TestScanDiagnostics_MSVCWarningWithErrorLikeFilenameStillMatchesAsWarning
+--- PASS: TestScanDiagnostics_MSVCWarningWithErrorLikeFilenameStillMatchesAsWarning (0.00s)
+=== NAME  
+=== RUN   TestScanDiagnostics_GCCClangShape
+--- PASS: TestScanDiagnostics_GCCClangShape (0.00s)
+=== NAME  
+=== RUN   TestScanDiagnostics_ScoutPassTraps_NeverMatch
+--- PASS: TestScanDiagnostics_ScoutPassTraps_NeverMatch (0.00s)
+=== NAME  
+=== RUN   TestScanDiagnostics_RealScoutPassSample_MSVCFatalErrorPlusNinjaFailed
+--- PASS: TestScanDiagnostics_RealScoutPassSample_MSVCFatalErrorPlusNinjaFailed (0.00s)
+=== NAME  
+=== RUN   TestDetectInterrupted
+--- PASS: TestDetectInterrupted (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_Case_A_BuildtreesPlusWrapper
+--- PASS: TestLastFailure_Case_A_BuildtreesPlusWrapper (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_Case_B_BuildtreesOnly_NoWrapper
+--- PASS: TestLastFailure_Case_B_BuildtreesOnly_NoWrapper (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_Case_C_WrapperMalformed_Degrades
+--- PASS: TestLastFailure_Case_C_WrapperMalformed_Degrades (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_Case_D_BuildtreesRootAbsent
+--- PASS: TestLastFailure_Case_D_BuildtreesRootAbsent (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_PortDirNotFound
+--- PASS: TestLastFailure_PortDirNotFound (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_NoPhaseLogsFound
+--- PASS: TestLastFailure_NoPhaseLogsFound (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_SuccessfulPort_NoDiagnostic_NeverFabricates
+--- PASS: TestLastFailure_SuccessfulPort_NoDiagnostic_NeverFabricates (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_WrapperConfirmsPortDidNotFail
+--- PASS: TestLastFailure_WrapperConfirmsPortDidNotFail (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_MultipleFailedPortsAmbiguous_NeverSilentlyPicks
+--- PASS: TestLastFailure_MultipleFailedPortsAmbiguous_NeverSilentlyPicks (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_BuildInterrupted_NotReportedAsFailure
+--- PASS: TestLastFailure_BuildInterrupted_NotReportedAsFailure (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_PatchPhaseFileRecognized_InSituWithRealFailure
+--- PASS: TestLastFailure_PatchPhaseFileRecognized_InSituWithRealFailure (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_SuccessfulPatchAlone_NeverFabricatesFailure
+--- PASS: TestLastFailure_SuccessfulPatchAlone_NeverFabricatesFailure (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_CapabilityProbeOnly_NeverReportedAsFailure
+--- PASS: TestLastFailure_CapabilityProbeOnly_NeverReportedAsFailure (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_PortNotSpecified_NoWrapperNoPort
+--- PASS: TestLastFailure_PortNotSpecified_NoWrapperNoPort (0.00s)
+=== NAME  
+=== RUN   TestNormalizeLogLine
+--- PASS: TestNormalizeLogLine (0.00s)
+=== NAME  
+=== RUN   TestDetectInterrupted_SurvivesTerminalDisplayBytes
+--- PASS: TestDetectInterrupted_SurvivesTerminalDisplayBytes (0.00s)
+=== NAME  
+=== RUN   TestScanDiagnostics_MatchesColourizedOutput
+--- PASS: TestScanDiagnostics_MatchesColourizedOutput (0.00s)
+=== NAME  
+=== RUN   TestFindRunBuildCommandLine_SurvivesTerminalDisplayBytes
+--- PASS: TestFindRunBuildCommandLine_SurvivesTerminalDisplayBytes (0.00s)
+=== NAME  
+=== RUN   TestScanPhaseLogStream_OwnedBuffersDoNotScaleWithLogBytes
+--- PASS: TestScanPhaseLogStream_OwnedBuffersDoNotScaleWithLogBytes (0.10s)
+=== NAME  
+=== RUN   TestScanPhaseLogStream_LogBufferHighWaterWireShape
+--- PASS: TestScanPhaseLogStream_LogBufferHighWaterWireShape (0.00s)
+=== NAME  
+=== RUN   TestScanPhaseLogStream_PerLogAndTotalSentinelsFailClosed
+--- PASS: TestScanPhaseLogStream_PerLogAndTotalSentinelsFailClosed (0.00s)
+=== NAME  
+=== RUN   TestScanPhaseLogStream_LineAndValueBounds
+--- PASS: TestScanPhaseLogStream_LineAndValueBounds (0.21s)
+=== NAME  
+=== RUN   TestScanPhaseLogStream_ProducerAggregationCapsBeforeResultMaterialization
+--- PASS: TestScanPhaseLogStream_ProducerAggregationCapsBeforeResultMaterialization (0.00s)
+=== NAME  
+=== RUN   TestScanPhaseLogStream_CancelReadClosePaths
+=== RUN   TestScanPhaseLogStream_CancelReadClosePaths/pre-cancel
+--- PASS: TestScanPhaseLogStream_CancelReadClosePaths/pre-cancel (0.00s)
+=== NAME  TestScanPhaseLogStream_CancelReadClosePaths
+=== RUN   TestScanPhaseLogStream_CancelReadClosePaths/mid-read-cancel
+--- PASS: TestScanPhaseLogStream_CancelReadClosePaths/mid-read-cancel (0.00s)
+=== NAME  TestScanPhaseLogStream_CancelReadClosePaths
+=== RUN   TestScanPhaseLogStream_CancelReadClosePaths/read-error
+--- PASS: TestScanPhaseLogStream_CancelReadClosePaths/read-error (0.00s)
+=== NAME  TestScanPhaseLogStream_CancelReadClosePaths
+=== RUN   TestScanPhaseLogStream_CancelReadClosePaths/close-error
+--- PASS: TestScanPhaseLogStream_CancelReadClosePaths/close-error (0.00s)
+=== NAME  TestScanPhaseLogStream_CancelReadClosePaths
+=== RUN   TestScanPhaseLogStream_CancelReadClosePaths/orchestrator-rolls-back-partial-read
+--- PASS: TestScanPhaseLogStream_CancelReadClosePaths/orchestrator-rolls-back-partial-read (0.00s)
+=== NAME  TestScanPhaseLogStream_CancelReadClosePaths
+--- PASS: TestScanPhaseLogStream_CancelReadClosePaths (0.00s)
+=== NAME  
+=== RUN   TestScanPhaseLogStream_PreservesThreeConsumerLineSemantics
+--- PASS: TestScanPhaseLogStream_PreservesThreeConsumerLineSemantics (0.03s)
+=== NAME  
+=== RUN   TestScanDiagnostics_OperatorNestedBuildLines
+--- PASS: TestScanDiagnostics_OperatorNestedBuildLines (0.00s)
+=== NAME  
+=== RUN   TestIsWrapperNoise_Predicate
+--- PASS: TestIsWrapperNoise_Predicate (0.00s)
+=== NAME  
+=== RUN   TestScanDiagnostics_NMAKEWrapperNoiseNeverMatches
+--- PASS: TestScanDiagnostics_NMAKEWrapperNoiseNeverMatches (0.00s)
+=== NAME  
+=== RUN   TestScanDiagnostics_FirstErrorPreferredOverWrapperTail
+--- PASS: TestScanDiagnostics_FirstErrorPreferredOverWrapperTail (0.01s)
+=== NAME  
+=== RUN   TestLastFailure_NestedBuildPhaseLog_OperatorFieldCase
+--- PASS: TestLastFailure_NestedBuildPhaseLog_OperatorFieldCase (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_NMAKENoiseAlone_NeverEstablishesFailure
+--- PASS: TestLastFailure_NMAKENoiseAlone_NeverEstablishesFailure (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_ClangClErrorInProbeLogStillCapabilityProbeOnly
+--- PASS: TestLastFailure_ClangClErrorInProbeLogStillCapabilityProbeOnly (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_PortDirEntryLimitFailsClosed
+--- PASS: TestLastFailure_PortDirEntryLimitFailsClosed (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_RelevantLogCountLimitFailsClosed
+--- PASS: TestLastFailure_RelevantLogCountLimitFailsClosed (0.02s)
+=== NAME  
+=== RUN   TestLastFailure_TotalLogByteLimitFailsClosed
+--- PASS: TestLastFailure_TotalLogByteLimitFailsClosed (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_WrapperMetadataLimitFailsClosed
+--- PASS: TestLastFailure_WrapperMetadataLimitFailsClosed (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_OverlayAndFailedPortListsAreBoundedAndReported
+--- PASS: TestLastFailure_OverlayAndFailedPortListsAreBoundedAndReported (0.00s)
+=== NAME  
+=== RUN   TestLastFailure_ProducerAggregationCapsBeforeResultMaterialization
+--- PASS: TestLastFailure_ProducerAggregationCapsBeforeResultMaterialization (0.00s)
+=== NAME  
+=== RUN   TestResponseBudget_FailedCausalTupleSurvivesPackageShaping
+--- PASS: TestResponseBudget_FailedCausalTupleSurvivesPackageShaping (0.00s)
+=== NAME  
+=== RUN   TestResponseBudget_MinimalFallbackCannotEmitUncausedFailure
+--- PASS: TestResponseBudget_MinimalFallbackCannotEmitUncausedFailure (0.00s)
+=== NAME  
+=== RUN   TestTruncateWireValue_TinyBudgetTerminatesAndStaysBounded
+--- PASS: TestTruncateWireValue_TinyBudgetTerminatesAndStaysBounded (0.00s)
+=== NAME  
+=== RUN   TestProjectStopClassRegistryIsTotalAndTerminal
+--- PASS: TestProjectStopClassRegistryIsTotalAndTerminal (0.00s)
+=== NAME  
+=== RUN   TestProjectionRowsThatPreviouslyContradictedTheirDomains
+=== RUN   TestProjectionRowsThatPreviouslyContradictedTheirDomains/arguments_invalid_leaves_evidence_not_applicable
+--- PASS: TestProjectionRowsThatPreviouslyContradictedTheirDomains/arguments_invalid_leaves_evidence_not_applicable (0.00s)
+=== NAME  TestProjectionRowsThatPreviouslyContradictedTheirDomains
+=== RUN   TestProjectionRowsThatPreviouslyContradictedTheirDomains/wrapper_proof_settles_metadata_and_makes_later_domains_inapplicable
+--- PASS: TestProjectionRowsThatPreviouslyContradictedTheirDomains/wrapper_proof_settles_metadata_and_makes_later_domains_inapplicable (0.00s)
+=== NAME  TestProjectionRowsThatPreviouslyContradictedTheirDomains
+=== RUN   TestProjectionRowsThatPreviouslyContradictedTheirDomains/verified_zero_logs_settles_discovery_and_makes_byte_scan_inapplicable
+--- PASS: TestProjectionRowsThatPreviouslyContradictedTheirDomains/verified_zero_logs_settles_discovery_and_makes_byte_scan_inapplicable (0.00s)
+=== NAME  TestProjectionRowsThatPreviouslyContradictedTheirDomains
+--- PASS: TestProjectionRowsThatPreviouslyContradictedTheirDomains (0.00s)
+=== NAME  
+=== RUN   TestDiagnosticsDroppedExactnessMatrix
+--- PASS: TestDiagnosticsDroppedExactnessMatrix (0.00s)
+=== NAME  
+=== RUN   TestBuildInterruptedPreservesEarlierProducerIncompleteness
+--- PASS: TestBuildInterruptedPreservesEarlierProducerIncompleteness (0.00s)
+=== NAME  
+=== RUN   TestMissingProjectionFailsClosedAndSerializes
+--- PASS: TestMissingProjectionFailsClosedAndSerializes (0.00s)
+=== NAME  
+=== RUN   TestR17WrapperPreservesWindowsPathsOnPOSIXHost
+--- PASS: TestR17WrapperPreservesWindowsPathsOnPOSIXHost (0.00s)
+=== NAME  
+=== RUN   TestR17GNUDriverDiagnosticsRetainLinkerCause
+--- PASS: TestR17GNUDriverDiagnosticsRetainLinkerCause (0.00s)
+=== NAME  
+=== RUN   TestR18PhaseLogRejectsSpecialFileBeforeOpen
+--- PASS: TestR18PhaseLogRejectsSpecialFileBeforeOpen (0.00s)
+=== NAME  
+=== RUN   TestR19GNULDWarningPreservesWarningSeverity
+--- PASS: TestR19GNULDWarningPreservesWarningSeverity (0.00s)
+=== NAME  
+=== RUN   TestR20NinjaOwnErrorIsSpecificFailureCause
+--- PASS: TestR20NinjaOwnErrorIsSpecificFailureCause (0.00s)
+=== NAME  
+=== RUN   TestR21ProjectionEnumeratesEveryOmittedSemanticField
+--- PASS: TestR21ProjectionEnumeratesEveryOmittedSemanticField (0.00s)
+=== NAME  
+=== RUN   TestR21CMakeErrorIsRecognizedAsSpecificFailure
+--- PASS: TestR21CMakeErrorIsRecognizedAsSpecificFailure (0.00s)
+=== NAME  
+=== RUN   TestR22WrapperNegativeProofRequiresRequestedCommandTarget
+--- PASS: TestR22WrapperNegativeProofRequiresRequestedCommandTarget (0.00s)
+=== NAME  
+=== RUN   TestR22WireRedactionFailsClosedOnUnclassifiedValueCarriers
+--- PASS: TestR22WireRedactionFailsClosedOnUnclassifiedValueCarriers (0.00s)
+=== NAME  
+=== RUN   TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation
+=== RUN   TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation/wrong_executable
+--- PASS: TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation/wrong_executable (0.00s)
+=== NAME  TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation
+=== RUN   TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation/wrong_triplet
+--- PASS: TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation/wrong_triplet (0.00s)
+=== NAME  TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation
+--- PASS: TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation (0.00s)
+=== NAME  
+=== RUN   TestR23WrapperDoesNotPairEarlierTargetWithLaterCommandTriplet
+--- PASS: TestR23WrapperDoesNotPairEarlierTargetWithLaterCommandTriplet (0.00s)
+=== NAME  
+=== RUN   TestR29CMakeErrorRetainsIndentedContinuation
+--- PASS: TestR29CMakeErrorRetainsIndentedContinuation (0.00s)
+=== NAME  
+=== RUN   TestR30StandaloneUserInterruptNeedsStructuralCorrelation
+--- PASS: TestR30StandaloneUserInterruptNeedsStructuralCorrelation (0.00s)
+=== NAME  
+=== RUN   TestR30StreamingInterruptUsesTheSameCorrelationRule
+--- PASS: TestR30StreamingInterruptUsesTheSameCorrelationRule (0.00s)
+=== NAME  
+=== RUN   TestR30SeparateUnsafeOptionValueIsRedacted
+--- PASS: TestR30SeparateUnsafeOptionValueIsRedacted (0.00s)
+=== NAME  
+=== RUN   TestR30GCCDiagnosticWithoutColumn
+--- PASS: TestR30GCCDiagnosticWithoutColumn (0.00s)
+=== NAME  
+=== RUN   TestR31CMakeInstallFailureKeepsInstallPhase
+--- PASS: TestR31CMakeInstallFailureKeepsInstallPhase (0.00s)
+=== NAME  
+=== RUN   TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt
+=== RUN   TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt/latest_command-derived_value
+--- PASS: TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt/latest_command-derived_value (0.00s)
+=== NAME  TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt
+=== RUN   TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt/latest_command_without_triplet_clears_inferred_value
+--- PASS: TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt/latest_command_without_triplet_clears_inferred_value (0.00s)
+=== NAME  TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt
+=== RUN   TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt/header_remains_authoritative
+--- PASS: TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt/header_remains_authoritative (0.00s)
+=== NAME  TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt
+--- PASS: TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt (0.00s)
+=== NAME  
+=== RUN   TestR33MSVCDiagnosticAllowsParenthesesBeforeFinalLocation
+--- PASS: TestR33MSVCDiagnosticAllowsParenthesesBeforeFinalLocation (0.00s)
+=== NAME  
+=== RUN   TestResponseBudget_BoundsThePhaseConcatenation
+    response_budget_test.go:109: 1 config(s) ( 2 logs): 200 diagnostics + 360 dropped, 52584 bytes JSON
+    response_budget_test.go:109: 2 config(s) ( 4 logs): 200 diagnostics + 920 dropped, 58192 bytes JSON
+    response_budget_test.go:109: 4 config(s) ( 8 logs): 200 diagnostics + 2040 dropped, 59482 bytes JSON
+    response_budget_test.go:109: 8 config(s) (16 logs): 200 diagnostics + 4280 dropped, 61899 bytes JSON
+--- PASS: TestResponseBudget_BoundsThePhaseConcatenation (0.05s)
+=== NAME  
+=== RUN   TestResponseBudget_DropsTheLowestRankedTailOnly
+--- PASS: TestResponseBudget_DropsTheLowestRankedTailOnly (0.01s)
+=== NAME  
+=== RUN   TestResponseBudget_BoundsOneEnormousDiagnosticLine
+    response_budget_test.go:205: one 3 MiB diagnostic line -> 15015-byte response
+--- PASS: TestResponseBudget_BoundsOneEnormousDiagnosticLine (0.70s)
+=== NAME  
+=== RUN   TestResponseBudget_TextTruncationIsRuneSafe
+--- PASS: TestResponseBudget_TextTruncationIsRuneSafe (0.00s)
+=== NAME  
+=== RUN   TestResponseBudget_NeverBindsOnRealFixtures
+--- PASS: TestResponseBudget_NeverBindsOnRealFixtures (0.00s)
+=== NAME  
+=== RUN   TestApplyResponseBudget_Edges
+--- PASS: TestApplyResponseBudget_Edges (0.00s)
+=== NAME  
+=== RUN   TestScanDiagnostics_AggregateFloodCannotStarveTheSpecificError
+--- PASS: TestScanDiagnostics_AggregateFloodCannotStarveTheSpecificError (0.00s)
+=== NAME  
+=== RUN   TestScanDiagnostics_WarningFloodStillCannotStarveTheError
+--- PASS: TestScanDiagnostics_WarningFloodStillCannotStarveTheError (0.00s)
+=== NAME  
+=== RUN   TestScanDiagnostics_BudgetIsStillBounded
+--- PASS: TestScanDiagnostics_BudgetIsStillBounded (0.00s)
+=== NAME  
+=== RUN   TestWireSize_EveryProducerIsBounded
+=== RUN   TestWireSize_EveryProducerIsBounded/gcc-clang_file_prefix
+    wire_size_test.go:106: gcc-clang file prefix                                oversize fields: []
+--- PASS: TestWireSize_EveryProducerIsBounded/gcc-clang_file_prefix (0.22s)
+=== NAME  TestWireSize_EveryProducerIsBounded
+=== RUN   TestWireSize_EveryProducerIsBounded/msvc-compile_file_prefix
+    wire_size_test.go:106: msvc-compile file prefix                             oversize fields: []
+--- PASS: TestWireSize_EveryProducerIsBounded/msvc-compile_file_prefix (0.40s)
+=== NAME  TestWireSize_EveryProducerIsBounded
+=== RUN   TestWireSize_EveryProducerIsBounded/msvc-link_file_prefix
+    wire_size_test.go:106: msvc-link file prefix                                oversize fields: []
+--- PASS: TestWireSize_EveryProducerIsBounded/msvc-link_file_prefix (0.67s)
+=== NAME  TestWireSize_EveryProducerIsBounded
+=== RUN   TestWireSize_EveryProducerIsBounded/tool-driver_message_(control:_File_is_a_closed_allowlist)
+    wire_size_test.go:106: tool-driver message (control: File is a closed allowlist) oversize fields: []
+--- PASS: TestWireSize_EveryProducerIsBounded/tool-driver_message_(control:_File_is_a_closed_allowlist) (0.82s)
+=== NAME  TestWireSize_EveryProducerIsBounded
+=== RUN   TestWireSize_EveryProducerIsBounded/ninja_FAILED_target
+    wire_size_test.go:106: ninja FAILED target                                  oversize fields: []
+--- PASS: TestWireSize_EveryProducerIsBounded/ninja_FAILED_target (1.31s)
+=== NAME  TestWireSize_EveryProducerIsBounded
+=== RUN   TestWireSize_EveryProducerIsBounded/Run_Build_Command(s)_tail
+    wire_size_test.go:106: Run Build Command(s) tail                            oversize fields: []
+--- PASS: TestWireSize_EveryProducerIsBounded/Run_Build_Command(s)_tail (0.39s)
+=== NAME  TestWireSize_EveryProducerIsBounded
+=== RUN   TestWireSize_EveryProducerIsBounded/wrapper_command:_line_(exact_command)
+    wire_size_test.go:106: wrapper command: line (exact_command)                oversize fields: []
+--- PASS: TestWireSize_EveryProducerIsBounded/wrapper_command:_line_(exact_command) (0.13s)
+=== NAME  TestWireSize_EveryProducerIsBounded
+=== RUN   TestWireSize_EveryProducerIsBounded/wrapper_--overlay-ports_value_(overlay_chain)
+    wire_size_test.go:106: wrapper --overlay-ports value (overlay_chain)        oversize fields: []
+--- PASS: TestWireSize_EveryProducerIsBounded/wrapper_--overlay-ports_value_(overlay_chain) (0.09s)
+=== NAME  TestWireSize_EveryProducerIsBounded
+--- PASS: TestWireSize_EveryProducerIsBounded (4.04s)
+=== NAME  
+=== RUN   TestWrapperScanAbort_IsNotReportedAsMalformed
+--- PASS: TestWrapperScanAbort_IsNotReportedAsMalformed (0.00s)
+=== NAME  
+=== RUN   TestWrapperReadableButUnrecognizable_IsStillMalformed
+--- PASS: TestWrapperReadableButUnrecognizable_IsStillMalformed (0.00s)
+=== NAME  
+PASS

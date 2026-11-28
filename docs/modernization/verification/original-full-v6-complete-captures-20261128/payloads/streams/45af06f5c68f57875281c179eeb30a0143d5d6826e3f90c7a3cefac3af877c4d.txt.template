@@ -1,0 +1,121 @@
+2026/11/28 15:04:18 /api/adopt: unknown validation failure at @@RECOVERY_SYNTHETIC_GUI_PRIVATE_FIXTURE_ROOT@@\config.toml
+2026/11/28 15:04:18 /api/adopt/plan: E_ADOPT_STAGE_MANIFEST_CREATE: manifest "common-producer-name-conflict-fixture" already exists at @@RECOVERY_APPROVED_WORK_AREA@@\o6\x1109af6646ad\TestAdoptManifestNameConflictSurvivesOpaqueFailure49726659\001\synthetic-private-name-conflict\common-producer-name-conflict-fixture\manifest.yaml; use edit instead: manifest name already exists
+2026/11/28 15:04:18 /api/adopt: E_ADOPT_STAGE_MANIFEST_CREATE: manifest "common-producer-name-conflict-fixture" already exists at @@RECOVERY_APPROVED_WORK_AREA@@\o6\x1109af6646ad\TestAdoptManifestNameConflictSurvivesOpaqueFailure49726659\001\synthetic-private-name-conflict\common-producer-name-conflict-fixture\manifest.yaml; use edit instead: manifest name already exists
+2026/11/28 15:04:18 /api/adopt/plan: synthetic opaque failure
+2026/11/28 15:04:18 /api/adopt/plan: E_ADOPT_STAGE_MANIFEST_CREATE: @@RECOVERY_APPROVED_WORK_AREA@@\o6\x1109af6646ad\TestAdoptManifestNameConflictSurvivesOpaqueFailure49726659\001\synthetic-private-name-conflict: manifest name collides with a shipped (built-in) server
+2026/11/28 15:04:18 /api/adopt: E_ADOPT_STAGE_MANIFEST_CREATE: @@RECOVERY_APPROVED_WORK_AREA@@\o6\x1109af6646ad\TestAdoptManifestNameConflictSurvivesOpaqueFailure49726659\001\synthetic-private-name-conflict: manifest name collides with a shipped (built-in) server
+2026/11/28 15:04:18 /api/adopt/plan: synthetic opaque failure
+2026/11/28 15:04:18 /api/adopt: synthetic opaque failure
+2026/11/28 15:04:18 /api/adopt: synthetic opaque failure
+2026/11/28 15:04:18 /api/adopt: synthetic opaque failure
+2026/11/28 15:04:18 /api/adopt: synthetic opaque failure
+2026/11/28 15:04:18 /api/adopt: synthetic opaque failure
+2026/11/28 15:04:18 /api/adopt: synthetic opaque failure
+2026/11/28 15:04:18 /api/adopt: synthetic opaque failure
+2026/11/28 15:04:18 /api/adopt: adopt: missing GUI API lifetime owner
+2026/11/28 15:04:18 /api/adopt: adopt: missing GUI API lifetime owner
+2026/11/28 15:04:18 /api/adopt: synthetic opaque failure
+2026/11/28 15:04:18 /api/adopt: E_ADOPT_STAGE_MANIFEST_VERIFY: synthetic-private-provider-cause
+2026/11/28 15:04:18 /api/adopt: E_ADOPT_STAGE_INSTALL: adopt install failed after creating manifest "gui-adopt-redact-path"; removed the adopt-created manifest so adopt can be re-run: add entry to codex-cli: synthetic write failure at @@RECOVERY_APPROVED_WORK_AREA@@\o6\x1109af6646ad\TestAdoptRouteExecuteFailureRedactsAbsolutePath2500952672\001\home\.codex\private-user-path\config.toml?token=gui-lease-redaction-canary[2Jxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+2026/11/28 15:04:26 /api/catalog/manifest name="wolfram": open @@RECOVERY_SYNTHETIC_GUI_POSIX_HOME_PREFIX@@/.local/share/mcphub/servers/wolfram/manifest.yaml: permission denied
+2026/11/28 15:04:26 cleanup-aggressive: wmic snapshot failed
+2026/11/28 15:04:26 /api/client-entry/remove: invalid client entry removal selection
+2026/11/28 15:04:26 /api/daemon/respawn supervisor unavailable: supervisor.lock.owner.json not found at @@RECOVERY_APPROVED_WORK_AREA@@\o6\x1109af6646ad\TestDaemonRespawnNoSupervisorReturns5031224612254\001\hardened-parent\supervisor.lock.owner.json
+2026/11/28 15:04:27 /api/daemons/weekly-refresh-membership PUT update membership: validation-shaped text
+path=@@RECOVERY_APPROVED_WORK_AREA@@\o6\x1109af6646ad\TestMembershipHandler_JoinedReleaseFailureIsOpaque5003436174794\002\private\workspaces.yaml.lock: lock release could not be confirmed; this process still holds the lock leaf
+2026/11/28 15:04:27 /api/daemons/weekly-schedule apply failed: weekly refresh task snapshot is unavailable: scheduler down
+2026/11/28 15:04:27 /api/daemons/weekly-schedule apply failed: create boom
+2026/11/28 15:04:27 /api/daemons/weekly-schedule apply failed: create + import boom
+2026/11/28 15:04:27 /api/daemons/weekly-schedule committed with an unconfirmed lock release: durable mutation applied before lock release became unconfirmed
+lock release could not be confirmed; this process still holds the lock leaf
+2026/11/28 15:04:27 /api/daemons/weekly-schedule apply failed: acquire weekly lock: lock release could not be confirmed; this process still holds the lock leaf
+2026/11/28 15:04:27 /api/daemons/weekly-schedule apply failed: weekly schedule settings update failed: lock @@RECOVERY_APPROVED_WORK_AREA@@\o6\x1109af6646ad\TestWeeklyScheduleHandler_ApplyFailureDoesNotDiscloseInternalPat3334707040\002\settings.toml: synthetic raw cause
+2026/11/28 15:04:32 /api/deadopt: de-adopt refused: gate is ON for 2 client(s) (claude-code, mimocode); gate OFF first, then de-adopt
+2026/11/28 15:04:32 /api/demigrate: open @@RECOVERY_SYNTHETIC_GUI_PROFILE_FIXTURE_ROOT@@\AppData\Local\mcp-local-hub\manifests\demo: permission denied
+2026/11/28 15:04:32 /api/dismiss DELETE: disk full at @@RECOVERY_SYNTHETIC_GUI_PRIVATE_FIXTURE_ROOT@@\gui-dismissed.json
+2026/11/28 15:04:34 hub-mcp listener startup failed; retry scheduled through existing restart driver: initial child hub bind blocked by outgoing parent
+2026/11/28 15:04:34 /api/gui/quit: owner: GUI_QUIT_GENERATION_CONFLICT
+2026/11/28 15:04:34 /api/gui/quit: owner: GUI_CONTROL_CONFLICT
+2026/11/28 15:04:34 /api/gui/quit: GUI_STOPPED_BY_USER: run mcphub gui --resume to start the GUI
+2026/11/28 15:04:34 /api/gui/quit: private-path-must-not-reach-wire
+2026/11/28 15:04:34 /api/gui/quit: private-path-must-not-reach-wire
+2026/11/28 15:04:34 /api/gui/quit response: response unavailable
+2026/11/28 15:04:39 hub-mcp listener startup failed; retry scheduled through existing restart driver: injected hub startup failure
+2026/11/28 15:04:40 hub-mcp listener startup failed; retry scheduled through existing restart driver: hub-mcp: hub-mcp bind canceled before endpoint load: context canceled
+2026/11/28 15:04:43 /api/lsp/register: <handler-path> --@@RECOVERY_SYNTHETIC_GUI_PASSWORD_ASSIGNMENT@@
+2026/11/28 15:04:44 /api/manifest/create name="demo": manifest "demo" already exists at ...
+2026/11/28 15:04:44 /api/manifest/view name="demo": synthetic private path: permission denied
+2026/11/28 15:04:44 /api/manifest/edit name="demo": disk full
+2026/11/28 15:04:44 /api/manifest/edit name="ghost": open /home/example/.mcphub/servers/ghost/manifest.yaml: file does not exist
+2026/11/28 15:04:44 /api/manifest/edit name="ghost": manifest "ghost" does not exist; use create instead
+2026/11/28 15:04:44 /api/manifest/get name="demo": open /home/example/.secret/manifests/demo/manifest.yaml: permission denied
+2026/11/28 15:04:44 /api/manifest/edit name="demo": atomic rename: rename /var/lib/mcphub/servers/demo/manifest.yaml.tmp: no space left on device
+2026/11/28 15:04:44 /api/manifest/create name="demo": mkdir /etc/secret/servers/demo: permission denied
+2026/11/28 15:04:44 /api/manifests: readdir /home/example/.local/share/mcphub/servers: permission denied
+2026/11/28 15:04:44 /api/catalog: readdir /home/example/.local/share/mcphub/servers: permission denied
+2026/11/28 15:04:44 /api/manifest/ delete name="ghost": manifest "ghost" does not exist
+2026/11/28 15:04:44 /api/manifest/ delete name="demo": remove /var/lib/mcphub/servers/demo: directory not empty
+2026/11/28 15:04:44 /api/marketplace/install required-secret gate name="suno": manifest suno uses secret refs but the vault is unreadable: vault exists but unreadable: read identity: open @@RECOVERY_APPROVED_WORK_AREA@@\o6\x1109af6646ad\TestMarketplaceInstall_HubUnreadableVaultBlocksBeforeManifestCre3405424565\001\Local\mcp-local-hub\.age-key: file does not exist
+  Fix: Fix or remove the corrupt vault — a secret-using server fails to start when it cannot be read.
+2026/11/28 15:04:44 /api/marketplace/install LoadEntry id="x": dial tcp: i/o timeout
+2026/11/28 15:04:44 /api/marketplace/install Install name="filesystem": wrapped: E_ADOPT_LEASE_CLEANUP
+2026/11/28 15:04:44 /api/marketplace/install Install name="filesystem": synthetic installer failure
+2026/11/28 15:04:45 /api/marketplace: fetch catalog: dial tcp: i/o timeout
+2026/11/28 15:04:45 /api/marketplace/refresh: fetch catalog: dial tcp: i/o timeout
+2026/11/28 15:04:49 /api/projects/scan: project root is required
+2026/11/28 15:04:49 /api/projects/scan: project root is required
+2026/11/28 15:04:49 /api/projects/scan: project root must be an absolute path
+2026/11/28 15:04:49 /api/projects/scan: project root must be an absolute path
+2026/11/28 15:04:49 /api/projects/scan: project root must be an absolute path
+2026/11/28 15:04:49 /api/projects/scan: project root does not exist or is not accessible
+2026/11/28 15:04:49 /api/projects/scan: project root is not a directory
+2026/11/28 15:04:49 /api/projects/toggle: @@RECOVERY_SYNTHETIC_TOGGLE_FIXTURE_ROOT@@\toggle --@@RECOVERY_SYNTHETIC_GUI_PASSWORD_ASSIGNMENT@@
+2026/11/28 15:04:49 /api/projects/toggle: project root must be an absolute path
+2026/11/28 15:04:49 /api/projects/toggle: project root must be an absolute path
+2026/11/28 15:04:49 /api/projects/toggle: project root must be an absolute path
+2026/11/28 15:04:49 /api/projects/toggle: project root does not exist or is not accessible
+2026/11/28 15:04:51 readiness: resolve manifest "no-such-zzz": resolve manifest "no-such-zzz": open @@RECOVERY_APPROVED_WORK_AREA@@\o6\x1109af6646ad\TestReadinessHandler_UnknownServer4042596786368\001\.local\bin\servers\no-such-zzz\manifest.yaml: The system cannot find the path specified.
+2026/11/28 15:04:52 http: panic serving 127.0.0.1:38769: test panic after committed termination
+goroutine 2447 [running]:
+net/http.(*conn).serve.func1()
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/net/http/server.go:1963 +0xbb
+panic({0x7ff6255a1c18?, 0x7ff624bb00e0?})
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/runtime/panic.go:859 +0x125
+mcp-local-hub/internal/gui.(*Server).daemonRecoverHandler.func2()
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/gui/daemon_recover.go:248 +0xb5
+panic({0x7ff6255a1c18?, 0x7ff624bb00e0?})
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/runtime/panic.go:859 +0x125
+mcp-local-hub/internal/gui.(*panicAfterCommitDaemonRecoverer).Recover(0x14455db1b488, {0x24?, 0x14455d798320?}, {0xd?, 0x7ff624a1333e?}, 0x9?, 0x7ff624a0f90a?)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/gui/recovery_settlement_registry_test.go:353 +0x78
+mcp-local-hub/internal/gui.(*Server).daemonRecoverHandler(0x14455d82c608, {0x7ff6256a5998, 0x14455da6de00}, 0x14455d729400)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/gui/daemon_recover.go:283 +0x746
+mcp-local-hub/internal/gui.installDaemonRecoveryHandlerCompletion.func1({0x7ff6256a5998?, 0x14455da6de00?}, 0x13?)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/gui/recovery_settlement_registry_test.go:100 +0x85
+mcp-local-hub/internal/gui.(*Server).requireSameOrigin.func1({0x7ff6256a5998, 0x14455da6de00}, 0x14455d729400)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/gui/csrf.go:88 +0x16a
+net/http.HandlerFunc.ServeHTTP(0x14455d6f5a40?, {0x7ff6256a5998?, 0x14455da6de00?}, 0x14455d6c39e0?)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/net/http/server.go:2362 +0x29
+net/http.(*ServeMux).ServeHTTP(0x14455d721808?, {0x7ff6256a5998, 0x14455da6de00}, 0x14455d729400)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/net/http/server.go:2927 +0x1cf
+mcp-local-hub/internal/gui.(*Server).requireAllowedHost.func1({0x7ff6256a5998, 0x14455da6de00}, 0x14455d729400)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/gui/csrf.go:33 +0x6d
+net/http.HandlerFunc.ServeHTTP(0x7ff625674c88?, {0x7ff6256a5998?, 0x14455da6de00?}, 0x510c83a244b8fda2?)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/net/http/server.go:2362 +0x29
+mcp-local-hub/internal/gui.(*guiListenerHandlerGate).ServeHTTP(0x14455d6ffa40, {0x7ff6256a5998, 0x14455da6de00}, 0x14455d729400)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-acceptance-rebuild-20261127-v1/source-original727d-v2/internal/gui/gui_listener_lifecycle.go:357 +0x1d2
+net/http.serverHandler.ServeHTTP({0x10?}, {0x7ff6256a5998?, 0x14455da6de00?}, 0x1?)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/net/http/server.go:3440 +0x8e
+net/http.(*conn).serve(0x14455de063f0, {0x7ff6256a6cd0, 0x14455d83b800})
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/net/http/server.go:2161 +0x6dc
+created by net/http.(*Server).Serve in goroutine 2475
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/net/http/server.go:3608 +0x4fd
+2026/11/28 15:04:52 /api/test: open @@RECOVERY_APPROVED_WORK_AREA@@\o6\x1109af6646ad\TestWriteAPIErrorRedacted_HidesRawPathKeepsCode2207186842\001\client\config.json: permission denied
+2026/11/28 15:04:52 /api/scan: open %USERPROFILE%\AppData\Local\mcp-local-hub\config.json: permission denied
+2026/11/28 15:05:11 /api/status daemon snapshot: snapshot exploded
+2026/11/28 15:05:11 /api/status daemon snapshot: supervisor IPC status: resolve state dir: @@RECOVERY_SYNTHETIC_GUI_POSIX_HOME_PREFIX@@/.local/state/mcp-local-hub: owner UID 1000 != current UID 1001: supervisor IPC status: local setup failure
+2026/11/28 15:05:11 /api/supervisor/restart owner: private-native-path-and-argv
+2026/11/28 15:05:11 /api/supervisor/restart owner: private-native-path-and-argv
+2026/11/28 15:05:11 /api/supervisor/restart owner: private-native-path-and-argv
+2026/11/28 15:05:11 /api/supervisor/restart owner: private-native-path-and-argv
+2026/11/28 15:05:11 /api/supervisor/restart owner: private-native-path-and-argv
+2026/11/28 15:05:11 /api/supervisor/restart delivery: required hub-mcp log delivery failed

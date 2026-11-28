@@ -1,0 +1,13 @@
+==> Building role=launcher subsystem=3 metadata=False -> @@RECOVERY_APPROVED_WORK_AREA_RAW@@\pub666-recovered-20261128\.scratch\qualified-successor-native-product\bundle\mcphub.exe
+==> Generating VERSIONINFO role=product
+==> Building role=product subsystem=2 metadata=True -> @@RECOVERY_APPROVED_WORK_AREA_RAW@@\pub666-recovered-20261128\.scratch\qualified-successor-native-product\bundle\mcphub-product\mcphub.exe
+==> Product VERSIONINFO resources:
+
+[32;1mProductVersion   : [0m0.4.65
+[32;1mPrivateBuild     : [0mmcphub-build-v1;commit=59f618ebfbf6d9f52c6994d68586e3c2ebc202a8;build_date=2026-11-28T14:19:34Z
+[32;1mSpecialBuild     : [0mmcphub-role-v1;role=product
+[32;1mInternalName     : [0mmcphub
+[32;1mOriginalFilename : [0mmcphub.exe
+
+==> Done. Complete canonical entry-set build observation passed; identity manifest=@@RECOVERY_APPROVED_WORK_AREA_RAW@@\pub666-recovered-20261128\.scratch\qualified-successor-native-product\bundle\windows-product-identity.json version=0.4.65 commit=59f618ebfbf6d9f52c6994d68586e3c2ebc202a8 buildDate=2026-11-28T14:19:34Z.
+Completed current-source native Product input preparation; no tests were executed.

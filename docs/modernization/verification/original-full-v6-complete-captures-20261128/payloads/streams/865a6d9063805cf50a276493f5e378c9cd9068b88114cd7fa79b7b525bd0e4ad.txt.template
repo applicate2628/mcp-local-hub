@@ -1,0 +1,164 @@
+{"Action":"start","Package":"mcp-local-hub/internal/api/daemon_env_overlay"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestObservedOverlayRetainsClosedOriginalAndPrivateFailureData"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestObservedOverlayRetainsClosedOriginalAndPrivateFailureData","Output":"=== RUN   TestObservedOverlayRetainsClosedOriginalAndPrivateFailureData\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestObservedOverlayRetainsClosedOriginalAndPrivateFailureData","Output":"--- PASS: TestObservedOverlayRetainsClosedOriginalAndPrivateFailureData (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestObservedOverlayRetainsClosedOriginalAndPrivateFailureData"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestConsumeOverlayOriginalCloseAndEarlyFailureCustody"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestConsumeOverlayOriginalCloseAndEarlyFailureCustody","Output":"=== RUN   TestConsumeOverlayOriginalCloseAndEarlyFailureCustody\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestConsumeOverlayOriginalCloseAndEarlyFailureCustody","Output":"--- PASS: TestConsumeOverlayOriginalCloseAndEarlyFailureCustody (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestConsumeOverlayOriginalCloseAndEarlyFailureCustody"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestObservedOverlayAbsenceHasNoInventedOwnedReader"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestObservedOverlayAbsenceHasNoInventedOwnedReader","Output":"=== RUN   TestObservedOverlayAbsenceHasNoInventedOwnedReader\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestObservedOverlayAbsenceHasNoInventedOwnedReader","Output":"--- PASS: TestObservedOverlayAbsenceHasNoInventedOwnedReader (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestObservedOverlayAbsenceHasNoInventedOwnedReader"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLookupOverlayReturnsRowEnv"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLookupOverlayReturnsRowEnv","Output":"=== RUN   TestLookupOverlayReturnsRowEnv\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLookupOverlayReturnsRowEnv","Output":"--- PASS: TestLookupOverlayReturnsRowEnv (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLookupOverlayReturnsRowEnv"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLookupOverlayNormalizesBareKey"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLookupOverlayNormalizesBareKey","Output":"=== RUN   TestLookupOverlayNormalizesBareKey\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLookupOverlayNormalizesBareKey","Output":"--- PASS: TestLookupOverlayNormalizesBareKey (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLookupOverlayNormalizesBareKey"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLookupOverlayReturnsNilOnMiss"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLookupOverlayReturnsNilOnMiss","Output":"=== RUN   TestLookupOverlayReturnsNilOnMiss\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLookupOverlayReturnsNilOnMiss","Output":"--- PASS: TestLookupOverlayReturnsNilOnMiss (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLookupOverlayReturnsNilOnMiss"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLookupOverlayHandlesNilAndEmptyOverlay"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLookupOverlayHandlesNilAndEmptyOverlay","Output":"=== RUN   TestLookupOverlayHandlesNilAndEmptyOverlay\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLookupOverlayHandlesNilAndEmptyOverlay","Output":"--- PASS: TestLookupOverlayHandlesNilAndEmptyOverlay (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLookupOverlayHandlesNilAndEmptyOverlay"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLookupOverlayReturnsDefensiveCopy"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLookupOverlayReturnsDefensiveCopy","Output":"=== RUN   TestLookupOverlayReturnsDefensiveCopy\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLookupOverlayReturnsDefensiveCopy","Output":"--- PASS: TestLookupOverlayReturnsDefensiveCopy (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLookupOverlayReturnsDefensiveCopy"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestNormalizeOverlayKey"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestNormalizeOverlayKey","Output":"=== RUN   TestNormalizeOverlayKey\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestNormalizeOverlayKey/bare_form_gets_backslash_prefix"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestNormalizeOverlayKey/bare_form_gets_backslash_prefix","Output":"=== RUN   TestNormalizeOverlayKey/bare_form_gets_backslash_prefix\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestNormalizeOverlayKey/bare_form_gets_backslash_prefix","Output":"--- PASS: TestNormalizeOverlayKey/bare_form_gets_backslash_prefix (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestNormalizeOverlayKey/bare_form_gets_backslash_prefix"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestNormalizeOverlayKey/already_canonical_is_idempotent"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestNormalizeOverlayKey/already_canonical_is_idempotent","Output":"=== RUN   TestNormalizeOverlayKey/already_canonical_is_idempotent\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestNormalizeOverlayKey/already_canonical_is_idempotent","Output":"--- PASS: TestNormalizeOverlayKey/already_canonical_is_idempotent (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestNormalizeOverlayKey/already_canonical_is_idempotent"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestNormalizeOverlayKey/empty_string_preserved_as_empty"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestNormalizeOverlayKey/empty_string_preserved_as_empty","Output":"=== RUN   TestNormalizeOverlayKey/empty_string_preserved_as_empty\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestNormalizeOverlayKey/empty_string_preserved_as_empty","Output":"--- PASS: TestNormalizeOverlayKey/empty_string_preserved_as_empty (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestNormalizeOverlayKey/empty_string_preserved_as_empty"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestNormalizeOverlayKey","Output":"--- PASS: TestNormalizeOverlayKey (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestNormalizeOverlayKey"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_StrictMode_BroadenedParent_Refuses"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_StrictMode_BroadenedParent_Refuses","Output":"=== RUN   TestLoad_StrictMode_BroadenedParent_Refuses\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_StrictMode_BroadenedParent_Refuses","Output":"    overlay_hardening_test.go:93: parent @@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\xbb80365f308a\\TestLoad_StrictMode_BroadenedParent_Refuses1623354610\\001 is not gate-rejecting on this host (cannot contrive a broadened parent without elevation): write-side gate accepted it\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_StrictMode_BroadenedParent_Refuses","Output":"--- SKIP: TestLoad_StrictMode_BroadenedParent_Refuses (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_StrictMode_BroadenedParent_Refuses"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_DefaultMode_BroadenedParent_Refuses"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_DefaultMode_BroadenedParent_Refuses","Output":"=== RUN   TestLoad_DefaultMode_BroadenedParent_Refuses\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_DefaultMode_BroadenedParent_Refuses","Output":"    overlay_hardening_test.go:114: parent @@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\xbb80365f308a\\TestLoad_DefaultMode_BroadenedParent_Refuses2297607129\\001 is not gate-rejecting on this host (cannot contrive a broadened parent without elevation): write-side gate accepted it\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_DefaultMode_BroadenedParent_Refuses","Output":"--- SKIP: TestLoad_DefaultMode_BroadenedParent_Refuses (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_DefaultMode_BroadenedParent_Refuses"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_RelaxOptOut_BroadenedParent_Succeeds"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_RelaxOptOut_BroadenedParent_Succeeds","Output":"=== RUN   TestLoad_RelaxOptOut_BroadenedParent_Succeeds\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_RelaxOptOut_BroadenedParent_Succeeds","Output":"    overlay_hardening_test.go:135: parent @@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\xbb80365f308a\\TestLoad_RelaxOptOut_BroadenedParent_Succeeds2829814662\\001 is not gate-rejecting on this host (cannot contrive a broadened parent without elevation): write-side gate accepted it\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_RelaxOptOut_BroadenedParent_Succeeds","Output":"--- SKIP: TestLoad_RelaxOptOut_BroadenedParent_Succeeds (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_RelaxOptOut_BroadenedParent_Succeeds"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_StrictMode_OverridesRelax_BroadenedParent_Refuses"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_StrictMode_OverridesRelax_BroadenedParent_Refuses","Output":"=== RUN   TestLoad_StrictMode_OverridesRelax_BroadenedParent_Refuses\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_StrictMode_OverridesRelax_BroadenedParent_Refuses","Output":"    overlay_hardening_test.go:158: parent @@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\xbb80365f308a\\TestLoad_StrictMode_OverridesRelax_BroadenedParent_Refuses3405227257\\001 is not gate-rejecting on this host (cannot contrive a broadened parent without elevation): write-side gate accepted it\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_StrictMode_OverridesRelax_BroadenedParent_Refuses","Output":"--- SKIP: TestLoad_StrictMode_OverridesRelax_BroadenedParent_Refuses (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_StrictMode_OverridesRelax_BroadenedParent_Refuses"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_DefaultMode_SafeParent_Succeeds"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_DefaultMode_SafeParent_Succeeds","Output":"=== RUN   TestLoad_DefaultMode_SafeParent_Succeeds\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_DefaultMode_SafeParent_Succeeds","Output":"--- PASS: TestLoad_DefaultMode_SafeParent_Succeeds (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_DefaultMode_SafeParent_Succeeds"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_TransientRetry_ErrorClassification"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_TransientRetry_ErrorClassification","Output":"=== RUN   TestLoad_TransientRetry_ErrorClassification\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_TransientRetry_ErrorClassification","Output":"--- PASS: TestLoad_TransientRetry_ErrorClassification (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_TransientRetry_ErrorClassification"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_ConcurrentWithWriteOverlay_NeverPartial"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_ConcurrentWithWriteOverlay_NeverPartial","Output":"=== RUN   TestLoad_ConcurrentWithWriteOverlay_NeverPartial\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_ConcurrentWithWriteOverlay_NeverPartial","Output":"--- PASS: TestLoad_ConcurrentWithWriteOverlay_NeverPartial (1.77s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_ConcurrentWithWriteOverlay_NeverPartial"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_TransientNotFound_RetriesThenReadsPresentFile"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_TransientNotFound_RetriesThenReadsPresentFile","Output":"=== RUN   TestLoad_TransientNotFound_RetriesThenReadsPresentFile\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_TransientNotFound_RetriesThenReadsPresentFile","Output":"--- PASS: TestLoad_TransientNotFound_RetriesThenReadsPresentFile (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_TransientNotFound_RetriesThenReadsPresentFile"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_PersistentNotFound_ReturnsEmptyOverlayAfterRetry"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_PersistentNotFound_ReturnsEmptyOverlayAfterRetry","Output":"=== RUN   TestLoad_PersistentNotFound_ReturnsEmptyOverlayAfterRetry\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_PersistentNotFound_ReturnsEmptyOverlayAfterRetry","Output":"--- PASS: TestLoad_PersistentNotFound_ReturnsEmptyOverlayAfterRetry (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_PersistentNotFound_ReturnsEmptyOverlayAfterRetry"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_PersistentNotFound_RealMissingFile"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_PersistentNotFound_RealMissingFile","Output":"=== RUN   TestLoad_PersistentNotFound_RealMissingFile\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_PersistentNotFound_RealMissingFile","Output":"--- PASS: TestLoad_PersistentNotFound_RealMissingFile (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_PersistentNotFound_RealMissingFile"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_TransientNotFound_NeverEmptyWhilePresent_Race"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_TransientNotFound_NeverEmptyWhilePresent_Race","Output":"=== RUN   TestLoad_TransientNotFound_NeverEmptyWhilePresent_Race\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_TransientNotFound_NeverEmptyWhilePresent_Race","Output":"--- PASS: TestLoad_TransientNotFound_NeverEmptyWhilePresent_Race (1.43s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_TransientNotFound_NeverEmptyWhilePresent_Race"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_MissingFile_ReturnsEmptyOverlay"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_MissingFile_ReturnsEmptyOverlay","Output":"=== RUN   TestLoad_MissingFile_ReturnsEmptyOverlay\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_MissingFile_ReturnsEmptyOverlay","Output":"--- PASS: TestLoad_MissingFile_ReturnsEmptyOverlay (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_MissingFile_ReturnsEmptyOverlay"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_YAMLRoundTrip_ParsesDaemonRow"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_YAMLRoundTrip_ParsesDaemonRow","Output":"=== RUN   TestLoad_YAMLRoundTrip_ParsesDaemonRow\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_YAMLRoundTrip_ParsesDaemonRow","Output":"--- PASS: TestLoad_YAMLRoundTrip_ParsesDaemonRow (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoad_YAMLRoundTrip_ParsesDaemonRow"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoadRejectsDirectoryAtPath"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoadRejectsDirectoryAtPath","Output":"=== RUN   TestLoadRejectsDirectoryAtPath\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoadRejectsDirectoryAtPath","Output":"--- PASS: TestLoadRejectsDirectoryAtPath (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoadRejectsDirectoryAtPath"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestCheckStateDirParentReadSafe_DefaultRelax"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestCheckStateDirParentReadSafe_DefaultRelax","Output":"=== RUN   TestCheckStateDirParentReadSafe_DefaultRelax\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestCheckStateDirParentReadSafe_DefaultRelax","Output":"--- PASS: TestCheckStateDirParentReadSafe_DefaultRelax (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestCheckStateDirParentReadSafe_DefaultRelax"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoadRejectsSymlink"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoadRejectsSymlink","Output":"=== RUN   TestLoadRejectsSymlink\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoadRejectsSymlink","Output":"    read_hardening_test.go:100: symlink creation on Windows requires SeCreateSymbolicLinkPrivilege; covered by reparse-point refusal in hardened-open Windows impl\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoadRejectsSymlink","Output":"--- SKIP: TestLoadRejectsSymlink (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestLoadRejectsSymlink"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_SingleSubstitution"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_SingleSubstitution","Output":"=== RUN   TestExpandParentPath_SingleSubstitution\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_SingleSubstitution","Output":"--- PASS: TestExpandParentPath_SingleSubstitution (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_SingleSubstitution"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_NoTokenEmitsEvent"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_NoTokenEmitsEvent","Output":"=== RUN   TestExpandParentPath_NoTokenEmitsEvent\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_NoTokenEmitsEvent","Output":"--- PASS: TestExpandParentPath_NoTokenEmitsEvent (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_NoTokenEmitsEvent"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_UnknownTokenRejected"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_UnknownTokenRejected","Output":"=== RUN   TestExpandParentPath_UnknownTokenRejected\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_UnknownTokenRejected","Output":"--- PASS: TestExpandParentPath_UnknownTokenRejected (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_UnknownTokenRejected"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_RejectsPunctuatedToken"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_RejectsPunctuatedToken","Output":"=== RUN   TestExpandParentPath_RejectsPunctuatedToken\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_RejectsPunctuatedToken/secret-reference"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_RejectsPunctuatedToken/secret-reference","Output":"=== RUN   TestExpandParentPath_RejectsPunctuatedToken/secret-reference\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_RejectsPunctuatedToken/secret-reference","Output":"--- PASS: TestExpandParentPath_RejectsPunctuatedToken/secret-reference (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_RejectsPunctuatedToken/secret-reference"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_RejectsPunctuatedToken/path-style-placeholder"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_RejectsPunctuatedToken/path-style-placeholder","Output":"=== RUN   TestExpandParentPath_RejectsPunctuatedToken/path-style-placeholder\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_RejectsPunctuatedToken/path-style-placeholder","Output":"--- PASS: TestExpandParentPath_RejectsPunctuatedToken/path-style-placeholder (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_RejectsPunctuatedToken/path-style-placeholder"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_RejectsPunctuatedToken/mixed-with-supported"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_RejectsPunctuatedToken/mixed-with-supported","Output":"=== RUN   TestExpandParentPath_RejectsPunctuatedToken/mixed-with-supported\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_RejectsPunctuatedToken/mixed-with-supported","Output":"--- PASS: TestExpandParentPath_RejectsPunctuatedToken/mixed-with-supported (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_RejectsPunctuatedToken/mixed-with-supported"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_RejectsPunctuatedToken","Output":"--- PASS: TestExpandParentPath_RejectsPunctuatedToken (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_RejectsPunctuatedToken"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_EmptyParentPath"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_EmptyParentPath","Output":"=== RUN   TestExpandParentPath_EmptyParentPath\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_EmptyParentPath","Output":"--- PASS: TestExpandParentPath_EmptyParentPath (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestExpandParentPath_EmptyParentPath"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestWriteOverlayAtomicCreate"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestWriteOverlayAtomicCreate","Output":"=== RUN   TestWriteOverlayAtomicCreate\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestWriteOverlayAtomicCreate","Output":"--- PASS: TestWriteOverlayAtomicCreate (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestWriteOverlayAtomicCreate"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestWriteOverlayMutatorErrorRollsBack"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestWriteOverlayMutatorErrorRollsBack","Output":"=== RUN   TestWriteOverlayMutatorErrorRollsBack\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestWriteOverlayMutatorErrorRollsBack","Output":"--- PASS: TestWriteOverlayMutatorErrorRollsBack (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestWriteOverlayMutatorErrorRollsBack"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestWriteOverlayConcurrentSerializes"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestWriteOverlayConcurrentSerializes","Output":"=== RUN   TestWriteOverlayConcurrentSerializes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestWriteOverlayConcurrentSerializes","Output":"--- PASS: TestWriteOverlayConcurrentSerializes (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Test":"TestWriteOverlayConcurrentSerializes"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/daemon_env_overlay","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/daemon_env_overlay"}

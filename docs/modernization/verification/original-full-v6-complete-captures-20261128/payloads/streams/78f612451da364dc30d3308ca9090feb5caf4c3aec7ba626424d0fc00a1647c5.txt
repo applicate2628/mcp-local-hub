@@ -1,0 +1,55 @@
+{"Action":"start","Package":"mcp-local-hub/cmd/mcphub-launcher"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce","Output":"=== RUN   TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/busy"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/busy","Output":"=== RUN   TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/busy\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/busy","Output":"--- PASS: TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/busy (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/busy"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/fence-error"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/fence-error","Output":"=== RUN   TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/fence-error\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/fence-error","Output":"--- PASS: TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/fence-error (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/fence-error"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/partial-set"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/partial-set","Output":"=== RUN   TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/partial-set\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/partial-set","Output":"--- PASS: TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/partial-set (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/partial-set"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/snapshot"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/snapshot","Output":"=== RUN   TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/snapshot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/snapshot","Output":"--- PASS: TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/snapshot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/snapshot"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/projection"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/projection","Output":"=== RUN   TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/projection\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/projection","Output":"--- PASS: TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/projection (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/projection"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce","Output":"--- PASS: TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherUsesHeldProductAndBorrowedStandards"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherUsesHeldProductAndBorrowedStandards","Output":"=== RUN   TestLauncherUsesHeldProductAndBorrowedStandards\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherUsesHeldProductAndBorrowedStandards","Output":"--- PASS: TestLauncherUsesHeldProductAndBorrowedStandards (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherUsesHeldProductAndBorrowedStandards"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherMissingBuildAndCancellationAcquireNothing"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherMissingBuildAndCancellationAcquireNothing","Output":"=== RUN   TestLauncherMissingBuildAndCancellationAcquireNothing\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherMissingBuildAndCancellationAcquireNothing","Output":"--- PASS: TestLauncherMissingBuildAndCancellationAcquireNothing (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestLauncherMissingBuildAndCancellationAcquireNothing"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestForegroundReceivingPreservesRootOutcomeAndSinkFailure"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestForegroundReceivingPreservesRootOutcomeAndSinkFailure","Output":"=== RUN   TestForegroundReceivingPreservesRootOutcomeAndSinkFailure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestForegroundReceivingPreservesRootOutcomeAndSinkFailure","Output":"--- PASS: TestForegroundReceivingPreservesRootOutcomeAndSinkFailure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestForegroundReceivingPreservesRootOutcomeAndSinkFailure"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestForegroundReceivingUnknownAndCancellationStayFailures"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestForegroundReceivingUnknownAndCancellationStayFailures","Output":"=== RUN   TestForegroundReceivingUnknownAndCancellationStayFailures\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestForegroundReceivingUnknownAndCancellationStayFailures","Output":"--- PASS: TestForegroundReceivingUnknownAndCancellationStayFailures (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestForegroundReceivingUnknownAndCancellationStayFailures"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts","Output":"=== RUN   TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts/closed"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts/closed","Output":"=== RUN   TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts/closed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts/closed","Output":"--- PASS: TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts/closed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts/closed"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts/close-failed"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts/close-failed","Output":"=== RUN   TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts/close-failed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts/close-failed","Output":"--- PASS: TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts/close-failed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts/close-failed"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts","Output":"--- PASS: TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub-launcher","Test":"TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub-launcher","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub-launcher"}

@@ -1,0 +1,38 @@
+{
+  "schema": "successor33-short-path-admission-data-v1",
+  "status": "DATA_ONLY_NO_CREATION",
+  "observed_utc": "2026-11-28T12:56:18.596877+00:00",
+  "paths": [
+    {
+      "path": "@@RECOVERY_APPROVED_WORK_DRIVE_JSON@@",
+      "exists": true,
+      "directory": true,
+      "reparse": false
+    },
+    {
+      "path": "@@RECOVERY_APPROVED_WORK_PARENT_JSON@@",
+      "exists": true,
+      "directory": true,
+      "reparse": false
+    },
+    {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@",
+      "exists": true,
+      "directory": true,
+      "reparse": false
+    },
+    {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7",
+      "exists": false
+    },
+    {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o7",
+      "exists": false
+    }
+  ],
+  "explicit_host_environment": {
+    "ProgramFiles": "@@RECOVERY_PROGRAM_FILES_JSON@@",
+    "ProgramFiles(x86)": "@@RECOVERY_PROGRAM_FILES_X86_JSON@@"
+  },
+  "refresh_before_launch": true
+}

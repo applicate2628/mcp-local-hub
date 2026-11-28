@@ -1,0 +1,25 @@
+{
+    "schema":  "source-isolation-initial-refusal-data-v1",
+    "status":  "FAIL/CLOSED",
+    "physical_complete":  true,
+    "original_error":  "RuntimeError: source head changed",
+    "original_failure_reclassified":  false,
+    "source_changes_started":  false,
+    "config_sha256":  "bf5e6f4abbab9f0d8abfcedb4eb127661e92e38361dc0e71d836fd955506cfc1",
+    "receipt_sha256":  "bba8de5a07ad4184d12d7d003cd54ff6a9b7531f128df78023c8d311acc9010d",
+    "parent_sha256":  "d207de0878e38847c4a5a70316c888d6be96852d5724b319a71805582ef2bed3",
+    "outer_sha256":  "3f7341c4f7a4c343e2afddf11e4606e6a1e38783ee8e4022451ebca7a98e97ce",
+    "commands":  [
+                     {
+                         "argv":  [
+                                      "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                      "rev-parse",
+                                      "HEAD"
+                                  ],
+                         "exit_code":  0,
+                         "stdout":  "05fbffa30f99914c8174966525a70bc9984e7038\n",
+                         "stderr":  ""
+                     }
+                 ],
+    "native_or_test_commands_started":  false
+}

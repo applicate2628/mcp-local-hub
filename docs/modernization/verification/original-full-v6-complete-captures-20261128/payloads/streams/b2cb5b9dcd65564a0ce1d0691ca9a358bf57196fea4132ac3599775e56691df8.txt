@@ -1,0 +1,386 @@
+{"Action":"start","Package":"mcp-local-hub/internal/sonnet"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputSettlementDoesNotHoldServerMutex"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputSettlementDoesNotHoldServerMutex","Output":"=== RUN   TestOutputSettlementDoesNotHoldServerMutex\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputSettlementDoesNotHoldServerMutex","Output":"--- PASS: TestOutputSettlementDoesNotHoldServerMutex (0.13s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputSettlementDoesNotHoldServerMutex"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputSettlementDeadlinePreservesExecutionOutcome"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputSettlementDeadlinePreservesExecutionOutcome","Output":"=== RUN   TestOutputSettlementDeadlinePreservesExecutionOutcome\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputSettlementDeadlinePreservesExecutionOutcome/completed"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputSettlementDeadlinePreservesExecutionOutcome/completed","Output":"=== RUN   TestOutputSettlementDeadlinePreservesExecutionOutcome/completed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputSettlementDeadlinePreservesExecutionOutcome/completed","Output":"--- PASS: TestOutputSettlementDeadlinePreservesExecutionOutcome/completed (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputSettlementDeadlinePreservesExecutionOutcome/completed"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputSettlementDeadlinePreservesExecutionOutcome/nonzero"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputSettlementDeadlinePreservesExecutionOutcome/nonzero","Output":"=== RUN   TestOutputSettlementDeadlinePreservesExecutionOutcome/nonzero\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputSettlementDeadlinePreservesExecutionOutcome/nonzero","Output":"--- PASS: TestOutputSettlementDeadlinePreservesExecutionOutcome/nonzero (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputSettlementDeadlinePreservesExecutionOutcome/nonzero"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputSettlementDeadlinePreservesExecutionOutcome/cleanup_failed"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputSettlementDeadlinePreservesExecutionOutcome/cleanup_failed","Output":"=== RUN   TestOutputSettlementDeadlinePreservesExecutionOutcome/cleanup_failed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputSettlementDeadlinePreservesExecutionOutcome/cleanup_failed","Output":"--- PASS: TestOutputSettlementDeadlinePreservesExecutionOutcome/cleanup_failed (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputSettlementDeadlinePreservesExecutionOutcome/cleanup_failed"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputSettlementDeadlinePreservesExecutionOutcome","Output":"--- PASS: TestOutputSettlementDeadlinePreservesExecutionOutcome (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputSettlementDeadlinePreservesExecutionOutcome"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputManifestClassifiesBaselineCreatedModifiedAndRemoved"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputManifestClassifiesBaselineCreatedModifiedAndRemoved","Output":"=== RUN   TestOutputManifestClassifiesBaselineCreatedModifiedAndRemoved\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputManifestClassifiesBaselineCreatedModifiedAndRemoved","Output":"--- PASS: TestOutputManifestClassifiesBaselineCreatedModifiedAndRemoved (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputManifestClassifiesBaselineCreatedModifiedAndRemoved"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputManifestRejectsLinksAndLimits"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputManifestRejectsLinksAndLimits","Output":"=== RUN   TestOutputManifestRejectsLinksAndLimits\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputManifestRejectsLinksAndLimits","Output":"--- PASS: TestOutputManifestRejectsLinksAndLimits (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestOutputManifestRejectsLinksAndLimits"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestRealAttRes16ThroughMCP"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRealAttRes16ThroughMCP","Output":"=== RUN   TestRealAttRes16ThroughMCP\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRealAttRes16ThroughMCP","Output":"    real_sample_integration_test.go:25: set SONNET_REAL_ATT_RUN=1 with controlled fixture metadata to authorize one real sample run\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRealAttRes16ThroughMCP","Output":"--- SKIP: TestRealAttRes16ThroughMCP (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/sonnet","Test":"TestRealAttRes16ThroughMCP"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartupReapsOnlyExpiredOwnedRecordlessWorkspaces"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartupReapsOnlyExpiredOwnedRecordlessWorkspaces","Output":"=== RUN   TestStartupReapsOnlyExpiredOwnedRecordlessWorkspaces\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartupReapsOnlyExpiredOwnedRecordlessWorkspaces","Output":"--- PASS: TestStartupReapsOnlyExpiredOwnedRecordlessWorkspaces (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartupReapsOnlyExpiredOwnedRecordlessWorkspaces"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestRecordlessSweepRequiresExclusiveStoreLease"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRecordlessSweepRequiresExclusiveStoreLease","Output":"=== RUN   TestRecordlessSweepRequiresExclusiveStoreLease\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRecordlessSweepRequiresExclusiveStoreLease","Output":"--- PASS: TestRecordlessSweepRequiresExclusiveStoreLease (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestRecordlessSweepRequiresExclusiveStoreLease"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestRecordlessSweepPreservesCorruptSnapshot"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRecordlessSweepPreservesCorruptSnapshot","Output":"=== RUN   TestRecordlessSweepPreservesCorruptSnapshot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRecordlessSweepPreservesCorruptSnapshot","Output":"--- PASS: TestRecordlessSweepPreservesCorruptSnapshot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestRecordlessSweepPreservesCorruptSnapshot"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestIdempotencyRequestBindingSurvivesRestart"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestIdempotencyRequestBindingSurvivesRestart","Output":"=== RUN   TestIdempotencyRequestBindingSurvivesRestart\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestIdempotencyRequestBindingSurvivesRestart","Output":"--- PASS: TestIdempotencyRequestBindingSurvivesRestart (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestIdempotencyRequestBindingSurvivesRestart"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestConcurrentIdempotencyConflictCleansLosingCopy"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestConcurrentIdempotencyConflictCleansLosingCopy","Output":"=== RUN   TestConcurrentIdempotencyConflictCleansLosingCopy\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestConcurrentIdempotencyConflictCleansLosingCopy","Output":"--- PASS: TestConcurrentIdempotencyConflictCleansLosingCopy (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestConcurrentIdempotencyConflictCleansLosingCopy"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestTimedOutFlagPersistsWithTerminalState"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestTimedOutFlagPersistsWithTerminalState","Output":"=== RUN   TestTimedOutFlagPersistsWithTerminalState\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestTimedOutFlagPersistsWithTerminalState","Output":"--- PASS: TestTimedOutFlagPersistsWithTerminalState (1.20s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestTimedOutFlagPersistsWithTerminalState"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestRequestHashPathCaseFollowsPlatformIdentity"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRequestHashPathCaseFollowsPlatformIdentity","Output":"=== RUN   TestRequestHashPathCaseFollowsPlatformIdentity\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRequestHashPathCaseFollowsPlatformIdentity","Output":"--- PASS: TestRequestHashPathCaseFollowsPlatformIdentity (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestRequestHashPathCaseFollowsPlatformIdentity"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestReplayDoesNotRequireProductDiscovery"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestReplayDoesNotRequireProductDiscovery","Output":"=== RUN   TestReplayDoesNotRequireProductDiscovery\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestReplayDoesNotRequireProductDiscovery/missing"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestReplayDoesNotRequireProductDiscovery/missing","Output":"=== RUN   TestReplayDoesNotRequireProductDiscovery/missing\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestReplayDoesNotRequireProductDiscovery/missing","Output":"--- PASS: TestReplayDoesNotRequireProductDiscovery/missing (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestReplayDoesNotRequireProductDiscovery/missing"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestReplayDoesNotRequireProductDiscovery/ambiguous"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestReplayDoesNotRequireProductDiscovery/ambiguous","Output":"=== RUN   TestReplayDoesNotRequireProductDiscovery/ambiguous\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestReplayDoesNotRequireProductDiscovery/ambiguous","Output":"--- PASS: TestReplayDoesNotRequireProductDiscovery/ambiguous (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestReplayDoesNotRequireProductDiscovery/ambiguous"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestReplayDoesNotRequireProductDiscovery/unavailable"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestReplayDoesNotRequireProductDiscovery/unavailable","Output":"=== RUN   TestReplayDoesNotRequireProductDiscovery/unavailable\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestReplayDoesNotRequireProductDiscovery/unavailable","Output":"--- PASS: TestReplayDoesNotRequireProductDiscovery/unavailable (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestReplayDoesNotRequireProductDiscovery/unavailable"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestReplayDoesNotRequireProductDiscovery","Output":"--- PASS: TestReplayDoesNotRequireProductDiscovery (0.04s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestReplayDoesNotRequireProductDiscovery"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunReadyProjectCopiesOriginalAndIsIdempotent"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunReadyProjectCopiesOriginalAndIsIdempotent","Output":"=== RUN   TestRunReadyProjectCopiesOriginalAndIsIdempotent\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunReadyProjectCopiesOriginalAndIsIdempotent","Output":"--- PASS: TestRunReadyProjectCopiesOriginalAndIsIdempotent (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunReadyProjectCopiesOriginalAndIsIdempotent"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStatusAndResultNeverInvokeDriverAndCancelRequiresPositiveForce"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStatusAndResultNeverInvokeDriverAndCancelRequiresPositiveForce","Output":"=== RUN   TestStatusAndResultNeverInvokeDriverAndCancelRequiresPositiveForce\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStatusAndResultNeverInvokeDriverAndCancelRequiresPositiveForce","Output":"--- PASS: TestStatusAndResultNeverInvokeDriverAndCancelRequiresPositiveForce (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStatusAndResultNeverInvokeDriverAndCancelRequiresPositiveForce"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestProductLocatorRejectsMultipleRegistryProducts"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestProductLocatorRejectsMultipleRegistryProducts","Output":"=== RUN   TestProductLocatorRejectsMultipleRegistryProducts\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestProductLocatorRejectsMultipleRegistryProducts","Output":"--- PASS: TestProductLocatorRejectsMultipleRegistryProducts (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestProductLocatorRejectsMultipleRegistryProducts"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestProductInfoUsesInjectedRegistryLocatorWhenNoExplicitLocator"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestProductInfoUsesInjectedRegistryLocatorWhenNoExplicitLocator","Output":"=== RUN   TestProductInfoUsesInjectedRegistryLocatorWhenNoExplicitLocator\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestProductInfoUsesInjectedRegistryLocatorWhenNoExplicitLocator","Output":"--- PASS: TestProductInfoUsesInjectedRegistryLocatorWhenNoExplicitLocator (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestProductInfoUsesInjectedRegistryLocatorWhenNoExplicitLocator"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestProductInfoReportsUnavailableWhenRegistryAndPathMiss"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestProductInfoReportsUnavailableWhenRegistryAndPathMiss","Output":"=== RUN   TestProductInfoReportsUnavailableWhenRegistryAndPathMiss\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestProductInfoReportsUnavailableWhenRegistryAndPathMiss","Output":"--- PASS: TestProductInfoReportsUnavailableWhenRegistryAndPathMiss (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestProductInfoReportsUnavailableWhenRegistryAndPathMiss"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestCancelOperationReceiptIsIdempotentAndCloseWaits"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCancelOperationReceiptIsIdempotentAndCloseWaits","Output":"=== RUN   TestCancelOperationReceiptIsIdempotentAndCloseWaits\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCancelOperationReceiptIsIdempotentAndCloseWaits","Output":"--- PASS: TestCancelOperationReceiptIsIdempotentAndCloseWaits (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestCancelOperationReceiptIsIdempotentAndCloseWaits"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestMCPWireSchemasAndFailuresAreTyped"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestMCPWireSchemasAndFailuresAreTyped","Output":"=== RUN   TestMCPWireSchemasAndFailuresAreTyped\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestMCPWireSchemasAndFailuresAreTyped","Output":"--- PASS: TestMCPWireSchemasAndFailuresAreTyped (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestMCPWireSchemasAndFailuresAreTyped"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestProductInfoToolsListSchemaDoesNotSerializeNullRequired"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestProductInfoToolsListSchemaDoesNotSerializeNullRequired","Output":"=== RUN   TestProductInfoToolsListSchemaDoesNotSerializeNullRequired\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestProductInfoToolsListSchemaDoesNotSerializeNullRequired","Output":"--- PASS: TestProductInfoToolsListSchemaDoesNotSerializeNullRequired (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestProductInfoToolsListSchemaDoesNotSerializeNullRequired"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestMCPProductInfoMapsAbsenceToTypedFailureAndRegistryProductToSuccess"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestMCPProductInfoMapsAbsenceToTypedFailureAndRegistryProductToSuccess","Output":"=== RUN   TestMCPProductInfoMapsAbsenceToTypedFailureAndRegistryProductToSuccess\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestMCPProductInfoMapsAbsenceToTypedFailureAndRegistryProductToSuccess","Output":"--- PASS: TestMCPProductInfoMapsAbsenceToTypedFailureAndRegistryProductToSuccess (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestMCPProductInfoMapsAbsenceToTypedFailureAndRegistryProductToSuccess"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartMissingProductDoesNotWrapNilCause"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartMissingProductDoesNotWrapNilCause","Output":"=== RUN   TestStartMissingProductDoesNotWrapNilCause\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartMissingProductDoesNotWrapNilCause","Output":"--- PASS: TestStartMissingProductDoesNotWrapNilCause (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartMissingProductDoesNotWrapNilCause"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestPreparedReceiptStoresRedactedResolvedProductIdentity"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestPreparedReceiptStoresRedactedResolvedProductIdentity","Output":"=== RUN   TestPreparedReceiptStoresRedactedResolvedProductIdentity\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestPreparedReceiptStoresRedactedResolvedProductIdentity","Output":"--- PASS: TestPreparedReceiptStoresRedactedResolvedProductIdentity (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestPreparedReceiptStoresRedactedResolvedProductIdentity"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestMCPResultExposesObservedPostAnalysisSummary"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestMCPResultExposesObservedPostAnalysisSummary","Output":"=== RUN   TestMCPResultExposesObservedPostAnalysisSummary\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestMCPResultExposesObservedPostAnalysisSummary","Output":"--- PASS: TestMCPResultExposesObservedPostAnalysisSummary (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestMCPResultExposesObservedPostAnalysisSummary"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnsafeFILEOUTFolderBeforeDriverLaunch"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnsafeFILEOUTFolderBeforeDriverLaunch","Output":"=== RUN   TestStartRejectsUnsafeFILEOUTFolderBeforeDriverLaunch\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnsafeFILEOUTFolderBeforeDriverLaunch","Output":"--- PASS: TestStartRejectsUnsafeFILEOUTFolderBeforeDriverLaunch (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnsafeFILEOUTFolderBeforeDriverLaunch"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch","Output":"=== RUN   TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/contained"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/contained","Output":"=== RUN   TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/contained\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/contained","Output":"--- PASS: TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/contained (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/contained"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/outside"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/outside","Output":"=== RUN   TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/outside\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/outside","Output":"--- PASS: TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/outside (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/outside"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/whitespace"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/whitespace","Output":"=== RUN   TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/whitespace\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/whitespace","Output":"--- PASS: TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/whitespace (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/whitespace"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/non-directive_NOTE"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/non-directive_NOTE","Output":"=== RUN   TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/non-directive_NOTE\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/non-directive_NOTE","Output":"--- PASS: TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/non-directive_NOTE (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/non-directive_NOTE"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/non-directive_COMMENT"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/non-directive_COMMENT","Output":"=== RUN   TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/non-directive_COMMENT\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/non-directive_COMMENT","Output":"--- PASS: TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/non-directive_COMMENT (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/non-directive_COMMENT"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch","Output":"--- PASS: TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartPersistsPathAdmissionReceiptForDotFILEOUT"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartPersistsPathAdmissionReceiptForDotFILEOUT","Output":"=== RUN   TestStartPersistsPathAdmissionReceiptForDotFILEOUT\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartPersistsPathAdmissionReceiptForDotFILEOUT","Output":"--- PASS: TestStartPersistsPathAdmissionReceiptForDotFILEOUT (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartPersistsPathAdmissionReceiptForDotFILEOUT"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestFILEOUTFolderAdmissionAcceptsOnlyCleanRelativeTargets"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestFILEOUTFolderAdmissionAcceptsOnlyCleanRelativeTargets","Output":"=== RUN   TestFILEOUTFolderAdmissionAcceptsOnlyCleanRelativeTargets\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestFILEOUTFolderAdmissionAcceptsOnlyCleanRelativeTargets","Output":"--- PASS: TestFILEOUTFolderAdmissionAcceptsOnlyCleanRelativeTargets (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestFILEOUTFolderAdmissionAcceptsOnlyCleanRelativeTargets"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRemovesOwnedWorkspaceWhenBaselineSnapshotFails"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRemovesOwnedWorkspaceWhenBaselineSnapshotFails","Output":"=== RUN   TestStartRemovesOwnedWorkspaceWhenBaselineSnapshotFails\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRemovesOwnedWorkspaceWhenBaselineSnapshotFails","Output":"--- PASS: TestStartRemovesOwnedWorkspaceWhenBaselineSnapshotFails (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRemovesOwnedWorkspaceWhenBaselineSnapshotFails"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartConcurrentDuplicateKeyRemovesOnlyLosingCopiedWorkspace"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartConcurrentDuplicateKeyRemovesOnlyLosingCopiedWorkspace","Output":"=== RUN   TestStartConcurrentDuplicateKeyRemovesOnlyLosingCopiedWorkspace\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartConcurrentDuplicateKeyRemovesOnlyLosingCopiedWorkspace","Output":"--- PASS: TestStartConcurrentDuplicateKeyRemovesOnlyLosingCopiedWorkspace (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartConcurrentDuplicateKeyRemovesOnlyLosingCopiedWorkspace"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRemovesOwnedWorkspaceWhenActiveMarkerCreationFails"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRemovesOwnedWorkspaceWhenActiveMarkerCreationFails","Output":"=== RUN   TestStartRemovesOwnedWorkspaceWhenActiveMarkerCreationFails\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRemovesOwnedWorkspaceWhenActiveMarkerCreationFails","Output":"--- PASS: TestStartRemovesOwnedWorkspaceWhenActiveMarkerCreationFails (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRemovesOwnedWorkspaceWhenActiveMarkerCreationFails"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartPreservesUncertainPreparedReceiptWithoutPublishingRun"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartPreservesUncertainPreparedReceiptWithoutPublishingRun","Output":"=== RUN   TestStartPreservesUncertainPreparedReceiptWithoutPublishingRun\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartPreservesUncertainPreparedReceiptWithoutPublishingRun","Output":"--- PASS: TestStartPreservesUncertainPreparedReceiptWithoutPublishingRun (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartPreservesUncertainPreparedReceiptWithoutPublishingRun"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartPreTransferCleanupFailuresRemainVisible"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartPreTransferCleanupFailuresRemainVisible","Output":"=== RUN   TestStartPreTransferCleanupFailuresRemainVisible\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartPreTransferCleanupFailuresRemainVisible/baseline_snapshot"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartPreTransferCleanupFailuresRemainVisible/baseline_snapshot","Output":"=== RUN   TestStartPreTransferCleanupFailuresRemainVisible/baseline_snapshot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartPreTransferCleanupFailuresRemainVisible/baseline_snapshot","Output":"--- PASS: TestStartPreTransferCleanupFailuresRemainVisible/baseline_snapshot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartPreTransferCleanupFailuresRemainVisible/baseline_snapshot"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartPreTransferCleanupFailuresRemainVisible/active_marker"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartPreTransferCleanupFailuresRemainVisible/active_marker","Output":"=== RUN   TestStartPreTransferCleanupFailuresRemainVisible/active_marker\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartPreTransferCleanupFailuresRemainVisible/active_marker","Output":"--- PASS: TestStartPreTransferCleanupFailuresRemainVisible/active_marker (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartPreTransferCleanupFailuresRemainVisible/active_marker"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartPreTransferCleanupFailuresRemainVisible/duplicate_replay"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartPreTransferCleanupFailuresRemainVisible/duplicate_replay","Output":"=== RUN   TestStartPreTransferCleanupFailuresRemainVisible/duplicate_replay\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartPreTransferCleanupFailuresRemainVisible/duplicate_replay","Output":"--- PASS: TestStartPreTransferCleanupFailuresRemainVisible/duplicate_replay (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartPreTransferCleanupFailuresRemainVisible/duplicate_replay"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartPreTransferCleanupFailuresRemainVisible","Output":"--- PASS: TestStartPreTransferCleanupFailuresRemainVisible (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartPreTransferCleanupFailuresRemainVisible"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestCleanupPreTransferWorkRefusesForeignWorkspace"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCleanupPreTransferWorkRefusesForeignWorkspace","Output":"=== RUN   TestCleanupPreTransferWorkRefusesForeignWorkspace\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCleanupPreTransferWorkRefusesForeignWorkspace","Output":"--- PASS: TestCleanupPreTransferWorkRefusesForeignWorkspace (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestCleanupPreTransferWorkRefusesForeignWorkspace"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestCopyProjectUsesCanonicalRelativeSourceManifest"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCopyProjectUsesCanonicalRelativeSourceManifest","Output":"=== RUN   TestCopyProjectUsesCanonicalRelativeSourceManifest\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCopyProjectUsesCanonicalRelativeSourceManifest","Output":"--- PASS: TestCopyProjectUsesCanonicalRelativeSourceManifest (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestCopyProjectUsesCanonicalRelativeSourceManifest"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestMCPRejectsNonObjectArgumentsForEveryTool"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestMCPRejectsNonObjectArgumentsForEveryTool","Output":"=== RUN   TestMCPRejectsNonObjectArgumentsForEveryTool\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestMCPRejectsNonObjectArgumentsForEveryTool","Output":"--- PASS: TestMCPRejectsNonObjectArgumentsForEveryTool (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestMCPRejectsNonObjectArgumentsForEveryTool"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestMCPResultProjectsOnlyCreatedOrModifiedOutputs"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestMCPResultProjectsOnlyCreatedOrModifiedOutputs","Output":"=== RUN   TestMCPResultProjectsOnlyCreatedOrModifiedOutputs\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestMCPResultProjectsOnlyCreatedOrModifiedOutputs","Output":"--- PASS: TestMCPResultProjectsOnlyCreatedOrModifiedOutputs (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestMCPResultProjectsOnlyCreatedOrModifiedOutputs"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestMCPResultIncludesAnEmptyOutputListForValidZeroDelta"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestMCPResultIncludesAnEmptyOutputListForValidZeroDelta","Output":"=== RUN   TestMCPResultIncludesAnEmptyOutputListForValidZeroDelta\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestMCPResultIncludesAnEmptyOutputListForValidZeroDelta","Output":"--- PASS: TestMCPResultIncludesAnEmptyOutputListForValidZeroDelta (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestMCPResultIncludesAnEmptyOutputListForValidZeroDelta"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestTerminalPersistenceFailureDoesNotPublishCompletedResult"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestTerminalPersistenceFailureDoesNotPublishCompletedResult","Output":"=== RUN   TestTerminalPersistenceFailureDoesNotPublishCompletedResult\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestTerminalPersistenceFailureDoesNotPublishCompletedResult","Output":"--- PASS: TestTerminalPersistenceFailureDoesNotPublishCompletedResult (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestTerminalPersistenceFailureDoesNotPublishCompletedResult"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestCancelRejectsEmptyOperationWithoutMutatingRun"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCancelRejectsEmptyOperationWithoutMutatingRun","Output":"=== RUN   TestCancelRejectsEmptyOperationWithoutMutatingRun\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCancelRejectsEmptyOperationWithoutMutatingRun","Output":"--- PASS: TestCancelRejectsEmptyOperationWithoutMutatingRun (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestCancelRejectsEmptyOperationWithoutMutatingRun"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreWriteFaultsPersistFailedStateAcrossRestart"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreWriteFaultsPersistFailedStateAcrossRestart","Output":"=== RUN   TestRunStoreWriteFaultsPersistFailedStateAcrossRestart\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreWriteFaultsPersistFailedStateAcrossRestart/running"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreWriteFaultsPersistFailedStateAcrossRestart/running","Output":"=== RUN   TestRunStoreWriteFaultsPersistFailedStateAcrossRestart/running\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreWriteFaultsPersistFailedStateAcrossRestart/running","Output":"--- PASS: TestRunStoreWriteFaultsPersistFailedStateAcrossRestart/running (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreWriteFaultsPersistFailedStateAcrossRestart/running"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreWriteFaultsPersistFailedStateAcrossRestart/terminal"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreWriteFaultsPersistFailedStateAcrossRestart/terminal","Output":"=== RUN   TestRunStoreWriteFaultsPersistFailedStateAcrossRestart/terminal\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreWriteFaultsPersistFailedStateAcrossRestart/terminal","Output":"--- PASS: TestRunStoreWriteFaultsPersistFailedStateAcrossRestart/terminal (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreWriteFaultsPersistFailedStateAcrossRestart/terminal"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreWriteFaultsPersistFailedStateAcrossRestart","Output":"--- PASS: TestRunStoreWriteFaultsPersistFailedStateAcrossRestart (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreWriteFaultsPersistFailedStateAcrossRestart"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreLoadsTerminalRecordAfterRestart"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreLoadsTerminalRecordAfterRestart","Output":"=== RUN   TestRunStoreLoadsTerminalRecordAfterRestart\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreLoadsTerminalRecordAfterRestart","Output":"--- PASS: TestRunStoreLoadsTerminalRecordAfterRestart (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreLoadsTerminalRecordAfterRestart"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreRecoversPendingRecordAsHostLostWithoutDriverAdoption"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreRecoversPendingRecordAsHostLostWithoutDriverAdoption","Output":"=== RUN   TestRunStoreRecoversPendingRecordAsHostLostWithoutDriverAdoption\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreRecoversPendingRecordAsHostLostWithoutDriverAdoption","Output":"--- PASS: TestRunStoreRecoversPendingRecordAsHostLostWithoutDriverAdoption (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreRecoversPendingRecordAsHostLostWithoutDriverAdoption"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestRecoveredHostLostResultPreservesFailureIdentity"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRecoveredHostLostResultPreservesFailureIdentity","Output":"=== RUN   TestRecoveredHostLostResultPreservesFailureIdentity\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRecoveredHostLostResultPreservesFailureIdentity","Output":"--- PASS: TestRecoveredHostLostResultPreservesFailureIdentity (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestRecoveredHostLostResultPreservesFailureIdentity"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStorePersistsAppendOnlyGenerationSnapshots"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStorePersistsAppendOnlyGenerationSnapshots","Output":"=== RUN   TestRunStorePersistsAppendOnlyGenerationSnapshots\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStorePersistsAppendOnlyGenerationSnapshots","Output":"--- PASS: TestRunStorePersistsAppendOnlyGenerationSnapshots (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStorePersistsAppendOnlyGenerationSnapshots"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreRejectsConcurrentOwner"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreRejectsConcurrentOwner","Output":"=== RUN   TestRunStoreRejectsConcurrentOwner\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreRejectsConcurrentOwner","Output":"--- PASS: TestRunStoreRejectsConcurrentOwner (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreRejectsConcurrentOwner"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreRejectsMalformedAndFutureRecords"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreRejectsMalformedAndFutureRecords","Output":"=== RUN   TestRunStoreRejectsMalformedAndFutureRecords\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreRejectsMalformedAndFutureRecords/malformed"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreRejectsMalformedAndFutureRecords/malformed","Output":"=== RUN   TestRunStoreRejectsMalformedAndFutureRecords/malformed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreRejectsMalformedAndFutureRecords/malformed","Output":"--- PASS: TestRunStoreRejectsMalformedAndFutureRecords/malformed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreRejectsMalformedAndFutureRecords/malformed"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreRejectsMalformedAndFutureRecords/future"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreRejectsMalformedAndFutureRecords/future","Output":"=== RUN   TestRunStoreRejectsMalformedAndFutureRecords/future\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreRejectsMalformedAndFutureRecords/future","Output":"--- PASS: TestRunStoreRejectsMalformedAndFutureRecords/future (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreRejectsMalformedAndFutureRecords/future"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreRejectsMalformedAndFutureRecords","Output":"--- PASS: TestRunStoreRejectsMalformedAndFutureRecords (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreRejectsMalformedAndFutureRecords"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreSweepRemovesOnlyExpiredOwnedTerminalOrAbandonedRuns"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreSweepRemovesOnlyExpiredOwnedTerminalOrAbandonedRuns","Output":"=== RUN   TestRunStoreSweepRemovesOnlyExpiredOwnedTerminalOrAbandonedRuns\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreSweepRemovesOnlyExpiredOwnedTerminalOrAbandonedRuns","Output":"--- PASS: TestRunStoreSweepRemovesOnlyExpiredOwnedTerminalOrAbandonedRuns (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestRunStoreSweepRemovesOnlyExpiredOwnedTerminalOrAbandonedRuns"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseRetainsLeaseUntilStubbornWorkerSettles"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseRetainsLeaseUntilStubbornWorkerSettles","Output":"=== RUN   TestCloseRetainsLeaseUntilStubbornWorkerSettles\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseRetainsLeaseUntilStubbornWorkerSettles","Output":"--- PASS: TestCloseRetainsLeaseUntilStubbornWorkerSettles (0.25s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseRetainsLeaseUntilStubbornWorkerSettles"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease","Output":"=== RUN   TestCloseDuringPreparationRejectsLateStartAndRetainsLease\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/final_admission"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/final_admission","Output":"=== RUN   TestCloseDuringPreparationRejectsLateStartAndRetainsLease/final_admission\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/final_admission","Output":"    server_test.go:1575: settled: late runs/writes/markers/calls=0/0/0/0; candidate cleanup failure=false; successor acquired\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/final_admission","Output":"--- PASS: TestCloseDuringPreparationRejectsLateStartAndRetainsLease/final_admission (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/final_admission"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/pre-copy_discovery"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/pre-copy_discovery","Output":"=== RUN   TestCloseDuringPreparationRejectsLateStartAndRetainsLease/pre-copy_discovery\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/pre-copy_discovery","Output":"    server_test.go:1575: settled: late runs/writes/markers/calls=0/0/0/0; candidate cleanup failure=false; successor acquired\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/pre-copy_discovery","Output":"--- PASS: TestCloseDuringPreparationRejectsLateStartAndRetainsLease/pre-copy_discovery (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/pre-copy_discovery"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/post-copy_replay"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/post-copy_replay","Output":"=== RUN   TestCloseDuringPreparationRejectsLateStartAndRetainsLease/post-copy_replay\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/post-copy_replay","Output":"    server_test.go:1575: settled: late runs/writes/markers/calls=0/0/0/0; candidate cleanup failure=false; successor acquired\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/post-copy_replay","Output":"--- PASS: TestCloseDuringPreparationRejectsLateStartAndRetainsLease/post-copy_replay (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/post-copy_replay"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/cleanup_cause"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/cleanup_cause","Output":"=== RUN   TestCloseDuringPreparationRejectsLateStartAndRetainsLease/cleanup_cause\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/cleanup_cause","Output":"    server_test.go:1575: settled: late runs/writes/markers/calls=0/0/0/0; candidate cleanup failure=true; successor acquired\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/cleanup_cause","Output":"--- PASS: TestCloseDuringPreparationRejectsLateStartAndRetainsLease/cleanup_cause (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/cleanup_cause"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/cleanup_wire_projection"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/cleanup_wire_projection","Output":"=== RUN   TestCloseDuringPreparationRejectsLateStartAndRetainsLease/cleanup_wire_projection\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/cleanup_wire_projection","Output":"    server_test.go:1575: settled: late runs/writes/markers/calls=0/0/0/0; candidate cleanup failure=true; successor acquired\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/cleanup_wire_projection","Output":"--- PASS: TestCloseDuringPreparationRejectsLateStartAndRetainsLease/cleanup_wire_projection (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/cleanup_wire_projection"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/already_closed"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/already_closed","Output":"=== RUN   TestCloseDuringPreparationRejectsLateStartAndRetainsLease/already_closed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/already_closed","Output":"    server_test.go:1575: settled: late runs/writes/markers/calls=0/0/0/0; candidate cleanup failure=false; successor acquired\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/already_closed","Output":"--- PASS: TestCloseDuringPreparationRejectsLateStartAndRetainsLease/already_closed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease/already_closed"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease","Output":"--- PASS: TestCloseDuringPreparationRejectsLateStartAndRetainsLease (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestCloseDuringPreparationRejectsLateStartAndRetainsLease"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsPostCopyHandoffAfterClose"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsPostCopyHandoffAfterClose","Output":"=== RUN   TestStartRejectsPostCopyHandoffAfterClose\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsPostCopyHandoffAfterClose/cleanup_succeeds"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsPostCopyHandoffAfterClose/cleanup_succeeds","Output":"=== RUN   TestStartRejectsPostCopyHandoffAfterClose/cleanup_succeeds\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsPostCopyHandoffAfterClose/cleanup_succeeds","Output":"--- PASS: TestStartRejectsPostCopyHandoffAfterClose/cleanup_succeeds (0.05s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsPostCopyHandoffAfterClose/cleanup_succeeds"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsPostCopyHandoffAfterClose/cleanup_failure_preserves_both_causes"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsPostCopyHandoffAfterClose/cleanup_failure_preserves_both_causes","Output":"=== RUN   TestStartRejectsPostCopyHandoffAfterClose/cleanup_failure_preserves_both_causes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsPostCopyHandoffAfterClose/cleanup_failure_preserves_both_causes","Output":"--- PASS: TestStartRejectsPostCopyHandoffAfterClose/cleanup_failure_preserves_both_causes (0.05s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsPostCopyHandoffAfterClose/cleanup_failure_preserves_both_causes"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsPostCopyHandoffAfterClose","Output":"--- PASS: TestStartRejectsPostCopyHandoffAfterClose (0.11s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStartRejectsPostCopyHandoffAfterClose"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_OrdinaryExitThreeIsCompletedNonzero"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_OrdinaryExitThreeIsCompletedNonzero","Output":"=== RUN   TestStrictDriver_OrdinaryExitThreeIsCompletedNonzero\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_OrdinaryExitThreeIsCompletedNonzero","Output":"--- PASS: TestStrictDriver_OrdinaryExitThreeIsCompletedNonzero (0.24s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_OrdinaryExitThreeIsCompletedNonzero"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_MissingExecutableIsLaunchFailure"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_MissingExecutableIsLaunchFailure","Output":"=== RUN   TestStrictDriver_MissingExecutableIsLaunchFailure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_MissingExecutableIsLaunchFailure","Output":"--- PASS: TestStrictDriver_MissingExecutableIsLaunchFailure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_MissingExecutableIsLaunchFailure"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_ContainmentFailureIsDistinct"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_ContainmentFailureIsDistinct","Output":"=== RUN   TestStrictDriver_ContainmentFailureIsDistinct\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_ContainmentFailureIsDistinct","Output":"--- PASS: TestStrictDriver_ContainmentFailureIsDistinct (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_ContainmentFailureIsDistinct"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_ExitThreeJoinedCleanupStaysFailed"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_ExitThreeJoinedCleanupStaysFailed","Output":"=== RUN   TestStrictDriver_ExitThreeJoinedCleanupStaysFailed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_ExitThreeJoinedCleanupStaysFailed","Output":"--- PASS: TestStrictDriver_ExitThreeJoinedCleanupStaysFailed (0.13s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_ExitThreeJoinedCleanupStaysFailed"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_ZeroExitJoinedCleanupStaysFailed"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_ZeroExitJoinedCleanupStaysFailed","Output":"=== RUN   TestStrictDriver_ZeroExitJoinedCleanupStaysFailed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_ZeroExitJoinedCleanupStaysFailed","Output":"--- PASS: TestStrictDriver_ZeroExitJoinedCleanupStaysFailed (0.12s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_ZeroExitJoinedCleanupStaysFailed"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_PipeOrPrewaitFailureHasNoExit"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_PipeOrPrewaitFailureHasNoExit","Output":"=== RUN   TestStrictDriver_PipeOrPrewaitFailureHasNoExit\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_PipeOrPrewaitFailureHasNoExit","Output":"--- PASS: TestStrictDriver_PipeOrPrewaitFailureHasNoExit (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_PipeOrPrewaitFailureHasNoExit"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed","Output":"=== RUN   TestStrictDriver_InvalidOrUnknownTreeFailsClosed\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed/invalid_invocation"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed/invalid_invocation","Output":"=== RUN   TestStrictDriver_InvalidOrUnknownTreeFailsClosed/invalid_invocation\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed/invalid_invocation","Output":"--- PASS: TestStrictDriver_InvalidOrUnknownTreeFailsClosed/invalid_invocation (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed/invalid_invocation"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed/unknown_strict_kind"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed/unknown_strict_kind","Output":"=== RUN   TestStrictDriver_InvalidOrUnknownTreeFailsClosed/unknown_strict_kind\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed/unknown_strict_kind","Output":"--- PASS: TestStrictDriver_InvalidOrUnknownTreeFailsClosed/unknown_strict_kind (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed/unknown_strict_kind"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed/untyped_error"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed/untyped_error","Output":"=== RUN   TestStrictDriver_InvalidOrUnknownTreeFailsClosed/untyped_error\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed/untyped_error","Output":"--- PASS: TestStrictDriver_InvalidOrUnknownTreeFailsClosed/untyped_error (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed/untyped_error"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed/mismatched_process_states"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed/mismatched_process_states","Output":"=== RUN   TestStrictDriver_InvalidOrUnknownTreeFailsClosed/mismatched_process_states\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed/mismatched_process_states","Output":"--- PASS: TestStrictDriver_InvalidOrUnknownTreeFailsClosed/mismatched_process_states (0.23s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed/mismatched_process_states"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed/nil_error_without_process_state"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed/nil_error_without_process_state","Output":"=== RUN   TestStrictDriver_InvalidOrUnknownTreeFailsClosed/nil_error_without_process_state\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed/nil_error_without_process_state","Output":"--- PASS: TestStrictDriver_InvalidOrUnknownTreeFailsClosed/nil_error_without_process_state (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed/nil_error_without_process_state"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed/exit_error_with_zero_code"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed/exit_error_with_zero_code","Output":"=== RUN   TestStrictDriver_InvalidOrUnknownTreeFailsClosed/exit_error_with_zero_code\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed/exit_error_with_zero_code","Output":"--- PASS: TestStrictDriver_InvalidOrUnknownTreeFailsClosed/exit_error_with_zero_code (0.11s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed/exit_error_with_zero_code"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed","Output":"--- PASS: TestStrictDriver_InvalidOrUnknownTreeFailsClosed (0.34s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_InvalidOrUnknownTreeFailsClosed"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_TimeoutAndCancelPolarityUnchanged"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_TimeoutAndCancelPolarityUnchanged","Output":"=== RUN   TestStrictDriver_TimeoutAndCancelPolarityUnchanged\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_TimeoutAndCancelPolarityUnchanged/timeout"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_TimeoutAndCancelPolarityUnchanged/timeout","Output":"=== RUN   TestStrictDriver_TimeoutAndCancelPolarityUnchanged/timeout\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_TimeoutAndCancelPolarityUnchanged/timeout","Output":"--- PASS: TestStrictDriver_TimeoutAndCancelPolarityUnchanged/timeout (1.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_TimeoutAndCancelPolarityUnchanged/timeout"}
+{"Action":"run","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_TimeoutAndCancelPolarityUnchanged/force_cancel"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_TimeoutAndCancelPolarityUnchanged/force_cancel","Output":"=== RUN   TestStrictDriver_TimeoutAndCancelPolarityUnchanged/force_cancel\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_TimeoutAndCancelPolarityUnchanged/force_cancel","Output":"--- PASS: TestStrictDriver_TimeoutAndCancelPolarityUnchanged/force_cancel (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_TimeoutAndCancelPolarityUnchanged/force_cancel"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_TimeoutAndCancelPolarityUnchanged","Output":"--- PASS: TestStrictDriver_TimeoutAndCancelPolarityUnchanged (1.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet","Test":"TestStrictDriver_TimeoutAndCancelPolarityUnchanged"}
+{"Action":"output","Package":"mcp-local-hub/internal/sonnet","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/sonnet"}

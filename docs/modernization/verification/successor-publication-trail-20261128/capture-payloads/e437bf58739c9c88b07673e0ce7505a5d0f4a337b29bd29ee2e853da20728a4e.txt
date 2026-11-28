@@ -1,0 +1,2 @@
+To https://github.com/applicate2628/mcp-local-hub.git
+   01b4e915..05fbffa3  05fbffa30f99914c8174966525a70bc9984e7038 -> fix/p0-test-entry-preserve-20261121

@@ -1,0 +1,69 @@
+{
+  "schema": "successor33-namespace-unchanged-inputs-v1",
+  "base_commit": "33eaf8af8fc46cb231f48c70f4775922393245b1",
+  "successor_commit": "04e5b4eadd6407cbff4e04ba453546d278314bd7",
+  "expected_successor_tree": "f68f7584dba7744e7607b07f615758f3ff633f54",
+  "files": [
+    {
+      "path": "tools/test-recovery-namespace/main_windows.go",
+      "bytes": 14751,
+      "sha256": "9a731af9334f4015aee2abacce19a5616f3de600f1ed2815c581fb6c35aeaf6b",
+      "git_blob": "a4087c475d16226e30d37bbff2c0482f2ea75e9b"
+    },
+    {
+      "path": "scripts/test-recovery-namespace/helper.ps1",
+      "bytes": 23316,
+      "sha256": "ce20de6a117350681b9db5979a67285b1d8d07ea7937ea912680b4e3d6a6fa32",
+      "git_blob": "72a86d959bf2740f38a4053b36e3a98adf5b1ead"
+    },
+    {
+      "path": "internal/process/contained_stream_observed.go",
+      "bytes": 4919,
+      "sha256": "f3cf8d99b0157ac87af8a1bf2282da41afaad22c11a58ebc9f2e27585b28e0da",
+      "git_blob": "3a416c8abf2dc235bbfc11dd0488806333f23c2f"
+    },
+    {
+      "path": "internal/api/secrets_init_recovery_test.go",
+      "bytes": 27581,
+      "sha256": "350eb3cfb95248e58ac89ba737a03caf93fac5d29067ce9df79e45c305f64965",
+      "git_blob": "90b596965456187271d6092596fa3dd037397bae"
+    },
+    {
+      "path": "internal/api/secrets_init_recovery_directory_windows.go",
+      "bytes": 2095,
+      "sha256": "1cc107051a94646a4bd93bfaca2e06120ef4b2b7c5d37237d1c02dd1062c9fd4",
+      "git_blob": "16c17b7daa08ad513549a3677fee670c2fc01300"
+    },
+    {
+      "path": "internal/api/main_test.go",
+      "bytes": 15816,
+      "sha256": "a34d3b8e14f610945662a7aeee122068641b931af19ffd9535ba6e24b186d869",
+      "git_blob": "0aebe605b377efd27cbcf8b57d4c417b151ce298"
+    },
+    {
+      "path": "internal/api/supervisor_ipc_peer_transport_windows_test.go",
+      "bytes": 15328,
+      "sha256": "d3b23fe403d74d0648c2860d1bda95ce8a343a3a2e8ed7e078dc860d730d6e3a",
+      "git_blob": "9d649f1a09023512c8078413807f24c06daef5aa"
+    },
+    {
+      "path": "internal/api/attach_client_public_cli_receiving_windows_test.go",
+      "bytes": 15043,
+      "sha256": "ee6ad604b53d188b513e5d4783d7741b4760f66594129faafbd1762b542a7123",
+      "git_blob": "9f1ff4104a81b0b2bd295729daf8232f08df3a05"
+    },
+    {
+      "path": "internal/api/supervisor_stderr_sink_test.go",
+      "bytes": 5431,
+      "sha256": "43943d1f99ccd8b46ca6b48dedd7e885629096a140c6d617c4e0145c863f22fd",
+      "git_blob": "39142cc73a25f9fdc92d6ebaf89b43967851e9b4"
+    },
+    {
+      "path": "internal/binaryadmission/windows_pe.go",
+      "bytes": 12336,
+      "sha256": "1c74201bfca3ba6ffc379edb35ddd56139ae8b617b66ac48c55ddc6d7aa9f119",
+      "git_blob": "3754b1f5434c425b6d7dfe927fe9f8ef3a38c8a1"
+    }
+  ],
+  "successor_receiving_execution_sha256": "d94591a33c5de636849b07985529cedcd71b47ac6f5dbd8d40fd4032f08d9a93"
+}

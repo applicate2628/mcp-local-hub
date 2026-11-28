@@ -1,0 +1,30 @@
+"""Post-closure DATA metadata for exactly two original API preparation proofs."""
+import datetime,hashlib,json,os,stat
+from pathlib import Path
+parent=Path(r"@@RECOVERY_APPROVED_WORK_AREA@@\r7\nf635b4256b7c\n")
+result={"schema":"closed-api-prechild-metadata-read-v1","scope":"two original preparation proofs only",
+        "original_namespace_refusal_sha256":"b54431c56d881ad42164980032de493bd2ab42d79ee6b6003b9771d92508e6e2",
+        "original_api_receipt_sha256":"e1cba7d99294f4e18816ebc91a8fd137c3533be5d9ed433071de4c89b66fc709",
+        "root_previously_received_api_physical_closure":True,"new_authority_issued":False,
+        "source_cache_cli_or_full_capture_read":False,"native_helper_or_test_executed":False,"files":[]}
+for name in ("inputs.json","binary.json"):
+    path=parent/"r"/"proof"/name
+    row={"path":str(path),"exists":os.path.lexists(path)}
+    if row["exists"]:
+        for item in (*reversed(path.parents),path):
+            state=item.lstat()
+            assert not stat.S_ISLNK(state.st_mode) and not getattr(state,"st_file_attributes",0)&0x400
+        before=path.stat()
+        assert stat.S_ISREG(before.st_mode) and before.st_size<=65536
+        raw=path.read_bytes()
+        after=path.stat()
+        assert (before.st_size,before.st_mtime_ns,before.st_ino)==(after.st_size,after.st_mtime_ns,after.st_ino)
+        row.update(bytes=len(raw),sha256=hashlib.sha256(raw).hexdigest(),mtime_ns=after.st_mtime_ns,
+                   mtime_utc=datetime.datetime.fromtimestamp(after.st_mtime,datetime.timezone.utc).isoformat(),
+                   contents=json.loads(raw))
+    result["files"].append(row)
+output=Path(__file__).absolute().parent/"api-prechild-metadata-read-v1.json"
+with output.open("xb") as stream:
+    stream.write((json.dumps(result,indent=2)+"\n").encode());stream.flush();os.fsync(stream.fileno())
+print(json.dumps(result,indent=2))
+print(json.dumps({"output":str(output),"sha256":hashlib.sha256(output.read_bytes()).hexdigest()}))

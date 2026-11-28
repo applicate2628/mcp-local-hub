@@ -1,0 +1,183 @@
+"""Compose reviewed successor runtime DATA; does not import or execute runtime modules."""
+import sys
+sys.dont_write_bytecode=True
+import argparse,ast,hashlib,json,os,re,stat
+from pathlib import Path
+
+TASK=Path(r"@@RECOVERY_APPROVED_WORK_AREA_RAW@@\mcp-acceptance-rebuild-20261127-v1")
+SOURCE=Path(r"@@RECOVERY_APPROVED_WORK_AREA_RAW@@\pub666-recovered-20261128")
+SOURCE_COMMIT="59f618ebfbf6d9f52c6994d68586e3c2ebc202a8"
+SOURCE_TREE="03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1"
+RUNS=Path(r"@@RECOVERY_APPROVED_WORK_AREA_RAW@@\r7")
+SHORT=Path(r"@@RECOVERY_APPROVED_WORK_AREA_RAW@@\o7")
+
+def require(ok,message):
+    if not ok:raise RuntimeError(message)
+def sha(path):
+    with Path(path).open("rb") as stream:return hashlib.file_digest(stream,"sha256").hexdigest()
+def ordinary(path,directory=False):
+    path=Path(path)
+    require(path.is_absolute() and ".." not in path.parts,"absolute clean input path required")
+    for p in (*reversed(path.parents),path):
+        info=p.lstat()
+        require(not stat.S_ISLNK(info.st_mode) and not getattr(info,"st_file_attributes",0)&0x400,
+                "ordinary non-reparse input required")
+    require(path.is_dir() if directory else path.is_file(),"unexpected input type")
+    return path
+def pin(row):
+    require(isinstance(row,dict) and set(row)=={"path","sha256"}
+            and isinstance(row["path"],str) and isinstance(row["sha256"],str)
+            and re.fullmatch("[0-9a-f]{64}",row["sha256"]),"unfilled concrete path/SHA256 input")
+    path=ordinary(row["path"])
+    require(str(path)==row["path"] and sha(path)==row["sha256"],"input bytes differ: "+str(path))
+    return path
+def read(row):
+    return json.loads(pin(row).read_text(encoding="utf-8-sig"))
+def write(path,raw):
+    with path.open("xb") as stream:
+        stream.write(raw);stream.flush();os.fsync(stream.fileno())
+    return sha(path)
+def exact_replace(text,before,after):
+    require(text.count(before)==1,"reviewed deterministic template transformation differs")
+    return text.replace(before,after,1)
+
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--bindings",required=True)
+    parser.add_argument("--bindings-sha256",required=True)
+    parser.add_argument("--templates",required=True)
+    parser.add_argument("--templates-sha256",required=True)
+    parser.add_argument("--output",required=True)
+    parser.add_argument("--reviewed",action="store_true")
+    args=parser.parse_args()
+    origin=Path(__file__).absolute().parent
+    cfg=read({"path":args.bindings,"sha256":args.bindings_sha256})
+    fields={"schema","task_root","source_dir","source_commit","source_tree","source_file_count",
+            "source_context","source_snapshot","product_snapshot","runs_root","run_name","trash_root",
+            "short_temp_parent","tools","guard","windows_job","controllers","canonical_tools",
+            "serena_preparation_tools","product","native_product","cache_copy","cache_parent",
+            "closed_producer_receipts","input_files","environment","outer_seconds","acceptance","cli_owner_protocol"}
+    require(set(cfg)==fields and cfg["schema"]=="literal-successor-inputs-v1","explicit complete successor schema required")
+    require(Path(cfg["task_root"])==TASK and Path(cfg["source_dir"])==SOURCE
+            and cfg["source_commit"]==SOURCE_COMMIT and cfg["source_tree"]==SOURCE_TREE
+            and cfg["source_file_count"]==3369,"selected clean successor59f with 3369 paths required")
+    require(Path(cfg["runs_root"])==RUNS and Path(cfg["short_temp_parent"])==SHORT
+            and not os.path.lexists(RUNS) and not os.path.lexists(SHORT),
+            "fresh exact approved r7 and o7 parents required")
+    ordinary(RUNS.parent,True)
+    require(cfg["run_name"]=="full59f"
+            and Path(cfg["trash_root"])==Path(r"@@RECOVERY_APPROVED_WORK_AREA_RAW@@\trash"),"fixed fresh run and user trash operands required")
+    require(type(cfg["outer_seconds"]) is int and 1800<=cfg["outer_seconds"]<=86400,"bounded original outer deadline required")
+    require(set(cfg["tools"])=={"go","git","gcc","pwsh","python"}
+            and set(cfg["controllers"])=={"contained","namespace","job","cli","test2json","validator"}
+            and set(cfg["serena_preparation_tools"])=={"uv","uvx","python"},"explicit executable roles required")
+    require(set(cfg["canonical_tools"]) in ({"powershell","netstat","netsh","conhost"},
+            {"powershell","netstat","netsh","conhost","wmic"}),"native control tool roles differ")
+    require(set(cfg["product"])=={"inputs","build_plan","bundle_root","fixture","compiler_resource"}
+            and set(cfg["native_product"])=={"inputs","build_plan","bundle_root","fixture"},
+            "separate marked CLI and unmarked tagged native Product operands required")
+    require(set(cfg["acceptance"])=={"migration_roots","canonical_roots","api_stderr_roots","cli_stderr_extra","migration_fixture"}
+            and cfg["acceptance"]["migration_fixture"] is None,
+            "ordinary original migration roots are required; no private replacement protocol")
+    for key,count in (("migration_roots",14),("canonical_roots",2),("api_stderr_roots",3),("cli_stderr_extra",3)):
+        names=cfg["acceptance"][key]
+        require(isinstance(names,list) and len(names)==count and len(set(names))==count
+                and all(isinstance(name,str) and re.fullmatch("Test[A-Za-z0-9_]+",name) for name in names),
+                "exact mandatory root cardinality differs: "+key)
+    templates=read({"path":args.templates,"sha256":args.templates_sha256})
+    require(templates.get("schema")=="literal-successor-templates-v1"
+            and set(templates.get("templates",{}))=={"scope","core","primitives","adapter","driver","launcher"}
+            and isinstance(cfg["cli_owner_protocol"],str) and cfg["cli_owner_protocol"]
+            and templates.get("cli_owner_protocol")==cfg["cli_owner_protocol"],
+            "concrete reviewed CLI native-owner protocol and all template roles are required")
+    require(not args.reviewed or templates.get("reviewed") is True,
+            "runtime cannot be marked reviewed while the concrete CLI owner or templates remain pending")
+    all_pins=[cfg["source_context"],cfg["source_snapshot"],cfg["product_snapshot"],
+              cfg["guard"],cfg["windows_job"],cfg["cache_copy"],cfg["cache_parent"],
+              *cfg["tools"].values(),*cfg["controllers"].values(),*cfg["canonical_tools"].values(),
+              *cfg["serena_preparation_tools"].values(),*cfg["closed_producer_receipts"],
+              *templates["templates"].values()]
+    for role in ("product","native_product"):
+        all_pins += [cfg[role][key] for key in ("inputs","build_plan","fixture")]
+        ordinary(cfg[role]["bundle_root"],True)
+    all_pins.append(cfg["product"]["compiler_resource"])
+    require(isinstance(cfg["input_files"],dict),"explicit auxiliary input map required")
+    all_pins += [{"path":path,"sha256":digest} for path,digest in cfg["input_files"].items()]
+    for row in all_pins:pin(row)
+    snapshot=read(cfg["source_snapshot"])
+    product_snapshot=read(cfg["product_snapshot"])
+    require(set(snapshot)=={"head","files"} and snapshot["head"]==SOURCE_COMMIT
+            and len(snapshot["files"])==3369
+            and product_snapshot.get("schema")=="reused-graphify-source-snapshot-v1"
+            and {p:row["sha256"] for p,row in product_snapshot["files"].items()}==snapshot["files"],
+            "complete exact TestSource and marked Product source maps must agree")
+    require(cfg["closed_producer_receipts"],"original closed producers must be supplied")
+    for row in cfg["closed_producer_receipts"]:
+        value=read(row)
+        require(value.get("terminal_exit_received") is True and value.get("parent_capture_files_closed") is True
+                and value.get("physical_complete") is True,"producer original native/IO closure is not received")
+    env=cfg["environment"]
+    require(isinstance(env,dict) and all(isinstance(k,str) and isinstance(v,str) and "\0" not in k+v for k,v in env.items())
+            and len({k.upper() for k in env})==len(env),"explicit unambiguous environment required")
+    require(all(key in env for key in ("SystemRoot","WINDIR","COMSPEC","PATH","PATHEXT","ProgramFiles","ProgramFiles(x86)"))
+            and not any(k.upper().startswith(("MCPHUB_","PYTHON")) or k.upper() in
+                        ("SERENA_HOME","TEST_TELEMETRY_DIR","GIT_ALLOW_PROTOCOL") for k in env),
+            "explicit Windows baseline without ambient opt-ins or an empty Git allow-list required")
+    require(env["ProgramFiles"]==r"@@RECOVERY_PROGRAM_FILES_RAW@@" and env["ProgramFiles(x86)"]==r"@@RECOVERY_PROGRAM_FILES_X86_RAW@@",
+            "actual received Program Files operands differ")
+    require(str(Path(cfg["canonical_tools"]["powershell"]["path"]).parent).lower()
+            in [p.lower() for p in env["PATH"].split(";")],"qualified Windows PowerShell must be on PATH")
+    output=Path(args.output)
+    require(output.is_absolute() and ".." not in output.parts and output.parent==origin.parent
+            and not os.path.lexists(output),"fresh sibling runtime output required")
+    # All source templates and concrete inputs have been received before writes.
+    output.mkdir()
+    config_path=output/"runtime-inputs.json"
+    config_sha=write(config_path,(json.dumps(cfg,indent=2,sort_keys=True)+"\n").encode("utf-8"))
+    values={"CONFIG_PATH_REPR":repr(str(config_path)),"CONFIG_SHA_REPR":repr(config_sha),
+            "TASK_PATH_REPR":repr(cfg["task_root"]),"INPUTS_PATH_REPR":repr(str(output)),
+            "RUNS_PATH_REPR":repr(cfg["runs_root"]),"ARTIFACTS_PATH_REPR":repr(str(SOURCE/".scratch")),
+            "GUARD_PATH_REPR":repr(cfg["guard"]["path"]),"GUARD_SHA_REPR":repr(cfg["guard"]["sha256"])}
+    files={"runtime-inputs.json":config_sha}
+    transformations={}
+    def compose(template_role,name,role):
+        row=templates["templates"][template_role]
+        text=pin(row).read_text(encoding="utf-8")
+        if template_role=="launcher":
+            replacements=(("literal-original-runtime-v6","literal-successor-runtime-v1"),
+                          ("run_literal_go_gate_v6.py","driver_successor.py"),
+                          ("original-literal-original-parent-v6","original-literal-successor-parent-v1"),
+                          ("runs.mkdir(exist_ok=True)","runs.mkdir(exist_ok=False)"))
+            for before,after in replacements:text=exact_replace(text,before,after)
+            transformations[name]=[{"before":before,"after":after} for before,after in replacements]
+        for key,value in values.items():text=text.replace("@@"+key+"@@",value)
+        require(not re.search(r"@@[A-Z_]+@@",text),"unresolved runtime operand: "+name)
+        ast.parse(text,filename=name)
+        digest=write(output/name,text.encode("utf-8"))
+        files[name]=digest
+        if role:
+            values[role+"_PATH_REPR"]=repr(str(output/name))
+            values[role+"_SHA_REPR"]=repr(digest)
+    for template,name,role in (("scope","private_run_scope.py","SCOPE"),("core","core_successor.py","CORE"),
+                              ("primitives","primitives_successor.py","PART"),("adapter","adapter_successor.py","ADAPTER"),
+                              ("driver","driver_successor.py","DRIVER"),("launcher","launch_successor.py","")):
+        compose(template,name,role)
+    manifest={"schema":"literal-successor-runtime-v1","reviewed":args.reviewed,
+              "source_commit":SOURCE_COMMIT,"source_tree":SOURCE_TREE,
+              "configuration":{"path":str(config_path),"sha256":config_sha},"files":files,
+              "template_manifest":{"path":args.templates,"sha256":args.templates_sha256},
+              "template_inputs":templates["templates"],"deterministic_launcher_changes":transformations,
+              "cli_owner_protocol":cfg["cli_owner_protocol"],"qualification":"NOT_RUN",
+              "native_or_test_commands_started":False}
+    manifest_path=output/"runtime-manifest.json"
+    digest=write(manifest_path,(json.dumps(manifest,indent=2)+"\n").encode("utf-8"))
+    launch=[cfg["tools"]["python"]["path"],"-I","-S","-B",str(output/"launch_successor.py"),
+            "--manifest",str(manifest_path),"--manifest-sha256",digest]
+    result={"schema":"literal-successor-preparation-v1","status":"PREPARED_NOT_EXECUTED",
+            "manifest":{"path":str(manifest_path),"sha256":digest},"launch_argv":launch,
+            "reviewed":args.reviewed,"source_mutation_performed":False,"native_or_test_commands_started":False}
+    write(output/"preparation.json",(json.dumps(result,indent=2)+"\n").encode("utf-8"))
+    print(json.dumps(result,indent=2))
+    return 0
+if __name__=="__main__":
+    raise SystemExit(main())

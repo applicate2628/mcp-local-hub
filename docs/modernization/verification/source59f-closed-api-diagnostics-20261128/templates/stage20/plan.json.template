@@ -1,0 +1,63 @@
+{
+  "run": "runs/cache-acceptance-stage-20261128-v20",
+  "source": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub664-363b",
+  "head": "05fbffa30f99914c8174966525a70bc9984e7038",
+  "environment": {
+    "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_NO_REPLACE_OBJECTS": "1",
+    "GIT_NO_LAZY_FETCH": "1"
+  },
+  "observed_files": [],
+  "steps": [
+    {
+      "name": "publication-worktree-status-before",
+      "argv": [
+        "git",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "fetch-published-docs-checkpoint",
+      "argv": [
+        "git",
+        "fetch",
+        "origin",
+        "27d90e626465dc9a3a012e50785d62785d4c5e7e"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "fast-forward-preserve-published-docs",
+      "argv": [
+        "git",
+        "merge",
+        "--ff-only",
+        "27d90e626465dc9a3a012e50785d62785d4c5e7e"
+      ],
+      "timeout": 60
+    },
+    {
+      "name": "publication-head-after",
+      "argv": [
+        "git",
+        "rev-parse",
+        "HEAD"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "publication-worktree-status-after",
+      "argv": [
+        "git",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all"
+      ],
+      "timeout": 30
+    }
+  ]
+}

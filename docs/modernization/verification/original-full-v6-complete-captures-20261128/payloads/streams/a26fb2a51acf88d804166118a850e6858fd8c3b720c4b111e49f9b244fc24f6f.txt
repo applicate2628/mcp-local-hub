@@ -1,0 +1,589 @@
+{"Action":"start","Package":"mcp-local-hub/internal/binaryadmission"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceCannotEmitMixedCommitTreeWhenHeadSwitchesWithinBothObservations"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceCannotEmitMixedCommitTreeWhenHeadSwitchesWithinBothObservations","Output":"=== RUN   TestPreparePublisherSourceCannotEmitMixedCommitTreeWhenHeadSwitchesWithinBothObservations\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceCannotEmitMixedCommitTreeWhenHeadSwitchesWithinBothObservations","Output":"--- PASS: TestPreparePublisherSourceCannotEmitMixedCommitTreeWhenHeadSwitchesWithinBothObservations (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceCannotEmitMixedCommitTreeWhenHeadSwitchesWithinBothObservations"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes","Output":"=== RUN   TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes/false"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes/false","Output":"=== RUN   TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes/false\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes/false","Output":"--- PASS: TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes/false (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes/false"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes/true"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes/true","Output":"=== RUN   TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes/true\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes/true","Output":"--- PASS: TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes/true (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes/true"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes","Output":"--- PASS: TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess","Output":"=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/commit"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/commit","Output":"=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/commit\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/commit","Output":"--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/commit (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/commit"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/commit_mismatch"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/commit_mismatch","Output":"=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/commit_mismatch\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/commit_mismatch","Output":"--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/commit_mismatch (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/commit_mismatch"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/duplicate"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/duplicate","Output":"=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/duplicate\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/duplicate","Output":"--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/duplicate (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/duplicate"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/case"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/case","Output":"=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/case\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/case","Output":"--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/case (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/case"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/directory"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/directory","Output":"=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/directory\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/directory","Output":"--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/directory (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/directory"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/traversal"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/traversal","Output":"=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/traversal\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/traversal","Output":"--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/traversal (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/traversal"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/empty"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/empty","Output":"=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/empty\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/empty","Output":"--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/empty (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/empty"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/glob"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/glob","Output":"=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/glob\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/glob","Output":"--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/glob (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/glob"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/overlap"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/overlap","Output":"=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/overlap\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/overlap","Output":"--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/overlap (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/overlap"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/snapshot_overlap"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/snapshot_overlap","Output":"=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/snapshot_overlap\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/snapshot_overlap","Output":"--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/snapshot_overlap (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/snapshot_overlap"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/existing"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/existing","Output":"=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/existing\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/existing","Output":"--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/existing (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/existing"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/unmerged"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/unmerged","Output":"=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/unmerged\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/unmerged","Output":"--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/unmerged (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/unmerged"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/link"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/link","Output":"=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/link\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/link","Output":"--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/link (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/link"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/git_drift"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/git_drift","Output":"=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/git_drift\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/git_drift","Output":"--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/git_drift (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/git_drift"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/head_drift"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/head_drift","Output":"=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/head_drift\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/head_drift","Output":"--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/head_drift (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/head_drift"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/source_drift"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/source_drift","Output":"=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/source_drift\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/source_drift","Output":"--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/source_drift (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/source_drift"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/cancel"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/cancel","Output":"=== RUN   TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/cancel\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/cancel","Output":"--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/cancel (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess/cancel"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess","Output":"--- PASS: TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess (0.05s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceOutputFailureRollsBackOwnedLeaves"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceOutputFailureRollsBackOwnedLeaves","Output":"=== RUN   TestPreparePublisherSourceOutputFailureRollsBackOwnedLeaves\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceOutputFailureRollsBackOwnedLeaves","Output":"--- PASS: TestPreparePublisherSourceOutputFailureRollsBackOwnedLeaves (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourceOutputFailureRollsBackOwnedLeaves"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourcePreservesExecutableMode"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourcePreservesExecutableMode","Output":"=== RUN   TestPreparePublisherSourcePreservesExecutableMode\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourcePreservesExecutableMode","Output":"    source_prepare_test.go:287: Windows has no executable permission bits\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourcePreservesExecutableMode","Output":"--- SKIP: TestPreparePublisherSourcePreservesExecutableMode (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPreparePublisherSourcePreservesExecutableMode"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildObservationDataAndIndependentBinding"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildObservationDataAndIndependentBinding","Output":"=== RUN   TestPortableCanonicalEntryBuildObservationDataAndIndependentBinding\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildObservationDataAndIndependentBinding","Output":"--- PASS: TestPortableCanonicalEntryBuildObservationDataAndIndependentBinding (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildObservationDataAndIndependentBinding"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildObservationRefusesHardlinkAlias"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildObservationRefusesHardlinkAlias","Output":"=== RUN   TestPortableCanonicalEntryBuildObservationRefusesHardlinkAlias\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildObservationRefusesHardlinkAlias","Output":"--- PASS: TestPortableCanonicalEntryBuildObservationRefusesHardlinkAlias (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildObservationRefusesHardlinkAlias"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildIdentitySizeBoundary"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildIdentitySizeBoundary","Output":"=== RUN   TestPortableCanonicalEntryBuildIdentitySizeBoundary\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildIdentitySizeBoundary/limit"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildIdentitySizeBoundary/limit","Output":"=== RUN   TestPortableCanonicalEntryBuildIdentitySizeBoundary/limit\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildIdentitySizeBoundary/limit","Output":"--- PASS: TestPortableCanonicalEntryBuildIdentitySizeBoundary/limit (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildIdentitySizeBoundary/limit"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildIdentitySizeBoundary/limit_plus_one"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildIdentitySizeBoundary/limit_plus_one","Output":"=== RUN   TestPortableCanonicalEntryBuildIdentitySizeBoundary/limit_plus_one\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildIdentitySizeBoundary/limit_plus_one","Output":"--- PASS: TestPortableCanonicalEntryBuildIdentitySizeBoundary/limit_plus_one (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildIdentitySizeBoundary/limit_plus_one"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildIdentitySizeBoundary","Output":"--- PASS: TestPortableCanonicalEntryBuildIdentitySizeBoundary (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildIdentitySizeBoundary"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch","Output":"=== RUN   TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch/absent_no_expected_epoch"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch/absent_no_expected_epoch","Output":"=== RUN   TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch/absent_no_expected_epoch\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch/absent_no_expected_epoch","Output":"--- PASS: TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch/absent_no_expected_epoch (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch/absent_no_expected_epoch"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch/malformed_present"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch/malformed_present","Output":"=== RUN   TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch/malformed_present\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch/malformed_present","Output":"--- PASS: TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch/malformed_present (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch/malformed_present"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch/unknown_source_version"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch/unknown_source_version","Output":"=== RUN   TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch/unknown_source_version\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch/unknown_source_version","Output":"--- PASS: TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch/unknown_source_version (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch/unknown_source_version"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch","Output":"--- PASS: TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPortableCanonicalEntryBuildObservationOptionalSourceEpoch"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntrySetBuildBindingAndRetainedGuards"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntrySetBuildBindingAndRetainedGuards","Output":"=== RUN   TestOriginalCanonicalEntrySetBuildBindingAndRetainedGuards\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntrySetBuildBindingAndRetainedGuards","Output":"--- PASS: TestOriginalCanonicalEntrySetBuildBindingAndRetainedGuards (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntrySetBuildBindingAndRetainedGuards"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntryIdentitySizeBoundary"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntryIdentitySizeBoundary","Output":"=== RUN   TestOriginalCanonicalEntryIdentitySizeBoundary\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntryIdentitySizeBoundary/limit"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntryIdentitySizeBoundary/limit","Output":"=== RUN   TestOriginalCanonicalEntryIdentitySizeBoundary/limit\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntryIdentitySizeBoundary/limit","Output":"--- PASS: TestOriginalCanonicalEntryIdentitySizeBoundary/limit (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntryIdentitySizeBoundary/limit"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntryIdentitySizeBoundary/limit_plus_one"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntryIdentitySizeBoundary/limit_plus_one","Output":"=== RUN   TestOriginalCanonicalEntryIdentitySizeBoundary/limit_plus_one\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntryIdentitySizeBoundary/limit_plus_one","Output":"--- PASS: TestOriginalCanonicalEntryIdentitySizeBoundary/limit_plus_one (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntryIdentitySizeBoundary/limit_plus_one"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntryIdentitySizeBoundary","Output":"--- PASS: TestOriginalCanonicalEntryIdentitySizeBoundary (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntryIdentitySizeBoundary"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPriorIdentitySizeBoundPreservesOriginalBytes"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPriorIdentitySizeBoundPreservesOriginalBytes","Output":"=== RUN   TestCanonicalEntryPriorIdentitySizeBoundPreservesOriginalBytes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPriorIdentitySizeBoundPreservesOriginalBytes","Output":"--- PASS: TestCanonicalEntryPriorIdentitySizeBoundPreservesOriginalBytes (0.04s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPriorIdentitySizeBoundPreservesOriginalBytes"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntryRefusesSubstitutedEntryAndRetainsPartialOwner"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntryRefusesSubstitutedEntryAndRetainsPartialOwner","Output":"=== RUN   TestOriginalCanonicalEntryRefusesSubstitutedEntryAndRetainsPartialOwner\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntryRefusesSubstitutedEntryAndRetainsPartialOwner","Output":"--- PASS: TestOriginalCanonicalEntryRefusesSubstitutedEntryAndRetainsPartialOwner (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntryRefusesSubstitutedEntryAndRetainsPartialOwner"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntryMissingIdentityClosesEveryPartialGuard"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntryMissingIdentityClosesEveryPartialGuard","Output":"=== RUN   TestOriginalCanonicalEntryMissingIdentityClosesEveryPartialGuard\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntryMissingIdentityClosesEveryPartialGuard","Output":"--- PASS: TestOriginalCanonicalEntryMissingIdentityClosesEveryPartialGuard (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntryMissingIdentityClosesEveryPartialGuard"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntrySetCompleteRelocationAndWrongExpectedGeneration"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntrySetCompleteRelocationAndWrongExpectedGeneration","Output":"=== RUN   TestOriginalCanonicalEntrySetCompleteRelocationAndWrongExpectedGeneration\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntrySetCompleteRelocationAndWrongExpectedGeneration","Output":"--- PASS: TestOriginalCanonicalEntrySetCompleteRelocationAndWrongExpectedGeneration (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntrySetCompleteRelocationAndWrongExpectedGeneration"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryStageReceivesBytesAndTransfersDispositionOnlyOnce"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryStageReceivesBytesAndTransfersDispositionOnlyOnce","Output":"=== RUN   TestCanonicalEntryStageReceivesBytesAndTransfersDispositionOnlyOnce\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryStageReceivesBytesAndTransfersDispositionOnlyOnce","Output":"--- PASS: TestCanonicalEntryStageReceivesBytesAndTransfersDispositionOnlyOnce (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryStageReceivesBytesAndTransfersDispositionOnlyOnce"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryStageCloseBeforeTakeCleansOnlyOriginalStages"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryStageCloseBeforeTakeCleansOnlyOriginalStages","Output":"=== RUN   TestCanonicalEntryStageCloseBeforeTakeCleansOnlyOriginalStages\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryStageCloseBeforeTakeCleansOnlyOriginalStages","Output":"--- PASS: TestCanonicalEntryStageCloseBeforeTakeCleansOnlyOriginalStages (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryStageCloseBeforeTakeCleansOnlyOriginalStages"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile","Output":"=== RUN   TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile/writer-live"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile/writer-live","Output":"=== RUN   TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile/writer-live\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile/writer-live","Output":"--- PASS: TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile/writer-live (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile/writer-live"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile/changed-before-seal"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile/changed-before-seal","Output":"=== RUN   TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile/changed-before-seal\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile/changed-before-seal","Output":"--- PASS: TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile/changed-before-seal (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile/changed-before-seal"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile/unchanged"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile/unchanged","Output":"=== RUN   TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile/unchanged\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile/unchanged","Output":"--- PASS: TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile/unchanged (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile/unchanged"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile","Output":"--- PASS: TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryStageRefusesRedirectedInstallationDirectory"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryStageRefusesRedirectedInstallationDirectory","Output":"=== RUN   TestCanonicalEntryStageRefusesRedirectedInstallationDirectory\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryStageRefusesRedirectedInstallationDirectory","Output":"--- PASS: TestCanonicalEntryStageRefusesRedirectedInstallationDirectory (0.05s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryStageRefusesRedirectedInstallationDirectory"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryStageOriginalMoveDeniesForeignSwapAtPromotionBarrier"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryStageOriginalMoveDeniesForeignSwapAtPromotionBarrier","Output":"=== RUN   TestCanonicalEntryStageOriginalMoveDeniesForeignSwapAtPromotionBarrier\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryStageOriginalMoveDeniesForeignSwapAtPromotionBarrier","Output":"--- PASS: TestCanonicalEntryStageOriginalMoveDeniesForeignSwapAtPromotionBarrier (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryStageOriginalMoveDeniesForeignSwapAtPromotionBarrier"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntryRefusesHardlinkedObjects"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntryRefusesHardlinkedObjects","Output":"=== RUN   TestOriginalCanonicalEntryRefusesHardlinkedObjects\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntryRefusesHardlinkedObjects","Output":"--- PASS: TestOriginalCanonicalEntryRefusesHardlinkedObjects (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalCanonicalEntryRefusesHardlinkedObjects"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement","Output":"=== RUN   TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement/inverse"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement/inverse","Output":"=== RUN   TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement/inverse\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement/inverse","Output":"--- PASS: TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement/inverse (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement/inverse"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement/commit"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement/commit","Output":"=== RUN   TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement/commit\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement/commit","Output":"--- PASS: TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement/commit (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement/commit"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement","Output":"--- PASS: TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryPriorOriginalMoveInverseAndCommittedRetirement"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryDiscardRefusesActualShortAliasOfCanonicalProduct"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryDiscardRefusesActualShortAliasOfCanonicalProduct","Output":"=== RUN   TestCanonicalEntryDiscardRefusesActualShortAliasOfCanonicalProduct\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryDiscardRefusesActualShortAliasOfCanonicalProduct","Output":"    windows_canonical_entry_native_windows_test.go:820: filesystem supplied no distinct qualified directory short alias: \"mcphub-product\"\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryDiscardRefusesActualShortAliasOfCanonicalProduct","Output":"--- SKIP: TestCanonicalEntryDiscardRefusesActualShortAliasOfCanonicalProduct (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryDiscardRefusesActualShortAliasOfCanonicalProduct"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime","Output":"=== RUN   TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/legacy"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/legacy","Output":"=== RUN   TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/legacy\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/legacy","Output":"--- PASS: TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/legacy (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/legacy"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/complete"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/complete","Output":"=== RUN   TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/complete\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/complete","Output":"--- PASS: TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/complete (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/complete"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/absent"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/absent","Output":"=== RUN   TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/absent\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/absent","Output":"--- PASS: TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/absent (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/absent"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/partial"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/partial","Output":"=== RUN   TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/partial\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/partial","Output":"--- PASS: TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/partial (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime/partial"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime","Output":"--- PASS: TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime (0.06s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryBorrowedPriorRuntimeRolesAbsenceAndLifetime"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalOwnerAwareImageProofUsesActualCurrentProcessHandle"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalOwnerAwareImageProofUsesActualCurrentProcessHandle","Output":"=== RUN   TestOriginalOwnerAwareImageProofUsesActualCurrentProcessHandle\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalOwnerAwareImageProofUsesActualCurrentProcessHandle","Output":"--- PASS: TestOriginalOwnerAwareImageProofUsesActualCurrentProcessHandle (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalOwnerAwareImageProofUsesActualCurrentProcessHandle"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalPayloadParentObservationRefusesAppearedDirectory"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalPayloadParentObservationRefusesAppearedDirectory","Output":"=== RUN   TestOriginalPayloadParentObservationRefusesAppearedDirectory\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalPayloadParentObservationRefusesAppearedDirectory","Output":"--- PASS: TestOriginalPayloadParentObservationRefusesAppearedDirectory (0.04s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalPayloadParentObservationRefusesAppearedDirectory"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalPayloadParentObservationDistinguishesMissingProductLeaf"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalPayloadParentObservationDistinguishesMissingProductLeaf","Output":"=== RUN   TestOriginalPayloadParentObservationDistinguishesMissingProductLeaf\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalPayloadParentObservationDistinguishesMissingProductLeaf","Output":"--- PASS: TestOriginalPayloadParentObservationDistinguishesMissingProductLeaf (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalPayloadParentObservationDistinguishesMissingProductLeaf"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalPayloadDirectoryEmptyInverseAndBorrowCustody"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalPayloadDirectoryEmptyInverseAndBorrowCustody","Output":"=== RUN   TestOriginalPayloadDirectoryEmptyInverseAndBorrowCustody\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalPayloadDirectoryEmptyInverseAndBorrowCustody","Output":"--- PASS: TestOriginalPayloadDirectoryEmptyInverseAndBorrowCustody (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestOriginalPayloadDirectoryEmptyInverseAndBorrowCustody"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPayloadDirectoryColdReacquisitionPreservesForeignEmpty"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPayloadDirectoryColdReacquisitionPreservesForeignEmpty","Output":"=== RUN   TestPayloadDirectoryColdReacquisitionPreservesForeignEmpty\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPayloadDirectoryColdReacquisitionPreservesForeignEmpty","Output":"--- PASS: TestPayloadDirectoryColdReacquisitionPreservesForeignEmpty (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPayloadDirectoryColdReacquisitionPreservesForeignEmpty"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPayloadDirectoryColdReacquiresPriorPresentWithoutDeleteAccess"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPayloadDirectoryColdReacquiresPriorPresentWithoutDeleteAccess","Output":"=== RUN   TestPayloadDirectoryColdReacquiresPriorPresentWithoutDeleteAccess\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPayloadDirectoryColdReacquiresPriorPresentWithoutDeleteAccess","Output":"--- PASS: TestPayloadDirectoryColdReacquiresPriorPresentWithoutDeleteAccess (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPayloadDirectoryColdReacquiresPriorPresentWithoutDeleteAccess"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved","Output":"=== RUN   TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved/prior-present"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved/prior-present","Output":"=== RUN   TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved/prior-present\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved/prior-present","Output":"--- PASS: TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved/prior-present (0.36s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved/prior-present"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved/created-nonempty"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved/created-nonempty","Output":"=== RUN   TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved/created-nonempty\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved/created-nonempty","Output":"--- PASS: TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved/created-nonempty (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved/created-nonempty"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved","Output":"--- PASS: TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved (0.38s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPayloadDirectoryPriorPresentAndNonemptyRemainPreserved"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPayloadDirectoryAuthorizedAbsenceAfterDisposeCrash"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPayloadDirectoryAuthorizedAbsenceAfterDisposeCrash","Output":"=== RUN   TestPayloadDirectoryAuthorizedAbsenceAfterDisposeCrash\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPayloadDirectoryAuthorizedAbsenceAfterDisposeCrash","Output":"--- PASS: TestPayloadDirectoryAuthorizedAbsenceAfterDisposeCrash (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPayloadDirectoryAuthorizedAbsenceAfterDisposeCrash"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalRecoveryOriginalAsideRestoreAndBorrowedRuntimeFence"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalRecoveryOriginalAsideRestoreAndBorrowedRuntimeFence","Output":"=== RUN   TestCanonicalRecoveryOriginalAsideRestoreAndBorrowedRuntimeFence\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalRecoveryOriginalAsideRestoreAndBorrowedRuntimeFence","Output":"--- PASS: TestCanonicalRecoveryOriginalAsideRestoreAndBorrowedRuntimeFence (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalRecoveryOriginalAsideRestoreAndBorrowedRuntimeFence"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias","Output":"=== RUN   TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias/missing"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias/missing","Output":"=== RUN   TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias/missing\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias/missing","Output":"--- PASS: TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias/missing (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias/missing"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias/hash-mismatch"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias/hash-mismatch","Output":"=== RUN   TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias/hash-mismatch\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias/hash-mismatch","Output":"--- PASS: TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias/hash-mismatch (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias/hash-mismatch"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias/cross-side-alias"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias/cross-side-alias","Output":"=== RUN   TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias/cross-side-alias\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias/cross-side-alias","Output":"--- PASS: TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias/cross-side-alias (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias/cross-side-alias"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias","Output":"--- PASS: TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalRecoveryRefusesMissingHashMismatchAndCrossSideAlias"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalRecoverySelectedAbsenceDoesNotClaimFinalVacancy"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalRecoverySelectedAbsenceDoesNotClaimFinalVacancy","Output":"=== RUN   TestCanonicalRecoverySelectedAbsenceDoesNotClaimFinalVacancy\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalRecoverySelectedAbsenceDoesNotClaimFinalVacancy","Output":"--- PASS: TestCanonicalRecoverySelectedAbsenceDoesNotClaimFinalVacancy (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalRecoverySelectedAbsenceDoesNotClaimFinalVacancy"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsPreservesExactPriorAndSourceEpoch"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsPreservesExactPriorAndSourceEpoch","Output":"=== RUN   TestCanonicalEntryCommentsPreservesExactPriorAndSourceEpoch\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsPreservesExactPriorAndSourceEpoch","Output":"--- PASS: TestCanonicalEntryCommentsPreservesExactPriorAndSourceEpoch (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsPreservesExactPriorAndSourceEpoch"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords","Output":"=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/missing_digest"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/missing_digest","Output":"=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/missing_digest\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/missing_digest","Output":"--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/missing_digest (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/missing_digest"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/trailing_newline"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/trailing_newline","Output":"=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/trailing_newline\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/trailing_newline","Output":"--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/trailing_newline (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/trailing_newline"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/trailing_document"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/trailing_document","Output":"=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/trailing_document\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/trailing_document","Output":"--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/trailing_document (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/trailing_document"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/wrong_reverse"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/wrong_reverse","Output":"=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/wrong_reverse\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/wrong_reverse","Output":"--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/wrong_reverse (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/wrong_reverse"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/unknown_version"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/unknown_version","Output":"=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/unknown_version\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/unknown_version","Output":"--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/unknown_version (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/unknown_version"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/case_variant"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/case_variant","Output":"=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/case_variant\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/case_variant","Output":"--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/case_variant (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/case_variant"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/uppercase_digest"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/uppercase_digest","Output":"=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/uppercase_digest\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/uppercase_digest","Output":"--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/uppercase_digest (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/uppercase_digest"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/whitespace"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/whitespace","Output":"=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/whitespace\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/whitespace","Output":"--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/whitespace (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/whitespace"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/missing_inserted_LF"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/missing_inserted_LF","Output":"=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/missing_inserted_LF\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/missing_inserted_LF","Output":"--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/missing_inserted_LF (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/missing_inserted_LF"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/duplicate_marker"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/duplicate_marker","Output":"=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/duplicate_marker\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/duplicate_marker","Output":"--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/duplicate_marker (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/duplicate_marker"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/unknown_key"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/unknown_key","Output":"=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/unknown_key\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/unknown_key","Output":"--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/unknown_key (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/unknown_key"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/duplicate_decoded_key"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/duplicate_decoded_key","Output":"=== RUN   TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/duplicate_decoded_key\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/duplicate_decoded_key","Output":"--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/duplicate_decoded_key (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords/duplicate_decoded_key"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords","Output":"--- PASS: TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryCommentsRejectsNoncanonicalAndAmbiguousRecords"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryIdentityV1RejectsExtensionsDuplicatesAndDefaultInputs"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryIdentityV1RejectsExtensionsDuplicatesAndDefaultInputs","Output":"=== RUN   TestCanonicalEntryIdentityV1RejectsExtensionsDuplicatesAndDefaultInputs\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryIdentityV1RejectsExtensionsDuplicatesAndDefaultInputs","Output":"--- PASS: TestCanonicalEntryIdentityV1RejectsExtensionsDuplicatesAndDefaultInputs (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryIdentityV1RejectsExtensionsDuplicatesAndDefaultInputs"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryIdentityV1SizeBoundary"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryIdentityV1SizeBoundary","Output":"=== RUN   TestCanonicalEntryIdentityV1SizeBoundary\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryIdentityV1SizeBoundary","Output":"--- PASS: TestCanonicalEntryIdentityV1SizeBoundary (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryIdentityV1SizeBoundary"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryRegistry3IsClosedAndRetainsFalseFields"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryRegistry3IsClosedAndRetainsFalseFields","Output":"=== RUN   TestCanonicalEntryRegistry3IsClosedAndRetainsFalseFields\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryRegistry3IsClosedAndRetainsFalseFields","Output":"--- PASS: TestCanonicalEntryRegistry3IsClosedAndRetainsFalseFields (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntryRegistry3IsClosedAndRetainsFalseFields"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntrySnapshotJSONPreservesNativeArtifactFields"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntrySnapshotJSONPreservesNativeArtifactFields","Output":"=== RUN   TestCanonicalEntrySnapshotJSONPreservesNativeArtifactFields\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntrySnapshotJSONPreservesNativeArtifactFields","Output":"--- PASS: TestCanonicalEntrySnapshotJSONPreservesNativeArtifactFields (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestCanonicalEntrySnapshotJSONPreservesNativeArtifactFields"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductRoleAdmissionBindsExactIdentityAndHash"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductRoleAdmissionBindsExactIdentityAndHash","Output":"=== RUN   TestWindowsProductRoleAdmissionBindsExactIdentityAndHash\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductRoleAdmissionBindsExactIdentityAndHash","Output":"--- PASS: TestWindowsProductRoleAdmissionBindsExactIdentityAndHash (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductRoleAdmissionBindsExactIdentityAndHash"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEAdmission"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEAdmission","Output":"=== RUN   TestWindowsPEAdmission\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEAdmission/PE32"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEAdmission/PE32","Output":"=== RUN   TestWindowsPEAdmission/PE32\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEAdmission/PE32","Output":"--- PASS: TestWindowsPEAdmission/PE32 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEAdmission/PE32"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEAdmission/PE32+"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEAdmission/PE32+","Output":"=== RUN   TestWindowsPEAdmission/PE32+\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEAdmission/PE32+","Output":"--- PASS: TestWindowsPEAdmission/PE32+ (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEAdmission/PE32+"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEAdmission","Output":"--- PASS: TestWindowsPEAdmission (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEAdmission"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestValidateWindowsNativeImage"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestValidateWindowsNativeImage","Output":"=== RUN   TestValidateWindowsNativeImage\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestValidateWindowsNativeImage/accepts_extensionless_PE_image"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestValidateWindowsNativeImage/accepts_extensionless_PE_image","Output":"=== RUN   TestValidateWindowsNativeImage/accepts_extensionless_PE_image\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestValidateWindowsNativeImage/accepts_extensionless_PE_image","Output":"--- PASS: TestValidateWindowsNativeImage/accepts_extensionless_PE_image (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestValidateWindowsNativeImage/accepts_extensionless_PE_image"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestValidateWindowsNativeImage/rejects_extensionless_shell_text"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestValidateWindowsNativeImage/rejects_extensionless_shell_text","Output":"=== RUN   TestValidateWindowsNativeImage/rejects_extensionless_shell_text\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestValidateWindowsNativeImage/rejects_extensionless_shell_text","Output":"--- PASS: TestValidateWindowsNativeImage/rejects_extensionless_shell_text (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestValidateWindowsNativeImage/rejects_extensionless_shell_text"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestValidateWindowsNativeImage/rejects_corrupt_PE"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestValidateWindowsNativeImage/rejects_corrupt_PE","Output":"=== RUN   TestValidateWindowsNativeImage/rejects_corrupt_PE\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestValidateWindowsNativeImage/rejects_corrupt_PE","Output":"--- PASS: TestValidateWindowsNativeImage/rejects_corrupt_PE (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestValidateWindowsNativeImage/rejects_corrupt_PE"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestValidateWindowsNativeImage/rejects_PE_DLL"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestValidateWindowsNativeImage/rejects_PE_DLL","Output":"=== RUN   TestValidateWindowsNativeImage/rejects_PE_DLL\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestValidateWindowsNativeImage/rejects_PE_DLL","Output":"--- PASS: TestValidateWindowsNativeImage/rejects_PE_DLL (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestValidateWindowsNativeImage/rejects_PE_DLL"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestValidateWindowsNativeImage","Output":"--- PASS: TestValidateWindowsNativeImage (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestValidateWindowsNativeImage"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsUpgradePriorAdmission"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsUpgradePriorAdmission","Output":"=== RUN   TestWindowsUpgradePriorAdmission\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsUpgradePriorAdmission","Output":"--- PASS: TestWindowsUpgradePriorAdmission (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsUpgradePriorAdmission"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionBindsRolesMetadataAndHashes"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionBindsRolesMetadataAndHashes","Output":"=== RUN   TestWindowsProductPairAdmissionBindsRolesMetadataAndHashes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionBindsRolesMetadataAndHashes","Output":"--- PASS: TestWindowsProductPairAdmissionBindsRolesMetadataAndHashes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionBindsRolesMetadataAndHashes"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine","Output":"=== RUN   TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine/matching_AMD64"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine/matching_AMD64","Output":"=== RUN   TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine/matching_AMD64\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine/matching_AMD64","Output":"--- PASS: TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine/matching_AMD64 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine/matching_AMD64"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine/matching_ARM64"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine/matching_ARM64","Output":"=== RUN   TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine/matching_ARM64\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine/matching_ARM64","Output":"--- PASS: TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine/matching_ARM64 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine/matching_ARM64"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine/mixed_AMD64_and_ARM64"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine/mixed_AMD64_and_ARM64","Output":"=== RUN   TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine/mixed_AMD64_and_ARM64\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine/mixed_AMD64_and_ARM64","Output":"--- PASS: TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine/mixed_AMD64_and_ARM64 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine/mixed_AMD64_and_ARM64"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine","Output":"--- PASS: TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsRoleAdmissionRejectsMetadataValidDLLImages"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsRoleAdmissionRejectsMetadataValidDLLImages","Output":"=== RUN   TestWindowsRoleAdmissionRejectsMetadataValidDLLImages\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsRoleAdmissionRejectsMetadataValidDLLImages/cli"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsRoleAdmissionRejectsMetadataValidDLLImages/cli","Output":"=== RUN   TestWindowsRoleAdmissionRejectsMetadataValidDLLImages/cli\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsRoleAdmissionRejectsMetadataValidDLLImages/cli","Output":"--- PASS: TestWindowsRoleAdmissionRejectsMetadataValidDLLImages/cli (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsRoleAdmissionRejectsMetadataValidDLLImages/cli"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsRoleAdmissionRejectsMetadataValidDLLImages/windowless"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsRoleAdmissionRejectsMetadataValidDLLImages/windowless","Output":"=== RUN   TestWindowsRoleAdmissionRejectsMetadataValidDLLImages/windowless\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsRoleAdmissionRejectsMetadataValidDLLImages/windowless","Output":"--- PASS: TestWindowsRoleAdmissionRejectsMetadataValidDLLImages/windowless (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsRoleAdmissionRejectsMetadataValidDLLImages/windowless"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsRoleAdmissionRejectsMetadataValidDLLImages","Output":"--- PASS: TestWindowsRoleAdmissionRejectsMetadataValidDLLImages (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsRoleAdmissionRejectsMetadataValidDLLImages"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch","Output":"=== RUN   TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch/subsystems_swapped"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch/subsystems_swapped","Output":"=== RUN   TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch/subsystems_swapped\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch/subsystems_swapped","Output":"--- PASS: TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch/subsystems_swapped (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch/subsystems_swapped"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch/metadata_differs"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch/metadata_differs","Output":"=== RUN   TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch/metadata_differs\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch/metadata_differs","Output":"--- PASS: TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch/metadata_differs (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch/metadata_differs"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch/duplicate_role"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch/duplicate_role","Output":"=== RUN   TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch/duplicate_role\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch/duplicate_role","Output":"--- PASS: TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch/duplicate_role (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch/duplicate_role"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch","Output":"--- PASS: TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionDerivesStrictIdentityFromBothArtifacts"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionDerivesStrictIdentityFromBothArtifacts","Output":"=== RUN   TestWindowsProductPairAdmissionDerivesStrictIdentityFromBothArtifacts\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionDerivesStrictIdentityFromBothArtifacts","Output":"--- PASS: TestWindowsProductPairAdmissionDerivesStrictIdentityFromBothArtifacts (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionDerivesStrictIdentityFromBothArtifacts"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRejectsDuplicateAndMixedArtifactIdentity"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRejectsDuplicateAndMixedArtifactIdentity","Output":"=== RUN   TestWindowsProductPairAdmissionRejectsDuplicateAndMixedArtifactIdentity\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRejectsDuplicateAndMixedArtifactIdentity","Output":"--- PASS: TestWindowsProductPairAdmissionRejectsDuplicateAndMixedArtifactIdentity (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionRejectsDuplicateAndMixedArtifactIdentity"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionIgnoresCallerMetadataAssertions"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionIgnoresCallerMetadataAssertions","Output":"=== RUN   TestWindowsProductPairAdmissionIgnoresCallerMetadataAssertions\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionIgnoresCallerMetadataAssertions","Output":"--- PASS: TestWindowsProductPairAdmissionIgnoresCallerMetadataAssertions (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsProductPairAdmissionIgnoresCallerMetadataAssertions"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed","Output":"=== RUN   TestWindowsPEMalformed\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/truncated_DOS"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/truncated_DOS","Output":"=== RUN   TestWindowsPEMalformed/truncated_DOS\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/truncated_DOS","Output":"--- PASS: TestWindowsPEMalformed/truncated_DOS (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/truncated_DOS"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/missing_MZ"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/missing_MZ","Output":"=== RUN   TestWindowsPEMalformed/missing_MZ\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/missing_MZ","Output":"--- PASS: TestWindowsPEMalformed/missing_MZ (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/missing_MZ"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/offset_before_DOS_end"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/offset_before_DOS_end","Output":"=== RUN   TestWindowsPEMalformed/offset_before_DOS_end\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/offset_before_DOS_end","Output":"--- PASS: TestWindowsPEMalformed/offset_before_DOS_end (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/offset_before_DOS_end"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/offset_beyond_bound"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/offset_beyond_bound","Output":"=== RUN   TestWindowsPEMalformed/offset_beyond_bound\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/offset_beyond_bound","Output":"--- PASS: TestWindowsPEMalformed/offset_beyond_bound (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/offset_beyond_bound"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/truncated_PE"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/truncated_PE","Output":"=== RUN   TestWindowsPEMalformed/truncated_PE\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/truncated_PE","Output":"--- PASS: TestWindowsPEMalformed/truncated_PE (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/truncated_PE"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/missing_signature"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/missing_signature","Output":"=== RUN   TestWindowsPEMalformed/missing_signature\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/missing_signature","Output":"--- PASS: TestWindowsPEMalformed/missing_signature (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/missing_signature"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/small_optional_header"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/small_optional_header","Output":"=== RUN   TestWindowsPEMalformed/small_optional_header\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/small_optional_header","Output":"--- PASS: TestWindowsPEMalformed/small_optional_header (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/small_optional_header"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/unsupported_magic"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/unsupported_magic","Output":"=== RUN   TestWindowsPEMalformed/unsupported_magic\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/unsupported_magic","Output":"--- PASS: TestWindowsPEMalformed/unsupported_magic (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed/unsupported_magic"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed","Output":"--- PASS: TestWindowsPEMalformed (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEMalformed"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEBoundedRead"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEBoundedRead","Output":"=== RUN   TestWindowsPEBoundedRead\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEBoundedRead","Output":"--- PASS: TestWindowsPEBoundedRead (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestWindowsPEBoundedRead"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataNeverAdmitsOrdinaryProduct"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataNeverAdmitsOrdinaryProduct","Output":"=== RUN   TestPrivatePublisherMetadataNeverAdmitsOrdinaryProduct\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataNeverAdmitsOrdinaryProduct","Output":"--- PASS: TestPrivatePublisherMetadataNeverAdmitsOrdinaryProduct (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataNeverAdmitsOrdinaryProduct"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity","Output":"=== RUN   TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/unmarked"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/unmarked","Output":"=== RUN   TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/unmarked\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/unmarked","Output":"--- PASS: TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/unmarked (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/unmarked"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/malformed_epoch"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/malformed_epoch","Output":"=== RUN   TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/malformed_epoch\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/malformed_epoch","Output":"--- PASS: TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/malformed_epoch (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/malformed_epoch"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/duplicate_epoch"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/duplicate_epoch","Output":"=== RUN   TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/duplicate_epoch\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/duplicate_epoch","Output":"--- PASS: TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/duplicate_epoch (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/duplicate_epoch"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/wrong_entry_name"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/wrong_entry_name","Output":"=== RUN   TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/wrong_entry_name\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/wrong_entry_name","Output":"--- PASS: TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/wrong_entry_name (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/wrong_entry_name"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/console_subsystem"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/console_subsystem","Output":"=== RUN   TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/console_subsystem\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/console_subsystem","Output":"--- PASS: TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/console_subsystem (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity/console_subsystem"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity","Output":"--- PASS: TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestPrivatePublisherMetadataRefusesMissingSourceAndWrongIdentity"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibrary"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibrary","Output":"=== RUN   TestAdmitWindowsRuntimeLibrary\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibrary/wrong_machine"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibrary/wrong_machine","Output":"=== RUN   TestAdmitWindowsRuntimeLibrary/wrong_machine\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibrary/wrong_machine","Output":"--- PASS: TestAdmitWindowsRuntimeLibrary/wrong_machine (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibrary/wrong_machine"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibrary/not_a_DLL"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibrary/not_a_DLL","Output":"=== RUN   TestAdmitWindowsRuntimeLibrary/not_a_DLL\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibrary/not_a_DLL","Output":"--- PASS: TestAdmitWindowsRuntimeLibrary/not_a_DLL (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibrary/not_a_DLL"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibrary/missing_export"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibrary/missing_export","Output":"=== RUN   TestAdmitWindowsRuntimeLibrary/missing_export\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibrary/missing_export","Output":"--- PASS: TestAdmitWindowsRuntimeLibrary/missing_export (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibrary/missing_export"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibrary/extra_export"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibrary/extra_export","Output":"=== RUN   TestAdmitWindowsRuntimeLibrary/extra_export\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibrary/extra_export","Output":"--- PASS: TestAdmitWindowsRuntimeLibrary/extra_export (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibrary/extra_export"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibrary/malformed_name_RVA"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibrary/malformed_name_RVA","Output":"=== RUN   TestAdmitWindowsRuntimeLibrary/malformed_name_RVA\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibrary/malformed_name_RVA","Output":"--- PASS: TestAdmitWindowsRuntimeLibrary/malformed_name_RVA (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibrary/malformed_name_RVA"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibrary","Output":"--- PASS: TestAdmitWindowsRuntimeLibrary (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibrary"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibraryRequiresAbsoluteRegularFileAndCanonicalExports"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibraryRequiresAbsoluteRegularFileAndCanonicalExports","Output":"=== RUN   TestAdmitWindowsRuntimeLibraryRequiresAbsoluteRegularFileAndCanonicalExports\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibraryRequiresAbsoluteRegularFileAndCanonicalExports","Output":"--- PASS: TestAdmitWindowsRuntimeLibraryRequiresAbsoluteRegularFileAndCanonicalExports (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestAdmitWindowsRuntimeLibraryRequiresAbsoluteRegularFileAndCanonicalExports"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestRustOwnerRuntimeLibraryRequiresBothSplitExports"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestRustOwnerRuntimeLibraryRequiresBothSplitExports","Output":"=== RUN   TestRustOwnerRuntimeLibraryRequiresBothSplitExports\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestRustOwnerRuntimeLibraryRequiresBothSplitExports/mh_wait1"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestRustOwnerRuntimeLibraryRequiresBothSplitExports/mh_wait1","Output":"=== RUN   TestRustOwnerRuntimeLibraryRequiresBothSplitExports/mh_wait1\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestRustOwnerRuntimeLibraryRequiresBothSplitExports/mh_wait1","Output":"--- PASS: TestRustOwnerRuntimeLibraryRequiresBothSplitExports/mh_wait1 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestRustOwnerRuntimeLibraryRequiresBothSplitExports/mh_wait1"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestRustOwnerRuntimeLibraryRequiresBothSplitExports/mh_close1"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestRustOwnerRuntimeLibraryRequiresBothSplitExports/mh_close1","Output":"=== RUN   TestRustOwnerRuntimeLibraryRequiresBothSplitExports/mh_close1\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestRustOwnerRuntimeLibraryRequiresBothSplitExports/mh_close1","Output":"--- PASS: TestRustOwnerRuntimeLibraryRequiresBothSplitExports/mh_close1 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestRustOwnerRuntimeLibraryRequiresBothSplitExports/mh_close1"}
+{"Action":"run","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestRustOwnerRuntimeLibraryRequiresBothSplitExports/mh_wait1+mh_close1"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestRustOwnerRuntimeLibraryRequiresBothSplitExports/mh_wait1+mh_close1","Output":"=== RUN   TestRustOwnerRuntimeLibraryRequiresBothSplitExports/mh_wait1+mh_close1\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestRustOwnerRuntimeLibraryRequiresBothSplitExports/mh_wait1+mh_close1","Output":"--- PASS: TestRustOwnerRuntimeLibraryRequiresBothSplitExports/mh_wait1+mh_close1 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestRustOwnerRuntimeLibraryRequiresBothSplitExports/mh_wait1+mh_close1"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestRustOwnerRuntimeLibraryRequiresBothSplitExports","Output":"--- PASS: TestRustOwnerRuntimeLibraryRequiresBothSplitExports (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission","Test":"TestRustOwnerRuntimeLibraryRequiresBothSplitExports"}
+{"Action":"output","Package":"mcp-local-hub/internal/binaryadmission","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/binaryadmission"}

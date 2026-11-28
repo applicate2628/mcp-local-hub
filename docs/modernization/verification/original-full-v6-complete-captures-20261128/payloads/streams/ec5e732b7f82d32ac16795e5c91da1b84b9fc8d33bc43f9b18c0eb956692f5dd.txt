@@ -1,0 +1,144 @@
+{"Action":"start","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestMoreThan512CandidatesSettleInBoundedBatchCount"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestMoreThan512CandidatesSettleInBoundedBatchCount","Output":"=== RUN   TestMoreThan512CandidatesSettleInBoundedBatchCount\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestMoreThan512CandidatesSettleInBoundedBatchCount","Output":"--- PASS: TestMoreThan512CandidatesSettleInBoundedBatchCount (1.27s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestMoreThan512CandidatesSettleInBoundedBatchCount"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestPermutationBatchBoundaryByteEquality"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestPermutationBatchBoundaryByteEquality","Output":"=== RUN   TestPermutationBatchBoundaryByteEquality\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestPermutationBatchBoundaryByteEquality","Output":"--- PASS: TestPermutationBatchBoundaryByteEquality (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestPermutationBatchBoundaryByteEquality"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestOneBatchFailureMakesNegativeUnknownAndRetainsPositives"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestOneBatchFailureMakesNegativeUnknownAndRetainsPositives","Output":"=== RUN   TestOneBatchFailureMakesNegativeUnknownAndRetainsPositives\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestOneBatchFailureMakesNegativeUnknownAndRetainsPositives","Output":"--- PASS: TestOneBatchFailureMakesNegativeUnknownAndRetainsPositives (0.20s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestOneBatchFailureMakesNegativeUnknownAndRetainsPositives"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestCancellationSettlesAllActiveBatches"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestCancellationSettlesAllActiveBatches","Output":"=== RUN   TestCancellationSettlesAllActiveBatches\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestCancellationSettlesAllActiveBatches","Output":"--- PASS: TestCancellationSettlesAllActiveBatches (0.37s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestCancellationSettlesAllActiveBatches"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestAnalyzeUsesResolvedPlansAndRemovesScratch"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestAnalyzeUsesResolvedPlansAndRemovesScratch","Output":"=== RUN   TestAnalyzeUsesResolvedPlansAndRemovesScratch\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestAnalyzeUsesResolvedPlansAndRemovesScratch","Output":"--- PASS: TestAnalyzeUsesResolvedPlansAndRemovesScratch (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestAnalyzeUsesResolvedPlansAndRemovesScratch"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestUnsupportedVersionFailsBeforeGraph"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestUnsupportedVersionFailsBeforeGraph","Output":"=== RUN   TestUnsupportedVersionFailsBeforeGraph\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestUnsupportedVersionFailsBeforeGraph","Output":"--- PASS: TestUnsupportedVersionFailsBeforeGraph (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestUnsupportedVersionFailsBeforeGraph"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestNonzeroPreservesRedactedStderr"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestNonzeroPreservesRedactedStderr","Output":"=== RUN   TestNonzeroPreservesRedactedStderr\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestNonzeroPreservesRedactedStderr","Output":"--- PASS: TestNonzeroPreservesRedactedStderr (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestNonzeroPreservesRedactedStderr"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestEveryCoverageHoleMakesNegativeUnknown"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestEveryCoverageHoleMakesNegativeUnknown","Output":"=== RUN   TestEveryCoverageHoleMakesNegativeUnknown\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestEveryCoverageHoleMakesNegativeUnknown","Output":"--- PASS: TestEveryCoverageHoleMakesNegativeUnknown (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestEveryCoverageHoleMakesNegativeUnknown"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestTripletInputDriftFailsClosed"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestTripletInputDriftFailsClosed","Output":"=== RUN   TestTripletInputDriftFailsClosed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestTripletInputDriftFailsClosed","Output":"--- PASS: TestTripletInputDriftFailsClosed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestTripletInputDriftFailsClosed"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestRemoteRegistryRefusedBeforeChildStart"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestRemoteRegistryRefusedBeforeChildStart","Output":"=== RUN   TestRemoteRegistryRefusedBeforeChildStart\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestRemoteRegistryRefusedBeforeChildStart","Output":"--- PASS: TestRemoteRegistryRefusedBeforeChildStart (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestRemoteRegistryRefusedBeforeChildStart"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestResolvedDGMLAndListContract"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestResolvedDGMLAndListContract","Output":"=== RUN   TestResolvedDGMLAndListContract\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestResolvedDGMLAndListContract","Output":"--- PASS: TestResolvedDGMLAndListContract (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestResolvedDGMLAndListContract"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestDGMLListMismatchFailsClosed"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestDGMLListMismatchFailsClosed","Output":"=== RUN   TestDGMLListMismatchFailsClosed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestDGMLListMismatchFailsClosed","Output":"--- PASS: TestDGMLListMismatchFailsClosed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestDGMLListMismatchFailsClosed"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestTargetHostOtherTripletIdentity"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestTargetHostOtherTripletIdentity","Output":"=== RUN   TestTargetHostOtherTripletIdentity\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestTargetHostOtherTripletIdentity","Output":"--- PASS: TestTargetHostOtherTripletIdentity (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestTargetHostOtherTripletIdentity"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestDeclaredFilterIsSuperset"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestDeclaredFilterIsSuperset","Output":"=== RUN   TestDeclaredFilterIsSuperset\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestDeclaredFilterIsSuperset","Output":"--- PASS: TestDeclaredFilterIsSuperset (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestDeclaredFilterIsSuperset"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestReverseDiamondMinDistance"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestReverseDiamondMinDistance","Output":"=== RUN   TestReverseDiamondMinDistance\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestReverseDiamondMinDistance","Output":"--- PASS: TestReverseDiamondMinDistance (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestReverseDiamondMinDistance"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestCycleSCCRetainsClosingEdges"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestCycleSCCRetainsClosingEdges","Output":"=== RUN   TestCycleSCCRetainsClosingEdges\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestCycleSCCRetainsClosingEdges","Output":"--- PASS: TestCycleSCCRetainsClosingEdges (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestCycleSCCRetainsClosingEdges"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestFeatureQualifiedNodesDoNotCollapse"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestFeatureQualifiedNodesDoNotCollapse","Output":"=== RUN   TestFeatureQualifiedNodesDoNotCollapse\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestFeatureQualifiedNodesDoNotCollapse","Output":"--- PASS: TestFeatureQualifiedNodesDoNotCollapse (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestFeatureQualifiedNodesDoNotCollapse"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestLiveDependInfoOracle"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestLiveDependInfoOracle","Output":"=== RUN   TestLiveDependInfoOracle\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestLiveDependInfoOracle","Output":"    live_dependinfo_test.go:21: set VCPKG_REVERSE_DEPENDENCIES_LIVE_ROOT for the installed-vcpkg oracle\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestLiveDependInfoOracle","Output":"--- SKIP: TestLiveDependInfoOracle (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestLiveDependInfoOracle"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestRunnerArgvEnvironmentAllowlist"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestRunnerArgvEnvironmentAllowlist","Output":"=== RUN   TestRunnerArgvEnvironmentAllowlist\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestRunnerArgvEnvironmentAllowlist","Output":"--- PASS: TestRunnerArgvEnvironmentAllowlist (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestRunnerArgvEnvironmentAllowlist"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestProcessTreeHelper"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestProcessTreeHelper","Output":"=== RUN   TestProcessTreeHelper\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestProcessTreeHelper","Output":"--- PASS: TestProcessTreeHelper (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestProcessTreeHelper"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestCancellationReapsProcessTree"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestCancellationReapsProcessTree","Output":"=== RUN   TestCancellationReapsProcessTree\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestCancellationReapsProcessTree","Output":"--- PASS: TestCancellationReapsProcessTree (0.23s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestCancellationReapsProcessTree"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestTimeoutReapsProcessTree"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestTimeoutReapsProcessTree","Output":"=== RUN   TestTimeoutReapsProcessTree\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestTimeoutReapsProcessTree","Output":"--- PASS: TestTimeoutReapsProcessTree (0.35s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestTimeoutReapsProcessTree"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestStartPlatformProcessSuppressesConsole"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestStartPlatformProcessSuppressesConsole","Output":"=== RUN   TestStartPlatformProcessSuppressesConsole\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestStartPlatformProcessSuppressesConsole","Output":"--- PASS: TestStartPlatformProcessSuppressesConsole (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestStartPlatformProcessSuppressesConsole"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestProjectionNMinusOneNPlusOne"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestProjectionNMinusOneNPlusOne","Output":"=== RUN   TestProjectionNMinusOneNPlusOne\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestProjectionNMinusOneNPlusOne","Output":"--- PASS: TestProjectionNMinusOneNPlusOne (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestProjectionNMinusOneNPlusOne"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootReturnsCanonicalOperatorRoot"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootReturnsCanonicalOperatorRoot","Output":"=== RUN   TestBindTrustedRootReturnsCanonicalOperatorRoot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootReturnsCanonicalOperatorRoot","Output":"--- PASS: TestBindTrustedRootReturnsCanonicalOperatorRoot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootReturnsCanonicalOperatorRoot"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootAdmitsAliasButReturnsTrustedCanonicalPath"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootAdmitsAliasButReturnsTrustedCanonicalPath","Output":"=== RUN   TestBindTrustedRootAdmitsAliasButReturnsTrustedCanonicalPath\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootAdmitsAliasButReturnsTrustedCanonicalPath","Output":"--- PASS: TestBindTrustedRootAdmitsAliasButReturnsTrustedCanonicalPath (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootAdmitsAliasButReturnsTrustedCanonicalPath"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs","Output":"=== RUN   TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/missing-requested"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/missing-requested","Output":"=== RUN   TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/missing-requested\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/missing-requested","Output":"--- PASS: TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/missing-requested (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/missing-requested"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/missing-trusted"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/missing-trusted","Output":"=== RUN   TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/missing-trusted\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/missing-trusted","Output":"--- PASS: TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/missing-trusted (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/missing-trusted"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/file-requested"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/file-requested","Output":"=== RUN   TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/file-requested\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/file-requested","Output":"--- PASS: TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/file-requested (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/file-requested"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/file-trusted"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/file-trusted","Output":"=== RUN   TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/file-trusted\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/file-trusted","Output":"--- PASS: TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/file-trusted (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/file-trusted"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs","Output":"--- PASS: TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootRefusesDistinctCaseSensitiveWindowsRoots"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootRefusesDistinctCaseSensitiveWindowsRoots","Output":"=== RUN   TestBindTrustedRootRefusesDistinctCaseSensitiveWindowsRoots\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootRefusesDistinctCaseSensitiveWindowsRoots","Output":"--- PASS: TestBindTrustedRootRefusesDistinctCaseSensitiveWindowsRoots (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestBindTrustedRootRefusesDistinctCaseSensitiveWindowsRoots"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestUniverseOverlayBuiltinPrecedence"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestUniverseOverlayBuiltinPrecedence","Output":"=== RUN   TestUniverseOverlayBuiltinPrecedence\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestUniverseOverlayBuiltinPrecedence","Output":"--- PASS: TestUniverseOverlayBuiltinPrecedence (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestUniverseOverlayBuiltinPrecedence"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestRemoteRegistryRefused"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestRemoteRegistryRefused","Output":"=== RUN   TestRemoteRegistryRefused\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestRemoteRegistryRefused","Output":"--- PASS: TestRemoteRegistryRefused (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestRemoteRegistryRefused"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestUniverseLocalRegistryUnion"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestUniverseLocalRegistryUnion","Output":"=== RUN   TestUniverseLocalRegistryUnion\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestUniverseLocalRegistryUnion","Output":"--- PASS: TestUniverseLocalRegistryUnion (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Test":"TestUniverseLocalRegistryUnion"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/reversedepgraph"}

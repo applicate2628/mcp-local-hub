@@ -1,0 +1,487 @@
+=== RUN   TestCSTSavedFieldFingerprintBaselineBudget
+--- PASS: TestCSTSavedFieldFingerprintBaselineBudget (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldFingerprintZeroSizeRowAtExactAggregateBudget
+--- PASS: TestCSTSavedFieldFingerprintZeroSizeRowAtExactAggregateBudget (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldFiveRowExactBudgetAllowsFinalZeroOnly
+--- PASS: TestCSTSavedFieldFiveRowExactBudgetAllowsFinalZeroOnly (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldFiveRowManifestRejectsOutsideHardlink
+--- PASS: TestCSTSavedFieldFiveRowManifestRejectsOutsideHardlink (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns
+=== RUN   TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/empty
+--- PASS: TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/empty (0.00s)
+=== NAME  TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns
+=== RUN   TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/malformed
+--- PASS: TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/malformed (0.00s)
+=== NAME  TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns
+=== RUN   TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/partial
+--- PASS: TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/partial (0.00s)
+=== NAME  TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns
+=== RUN   TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/missing_status
+--- PASS: TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/missing_status (0.00s)
+=== NAME  TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns
+=== RUN   TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/blocked
+--- PASS: TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/blocked (0.00s)
+=== NAME  TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns
+=== RUN   TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/pass
+--- PASS: TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/pass (0.00s)
+=== NAME  TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns
+=== RUN   TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_empty
+--- PASS: TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_empty (0.00s)
+=== NAME  TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns
+=== RUN   TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_partial
+--- PASS: TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_partial (0.00s)
+=== NAME  TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns
+=== RUN   TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_blocked
+--- PASS: TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_blocked (0.00s)
+=== NAME  TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns
+=== RUN   TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_pass
+--- PASS: TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_pass (0.00s)
+=== NAME  TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns
+--- PASS: TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldLegacyFakeChildRun
+=== RUN   TestCSTSavedFieldLegacyFakeChildRun/empty
+--- PASS: TestCSTSavedFieldLegacyFakeChildRun/empty (0.15s)
+=== NAME  TestCSTSavedFieldLegacyFakeChildRun
+=== RUN   TestCSTSavedFieldLegacyFakeChildRun/malformed
+--- PASS: TestCSTSavedFieldLegacyFakeChildRun/malformed (0.15s)
+=== NAME  TestCSTSavedFieldLegacyFakeChildRun
+=== RUN   TestCSTSavedFieldLegacyFakeChildRun/partial
+--- PASS: TestCSTSavedFieldLegacyFakeChildRun/partial (0.15s)
+=== NAME  TestCSTSavedFieldLegacyFakeChildRun
+=== RUN   TestCSTSavedFieldLegacyFakeChildRun/blocked
+--- PASS: TestCSTSavedFieldLegacyFakeChildRun/blocked (0.15s)
+=== NAME  TestCSTSavedFieldLegacyFakeChildRun
+=== RUN   TestCSTSavedFieldLegacyFakeChildRun/pass
+--- PASS: TestCSTSavedFieldLegacyFakeChildRun/pass (0.15s)
+=== NAME  TestCSTSavedFieldLegacyFakeChildRun
+--- PASS: TestCSTSavedFieldLegacyFakeChildRun (0.76s)
+=== NAME  
+=== RUN   TestCSTSavedFieldGenerationFullManifestWire
+=== RUN   TestCSTSavedFieldGenerationFullManifestWire/absent
+--- PASS: TestCSTSavedFieldGenerationFullManifestWire/absent (0.00s)
+=== NAME  TestCSTSavedFieldGenerationFullManifestWire
+=== RUN   TestCSTSavedFieldGenerationFullManifestWire/present
+--- PASS: TestCSTSavedFieldGenerationFullManifestWire/present (0.00s)
+=== NAME  TestCSTSavedFieldGenerationFullManifestWire
+--- PASS: TestCSTSavedFieldGenerationFullManifestWire (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldGenerationInputBudget
+    cst_saved_field_result_tree_probe_windows_test.go:1047: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable
+--- SKIP: TestCSTSavedFieldGenerationInputBudget (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldGenerationManifestAdmissionBeforeCSTImport
+    cst_saved_field_result_tree_probe_windows_test.go:1142: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable
+--- SKIP: TestCSTSavedFieldGenerationManifestAdmissionBeforeCSTImport (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldGenerationMetadataPostcheckSupportsVariableRows
+    cst_saved_field_result_tree_probe_windows_test.go:1190: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable
+--- SKIP: TestCSTSavedFieldGenerationMetadataPostcheckSupportsVariableRows (0.00s)
+=== NAME  
+=== RUN   TestOwnedResultTreeProbeRejectsOpenRequest
+    cst_saved_field_result_tree_probe_windows_test.go:1314: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable
+--- SKIP: TestOwnedResultTreeProbeRejectsOpenRequest (0.00s)
+=== NAME  
+=== RUN   TestOwnedResultTreeProbeSyntheticLifecycle
+    cst_saved_field_result_tree_probe_windows_test.go:1341: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable
+--- SKIP: TestOwnedResultTreeProbeSyntheticLifecycle (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldOwnedResultTreeProbeTimeout
+    cst_saved_field_result_tree_probe_windows_test.go:1431: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable
+--- SKIP: TestCSTSavedFieldOwnedResultTreeProbeTimeout (0.00s)
+=== NAME  
+=== RUN   TestOwnedResultTreeProbePreservationEvidence
+    cst_saved_field_result_tree_probe_windows_test.go:1492: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable
+--- SKIP: TestOwnedResultTreeProbePreservationEvidence (0.00s)
+=== NAME  
+=== RUN   TestOwnedResultTreeProbeForbiddenCallFailsClosed
+    cst_saved_field_result_tree_probe_windows_test.go:1618: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable
+--- SKIP: TestOwnedResultTreeProbeForbiddenCallFailsClosed (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldGenerateLine10FixtureCommandAllowlist
+    cst_saved_field_result_tree_probe_windows_test.go:1687: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable
+--- SKIP: TestCSTSavedFieldGenerateLine10FixtureCommandAllowlist (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldFingerprintInventoryHardlinkBeforeFallback
+--- PASS: TestCSTSavedFieldFingerprintInventoryHardlinkBeforeFallback (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldFingerprintSelectedRexCapture
+=== RUN   TestCSTSavedFieldFingerprintSelectedRexCapture/cap_and_cap_plus_one
+--- PASS: TestCSTSavedFieldFingerprintSelectedRexCapture/cap_and_cap_plus_one (0.01s)
+=== NAME  TestCSTSavedFieldFingerprintSelectedRexCapture
+=== RUN   TestCSTSavedFieldFingerprintSelectedRexCapture/growth_and_swap
+--- PASS: TestCSTSavedFieldFingerprintSelectedRexCapture/growth_and_swap (0.00s)
+=== NAME  TestCSTSavedFieldFingerprintSelectedRexCapture
+--- PASS: TestCSTSavedFieldFingerprintSelectedRexCapture (0.02s)
+=== NAME  
+=== RUN   TestCSTSavedFieldFingerprintBudgetGrowthAndSwap
+=== RUN   TestCSTSavedFieldFingerprintBudgetGrowthAndSwap/oversized_row
+--- PASS: TestCSTSavedFieldFingerprintBudgetGrowthAndSwap/oversized_row (0.00s)
+=== NAME  TestCSTSavedFieldFingerprintBudgetGrowthAndSwap
+=== RUN   TestCSTSavedFieldFingerprintBudgetGrowthAndSwap/growing_row
+--- PASS: TestCSTSavedFieldFingerprintBudgetGrowthAndSwap/growing_row (0.00s)
+=== NAME  TestCSTSavedFieldFingerprintBudgetGrowthAndSwap
+=== RUN   TestCSTSavedFieldFingerprintBudgetGrowthAndSwap/path_swap_window
+--- PASS: TestCSTSavedFieldFingerprintBudgetGrowthAndSwap/path_swap_window (0.00s)
+=== NAME  TestCSTSavedFieldFingerprintBudgetGrowthAndSwap
+--- PASS: TestCSTSavedFieldFingerprintBudgetGrowthAndSwap (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldBundleProbeCopyModesNoSolve
+    cst_saved_field_result_tree_probe_windows_test.go:2353: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable
+--- SKIP: TestCSTSavedFieldBundleProbeCopyModesNoSolve (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldFullBundleGenerationRequiresTwoPortsBeforeSolver
+    cst_saved_field_result_tree_probe_windows_test.go:2403: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable
+--- SKIP: TestCSTSavedFieldFullBundleGenerationRequiresTwoPortsBeforeSolver (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldFullBundleRetainsUnverifiedPostSolverTree
+    cst_saved_field_result_tree_probe_windows_test.go:2450: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable
+--- SKIP: TestCSTSavedFieldFullBundleRetainsUnverifiedPostSolverTree (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldBundleCompletenessLine10Diagnostic
+    cst_saved_field_result_tree_probe_windows_test.go:2487: set MCPHUB_CST_GENERATION_RUN=1 for authorized native bundle diagnostic
+--- SKIP: TestCSTSavedFieldBundleCompletenessLine10Diagnostic (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldPort2CompletionRetainsObservedOutput
+    cst_saved_field_result_tree_probe_windows_test.go:2578: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable
+--- SKIP: TestCSTSavedFieldPort2CompletionRetainsObservedOutput (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldGenerateVendorFailuresRetainRedactedReceipt
+    cst_saved_field_result_tree_probe_windows_test.go:2607: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable
+--- SKIP: TestCSTSavedFieldGenerateVendorFailuresRetainRedactedReceipt (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldGenerateSetupOnlyDiagnosticRedactsVendorMessage
+    cst_saved_field_result_tree_probe_windows_test.go:2679: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable
+--- SKIP: TestCSTSavedFieldGenerateSetupOnlyDiagnosticRedactsVendorMessage (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldGenerateSetupOnlyStopsBeforeSolver
+    cst_saved_field_result_tree_probe_windows_test.go:2719: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable
+--- SKIP: TestCSTSavedFieldGenerateSetupOnlyStopsBeforeSolver (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldGenerateLine10FixtureRetention
+    cst_saved_field_result_tree_probe_windows_test.go:1687: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable
+--- SKIP: TestCSTSavedFieldGenerateLine10FixtureRetention (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldGenerateLine10FixtureLimits
+    cst_saved_field_result_tree_probe_windows_test.go:2755: exercised by the manual-lifetime fixture parent
+--- SKIP: TestCSTSavedFieldGenerateLine10FixtureLimits (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldGenerateLine10FixtureLimitsPostWorkerRoot
+    cst_saved_field_result_tree_probe_windows_test.go:2817: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable
+--- SKIP: TestCSTSavedFieldGenerateLine10FixtureLimitsPostWorkerRoot (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldGenerationTimeoutDisposalRequiresPositiveProof
+    cst_saved_field_result_tree_probe_windows_test.go:2900: exercised by the manual-lifetime parent worker test
+--- SKIP: TestCSTSavedFieldGenerationTimeoutDisposalRequiresPositiveProof (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldGenerationTimeoutProofRootOutlivesWorker
+--- PASS: TestCSTSavedFieldGenerationTimeoutProofRootOutlivesWorker (0.17s)
+=== NAME  
+=== RUN   TestCSTSavedFieldGenerationWatcherStopJoins
+--- PASS: TestCSTSavedFieldGenerationWatcherStopJoins (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldGenerationWatcherStopCancelsActiveWalk
+--- PASS: TestCSTSavedFieldGenerationWatcherStopCancelsActiveWalk (0.25s)
+=== NAME  
+=== RUN   TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild
+=== RUN   TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild/growth
+--- PASS: TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild/growth (0.25s)
+=== NAME  TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild
+=== RUN   TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild/read
+--- PASS: TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild/read (0.25s)
+=== NAME  TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild
+--- PASS: TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild (0.51s)
+=== NAME  
+=== RUN   TestCSTSavedFieldGenerationWatcherGoexitJoinsActiveWalk
+--- PASS: TestCSTSavedFieldGenerationWatcherGoexitJoinsActiveWalk (0.25s)
+=== NAME  
+=== RUN   TestCSTSavedFieldLegacyChildPostflightObservesSourceAndForeignIndependently
+--- PASS: TestCSTSavedFieldLegacyChildPostflightObservesSourceAndForeignIndependently (0.06s)
+=== NAME  
+=== RUN   TestCSTSavedFieldGenerationSettledOutcomeFake
+=== RUN   TestCSTSavedFieldGenerationSettledOutcomeFake/setup_pass
+--- PASS: TestCSTSavedFieldGenerationSettledOutcomeFake/setup_pass (1.32s)
+=== NAME  TestCSTSavedFieldGenerationSettledOutcomeFake
+=== RUN   TestCSTSavedFieldGenerationSettledOutcomeFake/setup_blocked_exit1
+--- PASS: TestCSTSavedFieldGenerationSettledOutcomeFake/setup_blocked_exit1 (0.12s)
+=== NAME  TestCSTSavedFieldGenerationSettledOutcomeFake
+=== RUN   TestCSTSavedFieldGenerationSettledOutcomeFake/setup_blocked_missing_history_trace
+--- PASS: TestCSTSavedFieldGenerationSettledOutcomeFake/setup_blocked_missing_history_trace (0.12s)
+=== NAME  TestCSTSavedFieldGenerationSettledOutcomeFake
+=== RUN   TestCSTSavedFieldGenerationSettledOutcomeFake/port2_exit1
+--- PASS: TestCSTSavedFieldGenerationSettledOutcomeFake/port2_exit1 (0.12s)
+=== NAME  TestCSTSavedFieldGenerationSettledOutcomeFake
+=== RUN   TestCSTSavedFieldGenerationSettledOutcomeFake/setup_job_close_fault
+--- PASS: TestCSTSavedFieldGenerationSettledOutcomeFake/setup_job_close_fault (0.12s)
+=== NAME  TestCSTSavedFieldGenerationSettledOutcomeFake
+=== RUN   TestCSTSavedFieldGenerationSettledOutcomeFake/port2_job_close_fault
+--- PASS: TestCSTSavedFieldGenerationSettledOutcomeFake/port2_job_close_fault (0.12s)
+=== NAME  TestCSTSavedFieldGenerationSettledOutcomeFake
+=== RUN   TestCSTSavedFieldGenerationSettledOutcomeFake/watcher_growth
+--- PASS: TestCSTSavedFieldGenerationSettledOutcomeFake/watcher_growth (0.12s)
+=== NAME  TestCSTSavedFieldGenerationSettledOutcomeFake
+=== RUN   TestCSTSavedFieldGenerationSettledOutcomeFake/source_foreign_drift
+--- PASS: TestCSTSavedFieldGenerationSettledOutcomeFake/source_foreign_drift (0.12s)
+=== NAME  TestCSTSavedFieldGenerationSettledOutcomeFake
+--- PASS: TestCSTSavedFieldGenerationSettledOutcomeFake (2.16s)
+=== NAME  
+=== RUN   TestCSTSavedFieldGenerateSetupOnlyRequestUsesShortDeadline
+--- PASS: TestCSTSavedFieldGenerateSetupOnlyRequestUsesShortDeadline (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldGeneratePort2RequestMode
+--- PASS: TestCSTSavedFieldGeneratePort2RequestMode (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldGenerateLine10Fixture
+    cst_saved_field_result_tree_probe_windows_test.go:3447: set MCPHUB_CST_GENERATION_RUN=1 for authorized native generation path
+--- SKIP: TestCSTSavedFieldGenerateLine10Fixture (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldGenerateLine10SetupOnlyDiagnostic
+    cst_saved_field_result_tree_probe_windows_test.go:3447: set MCPHUB_CST_GENERATION_RUN=1 for authorized native generation path
+--- SKIP: TestCSTSavedFieldGenerateLine10SetupOnlyDiagnostic (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldGenerateLine10Port2Completion
+    cst_saved_field_result_tree_probe_windows_test.go:3447: set MCPHUB_CST_GENERATION_RUN=1 for authorized native generation path
+--- SKIP: TestCSTSavedFieldGenerateLine10Port2Completion (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldOwnedResultTreeProbe
+    cst_saved_field_result_tree_probe_windows_test.go:3672: set MCPHUB_CST_RESULT_TREE_RUN=1 for the single authorized native inspection
+--- SKIP: TestCSTSavedFieldOwnedResultTreeProbe (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence
+=== RUN   TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence/project
+--- PASS: TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence/project (0.00s)
+=== NAME  TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence
+=== RUN   TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence/rex
+--- PASS: TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence/rex (0.00s)
+=== NAME  TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence
+--- PASS: TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence (0.01s)
+=== NAME  
+=== RUN   TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks
+=== RUN   TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/safe_exact_full_and_result
+--- PASS: TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/safe_exact_full_and_result (0.00s)
+=== NAME  TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks
+=== RUN   TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/project
+--- PASS: TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/project (0.00s)
+=== NAME  TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks
+=== RUN   TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/m3d
+--- PASS: TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/m3d (0.00s)
+=== NAME  TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks
+=== RUN   TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/rex
+--- PASS: TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/rex (0.00s)
+=== NAME  TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks
+--- PASS: TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks (0.01s)
+=== NAME  
+=== RUN   TestCSTSavedFieldSelectorRexSafeCapture
+=== RUN   TestCSTSavedFieldSelectorRexSafeCapture/growth
+--- PASS: TestCSTSavedFieldSelectorRexSafeCapture/growth (0.00s)
+=== NAME  TestCSTSavedFieldSelectorRexSafeCapture
+=== RUN   TestCSTSavedFieldSelectorRexSafeCapture/oversize
+--- PASS: TestCSTSavedFieldSelectorRexSafeCapture/oversize (0.01s)
+=== NAME  TestCSTSavedFieldSelectorRexSafeCapture
+=== RUN   TestCSTSavedFieldSelectorRexSafeCapture/swap
+--- PASS: TestCSTSavedFieldSelectorRexSafeCapture/swap (0.00s)
+=== NAME  TestCSTSavedFieldSelectorRexSafeCapture
+--- PASS: TestCSTSavedFieldSelectorRexSafeCapture (0.02s)
+=== NAME  
+=== RUN   TestCSTSavedFieldProtectedHardlinkAfterDegradedFull
+--- PASS: TestCSTSavedFieldProtectedHardlinkAfterDegradedFull (0.00s)
+=== NAME  
+=== RUN   TestCSTSelectorHardlinkCaptureFailurePreservesOutside
+    cst_saved_field_result_tree_probe_windows_test.go:5586: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable
+--- SKIP: TestCSTSelectorHardlinkCaptureFailurePreservesOutside (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldSelectorBindingSynthetic
+    cst_saved_field_result_tree_probe_windows_test.go:5676: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable
+--- SKIP: TestCSTSavedFieldSelectorBindingSynthetic (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationHostFake
+    cst_saved_field_result_tree_probe_windows_test.go:7048: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable
+--- SKIP: TestCSTSavedFieldASCIIPointCalibrationHostFake (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationNative
+    cst_saved_field_result_tree_probe_windows_test.go:7305: native ASCII export needs separate one-run admission
+--- SKIP: TestCSTSavedFieldASCIIPointCalibrationNative (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldSelectorBindingNative
+    cst_saved_field_result_tree_probe_windows_test.go:7386: native copied-project selector binding requires explicit one-run opt-in
+--- SKIP: TestCSTSavedFieldSelectorBindingNative (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/synthetic_raw_wire_only
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/synthetic_raw_wire_only (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationReceipt
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/stale_request
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/stale_request (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationReceipt
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/wrong_section_id
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/wrong_section_id (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationReceipt
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/foreign_frame
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/foreign_frame (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationReceipt
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/wrong_selected_readback
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/wrong_selected_readback (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationReceipt
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/false_selection
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/false_selection (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationReceipt
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/unsettled
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/unsettled (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationReceipt
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/forbidden_call
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/forbidden_call (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationReceipt
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/changed_hash
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/changed_hash (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationReceipt
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/missing_field
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/missing_field (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationReceipt
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/unknown_field
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/unknown_field (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationReceipt
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/wrong_repeat
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/wrong_repeat (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationReceipt
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/producer_grammar_failure
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/producer_grammar_failure (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationReceipt
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/output_oversized
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/output_oversized (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationReceipt
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/partial
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/partial (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationReceipt
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/oversized
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/oversized (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationReceipt
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/trailing_json
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/trailing_json (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationReceipt
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/duplicate_key
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/duplicate_key (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationReceipt
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/unknown_status_not_echoed
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/unknown_status_not_echoed (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationReceipt
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationSection
+    cst_saved_field_result_tree_probe_windows_test.go:7955: explicit work-item root required for immutable native section fixture
+--- SKIP: TestCSTSavedFieldASCIIPointCalibrationSection (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationContainedFake
+    cst_saved_field_result_tree_probe_windows_test.go:8087: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable
+--- SKIP: TestCSTSavedFieldASCIIPointCalibrationContainedFake (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/headerless_synthetic_pipeline
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/headerless_synthetic_pipeline (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationParser
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/producer_fake
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/producer_fake (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationParser
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/plausible_header
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/plausible_header (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationParser
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/bom
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/bom (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationParser
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/non_ascii
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/non_ascii (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationParser
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/nan
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/nan (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationParser
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/overflow
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/overflow (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationParser
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/hex
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/hex (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationParser
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/bare_cr
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/bare_cr (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationParser
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/blank_line
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/blank_line (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationParser
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/eight_columns
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/eight_columns (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationParser
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/duplicate_point
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/duplicate_point (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationParser
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/swapped_points
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/swapped_points (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationParser
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/rounded_coordinate
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/rounded_coordinate (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationParser
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/repeat_drift
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/repeat_drift (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationParser
+=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/metre_exact_rational_independent_oracle
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/metre_exact_rational_independent_oracle (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibrationParser
+--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser (0.00s)
+=== NAME  
+=== RUN   TestCSTSavedFieldASCIIPointCalibration
+=== RUN   TestCSTSavedFieldASCIIPointCalibration/synthetic_unique_common_map
+--- PASS: TestCSTSavedFieldASCIIPointCalibration/synthetic_unique_common_map (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibration
+=== RUN   TestCSTSavedFieldASCIIPointCalibration/one_bit
+--- PASS: TestCSTSavedFieldASCIIPointCalibration/one_bit (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibration
+=== RUN   TestCSTSavedFieldASCIIPointCalibration/two_cells
+--- PASS: TestCSTSavedFieldASCIIPointCalibration/two_cells (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibration
+=== RUN   TestCSTSavedFieldASCIIPointCalibration/multiple_maps
+--- PASS: TestCSTSavedFieldASCIIPointCalibration/multiple_maps (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibration
+=== RUN   TestCSTSavedFieldASCIIPointCalibration/E_signed_zero_witness
+--- PASS: TestCSTSavedFieldASCIIPointCalibration/E_signed_zero_witness (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibration
+=== RUN   TestCSTSavedFieldASCIIPointCalibration/H_signed_zero_witness
+--- PASS: TestCSTSavedFieldASCIIPointCalibration/H_signed_zero_witness (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibration
+=== RUN   TestCSTSavedFieldASCIIPointCalibration/signed_zero_bits
+--- PASS: TestCSTSavedFieldASCIIPointCalibration/signed_zero_bits (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibration
+=== RUN   TestCSTSavedFieldASCIIPointCalibration/nan
+--- PASS: TestCSTSavedFieldASCIIPointCalibration/nan (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibration
+=== RUN   TestCSTSavedFieldASCIIPointCalibration/infinite_query
+--- PASS: TestCSTSavedFieldASCIIPointCalibration/infinite_query (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibration
+=== RUN   TestCSTSavedFieldASCIIPointCalibration/frame_specific_permutation
+--- PASS: TestCSTSavedFieldASCIIPointCalibration/frame_specific_permutation (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibration
+=== RUN   TestCSTSavedFieldASCIIPointCalibration/missing_query
+--- PASS: TestCSTSavedFieldASCIIPointCalibration/missing_query (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibration
+=== RUN   TestCSTSavedFieldASCIIPointCalibration/singleton_ascii
+--- PASS: TestCSTSavedFieldASCIIPointCalibration/singleton_ascii (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibration
+=== RUN   TestCSTSavedFieldASCIIPointCalibration/duplicate_in_one_row_still_unique
+--- PASS: TestCSTSavedFieldASCIIPointCalibration/duplicate_in_one_row_still_unique (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibration
+=== RUN   TestCSTSavedFieldASCIIPointCalibration/metre_one_round
+--- PASS: TestCSTSavedFieldASCIIPointCalibration/metre_one_round (0.00s)
+=== NAME  TestCSTSavedFieldASCIIPointCalibration
+--- PASS: TestCSTSavedFieldASCIIPointCalibration (0.01s)
+=== NAME  
+=== RUN   TestFakeScheduler_CreateExportDeleteRestoreContract
+--- PASS: TestFakeScheduler_CreateExportDeleteRestoreContract (0.00s)
+=== NAME  
+=== RUN   TestFakeScheduler_FailedCreateDoesNotPublishTask
+--- PASS: TestFakeScheduler_FailedCreateDoesNotPublishTask (0.00s)
+=== NAME  
+=== RUN   TestE2E_LazyRegisterFullLifecycle
+✓ deleted scheduler task mcp-local-hub-lsp-517e1d91-python
+--- PASS: TestE2E_LazyRegisterFullLifecycle (0.19s)
+=== NAME  
+PASS

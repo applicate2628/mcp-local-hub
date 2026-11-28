@@ -1,0 +1,290 @@
+=== RUN   TestOutputSettlementDoesNotHoldServerMutex
+--- PASS: TestOutputSettlementDoesNotHoldServerMutex (0.13s)
+=== NAME  
+=== RUN   TestOutputSettlementDeadlinePreservesExecutionOutcome
+=== RUN   TestOutputSettlementDeadlinePreservesExecutionOutcome/completed
+--- PASS: TestOutputSettlementDeadlinePreservesExecutionOutcome/completed (0.01s)
+=== NAME  TestOutputSettlementDeadlinePreservesExecutionOutcome
+=== RUN   TestOutputSettlementDeadlinePreservesExecutionOutcome/nonzero
+--- PASS: TestOutputSettlementDeadlinePreservesExecutionOutcome/nonzero (0.01s)
+=== NAME  TestOutputSettlementDeadlinePreservesExecutionOutcome
+=== RUN   TestOutputSettlementDeadlinePreservesExecutionOutcome/cleanup_failed
+--- PASS: TestOutputSettlementDeadlinePreservesExecutionOutcome/cleanup_failed (0.01s)
+=== NAME  TestOutputSettlementDeadlinePreservesExecutionOutcome
+--- PASS: TestOutputSettlementDeadlinePreservesExecutionOutcome (0.03s)
+=== NAME  
+=== RUN   TestOutputManifestClassifiesBaselineCreatedModifiedAndRemoved
+--- PASS: TestOutputManifestClassifiesBaselineCreatedModifiedAndRemoved (0.00s)
+=== NAME  
+=== RUN   TestOutputManifestRejectsLinksAndLimits
+--- PASS: TestOutputManifestRejectsLinksAndLimits (0.00s)
+=== NAME  
+=== RUN   TestRealAttRes16ThroughMCP
+    real_sample_integration_test.go:25: set SONNET_REAL_ATT_RUN=1 with controlled fixture metadata to authorize one real sample run
+--- SKIP: TestRealAttRes16ThroughMCP (0.00s)
+=== NAME  
+=== RUN   TestStartupReapsOnlyExpiredOwnedRecordlessWorkspaces
+--- PASS: TestStartupReapsOnlyExpiredOwnedRecordlessWorkspaces (0.01s)
+=== NAME  
+=== RUN   TestRecordlessSweepRequiresExclusiveStoreLease
+--- PASS: TestRecordlessSweepRequiresExclusiveStoreLease (0.00s)
+=== NAME  
+=== RUN   TestRecordlessSweepPreservesCorruptSnapshot
+--- PASS: TestRecordlessSweepPreservesCorruptSnapshot (0.00s)
+=== NAME  
+=== RUN   TestIdempotencyRequestBindingSurvivesRestart
+--- PASS: TestIdempotencyRequestBindingSurvivesRestart (0.01s)
+=== NAME  
+=== RUN   TestConcurrentIdempotencyConflictCleansLosingCopy
+--- PASS: TestConcurrentIdempotencyConflictCleansLosingCopy (0.01s)
+=== NAME  
+=== RUN   TestTimedOutFlagPersistsWithTerminalState
+--- PASS: TestTimedOutFlagPersistsWithTerminalState (1.20s)
+=== NAME  
+=== RUN   TestRequestHashPathCaseFollowsPlatformIdentity
+--- PASS: TestRequestHashPathCaseFollowsPlatformIdentity (0.00s)
+=== NAME  
+=== RUN   TestReplayDoesNotRequireProductDiscovery
+=== RUN   TestReplayDoesNotRequireProductDiscovery/missing
+--- PASS: TestReplayDoesNotRequireProductDiscovery/missing (0.01s)
+=== NAME  TestReplayDoesNotRequireProductDiscovery
+=== RUN   TestReplayDoesNotRequireProductDiscovery/ambiguous
+--- PASS: TestReplayDoesNotRequireProductDiscovery/ambiguous (0.01s)
+=== NAME  TestReplayDoesNotRequireProductDiscovery
+=== RUN   TestReplayDoesNotRequireProductDiscovery/unavailable
+--- PASS: TestReplayDoesNotRequireProductDiscovery/unavailable (0.01s)
+=== NAME  TestReplayDoesNotRequireProductDiscovery
+--- PASS: TestReplayDoesNotRequireProductDiscovery (0.04s)
+=== NAME  
+=== RUN   TestRunReadyProjectCopiesOriginalAndIsIdempotent
+--- PASS: TestRunReadyProjectCopiesOriginalAndIsIdempotent (0.01s)
+=== NAME  
+=== RUN   TestStatusAndResultNeverInvokeDriverAndCancelRequiresPositiveForce
+--- PASS: TestStatusAndResultNeverInvokeDriverAndCancelRequiresPositiveForce (0.01s)
+=== NAME  
+=== RUN   TestProductLocatorRejectsMultipleRegistryProducts
+--- PASS: TestProductLocatorRejectsMultipleRegistryProducts (0.00s)
+=== NAME  
+=== RUN   TestProductInfoUsesInjectedRegistryLocatorWhenNoExplicitLocator
+--- PASS: TestProductInfoUsesInjectedRegistryLocatorWhenNoExplicitLocator (0.00s)
+=== NAME  
+=== RUN   TestProductInfoReportsUnavailableWhenRegistryAndPathMiss
+--- PASS: TestProductInfoReportsUnavailableWhenRegistryAndPathMiss (0.00s)
+=== NAME  
+=== RUN   TestCancelOperationReceiptIsIdempotentAndCloseWaits
+--- PASS: TestCancelOperationReceiptIsIdempotentAndCloseWaits (0.01s)
+=== NAME  
+=== RUN   TestMCPWireSchemasAndFailuresAreTyped
+--- PASS: TestMCPWireSchemasAndFailuresAreTyped (0.00s)
+=== NAME  
+=== RUN   TestProductInfoToolsListSchemaDoesNotSerializeNullRequired
+--- PASS: TestProductInfoToolsListSchemaDoesNotSerializeNullRequired (0.00s)
+=== NAME  
+=== RUN   TestMCPProductInfoMapsAbsenceToTypedFailureAndRegistryProductToSuccess
+--- PASS: TestMCPProductInfoMapsAbsenceToTypedFailureAndRegistryProductToSuccess (0.00s)
+=== NAME  
+=== RUN   TestStartMissingProductDoesNotWrapNilCause
+--- PASS: TestStartMissingProductDoesNotWrapNilCause (0.00s)
+=== NAME  
+=== RUN   TestPreparedReceiptStoresRedactedResolvedProductIdentity
+--- PASS: TestPreparedReceiptStoresRedactedResolvedProductIdentity (0.01s)
+=== NAME  
+=== RUN   TestMCPResultExposesObservedPostAnalysisSummary
+--- PASS: TestMCPResultExposesObservedPostAnalysisSummary (0.01s)
+=== NAME  
+=== RUN   TestStartRejectsUnsafeFILEOUTFolderBeforeDriverLaunch
+--- PASS: TestStartRejectsUnsafeFILEOUTFolderBeforeDriverLaunch (0.00s)
+=== NAME  
+=== RUN   TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch
+=== RUN   TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/contained
+--- PASS: TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/contained (0.00s)
+=== NAME  TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch
+=== RUN   TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/outside
+--- PASS: TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/outside (0.00s)
+=== NAME  TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch
+=== RUN   TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/whitespace
+--- PASS: TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/whitespace (0.00s)
+=== NAME  TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch
+=== RUN   TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/non-directive_NOTE
+--- PASS: TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/non-directive_NOTE (0.00s)
+=== NAME  TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch
+=== RUN   TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/non-directive_COMMENT
+--- PASS: TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch/non-directive_COMMENT (0.00s)
+=== NAME  TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch
+--- PASS: TestStartRejectsUnverifiedSPROJReferencesBeforeDriverLaunch (0.01s)
+=== NAME  
+=== RUN   TestStartPersistsPathAdmissionReceiptForDotFILEOUT
+--- PASS: TestStartPersistsPathAdmissionReceiptForDotFILEOUT (0.01s)
+=== NAME  
+=== RUN   TestFILEOUTFolderAdmissionAcceptsOnlyCleanRelativeTargets
+--- PASS: TestFILEOUTFolderAdmissionAcceptsOnlyCleanRelativeTargets (0.00s)
+=== NAME  
+=== RUN   TestStartRemovesOwnedWorkspaceWhenBaselineSnapshotFails
+--- PASS: TestStartRemovesOwnedWorkspaceWhenBaselineSnapshotFails (0.00s)
+=== NAME  
+=== RUN   TestStartConcurrentDuplicateKeyRemovesOnlyLosingCopiedWorkspace
+--- PASS: TestStartConcurrentDuplicateKeyRemovesOnlyLosingCopiedWorkspace (0.01s)
+=== NAME  
+=== RUN   TestStartRemovesOwnedWorkspaceWhenActiveMarkerCreationFails
+--- PASS: TestStartRemovesOwnedWorkspaceWhenActiveMarkerCreationFails (0.00s)
+=== NAME  
+=== RUN   TestStartPreservesUncertainPreparedReceiptWithoutPublishingRun
+--- PASS: TestStartPreservesUncertainPreparedReceiptWithoutPublishingRun (0.01s)
+=== NAME  
+=== RUN   TestStartPreTransferCleanupFailuresRemainVisible
+=== RUN   TestStartPreTransferCleanupFailuresRemainVisible/baseline_snapshot
+--- PASS: TestStartPreTransferCleanupFailuresRemainVisible/baseline_snapshot (0.00s)
+=== NAME  TestStartPreTransferCleanupFailuresRemainVisible
+=== RUN   TestStartPreTransferCleanupFailuresRemainVisible/active_marker
+--- PASS: TestStartPreTransferCleanupFailuresRemainVisible/active_marker (0.00s)
+=== NAME  TestStartPreTransferCleanupFailuresRemainVisible
+=== RUN   TestStartPreTransferCleanupFailuresRemainVisible/duplicate_replay
+--- PASS: TestStartPreTransferCleanupFailuresRemainVisible/duplicate_replay (0.01s)
+=== NAME  TestStartPreTransferCleanupFailuresRemainVisible
+--- PASS: TestStartPreTransferCleanupFailuresRemainVisible (0.02s)
+=== NAME  
+=== RUN   TestCleanupPreTransferWorkRefusesForeignWorkspace
+--- PASS: TestCleanupPreTransferWorkRefusesForeignWorkspace (0.00s)
+=== NAME  
+=== RUN   TestCopyProjectUsesCanonicalRelativeSourceManifest
+--- PASS: TestCopyProjectUsesCanonicalRelativeSourceManifest (0.00s)
+=== NAME  
+=== RUN   TestMCPRejectsNonObjectArgumentsForEveryTool
+--- PASS: TestMCPRejectsNonObjectArgumentsForEveryTool (0.00s)
+=== NAME  
+=== RUN   TestMCPResultProjectsOnlyCreatedOrModifiedOutputs
+--- PASS: TestMCPResultProjectsOnlyCreatedOrModifiedOutputs (0.01s)
+=== NAME  
+=== RUN   TestMCPResultIncludesAnEmptyOutputListForValidZeroDelta
+--- PASS: TestMCPResultIncludesAnEmptyOutputListForValidZeroDelta (0.01s)
+=== NAME  
+=== RUN   TestTerminalPersistenceFailureDoesNotPublishCompletedResult
+--- PASS: TestTerminalPersistenceFailureDoesNotPublishCompletedResult (0.01s)
+=== NAME  
+=== RUN   TestCancelRejectsEmptyOperationWithoutMutatingRun
+--- PASS: TestCancelRejectsEmptyOperationWithoutMutatingRun (0.01s)
+=== NAME  
+=== RUN   TestRunStoreWriteFaultsPersistFailedStateAcrossRestart
+=== RUN   TestRunStoreWriteFaultsPersistFailedStateAcrossRestart/running
+--- PASS: TestRunStoreWriteFaultsPersistFailedStateAcrossRestart/running (0.01s)
+=== NAME  TestRunStoreWriteFaultsPersistFailedStateAcrossRestart
+=== RUN   TestRunStoreWriteFaultsPersistFailedStateAcrossRestart/terminal
+--- PASS: TestRunStoreWriteFaultsPersistFailedStateAcrossRestart/terminal (0.02s)
+=== NAME  TestRunStoreWriteFaultsPersistFailedStateAcrossRestart
+--- PASS: TestRunStoreWriteFaultsPersistFailedStateAcrossRestart (0.03s)
+=== NAME  
+=== RUN   TestRunStoreLoadsTerminalRecordAfterRestart
+--- PASS: TestRunStoreLoadsTerminalRecordAfterRestart (0.01s)
+=== NAME  
+=== RUN   TestRunStoreRecoversPendingRecordAsHostLostWithoutDriverAdoption
+--- PASS: TestRunStoreRecoversPendingRecordAsHostLostWithoutDriverAdoption (0.01s)
+=== NAME  
+=== RUN   TestRecoveredHostLostResultPreservesFailureIdentity
+--- PASS: TestRecoveredHostLostResultPreservesFailureIdentity (0.01s)
+=== NAME  
+=== RUN   TestRunStorePersistsAppendOnlyGenerationSnapshots
+--- PASS: TestRunStorePersistsAppendOnlyGenerationSnapshots (0.01s)
+=== NAME  
+=== RUN   TestRunStoreRejectsConcurrentOwner
+--- PASS: TestRunStoreRejectsConcurrentOwner (0.00s)
+=== NAME  
+=== RUN   TestRunStoreRejectsMalformedAndFutureRecords
+=== RUN   TestRunStoreRejectsMalformedAndFutureRecords/malformed
+--- PASS: TestRunStoreRejectsMalformedAndFutureRecords/malformed (0.00s)
+=== NAME  TestRunStoreRejectsMalformedAndFutureRecords
+=== RUN   TestRunStoreRejectsMalformedAndFutureRecords/future
+--- PASS: TestRunStoreRejectsMalformedAndFutureRecords/future (0.00s)
+=== NAME  TestRunStoreRejectsMalformedAndFutureRecords
+--- PASS: TestRunStoreRejectsMalformedAndFutureRecords (0.00s)
+=== NAME  
+=== RUN   TestRunStoreSweepRemovesOnlyExpiredOwnedTerminalOrAbandonedRuns
+--- PASS: TestRunStoreSweepRemovesOnlyExpiredOwnedTerminalOrAbandonedRuns (0.00s)
+=== NAME  
+=== RUN   TestCloseRetainsLeaseUntilStubbornWorkerSettles
+--- PASS: TestCloseRetainsLeaseUntilStubbornWorkerSettles (0.25s)
+=== NAME  
+=== RUN   TestCloseDuringPreparationRejectsLateStartAndRetainsLease
+=== RUN   TestCloseDuringPreparationRejectsLateStartAndRetainsLease/final_admission
+    server_test.go:1575: settled: late runs/writes/markers/calls=0/0/0/0; candidate cleanup failure=false; successor acquired
+--- PASS: TestCloseDuringPreparationRejectsLateStartAndRetainsLease/final_admission (0.00s)
+=== NAME  TestCloseDuringPreparationRejectsLateStartAndRetainsLease
+=== RUN   TestCloseDuringPreparationRejectsLateStartAndRetainsLease/pre-copy_discovery
+    server_test.go:1575: settled: late runs/writes/markers/calls=0/0/0/0; candidate cleanup failure=false; successor acquired
+--- PASS: TestCloseDuringPreparationRejectsLateStartAndRetainsLease/pre-copy_discovery (0.00s)
+=== NAME  TestCloseDuringPreparationRejectsLateStartAndRetainsLease
+=== RUN   TestCloseDuringPreparationRejectsLateStartAndRetainsLease/post-copy_replay
+    server_test.go:1575: settled: late runs/writes/markers/calls=0/0/0/0; candidate cleanup failure=false; successor acquired
+--- PASS: TestCloseDuringPreparationRejectsLateStartAndRetainsLease/post-copy_replay (0.01s)
+=== NAME  TestCloseDuringPreparationRejectsLateStartAndRetainsLease
+=== RUN   TestCloseDuringPreparationRejectsLateStartAndRetainsLease/cleanup_cause
+    server_test.go:1575: settled: late runs/writes/markers/calls=0/0/0/0; candidate cleanup failure=true; successor acquired
+--- PASS: TestCloseDuringPreparationRejectsLateStartAndRetainsLease/cleanup_cause (0.00s)
+=== NAME  TestCloseDuringPreparationRejectsLateStartAndRetainsLease
+=== RUN   TestCloseDuringPreparationRejectsLateStartAndRetainsLease/cleanup_wire_projection
+    server_test.go:1575: settled: late runs/writes/markers/calls=0/0/0/0; candidate cleanup failure=true; successor acquired
+--- PASS: TestCloseDuringPreparationRejectsLateStartAndRetainsLease/cleanup_wire_projection (0.00s)
+=== NAME  TestCloseDuringPreparationRejectsLateStartAndRetainsLease
+=== RUN   TestCloseDuringPreparationRejectsLateStartAndRetainsLease/already_closed
+    server_test.go:1575: settled: late runs/writes/markers/calls=0/0/0/0; candidate cleanup failure=false; successor acquired
+--- PASS: TestCloseDuringPreparationRejectsLateStartAndRetainsLease/already_closed (0.00s)
+=== NAME  TestCloseDuringPreparationRejectsLateStartAndRetainsLease
+--- PASS: TestCloseDuringPreparationRejectsLateStartAndRetainsLease (0.02s)
+=== NAME  
+=== RUN   TestStartRejectsPostCopyHandoffAfterClose
+=== RUN   TestStartRejectsPostCopyHandoffAfterClose/cleanup_succeeds
+--- PASS: TestStartRejectsPostCopyHandoffAfterClose/cleanup_succeeds (0.05s)
+=== NAME  TestStartRejectsPostCopyHandoffAfterClose
+=== RUN   TestStartRejectsPostCopyHandoffAfterClose/cleanup_failure_preserves_both_causes
+--- PASS: TestStartRejectsPostCopyHandoffAfterClose/cleanup_failure_preserves_both_causes (0.05s)
+=== NAME  TestStartRejectsPostCopyHandoffAfterClose
+--- PASS: TestStartRejectsPostCopyHandoffAfterClose (0.11s)
+=== NAME  
+=== RUN   TestStrictDriver_OrdinaryExitThreeIsCompletedNonzero
+--- PASS: TestStrictDriver_OrdinaryExitThreeIsCompletedNonzero (0.24s)
+=== NAME  
+=== RUN   TestStrictDriver_MissingExecutableIsLaunchFailure
+--- PASS: TestStrictDriver_MissingExecutableIsLaunchFailure (0.00s)
+=== NAME  
+=== RUN   TestStrictDriver_ContainmentFailureIsDistinct
+--- PASS: TestStrictDriver_ContainmentFailureIsDistinct (0.00s)
+=== NAME  
+=== RUN   TestStrictDriver_ExitThreeJoinedCleanupStaysFailed
+--- PASS: TestStrictDriver_ExitThreeJoinedCleanupStaysFailed (0.13s)
+=== NAME  
+=== RUN   TestStrictDriver_ZeroExitJoinedCleanupStaysFailed
+--- PASS: TestStrictDriver_ZeroExitJoinedCleanupStaysFailed (0.12s)
+=== NAME  
+=== RUN   TestStrictDriver_PipeOrPrewaitFailureHasNoExit
+--- PASS: TestStrictDriver_PipeOrPrewaitFailureHasNoExit (0.00s)
+=== NAME  
+=== RUN   TestStrictDriver_InvalidOrUnknownTreeFailsClosed
+=== RUN   TestStrictDriver_InvalidOrUnknownTreeFailsClosed/invalid_invocation
+--- PASS: TestStrictDriver_InvalidOrUnknownTreeFailsClosed/invalid_invocation (0.00s)
+=== NAME  TestStrictDriver_InvalidOrUnknownTreeFailsClosed
+=== RUN   TestStrictDriver_InvalidOrUnknownTreeFailsClosed/unknown_strict_kind
+--- PASS: TestStrictDriver_InvalidOrUnknownTreeFailsClosed/unknown_strict_kind (0.00s)
+=== NAME  TestStrictDriver_InvalidOrUnknownTreeFailsClosed
+=== RUN   TestStrictDriver_InvalidOrUnknownTreeFailsClosed/untyped_error
+--- PASS: TestStrictDriver_InvalidOrUnknownTreeFailsClosed/untyped_error (0.00s)
+=== NAME  TestStrictDriver_InvalidOrUnknownTreeFailsClosed
+=== RUN   TestStrictDriver_InvalidOrUnknownTreeFailsClosed/mismatched_process_states
+--- PASS: TestStrictDriver_InvalidOrUnknownTreeFailsClosed/mismatched_process_states (0.23s)
+=== NAME  TestStrictDriver_InvalidOrUnknownTreeFailsClosed
+=== RUN   TestStrictDriver_InvalidOrUnknownTreeFailsClosed/nil_error_without_process_state
+--- PASS: TestStrictDriver_InvalidOrUnknownTreeFailsClosed/nil_error_without_process_state (0.00s)
+=== NAME  TestStrictDriver_InvalidOrUnknownTreeFailsClosed
+=== RUN   TestStrictDriver_InvalidOrUnknownTreeFailsClosed/exit_error_with_zero_code
+--- PASS: TestStrictDriver_InvalidOrUnknownTreeFailsClosed/exit_error_with_zero_code (0.11s)
+=== NAME  TestStrictDriver_InvalidOrUnknownTreeFailsClosed
+--- PASS: TestStrictDriver_InvalidOrUnknownTreeFailsClosed (0.34s)
+=== NAME  
+=== RUN   TestStrictDriver_TimeoutAndCancelPolarityUnchanged
+=== RUN   TestStrictDriver_TimeoutAndCancelPolarityUnchanged/timeout
+--- PASS: TestStrictDriver_TimeoutAndCancelPolarityUnchanged/timeout (1.01s)
+=== NAME  TestStrictDriver_TimeoutAndCancelPolarityUnchanged
+=== RUN   TestStrictDriver_TimeoutAndCancelPolarityUnchanged/force_cancel
+--- PASS: TestStrictDriver_TimeoutAndCancelPolarityUnchanged/force_cancel (0.01s)
+=== NAME  TestStrictDriver_TimeoutAndCancelPolarityUnchanged
+--- PASS: TestStrictDriver_TimeoutAndCancelPolarityUnchanged (1.03s)
+=== NAME  
+PASS

@@ -1,0 +1,61 @@
+{
+	"GoVersion": "go1.27.4",
+	"Path": "mcp-local-hub/internal/binaryadmission.test",
+	"Main": {
+		"Path": "mcp-local-hub",
+		"Version": "(devel)"
+	},
+	"Deps": [
+		{
+			"Path": "golang.org/x/sys",
+			"Version": "v0.47.0",
+			"Sum": "h1:o7XGOvZQCADBQQ4Y7VNq2dRWQR7JmOUW8Kxx4ZsNgWs="
+		}
+	],
+	"Settings": [
+		{
+			"Key": "-buildmode",
+			"Value": "exe"
+		},
+		{
+			"Key": "-compiler",
+			"Value": "gc"
+		},
+		{
+			"Key": "-ldflags",
+			"Value": "mcp-local-hub/internal/cli=-H=windowsgui -s -w -X=mcp-local-hub/internal/buildinfo.version=0.4.60 -X=mcp-local-hub/internal/buildinfo.commit=727d66753814dc218e26d699e57402db2d13190a -X=mcp-local-hub/internal/buildinfo.date=2026-11-27T02:27:42Z -X=mcp-local-hub/internal/buildinfo.publisherSourceEpoch=5c3f54e2359b33266afb0dd52488c01ab0114af1370376492b8186e6ae74cf89"
+		},
+		{
+			"Key": "DefaultGODEBUG",
+			"Value": "tracebacklabels=0,x509sslcertoverrideplatform=0"
+		},
+		{
+			"Key": "CGO_ENABLED",
+			"Value": "1"
+		},
+		{
+			"Key": "CGO_CFLAGS"
+		},
+		{
+			"Key": "CGO_CPPFLAGS"
+		},
+		{
+			"Key": "CGO_CXXFLAGS"
+		},
+		{
+			"Key": "CGO_LDFLAGS"
+		},
+		{
+			"Key": "GOARCH",
+			"Value": "amd64"
+		},
+		{
+			"Key": "GOOS",
+			"Value": "windows"
+		},
+		{
+			"Key": "GOAMD64",
+			"Value": "v1"
+		}
+	]
+}

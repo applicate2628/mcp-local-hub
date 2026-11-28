@@ -1,0 +1,6 @@
+TestDebuggerDirs_OverrideDetectsAndSkips
+TestDebuggerDirs_Dedup
+TestDefaultLldbPath_AbsoluteWhenDetected
+TestDefaultLldbPath_BareFallback
+TestDefaultGdbPath_AbsoluteWhenDetected
+TestDefaultGdbPath_BareFallback

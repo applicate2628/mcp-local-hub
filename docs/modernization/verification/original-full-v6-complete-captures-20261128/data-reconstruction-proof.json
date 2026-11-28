@@ -1,0 +1,48 @@
+{
+  "schema": "closed-full-v6-all-captures-author-data-proof-v1",
+  "original_classification": "FAIL/CLOSED",
+  "source_commit": "727d66753814dc218e26d699e57402db2d13190a",
+  "original_command_count": 283,
+  "original_capture_count": 566,
+  "distinct_payloads": 285,
+  "empty_captures": 277,
+  "total_capture_bytes": 46234475,
+  "distinct_payload_bytes": 46072377,
+  "all_capture_sha256_matched": true,
+  "closed_package_receipts_sha256_matched": 65,
+  "new_originals": 333,
+  "new_original_bytes": 49417742,
+  "all_new_literal_round_trips_equal": true,
+  "public_dependencies": {
+    "different_stream_payloads": 11,
+    "original_capture_paths": 12,
+    "package_receipts": 6
+  },
+  "binary_NUL_list": {
+    "schema": "closed-source-file-list-reconstruction-v1",
+    "source_map_receipt_sha256": "6cd606a5ec4e6e1a3e74d4b8324786cc98dffe8cd587f4a41c89a751ea7f0c4a",
+    "field": "source_before.files",
+    "keys": "lexicographic-JS-order",
+    "count": 3509,
+    "separator": "NUL byte 0x00 after every exact relative path",
+    "bytes": 160859,
+    "sha256": "30c87a0defe033ff73447160b4c05e45e3c985b9c851aed52284bb59a393f27f",
+    "reads_binary_capture": false,
+    "executes_git": false
+  },
+  "global_default_stdout": {
+    "lines": 72452,
+    "read_chunks": 29,
+    "bytes": 16629137,
+    "sha256": "4e7148e7fd547cd3478473b3b8432dfa98edba574fc5c880a1f258bac6074d74",
+    "transport_read_failure_resolved_by_bounded_reads": true
+  },
+  "source_or_cache_payloads_read_for_capture_collection": false,
+  "bounded_inactive_source_reads_for_fixture_provenance": 2,
+  "public_reconstructor_executed_by_author": false,
+  "public_verifier_executed_by_author": false,
+  "materializer_executed_by_author": false,
+  "new_native_or_test_commands": false,
+  "existing_sources_or_receipts_modified": false,
+  "qualification_inherited": false
+}

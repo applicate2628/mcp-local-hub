@@ -1,0 +1,66 @@
+{
+  "schema": "successor59f-existing-public-inputs-v1",
+  "scope": "Immutable public sources and separate publication trails; links do not convey Source59f acceptance.",
+  "public_anchor": "05fbffa30f99914c8174966525a70bc9984e7038",
+  "inputs": [
+    {
+      "role": "native_guard",
+      "original_sha256": "e7c663f4ba2fd558005bc110173609cb19465ff33d3f4678aeb53b5ba00e0924",
+      "url": "https://github.com/applicate2628/mcp-local-hub/blob/05fbffa30f99914c8174966525a70bc9984e7038/docs/modernization/verification/cache-acceptance-recovery-20261128/sources/guard-custody.py"
+    },
+    {
+      "role": "windows_job",
+      "original_sha256": "d94583001a33ef34adb67feec34b4f4b0bf3626df9f63da3c7a7c85bf3e0b552",
+      "url": "https://github.com/applicate2628/mcp-local-hub/blob/05fbffa30f99914c8174966525a70bc9984e7038/docs/modernization/verification/cache-acceptance-recovery-20261128/sources/windows_job.py"
+    },
+    {
+      "role": "run_owned_commands",
+      "original_sha256": "6d16652d4893273b7e9d584920892ce5f5917622e7e242a62eb78ec824bcfb93",
+      "template_sha256": "232641e3f7ea43aa594a8e71a6aff2e24dcb29c6eeee82458e485e73436876a5",
+      "url": "https://github.com/applicate2628/mcp-local-hub/blob/05fbffa30f99914c8174966525a70bc9984e7038/docs/modernization/verification/cache-acceptance-recovery-20261128/sources/run_owned_commands.py.template",
+      "reconstructor_url": "https://github.com/applicate2628/mcp-local-hub/blob/05fbffa30f99914c8174966525a70bc9984e7038/docs/modernization/verification/cache-acceptance-recovery-20261128/sources/reconstruct_runner.py"
+    },
+    {
+      "role": "private_scope_template",
+      "original_sha256": "ce16701c0c8951d73a9e002c0447fe108ee2bcaa31437bde63bc184e509ec654",
+      "url": "https://github.com/applicate2628/mcp-local-hub/blob/05fbffa30f99914c8174966525a70bc9984e7038/docs/modernization/verification/original-v6-sources-20261128/sources/inputs-original-v6/private_run_scope.py.in"
+    },
+    {
+      "role": "launcher_template",
+      "original_sha256": "adf9f26a647aa6e869bc3dc25a6c13b5b913b2295f2629e77d10f36058e7493f",
+      "url": "https://github.com/applicate2628/mcp-local-hub/blob/05fbffa30f99914c8174966525a70bc9984e7038/docs/modernization/verification/original-v6-sources-20261128/sources/inputs-original-v6/launch_literal_v6.py.in"
+    },
+    {
+      "role": "contained_controller",
+      "original_sha256": "59fa2cc432b887114497c3c6625731d4dcde207e38b412371eb5fa83b39ed8a9",
+      "template_sha256": "817e93de849ace4485b08b9c242500bf3a5a12210c5ff0e5bd893cbe4bc6bab8",
+      "url": "https://github.com/applicate2628/mcp-local-hub/blob/05fbffa30f99914c8174966525a70bc9984e7038/docs/modernization/verification/original-v6-sources-20261128/templates/inputs-original-v6/external-source-original/literal_contained_test_receiver_v4.go.template",
+      "binding_url": "https://github.com/applicate2628/mcp-local-hub/blob/05fbffa30f99914c8174966525a70bc9984e7038/docs/modernization/verification/original-v6-sources-20261128/source-bindings.json"
+    },
+    {
+      "role": "job_original_owner_source",
+      "original_sha256": "7200935baff50c05b5f1893e87aac01768ee1d98ca85fcad5e655ca016b2264e",
+      "original_git_blob": "7a4aa5ae4216289215735f21f497e8a982926278",
+      "url": "https://github.com/applicate2628/mcp-local-hub/blob/5ad374eb60cadb8ad56ea167e3fb06edb44bdc18/tools/test-job-entry/owner_windows.go"
+    }
+  ],
+  "source_delta_capsules": [
+    {
+      "role": "seven_test_fixes_after_33eaf8",
+      "url": "https://github.com/applicate2628/mcp-local-hub/blob/05fbffa30f99914c8174966525a70bc9984e7038/docs/modernization/verification/source33-successor-test-fixes-20261128/README.md",
+      "readme_git_blob": "c02f24541cede0697d9505ad404ddb3c08dce308"
+    },
+    {
+      "role": "two_manifest_literals_after_04e",
+      "url": "https://github.com/applicate2628/mcp-local-hub/blob/05fbffa30f99914c8174966525a70bc9984e7038/docs/modernization/verification/successor14-manifest-pin-20261128/README.md",
+      "readme_git_blob": "5ad745ec0951352dc940ef3c7d73bf863ac1ed8b"
+    }
+  ],
+  "separate_trail": {
+    "directory": "successor-publication-trail-20261128",
+    "scope": "Eleven prior stage/commit/publication/warm-cache operations, 213 originals and 148 captures; not duplicated here.",
+    "publication_status_at_packaging": "Frozen and independently received by root; publication is controlled separately.",
+    "source59f_commit_operation": "commit-v10"
+  },
+  "raw_source59f_commit_object_included": false
+}

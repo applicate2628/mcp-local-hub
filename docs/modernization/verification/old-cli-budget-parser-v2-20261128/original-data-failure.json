@@ -1,0 +1,12 @@
+{
+  "scope": "DATA-only replay of exact reconstructed historical closed inputs",
+  "exception_type": "UnicodeDecodeError",
+  "decoder": "ascii",
+  "source_line": 108,
+  "byte_hex": "e2",
+  "position": 68,
+  "output_directory_created": false,
+  "original_script_modified": false,
+  "new_native_test_execution": false,
+  "full_traceback_included": false
+}

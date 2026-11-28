@@ -1,0 +1,815 @@
+{
+  "schema": "successor59f-preparation-data-reconstruction-proof-v1",
+  "status": "ALL_ORIGINAL_BYTES_RECONSTRUCTED_IN_MEMORY",
+  "source_bindings_sha256": "f6291141e747d821f22f174a0b4db38e808fb6bd9b8ed53eabee7f87f5e56090",
+  "originals": 133,
+  "original_bytes": 21400213,
+  "unique_published_payloads": 110,
+  "role_values_included": false,
+  "original_sources_imported_or_executed": false,
+  "product_or_test_commands_executed_by_this_check": false,
+  "full_acceptance_claimed": false,
+  "format_reused": "original-v6-source-preservation-bindings-v1",
+  "renderer_original_sha256": "7441c4f529fda6fc87141ec96442a25145e5ff459ba3a2af82763e38a63905e4",
+  "renderer_delta": "Only BINDINGS_SHA256 is replaced with this capsule's exact bindings hash.",
+  "files": [
+    {
+      "original_role_path": "receipts/product-v2/execution.json",
+      "bytes": 4703112,
+      "sha256": "a5992a80253c4e3f14de1f1ccecf37d8c24b897652b78a5c56598027ba054c12",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "receipts/producer-v1/execution.json",
+      "bytes": 11757824,
+      "sha256": "76d74ba0d51f044ff4601efece213eeb2d345ec63a1b31539b20231f0492a19b",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/producer-v1/private_producer_scope.py",
+      "bytes": 12568,
+      "sha256": "60a63b06447b9e836db5be06a534aa3d00ae518e041aeef91750fdd044590108",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/producer-v1/product-build-config.json",
+      "bytes": 2037,
+      "sha256": "e60e717eeb3727acad953c54df08fa0fb1da893f48dcc2d0d5e0d1782c5580bb",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/producer-v1/job-entry-whole-suite-main_windows.go.txt",
+      "bytes": 32466,
+      "sha256": "74c4cebbc91337eacabc113cb1f772589e0c823777c5f2ed734757647fc05977",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/producer-v1/literal-contained-receiver.go.txt",
+      "bytes": 17383,
+      "sha256": "59fa2cc432b887114497c3c6625731d4dcde207e38b412371eb5fa83b39ed8a9",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/producer-v1/publisher-source-snapshot.json",
+      "bytes": 486372,
+      "sha256": "0249af1149b94877e011186a92ee05f104a9bd7afd0e1d676755ee190e64356e",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/producer-v1/runtime-source-snapshot.json",
+      "bytes": 405520,
+      "sha256": "894f8279e51f2c3fa81e404b37be71f3ff9bad26c39ab1afd382d5814a9382a3",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/producer-v1/copy_closed_warm_caches.py",
+      "bytes": 11297,
+      "sha256": "cce49070461341d585ee32f0128f9c61a89cae637c09278c6074732a81cd07eb",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/producer-v1/build_successor_products.ps1",
+      "bytes": 16503,
+      "sha256": "b96fda0fe7b407181100076a4a277fb36df808247f98c78587c1b5eb445c6297",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/producer-v1/prepare_successor_inputs_v2.py",
+      "bytes": 12211,
+      "sha256": "0b7d8c107683f7db12ec9e56e0ca00f3f25a6e55d39d68471420fe633b3dc54c",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/producer-v1/helper-build-bindings-v2.json",
+      "bytes": 5147,
+      "sha256": "d078d88d6455056efc71fd5dfa800d1bd2dd026b8debb41997445590f58b1b01",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/product-v2/build_successor_products_v2.ps1",
+      "bytes": 16832,
+      "sha256": "6230aaa4474526e9d8ccf864e35d363669605e0560c784f7df36753cc5e35b06",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/product-v2/product-build-config-v2.json",
+      "bytes": 2027,
+      "sha256": "7117e3809763cf1b05145cd26fe56bba3586ce4650387647dba319de5228d484",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/product-v2/prepare_product_export_v2.py",
+      "bytes": 12155,
+      "sha256": "93bd95cbf3e1884316ff7ac86628940d887cf39a2eb6cbe7df68ebf1060e8f7a",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "receipts/producer-v1/root-receiving.json",
+      "bytes": 9804,
+      "sha256": "6e8568fd054048a082fe48feea83069e5759289b733294e534169d2fd5b77743",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "receipts/product-v2/root-receiving.json",
+      "bytes": 11311,
+      "sha256": "14e9a11dd5d82507d9faf984ea2ba0cb82f795dee8c75630c4f8280fc8a0da98",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "receipts/producer-v1/compiled-helpers.json",
+      "bytes": 6775,
+      "sha256": "4778c49ae9d57f83a6e0eb4227b294a4ce459f20cf760c05ddf1fbbbdb7f0e2c",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "receipts/producer-v1/source-helper-preparation.json",
+      "bytes": 11213,
+      "sha256": "90417ae2198018c16e9e4c990dd1844d3600ec07dc95a126dff41a20ebb3e970",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/producer-v1/receive_successor_products_v1.ps1",
+      "bytes": 17536,
+      "sha256": "7f704adcb3618e59c0a4e724afc4521f5513d03e153d1c5e62656944e4e9a39f",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/producer-v1/receive_compiled_helpers_v1.ps1",
+      "bytes": 8079,
+      "sha256": "69b1bbd87c447ac525ea856505df9167696ea37c8e9e4e9de560f297ce50d020",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/product-v2/receive_product_only_v2.ps1",
+      "bytes": 17912,
+      "sha256": "39958bd4105b077239c8ed7c016c185f0b123583ccb6ca64a1cbb43a58652ba9",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/foreground/main_windows.go",
+      "bytes": 27303,
+      "sha256": "77949871b3c0cbea570241409cd40840be9c88db9f4e83fe71044db80f2155d7",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/foreground/main_windows_test.go",
+      "bytes": 2772,
+      "sha256": "9712a445ce383ce89ec3a6051d7eb11dee5cf29a08ba93854d0c85fa8c142a0b",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/foreground/v3-to-v4.patch",
+      "bytes": 507,
+      "sha256": "0dd8424c24785ceb1ffee80e963babb6ef8268288603cb905db5f01dd136df1b",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/namespace/main_windows.go",
+      "bytes": 24227,
+      "sha256": "4e91b8ce877400a91a4f315b68a166ae3d2c7c19d4963d52ade521f03f2ac4b4",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/namespace/prebuilt_windows.go",
+      "bytes": 19606,
+      "sha256": "2fc1016b4eff51c77a3c0e342de14d938b3f39b6a67c438b04ef262e09d8eeed",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/runtime/adapter_successor.py.in",
+      "bytes": 85963,
+      "sha256": "48c5d6af30d62c1e63c1455689a19c1ce0b67ab761fc9b1683e5a522494b98bd",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/runtime/copy_closed_runtime_caches.py",
+      "bytes": 11354,
+      "sha256": "1a0314874d6141f56d960c431ca27e6ddef518b7b5b83878793f8fb0fb443d79",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/runtime/core_successor.py.in",
+      "bytes": 32674,
+      "sha256": "fcd8fadd43744d94426f59780028cef98d7b3c968dc42df200f9130b1e589991",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/runtime/driver_successor.py.in",
+      "bytes": 38786,
+      "sha256": "c29938a6c6570aa417c933bc7ce92ef44ced42e37727999ae46a115d758b6787",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/runtime/foreground_receiving.fragment.py",
+      "bytes": 16018,
+      "sha256": "64ecdeecfc635e1de41ef09ac1f5b0a0639f1a1ff87184c180dbe5b2dd419076",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/runtime/prepare_successor.py",
+      "bytes": 12625,
+      "sha256": "fe840964c1079ceac56f38ab16a4cf130d0ca8d59c6bd1b72d46099347a01c17",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/runtime/primitives_successor.py.in",
+      "bytes": 9841,
+      "sha256": "4dd6ea68986a8cda1da65373dad3077340a7483be15128f443d2657ca5a0483a",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/runtime/runtime-cache-copy-vs-producer.patch",
+      "bytes": 1546,
+      "sha256": "1870b248cb77bad1caad3440694915cdac5b9ae601ef48616ffaa3b7cd4dc82b",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/runtime/static-receiving.json",
+      "bytes": 8036,
+      "sha256": "6530437aa172d0bc7b1bb802efc92cd6948d827798a6b57b6834db9534b68d51",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/runtime/templates-manifest.candidate.json",
+      "bytes": 2240,
+      "sha256": "7eb9d0a93ce8d9ba6bc17a78037c9a1d072b919bc881d8ea7f3e2c5c965290c4",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/runtime/candidate-manifest.json",
+      "bytes": 3216,
+      "sha256": "88ae2fa8e94191babf660c94665819ca2c4939b60566c49bb9098cdd3c0b16bc",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/producer-v1/parent.stdout.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/producer-v1/parent.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/producer-v1/copy-closed-warm-caches.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/producer-v1/stage-exact-source-and-helpers.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/producer-v1/build-validator.stdout.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/producer-v1/build-validator.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/producer-v1/build-test2json.stdout.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/producer-v1/build-test2json.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/producer-v1/build-job.stdout.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/producer-v1/build-job.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/producer-v1/build-contained.stdout.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/producer-v1/build-contained.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/producer-v1/build-namespace.stdout.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/producer-v1/build-namespace.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/producer-v1/build-cli.stdout.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/producer-v1/build-cli.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/producer-v1/check-foreground-framed-parser.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/producer-v1/build-marked-product.stdout.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/product-v2/parent.stdout.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/product-v2/parent.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/product-v2/copy-original-warm-pass-caches.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/product-v2/export-exact-product-source.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/product-v2/build-marked-product.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/product-v2/build-native-product.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/producer-v1/approved-plan.json",
+      "bytes": 662796,
+      "sha256": "99333ab4cb43f9a01720c70e567782475065b0f7077d70a3f157dca475c9c15a",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/product-v2/approved-plan.json",
+      "bytes": 654163,
+      "sha256": "f6fd52b9a3d653b87bae7e51c1264ee27bb2a5b692219b36c9213a59a8b7fca5",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "source/source59f-input-sha256.json",
+      "bytes": 459779,
+      "sha256": "e8c3fc2f577a130f92ba4eee7f8eee7153afc032dee909557cf1156890917c06",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/runtime/adapter-vs-v6.patch",
+      "bytes": 49849,
+      "sha256": "ab5bfb1609f06fba1209b28c801aa8f1cbde3161cf5d9d77d7886f67399d7eaa",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/runtime/core-primitives-vs-v6.patch",
+      "bytes": 24182,
+      "sha256": "2c69a182e8cdeee4f98ea542bddc8f15f37f19f3a35c0a7882f0ca8acf46c139",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/runtime/driver-vs-v6.patch",
+      "bytes": 31662,
+      "sha256": "017089f1b4adeaf52d98c4a2af6f937981732175c9425f2b3bf8109f43f99227",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/runtime/owner_receiving.fragment.py",
+      "bytes": 5489,
+      "sha256": "fa8c35962f31ab576242dba4fbb76c23131dec06db1a429e710d724d343e1b7b",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/runtime/README.md",
+      "bytes": 9287,
+      "sha256": "5d39e2c59879df1031453c0dac0f08918635397190fe0d347663e1836b14bbfc",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "receipts/producer-v1/parent.json",
+      "bytes": 1507,
+      "sha256": "e900a860923c9b122436d06feffc2a5e815214d98d56a6982d54af009f846735",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "receipts/producer-v1/outer-original.json",
+      "bytes": 444,
+      "sha256": "922224681071013b491ce263840f0c2e9f0d35ca38b03154ae6017589b20ecd8",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/producer-v1/copy-closed-warm-caches.stdout.txt",
+      "bytes": 702,
+      "sha256": "5dd023ba6a35304c786e1fbf9aa24e64d6ffd44ff9fd7ebf0565565c243dce90",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/producer-v1/stage-exact-source-and-helpers.stdout.txt",
+      "bytes": 77,
+      "sha256": "bb449620d35bf22f2777941d4cfd17e193951dceca5f384a39eccc3536a08786",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/producer-v1/check-foreground-framed-parser.stdout.txt",
+      "bytes": 59,
+      "sha256": "8d050ef0f0d591a48e34a5566f4633dfc83dca837ffeb9005f09b202f8b7cac9",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/producer-v1/build-marked-product.stderr.txt",
+      "bytes": 488,
+      "sha256": "da908aec0f04384be3176b935840fcd98528bee091b66025f00059c993161ff1",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "receipts/product-v2/parent.json",
+      "bytes": 1507,
+      "sha256": "bbc353fe6ac620ddf190ba9712d0048a6a60bbc0e1d59bb4644fdcee4d521daf",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "receipts/product-v2/outer-original.json",
+      "bytes": 441,
+      "sha256": "922e93e5bd893aefbe56fa0ceeca346bb8ecd8337d7ae87eb4ca9322807dfc41",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/product-v2/copy-original-warm-pass-caches.stdout.txt",
+      "bytes": 698,
+      "sha256": "39281ecd86e3c3c5a77da78cba0a8309c6dfe95d65b537ad417ca8485d9b1b80",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/product-v2/export-exact-product-source.stdout.txt",
+      "bytes": 155,
+      "sha256": "bd0e612b2bd2e2fac61869ee24c20f4e846d7a4eaab7b51d9bdd2a75c53375e1",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/product-v2/build-marked-product.stdout.txt",
+      "bytes": 1331,
+      "sha256": "ad596a6faa5049f3183870a8bf1a8dd7762c3abaa631f5f68ff61fdbb1954a79",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "captures/product-v2/build-native-product.stdout.txt",
+      "bytes": 1105,
+      "sha256": "e584b6fdba48f4a9e65ff3525e54bdd87c890656a780b22fd8a155f71e2362a8",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "receipts/product-v2/source_export.json",
+      "bytes": 4147,
+      "sha256": "9c0bcb57c80ea466a8940bb13de4f508d1b83a32f1cf970985908521fbe82d77",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "receipts/product-v2/cache_copy.json",
+      "bytes": 2458,
+      "sha256": "ee016e7cbe3398b17c996865862a45dd232784c26d6f8871f4648e1f7541e0bd",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "receipts/product-v2/product/inputs.json",
+      "bytes": 7147,
+      "sha256": "60f9308d92756d75961a47af9272bcef95ac64cdc1d65bc9d2d90f8a6b37d7ac",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "receipts/product-v2/product/build_plan.json",
+      "bytes": 5183,
+      "sha256": "6f62dd9c5883e761db19e2c1a23b99c9a6c1561eb6781a24e4eacc723cf79929",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "receipts/product-v2/product/fixture.json",
+      "bytes": 616,
+      "sha256": "90c0b9181d2806bed6135cb57c6feb16485dcd2585405a2d2f9269bdc09d5e1e",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "receipts/product-v2/product/entry_observation.json",
+      "bytes": 580,
+      "sha256": "5211717ccd51b64b9e3220432ef3579be61398a016aee1d5606225a3aacfa007",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "receipts/product-v2/product/scope.json",
+      "bytes": 1371,
+      "sha256": "3a41729d9b80a3af1619ce22dc58758540281d14990f6e4590badc7f574098d0",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "receipts/product-v2/product/windows-product-identity.json",
+      "bytes": 295,
+      "sha256": "f7efd7f6388ec8b74b57eeaa2af5afd9094c65affcc82eff57ca86a9157905bc",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "receipts/product-v2/native_product/inputs.json",
+      "bytes": 5904,
+      "sha256": "0e0da8b092a1a8ece718ff283ba8fccedb6eeeed1f788832143f064045dece05",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "receipts/product-v2/native_product/build_plan.json",
+      "bytes": 4516,
+      "sha256": "579a06abc87434b78b0d05e118e7dd36286e602584752dd0ebddfa7ebab83c7c",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "receipts/product-v2/native_product/fixture.json",
+      "bytes": 548,
+      "sha256": "485a85adfc59257ba62918270f5d9787aa5a9a0e055be14e3130c778e1394cbe",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "receipts/product-v2/native_product/entry_observation.json",
+      "bytes": 516,
+      "sha256": "d0a444d1205c59c71d0a19347783d4c14add6bae2668b1214c687e699c0518c1",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "receipts/product-v2/native_product/scope.json",
+      "bytes": 1371,
+      "sha256": "f8695061a831c4667af5daa143d836d4d48867b9c26e1a1bf5d4fd20f2a4ed78",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "receipts/product-v2/native_product/windows-product-identity.json",
+      "bytes": 295,
+      "sha256": "868f33dedef8bc1a4f9083f40710d9f5ab35423d34ada364f25c79cdb70a953f",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "source/source59f-git-map.json",
+      "bytes": 1217703,
+      "sha256": "2f85b5e27243da8c853f20600df576b51fd60fea2fa420509a331b538dc8c547",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "diagnosis/probe_command_resolution.ps1",
+      "bytes": 3926,
+      "sha256": "81f7e0fcb4bcbe5a261baf7c6ad133e675c455bd625839cfc6726c679f3d273f",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "diagnosis/command-resolution.json",
+      "bytes": 3910,
+      "sha256": "b834eef1988139f251db5eec5c5ced9c10132cb6ea8950d7c8b9bf24b16c68fc",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/runtime-review/templates-manifest.reviewed.json",
+      "bytes": 3071,
+      "sha256": "03800ce5a383c993372dd40dc84079d5af5add24163978f9fbab7bd513e6d8b6",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/runtime-review/static-review-record.json",
+      "bytes": 2584,
+      "sha256": "b28db1a4349a1220e283686f2a2d80704bd808b70622059184c510af870109d2",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/runtime-review/review-manifest-receiving.json",
+      "bytes": 1315,
+      "sha256": "44edd2523ee6da5930ca65ef4430e3d40046263e9b4965f36b7d53aa3209c4cf",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/final-bindings/literal-successor-bindings.json",
+      "bytes": 18844,
+      "sha256": "53c5e8d351c70a184a851b7da4170e0bafdccfdedc262fe931030ffaf83f65d2",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "runtime-prepared/runtime-manifest.json",
+      "bytes": 3481,
+      "sha256": "bb532e4fec38ea60cad8a105ed2fad7495ee76440f9546a5100802f604fd0f7d",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "runtime-prepared/private_run_scope.py",
+      "bytes": 12494,
+      "sha256": "d8323aed325dbce50d4f7cb429c5c966b4a5877396df2844518940ff992fdaaa",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "runtime-prepared/core_successor.py",
+      "bytes": 32969,
+      "sha256": "b1139de92f5d216737a1fd14e68a42b91979e3c924a72f6a7d9a6d9b6002ee3d",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "runtime-prepared/primitives_successor.py",
+      "bytes": 9989,
+      "sha256": "b462499a54c8a22ee63913169b8654072bace536d8d8449834bf78d20741ac7c",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "runtime-prepared/adapter_successor.py",
+      "bytes": 86355,
+      "sha256": "2e1ec0c9caabff9ff12787a1edb9b4269a75a95cc5118b7fee3a4a0ffd4788d8",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "runtime-prepared/driver_successor.py",
+      "bytes": 39085,
+      "sha256": "b33e5fcfb18cd0ee7ecdc5d679536cf48bc812a16db781bc6635d8c4bf5b9327",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "runtime-prepared/launch_successor.py",
+      "bytes": 7708,
+      "sha256": "a074eb0b9e1c704602c16cdb50b4ba67ac1acb0ae94c3536f9509b0cafbb46e8",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/namespace/candidate-manifest.json",
+      "bytes": 2793,
+      "sha256": "deff5adcd9eabf0947e5d53e4df0f17b18eb5e26683c07bf370862d2ad8ca13b",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/producer-v1/root-review.json",
+      "bytes": 1760,
+      "sha256": "f0eb8319d76d59911aae4d987612c1cd7c27c771ea28f1ff51e845c915c9ddf8",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/product-v2/root-review.json",
+      "bytes": 1768,
+      "sha256": "4908918bdc76af6750c5cc6724950a875bd1c827e9ed5a6ee86ea54cc38eb7d3",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/producer-v1/launch_successor_product_helper_v1.ps1",
+      "bytes": 3742,
+      "sha256": "3cf60bb5a1d8a6232acf037df8bef7c0743eb2e4b0f4fb7b666d53973b6aa287",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/product-v2/launch_product_continuation_v2.ps1",
+      "bytes": 3741,
+      "sha256": "efd4b4a7888ed5e3626e633d070edd9365f4a61083ac7fd8f329e1afb79552d2",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/final-bindings/receiving.json",
+      "bytes": 21456,
+      "sha256": "57cbbf1c3b5ee7355140d10d14aa9e4d750c33da0a6e10a6d71b55a7a110074f",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/final-bindings/bindings-from-known.patch",
+      "bytes": 10066,
+      "sha256": "5d3635608dbbb2dfe5589641b997c66c0ccee80505b7112ed72b9c86c21b6175",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "runtime-prepared/preparation.json",
+      "bytes": 927,
+      "sha256": "53cebbfbf013f1b202c5438d59a56fad836c09e1fab87c8d044f4f627992ee55",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/namespace/assemble_namespace_candidate_data.py",
+      "bytes": 12605,
+      "sha256": "1576a8821696a86644036c44c9b177a47c5325c6cfe75367db4bc0aedeab64a5",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/namespace/assemble_receiving_candidate_data.py",
+      "bytes": 2664,
+      "sha256": "d408d45e2e8d73dc439bbdee7efdde16b5225b6d627819829dd406fd7daadb36",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/namespace/auxiliary-vs-source727.patch",
+      "bytes": 19076,
+      "sha256": "1de9c6d562d4584ff1c80cf6f2b638752048a7f0360d47efdb44f140cb77ad0a",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/namespace/environment-paths-readback.json",
+      "bytes": 806,
+      "sha256": "96781c08c79ba4c8b50cfc8738ed5c69c6b5035d356b1356fdea4c4c2a3377e3",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/namespace/environment-scaffold.json",
+      "bytes": 2008,
+      "sha256": "3ae3553c506f184ecf31f08773634013ed07213e4d2aa803b1f89ae6980f5094",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/namespace/helper.ps1",
+      "bytes": 23316,
+      "sha256": "ce20de6a117350681b9db5979a67285b1d8d07ea7937ea912680b4e3d6a6fa32",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/namespace/namespace-contract.json",
+      "bytes": 6301,
+      "sha256": "9d8216a439d5a6f9574c530c1addcef5dd21e58f8a0d8e67a7df9036280420d6",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/namespace/namespace_qualification.fragment.py",
+      "bytes": 1382,
+      "sha256": "adbcd381e6f11620154a5db7afc755d865748924047c4917a5f41cd5f21b6216",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/namespace/namespace_receiving_v2.fragment.py",
+      "bytes": 6806,
+      "sha256": "818c287d4b10755b52c95765d4d54c9a7e652981cef8ecd97f19caf4e21b9be7",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/namespace/README.md",
+      "bytes": 8640,
+      "sha256": "b6cf3010e9c71715c64613b4bb240014701239304832a6889cbe37dee07027cd",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/namespace/receiving-vs-v6.patch",
+      "bytes": 1299,
+      "sha256": "3a9eb6473931f96268c407895f83024f06f5d08163eb54257e3e700fc612eb56",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/namespace/static-receiving.json",
+      "bytes": 1018,
+      "sha256": "e2e1a21a02c393440408d40ca8d9776571d501eddffee8a1ff0142f55f47bb36",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "inputs/namespace/unchanged-source33-inputs.json",
+      "bytes": 2820,
+      "sha256": "a9c6ed8714e1e3414e6fb09615446c11c4266c3f5f9009845c5cdaa4b283b415",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "source/wait-fix/original-breakaway-wait.patch",
+      "bytes": 792,
+      "sha256": "8e38f2cfd816c86be0d440d56aeaf27b6ee42d0a61b9ab6c20e0386fcca53a6c",
+      "reconstructed": true
+    },
+    {
+      "original_role_path": "source/wait-fix/afterimages/internal/cli/supervisor_spawn_breakaway_windows_test.go",
+      "bytes": 7527,
+      "sha256": "d42abb3c6fef077397949e80fa74eebc264fa2e3e112a9830236fc196e02e95b",
+      "reconstructed": true
+    }
+  ]
+}

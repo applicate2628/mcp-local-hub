@@ -1,0 +1,204 @@
+#Requires -Version 7.5
+# DATA only. Invoke after the original producer terminal receipts exist.
+# No native command, process lookup, import, cleanup, retry or cache content read.
+$ErrorActionPreference='Stop'
+$Task='@@RECOVERY_APPROVED_WORK_AREA_RAW@@\mcp-acceptance-rebuild-20261127-v1'
+$InputRoot=$Task+'\inputs-successor33-v1\producer-candidate'
+$OutputRoot=$Task+'\successor-product-helper-inputs-v1'
+$Source='@@RECOVERY_APPROVED_WORK_AREA_RAW@@\pub666-recovered-20261128'
+$Commit='59f618ebfbf6d9f52c6994d68586e3c2ebc202a8'
+$Tree='03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1'
+$PlanPath=$InputRoot+'\successor-product-helper-inputs-v1-plan-v2.json'
+$PlanSHA='99333ab4cb43f9a01720c70e567782475065b0f7077d70a3f157dca475c9c15a'
+$ParentPath=$OutputRoot+'\parent.json'
+$OuterPath=$InputRoot+'\successor-product-helper-inputs-v1-outer-original.json'
+$ExecutionPath=$OutputRoot+'\commands\execution.json'
+$Target=$InputRoot+'\successor-product-helper-inputs-v1-root-receiving.json'
+
+function Require($Value,[string]$Message){if(-not $Value){throw $Message}}
+function SHA([string]$Path){
+ $a=[Security.Cryptography.SHA256]::Create()
+ try{[BitConverter]::ToString($a.ComputeHash([IO.File]::ReadAllBytes($Path))).Replace('-','').ToLowerInvariant()}finally{$a.Dispose()}
+}
+function ReadData([string]$Path){return ([IO.File]::ReadAllText($Path)|ConvertFrom-Json -AsHashtable -DateKind String)}
+function EqualData($Left,$Right){
+ if($null-eq$Left -or $null-eq$Right){return ($null-eq$Left -and $null-eq$Right)}
+ if($Left-is[Collections.IDictionary]){
+  if($Right-isnot[Collections.IDictionary] -or $Left.Count-ne$Right.Count){return $false}
+  foreach($key in $Left.Keys){if(-not $Right.Contains($key) -or -not(EqualData $Left[$key] $Right[$key])){return $false}}
+  return $true
+ }
+ if($Left-is[Array]){
+  if($Right-isnot[Array] -or $Left.Count-ne$Right.Count){return $false}
+  for($index=0;$index-lt$Left.Count;$index++){if(-not(EqualData $Left[$index] $Right[$index])){return $false}}
+  return $true
+ }
+ if($Left-is[bool] -or $Right-is[bool]){return ($Left-is[bool] -and $Right-is[bool] -and $Left-eq$Right)}
+ return ($Left-ceq$Right)
+}
+function Artifact([string]$Path){
+ $item=Get-Item -LiteralPath $Path -Force
+ Require (-not $item.PSIsContainer) ('regular file required: '+$Path)
+ for($ancestor=$item;$null-ne$ancestor;){
+  Require (($ancestor.Attributes-band[IO.FileAttributes]::ReparsePoint)-eq0) ('reparse entry: '+$Path)
+  $ancestor=if($ancestor-is[IO.FileInfo]){$ancestor.Directory}else{$ancestor.Parent}
+ }
+ return [ordered]@{path=$Path;bytes=$item.Length;sha256=(SHA $Path)}
+}
+function VerifyArtifact($Pair,[string]$ExpectedPath){
+ Require ($Pair.path-ceq$ExpectedPath -and $Pair.sha256-cmatch'^[0-9a-f]{64}$') 'artifact binding'
+ $actual=Artifact $ExpectedPath
+ Require ($actual.sha256-ceq$Pair.sha256) ('artifact SHA: '+$ExpectedPath)
+ if($Pair.Contains('bytes')){Require ($actual.bytes-eq$Pair.bytes) ('artifact size: '+$ExpectedPath)}
+ return $actual
+}
+
+# Phase 1: control metadata only. UNKNOWN and late-only receipts grant no access.
+Require ((SHA $PlanPath)-ceq$PlanSHA) 'approved plan hash'
+$p=ReadData $PlanPath
+$parent=ReadData $ParentPath
+$outer=ReadData $OuterPath
+$r=ReadData $ExecutionPath
+Require ($p.schema-ceq'fresh-owned-commands-v1' -and $p.reviewed-eq$true -and $p.output-ceq$OutputRoot -and @($p.commands).Count-eq12 -and $p.input_files.Count-eq3398) 'approved plan scope'
+Require ($parent.schema-ceq'fresh-owned-commands-v1-parent' -and $parent.status-in@('PASS','FAIL') -and $parent.physical_complete-eq$true -and $parent.terminal_exit_received-eq$true -and $parent.parent_capture_files_closed-eq$true) 'original parent closure'
+Require (-not $parent.Contains('command_capture_access_issued') -or $parent.command_capture_access_issued-eq$true) 'original failure denies capture access'
+Require ($outer.schema-ceq'successor-product-helper-original-parent-v1' -and $outer.same_process_start_object-eq$true -and $outer.wait_returned-eq$true -and $outer.original_process_object_disposed-eq$true -and $outer.new_job_or_tree_wait-eq$false -and @($outer.wait_errors).Count-eq0) 'original outer closure'
+Require ($outer.exit_code-eq$(if($parent.status-ceq'PASS'){0}else{1}) -and $parent.exit_code-eq$(if($parent.child_status-ceq'PASS'){0}else{1})) 'original exit/status binding'
+Require ($parent.plan_sha256-ceq$PlanSHA -and $outer.plan_sha256-ceq$PlanSHA -and $parent.execution_sha256-ceq(SHA $ExecutionPath)) 'original plan/execution pins'
+Require ($r.schema-ceq'fresh-owned-commands-v1' -and $r.status-in@('PASS','FAIL') -and $r.status-ceq$parent.child_status -and $r.plan_sha256-ceq$PlanSHA -and (EqualData $r.payload $p.payload)) 'original execution binding'
+Require ($r.commands_quiescent-eq$true -and $r.command_quiescence.complete-eq$true) 'unresolved original commands; captures remain unread'
+$commands=@($r.commands);$states=@($r.command_quiescence.commands)
+Require ($commands.Count-le12 -and $states.Count-eq$commands.Count) 'actual command inventory'
+Require ($commands.Count-gt0 -or ($r.status-ceq'FAIL' -and $r.no_command_started-eq$true)) 'no-command failure proof'
+Require (@($parent.capture_closure).Count-eq2) 'parent capture-close inventory'
+foreach($side in @('stdout','stderr')){
+ $closed=@($parent.capture_closure|Where-Object{$_.name-ceq$side})
+ Require ($closed.Count-eq1 -and $closed[0].close_attempted-eq$true -and $closed[0].close_returned-eq$true -and $closed[0].wrapper_closed-eq$true -and -not $closed[0].error) ('parent original sink: '+$side)
+}
+for($i=0;$i-lt$commands.Count;$i++){
+ $c=$commands[$i];$planned=$p.commands[$i];$state=$states[$i]
+ Require ((EqualData $c.argv $planned.argv) -and $c.cwd-ceq$planned.cwd -and $c.work_seconds-eq$planned.seconds -and $c.cleanup_seconds-eq10) ('command operands: '+$i)
+ Require ($state.name-ceq$planned.name -and $state.state-ceq'complete' -and $state.direct_exit_known-eq$true -and $c.quiescence_state-ceq'complete') ('original command settlement: '+$i)
+ # This receiver handles ordinary started commands and no-command FAIL.
+ # Prestart/pre-resume refusal requires the existing exact typed receiver; do not infer it here.
+ Require ($c.completion_receiving.lifecycle_state-ceq'CLOSED' -and ($c.original_pid-is[long] -or $c.original_pid-is[int])) ('ordinary original owner required: '+$i)
+ Require ($c.original_pid-gt0 -and $c.native_owner.sha256-ceq$p.payload.windows_job -and $c.exit_code-eq$c.native.direct_exit_code -and $c.native.direct_reaped-eq$true -and $c.native.active_zero-eq$true -and $c.native.handles_closed-eq$true -and @($c.native.issues).Count-eq0) ('original process/Job closure: '+$i)
+ Require ($c.original_owner_retained-eq$true -and $c.original_readers_retained-eq$true -and $c.original_readers_joined-eq$true -and $c.stdin_mode-ceq'null' -and @($c.worker_join_observations).Count-eq2) ('original reader custody: '+$i)
+ Require ($c.completion_receiving.schema-ceq'ordinary-original-native-io-completion-v1' -and (EqualData $c.completion_receiving.native $c.native) -and (EqualData $c.completion_receiving.io $c.io) -and $c.io.Count-eq2) ('received original proof: '+$i)
+ foreach($join in $c.worker_join_observations){Require ($join.joined-eq$true -and $join.alive_after-eq$false -and $join.join_error_count-eq0) ('original join: '+$i)}
+ foreach($side in @('stdout','stderr')){
+  $io=$c.io[$side]
+  Require ($io.acquired-eq$true -and $io.worker_started-eq$true -and $io.worker_complete-eq$true -and $io.eof-eq$true -and $io.pipe_close_returned-eq$true -and $io.capture_close_returned-eq$true -and -not $io.error) ('original IO closure: '+$i+' '+$side)
+  Require ($c[$side]-ceq($OutputRoot+'\commands\'+$planned.name+'.'+$side+'.txt')) ('original capture operand: '+$i+' '+$side)
+ }
+}
+
+# Phase 2 starts only after every actual original owner/reader above is CLOSED.
+$rows=@();$captureCount=0;$allCommandsSuccessful=($commands.Count-eq12)
+for($i=0;$i-lt$commands.Count;$i++){
+ $c=$commands[$i];$captures=[ordered]@{}
+ foreach($side in @('stdout','stderr')){
+  $measured=Artifact $c[$side]
+  Require ($measured.bytes-eq$c.io[$side].bytes_stored) ('closed capture size: '+$i+' '+$side)
+  if($c.Contains($side+'_sha256')){Require ($measured.sha256-ceq$c[$side+'_sha256']) ('closed capture SHA: '+$i+' '+$side)}
+  $captures[$side]=$measured;$captureCount++
+ }
+ $ok=($c.command_success-eq$true -and $c.exit_code-eq0 -and $c.timed_out-eq$false -and $c.work_deadline_exceeded-eq$false -and $c.cleanup_deadline_exceeded-eq$false -and $c.native.job_terminated-eq$false -and $c.captures_measured-eq$true -and $c.io.stdout.limit_exceeded-eq$false -and $c.io.stderr.limit_exceeded-eq$false)
+ $allCommandsSuccessful=$allCommandsSuccessful-and$ok
+ $rows+=[ordered]@{name=$p.commands[$i].name;seconds=$c.seconds;exit_code=$c.exit_code;closure='CLOSED';command_passed=$ok;captures=$captures}
+}
+$parentCaptures=[ordered]@{}
+foreach($side in @('stdout','stderr')){
+ $measured=Artifact ($OutputRoot+'\controller.'+$side+'.txt')
+ Require ($measured.sha256-ceq$parent.parent_captures[$side].sha256 -and $measured.bytes-eq$parent.parent_captures[$side].bytes) ('parent capture: '+$side)
+ $parentCaptures[$side]=$measured
+}
+$issues=[Collections.Generic.List[string]]::new()
+$stepMaps=0
+for($i=0;$i-lt@($r.step_inputs).Count;$i++){
+ $step=$r.step_inputs[$i]
+ if($i-ge12 -or $step.name-cne$p.commands[$i].name){$issues.Add('step inventory differs');continue}
+ foreach($which in @('before','after')){
+  if(EqualData $step[$which] $p.input_files){$stepMaps++}else{$issues.Add('input map differs: '+$step.name+'/'+$which)}
+ }
+}
+$verified=0
+foreach($path in $p.input_files.Keys){
+ try{if((SHA $path)-ceq$p.input_files[$path]){$verified++}else{$issues.Add('actual input changed: '+$path)}}catch{$issues.Add('actual input unreadable: '+$path)}
+}
+$originalPass=($parent.status-ceq'PASS' -and $parent.deadline_exceeded-eq$false -and $r.status-ceq'PASS' -and $r.input_files_unchanged-eq$true -and $allCommandsSuccessful -and $stepMaps-eq24 -and @($r.step_inputs).Count-eq12 -and $verified-eq3398 -and $issues.Count-eq0)
+$outputs=[ordered]@{};$outputErrors=[Collections.Generic.List[string]]::new()
+if($originalPass){
+ try{
+  $bindingPath=$InputRoot+'\helper-build-bindings-v2.json'
+  Require ((SHA $bindingPath)-ceq'd078d88d6455056efc71fd5dfa800d1bd2dd026b8debb41997445590f58b1b01') 'helper binding'
+  $binding=ReadData $bindingPath
+  $compiledPath=$OutputRoot+'\compiled-inputs.json';$compiled=ReadData $compiledPath
+  Require ($compiled.schema-ceq'successor-compiled-inputs-v1' -and $compiled.status-ceq'COMPILED_DATA_ONLY' -and $compiled.source_commit-ceq$Commit -and $compiled.source_tree-ceq$Tree -and $compiled.source_file_count-eq3369 -and $compiled.full_acceptance_executed-eq$false -and $compiled.qualification_passed-eq$false -and $compiled.native_authority_transferred-eq$false) 'compiled DATA scope'
+  Require ($compiled.binding.path-ceq$bindingPath -and $compiled.binding.sha256-ceq(SHA $bindingPath) -and $compiled.binaries.Count-eq6 -and $compiled.products.Count-eq2 -and $compiled.staged_sources.Count-eq7) 'compiled DATA inventory'
+  $outputs.compiled_inputs=Artifact $compiledPath
+  $outputs.preparation=VerifyArtifact $compiled.preparation ($OutputRoot+'\source-helper-preparation.json')
+  $prepared=ReadData $compiled.preparation.path
+  Require ($prepared.schema-ceq'successor-source-helper-preparation-v1' -and $prepared.status-ceq'STAGED_DATA_ONLY' -and $prepared.source_commit-ceq$Commit -and $prepared.source_tree-ceq$Tree -and $prepared.source_file_count-eq3369 -and $prepared.all_export_source_bytes_equal-eq$true -and $prepared.tracked_source_mutated-eq$false -and (EqualData $prepared.binding $compiled.binding) -and (EqualData $prepared.staged_sources $compiled.staged_sources)) 'prepared source/helper DATA'
+  $outputs.binaries=[ordered]@{}
+  foreach($role in @('validator','test2json','job','contained','namespace','cli')){$outputs.binaries[$role]=VerifyArtifact $compiled.binaries[$role] $binding.binaries[$role]}
+  $outputs.staged_sources=[ordered]@{}
+  foreach($role in @('job','contained','namespace','cli')){
+   foreach($leaf in $binding.auxiliary_sources[$role].Keys){
+    $path=$Source+'\.scratch\'+$binding.scope_names[$role]+'\'+$leaf
+    $actual=Artifact $path
+    Require ($actual.sha256-ceq$binding.auxiliary_sources[$role][$leaf].sha256 -and $actual.sha256-ceq$compiled.staged_sources[$path].sha256 -and $actual.bytes-eq$compiled.staged_sources[$path].bytes) 'staged source bytes'
+    $outputs.staged_sources[$path]=$actual
+   }
+  }
+  $config=ReadData ($InputRoot+'\product-build-config.json')
+  $outputs.products=[ordered]@{}
+  foreach($role in @('product','native_product')){
+   $prefix=if($role-ceq'product'){'marked'}else{'native'}
+   $receiptRoot=$config[$prefix+'_receipt_root'];$bundle=$config[$prefix+'_output']
+   $inputPath=$receiptRoot+'\product-inputs.json'
+   $pin=VerifyArtifact $compiled.products[$role] $inputPath
+   $value=ReadData $inputPath;$planPath=$receiptRoot+'\actual-build-plan.json'
+   $actualPlanPin=VerifyArtifact $value.build_plan_file $planPath
+   $build=ReadData $planPath
+   Require ($value.schema-ceq'current-source-product-receiver-inputs-v1' -and $value.source_commit-ceq$Commit -and (EqualData $value.build_plan $build) -and $build.schemaVersion-eq3 -and $build.commit-ceq$Commit -and $build.canonicalEntry.received-eq$true -and $value.actual_product.path-ceq$bundle -and $value.actual_product.files.Count-eq3) 'actual same-source Product'
+   $files=[ordered]@{}
+   foreach($rel in @('mcphub.exe','windows-product-identity.json','mcphub-product/mcphub.exe')){
+    $artifact=Artifact (Join-Path $bundle $rel)
+    Require ($artifact.sha256-ceq$value.actual_product.files[$rel].sha256 -and $artifact.bytes-eq$value.actual_product.files[$rel].bytes) 'Product bundle bytes'
+    $files[$rel]=$artifact
+   }
+   $actualNames=@(Get-ChildItem -LiteralPath $bundle -File -Recurse|ForEach-Object{[IO.Path]::GetRelativePath($bundle,$_.FullName).Replace('\','/')}|Sort-Object)
+   Require ((EqualData $actualNames @('mcphub-product/mcphub.exe','mcphub.exe','windows-product-identity.json'))) 'exact three Product files'
+   $epoch=if($role-ceq'product'){'861852f807c36673755014ef4657bf10252b4e75505bc8b73819bcf8cded7a3a'}else{''}
+   if($role-ceq'product'){
+    Require ($build.testOnly-eq$false -and @($build.buildTags).Count-eq0 -and $build.buildDate-ceq$config.release_build_date -and (EqualData $value.receiver_linker_flags @('-s','-w')) -and (EqualData $value.publisher_source $build.publisherSource) -and $build.publisherSource.file_count-eq3369 -and $build.publisherSource.source_epoch-ceq$epoch -and $build.publisherSource.source_snapshot_sha256-ceq$config.source_snapshot.sha256) 'marked Product source/resource role'
+    $outputs.resource=VerifyArtifact $value.resource ($receiptRoot+'\captured-product-versioninfo.syso')
+   }else{Require ($build.testOnly-eq$true -and (EqualData $build.buildTags @('test_state_path_env')) -and -not $build.Contains('publisherSource') -and -not $value.Contains('publisher_source')) 'unmarked tagged native Product role'}
+   $fixturePath=$receiptRoot+'\product-fixture.json'
+   Require ($value.actual_product.fixture-ceq$fixturePath) 'actual fixture path'
+   $fixture=ReadData $fixturePath
+   $expected=[ordered]@{product_root=$bundle;source_epoch=$epoch;product_version=$build.version;build_id=$build.entrySetBuildID;reverse_projection='../mcphub.exe';canonical_entry_sha256=$files['mcphub.exe'].sha256;product_sha256=$files['mcphub-product/mcphub.exe'].sha256;identity_sha256=$files['windows-product-identity.json'].sha256}
+   Require ((EqualData $fixture $expected) -and $files['mcphub.exe'].sha256-ceq$build.canonicalEntry.expectedCanonicalEntrySHA256) 'exact Product fixture'
+   $outputs.products[$role]=[ordered]@{inputs=$pin;build_plan=$actualPlanPin;files=$files;fixture=(Artifact $fixturePath);source_epoch=$epoch;qualification='COMPILED_INPUT_DATA_ONLY'}
+  }
+  $outputs.cache_copy_receipt=Artifact ($OutputRoot+'\cache-copy-receipt.json')
+ }catch{$outputErrors.Add($_.Exception.Message)}
+}
+$passed=$originalPass-and$outputErrors.Count-eq0
+$result=[ordered]@{
+ schema='successor-product-helper-root-receiving-v1';status=$(if($passed){'PASS'}else{'FAIL'});closure='CLOSED';physical_complete=$true
+ original_parent_status=$parent.status;original_execution_status=$r.status;original_exit_code=$parent.exit_code
+ source_commit=$Commit;source_tree=$Tree;plan_sha256=$PlanSHA;parent_sha256=(SHA $ParentPath);outer_sha256=(SHA $OuterPath);execution_sha256=(SHA $ExecutionPath)
+ actual_commands=$commands.Count;planned_commands=12;input_files_verified=$verified;step_maps_verified=$stepMaps;command_captures_verified=$captureCount;parent_captures=$parentCaptures
+ commands=$rows;input_issues=$issues.ToArray();compiled_outputs=$outputs;output_receiving_errors=$outputErrors.ToArray()
+ auxiliary_parser_tests_executed=(@($rows|Where-Object{$_.name-ceq'check-foreground-framed-parser' -and $_.command_passed}).Count-eq1)
+ full_acceptance_executed=$false;full_acceptance_pass=$false;original_status_changed=$false
+ receiving_scope='Original ordinary CLOSED commands; compile FAIL remains FAIL. No late-UNKNOWN or prestart/pre-resume reinterpretation.'
+ reviewed_utc=[DateTime]::UtcNow.ToString('o')
+}
+$raw=[Text.UTF8Encoding]::new($false).GetBytes(($result|ConvertTo-Json -Depth 40)+[char]10)
+$writer=[IO.File]::Open($Target,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+try{$writer.Write($raw,0,$raw.Length);$writer.Flush($true)}finally{$writer.Dispose()}
+$result|ConvertTo-Json -Depth 40
+[pscustomobject]@{receiving_path=$Target;receiving_sha256=(SHA $Target)}|ConvertTo-Json
