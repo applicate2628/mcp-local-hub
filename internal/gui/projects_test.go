@@ -30,6 +30,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/testkit"
 )
 
 // isolateHome points every client-config path root at an empty temp dir so a
@@ -294,7 +295,7 @@ func TestProjectsScan_NoWrite(t *testing.T) {
 	root := t.TempDir()
 	seedProject(t, root)
 
-	before := snapshotTree(t, root)
+	before := testkit.SnapshotTree(t, root)
 
 	s := NewServer(Config{})
 	rec := getProjectScan(t, s, root)
@@ -302,7 +303,7 @@ func TestProjectsScan_NoWrite(t *testing.T) {
 		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
 	}
 
-	after := snapshotTree(t, root)
+	after := testkit.SnapshotTree(t, root)
 	if !reflect.DeepEqual(before, after) {
 		t.Errorf("project tree changed after a read-only scan:\nbefore=%v\nafter=%v", before, after)
 	}
@@ -314,7 +315,7 @@ func TestProjectsScan_NoWrite_EmptyProjectCreatesNothing(t *testing.T) {
 	isolateHome(t)
 	root := t.TempDir()
 
-	before := snapshotTree(t, root)
+	before := testkit.SnapshotTree(t, root)
 	if len(before) != 0 {
 		t.Fatalf("fresh temp project should be empty, has %v", before)
 	}
@@ -325,7 +326,7 @@ func TestProjectsScan_NoWrite_EmptyProjectCreatesNothing(t *testing.T) {
 		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
 	}
 
-	after := snapshotTree(t, root)
+	after := testkit.SnapshotTree(t, root)
 	if len(after) != 0 {
 		t.Errorf("read-only scan created files under an empty project: %v", after)
 	}
@@ -395,30 +396,4 @@ func TestProjectsScan_GUIPortThreaded_SerenaStaleVsLive(t *testing.T) {
 			t.Errorf("serena at STALE port %d (live %d): status = %q, want \"external\" (GUIPort not threaded → would read \"via-hub\")", stalePort, livePort, got)
 		}
 	})
-}
-
-// snapshotTree returns a map of relative-path → (size, modtime-unixnano) for
-// every regular file under root, so the before/after comparison catches a
-// created OR modified file.
-func snapshotTree(t *testing.T, root string) map[string][2]int64 {
-	t.Helper()
-	out := map[string][2]int64{}
-	err := filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-		rel, rerr := filepath.Rel(root, p)
-		if rerr != nil {
-			return rerr
-		}
-		out[rel] = [2]int64{info.Size(), info.ModTime().UnixNano()}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk %s: %v", root, err)
-	}
-	return out
 }

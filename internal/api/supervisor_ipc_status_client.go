@@ -425,12 +425,16 @@ func validateSupervisorIPCHello(conn net.Conn, expected SupervisorLockOwner) err
 	return nil
 }
 
-func writeSupervisorIPCRequest(conn net.Conn, req IPCRequest) error {
+func writeSupervisorIPCRequest(conn net.Conn, req IPCRequest, prefix ...byte) error {
 	raw, err := json.Marshal(req)
 	if err != nil {
 		return err
 	}
-	_, err = conn.Write(append(raw, '\n'))
+	frame := append(raw, '\n')
+	if len(prefix) != 0 {
+		frame = append(prefix, frame...)
+	}
+	_, err = conn.Write(frame)
 	return err
 }
 
@@ -446,11 +450,11 @@ func readSupervisorIPCResponse(conn net.Conn) (supervisorIPCRawResponse, error) 
 	return resp, nil
 }
 
-func readSupervisorIPCLine(conn net.Conn, max int) ([]byte, error) {
+func readSupervisorIPCLine(source io.Reader, max int) ([]byte, error) {
 	buf := make([]byte, 0, max)
 	tmp := make([]byte, 1)
 	for len(buf) < max {
-		n, err := conn.Read(tmp)
+		n, err := source.Read(tmp)
 		if n > 0 {
 			if tmp[0] == '\n' {
 				return buf, nil

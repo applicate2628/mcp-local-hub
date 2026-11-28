@@ -20,10 +20,12 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -432,6 +434,8 @@ type ipcDispatchDeps struct {
 	forceStopRemoval *forceStopRemovalCapture
 	// The original singleton remains held until IPC handlers join on shutdown.
 	supervisorLock *api.SupervisorLock
+	aggregateConn  net.Conn
+	daemonCreators *daemonCreatorRecords
 	stateDir       string
 	events         *api.SupervisorEventLog
 	// Per-invocation test barrier at the accept-result boundary. Production
@@ -1155,7 +1159,15 @@ func runSuperviseWithIPCOptions(ctx context.Context, noIPC bool, strictMode bool
 	// (multi-frame) and `exit{graceful: true}` so the migration
 	// rollback path + v0.5 upgrade flow no longer fall through to the
 	// force-kill fallback on every invocation.
+	daemonCreators := &daemonCreatorRecords{}
 	if !noIPC {
+		if runtime.GOOS == "windows" {
+			var err error
+			daemonCreators.routeAggregate, err = newRouteAggregateSupervisor(loopCtx, stateDir, lk.Owner())
+			if err != nil {
+				_ = events.Emit(api.SupervisorEvent{Severity: "warn", Source: "ipc", Event: "route-aggregate-status-unavailable", Body: map[string]any{"err": err.Error()}})
+			}
+		}
 		pipePath := defaultPipePath(stateDir)
 		listener, lerr := NewSupervisorIPCListener(pipePath, lk.Owner())
 		if lerr != nil {
@@ -1199,6 +1211,7 @@ func runSuperviseWithIPCOptions(ctx context.Context, noIPC bool, strictMode bool
 
 		deps := ipcDispatchDeps{
 			supervisorLock:     lk,
+			daemonCreators:     daemonCreators,
 			stateDir:           stateDir,
 			events:             events,
 			afterAccept:        options.afterAccept,
@@ -1278,9 +1291,7 @@ func runSuperviseWithIPCOptions(ctx context.Context, noIPC bool, strictMode bool
 	// no-injection — never block startup.
 	oneAPIInj := buildOneAPIInjector(events)
 	spawnFn := reconcileSpawnFn
-	var daemonCreators *daemonCreatorRecords
 	if spawnFn == nil {
-		daemonCreators = &daemonCreatorRecords{}
 		spawnFn = makeProductionSpawnFnWithCreatorRecords(events, runtimeTracker, statePath, overlay, filepath.Join(stateDir, "daemon-env-overrides.yaml"), crashCh, loopCtx, oneAPIInj, strictJobProtection, nil, daemonCreators)
 	}
 	terminateFn := reconcileTerminateFn
@@ -2076,19 +2087,25 @@ func acceptIPCConnectionsWithSession(listener ipcAcceptor, deps ipcDispatchDeps,
 			continue
 		}
 		consecErrs = 0
-		if session != nil && !session.register(conn) {
-			_ = conn.Close()
+		handlerDeps := deps
+		retainedConn := conn
+		if deps.daemonCreators != nil && deps.daemonCreators.routeAggregate != nil {
+			retainedConn = &aggregateIPCConn{Conn: conn}
+			handlerDeps.aggregateConn = retainedConn
+		}
+		if session != nil && !session.register(retainedConn) {
+			_ = retainedConn.Close()
 			continue
 		}
 		go func() {
 			if session != nil {
-				defer session.finish(conn)
+				defer session.finish(retainedConn)
 			}
 			defer guardSupervisorGoroutine(deps.events, "ipc-connection-handler", "")
 			if deps.beforeHandlerDone != nil {
 				defer deps.beforeHandlerDone(conn)
 			}
-			serveIPCConn(conn, listener, deps, ipcAcceptTiming{
+			serveIPCConn(conn, listener, handlerDeps, ipcAcceptTiming{
 				acceptedAt:  acceptedAt,
 				acceptDwell: acceptedAt.Sub(enteredAccept),
 			})
@@ -2174,11 +2191,35 @@ func serveIPCConn(conn net.Conn, listener ipcAcceptor, deps ipcDispatchDeps, tim
 // doesn't belong in the long-lived audit channel); just the verb + correlation id.
 func handleIPCConn(conn net.Conn, deps ipcDispatchDeps) {
 	defer func() { _ = conn.Close() }()
+	if err := conn.SetReadDeadline(time.Now().Add(ipcConnIdleTimeout)); err != nil {
+		return
+	}
+	first, err := readSupervisorIPCFirstByte(conn)
+	if err != nil {
+		return
+	}
+	if deps.aggregateConn != nil &&
+		(first[0] == api.RouteAggregateStatusMarker || first[0] == api.OperatorAggregateStatusMarker) {
+		conn = deps.aggregateConn
+	}
+	switch first[0] {
+	case api.RouteAggregateStatusMarker:
+		_ = serveRouteAggregateStatus(conn, deps)
+		return
+	case api.OperatorAggregateStatusMarker:
+		_ = serveOperatorAggregateStatus(conn, deps)
+		return
+	}
+
+	// Replay the discriminator byte verbatim before entering the original
+	// legacy read loop, including all subsequent frames on this connection.
 	deps.forceStopRemoval = &forceStopRemovalCapture{}
 	defer deps.forceStopRemoval.close()
-	reader := bufio.NewReader(conn)
-	for {
-		_ = conn.SetReadDeadline(time.Now().Add(ipcConnIdleTimeout))
+	reader := bufio.NewReader(io.MultiReader(bytes.NewReader(first[:]), conn))
+	for firstFrame := true; ; firstFrame = false {
+		if !firstFrame {
+			_ = conn.SetReadDeadline(time.Now().Add(ipcConnIdleTimeout))
+		}
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			return
@@ -2220,6 +2261,14 @@ func handleIPCConn(conn net.Conn, deps ipcDispatchDeps) {
 			return
 		}
 	}
+}
+
+// Read exactly one byte from the raw connection before creating a buffered
+// reader. Read-ahead here would consume unauthenticated application bytes.
+func readSupervisorIPCFirstByte(source io.Reader) ([1]byte, error) {
+	var first [1]byte
+	_, err := io.ReadFull(source, first[:])
+	return first, err
 }
 
 // dispatchIPCRequest dispatches one IPC request to the matching command
@@ -2267,6 +2316,10 @@ func dispatchIPCRequest(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps)
 		})
 	}
 	switch req.Cmd {
+	case api.SupervisorAggregateStatusCommand:
+		return writeIPCFrame(conn, api.IPCResponse{
+			ID: req.ID, Error: &api.IPCErr{Code: "UNKNOWN_COMMAND", Message: "aggregate-status requires its private IPC mode"}, Final: true,
+		})
 	case "status":
 		daemons, err := supervisorStatusDaemons(deps.stateDir, deps.runtimeTracker, deps.statusCoalescer)
 		if err != nil {
@@ -3698,6 +3751,8 @@ type daemonCreatorRecords struct {
 	mu         sync.Mutex
 	next       uint64
 	operations []*daemonCreatorOperation
+
+	routeAggregate *routeAggregateSupervisor
 }
 
 type daemonCreatorOperation struct {
@@ -3730,6 +3785,8 @@ type daemonCreatorOperation struct {
 	waiterDone               bool
 	waiterErr                error
 	complete                 bool
+
+	routeAggregateStarted chan struct{}
 }
 
 func (r *daemonCreatorRecords) begin(task string) (*daemonCreatorOperation, error) {
@@ -3762,6 +3819,9 @@ func (r *daemonCreatorRecords) endStart(operation *daemonCreatorOperation, err e
 	defer r.mu.Unlock()
 	operation.starting = false
 	operation.startupErr = err
+	if operation.routeAggregateStarted != nil {
+		close(operation.routeAggregateStarted)
+	}
 }
 
 func (r *daemonCreatorRecords) workerFinished(operation *daemonCreatorOperation, readiness bool, err error) {
@@ -4149,6 +4209,7 @@ func makeProductionSpawnFnWithCreatorRecords(events *api.SupervisorEventLog, tra
 				})
 			}
 		}
+		creators.prepareRouteAggregateLaunch(operation, d, cmd)
 		process.NoConsole(cmd)
 
 		// PER-SPAWN Job Object (ADR #239 Option B, decision deadline
@@ -4530,6 +4591,7 @@ func makeProductionSpawnFnWithCreatorRecords(events *api.SupervisorEventLog, tra
 				creators.mu.Lock()
 				operation.root, operation.rootErr = root, rootErr
 				creators.mu.Unlock()
+				creators.retireRouteAggregateBinding(operation)
 				workerErr = terminalErr
 			} else {
 				waitErr = cmd.Wait()

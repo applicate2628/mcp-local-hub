@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -244,6 +245,34 @@ type AvailabilityProbe struct {
 	Platforms []string `yaml:"platforms,omitempty"`
 }
 
+// MCPStdioState describes the state lifetime of a fixed stdio-bridge daemon.
+// A zero value is the legacy shared behavior and is omitted in YAML.
+type MCPStdioState string
+
+const (
+	MCPStdioStateShared       MCPStdioState = "shared"
+	MCPStdioStateSessionLocal MCPStdioState = "session-local"
+)
+
+var (
+	ErrInvalidDaemonMCPStdioState   = errors.New("mcp_stdio_state requires shared or session-local on a stdio-bridge daemon")
+	ErrAmbiguousDaemonMCPStdioState = errors.New("ambiguous daemon name with session-local stdio")
+	ErrSessionLocalDaemonSelection  = errors.New("session-local stdio daemon selected")
+)
+
+func (s MCPStdioState) explicit() bool {
+	return s == MCPStdioStateShared || s == MCPStdioStateSessionLocal
+}
+
+func (s *MCPStdioState) UnmarshalYAML(n *yaml.Node) error {
+	value := MCPStdioState(n.Value)
+	if n.Kind != yaml.ScalarNode || n.ShortTag() != "!!str" || !value.explicit() {
+		return ErrInvalidDaemonMCPStdioState
+	}
+	*s = value
+	return nil
+}
+
 type DaemonSpec struct {
 	Name      string   `yaml:"name"`
 	Context   string   `yaml:"context"`
@@ -272,6 +301,8 @@ type DaemonSpec struct {
 	// policy for the stdio HTTP adapter. Empty preserves the strict current
 	// protocol allowlist; profiles are never global or inferred from server name.
 	MCPProtocolCompatibilityProfile string `yaml:"mcp_protocol_compatibility_profile,omitempty" json:"mcp_protocol_compatibility_profile,omitempty"`
+
+	MCPStdioState MCPStdioState `yaml:"mcp_stdio_state,omitempty" json:"-"`
 }
 
 // DaemonTemplate describes a per-workspace daemon spawn template for the
@@ -349,6 +380,35 @@ func ParseManifest(r io.Reader) (*ServerManifest, error) {
 // ParseManifestWithEnvironment uses the same parser and expansion rules with
 // one operation's captured environment. It does not alter process environment.
 func ParseManifestWithEnvironment(r io.Reader, lookup func(string) (string, bool)) (*ServerManifest, error) {
+	return parseManifestWithEnvironment(r, lookup, nil)
+}
+
+// ParseFixedDaemonLaunchManifestWithEnvironment resolves the exact selected
+// cohort before expanding the ordinary daemon launch environment.
+func ParseFixedDaemonLaunchManifestWithEnvironment(r io.Reader, lookup func(string) (string, bool), server, daemonName string) (*ServerManifest, *DaemonSpec, error) {
+	var selected *DaemonSpec
+	m, err := parseManifestWithEnvironment(r, lookup, func(m *ServerManifest) error {
+		if m.Name != server {
+			// Preserve the ordinary parser/error order for mismatched manifests.
+			return nil
+		}
+		spec, err := m.SelectDaemon(daemonName)
+		if err != nil {
+			return err
+		}
+		if spec != nil && spec.MCPStdioState == MCPStdioStateSessionLocal {
+			return ErrSessionLocalDaemonSelection
+		}
+		selected = spec
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return m, selected, nil
+}
+
+func parseManifestWithEnvironment(r io.Reader, lookup func(string) (string, bool), beforeExpansion func(*ServerManifest) error) (*ServerManifest, error) {
 	if lookup == nil {
 		return nil, fmt.Errorf("manifest environment lookup is required")
 	}
@@ -368,6 +428,17 @@ func ParseManifestWithEnvironment(r io.Reader, lookup func(string) (string, bool
 	var keyed map[string]any
 	if err := yaml.Unmarshal(raw, &keyed); err != nil {
 		return nil, fmt.Errorf("yaml decode (keyed pass): %w", err)
+	}
+	// yaml.v3 skips a field's UnmarshalYAML hook for explicit null. The
+	// existing keyed pass retains declaration presence and the transport gate.
+	daemons, _ := keyed["daemons"].([]any)
+	for _, daemon := range daemons {
+		fields, _ := daemon.(map[string]any)
+		if value, present := fields["mcp_stdio_state"]; present {
+			if value == nil || m.Transport != TransportStdioBridge {
+				return nil, ErrInvalidDaemonMCPStdioState
+			}
+		}
 	}
 	_, urlMentioned := keyed["url"]
 	_, headersMentioned := keyed["headers"]
@@ -400,6 +471,11 @@ func ParseManifestWithEnvironment(r io.Reader, lookup func(string) (string, bool
 			if _, mentioned := keyed[k]; mentioned {
 				return nil, fmt.Errorf("manifest %s: transport=remote-http rejects %s: (no local subprocess / no per-daemon port; remove the %s key)", m.Name, k, k)
 			}
+		}
+	}
+	if beforeExpansion != nil {
+		if err := beforeExpansion(&m); err != nil {
+			return nil, err
 		}
 	}
 	var missing []string
@@ -1187,6 +1263,9 @@ func (m *ServerManifest) Validate() error {
 	if m.Transport != TransportNativeHTTP && m.Transport != TransportStdioBridge && m.Transport != TransportRemoteHTTP && m.Transport != TransportProcess {
 		return fmt.Errorf("manifest %s: transport must be %q, %q, %q, or %q (got %q)", m.Name, TransportNativeHTTP, TransportStdioBridge, TransportRemoteHTTP, TransportProcess, m.Transport)
 	}
+	if err := m.validateDaemonMCPStdioStates(); err != nil {
+		return err
+	}
 	if err := m.validateDaemonMCPProtocolCompatibilityProfiles(); err != nil {
 		return err
 	}
@@ -1475,6 +1554,42 @@ func manifestEnvironmentKey(key string) string {
 		return strings.ToUpper(key)
 	}
 	return key
+}
+
+// SelectDaemon keeps the first exact-name row for a wholly shared cohort.
+// A matching session-local row cannot coexist with another row of that name.
+func (m *ServerManifest) SelectDaemon(name string) (*DaemonSpec, error) {
+	var first *DaemonSpec
+	for i := range m.Daemons {
+		next := &m.Daemons[i]
+		if next.Name != name {
+			continue
+		}
+		if first == nil {
+			first = next
+		} else if first.MCPStdioState == MCPStdioStateSessionLocal || next.MCPStdioState == MCPStdioStateSessionLocal {
+			return nil, ErrAmbiguousDaemonMCPStdioState
+		}
+	}
+	return first, nil
+}
+
+func (m *ServerManifest) validateDaemonMCPStdioStates() error {
+	for _, daemon := range m.Daemons {
+		state := daemon.MCPStdioState
+		if state == "" {
+			continue
+		}
+		if m.Transport != TransportStdioBridge || !state.explicit() {
+			return ErrInvalidDaemonMCPStdioState
+		}
+		if state == MCPStdioStateSessionLocal {
+			if _, err := m.SelectDaemon(daemon.Name); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (m *ServerManifest) validateDaemonMCPProtocolCompatibilityProfiles() error {

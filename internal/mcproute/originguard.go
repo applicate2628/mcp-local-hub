@@ -1,29 +1,12 @@
-// Package mcproute holds the port-bound, GUI-process-independent pieces of
-// the serena+LSP MCP data plane so they can be reused by a standalone
-// supervisor-managed front daemon (`mcphub route`) without importing
-// internal/gui.
-//
-// Increment 1 (work-items/decisions/2026-07-25-mcp-data-plane-off-gui-onto-
-// supervised-front-daemon.md) scopes this package to the ONE piece of the
-// router that the architect verified is trivially parameterizable: the
-// DNS-rebind / same-origin guard (internal/gui/csrf.go). It was, before this
-// change, the router's only coupling to *gui.Server (via s.effectivePort()).
-//
-// The request-handling logic itself (serena_router.go / lsp_router.go's
-// handler dispatch) was NOT relocated into this package this increment — see
-// the "Adjacent findings" section of the Increment-1 implementation report
-// for the verified conflict (Go visibility rules make several existing
-// internal/gui white-box tests incompatible with a literal file move of
-// serena_router_session.go / serena_router_handshake.go, and the handler
-// itself has an undeclared hard dependency on internal/gui/serena_router_
-// lifecycle.go's JSON-RPC helpers). `mcphub route` instead reuses the
-// existing, unchanged gui.Server plumbing directly (internal/cli/route.go),
-// which already benefits from this package's port-bound guard via gui's thin
-// adapter (internal/gui/csrf.go).
+// Package mcproute owns the workspace MCP HTTP handlers and port-bound
+// listener guards used by the supervised route daemon and the GUI listener.
 package mcproute
 
 import (
+	"encoding/json"
+	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -67,4 +50,60 @@ func AllowedOrigin(origin string, port int) bool {
 		return false
 	}
 	return AllowedHost(u.Host, port)
+}
+
+// RequireAllowedHost applies the listener's DNS-rebinding guard.
+func RequireAllowedHost(port func() int, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !AllowedHost(r.Host, port()) {
+			WriteAPIError(w, fmt.Errorf("host %q not allowed", r.Host),
+				http.StatusForbidden, "HOST_NOT_ALLOWED")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// RequireSameOrigin is a middleware that enforces a same-origin policy
+// on mutating routes. It rejects browser-driven cross-origin POSTs
+// while still allowing direct curl/script callers (which have no
+// Origin/Sec-Fetch-Site headers).
+//
+// Two checks must agree when both browser headers are present:
+//
+//  1. `Origin`, when present, must match this local listener origin. Empty Origin
+//     (curl, native clients) passes.
+//  2. `Sec-Fetch-Site`, when present, must not be cross-site.
+//
+// If either present check fails, returns 403 with the api-error envelope so
+// CSRF attempts surface clearly in logs.
+func RequireSameOrigin(port func() int, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin != "" && !AllowedOrigin(origin, port()) {
+			WriteAPIError(w, fmt.Errorf("origin %q not allowed", origin),
+				http.StatusForbidden, "CROSS_ORIGIN")
+			return
+		}
+
+		sfs := r.Header.Get("Sec-Fetch-Site")
+		if sfs != "" && sfs != "same-origin" && sfs != "none" {
+			WriteAPIError(w, fmt.Errorf("cross-origin %s request rejected", sfs),
+				http.StatusForbidden, "CROSS_ORIGIN")
+			return
+		}
+
+		next(w, r)
+	}
+}
+
+// WriteAPIError is the canonical error-envelope shape from spec §4.3.
+// Shared by all /api/* handlers added in Tasks 9–15.
+func WriteAPIError(w http.ResponseWriter, err error, status int, code string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"error": err.Error(),
+		"code":  code,
+	})
 }

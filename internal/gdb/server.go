@@ -309,7 +309,7 @@ func (gs *GdbServer) lookup(id string) *session {
 	return gs.sessions[id]
 }
 
-// defaultVersionProbe resolves the toolchain gdb path and runs `<gdb> --version`
+// defaultVersionProbe resolves the toolchain gdb path and runs `<gdb> --nx --version`
 // via Go exec, returning the path, the first line of the version output, and
 // whether the probe succeeded. The Go exec works in the console-less daemon — the
 // exact thing GDB-MCP's python subprocess probe could not do.
@@ -319,7 +319,7 @@ func defaultVersionProbe() (string, string, bool) {
 	return path, version, ok
 }
 
-// gdbVersionLine runs `<path> --version` via Go exec and returns the first
+// gdbVersionLine runs `<path> --nx --version` via Go exec and returns the first
 // non-empty line of its output and whether the probe succeeded. It is the single
 // owner of the version-exec logic shared by debugger_status (via
 // defaultVersionProbe) and gdb_start (via defaultStartVersion in session.go) —
@@ -328,7 +328,7 @@ func defaultVersionProbe() (string, string, bool) {
 // dedicated `--version` probe instead. The Go exec works in the console-less
 // daemon, the exact thing GDB-MCP's python subprocess probe could not do.
 func gdbVersionLine(path string) (string, bool) {
-	cmd := exec.Command(path, "--version")
+	cmd := exec.Command(path, "--nx", "--version")
 	process.NoConsole(cmd)
 	out, err := cmd.Output()
 	if err != nil {

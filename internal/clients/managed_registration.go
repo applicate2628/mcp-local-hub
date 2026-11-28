@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -1607,23 +1606,6 @@ func managedRegistrationClassifyRawIdentity(raw managedRegistrationRawState) (Ma
 	return ManagedRegistrationTransportUnknown, ManagedRegistrationIdentityUnavailable, ManagedRegistrationFingerprint{}
 }
 
-func managedRegistrationBackupID(configPath, backupPath string) (ManagedRegistrationBackupID, bool) {
-	configAbs, configErr := filepath.Abs(configPath)
-	backupAbs, backupErr := filepath.Abs(backupPath)
-	if configErr != nil || backupErr != nil || filepath.Dir(filepath.Clean(configAbs)) != filepath.Dir(filepath.Clean(backupAbs)) {
-		return ManagedRegistrationBackupID{}, false
-	}
-	id, parseErr := ParseManagedRegistrationBackupID(filepath.Base(backupAbs))
-	if parseErr != nil {
-		return ManagedRegistrationBackupID{}, false
-	}
-	resolved, resolveErr := resolveManagedRegistrationBackupID(configAbs, id)
-	if resolveErr != nil || filepath.Clean(resolved) != filepath.Clean(backupAbs) {
-		return ManagedRegistrationBackupID{}, false
-	}
-	return id, true
-}
-
 // managedRegistrationBackupLocation derives the only backup directory and
 // leaf accepted for an opaque backup identity. It performs no filesystem
 // lookup: the request-scoped BackupIO owns no-follow object validation.
@@ -1642,35 +1624,6 @@ func managedRegistrationBackupLocation(configPath string, id ManagedRegistration
 		return "", "", false
 	}
 	return filepath.Dir(configAbs), leaf, true
-}
-
-// resolveManagedRegistrationBackupID is deliberately unexported and is the
-// client-owned filesystem boundary. External callers can carry the opaque ID
-// but cannot turn it into a path.
-func resolveManagedRegistrationBackupID(configPath string, id ManagedRegistrationBackupID) (string, error) {
-	parsed, err := ParseManagedRegistrationBackupID(id.String())
-	if err != nil || parsed != id {
-		return "", managedRegistrationError(ManagedRegistrationFailureBackupIDInvalid)
-	}
-	configAbs, err := filepath.Abs(configPath)
-	if err != nil {
-		return "", managedRegistrationError(ManagedRegistrationFailureBackupIDInvalid)
-	}
-	configAbs = filepath.Clean(configAbs)
-	if !strings.HasPrefix(id.String(), filepath.Base(configAbs)+backupSuffixPrefix) {
-		return "", managedRegistrationError(ManagedRegistrationFailureBackupIDInvalid)
-	}
-	parent := filepath.Dir(configAbs)
-	candidate := filepath.Join(parent, id.String())
-	candidateAbs, err := filepath.Abs(candidate)
-	if err != nil || filepath.Dir(filepath.Clean(candidateAbs)) != parent || filepath.Base(candidateAbs) != id.String() {
-		return "", managedRegistrationError(ManagedRegistrationFailureBackupIDInvalid)
-	}
-	info, err := os.Lstat(candidateAbs)
-	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return "", managedRegistrationError(ManagedRegistrationFailureBackupIDInvalid)
-	}
-	return filepath.Clean(candidateAbs), nil
 }
 
 func managedRegistrationFingerprintTextValid(fingerprint string) bool {
