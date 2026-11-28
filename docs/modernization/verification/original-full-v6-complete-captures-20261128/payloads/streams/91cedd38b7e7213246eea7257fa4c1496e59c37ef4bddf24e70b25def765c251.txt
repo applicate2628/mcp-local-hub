@@ -1,0 +1,87 @@
+{"Action":"start","Package":"mcp-local-hub/internal/godbolt"}
+{"Action":"run","Package":"mcp-local-hub/internal/godbolt","Test":"TestGodboltDisabled_BlocksOutboundRequests"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestGodboltDisabled_BlocksOutboundRequests","Output":"=== RUN   TestGodboltDisabled_BlocksOutboundRequests\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestGodboltDisabled_BlocksOutboundRequests","Output":"--- PASS: TestGodboltDisabled_BlocksOutboundRequests (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/godbolt","Test":"TestGodboltDisabled_BlocksOutboundRequests"}
+{"Action":"run","Package":"mcp-local-hub/internal/godbolt","Test":"TestGodboltDisabled_BlocksFormatToolOutboundRequests"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestGodboltDisabled_BlocksFormatToolOutboundRequests","Output":"=== RUN   TestGodboltDisabled_BlocksFormatToolOutboundRequests\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestGodboltDisabled_BlocksFormatToolOutboundRequests","Output":"--- PASS: TestGodboltDisabled_BlocksFormatToolOutboundRequests (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/godbolt","Test":"TestGodboltDisabled_BlocksFormatToolOutboundRequests"}
+{"Action":"run","Package":"mcp-local-hub/internal/godbolt","Test":"TestCompileTool_SendsAcceptJSON"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestCompileTool_SendsAcceptJSON","Output":"=== RUN   TestCompileTool_SendsAcceptJSON\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestCompileTool_SendsAcceptJSON","Output":"--- PASS: TestCompileTool_SendsAcceptJSON (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/godbolt","Test":"TestCompileTool_SendsAcceptJSON"}
+{"Action":"run","Package":"mcp-local-hub/internal/godbolt","Test":"TestInvokeCompile_RejectsOversizedResponse"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestInvokeCompile_RejectsOversizedResponse","Output":"=== RUN   TestInvokeCompile_RejectsOversizedResponse\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestInvokeCompile_RejectsOversizedResponse","Output":"--- PASS: TestInvokeCompile_RejectsOversizedResponse (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/godbolt","Test":"TestInvokeCompile_RejectsOversizedResponse"}
+{"Action":"run","Package":"mcp-local-hub/internal/godbolt","Test":"TestCompileTool_PassesFiltersExecuteParametersAndTools"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestCompileTool_PassesFiltersExecuteParametersAndTools","Output":"=== RUN   TestCompileTool_PassesFiltersExecuteParametersAndTools\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestCompileTool_PassesFiltersExecuteParametersAndTools","Output":"--- PASS: TestCompileTool_PassesFiltersExecuteParametersAndTools (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/godbolt","Test":"TestCompileTool_PassesFiltersExecuteParametersAndTools"}
+{"Action":"run","Package":"mcp-local-hub/internal/godbolt","Test":"TestFormatTool_RejectsOversizedResponse"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestFormatTool_RejectsOversizedResponse","Output":"=== RUN   TestFormatTool_RejectsOversizedResponse\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestFormatTool_RejectsOversizedResponse","Output":"--- PASS: TestFormatTool_RejectsOversizedResponse (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/godbolt","Test":"TestFormatTool_RejectsOversizedResponse"}
+{"Action":"run","Package":"mcp-local-hub/internal/godbolt","Test":"TestFormatTool_ForwardsStyleOptions"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestFormatTool_ForwardsStyleOptions","Output":"=== RUN   TestFormatTool_ForwardsStyleOptions\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestFormatTool_ForwardsStyleOptions","Output":"--- PASS: TestFormatTool_ForwardsStyleOptions (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/godbolt","Test":"TestFormatTool_ForwardsStyleOptions"}
+{"Action":"run","Package":"mcp-local-hub/internal/godbolt","Test":"TestFormatTool_OmitsUnsetStyleOptions"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestFormatTool_OmitsUnsetStyleOptions","Output":"=== RUN   TestFormatTool_OmitsUnsetStyleOptions\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestFormatTool_OmitsUnsetStyleOptions","Output":"--- PASS: TestFormatTool_OmitsUnsetStyleOptions (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/godbolt","Test":"TestFormatTool_OmitsUnsetStyleOptions"}
+{"Action":"run","Package":"mcp-local-hub/internal/godbolt","Test":"TestFormatTool_ForwardsExplicitZeroValues"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestFormatTool_ForwardsExplicitZeroValues","Output":"=== RUN   TestFormatTool_ForwardsExplicitZeroValues\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestFormatTool_ForwardsExplicitZeroValues","Output":"--- PASS: TestFormatTool_ForwardsExplicitZeroValues (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/godbolt","Test":"TestFormatTool_ForwardsExplicitZeroValues"}
+{"Action":"run","Package":"mcp-local-hub/internal/godbolt","Test":"TestShortlinkInfoTool_DelegatesToResource"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestShortlinkInfoTool_DelegatesToResource","Output":"=== RUN   TestShortlinkInfoTool_DelegatesToResource\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestShortlinkInfoTool_DelegatesToResource","Output":"--- PASS: TestShortlinkInfoTool_DelegatesToResource (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/godbolt","Test":"TestShortlinkInfoTool_DelegatesToResource"}
+{"Action":"run","Package":"mcp-local-hub/internal/godbolt","Test":"TestShortlinkInfoTool_MissingLinkIDReturnsError"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestShortlinkInfoTool_MissingLinkIDReturnsError","Output":"=== RUN   TestShortlinkInfoTool_MissingLinkIDReturnsError\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestShortlinkInfoTool_MissingLinkIDReturnsError","Output":"--- PASS: TestShortlinkInfoTool_MissingLinkIDReturnsError (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/godbolt","Test":"TestShortlinkInfoTool_MissingLinkIDReturnsError"}
+{"Action":"run","Package":"mcp-local-hub/internal/godbolt","Test":"TestGetShortlinkInfo_ExtractsLinkID"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestGetShortlinkInfo_ExtractsLinkID","Output":"=== RUN   TestGetShortlinkInfo_ExtractsLinkID\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestGetShortlinkInfo_ExtractsLinkID","Output":"--- PASS: TestGetShortlinkInfo_ExtractsLinkID (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/godbolt","Test":"TestGetShortlinkInfo_ExtractsLinkID"}
+{"Action":"run","Package":"mcp-local-hub/internal/godbolt","Test":"TestGetPopularArguments"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestGetPopularArguments","Output":"=== RUN   TestGetPopularArguments\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestGetPopularArguments","Output":"--- PASS: TestGetPopularArguments (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/godbolt","Test":"TestGetPopularArguments"}
+{"Action":"run","Package":"mcp-local-hub/internal/godbolt","Test":"TestGetCompilers_ExtractsLanguageID"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestGetCompilers_ExtractsLanguageID","Output":"=== RUN   TestGetCompilers_ExtractsLanguageID\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestGetCompilers_ExtractsLanguageID","Output":"--- PASS: TestGetCompilers_ExtractsLanguageID (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/godbolt","Test":"TestGetCompilers_ExtractsLanguageID"}
+{"Action":"run","Package":"mcp-local-hub/internal/godbolt","Test":"TestGetLibraries_ExtractsLanguageID"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestGetLibraries_ExtractsLanguageID","Output":"=== RUN   TestGetLibraries_ExtractsLanguageID\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestGetLibraries_ExtractsLanguageID","Output":"--- PASS: TestGetLibraries_ExtractsLanguageID (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/godbolt","Test":"TestGetLibraries_ExtractsLanguageID"}
+{"Action":"run","Package":"mcp-local-hub/internal/godbolt","Test":"TestGetInstructionInfo_ExtractsBothParams"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestGetInstructionInfo_ExtractsBothParams","Output":"=== RUN   TestGetInstructionInfo_ExtractsBothParams\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestGetInstructionInfo_ExtractsBothParams","Output":"--- PASS: TestGetInstructionInfo_ExtractsBothParams (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/godbolt","Test":"TestGetInstructionInfo_ExtractsBothParams"}
+{"Action":"run","Package":"mcp-local-hub/internal/godbolt","Test":"TestListCompilersTool_DelegatesToResource"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestListCompilersTool_DelegatesToResource","Output":"=== RUN   TestListCompilersTool_DelegatesToResource\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestListCompilersTool_DelegatesToResource","Output":"--- PASS: TestListCompilersTool_DelegatesToResource (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/godbolt","Test":"TestListCompilersTool_DelegatesToResource"}
+{"Action":"run","Package":"mcp-local-hub/internal/godbolt","Test":"TestListCompilersTool_MissingLanguageIDReturnsError"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestListCompilersTool_MissingLanguageIDReturnsError","Output":"=== RUN   TestListCompilersTool_MissingLanguageIDReturnsError\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestListCompilersTool_MissingLanguageIDReturnsError","Output":"--- PASS: TestListCompilersTool_MissingLanguageIDReturnsError (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/godbolt","Test":"TestListCompilersTool_MissingLanguageIDReturnsError"}
+{"Action":"run","Package":"mcp-local-hub/internal/godbolt","Test":"TestGetVersionTool_DelegatesToResource"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestGetVersionTool_DelegatesToResource","Output":"=== RUN   TestGetVersionTool_DelegatesToResource\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestGetVersionTool_DelegatesToResource","Output":"--- PASS: TestGetVersionTool_DelegatesToResource (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/godbolt","Test":"TestGetVersionTool_DelegatesToResource"}
+{"Action":"run","Package":"mcp-local-hub/internal/godbolt","Test":"TestLookupInstructionTool_RequiresBothParams"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestLookupInstructionTool_RequiresBothParams","Output":"=== RUN   TestLookupInstructionTool_RequiresBothParams\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestLookupInstructionTool_RequiresBothParams","Output":"--- PASS: TestLookupInstructionTool_RequiresBothParams (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/godbolt","Test":"TestLookupInstructionTool_RequiresBothParams"}
+{"Action":"run","Package":"mcp-local-hub/internal/godbolt","Test":"TestCompileCMakeTool_MirrorsCompileToolSurface"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestCompileCMakeTool_MirrorsCompileToolSurface","Output":"=== RUN   TestCompileCMakeTool_MirrorsCompileToolSurface\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Test":"TestCompileCMakeTool_MirrorsCompileToolSurface","Output":"--- PASS: TestCompileCMakeTool_MirrorsCompileToolSurface (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/godbolt","Test":"TestCompileCMakeTool_MirrorsCompileToolSurface"}
+{"Action":"output","Package":"mcp-local-hub/internal/godbolt","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/godbolt"}

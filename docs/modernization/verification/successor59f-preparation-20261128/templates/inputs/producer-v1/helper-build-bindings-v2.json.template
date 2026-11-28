@@ -1,0 +1,88 @@
+{
+  "schema": "successor-helper-build-bindings-v1",
+  "source_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128",
+  "source_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+  "source_tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+  "output_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1",
+  "scope_names": {
+    "job": "qualified-successor-job",
+    "contained": "qualified-successor-contained",
+    "namespace": "qualified-successor-namespace",
+    "cli": "qualified-successor-cli",
+    "native_product": "qualified-successor-native-product"
+  },
+  "source_map": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\source-binding\\source59f-input-sha256.json",
+    "sha256": "e8c3fc2f577a130f92ba4eee7f8eee7153afc032dee909557cf1156890917c06"
+  },
+  "source_git_map": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\source-binding\\source59f-git-map.json",
+    "sha256": "2f85b5e27243da8c853f20600df576b51fd60fea2fa420509a331b538dc8c547"
+  },
+  "product_config": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer-candidate\\product-build-config.json",
+    "sha256": "e60e717eeb3727acad953c54df08fa0fb1da893f48dcc2d0d5e0d1782c5580bb"
+  },
+  "runtime_snapshot": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer-candidate\\runtime-source-snapshot.json",
+    "sha256": "894f8279e51f2c3fa81e404b37be71f3ff9bad26c39ab1afd382d5814a9382a3"
+  },
+  "scope_helper": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer-candidate\\private_producer_scope.py",
+    "sha256": "60a63b06447b9e836db5be06a534aa3d00ae518e041aeef91750fdd044590108"
+  },
+  "auxiliary_sources": {
+    "job": {
+      "main_windows.go": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer-candidate\\job-entry-whole-suite-main_windows.go.txt",
+        "sha256": "74c4cebbc91337eacabc113cb1f772589e0c823777c5f2ed734757647fc05977"
+      },
+      "owner_windows.go": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\tools\\test-job-entry\\owner_windows.go",
+        "sha256": "7200935baff50c05b5f1893e87aac01768ee1d98ca85fcad5e655ca016b2264e"
+      }
+    },
+    "contained": {
+      "main_windows.go": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer-candidate\\literal-contained-receiver.go.txt",
+        "sha256": "59fa2cc432b887114497c3c6625731d4dcde207e38b412371eb5fa83b39ed8a9"
+      }
+    },
+    "namespace": {
+      "main_windows.go": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-candidate\\main_windows.go",
+        "sha256": "4e91b8ce877400a91a4f315b68a166ae3d2c7c19d4963d52ade521f03f2ac4b4"
+      },
+      "prebuilt_windows.go": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-candidate\\prebuilt_windows.go",
+        "sha256": "2fc1016b4eff51c77a3c0e342de14d938b3f39b6a67c438b04ef262e09d8eeed"
+      }
+    },
+    "cli": {
+      "main_windows.go": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\foreground-candidate-v4\\main_windows.go",
+        "sha256": "77949871b3c0cbea570241409cd40840be9c88db9f4e83fe71044db80f2155d7"
+      },
+      "main_windows_test.go": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\foreground-candidate-v3\\main_windows_test.go",
+        "sha256": "9712a445ce383ce89ec3a6051d7eb11dee5cf29a08ba93854d0c85fa8c142a0b"
+      }
+    }
+  },
+  "binaries": {
+    "validator": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\windows-product-validate.exe",
+    "test2json": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\test2json.exe",
+    "job": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\test-job-entry.exe",
+    "contained": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\literal-contained.exe",
+    "namespace": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\test-recovery-namespace.exe",
+    "cli": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\literal-foreground-cli.exe"
+  },
+  "capability": {
+    "native_source_scope": "exact successor Source59f production",
+    "job_auxiliary": "unchanged existing whole-suite entry auxiliary recompiled against current Source",
+    "contained_auxiliary": "unchanged existing RunContainedStreamObserved receiver",
+    "namespace_auxiliary": "same incoming API Go image copied to exact original helper protected namespace",
+    "cli_auxiliary": "supported RunForeground; original root/Job and IO plus source-pinned test-owned escaped cleanup; no universal escaped-tree claim",
+    "qualification_passed": false
+  }
+}

@@ -1,0 +1,12 @@
+diff --git a/main_windows.go b/main_windows.go
+index 21a5a4c60ea102b855c58faec04101936b39648b..0e0fe1d6cb2d9c24a01820bc78038806d6e4000d 100644
+--- a/main_windows.go
++++ b/main_windows.go
+@@ -95,6 +95,7 @@
+ }
+ 
+ func main() {
++    defer retainUnknownReceiver()
+     binary := flag.String("test-binary", "", "same incoming qualified CLI image")
+     expected := flag.String("expected-sha256", "", "incoming image SHA-256")
+     source := flag.String("source-dir", "", "original Go package working directory")

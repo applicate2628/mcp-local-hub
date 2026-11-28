@@ -1,0 +1,13 @@
+{
+  "schema": "closed-successor-trail-data-verification-v1",
+  "status": "EXACT_CLOSED_TRAIL_DATA_VERIFIED",
+  "original_files_verified": 213,
+  "original_native_commands": 74,
+  "original_command_captures": 148,
+  "historical_stage_v11_failure_preserved": true,
+  "historical_full_v6_failure_preserved": true,
+  "current_source_test_acceptance_inherited": false,
+  "original_commands_reexecuted": false,
+  "live_source_or_cache_payload_read": false,
+  "original_trash_operation_reexecuted": false
+}

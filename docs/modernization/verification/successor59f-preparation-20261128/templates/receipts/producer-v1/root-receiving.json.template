@@ -1,0 +1,233 @@
+{
+  "schema": "successor-product-helper-root-receiving-v1",
+  "status": "FAIL",
+  "closure": "CLOSED",
+  "physical_complete": true,
+  "original_parent_status": "FAIL",
+  "original_execution_status": "FAIL",
+  "original_exit_code": 1,
+  "source_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+  "source_tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+  "plan_sha256": "99333ab4cb43f9a01720c70e567782475065b0f7077d70a3f157dca475c9c15a",
+  "parent_sha256": "e900a860923c9b122436d06feffc2a5e815214d98d56a6982d54af009f846735",
+  "outer_sha256": "922224681071013b491ce263840f0c2e9f0d35ca38b03154ae6017589b20ecd8",
+  "execution_sha256": "76d74ba0d51f044ff4601efece213eeb2d345ec63a1b31539b20231f0492a19b",
+  "actual_commands": 10,
+  "planned_commands": 12,
+  "input_files_verified": 3398,
+  "step_maps_verified": 20,
+  "command_captures_verified": 20,
+  "parent_captures": {
+    "stdout": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\controller.stdout.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "stderr": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\controller.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "commands": [
+    {
+      "name": "copy-closed-warm-caches",
+      "seconds": 104.85613000008743,
+      "exit_code": 0,
+      "closure": "CLOSED",
+      "command_passed": true,
+      "captures": {
+        "stdout": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\commands\\copy-closed-warm-caches.stdout.txt",
+          "bytes": 702,
+          "sha256": "5dd023ba6a35304c786e1fbf9aa24e64d6ffd44ff9fd7ebf0565565c243dce90"
+        },
+        "stderr": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\commands\\copy-closed-warm-caches.stderr.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "name": "stage-exact-source-and-helpers",
+      "seconds": 31.157155800028704,
+      "exit_code": 0,
+      "closure": "CLOSED",
+      "command_passed": true,
+      "captures": {
+        "stdout": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\commands\\stage-exact-source-and-helpers.stdout.txt",
+          "bytes": 77,
+          "sha256": "bb449620d35bf22f2777941d4cfd17e193951dceca5f384a39eccc3536a08786"
+        },
+        "stderr": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\commands\\stage-exact-source-and-helpers.stderr.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "name": "build-validator",
+      "seconds": 11.155198100022972,
+      "exit_code": 0,
+      "closure": "CLOSED",
+      "command_passed": true,
+      "captures": {
+        "stdout": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\commands\\build-validator.stdout.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stderr": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\commands\\build-validator.stderr.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "name": "build-test2json",
+      "seconds": 7.08453480002936,
+      "exit_code": 0,
+      "closure": "CLOSED",
+      "command_passed": true,
+      "captures": {
+        "stdout": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\commands\\build-test2json.stdout.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stderr": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\commands\\build-test2json.stderr.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "name": "build-job",
+      "seconds": 3.4702446999726817,
+      "exit_code": 0,
+      "closure": "CLOSED",
+      "command_passed": true,
+      "captures": {
+        "stdout": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\commands\\build-job.stdout.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stderr": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\commands\\build-job.stderr.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "name": "build-contained",
+      "seconds": 4.188819200033322,
+      "exit_code": 0,
+      "closure": "CLOSED",
+      "command_passed": true,
+      "captures": {
+        "stdout": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\commands\\build-contained.stdout.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stderr": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\commands\\build-contained.stderr.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "name": "build-namespace",
+      "seconds": 4.491352599929087,
+      "exit_code": 0,
+      "closure": "CLOSED",
+      "command_passed": true,
+      "captures": {
+        "stdout": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\commands\\build-namespace.stdout.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stderr": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\commands\\build-namespace.stderr.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "name": "build-cli",
+      "seconds": 5.035658199922182,
+      "exit_code": 0,
+      "closure": "CLOSED",
+      "command_passed": true,
+      "captures": {
+        "stdout": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\commands\\build-cli.stdout.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stderr": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\commands\\build-cli.stderr.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "name": "check-foreground-framed-parser",
+      "seconds": 5.578471900080331,
+      "exit_code": 0,
+      "closure": "CLOSED",
+      "command_passed": true,
+      "captures": {
+        "stdout": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\commands\\check-foreground-framed-parser.stdout.txt",
+          "bytes": 59,
+          "sha256": "8d050ef0f0d591a48e34a5566f4633dfc83dca837ffeb9005f09b202f8b7cac9"
+        },
+        "stderr": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\commands\\check-foreground-framed-parser.stderr.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "name": "build-marked-product",
+      "seconds": 8.410647800075822,
+      "exit_code": 1,
+      "closure": "CLOSED",
+      "command_passed": false,
+      "captures": {
+        "stdout": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\commands\\build-marked-product.stdout.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stderr": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\commands\\build-marked-product.stderr.txt",
+          "bytes": 488,
+          "sha256": "da908aec0f04384be3176b935840fcd98528bee091b66025f00059c993161ff1"
+        }
+      }
+    }
+  ],
+  "input_issues": [],
+  "compiled_outputs": {},
+  "output_receiving_errors": [],
+  "auxiliary_parser_tests_executed": true,
+  "full_acceptance_executed": false,
+  "full_acceptance_pass": false,
+  "original_status_changed": false,
+  "receiving_scope": "Original ordinary CLOSED commands; compile FAIL remains FAIL. No late-UNKNOWN or prestart/pre-resume reinterpretation.",
+  "reviewed_utc": "2026-11-28T14:00:18.2661239Z"
+}

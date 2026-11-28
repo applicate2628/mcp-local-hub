@@ -1,0 +1,68 @@
+# Temporary execution-copy Sync measurement
+
+This future-only standalone Windows Go program measures the specific copy
+operation used by the API namespace auxiliary. It uses only the Go standard
+library and does not import the Hub, start children, execute either copied
+test image, invoke a shell, use the network, or read Source/Go-cache payloads.
+
+## Fixed roles
+
+- Input: `@@RECOVERY_APPROVED_WORK_AREA@@\r7\x149e4a76727c\incoming-original.exe`.
+- Exact input SHA256: `d237704913484fe2931860793badbfdaadb3bb216f5c436b8d01bdf2301d3e60`.
+- Input authority: the root's original API v3 receiving; this program issues no authority.
+- Output: the new, absent directory `@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\namespace-copy-probe-v1-data`.
+- Its only files: `with-sync.exe`, `without-sync.exe`, `probe-receipt.json`.
+
+The two EXE files are DATA copies, never launched. Existing output is refused;
+there are no overwrite, delete, trash, retry or cleanup operations. Ancestors
+and leaf kinds are checked for ordinary non-reparse paths. Source bytes, size,
+mtime and file identity are checked before/after; both complete copied hashes
+and both reopened destination hashes must equal the exact input SHA.
+
+## Root-owned preparation and execution
+
+Build this single file with the already-pinned Go compiler under the existing
+original native owner, using an independently copied closed cache if needed:
+
+```text
+<go.exe> build -o <new-stage-output>\namespace-copy-probe.exe <this-directory>\main_windows.go
+<new-stage-output>\namespace-copy-probe.exe
+```
+
+The program accepts no operands. Its author has not compiled or run it.
+The root reviews the source, freezes its pins, builds, and runs it in the
+separately authorized native stage. No active full59f cache is an input.
+
+## Measured operations
+
+All duration fields are integer nanoseconds from Go monotonic `time.Now`/`time.Since`.
+Divide by 1,000,000 to obtain milliseconds.
+
+| Field | Included work |
+| --- | --- |
+| `copy_ns` | The original `io.Copy(io.MultiWriter(target, sha256), source)` operation. |
+| `sync_ns` | One destination `File.Sync()` only in the with-sync case. `sync_called` distinguishes omission from a completed zero-duration measurement. |
+| `destination_close_ns` | The original destination's single `Close` call. |
+| `source_close_ns` | The original source reader's single `Close` call. |
+| `readback_ns` | Ordinary-path checks plus reopening, full destination hashing, and checked close. |
+| `total_ns` | All work in one copy sample, including opens, checks and the listed operations. |
+
+Copy or Sync failure still leads to checked closes of both opened files.
+Close errors are preserved and prevent DATA success. Final receipt writing and
+its durability Sync occur after these measurements. A root must also require
+the original probe exit0 and normal native/IO closure before accepting the report.
+
+## Interpretation
+
+The input hash check happens before both samples and warms its file data.
+There is one observation per mode, in fixed order: with-sync then without-sync.
+The outputs have different fresh names. Cache, antivirus, storage load and order
+can affect times; this is not a statistical benchmark or a full replication of
+the namespace preparation path. The measured Sync duration is the useful direct
+quantity; a difference between whole-sample durations alone does not prove causality.
+
+The namespace helper and all admission/Go-test/native-owner predicates remain
+unchanged. This probe cannot grant API test PASS, namespace admission qualification,
+full-run closure, CLI closure, cache handoff, or a deadline increase. If measured
+cost is insufficient to explain the refusal, the next candidate is narrow timing
+instrumentation of the original admission path, not an arbitrary larger budget.

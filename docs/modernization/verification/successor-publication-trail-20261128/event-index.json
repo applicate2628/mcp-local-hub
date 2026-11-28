@@ -1,0 +1,362 @@
+{
+  "schema": "closed-successor-trail-event-index-v1",
+  "recorded_date": "2026-11-28",
+  "scope": {
+    "native_commands": 74,
+    "command_captures": 148,
+    "operations": 11,
+    "tests_executed_by_these_operations": false,
+    "source_acceptance_pass_granted": false
+  },
+  "events": [
+    {
+      "event": "stage-v11",
+      "status": "FAIL",
+      "physical_status": "CLOSED",
+      "commands": 4,
+      "seconds": 0.2824009000323713,
+      "source_role": "recovered-CLI-code-checkout",
+      "expected_start_head": "33eaf8af8fc46cb231f48c70f4775922393245b1",
+      "controller_exit_code": 1,
+      "outer_exit_code": 1,
+      "primary": {
+        "role_path": "events/stage-v11/receipt.json",
+        "sha256": "b9cda69df6f2052c33f3f3504ac93613d4bc3371a41efaca6a5e4e80ae68b192"
+      },
+      "root": {
+        "role_path": "events/stage-v11/root.json",
+        "sha256": "716b5f49a8744dbba0ebf9accc014b4647d417a01315bb4ff7e14fc311f77a3a"
+      },
+      "outer": {
+        "role_path": "events/stage-v11/outer.json",
+        "sha256": "2bfe816f9b42aefa691eebe7a07f063b49ae81e70d9430cac3d39d8abe1c66cc"
+      },
+      "input_plan": {
+        "role_path": "events/stage-v11/plan.json",
+        "sha256": "3e0bd76278be9de1c4eb87786f46de33fde7a9f858a7e1e213057791dddbbbf3"
+      },
+      "error": "RuntimeError: test changed observed source inputs"
+    },
+    {
+      "event": "stage-v12",
+      "status": "PASS",
+      "physical_status": "CLOSED",
+      "commands": 9,
+      "seconds": 1.2357118000509217,
+      "source_role": "recovered-CLI-code-checkout",
+      "expected_start_head": "33eaf8af8fc46cb231f48c70f4775922393245b1",
+      "controller_exit_code": 0,
+      "outer_exit_code": 0,
+      "primary": {
+        "role_path": "events/stage-v12/receipt.json",
+        "sha256": "f28d92a27baf20b005d6ecb08a378ec26244dc4c2949cf1f137629a63206760e"
+      },
+      "root": {
+        "role_path": "events/stage-v12/root.json",
+        "sha256": "bf4a809143865e6c7b527390795046f7950b0cb12bdc544aa108097e4bd9c73b"
+      },
+      "outer": {
+        "role_path": "events/stage-v12/outer.json",
+        "sha256": "83b9d234b656a314130d90fd2964c04c9666ba7891e20e4f80aecfb42a3f6cba"
+      },
+      "input_plan": {
+        "role_path": "events/stage-v12/plan.json",
+        "sha256": "ac6474cb067179b26737992e634e410ae6599128512fda87cd28f5a65463f5dd"
+      },
+      "error": null
+    },
+    {
+      "event": "commit-v7",
+      "status": "PASS",
+      "physical_status": "CLOSED",
+      "commands": 6,
+      "seconds": 0.3686769000487402,
+      "source_role": "recovered-CLI-code-checkout",
+      "expected_start_head": "33eaf8af8fc46cb231f48c70f4775922393245b1",
+      "controller_exit_code": 0,
+      "outer_exit_code": 0,
+      "primary": {
+        "role_path": "events/commit-v7/receipt.json",
+        "sha256": "d94591a33c5de636849b07985529cedcd71b47ac6f5dbd8d40fd4032f08d9a93"
+      },
+      "root": {
+        "role_path": "events/commit-v7/root.json",
+        "sha256": "b7a4c0b8a16e587c72d90e628683e7fc2f18866cbad48c6df629a8fab468df71"
+      },
+      "outer": {
+        "role_path": "events/commit-v7/outer.json",
+        "sha256": "e2e46c87030ddb8ba1b1c242e2c0e1f1cbefcee5d86253bb0abeca416c96354c"
+      },
+      "input_plan": {
+        "role_path": "events/commit-v7/plan.json",
+        "sha256": "7cae01bb4a043dbc1433780d82ab3fa1eb567dab9bc0e718277aa3d9737700a9"
+      },
+      "error": null
+    },
+    {
+      "event": "warm-cache",
+      "status": "PASS",
+      "physical_status": "CLOSED",
+      "commands": 4,
+      "seconds": 273.3384498000378,
+      "source_commit": "04e5b4eadd6407cbff4e04ba453546d278314bd7",
+      "scope": "Cache copying and three explicit compilations only; tests not executed.",
+      "primary": {
+        "role_path": "warm-cache/execution.json",
+        "sha256": "7f6cd144b02ecc796a5fa1506c19b72d50a6a65816b508a902689535c13671cd"
+      },
+      "parent": {
+        "role_path": "warm-cache/parent.json",
+        "sha256": "119d72b5603cd078d538c0e396d7e6fcfee592daa1c851f8aa59a1d15a5e697c"
+      },
+      "input_plan": {
+        "role_path": "warm-cache/plan.json",
+        "sha256": "bf28e617ee0e319ec4c085d13ee0c16b7536552bac92f28070138835d8286fb6"
+      }
+    },
+    {
+      "event": "stage-v13",
+      "status": "PASS",
+      "physical_status": "CLOSED",
+      "commands": 11,
+      "seconds": 3.3732354999519885,
+      "source_role": "recovered-CLI-code-checkout",
+      "expected_start_head": "04e5b4eadd6407cbff4e04ba453546d278314bd7",
+      "controller_exit_code": 0,
+      "outer_exit_code": 0,
+      "primary": {
+        "role_path": "events/stage-v13/receipt.json",
+        "sha256": "e9e45e2ca9a5c5fee82f59f87d2fae12b5f08c92bdcc0580986b036113fbd372"
+      },
+      "root": {
+        "role_path": "events/stage-v13/root.json",
+        "sha256": "39ea382d4f689219e2d99d961967d766d6e1755981b1131fdd6f6f8d1e05aa9f"
+      },
+      "outer": {
+        "role_path": "events/stage-v13/outer.json",
+        "sha256": "235027c685bbf505adcd7cee8f5b3b460450e2e1e4fbe092724d464dd63f11bf"
+      },
+      "input_plan": {
+        "role_path": "events/stage-v13/plan.json",
+        "sha256": "b324e56c54585340ed370fc320b1e084f9c41ffbfe248e04e94f6500644658a7"
+      },
+      "error": null
+    },
+    {
+      "event": "commit-v8",
+      "status": "PASS",
+      "physical_status": "CLOSED",
+      "commands": 6,
+      "seconds": 0.7418923999648541,
+      "source_role": "recovered-CLI-code-checkout",
+      "expected_start_head": "04e5b4eadd6407cbff4e04ba453546d278314bd7",
+      "controller_exit_code": 0,
+      "outer_exit_code": 0,
+      "primary": {
+        "role_path": "events/commit-v8/receipt.json",
+        "sha256": "3ad8230876e52e048d289b9dc97e710c9cca0ce2278f2291f6d394c8a8a5eefa"
+      },
+      "root": {
+        "role_path": "events/commit-v8/root.json",
+        "sha256": "6693f63fbf509c2a759a977fe3cf19367dc06c1f9988e8760fae77e1a44556b9"
+      },
+      "outer": {
+        "role_path": "events/commit-v8/outer.json",
+        "sha256": "bfed9835cc2cfdb53cb489968aaf8f4f86871960f5515aaeb4a77092db10cf47"
+      },
+      "input_plan": {
+        "role_path": "events/commit-v8/plan.json",
+        "sha256": "7e695bab3757aa3f4384112a5f031cade81582f4bc7da789f246722221ea276b"
+      },
+      "error": null
+    },
+    {
+      "event": "stage-v14",
+      "status": "PASS",
+      "physical_status": "CLOSED",
+      "commands": 7,
+      "seconds": 4.601339599932544,
+      "source_role": "existing-documentation-publication-checkout",
+      "expected_start_head": "01b4e915af6439e4c5e7c5c880a6d4885a2dbd3a",
+      "controller_exit_code": 0,
+      "outer_exit_code": 0,
+      "primary": {
+        "role_path": "events/stage-v14/receipt.json",
+        "sha256": "b3c099bfd8c0c50d0e4433f0b14b63784b55001853f30f360e142c4484c8d889"
+      },
+      "root": {
+        "role_path": "events/stage-v14/root.json",
+        "sha256": "f9e9b349fc4a151ac984fc096d5a63b328240f7abf4b58b2b4277ef39e657550"
+      },
+      "outer": {
+        "role_path": "events/stage-v14/outer.json",
+        "sha256": "9d3f9b8a09226e8bb6f8df56863e4813806188e04f8f212f4e78dba73dcd6de8"
+      },
+      "input_plan": {
+        "role_path": "events/stage-v14/plan.json",
+        "sha256": "e9e87fbb844f8eb3300b2b2756b4aa8a4c5f4b8e6a77bcee62adf9cc7cededcc"
+      },
+      "error": null
+    },
+    {
+      "event": "commit-v9",
+      "status": "PASS",
+      "physical_status": "CLOSED",
+      "commands": 6,
+      "seconds": 0.8185686999931931,
+      "source_role": "existing-documentation-publication-checkout",
+      "expected_start_head": "01b4e915af6439e4c5e7c5c880a6d4885a2dbd3a",
+      "controller_exit_code": 0,
+      "outer_exit_code": 0,
+      "primary": {
+        "role_path": "events/commit-v9/receipt.json",
+        "sha256": "e91c35780b63e7db1cb3d153031efe53e886750399d32b916d252fdf15af7a89"
+      },
+      "root": {
+        "role_path": "events/commit-v9/root.json",
+        "sha256": "8110e1c72921fd06ab933ae993e7a33d6ee90bcb8d7958d99bb2377ada500c4d"
+      },
+      "outer": {
+        "role_path": "events/commit-v9/outer.json",
+        "sha256": "665fb5de424358b042828516726907df5a2011b37a7cf06d2b6cd5648367c849"
+      },
+      "input_plan": {
+        "role_path": "events/commit-v9/plan.json",
+        "sha256": "10a8e14d049aa675cf01b3bfc51a204722802c27d8b83881796ed88159d4d80c"
+      },
+      "error": null
+    },
+    {
+      "event": "push-v7",
+      "status": "PASS",
+      "physical_status": "CLOSED",
+      "commands": 4,
+      "seconds": 29.024577399948612,
+      "source_role": "existing-documentation-publication-checkout",
+      "expected_start_head": "05fbffa30f99914c8174966525a70bc9984e7038",
+      "controller_exit_code": 0,
+      "outer_exit_code": 0,
+      "primary": {
+        "role_path": "events/push-v7/receipt.json",
+        "sha256": "bbcd6a775c7eed9c40286dd93ffc1e04fa32a5e8269140fda3cf3e6380c7ed72"
+      },
+      "root": {
+        "role_path": "events/push-v7/root.json",
+        "sha256": "c74394433850611d1e01d32ed667a4f6b7026c9704e566a635acf8eecd688013"
+      },
+      "outer": {
+        "role_path": "events/push-v7/outer.json",
+        "sha256": "4ac60fb8b758eac6b0eed9c92e0b3d96d28de2f6fb2f8359846da36ff8eaf1fe"
+      },
+      "input_plan": {
+        "role_path": "events/push-v7/plan.json",
+        "sha256": "bbf00ec8374393bdc056d6af8e057e1fc0085454682f41e56f39f4c1dc0cf231"
+      },
+      "error": null
+    },
+    {
+      "event": "stage-v15",
+      "status": "PASS",
+      "physical_status": "CLOSED",
+      "commands": 11,
+      "seconds": 1.2390464000636712,
+      "source_role": "recovered-CLI-code-checkout",
+      "expected_start_head": "74e7563db244ede5984834233ce8d59072e92c0a",
+      "controller_exit_code": 0,
+      "outer_exit_code": 0,
+      "primary": {
+        "role_path": "events/stage-v15/receipt.json",
+        "sha256": "3ae5e72a2fc79739839979305d464a4f2afe41e6448b0a4edb79dc384ed96188"
+      },
+      "root": {
+        "role_path": "events/stage-v15/root.json",
+        "sha256": "722932e2f5e3ddf81b0d31da8f324cb3c086c4a58652d4cc8d122b4892bdc868"
+      },
+      "outer": {
+        "role_path": "events/stage-v15/outer.json",
+        "sha256": "c710fbb87f243d43a5e79be0fe8924107d2400a84ab439a5c5b8082ffe13180e"
+      },
+      "input_plan": {
+        "role_path": "events/stage-v15/plan.json",
+        "sha256": "eeae16b52a14d695d266badcaf6eace9ec29596fdf307a1db46838c3eb4037ed"
+      },
+      "error": null
+    },
+    {
+      "event": "commit-v10",
+      "status": "PASS",
+      "physical_status": "CLOSED",
+      "commands": 6,
+      "seconds": 0.36736469995230436,
+      "source_role": "recovered-CLI-code-checkout",
+      "expected_start_head": "74e7563db244ede5984834233ce8d59072e92c0a",
+      "controller_exit_code": 0,
+      "outer_exit_code": 0,
+      "primary": {
+        "role_path": "events/commit-v10/receipt.json",
+        "sha256": "2cb3880b49e29383e462f0416c22776dee7f7df3184927e1d6115a170d6a446b"
+      },
+      "root": {
+        "role_path": "events/commit-v10/root.json",
+        "sha256": "50104f38fc28d467ee062ff3cb518c00a3ef96b1665633db0efa5036dd920646"
+      },
+      "outer": {
+        "role_path": "events/commit-v10/outer.json",
+        "sha256": "4a7d54506af92a377c4be8ac349ca553d8a5c3bbee0de92d73321f2446a53eec"
+      },
+      "input_plan": {
+        "role_path": "events/commit-v10/plan.json",
+        "sha256": "84d3b2b7ddedda87e1c26eae15b0e095215545ec26d6a2388e9bc0e4f1986a83"
+      },
+      "error": null
+    }
+  ],
+  "warm_compiled_outputs": [
+    {
+      "name": "provider-cwd-helper-386.exe",
+      "bytes": 2817536,
+      "sha256": "fce0d60916bf45c965053c48e379faae2b5c8245facf61b3a8d04dbbbee736f8",
+      "qualification": "COMPILED_CACHE_INPUT_ONLY"
+    },
+    {
+      "name": "provider-cwd-helper-amd64.exe",
+      "bytes": 2976768,
+      "sha256": "b8e516dc0617c822fceec21c53366883fd64fad1b6211f68ec5c3f873605eb64",
+      "qualification": "COMPILED_CACHE_INPUT_ONLY"
+    },
+    {
+      "name": "cli-state-mcphub.exe",
+      "bytes": 46608896,
+      "sha256": "914fd41c200e13eca13ab6dc033063d80fd05d1679ff461e25a4d4712407ac14",
+      "qualification": "COMPILED_CACHE_INPUT_ONLY"
+    }
+  ],
+  "preserved_classifications": {
+    "stage_v11": "FAIL/CLOSED",
+    "original_full_v6": "FAIL/CLOSED",
+    "old_full_v8": "UNKNOWN",
+    "final_Source59f_full_acceptance": "NOT_CLAIMED_BY_THIS_CAPSULE",
+    "remaining_original_expected_refusal": "UNRESOLVED_IDENTITY_NOT_SUBSTITUTED"
+  },
+  "source_commits": {
+    "Source04e": "04e5b4eadd6407cbff4e04ba453546d278314bd7",
+    "Source74e": "74e7563db244ede5984834233ce8d59072e92c0a",
+    "Source59f": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8"
+  },
+  "documentation_publication": {
+    "commit": "05fbffa30f99914c8174966525a70bc9984e7038",
+    "parent": "01b4e915af6439e4c5e7c5c880a6d4885a2dbd3a",
+    "tree": "89f3c5715356ff424d8538c1409cb91e58b1977c",
+    "pr": "https://github.com/applicate2628/mcp-local-hub/pull/664",
+    "native_gate_v3": "clean",
+    "native_gate_v4": "clean",
+    "code_branch_publication_inferred": false
+  },
+  "root_original_byte_verification": {
+    "role_path": "preservation/root-original-byte-verification.json",
+    "sha256": "979d907e4f0f6c94b6e46e66b2a00c84f9c1e4f2aea7ab19204fe13006ac3b7d",
+    "files": 209,
+    "matched": 209,
+    "qualification_passed": false
+  }
+}

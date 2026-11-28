@@ -1,0 +1,3 @@
+TestMarketplaceURLForErrorRedactsSchemeRelativeUserinfo
+TestScrubParseErrorRedactsCredentialsInURLParseError
+TestScrubParseErrorPassesThroughNonURLErrors

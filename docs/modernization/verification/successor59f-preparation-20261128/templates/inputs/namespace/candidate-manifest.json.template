@@ -1,0 +1,77 @@
+{
+  "schema": "successor33-namespace-candidate-manifest-v1",
+  "status": "FROZEN_FOR_REVIEW_NOT_EXECUTED",
+  "source": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128",
+    "commit": "04e5b4eadd6407cbff4e04ba453546d278314bd7",
+    "tree": "f68f7584dba7744e7607b07f615758f3ff633f54",
+    "parent": "33eaf8af8fc46cb231f48c70f4775922393245b1",
+    "file_count": 3369,
+    "scope": "seven reviewed test-only changes; namespace/API/helper inputs independently equal the base33 Git blobs"
+  },
+  "source_files_written": false,
+  "go_compiled": false,
+  "tests_executed": false,
+  "files": {
+    "assemble_namespace_candidate_data.py": {
+      "bytes": 12605,
+      "sha256": "1576a8821696a86644036c44c9b177a47c5325c6cfe75367db4bc0aedeab64a5"
+    },
+    "assemble_receiving_candidate_data.py": {
+      "bytes": 2664,
+      "sha256": "d408d45e2e8d73dc439bbdee7efdde16b5225b6d627819829dd406fd7daadb36"
+    },
+    "auxiliary-vs-source727.patch": {
+      "bytes": 19076,
+      "sha256": "1de9c6d562d4584ff1c80cf6f2b638752048a7f0360d47efdb44f140cb77ad0a"
+    },
+    "environment-paths-readback.json": {
+      "bytes": 806,
+      "sha256": "96781c08c79ba4c8b50cfc8738ed5c69c6b5035d356b1356fdea4c4c2a3377e3"
+    },
+    "environment-scaffold.json": {
+      "bytes": 2008,
+      "sha256": "3ae3553c506f184ecf31f08773634013ed07213e4d2aa803b1f89ae6980f5094"
+    },
+    "helper.ps1": {
+      "bytes": 23316,
+      "sha256": "ce20de6a117350681b9db5979a67285b1d8d07ea7937ea912680b4e3d6a6fa32"
+    },
+    "main_windows.go": {
+      "bytes": 24227,
+      "sha256": "4e91b8ce877400a91a4f315b68a166ae3d2c7c19d4963d52ade521f03f2ac4b4"
+    },
+    "namespace-contract.json": {
+      "bytes": 6301,
+      "sha256": "9d8216a439d5a6f9574c530c1addcef5dd21e58f8a0d8e67a7df9036280420d6"
+    },
+    "namespace_qualification.fragment.py": {
+      "bytes": 1382,
+      "sha256": "adbcd381e6f11620154a5db7afc755d865748924047c4917a5f41cd5f21b6216"
+    },
+    "namespace_receiving_v2.fragment.py": {
+      "bytes": 6806,
+      "sha256": "818c287d4b10755b52c95765d4d54c9a7e652981cef8ecd97f19caf4e21b9be7"
+    },
+    "prebuilt_windows.go": {
+      "bytes": 19606,
+      "sha256": "2fc1016b4eff51c77a3c0e342de14d938b3f39b6a67c438b04ef262e09d8eeed"
+    },
+    "README.md": {
+      "bytes": 8640,
+      "sha256": "b6cf3010e9c71715c64613b4bb240014701239304832a6889cbe37dee07027cd"
+    },
+    "receiving-vs-v6.patch": {
+      "bytes": 1299,
+      "sha256": "3a9eb6473931f96268c407895f83024f06f5d08163eb54257e3e700fc612eb56"
+    },
+    "static-receiving.json": {
+      "bytes": 1018,
+      "sha256": "e2e1a21a02c393440408d40ca8d9776571d501eddffee8a1ff0142f55f47bb36"
+    },
+    "unchanged-source33-inputs.json": {
+      "bytes": 2820,
+      "sha256": "a9c6ed8714e1e3414e6fb09615446c11c4266c3f5f9009845c5cdaa4b283b415"
+    }
+  }
+}

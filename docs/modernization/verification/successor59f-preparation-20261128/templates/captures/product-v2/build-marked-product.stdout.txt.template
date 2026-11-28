@@ -1,0 +1,14 @@
+==> Building role=launcher subsystem=3 metadata=False -> @@RECOVERY_APPROVED_WORK_AREA_RAW@@\mcp-acceptance-rebuild-20261127-v1\successor-product-only-inputs-v2\marked-bundle\mcphub.exe
+==> Generating VERSIONINFO role=product
+==> Building role=product subsystem=2 metadata=True -> @@RECOVERY_APPROVED_WORK_AREA_RAW@@\mcp-acceptance-rebuild-20261127-v1\successor-product-only-inputs-v2\marked-bundle\mcphub-product\mcphub.exe
+publisherSource={"source_epoch":"861852f807c36673755014ef4657bf10252b4e75505bc8b73819bcf8cded7a3a","source_snapshot_sha256":"0249af1149b94877e011186a92ee05f104a9bd7afd0e1d676755ee190e64356e","file_count":3369}
+==> Product VERSIONINFO resources:
+
+[32;1mProductVersion   : [0m0.4.65
+[32;1mPrivateBuild     : [0mmcphub-build-v1;commit=59f618ebfbf6d9f52c6994d68586e3c2ebc202a8;build_date=2026-11-28T13:33:34Z
+[32;1mSpecialBuild     : [0mmcphub-role-v1;role=product
+[32;1mInternalName     : [0mmcphub
+[32;1mOriginalFilename : [0mmcphub.exe
+
+==> Done. Complete canonical entry-set build observation passed; identity manifest=@@RECOVERY_APPROVED_WORK_AREA_RAW@@\mcp-acceptance-rebuild-20261127-v1\successor-product-only-inputs-v2\marked-bundle\windows-product-identity.json version=0.4.65 commit=59f618ebfbf6d9f52c6994d68586e3c2ebc202a8 buildDate=2026-11-28T13:33:34Z.
+Completed current-source marked Product input preparation; no tests were executed.

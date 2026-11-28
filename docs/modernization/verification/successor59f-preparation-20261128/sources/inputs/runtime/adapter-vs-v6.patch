@@ -1,0 +1,770 @@
+--- v6/adapter
++++ successor/adapter
+@@ -16,10 +16,6 @@
+ GUARDED = Path(@@GUARD_PATH_REPR@@)
+ GUARDED_SHA = @@GUARD_SHA_REPR@@
+ PREP_SECONDS, OWNER_SECONDS, FINAL_SECONDS, TOTAL_SECONDS = 30, 320, 10, 355
+-FOCUSED_SCHEMA = "private-serena-native-focused-plan-v1"
+-FOCUSED_CASE = "TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite"
+-CANONICAL_RECEIVING = Path(@@RECEIVER_PATH_REPR@@)
+-CANONICAL_RECEIVING_SHA = @@RECEIVER_SHA_REPR@@
+ METADATA_WORK_SECONDS = 5
+ METADATA_CAPTURE_LIMIT = 1 << 20
+ ISSUER_SCHEMA = "literal-original-owner-issuer-v1"
+@@ -39,15 +35,14 @@
+ 
+ def load_owner_runtime():
+     """Only the root issuer imports native owners and mutable cache-admission state."""
+-    global part, core, guarded, canonical, Invocation
++    global part, core, guarded, Invocation
+     if "Invocation" in globals():
+         return
+     if REVIEW_COMPLETE is not True:
+         raise RuntimeError("owner composition is disabled pending review and exact pins")
+     modules = []
+     for name, path, expected in (("literal_coverage_primitives", PART, PART_SHA),
+-                                 ("literal_guarded_commands", GUARDED, GUARDED_SHA),
+-                                 ("fixed_canonical_receiving", CANONICAL_RECEIVING, CANONICAL_RECEIVING_SHA)):
++                                 ("literal_guarded_commands", GUARDED, GUARDED_SHA)):
+         raw = path.read_bytes()
+         if hashlib.sha256(raw).hexdigest() != expected:
+             raise RuntimeError("reviewed owner runtime changed: " + str(path))
+@@ -55,7 +50,7 @@
+         module = importlib.util.module_from_spec(spec)
+         exec(compile(raw, str(path), "exec"), module.__dict__)
+         modules.append(module)
+-    part, guarded, canonical = modules
++    part, guarded = modules
+     core = part.core
+     base = guarded.make_guarded_run_class(SimpleNamespace(
+         Run=core.OriginalRun, REPO=core.REPO, sha=core.sha, subprocess=core.subprocess))
+@@ -115,9 +110,7 @@
+             and values["-test.v"]=="test2json" and values["-test.count"]=="1"
+             and values["-test.timeout"] in ("5m","5m0s"))
+ 
+-def flags_are_focused(args):
+-    return (len(args) == 5 and args[-1] == "-test.run=^" + FOCUSED_CASE + "$"
+-            and flags_are_literal(args[:-1]))
++
+ 
+ def raw_command(run, argv, name, cwd, timeout, *, physical_receiver=None):
+     # A direct owner exit does not permit capture access. The original native
+@@ -126,110 +119,292 @@
+                 physical_receiver=physical_receiver)
+     return run.receipt["commands"][-1]
+ 
+-def canonical_failed_receiver(argv, cwd, proof_path, binding):
+-    """Bind failed-only receiving before launch, without granting capture access.
+-
+-    The guard calls this only after waiting on the same original Popen. These
+-    two original control records are metadata, never captures or replay input.
+-    Any read/close failure retains the actual file and refuses later retries.
+-    """
++
++
++# Integration fragment: requires validate_namespace_terminal from namespace_receiving_v2.fragment.py.
++# Physical closure and qualification remain separate; known FAIL stays FAIL.
++def namespace_qualification(proof, binding):
++    if validate_namespace_terminal(proof, binding) != "suite":
++        return False
++    required = (
++        "TestSecretsInit_RecoveryNamespaceBoundary",
++        "TestSecretsInit_RecoveryNamespaceRetainedDirectory",
++        "TestSecretsInit_RecoveryNamespaceFailurePaths",
++        "TestSupervisorPeerStrictControlConnections",
++        "TestRotateSupervisorStderrSinkIfOversize_AtBoundary",
++        "TestRotateSupervisorStderrSinkIfOversize_ReplacesExistingBackup",
++        "TestSupervisorStderrSinkOversize_MatchesRotationThreshold",
++    )
++    mandatory = proof.get("mandatory_tests", {})
++    return (
++        proof.get("root_exit_code") == 0
++        and proof.get("observations_verified") is True
++        and proof.get("mandatory_tests_passed") is True
++        and proof.get("binary_unchanged") is True
++        and proof.get("execution_binary_unchanged") is True
++        and set(mandatory) == set(required)
++        and all(mandatory[name] == {"Runs": 1, "Passes": 1, "Fails": 0, "Skips": 0}
++                for name in required)
++        and not proof.get("failure")
++        and not proof.get("cleanup_error")
++        and not proof.get("native_error")
++    )
++
++# Typed DATA receiving for the pinned Source foreground owner; no native action.
++FOREGROUND_CLEANUP_TESTS = (
++    "TestCanonicalGUIRuntimeRecoveryNativeIndependentReplay",
++    "TestCanonicalGUIRuntimeRecoveryNativeIndependentReplay/cleanup-uses-current-operation-context",
++    "TestCanonicalSuccessorNativeControlRetainsOriginalFiles",
++    "TestCanonicalSuccessorNativeControlRetainsOriginalFiles/absent",
++    "TestCanonicalSuccessorNativeControlRetainsOriginalFiles/identical",
++    "TestCanonicalSuccessorNativeControlRetainsOriginalFiles/different-identity",
++    "TestStartSupervisorDetachedBreakaway_AddsFlagOnSuccess",
++)
++
++def validate_foreground_terminal(proof, binding):
++    """Receive original closure only; snapshots convey no process authority."""
++    def check(ok, message):
++        if not ok:
++            raise RuntimeError("original foreground " + message)
++    keys = {"request_sha256", "request_nonce", "binary", "expected_sha256", "source_dir",
++            "run_root", "args", "controller_argv"}
++    check(isinstance(proof, dict) and isinstance(binding, dict) and set(binding) == keys,
++          "terminal binding is incomplete")
++    check(all(isinstance(binding[key], str) and binding[key]
++              for key in keys - {"args", "controller_argv"})
++          and re.fullmatch("[0-9a-f]{64}", binding["request_sha256"])
++          and re.fullmatch("[0-9a-f]{32}", binding["request_nonce"])
++          and re.fullmatch("[0-9a-f]{64}", binding["expected_sha256"])
++          and isinstance(binding["args"], list) and flags_are_literal(binding["args"])
++          and isinstance(binding["controller_argv"], list) and binding["controller_argv"],
++          "request identity or exact Go arguments differ")
++    expected_argv = [binding["controller_argv"][0], "--test-binary", binding["binary"],
++                     "--expected-sha256", binding["expected_sha256"], "--source-dir", binding["source_dir"],
++                     "--run-root", binding["run_root"], "--timeout", "5m", "--", *binding["args"]]
++    check(all(isinstance(value, str) and value for value in expected_argv)
++          and binding["controller_argv"] == expected_argv, "controller arguments differ")
++    check(proof.get("schema") == "literal-foreground-cli-run-v1"
++          and proof.get("mode") == "incoming-go-cli-foreground"
++          and proof.get("native_scope") == "original-root-and-original-job-members"
++          and proof.get("escaped_cleanup_scope") == "source-pinned-test-owned-original-wait-and-release-path"
++          and proof.get("nested_close_success_receipt") is False
++          and proof.get("binary") == binding["binary"]
++          and proof.get("expected_sha256") == binding["expected_sha256"]
++          and proof.get("binary_sha256") == binding["expected_sha256"]
++          and proof.get("source_dir") == binding["source_dir"]
++          and proof.get("run_root") == binding["run_root"] and proof.get("args") == binding["args"]
++          and proof.get("test_timeout") == "5m0s" and proof.get("bootstrap_budget") == "5s",
++          "receipt scope or immutable invocation differs")
++    check(all(proof.get(key) is True for key in
++              ("native_complete", "io_complete", "sinks_finalized", "settlement_complete",
++               "physical_complete", "capture_access", "path_pins_closed"))
++          and proof.get("custody_retained") is False and proof.get("cancelled") is False
++          and proof.get("qualification") in ("PASS", "FAIL")
++          and type(proof.get("root_exit_code")) is int,
++          "native, IO, or retained custody remains incomplete")
++    from datetime import datetime
++    times = {}
++    for key in ("started_utc", "finished_utc", "work_deadline", "cleanup_deadline"):
++        value = proof.get(key)
++        check(isinstance(value, str) and value.endswith("Z"), "deadline metadata is not UTC")
++        times[key] = datetime.fromisoformat(value[:-1] + "+00:00")
++    check((times["work_deadline"] - times["started_utc"]).total_seconds() == 305
++          and (times["cleanup_deadline"] - times["work_deadline"]).total_seconds() == 10
++          and times["finished_utc"] >= times["started_utc"],
++          "original fixed work or cleanup deadline differs")
++
++    native, root, outcome = proof.get("native"), proof.get("root"), proof.get("outcome")
++    check(isinstance(native, dict) and isinstance(root, dict) and isinstance(outcome, dict),
++          "native owner snapshots are absent")
++    check(type(native.get("NoChildKnown")) is bool and native.get("HandlesClosed") is True
++          and native.get("Error") is None and outcome.get("Pending") in (None, [])
++          and outcome.get("AcquisitionEntered") is True and outcome.get("JobAcquired") is True
++          and outcome.get("OriginalAcquired") is True and outcome.get("ChildObservationKnown") is True
++          and outcome.get("Identity") == root
++          and outcome.get("AdmissionPresent") is False
++          and outcome.get("AdmissionCloseAttempted") is False
++          and outcome.get("AdmissionCloseError") is None,
++          "original foreground owner or release snapshot differs")
++    no_child = native["NoChildKnown"]
++    if no_child:
++        check(root.get("Known") is False and proof.get("root_wait_known") is False
++              and proof.get("qualification") == "FAIL", "no-child closure cannot qualify a suite")
++    else:
++        check(root.get("Known") is True and type(root.get("PID")) is int and root["PID"] > 0
++              and isinstance(root.get("StartedAt"), str) and root["StartedAt"]
++              and type(root.get("NativeBirthFILETIME")) is int and root["NativeBirthFILETIME"] > 0
++              and native.get("RootIdentity") == root and native.get("RootWaitKnown") is True
++              and proof.get("root_wait_known") is True
++              and native.get("RootExitCode") == proof["root_exit_code"]
++              and native.get("MembersExited") is True and native.get("AccountingKnown") is True
++              and type(native.get("FinalActive")) is int and native["FinalActive"] == 0
++              and outcome.get("IdentityError") is None,
++              "original root wait, birth, members or accounting remains unproved")
++
++    for name in ("JobClose", "ProcessClose", "ThreadClose", "WrapperClose"):
++        slot = outcome.get(name)
++        check(isinstance(slot, dict) and slot.get("AcquiredKnown") is True
++              and type(slot.get("Acquired")) is bool and slot.get("Error") is None,
++              "native close observation is unknown: " + name)
++        if slot["Acquired"]:
++            check(all(slot.get(key) is True for key in ("CloseAttempted", "ClosedKnown", "Closed")),
++                  "native close is unreceived: " + name)
++    inherited = outcome.get("Inherited")
++    check(inherited is None or isinstance(inherited, list), "inherited-handle inventory is invalid")
++    for slot in inherited or []:
++        check(isinstance(slot, dict) and slot.get("CloseAttempted") is True
++              and slot.get("ClosedKnown") is True and type(slot.get("OwnedKnown")) is bool
++              and slot.get("NativeError") is None and slot.get("ReportedError") is None,
++              "original inherited-handle close remains unknown")
++    check(type(outcome.get("AttributesPresent")) is bool, "attribute ownership is unknown")
++    if outcome["AttributesPresent"]:
++        attrs = outcome.get("Attributes")
++        check(isinstance(attrs, dict) and attrs.get("Returned") is True
++              and attrs.get("AllocationKnown") is True and attrs.get("Error") is None
++              and type(attrs.get("Allocated")) is bool and type(attrs.get("Initialized")) is bool,
++              "original attribute-list close is unknown")
++        if attrs["Allocated"]:
++            check(attrs.get("FreeAttempted") is True and attrs.get("Freed") is True
++                  and (attrs["Initialized"] is False
++                       or attrs.get("DeleteAttempted") is True and attrs.get("DeleteReturned") is True),
++                  "original attribute-list resource remains retained")
++    check(type(outcome.get("MemberObservationPresent")) is bool, "member observation ownership is unknown")
++    if outcome["MemberObservationPresent"]:
++        members = outcome.get("Members")
++        check(isinstance(members, dict) and outcome.get("MemberPolicyError") is None
++              and "members" in members and (members["members"] is None or isinstance(members["members"], list))
++              and all(isinstance(row, dict) and row.get("handle_closed") is True
++                      for row in members["members"] or []), "original member handle remains unclosed")
++
++    io_record = proof.get("io")
++    check(isinstance(io_record, dict), "IO receipt is absent")
++    for name in ("Stdin", "StdoutRead", "StdoutWrite", "StderrRead", "StderrWrite"):
++        slot = io_record.get(name)
++        check(isinstance(slot, dict) and all(slot.get(key) is True for key in
++              ("Acquired", "CloseAttempted", "Closed")) and slot.get("CloseError") is None,
++              "original standard-file close is unreceived: " + name)
++    for name in ("Stdout", "Stderr"):
++        stream = io_record.get(name)
++        check(isinstance(stream, dict) and all(stream.get(key) is True for key in
++              ("WorkerStarted", "WorkerComplete", "EOF")) and stream.get("Error") is None
++              and stream.get("LimitExceeded") is False and stream.get("Limit") == 16 << 20
++              and type(stream.get("Bytes")) is int and 0 <= stream["Bytes"] <= 16 << 20,
++              "original reader, EOF or capture bound remains unreceived: " + name)
++    for name in ("stdout_sink", "stderr_sink"):
++        slot = proof.get(name)
++        check(isinstance(slot, dict) and all(slot.get(key) is True for key in
++              ("Acquired", "CloseAttempted", "Closed")) and slot.get("CloseError") is None,
++              "original sink finalization is unreceived: " + name)
++
++    pins = proof.get("path_pins")
++    expected_pins = [(binding["binary"], False), (binding["source_dir"], True),
++                     (str(Path(binding["run_root"]).parent), True), (binding["run_root"], True)]
++    check(isinstance(pins, list) and len(pins) == len(expected_pins),
++          "original path/image pin inventory is incomplete")
++    for pin, (path, directory) in zip(pins, expected_pins):
++        acquired = len(Path(path).parents) + 1
++        check(isinstance(pin, dict) and set(pin) == {"path", "directory", "acquired", "closes"}
++              and pin["path"] == path and pin["directory"] is directory
++              and type(pin["acquired"]) is int and pin["acquired"] == acquired
++              and isinstance(pin["closes"], list) and len(pin["closes"]) == acquired,
++              "original ancestor or image pin inventory differs")
++        for slot, expected_slot in zip(pin["closes"], range(acquired - 1, -1, -1)):
++            check(isinstance(slot, dict) and set(slot) in
++                  ({"slot", "attempted", "closed"}, {"slot", "attempted", "closed", "error"})
++                  and type(slot["slot"]) is int and slot["slot"] == expected_slot
++                  and slot["attempted"] is True and slot["closed"] is True
++                  and slot.get("error", "") == "", "original path/image pin close remains unreceived")
++
++    counts = proof.get("cleanup_tests")
++    check(isinstance(counts, dict) and set(counts) == set(FOREGROUND_CLEANUP_TESTS)
++          and all(isinstance(row, dict) and set(row) == {"Runs", "Passes", "Fails", "Skips"}
++                  and all(type(value) is int and value >= 0 for value in row.values())
++                  for row in counts.values()), "escaped-cleanup test observations are incomplete")
++    cleanup_passed = all(row == {"Runs": 1, "Passes": 1, "Fails": 0, "Skips": 0}
++                         for row in counts.values())
++    check(type(proof.get("escaped_cleanup_proved")) is bool
++          and proof["escaped_cleanup_proved"] is cleanup_passed
++          and (no_child or cleanup_passed), "escaped-actor cleanup is unproved")
++    return "no-child" if no_child else "suite"
++
++def foreground_qualification(proof, binding):
++    return (validate_foreground_terminal(proof, binding) == "suite"
++            and proof.get("qualification") == "PASS" and proof.get("root_exit_code") == 0
++            and proof.get("binary_after_measured") is True and proof.get("binary_unchanged") is True
++            and not proof.get("native_error") and not proof.get("failure"))
++
++def foreground_failed_receiver(argv, cwd, proof_path, binding):
++    """Freeze one original callback and share its control reader with normal receiving."""
+     expected_argv, expected_cwd = [str(value) for value in argv], str(cwd)
+     bound = json.loads(json.dumps(binding))
+     proof_path = Path(proof_path)
+-    physical_path = proof_path.parent / "failed-physical-closure.json"
++    if (expected_argv != bound["controller_argv"] or expected_cwd != bound["source_dir"]
++            or proof_path != Path(bound["run_root"]) / "result.json"):
++        raise RuntimeError("foreground receiving requires the prebound original invocation")
+     metadata_files, failure, received = [], None, None
+     unread = object()
+     original_result, original_bytes = unread, None
+-    if not canonical.same_path(str(proof_path),
+-                               canonical.ntpath.join(bound["run_root"], "result.json")):
+-        raise ValueError("failed canonical receiving requires the original result path")
+-
+-    def read_control(path):
+-        handle = path.open("rb")
+-        metadata_files.append(handle)
+-        try:
+-            raw = handle.read((16 << 20) + 1)
+-        finally:
+-            handle.close()
+-        if not handle.closed or len(raw) > 16 << 20:
+-            raise ValueError("original canonical control read/close is incomplete")
+-        return json.loads(raw), raw
+-
+     def read_original_result():
+         nonlocal failure, original_result, original_bytes
+         if failure is not None:
+-            raise RuntimeError("original canonical reader retains its first error") from failure
++            raise RuntimeError("original foreground reader retains its first error") from failure
+         if original_result is not unread:
+             return original_result
+         try:
+-            original_result, original_bytes = read_control(proof_path)
++            handle = proof_path.open("rb")
++            metadata_files.append(handle)
++            try:
++                original_bytes = handle.read((16 << 20) + 1)
++            finally:
++                handle.close()
++            if not handle.closed or len(original_bytes) > 16 << 20:
++                raise RuntimeError("original foreground control read/close is incomplete")
++            original_result = json.loads(original_bytes, object_pairs_hook=core.unique_object)
+             return original_result
+         except BaseException as error:
+             failure = error
+             raise
+-
+     def original_result_sha256():
+         read_original_result()
+         return hashlib.sha256(original_bytes).hexdigest()
+-
+     def receive(row, direct_exit_code):
+         nonlocal failure, received
+         if failure is not None:
+-            raise RuntimeError("original failed receiving retains its first error") from failure
++            raise RuntimeError("original failed foreground receiver retains its first error") from failure
+         if received is not None:
+             return received
+         try:
+             if (row.get("argv") != expected_argv or row.get("cwd") != expected_cwd
+                     or type(row.get("original_pid")) is not int or row["original_pid"] <= 0
+                     or type(direct_exit_code) is not int):
+-                raise ValueError("late receiving differs from the prebound original invocation")
+-            original = read_original_result()
+-            try:
+-                facts = canonical.receive(original, bound)
+-                mode = "normal-original-result-after-parent-failure"
+-            except ValueError:
+-                physical, _ = read_control(physical_path)
+-                facts = canonical.receive_failed(physical, bound, original,
+-                                                 row["original_pid"], direct_exit_code)
+-                mode = "original-failed-physical-closure"
+-            if facts.get("physical_complete") is not True or not all(f.closed for f in metadata_files):
+-                raise ValueError("original canonical physical receiving remains incomplete")
+-            received = {"physical_complete": True, "receiving_mode": mode,
+-                "original_result": str(proof_path), "original_controller_pid": row["original_pid"],
+-                "original_direct_exit_code": direct_exit_code, "metadata_handles_closed": True,
+-                "qualification_passed": False, "capture_access_issued": False,
+-                "source_or_cache_access_issued": False, "new_commands_permitted": False,
+-                "qualification_deadlines_extended": False, "physical_receiving": facts}
++                raise RuntimeError("late foreground receiving differs from its prebound invocation")
++            proof = read_original_result()
++            terminal = validate_foreground_terminal(proof, bound)
++            if terminal == "no-child" and direct_exit_code == 0:
++                raise RuntimeError("closed foreground creation failure requires its original nonzero exit")
++            if not all(handle.closed for handle in metadata_files):
++                raise RuntimeError("original foreground metadata reader remains open")
++            received = {"schema": "foreground-original-physical-closure-v1", "status": "CLOSED",
++                "physical_complete": True, "terminal_kind": terminal,
++                "original_controller_pid": row["original_pid"], "original_direct_exit_code": direct_exit_code,
++                "original_receipt": {"path": str(proof_path), "sha256": original_result_sha256()},
++                "proof": proof, "metadata_handles_closed": True, "qualification_passed": False,
++                "capture_access_issued": False, "source_or_cache_access_issued": False,
++                "new_commands_permitted": False, "qualification_deadlines_extended": False}
+             return received
+         except BaseException as error:
+             failure = error
+             raise
+-
+-    # Normal and failed receiving share the same prebound one-shot reader.
+     receive.read_original_result = read_original_result
+     receive.original_result_sha256 = original_result_sha256
+     return receive
+ 
++
+ def owner_proof(kind, proof, binary, digest, cwd, args, tagged, binding=None):
+-    if kind == "canonical":
+-        return canonical.receive(proof, binding)["qualification_passed"]
++    if kind == "foreground":
++        return foreground_qualification(proof, binding)
+     if kind == "namespace":
+-        mandatory = proof.get("mandatory_tests",{})
+-        required = (*part.NAMESPACE_TESTS,*part.PEER_TESTS)
+-        return (proof.get("schema")=="api-namespace-full-suite-v1"
+-                and proof.get("mode")=="prebuilt-full-suite"
+-                and proof.get("binary")==str(binary) and proof.get("expected_sha256")==digest
+-                and proof.get("binary_sha256")==digest and proof.get("source_dir")==str(cwd)
+-                and proof.get("args")==args
+-                and proof.get("compiled_tags")==(["test_state_path_env"] if tagged else [])
+-                and proof.get("root_wait_known") is True and proof.get("root_exit_code")==0
+-                and proof.get("settlement_complete") is True and proof.get("custody_retained") is False
+-                and proof.get("native_complete") is True and proof.get("io_complete") is True
+-                and proof.get("observations_verified") is True and proof.get("mandatory_tests_passed") is True
+-                and proof.get("binary_unchanged") is True
+-                and set(mandatory)==set(required)
+-                and all(mandatory[n]=={"Runs":1,"Passes":1,"Fails":0,"Skips":0} for n in required)
+-                and not proof.get("failure") and not proof.get("cleanup_error") and not proof.get("native_error"))
++        return namespace_qualification(proof, binding)
+     if kind == "job":
+         required = {*part.JOB_TESTS, part.JOB_TESTS[1]+"/real-native-typed-gc-and-creator"}
+         return (proof.get("fullSuite") is True and proof.get("success") is True
+@@ -238,12 +413,13 @@
+                 and proof.get("streamsJoined") is True and proof.get("controlWriterJoined") is True
+                 and proof.get("stdoutEOF") is True and proof.get("stderrEOF") is True
+                 and proof.get("binaryUnchanged") is True and set(proof.get("passed",[]))==required)
+-    return (proof.get("schema")=="literal-contained-test-run-v1" and proof.get("binary")==str(binary)
+-            and proof.get("binary_sha256")==digest and proof.get("source_dir")==str(cwd)
+-            and proof.get("args")==args and proof.get("root_wait_known") is True
+-            and proof.get("root_exit_code")==0 and proof.get("settlement_complete") is True
+-            and proof.get("custody_retained") is False and proof.get("binary_unchanged") is True
+-            and proof.get("binary_after_measured") is True and not proof.get("failure"))
++    return (kind == "contained" and proof.get("schema")=="literal-contained-test-run-v1"
++            and proof.get("binary")==str(binary) and proof.get("binary_sha256")==digest
++            and proof.get("source_dir")==str(cwd) and proof.get("args")==args
++            and proof.get("root_wait_known") is True and proof.get("root_exit_code")==0
++            and proof.get("settlement_complete") is True and proof.get("custody_retained") is False
++            and proof.get("binary_unchanged") is True and proof.get("binary_after_measured") is True
++            and not proof.get("failure"))
+ 
+ def native_settled(kind, proof):
+     if kind == "job":
+@@ -251,7 +427,8 @@
+                 and proof.get("streamsJoined") is True and proof.get("controlWriterJoined") is True
+                 and proof.get("stdoutEOF") is True and proof.get("stderrEOF") is True
+                 and proof.get("custodyRetained",False) is False)
+-    return (proof.get("root_wait_known") is True and proof.get("settlement_complete") is True
++    return (kind in ("namespace", "contained")
++            and proof.get("root_wait_known") is True and proof.get("settlement_complete") is True
+             and proof.get("custody_retained") is False
+             and (kind!="namespace" or (proof.get("native_complete") is True and proof.get("io_complete") is True)))
+ 
+@@ -281,11 +458,14 @@
+                 or not isinstance(proof.get("failure"), str) or not proof["failure"]):
+             raise RuntimeError("namespace pre-child refusal differs from the original request")
+         return "prechild-refusal"
+-    if (proof.get("schema") != "api-namespace-full-suite-v1"
+-            or proof.get("mode") != "prebuilt-full-suite"
++    if (proof.get("schema") != "api-namespace-full-suite-v2"
++            or proof.get("mode") != "incoming-go-image-copy"
+             or proof.get("binary") != binding["binary"]
+             or proof.get("expected_sha256") != binding["expected_sha256"]
+             or proof.get("binary_sha256") != binding["expected_sha256"]
++            or proof.get("evidence_root") != str(Path(binding["parent"])/"r")
++            or proof.get("execution_binary") != str(Path(binding["parent"])/"r"/"bin"/"api.test.exe")
++            or proof.get("execution_sha256") != binding["expected_sha256"]
+             or proof.get("source_dir") != binding["source_dir"] or proof.get("args") != binding["args"]
+             or proof.get("compiled_tags") != (["test_state_path_env"] if binding["test_state_path_env"] else [])
+             or not native_settled("namespace", proof)):
+@@ -360,31 +540,21 @@
+     receive.original_result_sha256=original_result_sha256
+     return receive
+ 
+-def finalize_owner_capture(run, command, kind, proof_path, receipt_key, binary, digest, cwd, args, tagged, binding=None, *, canonical_receiver=None, namespace_binding=None, namespace_receiver=None):
+-    def receive_completion(_row):
+-        if kind == "canonical":
+-            if canonical_receiver is None:
+-                raise RuntimeError("canonical receiving requires its prebound original reader")
+-            proof=canonical_receiver.read_original_result()
+-        elif kind=="namespace":
+-            if namespace_receiver is None:
+-                raise RuntimeError("namespace receiving requires its prebound original reader")
+-            proof=namespace_receiver.read_original_result()
++def finalize_owner_capture(run, command, kind, proof_path, receipt_key, binary, digest, cwd, args, tagged, *, owner_binding=None, owner_receiver=None):
++    def receive_completion(row):
++        if kind in ("namespace", "foreground"):
++            if owner_receiver is None:
++                raise RuntimeError("typed owner receiving requires its prebound original reader")
++            proof=owner_receiver.read_original_result()
+         else:
+             proof=json.loads(proof_path.read_text(encoding="utf-8"))
+         record={"receipt":str(proof_path),"proof":proof}
+         if receipt_key=="owner":
+             record["kind"]=kind
+         run.receipt[receipt_key]=record
+-        if kind == "canonical":
+-            facts = canonical.receive(proof, binding)
+-            run.receipt["canonical_receiving"] = facts
+-            bound = facts["physical_complete"] is True
+-        elif kind!="namespace" and not native_settled(kind,proof):
++        if kind not in ("namespace", "foreground") and not native_settled(kind, proof):
+             raise RuntimeError("original native or IO settlement is unverified; captures retained unmeasured")
+-        if kind=="canonical":
+-            pass  # The exact original composite, invocation and plan were received above.
+-        elif kind=="job":
++        if kind=="job":
+             packet_path=proof_path.parent/"packet.json"
+             packet=json.loads(packet_path.read_text(encoding="utf-8"))
+             bound=(proof.get("schema")=="job-fixture-controller-result-v1" and proof.get("fullSuite") is True
+@@ -393,11 +563,18 @@
+                 and packet.get("sourceDir")==str(cwd) and packet.get("binarySha256")==digest
+                 and sha(packet_path)==proof.get("bind",{}).get("packet"))
+         elif kind=="namespace":
+-            terminal=validate_namespace_terminal(proof,namespace_binding)
++            terminal=validate_namespace_terminal(proof,owner_binding)
+             if terminal=="prechild-refusal":
+-                if type(_row.get("exit_code")) is not int or _row["exit_code"]==0:
++                if type(row.get("exit_code")) is not int or row["exit_code"]==0:
+                     raise RuntimeError("namespace admission refusal requires its original nonzero exit")
+                 run.receipt["namespace_prechild_refusal"]=True
++            bound=True
++        elif kind=="foreground":
++            terminal=validate_foreground_terminal(proof,owner_binding)
++            if terminal=="no-child":
++                if type(row.get("exit_code")) is not int or row["exit_code"]==0:
++                    raise RuntimeError("foreground creation failure requires its original nonzero exit")
++                run.receipt["foreground_no_child"]=True
+             bound=True
+         elif kind=="contained":
+             bound=(proof.get("schema")=="literal-contained-test-run-v1"
+@@ -411,9 +588,8 @@
+         run.receipt["native_custody_settled"]=True
+         return proof
+     run.finalize_deferred(command,receive_completion,decode=False)
+-    run.receipt[receipt_key]["sha256"]=(canonical_receiver.original_result_sha256()
+-                                        if kind == "canonical" else namespace_receiver.original_result_sha256()
+-                                        if kind == "namespace" else sha(proof_path))
++    run.receipt[receipt_key]["sha256"]=(owner_receiver.original_result_sha256()
++                                       if kind in ("namespace", "foreground") else sha(proof_path))
+     return command["completion_receiving"]
+ 
+ def mandatory(package, tagged):
+@@ -464,33 +640,11 @@
+                             "--expected-commit",plan["commit"],"--expected-build-date",plan["buildDate"],
+                             "--expected-source-epoch",built["publisher_source"]["source_epoch"]],"incoming-product")
+     core.new_json(bundle/"windows-product-identity.json",identity)
+-    record=core.bundle_admission(run,bundle,plan,"incoming",built["native_input_sha256"],
++    record=core.bundle_admission(run,bundle,plan,"incoming",
+                                  source_epoch=built["publisher_source"]["source_epoch"])
+     return binary,record
+ 
+-def canonical_plan(run, parent_plan, binary, digest, cwd, args):
+-    inputs = parent_plan["canonical_inputs"]
+-    if (set(inputs) != {"source_commit", "fixture", "product", "tools"}
+-            or inputs["source_commit"] != parent_plan["commit"]
+-            or inputs["fixture"]["path"] != parent_plan["native_actor_fixture"]
+-            or not {"powershell", "netstat", "netsh", "conhost"}.issubset(inputs["tools"])
+-            or not set(inputs["tools"]).issubset({"powershell", "netstat", "netsh", "conhost", "wmic"})):
+-        raise RuntimeError("fixed original canonical operands differ")
+-    for value in (inputs["fixture"], inputs["product"], *inputs["tools"].values()):
+-        if (set(value) != {"path", "sha256"} or not re.fullmatch(r"[0-9a-f]{64}", value["sha256"])
+-                or parent_plan["input_files"].get(value["path"]) != value["sha256"]):
+-            raise RuntimeError("canonical operand is not pinned by the original driver")
+-    value = {"schema": canonical.PLAN_SCHEMA, "source_commit": parent_plan["commit"],
+-        "profile": "full", "focused_case": "", "binary": {"path": str(binary), "sha256": digest},
+-        "source_dir": str(cwd), "fixture": inputs["fixture"], "product": inputs["product"],
+-        "tools": inputs["tools"], "original_args": list(args), "expected_root_names": list(canonical.ROOTS)}
+-    path = run.root / "canonical-plan.json"
+-    core.new_json(path, value)
+-    binding = {"plan": value, "canonical_plan": str(path), "canonical_plan_sha256": sha(path),
+-               "run_root": str(run.root / "suite")}
+-    run.receipt["canonical_binding"] = binding
+-    run.save()
+-    return binding
++
+ 
+ def execute(options, retain, cancelled):
+     started=options.started_ns / 1_000_000_000
+@@ -498,17 +652,11 @@
+     if not plan_path.is_relative_to(core.RUNS) or sha(plan_path)!=options.plan_sha256:
+         raise RuntimeError("original pinned private plan required")
+     plan=json.loads(plan_path.read_text(encoding="utf-8"))
+-    focused=plan.get("schema")==FOCUSED_SCHEMA
+-    if focused:
+-        if (plan.get("phase")!="default" or plan.get("focused_case")!=FOCUSED_CASE
+-                or set(plan.get("packages",{}))!={part.CLI}
+-                or plan.get("private_serena_migration") is None):
+-            raise RuntimeError("only the one original default CLI native consumer may be selected")
+-    elif (plan.get("schema")!="literal-go-test-plan-v1" or plan["phase"] not in ("default","state")
+-            or "focused_case" in plan):
+-        raise RuntimeError("unexpected literal plan schema")
++    if (plan.get("schema")!="literal-go-test-plan-v1" or plan["phase"] not in ("default","state")
++            or "focused_case" in plan or "private_serena_migration" in plan or "canonical_inputs" in plan):
++        raise RuntimeError("unexpected literal successor plan schema")
+     driver=core.ordinary(plan["driver_root"],True)
+-    expected_driver=core.FOCUSED_RUN if focused else core.FULL_RUN
++    expected_driver=core.FULL_RUN
+     if driver!=expected_driver or plan_path.parent!=driver:
+         raise RuntimeError("literal plan is outside its original driver scope")
+     snapshot=core.ordinary(plan["source_snapshot"],False)
+@@ -518,14 +666,14 @@
+         raise RuntimeError("source snapshot commit differs from the literal plan")
+     if (plan.get("test_source_commit") != plan["commit"] or plan["commit"] != core.CACHE_COMMIT
+             or plan.get("product_source_commit") != core.PRODUCT_SOURCE_COMMIT):
+-        raise RuntimeError("separate TestSource and retained Product identities differ")
++        raise RuntimeError("exact TestSource and same-source Product identities differ")
+     stop=driver/"unsafe-stop.json"
+     if stop.exists():
+         raise RuntimeError("an earlier original owner remains unverified; no later receiver may start")
+     pinned(plan["input_files"])
+     cwd=core.ordinary(options.cwd,True)
+     packages=[p for p,row in plan["packages"].items() if os.path.normcase(row["directory"])==os.path.normcase(str(cwd))]
+-    exact_flags=flags_are_focused(options.test_args) if focused else flags_are_literal(options.test_args)
++    exact_flags=flags_are_literal(options.test_args)
+     if len(packages)!=1 or not exact_flags:
+         raise RuntimeError("original Go cwd or literal arguments differ from the frozen manifest")
+     package=packages[0]
+@@ -565,13 +713,10 @@
+         "budgets_seconds":{"adapter_preparation":PREP_SECONDS,"owner_logical":315,"owner_host_watchdog":OWNER_SECONDS,
+                            "final_measurement_conversion_replay":FINAL_SECONDS,"adapter_total_checked":TOTAL_SECONDS,"cmd_go_hard_kill":360},
+         "receiver_environment_overrides":plan["receiver_overrides"]})
+-    if focused:
+-        run.receipt["focused_case"]=FOCUSED_CASE
+     replay=None
+     owner_finished=None
+-    migration=None
+-    canonical_binding=None
+     namespace_binding=None
++    foreground_binding=None
+     code=1
+     try:
+         temp_pin,temp_record=core.receive_short_temp(run)
+@@ -597,11 +742,11 @@
+                 or plan.get("receiver_product_source_commit")!=core.CACHE_COMMIT
+                 or plan.get("receiver_publisher_source")!=built["publisher_source"]
+                 or plan.get("receiver_linker_flags")!=["-s","-w"]
+-                or plan.get("marked_product_inputs")!=core.CFG["marked"]["inputs"]):
++                or plan.get("marked_product_inputs")!=core.CFG["product"]["inputs"]):
+             raise RuntimeError("incoming recorded flags and exact original marked receiver binding differ")
+         run.receipt["marked_receiver_source"]={"publisher_inputs":plan["marked_product_inputs"],
+             "product_source_commit":core.CACHE_COMMIT,"publisher_source":built["publisher_source"],
+-            "receiver_linker_flags":["-s","-w"],"new_product_qualification":package in (part.API,part.CLI)}
++            "receiver_linker_flags":["-s","-w"],"new_product_qualification":package==part.CLI}
+         # Go records the last raw per-package flag, not the selected flags.
+         # This binds the invocation record; actual PE admission remains separate.
+         if settings.get("-ldflags")!=plan["recorded_linker_flags"]:
+@@ -610,26 +755,19 @@
+         built=json.loads(Path(plan["build_receipt"]).read_text(encoding="utf-8"))
+         if (built.get("schema")!="current-source-product-receiver-inputs-v1"
+                 or built.get("build_plan",{}).get("commit")!=plan["test_source_commit"]):
+-            raise RuntimeError("same-image marked receiver must bind original TestSource727d")
++            raise RuntimeError("same-image marked receiver must bind the selected final TestSource")
+         if package in (part.API,part.CLI):
++            run.env["MCPHUB_E2E_SCHEDULER"]="none"
++        if package==part.CLI:
+             binary,record=qualify(run,incoming,built)
+             run.env.update(part.canonical_environment(record))
+-            run.env["MCPHUB_E2E_SCHEDULER"]="none"
+-            if package==part.CLI:
+-                run.env["MCPHUB_CANONICAL_NATIVE_ACTOR_FIXTURE"]=plan["native_actor_fixture"]
+-                migration=plan.get("private_serena_migration")
+-                if migration is not None:
+-                    names=("MCPHUB_PRIVATE_SERENA_MIGRATION_INPUT","MCPHUB_PRIVATE_SERENA_MIGRATION_INPUT_SHA256")
+-                    if (set(migration)!={"input","input_files"} or set(migration["input"])!={"path","sha256"}
+-                            or migration["input_files"].get(migration["input"]["path"])!=migration["input"]["sha256"]
+-                            or not re.fullmatch("[0-9a-f]{64}",migration["input"]["sha256"])
+-                            or any(k in options.ambient_present or k in run.env for k in (*names,"MCPHUB_PRIVATE_SERENA_MIGRATION_CASE_CONFIG"))):
+-                        raise RuntimeError("explicit pinned CLI migration input differs or ambient dispatch is present")
+-                    pinned(migration["input_files"])
+-                    run.env.update(dict(zip(names,(migration["input"]["path"],migration["input"]["sha256"]))))
+-                    run.receipt["private_serena_migration_input"]=migration["input"]
+-            if package==part.API and tagged:
+-                run.env.update(plan["attach_environment"])
++            fixture=core.ordinary(plan["native_actor_fixture"],False)
++            if (plan.get("native_product",{}).get("fixture")!=str(fixture)
++                    or plan["input_files"].get(str(fixture))!=sha(fixture)):
++                raise RuntimeError("separate tagged native Product fixture is not pinned by this invocation")
++            run.env["MCPHUB_CANONICAL_NATIVE_ENTRY_FIXTURE"]=str(fixture)
++        if package==part.API and tagged:
++            run.env.update(plan["attach_environment"])
+         run.receipt.update({"executed_binary":str(binary),"executed_sha256":sha(binary),"build_info":info,
+                             "qualified_bundle":record,
+                             "receiver_environment":{k:v for k,v in run.env.items() if k.startswith(("GO","CGO","MCPHUB_")) or k in ("PATH","TEMP","TMP","USERPROFILE","APPDATA","LOCALAPPDATA","SERENA_HOME")}})
+@@ -649,8 +787,8 @@
+             raise RuntimeError("same-image inventory has duplicate names")
+         tests=sorted(n for n in names if not n.startswith("Benchmark"))
+         run.receipt["inventory"]={"tests":{package:tests},"benchmarks":{package:sorted(n for n in names if n.startswith("Benchmark"))}}
+-        required=[(part.CLI,FOCUSED_CASE)] if focused else mandatory(package,tagged)
+-        selected=[FOCUSED_CASE] if focused else tests
++        required=mandatory(package,tagged)
++        selected=tests
+         if not {t.split("/",1)[0] for _,t in required}.issubset(tests):
+             raise RuntimeError("mandatory original owner tests are missing from this input image")
+         run.receipt["preparation_seconds"]=time.monotonic()-started
+@@ -677,42 +815,43 @@
+                 "args":list(options.test_args),"controller_argv":[str(value) for value in argv],
+                 "test_state_path_env":tagged}
+             run.receipt["namespace_request"]=namespace_binding
+-        elif package==part.CLI and not focused:
+-            kind="canonical"; owner_root=case/"suite"
+-            canonical_binding=canonical_plan(run,plan,binary,original_hash,cwd,options.test_args)
+-            argv=[plan["tools"]["canonical"],"--test-binary",binary,"--expected-sha256",original_hash,
+-                  "--source-dir",cwd,"--run-root",owner_root,"--timeout","5m",
+-                  "--canonical-plan",canonical_binding["canonical_plan"],
+-                  "--canonical-plan-sha256",canonical_binding["canonical_plan_sha256"],
+-                  "--profile","full","--",*options.test_args]
++        elif package==part.CLI:
++            if plan.get("cli_owner_protocol")!="literal-foreground-cli-run-v1":
++                raise RuntimeError("exact reviewed foreground CLI owner protocol required")
++            kind="foreground"; owner_root=case/"suite"
++            argv=[plan["tools"]["cli"],"--test-binary",binary,"--expected-sha256",original_hash,
++                  "--source-dir",cwd,"--run-root",owner_root,"--timeout","5m","--",*options.test_args]
+             proof_path=owner_root/"result.json"
++            foreground_binding={"request_sha256":options.request_sha256,"request_nonce":options.request_nonce,
++                "binary":str(binary),"expected_sha256":original_hash,"source_dir":str(cwd),
++                "run_root":str(owner_root),"args":list(options.test_args),
++                "controller_argv":[str(value) for value in argv]}
++            run.receipt["foreground_request"]=foreground_binding
+         else:
+             kind="contained"; owner_root=case/"suite"
+             argv=[plan["tools"]["contained"],"--test-binary",binary,"--expected-sha256",original_hash,
+                   "--source-dir",cwd,"--run-root",owner_root,"--timeout","5m","--",*options.test_args]
+             proof_path=owner_root/"result.json"
+-        if not focused:
+-            run.receipt["headless_configuration"]=core.receive_headless_before(case,run.env)
++        run.receipt["headless_configuration"]=core.receive_headless_before(case,run.env)
+         run.receipt["preparation_seconds"]=time.monotonic()-started
+         if run.receipt["preparation_seconds"]>PREP_SECONDS:
+             raise RuntimeError("adapter preparation expired before original full-suite creation")
+         run.receipt["native_custody_settled"]=False
+         run.save()
+-        failed_receiver = (canonical_failed_receiver(argv, cwd, proof_path, canonical_binding)
+-                           if kind == "canonical" else namespace_failed_receiver(argv,cwd,proof_path,namespace_binding)
+-                           if kind == "namespace" else None)
++        owner_binding=foreground_binding if kind=="foreground" else namespace_binding
++        failed_receiver = (foreground_failed_receiver(argv,cwd,proof_path,foreground_binding)
++                           if kind=="foreground" else namespace_failed_receiver(argv,cwd,proof_path,namespace_binding)
++                           if kind=="namespace" else None)
+         replay=raw_command(run,argv,"suite-owner",cwd,OWNER_SECONDS,
+                            physical_receiver=failed_receiver)
+         owner_finished=time.monotonic()
+         code=replay["exit_code"]
+-        proof=finalize_owner_capture(run,replay,kind,proof_path,"owner",binary,original_hash,cwd,options.test_args,tagged,canonical_binding,
+-                                     canonical_receiver=failed_receiver if kind=="canonical" else None,
+-                                     namespace_binding=namespace_binding,
+-                                     namespace_receiver=failed_receiver if kind=="namespace" else None)
++        proof=finalize_owner_capture(run,replay,kind,proof_path,"owner",binary,original_hash,cwd,options.test_args,tagged,
++                                     owner_binding=owner_binding,owner_receiver=failed_receiver)
+         if run.receipt.get("namespace_prechild_refusal") is True:
+             raise RuntimeError("original namespace admission refused before a contained stage: "+proof["failure"])
+         settled=run.receipt["native_custody_settled"]
+-        proof_ok=owner_proof(kind,proof,binary,original_hash,cwd,options.test_args,tagged,canonical_binding) and code==0
++        proof_ok=owner_proof(kind,proof,binary,original_hash,cwd,options.test_args,tagged,owner_binding) and code==0
+         if settled:
+             raw_stdout=Path(proof["stdout_path"]) if kind=="namespace" else proof_path.parent/("stdout.log" if kind=="job" else "stdout.raw")
+             raw_stderr=Path(proof["stderr_path"]) if kind=="namespace" else proof_path.parent/("stderr.log" if kind=="job" else "stderr.txt")
+@@ -748,15 +887,8 @@
+             run.receipt["image_unchanged"]=sha(incoming)==original_hash and sha(binary)==original_hash
+             run.receipt["bundle_unchanged"]=record is None or core.tree(Path(record["path"]))==record["files"]
+             pinned(plan["input_files"])
+-            if canonical_binding is not None:
+-                if sha(canonical_binding["canonical_plan"]) != canonical_binding["canonical_plan_sha256"]:
+-                    raise RuntimeError("original canonical plan changed after composite completion")
+-            if migration is not None:
+-                pinned(migration["input_files"])
+-                run.receipt["private_migration_inputs_unchanged"]=True
+-            if not focused:
+-                run.receipt["headless_configuration"]["after"]=core.receive_headless_after(case,run.env,run.receipt["headless_configuration"])
+-                run.receipt["headless_configuration_received"]=True
++            run.receipt["headless_configuration"]["after"]=core.receive_headless_after(case,run.env,run.receipt["headless_configuration"])
++            run.receipt["headless_configuration_received"]=True
+             run.receipt["original_inputs_unchanged"]=True
+             if time.monotonic()-owner_finished>FINAL_SECONDS or time.monotonic()-started>TOTAL_SECONDS:
+                 raise RuntimeError("late post-owner verification; infrastructure failure, no retry")
+@@ -925,6 +1057,7 @@
+ class OriginalInvocationIssuer:
+     """One root-owned serial worker; filesystem records carry data, never owners."""
+     validate_namespace_terminal=staticmethod(validate_namespace_terminal)
++    validate_foreground_terminal=staticmethod(validate_foreground_terminal)
+     def __init__(self, root, plans):
+         load_owner_runtime()
+         self.root = Path(root)

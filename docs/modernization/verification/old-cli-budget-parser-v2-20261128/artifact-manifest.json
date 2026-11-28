@@ -1,0 +1,29 @@
+{
+  "schema": "old-cli-budget-parser-v2-artifacts",
+  "files": {
+    ".gitattributes": {
+      "bytes": 8,
+      "sha256": "705fd4d6451a31d36b3df7de96f83f30ac976c9b4a6d1e51671d8e2f33e2d0da"
+    },
+    "ascii-to-utf8.patch": {
+      "bytes": 1097,
+      "sha256": "d8a2f53c5ac598610c64f961c32cbe4046b81109bd292a96f5b5a6b5ca73ef1f"
+    },
+    "evidence.json": {
+      "bytes": 1835,
+      "sha256": "eb3a5f5207dedb1c26823e0bbef179697d1aed20963abb456e1cf72ce714a9e6"
+    },
+    "original-data-failure.json": {
+      "bytes": 354,
+      "sha256": "2e0690b608eda5d2d4bb9c722f8dcd90d0e520b757a86d36efa3caa1ed2f174b"
+    },
+    "parse_closed_cli_durations_v2.py": {
+      "bytes": 9156,
+      "sha256": "7f623cc124d2aa04432c694d94007d39ebf6563a13a3944f2efc30a125bb13c9"
+    },
+    "README.md": {
+      "bytes": 3596,
+      "sha256": "dc2bcfca21e3ee8ca46a9a32b611063bbdafd7820a4dd0e965d7285596ab8f9d"
+    }
+  }
+}

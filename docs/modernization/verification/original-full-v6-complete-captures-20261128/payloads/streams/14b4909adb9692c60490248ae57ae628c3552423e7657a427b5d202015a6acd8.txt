@@ -1,0 +1,3 @@
+TestRustOwnerBuildBindingClassifiesAbsentMark
+TestValidateRustOwnerBuildMark
+TestRustOwnerBuildBindingRejectsUnmarkedAndMalformed

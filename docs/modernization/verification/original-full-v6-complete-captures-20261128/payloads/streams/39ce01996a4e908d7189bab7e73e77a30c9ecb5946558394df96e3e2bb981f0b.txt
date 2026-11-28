@@ -1,0 +1,138 @@
+=== RUN   TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics
+=== RUN   TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics/sink-success
+--- PASS: TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics/sink-success (0.02s)
+=== NAME  TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics
+=== RUN   TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics/sink-error
+--- PASS: TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics/sink-error (0.01s)
+=== NAME  TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics
+--- PASS: TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics (0.02s)
+=== NAME  
+=== RUN   TestResolveDefaultWorkspaceRoutesMarkerFallbackToConfiguredAuditSink
+--- PASS: TestResolveDefaultWorkspaceRoutesMarkerFallbackToConfiguredAuditSink (0.01s)
+=== NAME  
+=== RUN   TestResolveByPath_AbsoluteMatch
+--- PASS: TestResolveByPath_AbsoluteMatch (0.01s)
+=== NAME  
+=== RUN   TestResolveByPath_RelativeMatchFirstWorkspace
+--- PASS: TestResolveByPath_RelativeMatchFirstWorkspace (0.01s)
+=== NAME  
+=== RUN   TestResolveByPath_RelativePathDotDotEscapeRejected
+--- PASS: TestResolveByPath_RelativePathDotDotEscapeRejected (0.02s)
+=== NAME  
+=== RUN   TestResolveByPath_NoMatch_ReturnsErrWorkspaceNotFound
+--- PASS: TestResolveByPath_NoMatch_ReturnsErrWorkspaceNotFound (0.01s)
+=== NAME  
+=== RUN   TestAncestorWalk_FindsProjectYml
+--- PASS: TestAncestorWalk_FindsProjectYml (0.00s)
+=== NAME  
+=== RUN   TestAncestorWalk_NoMarker_ReturnsErrWorkspaceNotFound
+--- PASS: TestAncestorWalk_NoMarker_ReturnsErrWorkspaceNotFound (0.00s)
+=== NAME  
+=== RUN   TestAncestorWalk_RejectsRelativeInput
+--- PASS: TestAncestorWalk_RejectsRelativeInput (0.00s)
+=== NAME  
+=== RUN   TestResolveByPath_EmptyPath_ReturnsErrInvalidPath
+--- PASS: TestResolveByPath_EmptyPath_ReturnsErrInvalidPath (0.00s)
+=== NAME  
+=== RUN   TestResolveDefaultWorkspace_UsesOnlyTheCurrentCanonicalSerenaRow
+--- PASS: TestResolveDefaultWorkspace_UsesOnlyTheCurrentCanonicalSerenaRow (0.01s)
+=== NAME  
+=== RUN   TestResolveDefaultWorkspace_ClassifiesAbsentEmptyAndUnreadableMarker
+--- PASS: TestResolveDefaultWorkspace_ClassifiesAbsentEmptyAndUnreadableMarker (0.01s)
+=== NAME  
+=== RUN   TestResolveByPath_RejectsUNCPath_OnWindows
+--- PASS: TestResolveByPath_RejectsUNCPath_OnWindows (0.00s)
+=== NAME  
+=== RUN   TestResolveByPath_AcceptsLocalDoubleSlash_OnNonWindows
+    resolver_test.go:415: double-slash absolute is Unix-only path semantics; runtime.GOOS = "windows"
+--- SKIP: TestResolveByPath_AcceptsLocalDoubleSlash_OnNonWindows (0.00s)
+=== NAME  
+=== RUN   TestResolveByPath_EmptyRegistry_ReturnsErrWorkspaceNotFound
+--- PASS: TestResolveByPath_EmptyRegistry_ReturnsErrWorkspaceNotFound (0.00s)
+=== NAME  
+=== RUN   TestResolveByPath_TransientStatErrorPreservesCache
+--- PASS: TestResolveByPath_TransientStatErrorPreservesCache (0.01s)
+=== NAME  
+=== RUN   TestResolveByPath_FileDeletionClearsCache
+--- PASS: TestResolveByPath_FileDeletionClearsCache (0.01s)
+=== NAME  
+=== RUN   TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups
+--- PASS: TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups (0.01s)
+=== NAME  
+=== RUN   TestResolveByPath_SameIdentitySizeMtimeEditObservedWithin32Lookups
+--- PASS: TestResolveByPath_SameIdentitySizeMtimeEditObservedWithin32Lookups (0.01s)
+=== NAME  
+=== RUN   TestResolveByPath_DoesNotCloneUnrelatedNestedRows
+    resolver_test.go:672: allocations per lookup: one row=88; with 256 unrelated rows=88; growth=0
+--- PASS: TestResolveByPath_DoesNotCloneUnrelatedNestedRows (0.04s)
+=== NAME  
+=== RUN   TestResolveByPath_IgnoresLSPEntries
+--- PASS: TestResolveByPath_IgnoresLSPEntries (0.00s)
+=== NAME  
+=== RUN   TestCanonicalizeWorkspacePath_WindowsDriveLetter
+--- PASS: TestCanonicalizeWorkspacePath_WindowsDriveLetter (0.00s)
+=== NAME  
+=== RUN   TestCanonicalizeWorkspacePath_EmptyReturnsEmpty
+--- PASS: TestCanonicalizeWorkspacePath_EmptyReturnsEmpty (0.00s)
+=== NAME  
+=== RUN   TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock
+--- PASS: TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock (0.01s)
+=== NAME  
+=== RUN   TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock
+--- PASS: TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock (0.31s)
+=== NAME  
+=== RUN   TestSessionRouter_BindOnPathCall
+--- PASS: TestSessionRouter_BindOnPathCall (0.00s)
+=== NAME  
+=== RUN   TestSessionRouter_LookupUnboundReturnsNil
+--- PASS: TestSessionRouter_LookupUnboundReturnsNil (0.00s)
+=== NAME  
+=== RUN   TestSessionRouter_UnbindRemovesEntry
+--- PASS: TestSessionRouter_UnbindRemovesEntry (0.00s)
+=== NAME  
+=== RUN   TestSessionRouter_CleanupExpiresOldSessions
+--- PASS: TestSessionRouter_CleanupExpiresOldSessions (0.00s)
+=== NAME  
+=== RUN   TestSessionRouter_CleanupPreservesRecentSessions
+--- PASS: TestSessionRouter_CleanupPreservesRecentSessions (0.00s)
+=== NAME  
+=== RUN   TestSessionRouter_RebindRefreshesTTL
+--- PASS: TestSessionRouter_RebindRefreshesTTL (0.00s)
+=== NAME  
+=== RUN   TestSessionRouter_LookupRefreshesLastSeen
+--- PASS: TestSessionRouter_LookupRefreshesLastSeen (0.00s)
+=== NAME  
+=== RUN   TestSessionRouter_NoLookupExpiresAtTTL
+--- PASS: TestSessionRouter_NoLookupExpiresAtTTL (0.00s)
+=== NAME  
+=== RUN   TestSessionRouter_BindNilWorkspaceIgnored
+--- PASS: TestSessionRouter_BindNilWorkspaceIgnored (0.00s)
+=== NAME  
+=== RUN   TestSessionRouter_BindEmptySessionIDIgnored
+--- PASS: TestSessionRouter_BindEmptySessionIDIgnored (0.00s)
+=== NAME  
+=== RUN   TestSessionRouter_BindOverwritesExistingBinding
+--- PASS: TestSessionRouter_BindOverwritesExistingBinding (0.00s)
+=== NAME  
+=== RUN   TestSessionRouter_UpdateSessionGenerationIfCurrent_DoesNotResurrectUnboundSession
+--- PASS: TestSessionRouter_UpdateSessionGenerationIfCurrent_DoesNotResurrectUnboundSession (0.00s)
+=== NAME  
+=== RUN   TestSessionRouter_LookupReturnsValueCopy
+--- PASS: TestSessionRouter_LookupReturnsValueCopy (0.00s)
+=== NAME  
+=== RUN   TestSessionRouter_ConcurrentAccess
+--- PASS: TestSessionRouter_ConcurrentAccess (0.00s)
+=== NAME  
+=== RUN   TestSharedRegistryObserver_GUILockedWriterAndReadersSettle
+--- PASS: TestSharedRegistryObserver_GUILockedWriterAndReadersSettle (0.07s)
+=== NAME  
+=== RUN   TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh
+=== RUN   TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh/serena-then-other
+--- PASS: TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh/serena-then-other (0.11s)
+=== NAME  TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh
+=== RUN   TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh/lsp-then-other
+--- PASS: TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh/lsp-then-other (0.11s)
+=== NAME  TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh
+--- PASS: TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh (0.23s)
+=== NAME  
+PASS

@@ -1,0 +1,155 @@
+{"Action":"start","Package":"mcp-local-hub/tools/test-recovery-namespace"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuitePreservesOriginalGoArguments"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuitePreservesOriginalGoArguments","Output":"=== RUN   TestNamespaceSuitePreservesOriginalGoArguments\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuitePreservesOriginalGoArguments","Output":"--- PASS: TestNamespaceSuitePreservesOriginalGoArguments (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuitePreservesOriginalGoArguments"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution","Output":"=== RUN   TestNamespaceSuiteRefusesFilteredOrRepeatedExecution\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/short-deadline"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/short-deadline","Output":"=== RUN   TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/short-deadline\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/short-deadline","Output":"--- PASS: TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/short-deadline (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/short-deadline"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/bench"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/bench","Output":"=== RUN   TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/bench\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/bench","Output":"--- PASS: TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/bench (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/bench"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/fuzz"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/fuzz","Output":"=== RUN   TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/fuzz\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/fuzz","Output":"--- PASS: TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/fuzz (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/fuzz"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/missing"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/missing","Output":"=== RUN   TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/missing\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/missing","Output":"--- PASS: TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/missing (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/missing"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/unframed"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/unframed","Output":"=== RUN   TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/unframed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/unframed","Output":"--- PASS: TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/unframed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/unframed"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/selector"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/selector","Output":"=== RUN   TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/selector\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/selector","Output":"--- PASS: TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/selector (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/selector"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/empty-filter"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/empty-filter","Output":"=== RUN   TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/empty-filter\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/empty-filter","Output":"--- PASS: TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/empty-filter (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/empty-filter"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/skip"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/skip","Output":"=== RUN   TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/skip\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/skip","Output":"--- PASS: TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/skip (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/skip"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/repeat"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/repeat","Output":"=== RUN   TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/repeat\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/repeat","Output":"--- PASS: TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/repeat (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/repeat"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/duplicate"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/duplicate","Output":"=== RUN   TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/duplicate\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/duplicate","Output":"--- PASS: TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/duplicate (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/duplicate"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution","Output":"--- PASS: TestNamespaceSuiteRefusesFilteredOrRepeatedExecution (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesFilteredOrRepeatedExecution"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses","Output":"=== RUN   TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/failed"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/failed","Output":"=== RUN   TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/failed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/failed","Output":"--- PASS: TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/failed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/failed"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/missing"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/missing","Output":"=== RUN   TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/missing\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/missing","Output":"--- PASS: TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/missing (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/missing"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/plain-PASS-is-not-evidence"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/plain-PASS-is-not-evidence","Output":"=== RUN   TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/plain-PASS-is-not-evidence\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/plain-PASS-is-not-evidence","Output":"--- PASS: TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/plain-PASS-is-not-evidence (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/plain-PASS-is-not-evidence"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/duplicate-run"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/duplicate-run","Output":"=== RUN   TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/duplicate-run\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/duplicate-run","Output":"--- PASS: TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/duplicate-run (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/duplicate-run"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/duplicate-pass"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/duplicate-pass","Output":"=== RUN   TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/duplicate-pass\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/duplicate-pass","Output":"--- PASS: TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/duplicate-pass (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/duplicate-pass"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/skipped"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/skipped","Output":"=== RUN   TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/skipped\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/skipped","Output":"--- PASS: TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/skipped (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/skipped"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses","Output":"--- PASS: TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags","Output":"=== RUN   TestNamespaceSuiteUsesActualCompiledTags\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags/tag-declaration-without-compiled-tag"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags/tag-declaration-without-compiled-tag","Output":"=== RUN   TestNamespaceSuiteUsesActualCompiledTags/tag-declaration-without-compiled-tag\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags/tag-declaration-without-compiled-tag","Output":"--- PASS: TestNamespaceSuiteUsesActualCompiledTags/tag-declaration-without-compiled-tag (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags/tag-declaration-without-compiled-tag"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags/wrong-lane"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags/wrong-lane","Output":"=== RUN   TestNamespaceSuiteUsesActualCompiledTags/wrong-lane\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags/wrong-lane","Output":"--- PASS: TestNamespaceSuiteUsesActualCompiledTags/wrong-lane (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags/wrong-lane"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags/wrong-entry-point"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags/wrong-entry-point","Output":"=== RUN   TestNamespaceSuiteUsesActualCompiledTags/wrong-entry-point\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags/wrong-entry-point","Output":"--- PASS: TestNamespaceSuiteUsesActualCompiledTags/wrong-entry-point (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags/wrong-entry-point"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags/extra-tag"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags/extra-tag","Output":"=== RUN   TestNamespaceSuiteUsesActualCompiledTags/extra-tag\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags/extra-tag","Output":"--- PASS: TestNamespaceSuiteUsesActualCompiledTags/extra-tag (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags/extra-tag"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags/duplicate-setting"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags/duplicate-setting","Output":"=== RUN   TestNamespaceSuiteUsesActualCompiledTags/duplicate-setting\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags/duplicate-setting","Output":"--- PASS: TestNamespaceSuiteUsesActualCompiledTags/duplicate-setting (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags/duplicate-setting"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags/rust-mark"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags/rust-mark","Output":"=== RUN   TestNamespaceSuiteUsesActualCompiledTags/rust-mark\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags/rust-mark","Output":"--- PASS: TestNamespaceSuiteUsesActualCompiledTags/rust-mark (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags/rust-mark"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags","Output":"--- PASS: TestNamespaceSuiteUsesActualCompiledTags (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteUsesActualCompiledTags"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteAcceptsRecordedCLIScopedPublisherFlags"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteAcceptsRecordedCLIScopedPublisherFlags","Output":"=== RUN   TestNamespaceSuiteAcceptsRecordedCLIScopedPublisherFlags\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteAcceptsRecordedCLIScopedPublisherFlags","Output":"--- PASS: TestNamespaceSuiteAcceptsRecordedCLIScopedPublisherFlags (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteAcceptsRecordedCLIScopedPublisherFlags"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch","Output":"=== RUN   TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/non-hex"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/non-hex","Output":"=== RUN   TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/non-hex\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/non-hex","Output":"--- PASS: TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/non-hex (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/non-hex"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/not-a-digest"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/not-a-digest","Output":"=== RUN   TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/not-a-digest\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/not-a-digest","Output":"--- PASS: TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/not-a-digest (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/not-a-digest"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/uppercase"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/uppercase","Output":"=== RUN   TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/uppercase\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/uppercase","Output":"--- PASS: TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/uppercase (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/uppercase"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/short"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/short","Output":"=== RUN   TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/short\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/short","Output":"--- PASS: TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/short (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/short"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch","Output":"--- PASS: TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRetainsOriginalFailedRootExit"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRetainsOriginalFailedRootExit","Output":"=== RUN   TestNamespaceSuiteRetainsOriginalFailedRootExit\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRetainsOriginalFailedRootExit","Output":"--- PASS: TestNamespaceSuiteRetainsOriginalFailedRootExit (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteRetainsOriginalFailedRootExit"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteEnvironmentDoesNotRestoreChildSentinels"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteEnvironmentDoesNotRestoreChildSentinels","Output":"=== RUN   TestNamespaceSuiteEnvironmentDoesNotRestoreChildSentinels\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteEnvironmentDoesNotRestoreChildSentinels","Output":"--- PASS: TestNamespaceSuiteEnvironmentDoesNotRestoreChildSentinels (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespaceSuiteEnvironmentDoesNotRestoreChildSentinels"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespacePrechildRefusalRequiresOriginalUnstartedScope"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespacePrechildRefusalRequiresOriginalUnstartedScope","Output":"=== RUN   TestNamespacePrechildRefusalRequiresOriginalUnstartedScope\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespacePrechildRefusalRequiresOriginalUnstartedScope/unadmitted_parent"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespacePrechildRefusalRequiresOriginalUnstartedScope/unadmitted_parent","Output":"=== RUN   TestNamespacePrechildRefusalRequiresOriginalUnstartedScope/unadmitted_parent\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespacePrechildRefusalRequiresOriginalUnstartedScope/unadmitted_parent","Output":"--- PASS: TestNamespacePrechildRefusalRequiresOriginalUnstartedScope/unadmitted_parent (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespacePrechildRefusalRequiresOriginalUnstartedScope/unadmitted_parent"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespacePrechildRefusalRequiresOriginalUnstartedScope/stage_already_entered"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespacePrechildRefusalRequiresOriginalUnstartedScope/stage_already_entered","Output":"=== RUN   TestNamespacePrechildRefusalRequiresOriginalUnstartedScope/stage_already_entered\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespacePrechildRefusalRequiresOriginalUnstartedScope/stage_already_entered","Output":"--- PASS: TestNamespacePrechildRefusalRequiresOriginalUnstartedScope/stage_already_entered (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespacePrechildRefusalRequiresOriginalUnstartedScope/stage_already_entered"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespacePrechildRefusalRequiresOriginalUnstartedScope/no_refusal"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespacePrechildRefusalRequiresOriginalUnstartedScope/no_refusal","Output":"=== RUN   TestNamespacePrechildRefusalRequiresOriginalUnstartedScope/no_refusal\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespacePrechildRefusalRequiresOriginalUnstartedScope/no_refusal","Output":"--- PASS: TestNamespacePrechildRefusalRequiresOriginalUnstartedScope/no_refusal (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespacePrechildRefusalRequiresOriginalUnstartedScope/no_refusal"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespacePrechildRefusalRequiresOriginalUnstartedScope","Output":"--- PASS: TestNamespacePrechildRefusalRequiresOriginalUnstartedScope (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace","Test":"TestNamespacePrechildRefusalRequiresOriginalUnstartedScope"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-recovery-namespace","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-recovery-namespace"}

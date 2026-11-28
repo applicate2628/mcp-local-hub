@@ -1,0 +1,527 @@
+{"Action":"start","Package":"mcp-local-hub/internal/cmakegraph"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestCurrentListDirChain_ResolvesPerFileNotPinnedToRoot"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestCurrentListDirChain_ResolvesPerFileNotPinnedToRoot","Output":"=== RUN   TestCurrentListDirChain_ResolvesPerFileNotPinnedToRoot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestCurrentListDirChain_ResolvesPerFileNotPinnedToRoot","Output":"--- PASS: TestCurrentListDirChain_ResolvesPerFileNotPinnedToRoot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestCurrentListDirChain_ResolvesPerFileNotPinnedToRoot"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestMutationProof_DanglingPathNeverReportedResolved"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestMutationProof_DanglingPathNeverReportedResolved","Output":"=== RUN   TestMutationProof_DanglingPathNeverReportedResolved\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestMutationProof_DanglingPathNeverReportedResolved","Output":"--- PASS: TestMutationProof_DanglingPathNeverReportedResolved (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestMutationProof_DanglingPathNeverReportedResolved"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestCycle_DetectedNotInfiniteLoop"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestCycle_DetectedNotInfiniteLoop","Output":"=== RUN   TestCycle_DetectedNotInfiniteLoop\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestCycle_DetectedNotInfiniteLoop","Output":"--- PASS: TestCycle_DetectedNotInfiniteLoop (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestCycle_DetectedNotInfiniteLoop"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOutsideWorkspace_DotDotEscape"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOutsideWorkspace_DotDotEscape","Output":"=== RUN   TestOutsideWorkspace_DotDotEscape\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOutsideWorkspace_DotDotEscape","Output":"--- PASS: TestOutsideWorkspace_DotDotEscape (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOutsideWorkspace_DotDotEscape"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOutsideWorkspace_SymlinkEscape"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOutsideWorkspace_SymlinkEscape","Output":"=== RUN   TestOutsideWorkspace_SymlinkEscape\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOutsideWorkspace_SymlinkEscape","Output":"--- PASS: TestOutsideWorkspace_SymlinkEscape (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOutsideWorkspace_SymlinkEscape"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestNonStaticVariable_UnknownAndCurrentSourceDirBothRefused"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestNonStaticVariable_UnknownAndCurrentSourceDirBothRefused","Output":"=== RUN   TestNonStaticVariable_UnknownAndCurrentSourceDirBothRefused\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestNonStaticVariable_UnknownAndCurrentSourceDirBothRefused","Output":"--- PASS: TestNonStaticVariable_UnknownAndCurrentSourceDirBothRefused (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestNonStaticVariable_UnknownAndCurrentSourceDirBothRefused"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestCmakeSourceDir_ResolvesToWorkspaceRoot"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestCmakeSourceDir_ResolvesToWorkspaceRoot","Output":"=== RUN   TestCmakeSourceDir_ResolvesToWorkspaceRoot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestCmakeSourceDir_ResolvesToWorkspaceRoot","Output":"--- PASS: TestCmakeSourceDir_ResolvesToWorkspaceRoot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestCmakeSourceDir_ResolvesToWorkspaceRoot"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestGeneratorExpression_NeverEvaluated"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestGeneratorExpression_NeverEvaluated","Output":"=== RUN   TestGeneratorExpression_NeverEvaluated\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestGeneratorExpression_NeverEvaluated","Output":"--- PASS: TestGeneratorExpression_NeverEvaluated (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestGeneratorExpression_NeverEvaluated"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestModuleNameNotPath_BareIncludeName"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestModuleNameNotPath_BareIncludeName","Output":"=== RUN   TestModuleNameNotPath_BareIncludeName\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestModuleNameNotPath_BareIncludeName","Output":"--- PASS: TestModuleNameNotPath_BareIncludeName (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestModuleNameNotPath_BareIncludeName"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestConditional_PathResolvedNormallyOrthogonalToStatus"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestConditional_PathResolvedNormallyOrthogonalToStatus","Output":"=== RUN   TestConditional_PathResolvedNormallyOrthogonalToStatus\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestConditional_PathResolvedNormallyOrthogonalToStatus","Output":"--- PASS: TestConditional_PathResolvedNormallyOrthogonalToStatus (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestConditional_PathResolvedNormallyOrthogonalToStatus"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestAddSubdirectory_BareRelativeName"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestAddSubdirectory_BareRelativeName","Output":"=== RUN   TestAddSubdirectory_BareRelativeName\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestAddSubdirectory_BareRelativeName","Output":"--- PASS: TestAddSubdirectory_BareRelativeName (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestAddSubdirectory_BareRelativeName"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestAddSubdirectory_MissingCMakeListsIsDangling"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestAddSubdirectory_MissingCMakeListsIsDangling","Output":"=== RUN   TestAddSubdirectory_MissingCMakeListsIsDangling\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestAddSubdirectory_MissingCMakeListsIsDangling","Output":"--- PASS: TestAddSubdirectory_MissingCMakeListsIsDangling (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestAddSubdirectory_MissingCMakeListsIsDangling"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestDepthLimit_StopsExpansionAndReportsReason"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestDepthLimit_StopsExpansionAndReportsReason","Output":"=== RUN   TestDepthLimit_StopsExpansionAndReportsReason\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestDepthLimit_StopsExpansionAndReportsReason","Output":"--- PASS: TestDepthLimit_StopsExpansionAndReportsReason (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestDepthLimit_StopsExpansionAndReportsReason"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestNodeCap_StopsExpansionAndReportsReason"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestNodeCap_StopsExpansionAndReportsReason","Output":"=== RUN   TestNodeCap_StopsExpansionAndReportsReason\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestNodeCap_StopsExpansionAndReportsReason","Output":"--- PASS: TestNodeCap_StopsExpansionAndReportsReason (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestNodeCap_StopsExpansionAndReportsReason"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestParseError_UnterminatedCall"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestParseError_UnterminatedCall","Output":"=== RUN   TestParseError_UnterminatedCall\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestParseError_UnterminatedCall","Output":"--- PASS: TestParseError_UnterminatedCall (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestParseError_UnterminatedCall"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestCommentedOutInclude_NotDiscovered"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestCommentedOutInclude_NotDiscovered","Output":"=== RUN   TestCommentedOutInclude_NotDiscovered\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestCommentedOutInclude_NotDiscovered","Output":"--- PASS: TestCommentedOutInclude_NotDiscovered (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestCommentedOutInclude_NotDiscovered"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestStringLiteralGuard_CommandNameInsideStringIsSkipped"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestStringLiteralGuard_CommandNameInsideStringIsSkipped","Output":"=== RUN   TestStringLiteralGuard_CommandNameInsideStringIsSkipped\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestStringLiteralGuard_CommandNameInsideStringIsSkipped","Output":"--- PASS: TestStringLiteralGuard_CommandNameInsideStringIsSkipped (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestStringLiteralGuard_CommandNameInsideStringIsSkipped"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestWalkTree_WildcardPatternReachesFilesNoPortfileReferences"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestWalkTree_WildcardPatternReachesFilesNoPortfileReferences","Output":"=== RUN   TestWalkTree_WildcardPatternReachesFilesNoPortfileReferences\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestWalkTree_WildcardPatternReachesFilesNoPortfileReferences","Output":"--- PASS: TestWalkTree_WildcardPatternReachesFilesNoPortfileReferences (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestWalkTree_WildcardPatternReachesFilesNoPortfileReferences"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestWalkTree_SharedFileScannedOnceNotDuplicated"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestWalkTree_SharedFileScannedOnceNotDuplicated","Output":"=== RUN   TestWalkTree_SharedFileScannedOnceNotDuplicated\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestWalkTree_SharedFileScannedOnceNotDuplicated","Output":"--- PASS: TestWalkTree_SharedFileScannedOnceNotDuplicated (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestWalkTree_SharedFileScannedOnceNotDuplicated"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestDiamondInclude_NotMisreportedAsCyclic"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestDiamondInclude_NotMisreportedAsCyclic","Output":"=== RUN   TestDiamondInclude_NotMisreportedAsCyclic\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestDiamondInclude_NotMisreportedAsCyclic","Output":"--- PASS: TestDiamondInclude_NotMisreportedAsCyclic (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestDiamondInclude_NotMisreportedAsCyclic"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestWalkTree_IndependentPortLikeUnits"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestWalkTree_IndependentPortLikeUnits","Output":"=== RUN   TestWalkTree_IndependentPortLikeUnits\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestWalkTree_IndependentPortLikeUnits","Output":"--- PASS: TestWalkTree_IndependentPortLikeUnits (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestWalkTree_IndependentPortLikeUnits"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_1_RelativeIncludeResolvesAgainstCurrentSourceDirNotListDir"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_1_RelativeIncludeResolvesAgainstCurrentSourceDirNotListDir","Output":"=== RUN   TestP1_1_RelativeIncludeResolvesAgainstCurrentSourceDirNotListDir\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_1_RelativeIncludeResolvesAgainstCurrentSourceDirNotListDir","Output":"--- PASS: TestP1_1_RelativeIncludeResolvesAgainstCurrentSourceDirNotListDir (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_1_RelativeIncludeResolvesAgainstCurrentSourceDirNotListDir"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_1_TopLevelBareRelativeUnaffected"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_1_TopLevelBareRelativeUnaffected","Output":"=== RUN   TestP1_1_TopLevelBareRelativeUnaffected\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_1_TopLevelBareRelativeUnaffected","Output":"--- PASS: TestP1_1_TopLevelBareRelativeUnaffected (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_1_TopLevelBareRelativeUnaffected"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_2_CurrentListDirInsideMacroBodyRefused"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_2_CurrentListDirInsideMacroBodyRefused","Output":"=== RUN   TestP1_2_CurrentListDirInsideMacroBodyRefused\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_2_CurrentListDirInsideMacroBodyRefused","Output":"--- PASS: TestP1_2_CurrentListDirInsideMacroBodyRefused (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_2_CurrentListDirInsideMacroBodyRefused"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_2_FunctionBodyAlsoGatesAndOutsideCallUnaffected"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_2_FunctionBodyAlsoGatesAndOutsideCallUnaffected","Output":"=== RUN   TestP1_2_FunctionBodyAlsoGatesAndOutsideCallUnaffected\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_2_FunctionBodyAlsoGatesAndOutsideCallUnaffected","Output":"--- PASS: TestP1_2_FunctionBodyAlsoGatesAndOutsideCallUnaffected (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_2_FunctionBodyAlsoGatesAndOutsideCallUnaffected"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_3_StandaloneRootBareRelativeRefusedUnverified"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_3_StandaloneRootBareRelativeRefusedUnverified","Output":"=== RUN   TestP1_3_StandaloneRootBareRelativeRefusedUnverified\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_3_StandaloneRootBareRelativeRefusedUnverified","Output":"--- PASS: TestP1_3_StandaloneRootBareRelativeRefusedUnverified (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_3_StandaloneRootBareRelativeRefusedUnverified"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_3_CMakeListsRootBareRelativeStillResolves"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_3_CMakeListsRootBareRelativeStillResolves","Output":"=== RUN   TestP1_3_CMakeListsRootBareRelativeStillResolves\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_3_CMakeListsRootBareRelativeStillResolves","Output":"--- PASS: TestP1_3_CMakeListsRootBareRelativeStillResolves (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_3_CMakeListsRootBareRelativeStillResolves"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_3_AddSubdirectoryEstablishesFreshVerifiedContext"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_3_AddSubdirectoryEstablishesFreshVerifiedContext","Output":"=== RUN   TestP1_3_AddSubdirectoryEstablishesFreshVerifiedContext\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_3_AddSubdirectoryEstablishesFreshVerifiedContext","Output":"--- PASS: TestP1_3_AddSubdirectoryEstablishesFreshVerifiedContext (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_3_AddSubdirectoryEstablishesFreshVerifiedContext"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_4_CacheVariableRefused"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_4_CacheVariableRefused","Output":"=== RUN   TestP1_4_CacheVariableRefused\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_4_CacheVariableRefused","Output":"--- PASS: TestP1_4_CacheVariableRefused (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_4_CacheVariableRefused"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_4_BackslashEscapeSequenceRefused"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_4_BackslashEscapeSequenceRefused","Output":"=== RUN   TestP1_4_BackslashEscapeSequenceRefused\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_4_BackslashEscapeSequenceRefused","Output":"--- PASS: TestP1_4_BackslashEscapeSequenceRefused (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_4_BackslashEscapeSequenceRefused"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_4_BracketArgumentRefused"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_4_BracketArgumentRefused","Output":"=== RUN   TestP1_4_BracketArgumentRefused\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_4_BracketArgumentRefused","Output":"--- PASS: TestP1_4_BracketArgumentRefused (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_4_BracketArgumentRefused"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_5_NestedCommandInBalancedParensNotMisreadAsDirective"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_5_NestedCommandInBalancedParensNotMisreadAsDirective","Output":"=== RUN   TestP1_5_NestedCommandInBalancedParensNotMisreadAsDirective\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_5_NestedCommandInBalancedParensNotMisreadAsDirective","Output":"--- PASS: TestP1_5_NestedCommandInBalancedParensNotMisreadAsDirective (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_5_NestedCommandInBalancedParensNotMisreadAsDirective"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_5_FakeNestedIfDoesNotCorruptConditionalTracking"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_5_FakeNestedIfDoesNotCorruptConditionalTracking","Output":"=== RUN   TestP1_5_FakeNestedIfDoesNotCorruptConditionalTracking\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_5_FakeNestedIfDoesNotCorruptConditionalTracking","Output":"--- PASS: TestP1_5_FakeNestedIfDoesNotCorruptConditionalTracking (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_5_FakeNestedIfDoesNotCorruptConditionalTracking"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_5_EscapeParityDoesNotSwallowNextCommand"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_5_EscapeParityDoesNotSwallowNextCommand","Output":"=== RUN   TestP1_5_EscapeParityDoesNotSwallowNextCommand\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_5_EscapeParityDoesNotSwallowNextCommand","Output":"--- PASS: TestP1_5_EscapeParityDoesNotSwallowNextCommand (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_5_EscapeParityDoesNotSwallowNextCommand"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_5_BracketCommentMatchedAcrossMultipleLines"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_5_BracketCommentMatchedAcrossMultipleLines","Output":"=== RUN   TestP1_5_BracketCommentMatchedAcrossMultipleLines\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_5_BracketCommentMatchedAcrossMultipleLines","Output":"--- PASS: TestP1_5_BracketCommentMatchedAcrossMultipleLines (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_5_BracketCommentMatchedAcrossMultipleLines"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_6_NodeCapGatesRootAdmissionAndIsVisible"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_6_NodeCapGatesRootAdmissionAndIsVisible","Output":"=== RUN   TestP1_6_NodeCapGatesRootAdmissionAndIsVisible\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_6_NodeCapGatesRootAdmissionAndIsVisible","Output":"--- PASS: TestP1_6_NodeCapGatesRootAdmissionAndIsVisible (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP1_6_NodeCapGatesRootAdmissionAndIsVisible"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP2_7_ByteCapSkipIsVisibleNotSilent"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP2_7_ByteCapSkipIsVisibleNotSilent","Output":"=== RUN   TestP2_7_ByteCapSkipIsVisibleNotSilent\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP2_7_ByteCapSkipIsVisibleNotSilent","Output":"--- PASS: TestP2_7_ByteCapSkipIsVisibleNotSilent (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestP2_7_ByteCapSkipIsVisibleNotSilent"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF18_UnterminatedBracketArgumentDoesNotLeakPayloadAsSyntax"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF18_UnterminatedBracketArgumentDoesNotLeakPayloadAsSyntax","Output":"=== RUN   TestF18_UnterminatedBracketArgumentDoesNotLeakPayloadAsSyntax\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF18_UnterminatedBracketArgumentDoesNotLeakPayloadAsSyntax","Output":"--- PASS: TestF18_UnterminatedBracketArgumentDoesNotLeakPayloadAsSyntax (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF18_UnterminatedBracketArgumentDoesNotLeakPayloadAsSyntax"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF18_LiteralBracketIsNotMistakenForAnUnterminatedOpener"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF18_LiteralBracketIsNotMistakenForAnUnterminatedOpener","Output":"=== RUN   TestF18_LiteralBracketIsNotMistakenForAnUnterminatedOpener\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF18_LiteralBracketIsNotMistakenForAnUnterminatedOpener","Output":"--- PASS: TestF18_LiteralBracketIsNotMistakenForAnUnterminatedOpener (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF18_LiteralBracketIsNotMistakenForAnUnterminatedOpener"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF17_NonAbsenceStatErrorIsUnresolvedNotDangling"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF17_NonAbsenceStatErrorIsUnresolvedNotDangling","Output":"=== RUN   TestF17_NonAbsenceStatErrorIsUnresolvedNotDangling\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF17_NonAbsenceStatErrorIsUnresolvedNotDangling","Output":"--- PASS: TestF17_NonAbsenceStatErrorIsUnresolvedNotDangling (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF17_NonAbsenceStatErrorIsUnresolvedNotDangling"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF17_GenuinelyAbsentTargetIsStillDangling"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF17_GenuinelyAbsentTargetIsStillDangling","Output":"=== RUN   TestF17_GenuinelyAbsentTargetIsStillDangling\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF17_GenuinelyAbsentTargetIsStillDangling","Output":"--- PASS: TestF17_GenuinelyAbsentTargetIsStillDangling (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF17_GenuinelyAbsentTargetIsStillDangling"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF16_UnenumerableSubtreeIsRecordedAsIncompleteCoverage"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF16_UnenumerableSubtreeIsRecordedAsIncompleteCoverage","Output":"=== RUN   TestF16_UnenumerableSubtreeIsRecordedAsIncompleteCoverage\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF16_UnenumerableSubtreeIsRecordedAsIncompleteCoverage","Output":"--- PASS: TestF16_UnenumerableSubtreeIsRecordedAsIncompleteCoverage (0.04s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF16_UnenumerableSubtreeIsRecordedAsIncompleteCoverage"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF16_RootEnumerationFailureTerminatesWithError"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF16_RootEnumerationFailureTerminatesWithError","Output":"=== RUN   TestF16_RootEnumerationFailureTerminatesWithError\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF16_RootEnumerationFailureTerminatesWithError","Output":"--- PASS: TestF16_RootEnumerationFailureTerminatesWithError (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF16_RootEnumerationFailureTerminatesWithError"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF22_SymlinkedRootEscapingWorkspaceIsRefusedBeforeAnyRead"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF22_SymlinkedRootEscapingWorkspaceIsRefusedBeforeAnyRead","Output":"=== RUN   TestF22_SymlinkedRootEscapingWorkspaceIsRefusedBeforeAnyRead\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF22_SymlinkedRootEscapingWorkspaceIsRefusedBeforeAnyRead","Output":"--- PASS: TestF22_SymlinkedRootEscapingWorkspaceIsRefusedBeforeAnyRead (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF22_SymlinkedRootEscapingWorkspaceIsRefusedBeforeAnyRead"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF27_RootEnumerationIsBoundedAndTheCapIsVisible"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF27_RootEnumerationIsBoundedAndTheCapIsVisible","Output":"=== RUN   TestF27_RootEnumerationIsBoundedAndTheCapIsVisible\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF27_RootEnumerationIsBoundedAndTheCapIsVisible","Output":"--- PASS: TestF27_RootEnumerationIsBoundedAndTheCapIsVisible (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF27_RootEnumerationIsBoundedAndTheCapIsVisible"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF20_WalkTreeHonoursAParentWorkspaceRoot"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF20_WalkTreeHonoursAParentWorkspaceRoot","Output":"=== RUN   TestF20_WalkTreeHonoursAParentWorkspaceRoot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF20_WalkTreeHonoursAParentWorkspaceRoot","Output":"--- PASS: TestF20_WalkTreeHonoursAParentWorkspaceRoot (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestF20_WalkTreeHonoursAParentWorkspaceRoot"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestCanceledWalkReturnsErrorNotAPartialGraph"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestCanceledWalkReturnsErrorNotAPartialGraph","Output":"=== RUN   TestCanceledWalkReturnsErrorNotAPartialGraph\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestCanceledWalkReturnsErrorNotAPartialGraph","Output":"--- PASS: TestCanceledWalkReturnsErrorNotAPartialGraph (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestCanceledWalkReturnsErrorNotAPartialGraph"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestByteCapCoverageCarriesAClosedReasonAndADetail"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestByteCapCoverageCarriesAClosedReasonAndADetail","Output":"=== RUN   TestByteCapCoverageCarriesAClosedReasonAndADetail\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestByteCapCoverageCarriesAClosedReasonAndADetail","Output":"--- PASS: TestByteCapCoverageCarriesAClosedReasonAndADetail (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestByteCapCoverageCarriesAClosedReasonAndADetail"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOversizedRootIsNotReportedAsScanned"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOversizedRootIsNotReportedAsScanned","Output":"=== RUN   TestOversizedRootIsNotReportedAsScanned\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOversizedRootIsNotReportedAsScanned","Output":"--- PASS: TestOversizedRootIsNotReportedAsScanned (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOversizedRootIsNotReportedAsScanned"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOversizedIncludeTargetIsNotReportedAsScanned"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOversizedIncludeTargetIsNotReportedAsScanned","Output":"=== RUN   TestOversizedIncludeTargetIsNotReportedAsScanned\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOversizedIncludeTargetIsNotReportedAsScanned","Output":"--- PASS: TestOversizedIncludeTargetIsNotReportedAsScanned (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOversizedIncludeTargetIsNotReportedAsScanned"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestSuccessfullyReadFilesAreStillReportedAsScanned"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestSuccessfullyReadFilesAreStillReportedAsScanned","Output":"=== RUN   TestSuccessfullyReadFilesAreStillReportedAsScanned\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestSuccessfullyReadFilesAreStillReportedAsScanned","Output":"--- PASS: TestSuccessfullyReadFilesAreStillReportedAsScanned (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestSuccessfullyReadFilesAreStillReportedAsScanned"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestReadBoundedFromDetectsAFileThatGrewPastTheCap"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestReadBoundedFromDetectsAFileThatGrewPastTheCap","Output":"=== RUN   TestReadBoundedFromDetectsAFileThatGrewPastTheCap\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestReadBoundedFromDetectsAFileThatGrewPastTheCap","Output":"--- PASS: TestReadBoundedFromDetectsAFileThatGrewPastTheCap (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestReadBoundedFromDetectsAFileThatGrewPastTheCap"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestFirstArgumentSkipsCommentsBeforeTheArgument"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestFirstArgumentSkipsCommentsBeforeTheArgument","Output":"=== RUN   TestFirstArgumentSkipsCommentsBeforeTheArgument\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestFirstArgumentSkipsCommentsBeforeTheArgument/line_comment_before_argument"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestFirstArgumentSkipsCommentsBeforeTheArgument/line_comment_before_argument","Output":"=== RUN   TestFirstArgumentSkipsCommentsBeforeTheArgument/line_comment_before_argument\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestFirstArgumentSkipsCommentsBeforeTheArgument/line_comment_before_argument","Output":"--- PASS: TestFirstArgumentSkipsCommentsBeforeTheArgument/line_comment_before_argument (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestFirstArgumentSkipsCommentsBeforeTheArgument/line_comment_before_argument"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestFirstArgumentSkipsCommentsBeforeTheArgument/bracket_comment_before_argument"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestFirstArgumentSkipsCommentsBeforeTheArgument/bracket_comment_before_argument","Output":"=== RUN   TestFirstArgumentSkipsCommentsBeforeTheArgument/bracket_comment_before_argument\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestFirstArgumentSkipsCommentsBeforeTheArgument/bracket_comment_before_argument","Output":"--- PASS: TestFirstArgumentSkipsCommentsBeforeTheArgument/bracket_comment_before_argument (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestFirstArgumentSkipsCommentsBeforeTheArgument/bracket_comment_before_argument"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestFirstArgumentSkipsCommentsBeforeTheArgument/comment_then_quoted_argument"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestFirstArgumentSkipsCommentsBeforeTheArgument/comment_then_quoted_argument","Output":"=== RUN   TestFirstArgumentSkipsCommentsBeforeTheArgument/comment_then_quoted_argument\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestFirstArgumentSkipsCommentsBeforeTheArgument/comment_then_quoted_argument","Output":"--- PASS: TestFirstArgumentSkipsCommentsBeforeTheArgument/comment_then_quoted_argument (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestFirstArgumentSkipsCommentsBeforeTheArgument/comment_then_quoted_argument"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestFirstArgumentSkipsCommentsBeforeTheArgument/no_comment_at_all"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestFirstArgumentSkipsCommentsBeforeTheArgument/no_comment_at_all","Output":"=== RUN   TestFirstArgumentSkipsCommentsBeforeTheArgument/no_comment_at_all\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestFirstArgumentSkipsCommentsBeforeTheArgument/no_comment_at_all","Output":"--- PASS: TestFirstArgumentSkipsCommentsBeforeTheArgument/no_comment_at_all (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestFirstArgumentSkipsCommentsBeforeTheArgument/no_comment_at_all"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestFirstArgumentSkipsCommentsBeforeTheArgument","Output":"--- PASS: TestFirstArgumentSkipsCommentsBeforeTheArgument (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestFirstArgumentSkipsCommentsBeforeTheArgument"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestIncludeWithALeadingCommentResolves"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestIncludeWithALeadingCommentResolves","Output":"=== RUN   TestIncludeWithALeadingCommentResolves\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestIncludeWithALeadingCommentResolves","Output":"--- PASS: TestIncludeWithALeadingCommentResolves (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestIncludeWithALeadingCommentResolves"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestPR591_LoopNestedEdgesAreConditional"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestPR591_LoopNestedEdgesAreConditional","Output":"=== RUN   TestPR591_LoopNestedEdgesAreConditional\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestPR591_LoopNestedEdgesAreConditional","Output":"--- PASS: TestPR591_LoopNestedEdgesAreConditional (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestPR591_LoopNestedEdgesAreConditional"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestPR591_DirectorySymlinkIsNotDescended"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestPR591_DirectorySymlinkIsNotDescended","Output":"=== RUN   TestPR591_DirectorySymlinkIsNotDescended\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestPR591_DirectorySymlinkIsNotDescended","Output":"--- PASS: TestPR591_DirectorySymlinkIsNotDescended (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestPR591_DirectorySymlinkIsNotDescended"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestPR591_CancellationAfterFinalRootReturnsError"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestPR591_CancellationAfterFinalRootReturnsError","Output":"=== RUN   TestPR591_CancellationAfterFinalRootReturnsError\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestPR591_CancellationAfterFinalRootReturnsError","Output":"--- PASS: TestPR591_CancellationAfterFinalRootReturnsError (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestPR591_CancellationAfterFinalRootReturnsError"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestPR591_MaxInt64FileCapFailsBeforeIO"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestPR591_MaxInt64FileCapFailsBeforeIO","Output":"=== RUN   TestPR591_MaxInt64FileCapFailsBeforeIO\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestPR591_MaxInt64FileCapFailsBeforeIO","Output":"--- PASS: TestPR591_MaxInt64FileCapFailsBeforeIO (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestPR591_MaxInt64FileCapFailsBeforeIO"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestPR591_WalkTreeBoundsAllVisitedEntriesBeforeNameFiltering"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestPR591_WalkTreeBoundsAllVisitedEntriesBeforeNameFiltering","Output":"=== RUN   TestPR591_WalkTreeBoundsAllVisitedEntriesBeforeNameFiltering\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestPR591_WalkTreeBoundsAllVisitedEntriesBeforeNameFiltering","Output":"--- PASS: TestPR591_WalkTreeBoundsAllVisitedEntriesBeforeNameFiltering (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestPR591_WalkTreeBoundsAllVisitedEntriesBeforeNameFiltering"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestPR591_VisitedEntryCapPreservesSortedAdmittedRootOrder"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestPR591_VisitedEntryCapPreservesSortedAdmittedRootOrder","Output":"=== RUN   TestPR591_VisitedEntryCapPreservesSortedAdmittedRootOrder\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestPR591_VisitedEntryCapPreservesSortedAdmittedRootOrder","Output":"--- PASS: TestPR591_VisitedEntryCapPreservesSortedAdmittedRootOrder (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestPR591_VisitedEntryCapPreservesSortedAdmittedRootOrder"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork","Output":"=== RUN   TestOptionsRejectEveryHardMaximumPlusOneBeforeWork\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/depth"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/depth","Output":"=== RUN   TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/depth\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/depth","Output":"--- PASS: TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/depth (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/depth"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/nodes"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/nodes","Output":"=== RUN   TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/nodes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/nodes","Output":"--- PASS: TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/nodes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/nodes"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/file-bytes"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/file-bytes","Output":"=== RUN   TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/file-bytes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/file-bytes","Output":"--- PASS: TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/file-bytes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/file-bytes"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/roots"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/roots","Output":"=== RUN   TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/roots\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/roots","Output":"--- PASS: TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/roots (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/roots"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/visited-entries"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/visited-entries","Output":"=== RUN   TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/visited-entries\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/visited-entries","Output":"--- PASS: TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/visited-entries (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork/visited-entries"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork","Output":"--- PASS: TestOptionsRejectEveryHardMaximumPlusOneBeforeWork (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir","Output":"=== RUN   TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/count-boundary"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/count-boundary","Output":"=== RUN   TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/count-boundary\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/count-boundary","Output":"--- PASS: TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/count-boundary (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/count-boundary"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/count-plus-one"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/count-plus-one","Output":"=== RUN   TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/count-plus-one\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/count-plus-one","Output":"--- PASS: TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/count-plus-one (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/count-plus-one"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/byte-boundary"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/byte-boundary","Output":"=== RUN   TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/byte-boundary\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/byte-boundary","Output":"--- PASS: TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/byte-boundary (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/byte-boundary"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/byte-plus-one"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/byte-plus-one","Output":"=== RUN   TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/byte-plus-one\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/byte-plus-one","Output":"--- PASS: TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/byte-plus-one (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir/byte-plus-one"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir","Output":"--- PASS: TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestEntryFiltersRejectCountAndByteLimitsBeforeWalkDir"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestCompiledEntryFiltersPreserveExactAndSuffixSemantics"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestCompiledEntryFiltersPreserveExactAndSuffixSemantics","Output":"=== RUN   TestCompiledEntryFiltersPreserveExactAndSuffixSemantics\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestCompiledEntryFiltersPreserveExactAndSuffixSemantics","Output":"--- PASS: TestCompiledEntryFiltersPreserveExactAndSuffixSemantics (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestCompiledEntryFiltersPreserveExactAndSuffixSemantics"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR15AggregateEdgeCountCapReportsCoverage"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR15AggregateEdgeCountCapReportsCoverage","Output":"=== RUN   TestR15AggregateEdgeCountCapReportsCoverage\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR15AggregateEdgeCountCapReportsCoverage","Output":"--- PASS: TestR15AggregateEdgeCountCapReportsCoverage (3.15s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR15AggregateEdgeCountCapReportsCoverage"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR15AggregateEdgeByteCapReportsCoverage"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR15AggregateEdgeByteCapReportsCoverage","Output":"=== RUN   TestR15AggregateEdgeByteCapReportsCoverage\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR15AggregateEdgeByteCapReportsCoverage","Output":"--- PASS: TestR15AggregateEdgeByteCapReportsCoverage (0.16s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR15AggregateEdgeByteCapReportsCoverage"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR15MissingOptionalIncludeIsNotDangling"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR15MissingOptionalIncludeIsNotDangling","Output":"=== RUN   TestR15MissingOptionalIncludeIsNotDangling\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR15MissingOptionalIncludeIsNotDangling","Output":"--- PASS: TestR15MissingOptionalIncludeIsNotDangling (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR15MissingOptionalIncludeIsNotDangling"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR17CoverageAggregateIsBoundedAndSignalsOmission"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR17CoverageAggregateIsBoundedAndSignalsOmission","Output":"=== RUN   TestR17CoverageAggregateIsBoundedAndSignalsOmission\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR17CoverageAggregateIsBoundedAndSignalsOmission","Output":"--- PASS: TestR17CoverageAggregateIsBoundedAndSignalsOmission (0.20s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR17CoverageAggregateIsBoundedAndSignalsOmission"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR18WalkTreeBoundsAggregateRetainedRootPathBytes"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR18WalkTreeBoundsAggregateRetainedRootPathBytes","Output":"=== RUN   TestR18WalkTreeBoundsAggregateRetainedRootPathBytes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR18WalkTreeBoundsAggregateRetainedRootPathBytes","Output":"--- PASS: TestR18WalkTreeBoundsAggregateRetainedRootPathBytes (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR18WalkTreeBoundsAggregateRetainedRootPathBytes"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR20PinnedRootReadRefusesRetargetOutsideWorkspace"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR20PinnedRootReadRefusesRetargetOutsideWorkspace","Output":"=== RUN   TestR20PinnedRootReadRefusesRetargetOutsideWorkspace\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR20PinnedRootReadRefusesRetargetOutsideWorkspace","Output":"--- PASS: TestR20PinnedRootReadRefusesRetargetOutsideWorkspace (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR20PinnedRootReadRefusesRetargetOutsideWorkspace"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR21LineIndexMatchesOffsetsWithoutPerEdgeRescan"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR21LineIndexMatchesOffsetsWithoutPerEdgeRescan","Output":"=== RUN   TestR21LineIndexMatchesOffsetsWithoutPerEdgeRescan\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR21LineIndexMatchesOffsetsWithoutPerEdgeRescan","Output":"--- PASS: TestR21LineIndexMatchesOffsetsWithoutPerEdgeRescan (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR21LineIndexMatchesOffsetsWithoutPerEdgeRescan"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR22AddSubdirectoryRejectsEscapingCMakeListsSymlink"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR22AddSubdirectoryRejectsEscapingCMakeListsSymlink","Output":"=== RUN   TestR22AddSubdirectoryRejectsEscapingCMakeListsSymlink\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR22AddSubdirectoryRejectsEscapingCMakeListsSymlink","Output":"--- PASS: TestR22AddSubdirectoryRejectsEscapingCMakeListsSymlink (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR22AddSubdirectoryRejectsEscapingCMakeListsSymlink"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR24DeferredCommandBodyRefusesBareRelativePath"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR24DeferredCommandBodyRefusesBareRelativePath","Output":"=== RUN   TestR24DeferredCommandBodyRefusesBareRelativePath\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR24DeferredCommandBodyRefusesBareRelativePath","Output":"--- PASS: TestR24DeferredCommandBodyRefusesBareRelativePath (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR24DeferredCommandBodyRefusesBareRelativePath"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR24ResultVariableValueNamedOptionalIsNotAnOption"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR24ResultVariableValueNamedOptionalIsNotAnOption","Output":"=== RUN   TestR24ResultVariableValueNamedOptionalIsNotAnOption\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR24ResultVariableValueNamedOptionalIsNotAnOption","Output":"--- PASS: TestR24ResultVariableValueNamedOptionalIsNotAnOption (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR24ResultVariableValueNamedOptionalIsNotAnOption"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR26WalkTreeUnreadableDiscoveredRootIsCoverageHole"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR26WalkTreeUnreadableDiscoveredRootIsCoverageHole","Output":"=== RUN   TestR26WalkTreeUnreadableDiscoveredRootIsCoverageHole\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR26WalkTreeUnreadableDiscoveredRootIsCoverageHole","Output":"--- PASS: TestR26WalkTreeUnreadableDiscoveredRootIsCoverageHole (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR26WalkTreeUnreadableDiscoveredRootIsCoverageHole"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR26CommandDiscoveryIsCappedAndReported"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR26CommandDiscoveryIsCappedAndReported","Output":"=== RUN   TestR26CommandDiscoveryIsCappedAndReported\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR26CommandDiscoveryIsCappedAndReported","Output":"--- PASS: TestR26CommandDiscoveryIsCappedAndReported (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR26CommandDiscoveryIsCappedAndReported"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR28LowercaseOptionalIsNotCMakeOption"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR28LowercaseOptionalIsNotCMakeOption","Output":"=== RUN   TestR28LowercaseOptionalIsNotCMakeOption\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR28LowercaseOptionalIsNotCMakeOption","Output":"--- PASS: TestR28LowercaseOptionalIsNotCMakeOption (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR28LowercaseOptionalIsNotCMakeOption"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR30CommandNameCannotCrossLineEnding"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR30CommandNameCannotCrossLineEnding","Output":"=== RUN   TestR30CommandNameCannotCrossLineEnding\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR30CommandNameCannotCrossLineEnding","Output":"--- PASS: TestR30CommandNameCannotCrossLineEnding (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR30CommandNameCannotCrossLineEnding"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR30MalformedIncludeTailIsUnresolved"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR30MalformedIncludeTailIsUnresolved","Output":"=== RUN   TestR30MalformedIncludeTailIsUnresolved\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR30MalformedIncludeTailIsUnresolved","Output":"--- PASS: TestR30MalformedIncludeTailIsUnresolved (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR30MalformedIncludeTailIsUnresolved"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR31InvalidControlTerminatorStopsConfidentEdgeResolution"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR31InvalidControlTerminatorStopsConfidentEdgeResolution","Output":"=== RUN   TestR31InvalidControlTerminatorStopsConfidentEdgeResolution\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/unmatched_endif"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/unmatched_endif","Output":"=== RUN   TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/unmatched_endif\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/unmatched_endif","Output":"--- PASS: TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/unmatched_endif (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/unmatched_endif"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/unmatched_endforeach"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/unmatched_endforeach","Output":"=== RUN   TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/unmatched_endforeach\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/unmatched_endforeach","Output":"--- PASS: TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/unmatched_endforeach (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/unmatched_endforeach"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/unmatched_endwhile"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/unmatched_endwhile","Output":"=== RUN   TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/unmatched_endwhile\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/unmatched_endwhile","Output":"--- PASS: TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/unmatched_endwhile (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/unmatched_endwhile"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/mismatched_terminator"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/mismatched_terminator","Output":"=== RUN   TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/mismatched_terminator\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/mismatched_terminator","Output":"--- PASS: TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/mismatched_terminator (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR31InvalidControlTerminatorStopsConfidentEdgeResolution/mismatched_terminator"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR31InvalidControlTerminatorStopsConfidentEdgeResolution","Output":"--- PASS: TestR31InvalidControlTerminatorStopsConfidentEdgeResolution (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR31InvalidControlTerminatorStopsConfidentEdgeResolution"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar","Output":"=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child)"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child)","Output":"=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child)\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child)","Output":"--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child) (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child)"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build)"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build)","Output":"=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build)\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build)","Output":"--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build) (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build)"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL)"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL)","Output":"=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL)\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL)","Output":"--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL) (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL)"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM)"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM)","Output":"=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM)\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM)","Output":"--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM) (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM)"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_EXCLUDE_FROM_ALL)"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_EXCLUDE_FROM_ALL)","Output":"=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_EXCLUDE_FROM_ALL)\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_EXCLUDE_FROM_ALL)","Output":"--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_EXCLUDE_FROM_ALL) (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_EXCLUDE_FROM_ALL)"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_SYSTEM)"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_SYSTEM)","Output":"=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_SYSTEM)\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_SYSTEM)","Output":"--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_SYSTEM) (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_SYSTEM)"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL_SYSTEM)"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL_SYSTEM)","Output":"=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL_SYSTEM)\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL_SYSTEM)","Output":"--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL_SYSTEM) (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL_SYSTEM)"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_EXCLUDE_FROM_ALL_SYSTEM)"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_EXCLUDE_FROM_ALL_SYSTEM)","Output":"=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_EXCLUDE_FROM_ALL_SYSTEM)\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_EXCLUDE_FROM_ALL_SYSTEM)","Output":"--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_EXCLUDE_FROM_ALL_SYSTEM) (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_EXCLUDE_FROM_ALL_SYSTEM)"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_[=[EXCLUDE_FROM_ALL]=])"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_[=[EXCLUDE_FROM_ALL]=])","Output":"=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_[=[EXCLUDE_FROM_ALL]=])\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_[=[EXCLUDE_FROM_ALL]=])","Output":"--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_[=[EXCLUDE_FROM_ALL]=]) (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_[=[EXCLUDE_FROM_ALL]=])"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_[=[SYSTEM]=])"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_[=[SYSTEM]=])","Output":"=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_[=[SYSTEM]=])\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_[=[SYSTEM]=])","Output":"--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_[=[SYSTEM]=]) (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_[=[SYSTEM]=])"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_[=[EXCLUDE_FROM_ALL]=]_[=[SYSTEM]=])"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_[=[EXCLUDE_FROM_ALL]=]_[=[SYSTEM]=])","Output":"=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_[=[EXCLUDE_FROM_ALL]=]_[=[SYSTEM]=])\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_[=[EXCLUDE_FROM_ALL]=]_[=[SYSTEM]=])","Output":"--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_[=[EXCLUDE_FROM_ALL]=]_[=[SYSTEM]=]) (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_[=[EXCLUDE_FROM_ALL]=]_[=[SYSTEM]=])"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_junk)"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_junk)","Output":"=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_junk)\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_junk)","Output":"--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_junk) (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_build_junk)"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL_build)"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL_build)","Output":"=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL_build)\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL_build)","Output":"--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL_build) (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL_build)"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM_build)"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM_build)","Output":"=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM_build)\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM_build)","Output":"--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM_build) (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM_build)"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM_EXCLUDE_FROM_ALL)"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM_EXCLUDE_FROM_ALL)","Output":"=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM_EXCLUDE_FROM_ALL)\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM_EXCLUDE_FROM_ALL)","Output":"--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM_EXCLUDE_FROM_ALL) (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM_EXCLUDE_FROM_ALL)"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL_EXCLUDE_FROM_ALL)"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL_EXCLUDE_FROM_ALL)","Output":"=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL_EXCLUDE_FROM_ALL)\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL_EXCLUDE_FROM_ALL)","Output":"--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL_EXCLUDE_FROM_ALL) (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_EXCLUDE_FROM_ALL_EXCLUDE_FROM_ALL)"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM_SYSTEM)"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM_SYSTEM)","Output":"=== RUN   TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM_SYSTEM)\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM_SYSTEM)","Output":"--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM_SYSTEM) (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar/add_subdirectory(child_SYSTEM_SYSTEM)"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar","Output":"--- PASS: TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32AddSubdirectoryAcceptsOnlyDocumentedTrailingGrammar"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32CMakeListsCaseFollowsActualFilesystem"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32CMakeListsCaseFollowsActualFilesystem","Output":"=== RUN   TestR32CMakeListsCaseFollowsActualFilesystem\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32CMakeListsCaseFollowsActualFilesystem","Output":"--- PASS: TestR32CMakeListsCaseFollowsActualFilesystem (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32CMakeListsCaseFollowsActualFilesystem"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32CaseFoldAloneCannotVerifyCMakeLists"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32CaseFoldAloneCannotVerifyCMakeLists","Output":"=== RUN   TestR32CaseFoldAloneCannotVerifyCMakeLists\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32CaseFoldAloneCannotVerifyCMakeLists/canonical_spelling_absent"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32CaseFoldAloneCannotVerifyCMakeLists/canonical_spelling_absent","Output":"=== RUN   TestR32CaseFoldAloneCannotVerifyCMakeLists/canonical_spelling_absent\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32CaseFoldAloneCannotVerifyCMakeLists/canonical_spelling_absent","Output":"--- PASS: TestR32CaseFoldAloneCannotVerifyCMakeLists/canonical_spelling_absent (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32CaseFoldAloneCannotVerifyCMakeLists/canonical_spelling_absent"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32CaseFoldAloneCannotVerifyCMakeLists/canonical_spelling_is_a_different_file"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32CaseFoldAloneCannotVerifyCMakeLists/canonical_spelling_is_a_different_file","Output":"=== RUN   TestR32CaseFoldAloneCannotVerifyCMakeLists/canonical_spelling_is_a_different_file\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32CaseFoldAloneCannotVerifyCMakeLists/canonical_spelling_is_a_different_file","Output":"--- PASS: TestR32CaseFoldAloneCannotVerifyCMakeLists/canonical_spelling_is_a_different_file (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32CaseFoldAloneCannotVerifyCMakeLists/canonical_spelling_is_a_different_file"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32CaseFoldAloneCannotVerifyCMakeLists/canonical_spelling_identifies_the_same_file"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32CaseFoldAloneCannotVerifyCMakeLists/canonical_spelling_identifies_the_same_file","Output":"=== RUN   TestR32CaseFoldAloneCannotVerifyCMakeLists/canonical_spelling_identifies_the_same_file\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32CaseFoldAloneCannotVerifyCMakeLists/canonical_spelling_identifies_the_same_file","Output":"--- PASS: TestR32CaseFoldAloneCannotVerifyCMakeLists/canonical_spelling_identifies_the_same_file (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32CaseFoldAloneCannotVerifyCMakeLists/canonical_spelling_identifies_the_same_file"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32CaseFoldAloneCannotVerifyCMakeLists","Output":"--- PASS: TestR32CaseFoldAloneCannotVerifyCMakeLists (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR32CaseFoldAloneCannotVerifyCMakeLists"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33UnterminatedControlFrameRetractsItsEdges"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33UnterminatedControlFrameRetractsItsEdges","Output":"=== RUN   TestR33UnterminatedControlFrameRetractsItsEdges\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33UnterminatedControlFrameRetractsItsEdges/if"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33UnterminatedControlFrameRetractsItsEdges/if","Output":"=== RUN   TestR33UnterminatedControlFrameRetractsItsEdges/if\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33UnterminatedControlFrameRetractsItsEdges/if","Output":"--- PASS: TestR33UnterminatedControlFrameRetractsItsEdges/if (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33UnterminatedControlFrameRetractsItsEdges/if"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33UnterminatedControlFrameRetractsItsEdges/foreach"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33UnterminatedControlFrameRetractsItsEdges/foreach","Output":"=== RUN   TestR33UnterminatedControlFrameRetractsItsEdges/foreach\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33UnterminatedControlFrameRetractsItsEdges/foreach","Output":"--- PASS: TestR33UnterminatedControlFrameRetractsItsEdges/foreach (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33UnterminatedControlFrameRetractsItsEdges/foreach"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33UnterminatedControlFrameRetractsItsEdges/while"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33UnterminatedControlFrameRetractsItsEdges/while","Output":"=== RUN   TestR33UnterminatedControlFrameRetractsItsEdges/while\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33UnterminatedControlFrameRetractsItsEdges/while","Output":"--- PASS: TestR33UnterminatedControlFrameRetractsItsEdges/while (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33UnterminatedControlFrameRetractsItsEdges/while"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33UnterminatedControlFrameRetractsItsEdges","Output":"--- PASS: TestR33UnterminatedControlFrameRetractsItsEdges (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33UnterminatedControlFrameRetractsItsEdges"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeDirectoryIsUnresolvedWrongType"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeDirectoryIsUnresolvedWrongType","Output":"=== RUN   TestR33IncludeDirectoryIsUnresolvedWrongType\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeDirectoryIsUnresolvedWrongType/required"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeDirectoryIsUnresolvedWrongType/required","Output":"=== RUN   TestR33IncludeDirectoryIsUnresolvedWrongType/required\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeDirectoryIsUnresolvedWrongType/required","Output":"--- PASS: TestR33IncludeDirectoryIsUnresolvedWrongType/required (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeDirectoryIsUnresolvedWrongType/required"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeDirectoryIsUnresolvedWrongType/optional"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeDirectoryIsUnresolvedWrongType/optional","Output":"=== RUN   TestR33IncludeDirectoryIsUnresolvedWrongType/optional\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeDirectoryIsUnresolvedWrongType/optional","Output":"--- PASS: TestR33IncludeDirectoryIsUnresolvedWrongType/optional (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeDirectoryIsUnresolvedWrongType/optional"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeDirectoryIsUnresolvedWrongType","Output":"--- PASS: TestR33IncludeDirectoryIsUnresolvedWrongType (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeDirectoryIsUnresolvedWrongType"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeSemicolonHonorsQuoteProvenance"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeSemicolonHonorsQuoteProvenance","Output":"=== RUN   TestR33IncludeSemicolonHonorsQuoteProvenance\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeSemicolonHonorsQuoteProvenance/quoted_semicolon_is_literal"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeSemicolonHonorsQuoteProvenance/quoted_semicolon_is_literal","Output":"=== RUN   TestR33IncludeSemicolonHonorsQuoteProvenance/quoted_semicolon_is_literal\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeSemicolonHonorsQuoteProvenance/quoted_semicolon_is_literal","Output":"--- PASS: TestR33IncludeSemicolonHonorsQuoteProvenance/quoted_semicolon_is_literal (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeSemicolonHonorsQuoteProvenance/quoted_semicolon_is_literal"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeSemicolonHonorsQuoteProvenance/unquoted_semicolon_expands_argument_list"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeSemicolonHonorsQuoteProvenance/unquoted_semicolon_expands_argument_list","Output":"=== RUN   TestR33IncludeSemicolonHonorsQuoteProvenance/unquoted_semicolon_expands_argument_list\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeSemicolonHonorsQuoteProvenance/unquoted_semicolon_expands_argument_list","Output":"--- PASS: TestR33IncludeSemicolonHonorsQuoteProvenance/unquoted_semicolon_expands_argument_list (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeSemicolonHonorsQuoteProvenance/unquoted_semicolon_expands_argument_list"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeSemicolonHonorsQuoteProvenance/unquoted_second_list_element_uses_legacy_ignored_position"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeSemicolonHonorsQuoteProvenance/unquoted_second_list_element_uses_legacy_ignored_position","Output":"=== RUN   TestR33IncludeSemicolonHonorsQuoteProvenance/unquoted_second_list_element_uses_legacy_ignored_position\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeSemicolonHonorsQuoteProvenance/unquoted_second_list_element_uses_legacy_ignored_position","Output":"--- PASS: TestR33IncludeSemicolonHonorsQuoteProvenance/unquoted_second_list_element_uses_legacy_ignored_position (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeSemicolonHonorsQuoteProvenance/unquoted_second_list_element_uses_legacy_ignored_position"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeSemicolonHonorsQuoteProvenance","Output":"--- PASS: TestR33IncludeSemicolonHonorsQuoteProvenance (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR33IncludeSemicolonHonorsQuoteProvenance"}
+{"Action":"run","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR35IncludeResultVariableRequiresExactCase"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR35IncludeResultVariableRequiresExactCase","Output":"=== RUN   TestR35IncludeResultVariableRequiresExactCase\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR35IncludeResultVariableRequiresExactCase","Output":"--- PASS: TestR35IncludeResultVariableRequiresExactCase (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph","Test":"TestR35IncludeResultVariableRequiresExactCase"}
+{"Action":"output","Package":"mcp-local-hub/internal/cmakegraph","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cmakegraph"}

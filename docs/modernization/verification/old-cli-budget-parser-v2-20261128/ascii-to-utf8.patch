@@ -1,0 +1,22 @@
+diff --git a/parse_closed_cli_durations.py b/parse_closed_cli_durations.py
+index 4acf520446b3286eef01539549188982765762af..fbecf3a15e19d7d52effc08d54b71cccea438a5c 100644
+--- a/parse_closed_cli_durations.py
++++ b/parse_closed_cli_durations.py
+@@ -84,7 +84,7 @@
+         terminal = terminal_pattern.fullmatch(text)
+         if terminal:
+             indent, action, name, elapsed = terminal.groups()
+-            name, action = name.decode("ascii"), action.decode("ascii")
++            name, action = name.decode("utf-8"), action.decode("ascii")
+             duration = Decimal(elapsed.decode("ascii"))
+             top = not indent and "/" not in name
+             all_terminals.append({"test": name, "outcome": action,
+@@ -105,7 +105,7 @@
+                  or text in (b"PASS", b"FAIL"), "Unexpected framed record")
+             continue
+         action, name = transition.groups()
+-        action, name = action.decode("ascii"), name.decode("ascii")
++        action, name = action.decode("ascii"), name.decode("utf-8")
+         if "/" in name:
+             continue
+         if action == "RUN":

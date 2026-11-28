@@ -1,0 +1,164 @@
+{
+    "schema":  "publication-original-root-data-audit-v1",
+    "status":  "PASS",
+    "physical_complete":  true,
+    "scope":  "cache-acceptance-stage-20261128-v13",
+    "config_sha256":  "b324e56c54585340ed370fc320b1e084f9c41ffbfe248e04e94f6500644658a7",
+    "receipt_sha256":  "e9e45e2ca9a5c5fee82f59f87d2fae12b5f08c92bdcc0580986b036113fbd372",
+    "root_sha256":  "39ea382d4f689219e2d99d961967d766d6e1755981b1131fdd6f6f8d1e05aa9f",
+    "outer_sha256":  "235027c685bbf505adcd7cee8f5b3b460450e2e1e4fbe092724d464dd63f11bf",
+    "commands_verified":  11,
+    "captures_verified":  22,
+    "results":  [
+                    {
+                        "name":  "head.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rev-parse",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.26935970003250986,
+                        "exit_code":  0,
+                        "stdout_sha256":  "5ebe6358d1f36ad1c8e34db1926b80e71ec95368410d43b6a3e540a04cf4d65a",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "04e5b4eadd6407cbff4e04ba453546d278314bd7\n"
+                    },
+                    {
+                        "name":  "starting-worktree-state.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "status",
+                                     "--porcelain=v1",
+                                     "--untracked-files=all"
+                                 ],
+                        "seconds":  0.297906499938108,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "reviewed-test-patch-check.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "apply",
+                                     "--check",
+                                     "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\successor14-manifest-pin-v1\\migration-source-pin.patch"
+                                 ],
+                        "seconds":  0.037925399956293404,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "apply-two-source-requirement-literals.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "apply",
+                                     "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\successor14-manifest-pin-v1\\migration-source-pin.patch"
+                                 ],
+                        "seconds":  0.03756059997249395,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "gofmt-read-only-check.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\gofmt.exe",
+                                     "-l",
+                                     "internal/cli/migrate_serena_test.go"
+                                 ],
+                        "seconds":  1.2220607999479398,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "test-patch-whitespace.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "diff",
+                                     "--check"
+                                 ],
+                        "seconds":  0.050852300017140806,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "stage-reviewed-test-input.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "add",
+                                     "--",
+                                     "internal/cli/migrate_serena_test.go"
+                                 ],
+                        "seconds":  0.04304459993727505,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "staged-name-status.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "diff",
+                                     "--cached",
+                                     "--name-status"
+                                 ],
+                        "seconds":  0.046226799953728914,
+                        "exit_code":  0,
+                        "stdout_sha256":  "0af7cac03348933c738091470280747e3c031a1d735f9fdee15ab4961e816fa7",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "M\tinternal/cli/migrate_serena_test.go\n"
+                    },
+                    {
+                        "name":  "reviewed-staged-tree.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "write-tree"
+                                 ],
+                        "seconds":  0.126916499924846,
+                        "exit_code":  0,
+                        "stdout_sha256":  "72c193aae7b6179d784a27e615a2ab5243ac24209887fdec7c2b2a61b30bf601",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "bcf1bd3539a8ba5ab54cff123adbb4bc071276d3\n"
+                    },
+                    {
+                        "name":  "staged-stat.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "diff",
+                                     "--cached",
+                                     "--stat"
+                                 ],
+                        "seconds":  0.03868820006027818,
+                        "exit_code":  0,
+                        "stdout_sha256":  "57d968e45f65e763b1543a8786aa21350c89f7bd91b7b80b35104b314548655b",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  " internal/cli/migrate_serena_test.go | 4 ++--\n 1 file changed, 2 insertions(+), 2 deletions(-)\n"
+                    },
+                    {
+                        "name":  "staged-worktree-state.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "status",
+                                     "--porcelain=v1",
+                                     "--untracked-files=all"
+                                 ],
+                        "seconds":  0.041724300011992455,
+                        "exit_code":  0,
+                        "stdout_sha256":  "a39f7d19ef04c6e18b2417c6c51adcda7cf81569213820bde75fb1fcb78e6491",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "M  internal/cli/migrate_serena_test.go\n"
+                    }
+                ],
+    "tests_executed":  false,
+    "reviewed_utc":  "2026-11-28T13:16:18.5932995Z"
+}

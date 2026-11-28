@@ -1,0 +1,121 @@
+=== RUN   TestScanCodexConfig_FindsApiKey
+--- PASS: TestScanCodexConfig_FindsApiKey (0.00s)
+=== NAME  
+=== RUN   TestScanConfigText_SkipsPlaceholders
+--- PASS: TestScanConfigText_SkipsPlaceholders (0.00s)
+=== NAME  
+=== RUN   TestVaultAtCanonicalLocation_TrueWhenCanonicalExists
+--- PASS: TestVaultAtCanonicalLocation_TrueWhenCanonicalExists (0.00s)
+=== NAME  
+=== RUN   TestVaultAtCanonicalLocation_FalseForLegacyCwdVault
+--- PASS: TestVaultAtCanonicalLocation_FalseForLegacyCwdVault (0.00s)
+=== NAME  
+=== RUN   TestResolverWithEnvironmentLookupPreservesReferenceAndOmission
+--- PASS: TestResolverWithEnvironmentLookupPreservesReferenceAndOmission (0.00s)
+=== NAME  
+=== RUN   TestResolver_Secret
+--- PASS: TestResolver_Secret (0.01s)
+=== NAME  
+=== RUN   TestResolver_File
+--- PASS: TestResolver_File (0.00s)
+=== NAME  
+=== RUN   TestResolver_Env
+--- PASS: TestResolver_Env (0.00s)
+=== NAME  
+=== RUN   TestResolver_EnvBracePlaceholder
+--- PASS: TestResolver_EnvBracePlaceholder (0.00s)
+=== NAME  
+=== RUN   TestResolver_EnvBracePlaceholderComposite
+--- PASS: TestResolver_EnvBracePlaceholderComposite (0.00s)
+=== NAME  
+=== RUN   TestResolver_EnvBracePlaceholderCompositeMultipleTokens
+--- PASS: TestResolver_EnvBracePlaceholderCompositeMultipleTokens (0.00s)
+=== NAME  
+=== RUN   TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens
+=== RUN   TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens/path-like_separator
+--- PASS: TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens/path-like_separator (0.00s)
+=== NAME  TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens
+=== RUN   TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens/hyphen_separator
+--- PASS: TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens/hyphen_separator (0.00s)
+=== NAME  TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens
+--- PASS: TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens (0.00s)
+=== NAME  
+=== RUN   TestResolver_EnvBracePlaceholderCompositeMissingIsError
+--- PASS: TestResolver_EnvBracePlaceholderCompositeMissingIsError (0.00s)
+=== NAME  
+=== RUN   TestResolver_EnvBracePlaceholderMalformedTokenIsError
+--- PASS: TestResolver_EnvBracePlaceholderMalformedTokenIsError (0.00s)
+=== NAME  
+=== RUN   TestResolver_EnvBracePlaceholderMissingErrorsNameToken
+=== RUN   TestResolver_EnvBracePlaceholderMissingErrorsNameToken/single_token
+--- PASS: TestResolver_EnvBracePlaceholderMissingErrorsNameToken/single_token (0.00s)
+=== NAME  TestResolver_EnvBracePlaceholderMissingErrorsNameToken
+=== RUN   TestResolver_EnvBracePlaceholderMissingErrorsNameToken/composite_token
+--- PASS: TestResolver_EnvBracePlaceholderMissingErrorsNameToken/composite_token (0.00s)
+=== NAME  TestResolver_EnvBracePlaceholderMissingErrorsNameToken
+--- PASS: TestResolver_EnvBracePlaceholderMissingErrorsNameToken (0.00s)
+=== NAME  
+=== RUN   TestResolver_Literal
+--- PASS: TestResolver_Literal (0.00s)
+=== NAME  
+=== RUN   TestResolver_SecretMissing
+--- PASS: TestResolver_SecretMissing (0.01s)
+=== NAME  
+=== RUN   TestResolver_EnvMissing
+--- PASS: TestResolver_EnvMissing (0.00s)
+=== NAME  
+=== RUN   TestResolveMapBestEffort_OmitsMissingSecret
+--- PASS: TestResolveMapBestEffort_OmitsMissingSecret (0.00s)
+=== NAME  
+=== RUN   TestResolveMapBestEffort_NeverErrorsAllResolvable
+--- PASS: TestResolveMapBestEffort_NeverErrorsAllResolvable (0.00s)
+=== NAME  
+=== RUN   TestResolveMapBestEffort_NonSecretRefStaysFatal
+--- PASS: TestResolveMapBestEffort_NonSecretRefStaysFatal (0.00s)
+=== NAME  
+=== RUN   TestHasSecretRef
+--- PASS: TestHasSecretRef (0.00s)
+=== NAME  
+=== RUN   TestOpenVaultOptional_AbsentIsNilNil
+--- PASS: TestOpenVaultOptional_AbsentIsNilNil (0.00s)
+=== NAME  
+=== RUN   TestOpenVaultOptional_UnreadableIsError
+--- PASS: TestOpenVaultOptional_UnreadableIsError (0.01s)
+=== NAME  
+=== RUN   TestVault_ExportYAML_ImportYAML_Roundtrip
+--- PASS: TestVault_ExportYAML_ImportYAML_Roundtrip (0.03s)
+=== NAME  
+=== RUN   TestWithVaultLock_ConcurrentSetNoLostOrCorruptEntries
+--- PASS: TestWithVaultLock_ConcurrentSetNoLostOrCorruptEntries (0.47s)
+=== NAME  
+=== RUN   TestTryWithVaultLock_ContentionErrorAndRelease
+--- PASS: TestTryWithVaultLock_ContentionErrorAndRelease (0.00s)
+=== NAME  
+=== RUN   TestVaultSaveAtomicUnsupportedParentSyncIsNonFatal
+--- PASS: TestVaultSaveAtomicUnsupportedParentSyncIsNonFatal (0.01s)
+=== NAME  
+=== RUN   TestVault_InitSetGet
+--- PASS: TestVault_InitSetGet (0.01s)
+=== NAME  
+=== RUN   TestVaultSaveAtomicRenameFailurePreservesExistingVault
+--- PASS: TestVaultSaveAtomicRenameFailurePreservesExistingVault (0.01s)
+=== NAME  
+=== RUN   TestVaultSaveAtomicParentSyncFailureIsReturned
+--- PASS: TestVaultSaveAtomicParentSyncFailureIsReturned (0.01s)
+=== NAME  
+=== RUN   TestInitVaultIdentityWriteUsesAtomicSiblingTemp
+--- PASS: TestInitVaultIdentityWriteUsesAtomicSiblingTemp (0.00s)
+=== NAME  
+=== RUN   TestInitVaultIdentityWriteParentSyncFailureIsReturned
+--- PASS: TestInitVaultIdentityWriteParentSyncFailureIsReturned (0.00s)
+=== NAME  
+=== RUN   TestVault_List
+--- PASS: TestVault_List (0.02s)
+=== NAME  
+=== RUN   TestVault_Delete
+--- PASS: TestVault_Delete (0.02s)
+=== NAME  
+=== RUN   TestVault_WrongIdentity
+--- PASS: TestVault_WrongIdentity (0.49s)
+=== NAME  
+PASS

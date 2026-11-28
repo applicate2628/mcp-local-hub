@@ -1,0 +1,42 @@
+{
+  "schema": "old-cli-budget-parser-utf8-correction-v2",
+  "status": "PREPARED_NOT_EXECUTED",
+  "original_capsule_manifest_sha256": "bcfeae39f1c96fc4656e5f0490497649545919dbc437e6577d464dd6b5df8252",
+  "original_parser_sha256": "4d5422763fc3a3f55fd52bc14506aa10fb669c8b3eb491661e593696e7db6414",
+  "corrected_parser_sha256": "7f623cc124d2aa04432c694d94007d39ebf6563a13a3944f2efc30a125bb13c9",
+  "corrected_parser_bytes": 9156,
+  "exact_delta": "Two test-name decoders ASCII -> strict UTF-8; frame patterns, ASCII event/decimal decoders, closure and input hash predicates unchanged",
+  "root_reported_original_data_failure": {
+    "scope": "DATA-only replay of exact reconstructed historical closed inputs",
+    "exception_type": "UnicodeDecodeError",
+    "decoder": "ascii",
+    "source_line": 108,
+    "byte_hex": "e2",
+    "position": 68,
+    "output_directory_created": false,
+    "original_script_modified": false,
+    "new_native_test_execution": false,
+    "full_traceback_included": false
+  },
+  "verified_static_anchor": {
+    "frame_index": 1981,
+    "stdout_line": 2425,
+    "first_non_ascii_codepoint": "U+2192"
+  },
+  "expected_after_execution": {
+    "ledger_sha256": "6a687a7e45efcf069e46e0bbafd36edcf09247e8f09e49467c59278925c34ea8",
+    "ledger_bytes": 456870,
+    "frames": 7642,
+    "top_level_terminals": 1599,
+    "pass": 1585,
+    "skip": 14,
+    "printed_seconds": 299.3,
+    "paused": 14,
+    "continuations": 0,
+    "never_started": 374
+  },
+  "expected_values_source": "Previous actual V8 calculation; v2 Python execution remains pending root",
+  "output_json_unchanged_reason": "All 1599 top-level ledger names are ASCII; UTF-8 decoding fixes non-ASCII nested names without changing published ledger JSON serialization",
+  "current_unknown_access": false,
+  "original_test_status_unchanged": "FAIL/CLOSED"
+}

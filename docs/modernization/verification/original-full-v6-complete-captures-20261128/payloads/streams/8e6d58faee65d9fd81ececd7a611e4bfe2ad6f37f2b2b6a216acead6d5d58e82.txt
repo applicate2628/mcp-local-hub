@@ -1,0 +1,4 @@
+TestParseLegalAndIllegalNames
+TestJoinContainsOpaqueNameAndRejectsZeroOrEscape
+TestPortNamePolicyHasOneProductionOwner
+TestR34ConsecutiveHyphensAreRejected

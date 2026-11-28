@@ -1,0 +1,46 @@
+{
+  "schema": "successor-closed-api-subtree-receiving-v1",
+  "source_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+  "source_tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+  "package": "mcp-local-hub/internal/api",
+  "phase": "default",
+  "case": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c",
+  "original_receipt_sha256": "e1cba7d99294f4e18816ebc91a8fd137c3533be5d9ed433071de4c89b66fc709",
+  "classification": "UNKNOWN",
+  "physical_complete": false,
+  "diagnostic_payload_access": false,
+  "api_qualification_passed": false,
+  "data_verification": "NOT_RECEIVED",
+  "receiving_issues": [
+    "KeyError: 'kind'"
+  ],
+  "full_run_qualification_claimed": false,
+  "full_run_physical_closure_claimed": false,
+  "cli_physical_closure_claimed": false,
+  "other_package_payload_access": false,
+  "source_payload_access": false,
+  "cache_payload_access": false,
+  "cache_handoff_eligible": false,
+  "new_native_or_test_execution": false,
+  "deadline_extension": false,
+  "control_pins": {
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-prepared-v1\\runtime-manifest.json": "bb532e4fec38ea60cad8a105ed2fad7495ee76440f9546a5100802f604fd0f7d",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-prepared-v1\\runtime-inputs.json": "53c5e8d351c70a184a851b7da4170e0bafdccfdedc262fe931030ffaf83f65d2",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\receipt.json": "e1cba7d99294f4e18816ebc91a8fd137c3533be5d9ed433071de4c89b66fc709",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\full59f\\plan-default.json": "abd4f3a4f7a3301d7db5d3be8db21b049c5ecca35256cdb9d7f96d374a547ff9",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\full59f\\invocations-default\\20de3352b54d310a0063823babc07f6d961a1e915d68b24be476bfdf404cb70e.started.json": "1d311477c8f756ceebf1ccf00c90ba370f8311ffd0fbef075851e1204b073a9a",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\full59f\\invocations-default\\20de3352b54d310a0063823babc07f6d961a1e915d68b24be476bfdf404cb70e.completed.json": "64302ee8517c8760380809f98086efcd84716505ab26557981991a835610e841",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\full59f\\invocations-default\\requests\\20de3352b54d310a0063823babc07f6d961a1e915d68b24be476bfdf404cb70e.request.json": "95f2051d09ef350bf010d0b2f7c49db1ba0c73a4e12d230bb09c5c7c2ce01d8b",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\full59f\\invocations-default\\requests\\20de3352b54d310a0063823babc07f6d961a1e915d68b24be476bfdf404cb70e.response.json": "e20a2c601c77ff2c3d95fb4905b95eb106dd303eedcfb1a4b7881f4c0e9d41f7",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\full59f\\invocations-default\\requests\\20de3352b54d310a0063823babc07f6d961a1e915d68b24be476bfdf404cb70e.replayed.json": "7d14eacc06e2fc241bf40bafdc3a052a6941381f81282e4c8b2fa2a3ef5571e5",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\inventory\\result.json": "4b76e7d232fceef47178400e02beec4af898a61496a319661aaf5f8302261db6"
+  },
+  "allowed_capture_pins": {
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\incoming-build-info.stdout.txt": "f01a3fc3cbcf6f720e6fd4ddb3ed80f9f014ec35ebfe737db51d90433ebef693",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\incoming-build-info.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\inventory-owner.stdout.txt": "799ca05869d28e73dbadb96412959b81c0d9e1354b4b4230b6ce9fd2b7138388",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\inventory-owner.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\suite-owner.stdout.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\suite-owner.stderr.txt": "55c50dd4e1b6e9544542902703a5c054d550c5dcbdcd0a8e295db15df1c1af38"
+  }
+}

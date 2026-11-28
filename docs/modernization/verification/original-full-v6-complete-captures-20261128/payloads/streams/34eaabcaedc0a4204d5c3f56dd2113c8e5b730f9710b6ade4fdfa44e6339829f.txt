@@ -1,0 +1,156 @@
+{"Action":"start","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper","Output":"=== RUN   TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/depth"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/depth","Output":"=== RUN   TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/depth\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/depth","Output":"--- PASS: TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/depth (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/depth"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/nodes"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/nodes","Output":"=== RUN   TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/nodes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/nodes","Output":"--- PASS: TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/nodes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/nodes"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/file-bytes"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/file-bytes","Output":"=== RUN   TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/file-bytes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/file-bytes","Output":"--- PASS: TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/file-bytes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/file-bytes"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/roots"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/roots","Output":"=== RUN   TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/roots\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/roots","Output":"--- PASS: TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/roots (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/roots"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper","Output":"--- PASS: TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR15RunForwardsAggregateEdgeCoverage"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR15RunForwardsAggregateEdgeCoverage","Output":"=== RUN   TestR15RunForwardsAggregateEdgeCoverage\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR15RunForwardsAggregateEdgeCoverage","Output":"--- PASS: TestR15RunForwardsAggregateEdgeCoverage (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR15RunForwardsAggregateEdgeCoverage"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR17ProjectionRetainsBoundedCausalCoverageAndEnumeratesOmissions"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR17ProjectionRetainsBoundedCausalCoverageAndEnumeratesOmissions","Output":"=== RUN   TestR17ProjectionRetainsBoundedCausalCoverageAndEnumeratesOmissions\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR17ProjectionRetainsBoundedCausalCoverageAndEnumeratesOmissions","Output":"--- PASS: TestR17ProjectionRetainsBoundedCausalCoverageAndEnumeratesOmissions (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR17ProjectionRetainsBoundedCausalCoverageAndEnumeratesOmissions"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR17RunForwardsCoverageAggregateAccounting"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR17RunForwardsCoverageAggregateAccounting","Output":"=== RUN   TestR17RunForwardsCoverageAggregateAccounting\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR17RunForwardsCoverageAggregateAccounting","Output":"--- PASS: TestR17RunForwardsCoverageAggregateAccounting (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR17RunForwardsCoverageAggregateAccounting"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR27GraphEvidenceIsLinearUniqueAndCancellationAware"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR27GraphEvidenceIsLinearUniqueAndCancellationAware","Output":"=== RUN   TestR27GraphEvidenceIsLinearUniqueAndCancellationAware\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR27GraphEvidenceIsLinearUniqueAndCancellationAware","Output":"--- PASS: TestR27GraphEvidenceIsLinearUniqueAndCancellationAware (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR27GraphEvidenceIsLinearUniqueAndCancellationAware"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR31RunPreservesWhitespaceInFilesystemPaths"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR31RunPreservesWhitespaceInFilesystemPaths","Output":"=== RUN   TestR31RunPreservesWhitespaceInFilesystemPaths\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR31RunPreservesWhitespaceInFilesystemPaths","Output":"--- PASS: TestR31RunPreservesWhitespaceInFilesystemPaths (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR31RunPreservesWhitespaceInFilesystemPaths"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR31RunRejectsNegativeGraphLimitsBeforeTraversal"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR31RunRejectsNegativeGraphLimitsBeforeTraversal","Output":"=== RUN   TestR31RunRejectsNegativeGraphLimitsBeforeTraversal\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/depth"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/depth","Output":"=== RUN   TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/depth\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/depth","Output":"--- PASS: TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/depth (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/depth"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/nodes"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/nodes","Output":"=== RUN   TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/nodes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/nodes","Output":"--- PASS: TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/nodes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/nodes"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/file-bytes"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/file-bytes","Output":"=== RUN   TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/file-bytes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/file-bytes","Output":"--- PASS: TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/file-bytes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/file-bytes"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/roots"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/roots","Output":"=== RUN   TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/roots\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/roots","Output":"--- PASS: TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/roots (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/roots"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR31RunRejectsNegativeGraphLimitsBeforeTraversal","Output":"--- PASS: TestR31RunRejectsNegativeGraphLimitsBeforeTraversal (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestR31RunRejectsNegativeGraphLimitsBeforeTraversal"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRunGraph_RealWalkTree"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRunGraph_RealWalkTree","Output":"=== RUN   TestRunGraph_RealWalkTree\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRunGraph_RealWalkTree","Output":"--- PASS: TestRunGraph_RealWalkTree (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRunGraph_RealWalkTree"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRunGraph_RealWalk_SingleFile"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRunGraph_RealWalk_SingleFile","Output":"=== RUN   TestRunGraph_RealWalk_SingleFile\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRunGraph_RealWalk_SingleFile","Output":"--- PASS: TestRunGraph_RealWalk_SingleFile (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRunGraph_RealWalk_SingleFile"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRun_ArgsInvalid_NeitherRootNorFile"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRun_ArgsInvalid_NeitherRootNorFile","Output":"=== RUN   TestRun_ArgsInvalid_NeitherRootNorFile\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRun_ArgsInvalid_NeitherRootNorFile","Output":"--- PASS: TestRun_ArgsInvalid_NeitherRootNorFile (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRun_ArgsInvalid_NeitherRootNorFile"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRun_WalkFailed_PropagatesAsUnknown"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRun_WalkFailed_PropagatesAsUnknown","Output":"=== RUN   TestRun_WalkFailed_PropagatesAsUnknown\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRun_WalkFailed_PropagatesAsUnknown","Output":"--- PASS: TestRun_WalkFailed_PropagatesAsUnknown (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRun_WalkFailed_PropagatesAsUnknown"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRun_HistogramIsVerbatimNotRederived"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRun_HistogramIsVerbatimNotRederived","Output":"=== RUN   TestRun_HistogramIsVerbatimNotRederived\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRun_HistogramIsVerbatimNotRederived","Output":"--- PASS: TestRun_HistogramIsVerbatimNotRederived (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRun_HistogramIsVerbatimNotRederived"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF19_BothRootAndFileIsRefusedNotSilentlyResolvedInRootsFavour"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF19_BothRootAndFileIsRefusedNotSilentlyResolvedInRootsFavour","Output":"=== RUN   TestF19_BothRootAndFileIsRefusedNotSilentlyResolvedInRootsFavour\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF19_BothRootAndFileIsRefusedNotSilentlyResolvedInRootsFavour","Output":"--- PASS: TestF19_BothRootAndFileIsRefusedNotSilentlyResolvedInRootsFavour (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF19_BothRootAndFileIsRefusedNotSilentlyResolvedInRootsFavour"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF20_WorkspaceRootIsForwardedInRootMode"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF20_WorkspaceRootIsForwardedInRootMode","Output":"=== RUN   TestF20_WorkspaceRootIsForwardedInRootMode\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF20_WorkspaceRootIsForwardedInRootMode","Output":"--- PASS: TestF20_WorkspaceRootIsForwardedInRootMode (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF20_WorkspaceRootIsForwardedInRootMode"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF20_OmittedWorkspaceRootStillDefaultsToRoot"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF20_OmittedWorkspaceRootStillDefaultsToRoot","Output":"=== RUN   TestF20_OmittedWorkspaceRootStillDefaultsToRoot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF20_OmittedWorkspaceRootStillDefaultsToRoot","Output":"--- PASS: TestF20_OmittedWorkspaceRootStillDefaultsToRoot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF20_OmittedWorkspaceRootStillDefaultsToRoot"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF21_RootLevelFileYieldsAValidDefaultWorkspace"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF21_RootLevelFileYieldsAValidDefaultWorkspace","Output":"=== RUN   TestF21_RootLevelFileYieldsAValidDefaultWorkspace\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF21_RootLevelFileYieldsAValidDefaultWorkspace/windows_drive_root"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF21_RootLevelFileYieldsAValidDefaultWorkspace/windows_drive_root","Output":"=== RUN   TestF21_RootLevelFileYieldsAValidDefaultWorkspace/windows_drive_root\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF21_RootLevelFileYieldsAValidDefaultWorkspace/windows_drive_root","Output":"--- PASS: TestF21_RootLevelFileYieldsAValidDefaultWorkspace/windows_drive_root (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF21_RootLevelFileYieldsAValidDefaultWorkspace/windows_drive_root"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF21_RootLevelFileYieldsAValidDefaultWorkspace/posix_style_root"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF21_RootLevelFileYieldsAValidDefaultWorkspace/posix_style_root","Output":"=== RUN   TestF21_RootLevelFileYieldsAValidDefaultWorkspace/posix_style_root\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF21_RootLevelFileYieldsAValidDefaultWorkspace/posix_style_root","Output":"    tool_test.go:216: \"/CMakeLists.txt\" is not absolute under this host's filepath semantics\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF21_RootLevelFileYieldsAValidDefaultWorkspace/posix_style_root","Output":"--- SKIP: TestF21_RootLevelFileYieldsAValidDefaultWorkspace/posix_style_root (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF21_RootLevelFileYieldsAValidDefaultWorkspace/posix_style_root"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF21_RootLevelFileYieldsAValidDefaultWorkspace","Output":"--- PASS: TestF21_RootLevelFileYieldsAValidDefaultWorkspace (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF21_RootLevelFileYieldsAValidDefaultWorkspace"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRun_CanceledContextIsItsOwnReason"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRun_CanceledContextIsItsOwnReason","Output":"=== RUN   TestRun_CanceledContextIsItsOwnReason\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRun_CanceledContextIsItsOwnReason","Output":"--- PASS: TestRun_CanceledContextIsItsOwnReason (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRun_CanceledContextIsItsOwnReason"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal","Output":"=== RUN   TestPR591_RelativeGraphPathsRejectedBeforeTraversal\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal/relative_root"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal/relative_root","Output":"=== RUN   TestPR591_RelativeGraphPathsRejectedBeforeTraversal/relative_root\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal/relative_root","Output":"--- PASS: TestPR591_RelativeGraphPathsRejectedBeforeTraversal/relative_root (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal/relative_root"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal/drive-relative_root"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal/drive-relative_root","Output":"=== RUN   TestPR591_RelativeGraphPathsRejectedBeforeTraversal/drive-relative_root\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal/drive-relative_root","Output":"--- PASS: TestPR591_RelativeGraphPathsRejectedBeforeTraversal/drive-relative_root (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal/drive-relative_root"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal/relative_file"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal/relative_file","Output":"=== RUN   TestPR591_RelativeGraphPathsRejectedBeforeTraversal/relative_file\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal/relative_file","Output":"--- PASS: TestPR591_RelativeGraphPathsRejectedBeforeTraversal/relative_file (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal/relative_file"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal/explicit_relative_workspace_root"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal/explicit_relative_workspace_root","Output":"=== RUN   TestPR591_RelativeGraphPathsRejectedBeforeTraversal/explicit_relative_workspace_root\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal/explicit_relative_workspace_root","Output":"--- PASS: TestPR591_RelativeGraphPathsRejectedBeforeTraversal/explicit_relative_workspace_root (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal/explicit_relative_workspace_root"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal/absolute_root_control"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal/absolute_root_control","Output":"=== RUN   TestPR591_RelativeGraphPathsRejectedBeforeTraversal/absolute_root_control\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal/absolute_root_control","Output":"--- PASS: TestPR591_RelativeGraphPathsRejectedBeforeTraversal/absolute_root_control (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal/absolute_root_control"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal/absolute_file_control"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal/absolute_file_control","Output":"=== RUN   TestPR591_RelativeGraphPathsRejectedBeforeTraversal/absolute_file_control\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal/absolute_file_control","Output":"--- PASS: TestPR591_RelativeGraphPathsRejectedBeforeTraversal/absolute_file_control (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal/absolute_file_control"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal","Output":"--- PASS: TestPR591_RelativeGraphPathsRejectedBeforeTraversal (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_RelativeGraphPathsRejectedBeforeTraversal"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_CMakeWrapPublicDocsMatchAbsolutePathContract"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_CMakeWrapPublicDocsMatchAbsolutePathContract","Output":"=== RUN   TestPR591_CMakeWrapPublicDocsMatchAbsolutePathContract\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_CMakeWrapPublicDocsMatchAbsolutePathContract","Output":"--- PASS: TestPR591_CMakeWrapPublicDocsMatchAbsolutePathContract (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestPR591_CMakeWrapPublicDocsMatchAbsolutePathContract"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRunGraph_ForwardsRootEnumerationCapVerbatim"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRunGraph_ForwardsRootEnumerationCapVerbatim","Output":"=== RUN   TestRunGraph_ForwardsRootEnumerationCapVerbatim\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRunGraph_ForwardsRootEnumerationCapVerbatim","Output":"--- PASS: TestRunGraph_ForwardsRootEnumerationCapVerbatim (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestRunGraph_ForwardsRootEnumerationCapVerbatim"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF20_Field_EchoedWorkspaceRootEqualsTheSuppliedOne"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF20_Field_EchoedWorkspaceRootEqualsTheSuppliedOne","Output":"=== RUN   TestF20_Field_EchoedWorkspaceRootEqualsTheSuppliedOne\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF20_Field_EchoedWorkspaceRootEqualsTheSuppliedOne","Output":"--- PASS: TestF20_Field_EchoedWorkspaceRootEqualsTheSuppliedOne (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF20_Field_EchoedWorkspaceRootEqualsTheSuppliedOne"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF20_Field_RootOutsideSuppliedWorkspaceFailsLoudlyNotSilently"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF20_Field_RootOutsideSuppliedWorkspaceFailsLoudlyNotSilently","Output":"=== RUN   TestF20_Field_RootOutsideSuppliedWorkspaceFailsLoudlyNotSilently\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF20_Field_RootOutsideSuppliedWorkspaceFailsLoudlyNotSilently","Output":"--- PASS: TestF20_Field_RootOutsideSuppliedWorkspaceFailsLoudlyNotSilently (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Test":"TestF20_Field_RootOutsideSuppliedWorkspaceFailsLoudlyNotSilently"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmakewrap"}

@@ -1,0 +1,282 @@
+{"Action":"start","Package":"mcp-local-hub/internal/cbuild"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanRejectsUnboundPreset"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanRejectsUnboundPreset","Output":"=== RUN   TestCmakeCleanRejectsUnboundPreset\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanRejectsUnboundPreset/dev_bound_false/purge_false"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanRejectsUnboundPreset/dev_bound_false/purge_false","Output":"=== RUN   TestCmakeCleanRejectsUnboundPreset/dev_bound_false/purge_false\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanRejectsUnboundPreset/dev_bound_false/purge_false","Output":"--- PASS: TestCmakeCleanRejectsUnboundPreset/dev_bound_false/purge_false (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanRejectsUnboundPreset/dev_bound_false/purge_false"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanRejectsUnboundPreset/dev_bound_false/purge_true"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanRejectsUnboundPreset/dev_bound_false/purge_true","Output":"=== RUN   TestCmakeCleanRejectsUnboundPreset/dev_bound_false/purge_true\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanRejectsUnboundPreset/dev_bound_false/purge_true","Output":"--- PASS: TestCmakeCleanRejectsUnboundPreset/dev_bound_false/purge_true (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanRejectsUnboundPreset/dev_bound_false/purge_true"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanRejectsUnboundPreset/dev_bound_true/purge_false"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanRejectsUnboundPreset/dev_bound_true/purge_false","Output":"=== RUN   TestCmakeCleanRejectsUnboundPreset/dev_bound_true/purge_false\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanRejectsUnboundPreset/dev_bound_true/purge_false","Output":"--- PASS: TestCmakeCleanRejectsUnboundPreset/dev_bound_true/purge_false (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanRejectsUnboundPreset/dev_bound_true/purge_false"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanRejectsUnboundPreset/dev_bound_true/purge_true"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanRejectsUnboundPreset/dev_bound_true/purge_true","Output":"=== RUN   TestCmakeCleanRejectsUnboundPreset/dev_bound_true/purge_true\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanRejectsUnboundPreset/dev_bound_true/purge_true","Output":"--- PASS: TestCmakeCleanRejectsUnboundPreset/dev_bound_true/purge_true (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanRejectsUnboundPreset/dev_bound_true/purge_true"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanRejectsUnboundPreset","Output":"--- PASS: TestCmakeCleanRejectsUnboundPreset (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanRejectsUnboundPreset"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanUsesOnlySettledPreset"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanUsesOnlySettledPreset","Output":"=== RUN   TestCmakeCleanUsesOnlySettledPreset\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanUsesOnlySettledPreset","Output":"--- PASS: TestCmakeCleanUsesOnlySettledPreset (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanUsesOnlySettledPreset"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanRevalidatesSettledCache"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanRevalidatesSettledCache","Output":"=== RUN   TestCmakeCleanRevalidatesSettledCache\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanRevalidatesSettledCache","Output":"--- PASS: TestCmakeCleanRevalidatesSettledCache (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanRevalidatesSettledCache"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestPurgeRefusesExpiredBudgetAfterBindingWait"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestPurgeRefusesExpiredBudgetAfterBindingWait","Output":"=== RUN   TestPurgeRefusesExpiredBudgetAfterBindingWait\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestPurgeRefusesExpiredBudgetAfterBindingWait","Output":"--- PASS: TestPurgeRefusesExpiredBudgetAfterBindingWait (1.10s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestPurgeRefusesExpiredBudgetAfterBindingWait"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics","Output":"=== RUN   TestParseDiagnostics\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/msvc_error_with_code_and_col"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/msvc_error_with_code_and_col","Output":"=== RUN   TestParseDiagnostics/msvc_error_with_code_and_col\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/msvc_error_with_code_and_col","Output":"--- PASS: TestParseDiagnostics/msvc_error_with_code_and_col (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/msvc_error_with_code_and_col"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/msvc_warning_without_col"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/msvc_warning_without_col","Output":"=== RUN   TestParseDiagnostics/msvc_warning_without_col\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/msvc_warning_without_col","Output":"--- PASS: TestParseDiagnostics/msvc_warning_without_col (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/msvc_warning_without_col"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/msvc_fatal_error_normalizes_to_error"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/msvc_fatal_error_normalizes_to_error","Output":"=== RUN   TestParseDiagnostics/msvc_fatal_error_normalizes_to_error\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/msvc_fatal_error_normalizes_to_error","Output":"--- PASS: TestParseDiagnostics/msvc_fatal_error_normalizes_to_error (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/msvc_fatal_error_normalizes_to_error"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/gcc_clang_error_with_col"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/gcc_clang_error_with_col","Output":"=== RUN   TestParseDiagnostics/gcc_clang_error_with_col\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/gcc_clang_error_with_col","Output":"--- PASS: TestParseDiagnostics/gcc_clang_error_with_col (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/gcc_clang_error_with_col"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/gcc_clang_warning_captures_-W_flag_as_code"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/gcc_clang_warning_captures_-W_flag_as_code","Output":"=== RUN   TestParseDiagnostics/gcc_clang_warning_captures_-W_flag_as_code\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/gcc_clang_warning_captures_-W_flag_as_code","Output":"--- PASS: TestParseDiagnostics/gcc_clang_warning_captures_-W_flag_as_code (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/gcc_clang_warning_captures_-W_flag_as_code"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/gcc_clang_note_without_col"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/gcc_clang_note_without_col","Output":"=== RUN   TestParseDiagnostics/gcc_clang_note_without_col\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/gcc_clang_note_without_col","Output":"--- PASS: TestParseDiagnostics/gcc_clang_note_without_col (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/gcc_clang_note_without_col"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/cmake_error_with_location"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/cmake_error_with_location","Output":"=== RUN   TestParseDiagnostics/cmake_error_with_location\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/cmake_error_with_location","Output":"--- PASS: TestParseDiagnostics/cmake_error_with_location (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/cmake_error_with_location"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/cmake_warning_without_location"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/cmake_warning_without_location","Output":"=== RUN   TestParseDiagnostics/cmake_warning_without_location\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/cmake_warning_without_location","Output":"--- PASS: TestParseDiagnostics/cmake_warning_without_location (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/cmake_warning_without_location"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/msvc_linker_LNK_error"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/msvc_linker_LNK_error","Output":"=== RUN   TestParseDiagnostics/msvc_linker_LNK_error\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/msvc_linker_LNK_error","Output":"--- PASS: TestParseDiagnostics/msvc_linker_LNK_error (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/msvc_linker_LNK_error"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/msvc_linker_LINK_label_is_file-less"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/msvc_linker_LINK_label_is_file-less","Output":"=== RUN   TestParseDiagnostics/msvc_linker_LINK_label_is_file-less\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/msvc_linker_LINK_label_is_file-less","Output":"--- PASS: TestParseDiagnostics/msvc_linker_LINK_label_is_file-less (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/msvc_linker_LINK_label_is_file-less"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/gnu_ld_undefined_reference_best_effort"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/gnu_ld_undefined_reference_best_effort","Output":"=== RUN   TestParseDiagnostics/gnu_ld_undefined_reference_best_effort\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/gnu_ld_undefined_reference_best_effort","Output":"--- PASS: TestParseDiagnostics/gnu_ld_undefined_reference_best_effort (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/gnu_ld_undefined_reference_best_effort"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/unrecognized_lines_are_dropped"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/unrecognized_lines_are_dropped","Output":"=== RUN   TestParseDiagnostics/unrecognized_lines_are_dropped\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/unrecognized_lines_are_dropped","Output":"--- PASS: TestParseDiagnostics/unrecognized_lines_are_dropped (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/unrecognized_lines_are_dropped"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/order_preserved_across_mixed_formats"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/order_preserved_across_mixed_formats","Output":"=== RUN   TestParseDiagnostics/order_preserved_across_mixed_formats\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/order_preserved_across_mixed_formats","Output":"--- PASS: TestParseDiagnostics/order_preserved_across_mixed_formats (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics/order_preserved_across_mixed_formats"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics","Output":"--- PASS: TestParseDiagnostics (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseDiagnostics"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestBoundedBufferCaps"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestBoundedBufferCaps","Output":"=== RUN   TestBoundedBufferCaps\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestBoundedBufferCaps","Output":"--- PASS: TestBoundedBufferCaps (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestBoundedBufferCaps"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestPurgeBuildDirWithinSourceSymlinkEscape"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestPurgeBuildDirWithinSourceSymlinkEscape","Output":"=== RUN   TestPurgeBuildDirWithinSourceSymlinkEscape\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestPurgeBuildDirWithinSourceSymlinkEscape","Output":"--- PASS: TestPurgeBuildDirWithinSourceSymlinkEscape (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestPurgeBuildDirWithinSourceSymlinkEscape"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestRunCommandTimeoutReturnsPromptly"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestRunCommandTimeoutReturnsPromptly","Output":"=== RUN   TestRunCommandTimeoutReturnsPromptly\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestRunCommandTimeoutReturnsPromptly","Output":"--- PASS: TestRunCommandTimeoutReturnsPromptly (0.50s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestRunCommandTimeoutReturnsPromptly"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestProcGroupStartDisablesJobAfterOpenProcessFailure"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestProcGroupStartDisablesJobAfterOpenProcessFailure","Output":"=== RUN   TestProcGroupStartDisablesJobAfterOpenProcessFailure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestProcGroupStartDisablesJobAfterOpenProcessFailure","Output":"--- PASS: TestProcGroupStartDisablesJobAfterOpenProcessFailure (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestProcGroupStartDisablesJobAfterOpenProcessFailure"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeBuildRejectsFlagTarget"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeBuildRejectsFlagTarget","Output":"=== RUN   TestCmakeBuildRejectsFlagTarget\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeBuildRejectsFlagTarget","Output":"--- PASS: TestCmakeBuildRejectsFlagTarget (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeBuildRejectsFlagTarget"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestVcpkgSearchRejectsFlagQuery"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestVcpkgSearchRejectsFlagQuery","Output":"=== RUN   TestVcpkgSearchRejectsFlagQuery\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestVcpkgSearchRejectsFlagQuery","Output":"--- PASS: TestVcpkgSearchRejectsFlagQuery (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestVcpkgSearchRejectsFlagQuery"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestPresetFlagEqualsForm"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestPresetFlagEqualsForm","Output":"=== RUN   TestPresetFlagEqualsForm\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestPresetFlagEqualsForm","Output":"--- PASS: TestPresetFlagEqualsForm (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestPresetFlagEqualsForm"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeListPresetsDelegatesToCMake"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeListPresetsDelegatesToCMake","Output":"=== RUN   TestCmakeListPresetsDelegatesToCMake\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeListPresetsDelegatesToCMake","Output":"--- PASS: TestCmakeListPresetsDelegatesToCMake (2.09s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeListPresetsDelegatesToCMake"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeListPresetsRefusesUnknownOutput"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeListPresetsRefusesUnknownOutput","Output":"=== RUN   TestCmakeListPresetsRefusesUnknownOutput\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeListPresetsRefusesUnknownOutput","Output":"--- PASS: TestCmakeListPresetsRefusesUnknownOutput (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeListPresetsRefusesUnknownOutput"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestSettleConfiguredCacheFailureClearsPriorMapping"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestSettleConfiguredCacheFailureClearsPriorMapping","Output":"=== RUN   TestSettleConfiguredCacheFailureClearsPriorMapping\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestSettleConfiguredCacheFailureClearsPriorMapping","Output":"--- PASS: TestSettleConfiguredCacheFailureClearsPriorMapping (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestSettleConfiguredCacheFailureClearsPriorMapping"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestPresetArgvWiring"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestPresetArgvWiring","Output":"=== RUN   TestPresetArgvWiring\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestPresetArgvWiring","Output":"cbuild: configured-cache identity unavailable: CMake completion line not found\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestPresetArgvWiring","Output":"--- PASS: TestPresetArgvWiring (2.52s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestPresetArgvWiring"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanPurgeRefusesNonDirectoryTarget"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanPurgeRefusesNonDirectoryTarget","Output":"=== RUN   TestCmakeCleanPurgeRefusesNonDirectoryTarget\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanPurgeRefusesNonDirectoryTarget","Output":"--- PASS: TestCmakeCleanPurgeRefusesNonDirectoryTarget (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestCmakeCleanPurgeRefusesNonDirectoryTarget"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels","Output":"=== RUN   TestExecutionResultsRetainRawTailInMCPChannels\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/configure"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/configure","Output":"=== RUN   TestExecutionResultsRetainRawTailInMCPChannels/configure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/configure","Output":"--- PASS: TestExecutionResultsRetainRawTailInMCPChannels/configure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/configure"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/build"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/build","Output":"=== RUN   TestExecutionResultsRetainRawTailInMCPChannels/build\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/build","Output":"--- PASS: TestExecutionResultsRetainRawTailInMCPChannels/build (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/build"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/test"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/test","Output":"=== RUN   TestExecutionResultsRetainRawTailInMCPChannels/test\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/test","Output":"--- PASS: TestExecutionResultsRetainRawTailInMCPChannels/test (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/test"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/workflow"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/workflow","Output":"=== RUN   TestExecutionResultsRetainRawTailInMCPChannels/workflow\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/workflow","Output":"--- PASS: TestExecutionResultsRetainRawTailInMCPChannels/workflow (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/workflow"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/clean"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/clean","Output":"=== RUN   TestExecutionResultsRetainRawTailInMCPChannels/clean\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/clean","Output":"--- PASS: TestExecutionResultsRetainRawTailInMCPChannels/clean (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/clean"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/vcpkg_install"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/vcpkg_install","Output":"=== RUN   TestExecutionResultsRetainRawTailInMCPChannels/vcpkg_install\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/vcpkg_install","Output":"--- PASS: TestExecutionResultsRetainRawTailInMCPChannels/vcpkg_install (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/vcpkg_install"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/vcpkg_list"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/vcpkg_list","Output":"=== RUN   TestExecutionResultsRetainRawTailInMCPChannels/vcpkg_list\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/vcpkg_list","Output":"--- PASS: TestExecutionResultsRetainRawTailInMCPChannels/vcpkg_list (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/vcpkg_list"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/vcpkg_search"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/vcpkg_search","Output":"=== RUN   TestExecutionResultsRetainRawTailInMCPChannels/vcpkg_search\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/vcpkg_search","Output":"--- PASS: TestExecutionResultsRetainRawTailInMCPChannels/vcpkg_search (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/vcpkg_search"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/nonempty"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/nonempty","Output":"=== RUN   TestExecutionResultsRetainRawTailInMCPChannels/nonempty\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/nonempty","Output":"--- PASS: TestExecutionResultsRetainRawTailInMCPChannels/nonempty (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels/nonempty"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels","Output":"--- PASS: TestExecutionResultsRetainRawTailInMCPChannels (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestExecutionResultsRetainRawTailInMCPChannels"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestProjectOperationWaitIsCancellableAndIsolated"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestProjectOperationWaitIsCancellableAndIsolated","Output":"=== RUN   TestProjectOperationWaitIsCancellableAndIsolated\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestProjectOperationWaitIsCancellableAndIsolated","Output":"--- PASS: TestProjectOperationWaitIsCancellableAndIsolated (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestProjectOperationWaitIsCancellableAndIsolated"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation","Output":"=== RUN   TestMutatingToolsWaitForProjectOperation\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/configure"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/configure","Output":"=== RUN   TestMutatingToolsWaitForProjectOperation/configure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/configure","Output":"--- PASS: TestMutatingToolsWaitForProjectOperation/configure (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/configure"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/build"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/build","Output":"=== RUN   TestMutatingToolsWaitForProjectOperation/build\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/build","Output":"--- PASS: TestMutatingToolsWaitForProjectOperation/build (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/build"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/test"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/test","Output":"=== RUN   TestMutatingToolsWaitForProjectOperation/test\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/test","Output":"--- PASS: TestMutatingToolsWaitForProjectOperation/test (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/test"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/clean"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/clean","Output":"=== RUN   TestMutatingToolsWaitForProjectOperation/clean\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/clean","Output":"--- PASS: TestMutatingToolsWaitForProjectOperation/clean (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/clean"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/purge"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/purge","Output":"=== RUN   TestMutatingToolsWaitForProjectOperation/purge\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/purge","Output":"--- PASS: TestMutatingToolsWaitForProjectOperation/purge (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/purge"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/workflow"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/workflow","Output":"=== RUN   TestMutatingToolsWaitForProjectOperation/workflow\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/workflow","Output":"--- PASS: TestMutatingToolsWaitForProjectOperation/workflow (0.04s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/workflow"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/vcpkg_install"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/vcpkg_install","Output":"=== RUN   TestMutatingToolsWaitForProjectOperation/vcpkg_install\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/vcpkg_install","Output":"--- PASS: TestMutatingToolsWaitForProjectOperation/vcpkg_install (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation/vcpkg_install"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation","Output":"--- PASS: TestMutatingToolsWaitForProjectOperation (0.25s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestMutatingToolsWaitForProjectOperation"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestConfigureInvalidatesBindingsBeforeUnsettledResult"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestConfigureInvalidatesBindingsBeforeUnsettledResult","Output":"=== RUN   TestConfigureInvalidatesBindingsBeforeUnsettledResult\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestConfigureInvalidatesBindingsBeforeUnsettledResult","Output":"cbuild: configured-cache identity unavailable: CMake completion line not found\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestConfigureInvalidatesBindingsBeforeUnsettledResult","Output":"--- PASS: TestConfigureInvalidatesBindingsBeforeUnsettledResult (1.13s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestConfigureInvalidatesBindingsBeforeUnsettledResult"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseCTest"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseCTest","Output":"=== RUN   TestParseCTest\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseCTest","Output":"--- PASS: TestParseCTest (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseCTest"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseCTestEmpty"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseCTestEmpty","Output":"=== RUN   TestParseCTestEmpty\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseCTestEmpty","Output":"--- PASS: TestParseCTestEmpty (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseCTestEmpty"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseVcpkgList"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseVcpkgList","Output":"=== RUN   TestParseVcpkgList\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseVcpkgList","Output":"--- PASS: TestParseVcpkgList (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseVcpkgList"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseVcpkgInstalled"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseVcpkgInstalled","Output":"=== RUN   TestParseVcpkgInstalled\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseVcpkgInstalled","Output":"--- PASS: TestParseVcpkgInstalled (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseVcpkgInstalled"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseVcpkgSearch"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseVcpkgSearch","Output":"=== RUN   TestParseVcpkgSearch\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseVcpkgSearch","Output":"--- PASS: TestParseVcpkgSearch (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseVcpkgSearch"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseVcpkgSearchGarbageSafe"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseVcpkgSearchGarbageSafe","Output":"=== RUN   TestParseVcpkgSearchGarbageSafe\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseVcpkgSearchGarbageSafe","Output":"--- PASS: TestParseVcpkgSearchGarbageSafe (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestParseVcpkgSearchGarbageSafe"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestValidateConfiguredCacheRejectsBinaryDirOnly"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestValidateConfiguredCacheRejectsBinaryDirOnly","Output":"=== RUN   TestValidateConfiguredCacheRejectsBinaryDirOnly\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestValidateConfiguredCacheRejectsBinaryDirOnly","Output":"--- PASS: TestValidateConfiguredCacheRejectsBinaryDirOnly (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestValidateConfiguredCacheRejectsBinaryDirOnly"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestCTestReportsCaptureTruncation"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCTestReportsCaptureTruncation","Output":"=== RUN   TestCTestReportsCaptureTruncation\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestCTestReportsCaptureTruncation/small"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCTestReportsCaptureTruncation/small","Output":"=== RUN   TestCTestReportsCaptureTruncation/small\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCTestReportsCaptureTruncation/small","Output":"--- PASS: TestCTestReportsCaptureTruncation/small (1.88s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestCTestReportsCaptureTruncation/small"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestCTestReportsCaptureTruncation/large"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCTestReportsCaptureTruncation/large","Output":"=== RUN   TestCTestReportsCaptureTruncation/large\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCTestReportsCaptureTruncation/large","Output":"--- PASS: TestCTestReportsCaptureTruncation/large (0.12s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestCTestReportsCaptureTruncation/large"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCTestReportsCaptureTruncation","Output":"--- PASS: TestCTestReportsCaptureTruncation (2.46s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestCTestReportsCaptureTruncation"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestProjectPathKeyCasePolicy"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestProjectPathKeyCasePolicy","Output":"=== RUN   TestProjectPathKeyCasePolicy\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestProjectPathKeyCasePolicy","Output":"--- PASS: TestProjectPathKeyCasePolicy (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestProjectPathKeyCasePolicy"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestConfiguredBindingUsesNormalizedSourceKey"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestConfiguredBindingUsesNormalizedSourceKey","Output":"=== RUN   TestConfiguredBindingUsesNormalizedSourceKey\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestConfiguredBindingUsesNormalizedSourceKey","Output":"--- PASS: TestConfiguredBindingUsesNormalizedSourceKey (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestConfiguredBindingUsesNormalizedSourceKey"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestCMakeIntegration"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCMakeIntegration","Output":"=== RUN   TestCMakeIntegration\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestCMakeIntegration","Output":"--- PASS: TestCMakeIntegration (8.24s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestCMakeIntegration"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestVcpkgIntegration"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestVcpkgIntegration","Output":"=== RUN   TestVcpkgIntegration\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestVcpkgIntegration","Output":"    integration_test.go:230: VCPKG_ROOT not set; skipping vcpkg integration test\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestVcpkgIntegration","Output":"--- SKIP: TestVcpkgIntegration (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/cbuild","Test":"TestVcpkgIntegration"}
+{"Action":"run","Package":"mcp-local-hub/internal/cbuild","Test":"TestStdioProtocolRoundTrip"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestStdioProtocolRoundTrip","Output":"=== RUN   TestStdioProtocolRoundTrip\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Test":"TestStdioProtocolRoundTrip","Output":"--- PASS: TestStdioProtocolRoundTrip (0.88s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild","Test":"TestStdioProtocolRoundTrip"}
+{"Action":"output","Package":"mcp-local-hub/internal/cbuild","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/cbuild"}

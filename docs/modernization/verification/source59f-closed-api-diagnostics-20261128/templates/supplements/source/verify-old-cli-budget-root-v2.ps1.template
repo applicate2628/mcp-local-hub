@@ -1,0 +1,19 @@
+$ErrorActionPreference='Stop'
+function SHA([string]$p){$h=[Security.Cryptography.SHA256]::Create();try{[BitConverter]::ToString($h.ComputeHash([IO.File]::ReadAllBytes($p))).Replace('-','').ToLowerInvariant()}finally{$h.Dispose()}}
+$Capsule='@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\recovery-inputs-v1\old-cli-budget-parser-v2'
+$Out='@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\recovery-inputs-v1\root-checkpoint-data-20261128-v1'
+if((SHA ($Capsule+'\artifact-manifest.json')) -ne 'aa72bc02efb434dec5aeef46f630b2ec3115cd6fd3367c64a43e4fff4ac6deee'){throw 'v2 manifest differs'}
+$m=Get-Content -Raw -LiteralPath ($Capsule+'\artifact-manifest.json')|ConvertFrom-Json
+foreach($row in $m.files.PSObject.Properties){$p=Join-Path $Capsule $row.Name;if((Get-Item -LiteralPath $p).Length -ne $row.Value.bytes -or (SHA $p) -ne $row.Value.sha256){throw 'v2 artifact differs'}}
+if(@(Get-ChildItem -LiteralPath $Capsule -File -Force).Count -ne 7){throw 'v2 file count differs'}
+& '@@RECOVERY_NATIVE_USER_PROFILE@@\AppData\Local\Python\pythoncore-3.15-64\python.exe' -E -S -B ($Capsule+'\parse_closed_cli_durations_v2.py') --root-receiving ($Out+'\prior-full20\root-receiving\result.json') --receipt ($Out+'\prior-full20\default-cli\receipt.json') --stdout ($Out+'\prior-full20\default-cli\suite-owner.stdout.txt') --output ($Out+'\old-cli-budget-replay-v2')
+if($LASTEXITCODE -ne 0){throw 'DATA parser v2 failed'}
+$original='@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\recovery-inputs-v1\old-cli-budget-analysis-v1\top-level-terminal-ledger.json'
+$replayed=$Out+'\old-cli-budget-replay-v2\top-level-terminal-ledger.json'
+if((SHA $original) -ne (SHA $replayed)){throw 'Replayed ledger differs from author ledger'}
+$result=[pscustomobject]@{schema='old-cli-data-replay-root-v2';status='PASS_EXACT_LEDGER';manifest_sha256=(SHA ($Capsule+'\artifact-manifest.json'));files_verified=7;ledger_sha256=(SHA $replayed);bytes=(Get-Item -LiteralPath $replayed).Length;summary_sha256=(SHA ($Out+'\old-cli-budget-replay-v2\summary.json'));native_or_test_commands=$false;original_data_v1='FAIL_UnicodeDecodeError_preserved';historical_qualification='FAIL/CLOSED'}
+$target=$Out+'\root-old-cli-parser-v2.json'
+if(Test-Path -LiteralPath $target){throw 'Receipt exists'}
+[IO.File]::WriteAllText($target,($result|ConvertTo-Json -Depth 6)+[Environment]::NewLine,(New-Object Text.UTF8Encoding($false)))
+$result|ConvertTo-Json -Depth 6
+[pscustomobject]@{receipt_sha256=(SHA $target)}|ConvertTo-Json

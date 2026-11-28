@@ -1,0 +1,48 @@
+{
+  "schema": "closed-full-v6-capture-preservation-disposition-v1",
+  "moves_performed": 0,
+  "permanent_deletions_performed": 0,
+  "primary_closed_full_run": {
+    "role": "historical-full-v6-run-root",
+    "status": "KEEP",
+    "reason": "Keep until independent materialization/reconstruction and public immutable readback are received; other run files are outside this capture-only inventory."
+  },
+  "original_command_captures": {
+    "count": 566,
+    "source_payloads": 285,
+    "status": "KEEP_UNTIL_PUBLIC_READBACK",
+    "public_mapping": "capture-index.json",
+    "no_semantic_discard": true
+  },
+  "package_receipts": {
+    "count": 65,
+    "status": "KEEP_UNTIL_PUBLIC_READBACK",
+    "new_exact_originals": 59,
+    "existing_public_originals": 6
+  },
+  "original_native_owner_receipts": {
+    "count": 130,
+    "status": "KEEP",
+    "reason": "Previously received by root; raw owner-file byte reconstruction is not claimed by this capsule."
+  },
+  "other_original_run_files": {
+    "status": "KEEP",
+    "reason": "No directory-wide disposable-data conclusion was made."
+  },
+  "active_or_UNKNOWN_scopes": {
+    "status": "KEEP",
+    "reason": "No payload access, cleanup, closure inheritance, or cache handoff is granted."
+  },
+  "cache_artifacts": {
+    "status": "KEEP_PENDING_SEPARATE_UNUSED_PROOF",
+    "qualification_inherited": false
+  },
+  "operator_role_values": {
+    "status": "KEEP",
+    "reason": "Required to reconstruct exact historical bytes; values are intentionally outside the public capsule."
+  },
+  "future_DATA_reconstruction_outputs": {
+    "status": "KEEP_UNTIL_VERIFIED_DUPLICATE",
+    "reason": "Only independently verified copies with preserved public originals may later be moved to trash by the owner."
+  }
+}

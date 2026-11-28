@@ -1,0 +1,145 @@
+=== RUN   TestTrace_WellFormed_IncludeChainAndExecutedLines
+--- PASS: TestTrace_WellFormed_IncludeChainAndExecutedLines (0.00s)
+=== NAME  
+=== RUN   TestTrace_NoVersionHeader_ParsedAnyway
+--- PASS: TestTrace_NoVersionHeader_ParsedAnyway (0.00s)
+=== NAME  
+=== RUN   TestTrace_MalformedLinesCountedAndParseContinues
+--- PASS: TestTrace_MalformedLinesCountedAndParseContinues (0.00s)
+=== NAME  
+=== RUN   TestTrace_EmptyFile
+--- PASS: TestTrace_EmptyFile (0.00s)
+=== NAME  
+=== RUN   TestTrace_NotJSONLines
+--- PASS: TestTrace_NotJSONLines (0.00s)
+=== NAME  
+=== RUN   TestTrace_MissingPath
+--- PASS: TestTrace_MissingPath (0.00s)
+=== NAME  
+=== RUN   TestTrace_Unreadable
+--- PASS: TestTrace_Unreadable (0.00s)
+=== NAME  
+=== RUN   TestTrace_FileAndCommandFilters
+=== RUN   TestTrace_FileAndCommandFilters/file_filter_narrows_to_one_file
+--- PASS: TestTrace_FileAndCommandFilters/file_filter_narrows_to_one_file (0.00s)
+=== NAME  TestTrace_FileAndCommandFilters
+=== RUN   TestTrace_FileAndCommandFilters/command_filter_is_case-insensitive_across_differing-case_occurrences
+--- PASS: TestTrace_FileAndCommandFilters/command_filter_is_case-insensitive_across_differing-case_occurrences (0.00s)
+=== NAME  TestTrace_FileAndCommandFilters
+=== RUN   TestTrace_FileAndCommandFilters/file_and_command_combined
+--- PASS: TestTrace_FileAndCommandFilters/file_and_command_combined (0.00s)
+=== NAME  TestTrace_FileAndCommandFilters
+=== RUN   TestTrace_FileAndCommandFilters/include_chain_and_executed_lines_stay_whole-trace_under_a_filter
+--- PASS: TestTrace_FileAndCommandFilters/include_chain_and_executed_lines_stay_whole-trace_under_a_filter (0.00s)
+=== NAME  TestTrace_FileAndCommandFilters
+--- PASS: TestTrace_FileAndCommandFilters (0.00s)
+=== NAME  
+=== RUN   TestTrace_MaxRecordsCapsAndSetsTruncated
+--- PASS: TestTrace_MaxRecordsCapsAndSetsTruncated (0.00s)
+=== NAME  
+=== RUN   TestTrace_MaxRecordsZeroUsesDefaultAndDoesNotTruncateASmallTrace
+--- PASS: TestTrace_MaxRecordsZeroUsesDefaultAndDoesNotTruncateASmallTrace (0.00s)
+=== NAME  
+=== RUN   TestTrace_ArgsPreservedVerbatim
+--- PASS: TestTrace_ArgsPreservedVerbatim (0.00s)
+=== NAME  
+=== RUN   TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim
+=== RUN   TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim/unseen_file_yields_no_records_matched_and_is_absent_from_FilesInTrace
+--- PASS: TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim/unseen_file_yields_no_records_matched_and_is_absent_from_FilesInTrace (0.00s)
+=== NAME  TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim
+=== RUN   TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim/known_file_with_an_unobserved_line_is_a_distinct_absence_claim
+--- PASS: TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim/known_file_with_an_unobserved_line_is_a_distinct_absence_claim (0.00s)
+=== NAME  TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim
+--- PASS: TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim (0.00s)
+=== NAME  
+=== RUN   TestTrace_MidRecordInputIsIndependentlyMarkedIncomplete
+--- PASS: TestTrace_MidRecordInputIsIndependentlyMarkedIncomplete (0.00s)
+=== NAME  
+=== RUN   TestTrace_InvalidMandatoryRecordFieldsAreMalformedNotEvidence
+--- PASS: TestTrace_InvalidMandatoryRecordFieldsAreMalformedNotEvidence (0.00s)
+=== NAME  
+=== RUN   TestF26_CancellationDuringTheParseStopsReadingMidStream
+--- PASS: TestF26_CancellationDuringTheParseStopsReadingMidStream (0.08s)
+=== NAME  
+=== RUN   TestF26_CanceledRequestFailsClosedAndStopsReading
+--- PASS: TestF26_CanceledRequestFailsClosedAndStopsReading (0.00s)
+=== NAME  
+=== RUN   TestF26_TraceReaderIsClosedOnTheSuccessPath
+--- PASS: TestF26_TraceReaderIsClosedOnTheSuccessPath (0.00s)
+=== NAME  
+=== RUN   TestF26_OverlongLineIsRefusedAndReportedAsIncomplete
+--- PASS: TestF26_OverlongLineIsRefusedAndReportedAsIncomplete (0.01s)
+=== NAME  
+=== RUN   TestF26_MultipleIncompletenessCausesAreAllReported
+--- PASS: TestF26_MultipleIncompletenessCausesAreAllReported (0.00s)
+=== NAME  
+=== RUN   TestF26_EmptyAndWhitespaceOnlyTracesStillReportTraceEmpty
+--- PASS: TestF26_EmptyAndWhitespaceOnlyTracesStillReportTraceEmpty (0.00s)
+=== NAME  
+=== RUN   TestF26_RecordCeilingBoundsParseIndexAndResponseTogether
+--- PASS: TestF26_RecordCeilingBoundsParseIndexAndResponseTogether (0.00s)
+=== NAME  
+=== RUN   TestF26_ByteCeilingStopsTheReadAndIsReported
+--- PASS: TestF26_ByteCeilingStopsTheReadAndIsReported (0.00s)
+=== NAME  
+=== RUN   TestF26_LineCeilingBoundsTheReadNotJustTheClassification
+--- PASS: TestF26_LineCeilingBoundsTheReadNotJustTheClassification (0.01s)
+=== NAME  
+=== RUN   TestTraceRejectsSpecialFileFromOpenedHandle
+--- PASS: TestTraceRejectsSpecialFileFromOpenedHandle (0.00s)
+=== NAME  
+=== RUN   TestRelativeTracePathIsRefusedBeforeFilesystemAccess
+--- PASS: TestRelativeTracePathIsRefusedBeforeFilesystemAccess (0.00s)
+=== NAME  
+=== RUN   TestUnsupportedTraceMajorFailsClosedWithoutPartialRecords
+--- PASS: TestUnsupportedTraceMajorFailsClosedWithoutPartialRecords (0.00s)
+=== NAME  
+=== RUN   TestR16TraceProjectionRetainsIdentityAndEnumeratesCollections
+--- PASS: TestR16TraceProjectionRetainsIdentityAndEnumeratesCollections (0.00s)
+=== NAME  
+=== RUN   TestR16TraceAdmissionRejectsLargeAggregateBeforeEncoding
+--- PASS: TestR16TraceAdmissionRejectsLargeAggregateBeforeEncoding (0.00s)
+=== NAME  
+=== RUN   TestR18TraceAdmissionAccountsForEncodedLineNumberBytes
+--- PASS: TestR18TraceAdmissionAccountsForEncodedLineNumberBytes (0.00s)
+=== NAME  
+=== RUN   TestR19TraceAdmissionAccountsForExecutedLineEntrySyntax
+--- PASS: TestR19TraceAdmissionAccountsForExecutedLineEntrySyntax (0.00s)
+=== NAME  
+=== RUN   TestR21TraceUsesSameHandleForOpenAndRegularFileValidation
+--- PASS: TestR21TraceUsesSameHandleForOpenAndRegularFileValidation (0.00s)
+=== NAME  
+=== RUN   TestR22TraceAdmissionAccountsForEscapedJSONStringBytes
+--- PASS: TestR22TraceAdmissionAccountsForEscapedJSONStringBytes (0.00s)
+=== NAME  
+=== RUN   TestR22EncodedJSONStringBytesMatchesJSONEncoder
+--- PASS: TestR22EncodedJSONStringBytesMatchesJSONEncoder (0.00s)
+=== NAME  
+=== RUN   TestR23TraceAdmissionAccountsForRecordObjectSyntax
+--- PASS: TestR23TraceAdmissionAccountsForRecordObjectSyntax (0.00s)
+=== NAME  
+=== RUN   TestR23ParserRetainedRecordByteCeiling
+--- PASS: TestR23ParserRetainedRecordByteCeiling (0.00s)
+=== NAME  
+=== RUN   TestR28DerivedTraceIndexesShareRetainedByteBudget
+--- PASS: TestR28DerivedTraceIndexesShareRetainedByteBudget (0.00s)
+=== NAME  
+=== RUN   TestR32TraceRequiresPresentNonNullArgsArray
+--- PASS: TestR32TraceRequiresPresentNonNullArgsArray (0.00s)
+=== NAME  
+=== RUN   TestR32OversizedLineDrainStopsOnCancellation
+--- PASS: TestR32OversizedLineDrainStopsOnCancellation (0.00s)
+=== NAME  
+=== RUN   TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence
+=== RUN   TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence/field_omitted_/_empty
+--- PASS: TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence/field_omitted_/_empty (0.00s)
+=== NAME  TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence
+=== RUN   TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence/whitespace_only_names_no_file_either
+--- PASS: TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence/whitespace_only_names_no_file_either (0.00s)
+=== NAME  TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence
+--- PASS: TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence (0.00s)
+=== NAME  
+=== RUN   TestTrace_SuppliedButAbsentPath_IsStillAVerifiedAbsence
+--- PASS: TestTrace_SuppliedButAbsentPath_IsStillAVerifiedAbsence (0.00s)
+=== NAME  
+PASS

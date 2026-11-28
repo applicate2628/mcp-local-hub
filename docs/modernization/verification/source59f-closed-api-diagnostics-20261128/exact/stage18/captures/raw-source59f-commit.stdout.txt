@@ -1,0 +1,6 @@
+tree 03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1
+parent 74e7563db244ede5984834233ce8d59072e92c0a
+author applicate2628 <dima_den@inbox.ru> 1795872628 +0300
+committer applicate2628 <dima_den@inbox.ru> 1795872628 +0300
+
+test: receive the original breakaway process wait error

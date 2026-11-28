@@ -1,0 +1,97 @@
+# Successor literal runtime candidate
+
+## Status and scope
+
+This is source preparation for the final TestSource `59f618ebfbf6d9f52c6994d68586e3c2ebc202a8`, tree `03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1`, with 3,369 tracked paths. No helper compilation, Product build, runtime import, application process, or Go test was performed by this preparation.
+
+The actual helper and Product producers must finish with received original native and input/output closure before a concrete runtime configuration can be composed. A template manifest marked reviewed is also required. The candidate alone is not a runnable acceptance result.
+
+## Contents
+
+- [1. Original command contract](#1-original-command-contract)
+- [2. Executable and Product roles](#2-executable-and-product-roles)
+- [3. Physical closure and qualification](#3-physical-closure-and-qualification)
+- [4. Preserved original ownership](#4-preserved-original-ownership)
+- [5. Inputs, paths, and cache](#5-inputs-paths-and-cache)
+- [6. Receiving and remaining work](#6-receiving-and-remaining-work)
+
+## 1. Original command contract
+
+The driver preserves both requested commands, their package scopes, one execution, and the five-minute Go timeout:
+
+```text
+go build ./... && go vet ./... && go test -count=1 -timeout 5m ./...
+go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/
+```
+
+The original Go `-exec` consumer/issuer protocol receives the same image produced for each package by that invocation. Its original four test arguments are retained. The full same-image inventory is required; there is no focused selector or private migration replacement.
+
+Both modes require the original fourteen migration roots, both canonical native roots, and the three API stderr rotation roots. The three CLI panic/error stderr roots remain an additional explicit group. The driver and adapter retain the exact names independently; the configuration must match them. The original required count remains nineteen. Native cleanup subcase evidence is additionally required by the CLI physical owner.
+
+## 2. Executable and Product roles
+
+| Consumer | Actual image | Owner |
+|---|---|---|
+| CLI full suite | Exact bytes of the incoming Go image, admitted in its own three-file V1 bundle | Separate foreground auxiliary using Source `RunForeground` with required breakaway support |
+| API full suite | Exact incoming Go image copied by the namespace owner to its private `r/bin/api.test.exe` | Frozen namespace-v2 auxiliary with original namespace observations |
+| Process full suite | Original incoming Go image and all four original test arguments | Existing whole-suite Job entry owner |
+| Other packages and inventories | Original incoming image, or the same admitted CLI bytes for its inventory | Existing contained receiver |
+
+The marked Product is built from the complete final TestSource map. Its real publisher epoch and compiler resource describe the CLI incoming image. The CLI receives its version, commit, date, source epoch, GUI subsystem, and the explicit `-s -w` receiver flags through the original Go compiler/linker route. Its binary bytes must remain equal to the incoming image.
+
+A separate tagged `-TestStateIsolatedProduct` has no publisher epoch. Its V1 fixture is supplied as `MCPHUB_CANONICAL_NATIVE_ENTRY_FIXTURE`; tagged API attach-client tests receive this same separate Product through their explicit attach operands. The incoming CLI's `MCPHUB_CANONICAL_ENTRY_FIXTURE` still names the same executing test image. Both Products contain exactly the original three files; no Rust DLL or private3ebe issuer protocol is introduced.
+
+## 3. Physical closure and qualification
+
+The foreground receipt is `literal-foreground-cli-run-v1`. Its receiver binds the exact image digest, original working directory, run root, controller arguments, and the parent issuer's request identity.
+
+Physical closure requires the actual Source native snapshot, empty original `Outcome.Pending`, each acquired native close observation, reader completion and EOF, all original standard-file closes, both capture sinks, and all four path/image pin rows. Every ancestor pin must have its matching original slot close. The fixed source-owned cleanup observations must each have one RUN and one PASS, with no FAIL or SKIP:
+
+1. `TestCanonicalGUIRuntimeRecoveryNativeIndependentReplay`
+2. Its `cleanup-uses-current-operation-context` subcase
+3. `TestCanonicalSuccessorNativeControlRetainsOriginalFiles`
+4. Its `absent` subcase
+5. Its `identical` subcase
+6. Its `different-identity` subcase
+7. `TestStartSupervisorDetachedBreakaway_AddsFlagOnSuccess`
+
+The receipt explicitly describes escaped-actor evidence as a source-pinned test-owned wait/release path. It does not claim a nested close-success receipt or turn snapshots into process authority.
+
+A received original no-child result may close a failed creation only when the actual producer emitted that result and exited nonzero. An early error with no result remains UNKNOWN. Missing cleanup observations, open pins/readers, retained custody, cancellation, or incomplete native observations also remain UNKNOWN.
+
+Normal receiving and the prebound two-argument failed-command callback share one metadata reader and its first error. There is no control-file retry, PID reopen, second wait, new cleanup, or replay in that callback. Failed physical receiving reports closure only and explicitly refuses qualification, capture, cache, and new-command grants. PASS additionally requires the original zero exit, successful full ledger, unchanged input image/bundle, and the existing deadlines.
+
+Namespace receiving uses the already frozen v2 image-copy and seven-API-root fragments. It calls namespace qualification after physical receiving; closure alone cannot qualify a test.
+
+## 4. Preserved original ownership
+
+The baseline is the frozen original-v6 runtime, itself composed from the published full-v13/ns1 ownership route. The diff files in this directory show all source changes.
+
+Static comparison confirms that the original issuer's methods, request/replay functions, namespace failed-reader callback, and the adapter's complete finalization block are unchanged. All core `OriginalRun` methods except the receipt schema string in its constructor are unchanged. The partition functions, driver phase callback/capture guard, and original outer execute/finally wrapper are unchanged.
+
+Removed behavior is limited to the recovered727-specific private migration publisher, external canonical owner, and unused focused route. Product/source admission now requires one complete final Source map and the two actual Product roles above.
+
+The old templates, old full727 FAIL, and all their original receipts are preserved separately. This candidate gives no PASS to old source or to a different public PR head.
+
+## 5. Inputs, paths, and cache
+
+The exact approved runtime owner is `@@RECOVERY_APPROVED_WORK_AREA_RAW@@\r7\full59f`. Package owners are fresh `r7/x<12hex>` and `r7/n<12hex>` scopes. The short temporary parent is `@@RECOVERY_APPROVED_WORK_AREA_RAW@@\o7`. Both top-level paths must be absent, and their ancestors ordinary and non-reparse, at composition and original launch.
+
+The complete environment is explicit. It omits `GIT_ALLOW_PROTOCOL` entirely, includes the received `ProgramFiles` and `ProgramFiles(x86)`, and retains the qualified Windows PowerShell directory on PATH. The ordinary private headless Serena configuration is unchanged. No ambient profile or test opt-in is merged.
+
+`copy_closed_runtime_caches.py` changes only the producer copier's destination admission to the exact approved runtime owner. The original warm Source04e PASS parent, execution, root receiving, original input map, and complete before/after source/destination cache inventories remain required. The currently selected Source may have advanced to59f; the copier never rereads a fictitious live04e Source or qualifies a cache from the old full FAIL.
+
+`prepare_successor.py` composes DATA only. It validates concrete path/SHA256 pairs, source maps, original closed producer metadata, exact role schemas, and all template bytes before writing a fresh output. It parses emitted Python without importing it. The unchanged scope helper is rendered with the approved roots. The old outer launcher has four explicit deterministic substitutions: runtime schema, driver filename, parent schema, and exclusive creation of the fresh runs root.
+
+## 6. Receiving and remaining work
+
+The source templates have been parsed and compared as DATA. The candidate has not executed either full command and does not assert a time-budget or functional result.
+
+Required before launch:
+
+- Receive the actual completed final-source helper and both Product producers, their artifacts, compiler resource, fixture bytes, and source-map equality.
+- Bind those exact pins, the approved explicit environment, and the warm PASS cache donor into a concrete configuration.
+- Complete root review of the typed foreground receiver and all diffs, then create the reviewed template manifest.
+- Run the DATA composer, receive its exact outputs, and launch the original retained outer process outside an enclosing Job.
+- Receive original physical closure before measuring later outputs, source, or cache; preserve every FAIL and UNKNOWN without relabeling.
+

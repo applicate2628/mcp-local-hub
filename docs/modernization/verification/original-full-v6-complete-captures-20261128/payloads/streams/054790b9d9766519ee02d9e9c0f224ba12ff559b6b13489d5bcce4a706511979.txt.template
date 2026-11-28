@@ -1,0 +1,81 @@
+{"Action":"start","Package":"mcp-local-hub/internal/oneapi"}
+{"Action":"run","Package":"mcp-local-hub/internal/oneapi","Test":"TestMergeEnv_OverlayWinsKeepsBaseAppendsNew"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestMergeEnv_OverlayWinsKeepsBaseAppendsNew","Output":"=== RUN   TestMergeEnv_OverlayWinsKeepsBaseAppendsNew\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestMergeEnv_OverlayWinsKeepsBaseAppendsNew","Output":"--- PASS: TestMergeEnv_OverlayWinsKeepsBaseAppendsNew (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/oneapi","Test":"TestMergeEnv_OverlayWinsKeepsBaseAppendsNew"}
+{"Action":"run","Package":"mcp-local-hub/internal/oneapi","Test":"TestMergeEnv_WindowsCaseInsensitiveKeyMatch"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestMergeEnv_WindowsCaseInsensitiveKeyMatch","Output":"=== RUN   TestMergeEnv_WindowsCaseInsensitiveKeyMatch\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestMergeEnv_WindowsCaseInsensitiveKeyMatch","Output":"--- PASS: TestMergeEnv_WindowsCaseInsensitiveKeyMatch (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/oneapi","Test":"TestMergeEnv_WindowsCaseInsensitiveKeyMatch"}
+{"Action":"run","Package":"mcp-local-hub/internal/oneapi","Test":"TestMergeEnv_SkipsMalformedOverlayKeepsMalformedBase"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestMergeEnv_SkipsMalformedOverlayKeepsMalformedBase","Output":"=== RUN   TestMergeEnv_SkipsMalformedOverlayKeepsMalformedBase\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestMergeEnv_SkipsMalformedOverlayKeepsMalformedBase","Output":"--- PASS: TestMergeEnv_SkipsMalformedOverlayKeepsMalformedBase (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/oneapi","Test":"TestMergeEnv_SkipsMalformedOverlayKeepsMalformedBase"}
+{"Action":"run","Package":"mcp-local-hub/internal/oneapi","Test":"TestEnvOverlay_HostIndependent"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestEnvOverlay_HostIndependent","Output":"=== RUN   TestEnvOverlay_HostIndependent\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestEnvOverlay_HostIndependent","Output":"    env_overlay_test.go:127: no oneAPI install on this host — EnvOverlay returned nil (documented fallback)\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestEnvOverlay_HostIndependent","Output":"--- PASS: TestEnvOverlay_HostIndependent (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/oneapi","Test":"TestEnvOverlay_HostIndependent"}
+{"Action":"run","Package":"mcp-local-hub/internal/oneapi","Test":"TestDetectRootFound"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestDetectRootFound","Output":"=== RUN   TestDetectRootFound\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestDetectRootFound","Output":"    oneapi_test.go:46: POSIX DetectRoot returned ok=true with no probe candidates; got \"@@RECOVERY_APPROVED_WORK_AREA_JSON2@@\\\\o6\\\\x3f95ee65cb8b\\\\TestDetectRootFound4282235050\\\\001\"\n","OutputType":"error"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestDetectRootFound","Output":"--- FAIL: TestDetectRootFound (0.00s)\n","OutputType":"frame"}
+{"Action":"fail","Package":"mcp-local-hub/internal/oneapi","Test":"TestDetectRootFound"}
+{"Action":"run","Package":"mcp-local-hub/internal/oneapi","Test":"TestDetectRootMissing"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestDetectRootMissing","Output":"=== RUN   TestDetectRootMissing\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestDetectRootMissing","Output":"--- PASS: TestDetectRootMissing (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/oneapi","Test":"TestDetectRootMissing"}
+{"Action":"run","Package":"mcp-local-hub/internal/oneapi","Test":"TestDLLDirsEnumeratesPriorityFirst"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestDLLDirsEnumeratesPriorityFirst","Output":"=== RUN   TestDLLDirsEnumeratesPriorityFirst\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestDLLDirsEnumeratesPriorityFirst","Output":"--- PASS: TestDLLDirsEnumeratesPriorityFirst (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/oneapi","Test":"TestDLLDirsEnumeratesPriorityFirst"}
+{"Action":"run","Package":"mcp-local-hub/internal/oneapi","Test":"TestDLLDirsExcludesNoDLLComponent"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestDLLDirsExcludesNoDLLComponent","Output":"=== RUN   TestDLLDirsExcludesNoDLLComponent\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestDLLDirsExcludesNoDLLComponent","Output":"--- PASS: TestDLLDirsExcludesNoDLLComponent (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/oneapi","Test":"TestDLLDirsExcludesNoDLLComponent"}
+{"Action":"run","Package":"mcp-local-hub/internal/oneapi","Test":"TestDLLDirsEmptyRootIsNil"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestDLLDirsEmptyRootIsNil","Output":"=== RUN   TestDLLDirsEmptyRootIsNil\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestDLLDirsEmptyRootIsNil","Output":"--- PASS: TestDLLDirsEmptyRootIsNil (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/oneapi","Test":"TestDLLDirsEmptyRootIsNil"}
+{"Action":"run","Package":"mcp-local-hub/internal/oneapi","Test":"TestDLLDirsAgainstSeam"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestDLLDirsAgainstSeam","Output":"=== RUN   TestDLLDirsAgainstSeam\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestDLLDirsAgainstSeam","Output":"--- PASS: TestDLLDirsAgainstSeam (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/oneapi","Test":"TestDLLDirsAgainstSeam"}
+{"Action":"run","Package":"mcp-local-hub/internal/oneapi","Test":"TestPrependEnvList_PrependsToExistingKey"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestPrependEnvList_PrependsToExistingKey","Output":"=== RUN   TestPrependEnvList_PrependsToExistingKey\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestPrependEnvList_PrependsToExistingKey","Output":"--- PASS: TestPrependEnvList_PrependsToExistingKey (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/oneapi","Test":"TestPrependEnvList_PrependsToExistingKey"}
+{"Action":"run","Package":"mcp-local-hub/internal/oneapi","Test":"TestPrependEnvList_CaseInsensitiveKeyPreservesCasing"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestPrependEnvList_CaseInsensitiveKeyPreservesCasing","Output":"=== RUN   TestPrependEnvList_CaseInsensitiveKeyPreservesCasing\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestPrependEnvList_CaseInsensitiveKeyPreservesCasing","Output":"--- PASS: TestPrependEnvList_CaseInsensitiveKeyPreservesCasing (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/oneapi","Test":"TestPrependEnvList_CaseInsensitiveKeyPreservesCasing"}
+{"Action":"run","Package":"mcp-local-hub/internal/oneapi","Test":"TestPrependEnvList_SynthesizesWhenAbsent"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestPrependEnvList_SynthesizesWhenAbsent","Output":"=== RUN   TestPrependEnvList_SynthesizesWhenAbsent\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestPrependEnvList_SynthesizesWhenAbsent","Output":"--- PASS: TestPrependEnvList_SynthesizesWhenAbsent (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/oneapi","Test":"TestPrependEnvList_SynthesizesWhenAbsent"}
+{"Action":"run","Package":"mcp-local-hub/internal/oneapi","Test":"TestPrependEnvList_EmptyDirsReturnsCopy"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestPrependEnvList_EmptyDirsReturnsCopy","Output":"=== RUN   TestPrependEnvList_EmptyDirsReturnsCopy\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestPrependEnvList_EmptyDirsReturnsCopy","Output":"--- PASS: TestPrependEnvList_EmptyDirsReturnsCopy (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/oneapi","Test":"TestPrependEnvList_EmptyDirsReturnsCopy"}
+{"Action":"run","Package":"mcp-local-hub/internal/oneapi","Test":"TestSetvarsCaptureBatchContent_GuardsSetWithCallFailure"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestSetvarsCaptureBatchContent_GuardsSetWithCallFailure","Output":"=== RUN   TestSetvarsCaptureBatchContent_GuardsSetWithCallFailure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestSetvarsCaptureBatchContent_GuardsSetWithCallFailure","Output":"--- PASS: TestSetvarsCaptureBatchContent_GuardsSetWithCallFailure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/oneapi","Test":"TestSetvarsCaptureBatchContent_GuardsSetWithCallFailure"}
+{"Action":"run","Package":"mcp-local-hub/internal/oneapi","Test":"TestParseSetDump_ParsesKeyValueLines"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestParseSetDump_ParsesKeyValueLines","Output":"=== RUN   TestParseSetDump_ParsesKeyValueLines\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestParseSetDump_ParsesKeyValueLines","Output":"--- PASS: TestParseSetDump_ParsesKeyValueLines (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/oneapi","Test":"TestParseSetDump_ParsesKeyValueLines"}
+{"Action":"run","Package":"mcp-local-hub/internal/oneapi","Test":"TestParseSetDump_SkipsBlankAndKeyless"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestParseSetDump_SkipsBlankAndKeyless","Output":"=== RUN   TestParseSetDump_SkipsBlankAndKeyless\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestParseSetDump_SkipsBlankAndKeyless","Output":"--- PASS: TestParseSetDump_SkipsBlankAndKeyless (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/oneapi","Test":"TestParseSetDump_SkipsBlankAndKeyless"}
+{"Action":"run","Package":"mcp-local-hub/internal/oneapi","Test":"TestParseSetDump_ValueWithEquals"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestParseSetDump_ValueWithEquals","Output":"=== RUN   TestParseSetDump_ValueWithEquals\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestParseSetDump_ValueWithEquals","Output":"--- PASS: TestParseSetDump_ValueWithEquals (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/oneapi","Test":"TestParseSetDump_ValueWithEquals"}
+{"Action":"run","Package":"mcp-local-hub/internal/oneapi","Test":"TestFileExists_DirIsNotFile"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestFileExists_DirIsNotFile","Output":"=== RUN   TestFileExists_DirIsNotFile\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Test":"TestFileExists_DirIsNotFile","Output":"--- PASS: TestFileExists_DirIsNotFile (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/oneapi","Test":"TestFileExists_DirIsNotFile"}
+{"Action":"output","Package":"mcp-local-hub/internal/oneapi","Output":"FAIL\n","OutputType":"frame"}
+{"Action":"fail","Package":"mcp-local-hub/internal/oneapi"}

@@ -1,0 +1,6 @@
+=== RUN   TestBridgeSignalReturnsWhenStdinIdle
+=== PAUSE TestBridgeSignalReturnsWhenStdinIdle
+=== NAME  
+=== CONT  TestBridgeSignalReturnsWhenStdinIdle
+--- PASS: TestBridgeSignalReturnsWhenStdinIdle (0.00s)
+PASS

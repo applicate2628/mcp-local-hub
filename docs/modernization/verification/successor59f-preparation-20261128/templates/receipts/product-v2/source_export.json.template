@@ -1,0 +1,97 @@
+{
+  "all_export_source_bytes_equal": true,
+  "compiled_helper_receiving": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer-candidate\\compiled-helpers-v1-receiving.json",
+    "sha256": "4778c49ae9d57f83a6e0eb4227b294a4ce459f20cf760c05ddf1fbbbdb7f0e2c"
+  },
+  "config": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\product-continuation-v2\\product-build-config-v2.json",
+    "sha256": "7117e3809763cf1b05145cd26fe56bba3586ce4650387647dba319de5228d484"
+  },
+  "existing_acl_changed": false,
+  "existing_private_parent_observations": {
+    "native_product": {
+      "dacl_protected": true,
+      "file_index": 2533274795552160,
+      "owner_sid": "@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@",
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-native-product",
+      "rules": [
+        {
+          "flags": 3,
+          "mask": 2032127,
+          "sid": "@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@"
+        },
+        {
+          "flags": 3,
+          "mask": 2032127,
+          "sid": "S-1-5-18"
+        },
+        {
+          "flags": 3,
+          "mask": 2032127,
+          "sid": "S-1-5-32-544"
+        }
+      ],
+      "sddl": "O:@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@D:P(A;OICI;FA;;;@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+      "volume_serial": 275429471
+    },
+    "parent": {
+      "dacl_protected": true,
+      "file_index": 3096224748973438,
+      "owner_sid": "@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@",
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch",
+      "rules": [
+        {
+          "flags": 3,
+          "mask": 2032127,
+          "sid": "@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@"
+        },
+        {
+          "flags": 3,
+          "mask": 2032127,
+          "sid": "S-1-5-18"
+        },
+        {
+          "flags": 3,
+          "mask": 2032127,
+          "sid": "S-1-5-32-544"
+        }
+      ],
+      "sddl": "O:@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@D:P(A;OICI;FA;;;@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+      "volume_serial": 275429471
+    }
+  },
+  "export_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\source",
+  "failed_phase_cache_reused": false,
+  "helper_binaries_rebuilt": false,
+  "native_builds_or_tests_executed": false,
+  "original_closed_receiving": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer-candidate\\successor-product-helper-inputs-v1-root-receiving.json",
+    "sha256": "6e8568fd054048a082fe48feea83069e5759289b733294e534169d2fd5b77743"
+  },
+  "original_native_parent_empty": true,
+  "original_preparation": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\source-helper-preparation.json",
+    "sha256": "90417ae2198018c16e9e4c990dd1844d3600ec07dc95a126dff41a20ebb3e970"
+  },
+  "publisher_snapshot": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer-candidate\\publisher-source-snapshot.json",
+    "sha256": "0249af1149b94877e011186a92ee05f104a9bd7afd0e1d676755ee190e64356e"
+  },
+  "qualification_passed": false,
+  "read_only_directory_handles_closed": true,
+  "schema": "successor-product-source-export-v2",
+  "source_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+  "source_file_count": 3369,
+  "source_git_map": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\source-binding\\source59f-git-map.json",
+    "sha256": "2f85b5e27243da8c853f20600df576b51fd60fea2fa420509a331b538dc8c547"
+  },
+  "source_map": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\source-binding\\source59f-input-sha256.json",
+    "sha256": "e8c3fc2f577a130f92ba4eee7f8eee7153afc032dee909557cf1156890917c06"
+  },
+  "source_tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+  "status": "EXPORTED_DATA_ONLY",
+  "tracked_source_mutated": false
+}

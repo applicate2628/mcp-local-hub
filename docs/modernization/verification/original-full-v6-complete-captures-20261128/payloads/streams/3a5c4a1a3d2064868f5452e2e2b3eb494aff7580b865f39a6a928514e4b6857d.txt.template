@@ -1,0 +1,123 @@
+=== RUN   TestObservedOverlayRetainsClosedOriginalAndPrivateFailureData
+--- PASS: TestObservedOverlayRetainsClosedOriginalAndPrivateFailureData (0.00s)
+=== NAME  
+=== RUN   TestConsumeOverlayOriginalCloseAndEarlyFailureCustody
+--- PASS: TestConsumeOverlayOriginalCloseAndEarlyFailureCustody (0.00s)
+=== NAME  
+=== RUN   TestObservedOverlayAbsenceHasNoInventedOwnedReader
+--- PASS: TestObservedOverlayAbsenceHasNoInventedOwnedReader (0.00s)
+=== NAME  
+=== RUN   TestLookupOverlayReturnsRowEnv
+--- PASS: TestLookupOverlayReturnsRowEnv (0.00s)
+=== NAME  
+=== RUN   TestLookupOverlayNormalizesBareKey
+--- PASS: TestLookupOverlayNormalizesBareKey (0.00s)
+=== NAME  
+=== RUN   TestLookupOverlayReturnsNilOnMiss
+--- PASS: TestLookupOverlayReturnsNilOnMiss (0.00s)
+=== NAME  
+=== RUN   TestLookupOverlayHandlesNilAndEmptyOverlay
+--- PASS: TestLookupOverlayHandlesNilAndEmptyOverlay (0.00s)
+=== NAME  
+=== RUN   TestLookupOverlayReturnsDefensiveCopy
+--- PASS: TestLookupOverlayReturnsDefensiveCopy (0.00s)
+=== NAME  
+=== RUN   TestNormalizeOverlayKey
+=== RUN   TestNormalizeOverlayKey/bare_form_gets_backslash_prefix
+--- PASS: TestNormalizeOverlayKey/bare_form_gets_backslash_prefix (0.00s)
+=== NAME  TestNormalizeOverlayKey
+=== RUN   TestNormalizeOverlayKey/already_canonical_is_idempotent
+--- PASS: TestNormalizeOverlayKey/already_canonical_is_idempotent (0.00s)
+=== NAME  TestNormalizeOverlayKey
+=== RUN   TestNormalizeOverlayKey/empty_string_preserved_as_empty
+--- PASS: TestNormalizeOverlayKey/empty_string_preserved_as_empty (0.00s)
+=== NAME  TestNormalizeOverlayKey
+--- PASS: TestNormalizeOverlayKey (0.00s)
+=== NAME  
+=== RUN   TestLoad_StrictMode_BroadenedParent_Refuses
+    overlay_hardening_test.go:93: parent @@RECOVERY_APPROVED_WORK_AREA@@\o6\xbb80365f308a\TestLoad_StrictMode_BroadenedParent_Refuses1623354610\001 is not gate-rejecting on this host (cannot contrive a broadened parent without elevation): write-side gate accepted it
+--- SKIP: TestLoad_StrictMode_BroadenedParent_Refuses (0.00s)
+=== NAME  
+=== RUN   TestLoad_DefaultMode_BroadenedParent_Refuses
+    overlay_hardening_test.go:114: parent @@RECOVERY_APPROVED_WORK_AREA@@\o6\xbb80365f308a\TestLoad_DefaultMode_BroadenedParent_Refuses2297607129\001 is not gate-rejecting on this host (cannot contrive a broadened parent without elevation): write-side gate accepted it
+--- SKIP: TestLoad_DefaultMode_BroadenedParent_Refuses (0.00s)
+=== NAME  
+=== RUN   TestLoad_RelaxOptOut_BroadenedParent_Succeeds
+    overlay_hardening_test.go:135: parent @@RECOVERY_APPROVED_WORK_AREA@@\o6\xbb80365f308a\TestLoad_RelaxOptOut_BroadenedParent_Succeeds2829814662\001 is not gate-rejecting on this host (cannot contrive a broadened parent without elevation): write-side gate accepted it
+--- SKIP: TestLoad_RelaxOptOut_BroadenedParent_Succeeds (0.00s)
+=== NAME  
+=== RUN   TestLoad_StrictMode_OverridesRelax_BroadenedParent_Refuses
+    overlay_hardening_test.go:158: parent @@RECOVERY_APPROVED_WORK_AREA@@\o6\xbb80365f308a\TestLoad_StrictMode_OverridesRelax_BroadenedParent_Refuses3405227257\001 is not gate-rejecting on this host (cannot contrive a broadened parent without elevation): write-side gate accepted it
+--- SKIP: TestLoad_StrictMode_OverridesRelax_BroadenedParent_Refuses (0.00s)
+=== NAME  
+=== RUN   TestLoad_DefaultMode_SafeParent_Succeeds
+--- PASS: TestLoad_DefaultMode_SafeParent_Succeeds (0.00s)
+=== NAME  
+=== RUN   TestLoad_TransientRetry_ErrorClassification
+--- PASS: TestLoad_TransientRetry_ErrorClassification (0.00s)
+=== NAME  
+=== RUN   TestLoad_ConcurrentWithWriteOverlay_NeverPartial
+--- PASS: TestLoad_ConcurrentWithWriteOverlay_NeverPartial (1.77s)
+=== NAME  
+=== RUN   TestLoad_TransientNotFound_RetriesThenReadsPresentFile
+--- PASS: TestLoad_TransientNotFound_RetriesThenReadsPresentFile (0.00s)
+=== NAME  
+=== RUN   TestLoad_PersistentNotFound_ReturnsEmptyOverlayAfterRetry
+--- PASS: TestLoad_PersistentNotFound_ReturnsEmptyOverlayAfterRetry (0.00s)
+=== NAME  
+=== RUN   TestLoad_PersistentNotFound_RealMissingFile
+--- PASS: TestLoad_PersistentNotFound_RealMissingFile (0.00s)
+=== NAME  
+=== RUN   TestLoad_TransientNotFound_NeverEmptyWhilePresent_Race
+--- PASS: TestLoad_TransientNotFound_NeverEmptyWhilePresent_Race (1.43s)
+=== NAME  
+=== RUN   TestLoad_MissingFile_ReturnsEmptyOverlay
+--- PASS: TestLoad_MissingFile_ReturnsEmptyOverlay (0.00s)
+=== NAME  
+=== RUN   TestLoad_YAMLRoundTrip_ParsesDaemonRow
+--- PASS: TestLoad_YAMLRoundTrip_ParsesDaemonRow (0.00s)
+=== NAME  
+=== RUN   TestLoadRejectsDirectoryAtPath
+--- PASS: TestLoadRejectsDirectoryAtPath (0.00s)
+=== NAME  
+=== RUN   TestCheckStateDirParentReadSafe_DefaultRelax
+--- PASS: TestCheckStateDirParentReadSafe_DefaultRelax (0.00s)
+=== NAME  
+=== RUN   TestLoadRejectsSymlink
+    read_hardening_test.go:100: symlink creation on Windows requires SeCreateSymbolicLinkPrivilege; covered by reparse-point refusal in hardened-open Windows impl
+--- SKIP: TestLoadRejectsSymlink (0.00s)
+=== NAME  
+=== RUN   TestExpandParentPath_SingleSubstitution
+--- PASS: TestExpandParentPath_SingleSubstitution (0.00s)
+=== NAME  
+=== RUN   TestExpandParentPath_NoTokenEmitsEvent
+--- PASS: TestExpandParentPath_NoTokenEmitsEvent (0.01s)
+=== NAME  
+=== RUN   TestExpandParentPath_UnknownTokenRejected
+--- PASS: TestExpandParentPath_UnknownTokenRejected (0.00s)
+=== NAME  
+=== RUN   TestExpandParentPath_RejectsPunctuatedToken
+=== RUN   TestExpandParentPath_RejectsPunctuatedToken/secret-reference
+--- PASS: TestExpandParentPath_RejectsPunctuatedToken/secret-reference (0.00s)
+=== NAME  TestExpandParentPath_RejectsPunctuatedToken
+=== RUN   TestExpandParentPath_RejectsPunctuatedToken/path-style-placeholder
+--- PASS: TestExpandParentPath_RejectsPunctuatedToken/path-style-placeholder (0.00s)
+=== NAME  TestExpandParentPath_RejectsPunctuatedToken
+=== RUN   TestExpandParentPath_RejectsPunctuatedToken/mixed-with-supported
+--- PASS: TestExpandParentPath_RejectsPunctuatedToken/mixed-with-supported (0.00s)
+=== NAME  TestExpandParentPath_RejectsPunctuatedToken
+--- PASS: TestExpandParentPath_RejectsPunctuatedToken (0.00s)
+=== NAME  
+=== RUN   TestExpandParentPath_EmptyParentPath
+--- PASS: TestExpandParentPath_EmptyParentPath (0.00s)
+=== NAME  
+=== RUN   TestWriteOverlayAtomicCreate
+--- PASS: TestWriteOverlayAtomicCreate (0.00s)
+=== NAME  
+=== RUN   TestWriteOverlayMutatorErrorRollsBack
+--- PASS: TestWriteOverlayMutatorErrorRollsBack (0.01s)
+=== NAME  
+=== RUN   TestWriteOverlayConcurrentSerializes
+--- PASS: TestWriteOverlayConcurrentSerializes (0.03s)
+=== NAME  
+PASS

@@ -1,0 +1,166 @@
+{
+  "schema": "successor33-namespace-auxiliary-contract-v1",
+  "status": "CANDIDATE_NOT_EXECUTED",
+  "source": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128",
+    "commit": "04e5b4eadd6407cbff4e04ba453546d278314bd7",
+    "tree": "f68f7584dba7744e7607b07f615758f3ff633f54",
+    "parent": "33eaf8af8fc46cb231f48c70f4775922393245b1",
+    "file_count": 3369,
+    "scope": "seven reviewed test-only changes; namespace/API/helper inputs independently equal the base33 Git blobs"
+  },
+  "auxiliary_source": {
+    "main": {
+      "file": "main_windows.go",
+      "sha256": "4e91b8ce877400a91a4f315b68a166ae3d2c7c19d4963d52ade521f03f2ac4b4"
+    },
+    "prebuilt": {
+      "file": "prebuilt_windows.go",
+      "sha256": "2fc1016b4eff51c77a3c0e342de14d938b3f39b6a67c438b04ef262e09d8eeed"
+    },
+    "origin_commit": "727d66753814dc218e26d699e57402db2d13190a",
+    "origin_main_sha256": "7d30a698fbe9521f853e2f7c0bd394796ac8fc2e16d5d28f4b62bff33898dbb8",
+    "origin_prebuilt_sha256": "cbbbf28bd340aaec42dbc34ad54a3e1e2960804d7e9260fcd6af2f56fe09def7",
+    "tracked_source_changes": false,
+    "production_api_origin": "selected successor04e internal/process and internal/binaryadmission; no ResourcesFinalized assumption"
+  },
+  "helper": {
+    "source_path": "scripts/test-recovery-namespace/helper.ps1",
+    "candidate_copy": "helper.ps1",
+    "sha256": "ce20de6a117350681b9db5979a67285b1d8d07ea7937ea912680b4e3d6a6fa32",
+    "git_blob": "72a86d959bf2740f38a4053b36e3a98adf5b1ead",
+    "bytes": 23316,
+    "semantics": "unchanged Source33 helper; execution copy created from the selected source and pinned for the full actor lifetime"
+  },
+  "build_template": {
+    "cwd_role": "selected_successor_source",
+    "fresh_stage_relative": ".scratch/qualified-successor33-namespace",
+    "staged_files": [
+      "main_windows.go",
+      "prebuilt_windows.go"
+    ],
+    "argv": [
+      "<GO_EXE>",
+      "build",
+      "-mod=readonly",
+      "-trimpath",
+      "-buildvcs=false",
+      "-ldflags=-H=windowsgui",
+      "-o",
+      "<NAMESPACE_AUXILIARY_EXE>",
+      "./.scratch/qualified-successor33-namespace"
+    ],
+    "required_environment": {
+      "GOOS": "windows",
+      "GOARCH": "amd64",
+      "CGO_ENABLED": "0",
+      "GOENV": "off",
+      "GOWORK": "off",
+      "GOTOOLCHAIN": "local"
+    },
+    "compile_receipt": null,
+    "compiled_exe_sha256": null,
+    "role": "auxiliary original owner only; never a replacement for incoming API test image"
+  },
+  "runtime_argv_template": [
+    "<NAMESPACE_AUXILIARY_EXE>",
+    "--test-binary",
+    "<ACTUAL_INCOMING_API_TEST_EXE>",
+    "--expected-sha256",
+    "<ACTUAL_INCOMING_SHA256>",
+    "--source-dir",
+    "<SOURCE>\\internal\\api",
+    "--repo",
+    "<SOURCE>",
+    "--go",
+    "<GO_EXE>",
+    "--pwsh",
+    "<PWSH_EXE>",
+    "--parent",
+    "<FRESH_NAMESPACE_PARENT>",
+    "--test-timeout",
+    "5m",
+    "--request-sha256",
+    "<ORIGINAL_ISSUER_REQUEST_SHA256>",
+    "--request-nonce",
+    "<ORIGINAL_ISSUER_REQUEST_NONCE>",
+    "<STATE_ONLY:--test-state-path-env>",
+    "--",
+    "<FOUR_ORIGINAL_GO_TEST_ARGUMENTS_IN_ORIGINAL_ORDER>"
+  ],
+  "incoming_contract": {
+    "arguments": {
+      "count": 4,
+      "required": [
+        "-test.paniconexit0",
+        "-test.v=test2json",
+        "-test.count=1",
+        "-test.timeout=<original Go value parsing to 5m>"
+      ],
+      "selectors_permitted": false
+    },
+    "binary_entrypoint": "mcp-local-hub/internal/api.test",
+    "machine": "AMD64",
+    "compiled_tags_default": [],
+    "compiled_tags_state": [
+      "test_state_path_env"
+    ],
+    "original_cwd": "selected source internal/api",
+    "copy_path": "<FRESH_NAMESPACE_PARENT>\\r\\bin\\api.test.exe",
+    "copy_mode": "exclusive new ordinary file; hash before/after equals actual incoming original; no binary compilation or modification",
+    "canonical_product_for_api_image": false,
+    "tagged_attach_product": {
+      "required": true,
+      "environment_keys": [
+        "MCPHUB_ATTACH_TEST_BIN",
+        "MCPHUB_ATTACH_TEST_BIN_SHA256"
+      ],
+      "role": "separate real Product; AMD64 Product role, cmd/mcphub entrypoint, test_state_path_env tag, no publisherSourceEpoch",
+      "concrete_artifact_and_receipt": null
+    }
+  },
+  "receipt": {
+    "suite_schema": "api-namespace-full-suite-v2",
+    "mode": "incoming-go-image-copy",
+    "refusal_schema": "api-namespace-prechild-refusal-v1",
+    "file": "<FRESH_NAMESPACE_PARENT>\\namespace-suite-receipt.json",
+    "incoming_fields": [
+      "binary",
+      "expected_sha256",
+      "binary_sha256"
+    ],
+    "execution_fields": [
+      "execution_binary",
+      "execution_sha256",
+      "execution_binary_unchanged"
+    ],
+    "namespace_observations": 4,
+    "required_root_names": [
+      "TestSecretsInit_RecoveryNamespaceBoundary",
+      "TestSecretsInit_RecoveryNamespaceRetainedDirectory",
+      "TestSecretsInit_RecoveryNamespaceFailurePaths",
+      "TestSupervisorPeerStrictControlConnections",
+      "TestRotateSupervisorStderrSinkIfOversize_AtBoundary",
+      "TestRotateSupervisorStderrSinkIfOversize_ReplacesExistingBackup",
+      "TestSupervisorStderrSinkOversize_MatchesRotationThreshold"
+    ]
+  },
+  "custody": {
+    "normal": "original native and IO Complete; original sinks synced/closed, image and observations received, raw streams forwarded once, pins closed after run returns",
+    "unknown": "same global namespaceStageCustody retains receipt, original runErr, returned joined error, borrowed sinks and pathPins; main remains alive without new wait/cleanup/replay; no physical completion claimed",
+    "original_worker_late_return": "may progress on its original objects; this auxiliary does not synthesize late closure or reopen any PID",
+    "enclosing_outer_job": false,
+    "work_admission_seconds": 5,
+    "go_test_minutes": 5,
+    "original_cleanup_seconds": 10
+  },
+  "required_before_execution": [
+    "root review of concrete build/source/environment bindings",
+    "closed build producer and actual helper executable SHA256",
+    "selected source full context/byte map",
+    "exact original issuer request and incoming image binding",
+    "fresh approved short paths and protected namespace parent",
+    "tagged actual Product artifact/compile receipt",
+    "integrated typed receiving-v2 and namespace success predicate"
+  ]
+}

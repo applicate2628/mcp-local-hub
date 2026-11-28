@@ -1,0 +1,284 @@
+{"Action":"start","Package":"mcp-local-hub/internal/tray"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestDispatchEvent_RoutesEachEventToTheRightCallback"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestDispatchEvent_RoutesEachEventToTheRightCallback","Output":"=== RUN   TestDispatchEvent_RoutesEachEventToTheRightCallback\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestDispatchEvent_RoutesEachEventToTheRightCallback","Output":"--- PASS: TestDispatchEvent_RoutesEachEventToTheRightCallback (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestDispatchEvent_RoutesEachEventToTheRightCallback"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestDispatchEvent_QuitAndStopAllFallsBackToQuit"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestDispatchEvent_QuitAndStopAllFallsBackToQuit","Output":"=== RUN   TestDispatchEvent_QuitAndStopAllFallsBackToQuit\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestDispatchEvent_QuitAndStopAllFallsBackToQuit","Output":"--- PASS: TestDispatchEvent_QuitAndStopAllFallsBackToQuit (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestDispatchEvent_QuitAndStopAllFallsBackToQuit"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestDispatchEvent_NilCallbacksAreSafe"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestDispatchEvent_NilCallbacksAreSafe","Output":"=== RUN   TestDispatchEvent_NilCallbacksAreSafe\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestDispatchEvent_NilCallbacksAreSafe","Output":"tray: unknown event \"unknown-event\"\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestDispatchEvent_NilCallbacksAreSafe","Output":"--- PASS: TestDispatchEvent_NilCallbacksAreSafe (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestDispatchEvent_NilCallbacksAreSafe"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestIconBytes_AllStatesHaveDistinctIcons"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestIconBytes_AllStatesHaveDistinctIcons","Output":"=== RUN   TestIconBytes_AllStatesHaveDistinctIcons\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestIconBytes_AllStatesHaveDistinctIcons","Output":"--- PASS: TestIconBytes_AllStatesHaveDistinctIcons (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestIconBytes_AllStatesHaveDistinctIcons"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestIconBytes_FormatPerOS"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestIconBytes_FormatPerOS","Output":"=== RUN   TestIconBytes_FormatPerOS\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestIconBytes_FormatPerOS","Output":"--- PASS: TestIconBytes_FormatPerOS (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestIconBytes_FormatPerOS"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestIconBytes_LazyCacheReusesBytes"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestIconBytes_LazyCacheReusesBytes","Output":"=== RUN   TestIconBytes_LazyCacheReusesBytes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestIconBytes_LazyCacheReusesBytes","Output":"--- PASS: TestIconBytes_LazyCacheReusesBytes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestIconBytes_LazyCacheReusesBytes"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RealFailure_NoIntent_StillError"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RealFailure_NoIntent_StillError","Output":"=== RUN   TestAggregateWithIntent_RealFailure_NoIntent_StillError\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RealFailure_NoIntent_StillError","Output":"--- PASS: TestAggregateWithIntent_RealFailure_NoIntent_StillError (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RealFailure_NoIntent_StillError"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RealFailure_UserStop_DownNotError"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RealFailure_UserStop_DownNotError","Output":"=== RUN   TestAggregateWithIntent_RealFailure_UserStop_DownNotError\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RealFailure_UserStop_DownNotError","Output":"--- PASS: TestAggregateWithIntent_RealFailure_UserStop_DownNotError (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RealFailure_UserStop_DownNotError"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RealFailure_UserStop_TTLExpired_BackToError"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RealFailure_UserStop_TTLExpired_BackToError","Output":"=== RUN   TestAggregateWithIntent_RealFailure_UserStop_TTLExpired_BackToError\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RealFailure_UserStop_TTLExpired_BackToError","Output":"--- PASS: TestAggregateWithIntent_RealFailure_UserStop_TTLExpired_BackToError (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RealFailure_UserStop_TTLExpired_BackToError"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RealFailure_UserDisabled_DownNotError"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RealFailure_UserDisabled_DownNotError","Output":"=== RUN   TestAggregateWithIntent_RealFailure_UserDisabled_DownNotError\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RealFailure_UserDisabled_DownNotError","Output":"--- PASS: TestAggregateWithIntent_RealFailure_UserDisabled_DownNotError (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RealFailure_UserDisabled_DownNotError"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RealFailure_Uninstalled_DownNotError"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RealFailure_Uninstalled_DownNotError","Output":"=== RUN   TestAggregateWithIntent_RealFailure_Uninstalled_DownNotError\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RealFailure_Uninstalled_DownNotError","Output":"--- PASS: TestAggregateWithIntent_RealFailure_Uninstalled_DownNotError (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RealFailure_Uninstalled_DownNotError"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RealFailure_ChronicFailure_StaysError"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RealFailure_ChronicFailure_StaysError","Output":"=== RUN   TestAggregateWithIntent_RealFailure_ChronicFailure_StaysError\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RealFailure_ChronicFailure_StaysError","Output":"--- PASS: TestAggregateWithIntent_RealFailure_ChronicFailure_StaysError (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RealFailure_ChronicFailure_StaysError"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_Running_IgnoresIntent"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_Running_IgnoresIntent","Output":"=== RUN   TestAggregateWithIntent_Running_IgnoresIntent\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_Running_IgnoresIntent","Output":"--- PASS: TestAggregateWithIntent_Running_IgnoresIntent (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_Running_IgnoresIntent"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_StateContainsFail_UserStop_Suppressed"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_StateContainsFail_UserStop_Suppressed","Output":"=== RUN   TestAggregateWithIntent_StateContainsFail_UserStop_Suppressed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_StateContainsFail_UserStop_Suppressed","Output":"--- PASS: TestAggregateWithIntent_StateContainsFail_UserStop_Suppressed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_StateContainsFail_UserStop_Suppressed"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_TaskNameNormalization"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_TaskNameNormalization","Output":"=== RUN   TestAggregateWithIntent_TaskNameNormalization\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_TaskNameNormalization","Output":"--- PASS: TestAggregateWithIntent_TaskNameNormalization (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_TaskNameNormalization"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_MixedRunningPlusUserStopped_Healthy"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_MixedRunningPlusUserStopped_Healthy","Output":"=== RUN   TestAggregateWithIntent_MixedRunningPlusUserStopped_Healthy\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_MixedRunningPlusUserStopped_Healthy","Output":"--- PASS: TestAggregateWithIntent_MixedRunningPlusUserStopped_Healthy (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_MixedRunningPlusUserStopped_Healthy"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_MultiRow_OneUserStoppedPlusOneRealFailure"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_MultiRow_OneUserStoppedPlusOneRealFailure","Output":"=== RUN   TestAggregateWithIntent_MultiRow_OneUserStoppedPlusOneRealFailure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_MultiRow_OneUserStoppedPlusOneRealFailure","Output":"--- PASS: TestAggregateWithIntent_MultiRow_OneUserStoppedPlusOneRealFailure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_MultiRow_OneUserStoppedPlusOneRealFailure"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_ZeroNow_FallsBackToTimeNow"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_ZeroNow_FallsBackToTimeNow","Output":"=== RUN   TestAggregateWithIntent_ZeroNow_FallsBackToTimeNow\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_ZeroNow_FallsBackToTimeNow","Output":"--- PASS: TestAggregateWithIntent_ZeroNow_FallsBackToTimeNow (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_ZeroNow_FallsBackToTimeNow"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_ZeroNow_ChronicFailure_StaysError"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_ZeroNow_ChronicFailure_StaysError","Output":"=== RUN   TestAggregateWithIntent_ZeroNow_ChronicFailure_StaysError\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_ZeroNow_ChronicFailure_StaysError","Output":"--- PASS: TestAggregateWithIntent_ZeroNow_ChronicFailure_StaysError (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_ZeroNow_ChronicFailure_StaysError"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_AllUserStopped_StateDown"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_AllUserStopped_StateDown","Output":"=== RUN   TestAggregateWithIntent_AllUserStopped_StateDown\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_AllUserStopped_StateDown","Output":"--- PASS: TestAggregateWithIntent_AllUserStopped_StateDown (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_AllUserStopped_StateDown"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_AllUserDisabled_StateDown"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_AllUserDisabled_StateDown","Output":"=== RUN   TestAggregateWithIntent_AllUserDisabled_StateDown\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_AllUserDisabled_StateDown","Output":"--- PASS: TestAggregateWithIntent_AllUserDisabled_StateDown (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_AllUserDisabled_StateDown"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RunningPlusUserStop_LastResultZero_Healthy"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RunningPlusUserStop_LastResultZero_Healthy","Output":"=== RUN   TestAggregateWithIntent_RunningPlusUserStop_LastResultZero_Healthy\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RunningPlusUserStop_LastResultZero_Healthy","Output":"--- PASS: TestAggregateWithIntent_RunningPlusUserStop_LastResultZero_Healthy (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RunningPlusUserStop_LastResultZero_Healthy"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RunningPlusUserStop_NeverRunSentinel_Healthy"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RunningPlusUserStop_NeverRunSentinel_Healthy","Output":"=== RUN   TestAggregateWithIntent_RunningPlusUserStop_NeverRunSentinel_Healthy\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RunningPlusUserStop_NeverRunSentinel_Healthy","Output":"--- PASS: TestAggregateWithIntent_RunningPlusUserStop_NeverRunSentinel_Healthy (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RunningPlusUserStop_NeverRunSentinel_Healthy"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RunningPlusUserStop_TaskSchedulerInfoCode_Healthy"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RunningPlusUserStop_TaskSchedulerInfoCode_Healthy","Output":"=== RUN   TestAggregateWithIntent_RunningPlusUserStop_TaskSchedulerInfoCode_Healthy\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RunningPlusUserStop_TaskSchedulerInfoCode_Healthy","Output":"--- PASS: TestAggregateWithIntent_RunningPlusUserStop_TaskSchedulerInfoCode_Healthy (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_RunningPlusUserStop_TaskSchedulerInfoCode_Healthy"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_PlainStoppedPlusUserStopped_StateDown"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_PlainStoppedPlusUserStopped_StateDown","Output":"=== RUN   TestAggregateWithIntent_PlainStoppedPlusUserStopped_StateDown\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_PlainStoppedPlusUserStopped_StateDown","Output":"--- PASS: TestAggregateWithIntent_PlainStoppedPlusUserStopped_StateDown (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_PlainStoppedPlusUserStopped_StateDown"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_NoRows_StateHealthy"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_NoRows_StateHealthy","Output":"=== RUN   TestAggregateWithIntent_NoRows_StateHealthy\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_NoRows_StateHealthy","Output":"--- PASS: TestAggregateWithIntent_NoRows_StateHealthy (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_NoRows_StateHealthy"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate","Output":"=== RUN   TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/empty"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/empty","Output":"=== RUN   TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/empty\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/empty","Output":"--- PASS: TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/empty (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/empty"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/all_running"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/all_running","Output":"=== RUN   TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/all_running\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/all_running","Output":"--- PASS: TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/all_running (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/all_running"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/some_stopped"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/some_stopped","Output":"=== RUN   TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/some_stopped\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/some_stopped","Output":"--- PASS: TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/some_stopped (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/some_stopped"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/all_stopped"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/all_stopped","Output":"=== RUN   TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/all_stopped\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/all_stopped","Output":"--- PASS: TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/all_stopped (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/all_stopped"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/failure"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/failure","Output":"=== RUN   TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/failure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/failure","Output":"--- PASS: TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/failure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/failure"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/info_code"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/info_code","Output":"=== RUN   TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/info_code\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/info_code","Output":"--- PASS: TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/info_code (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/info_code"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate","Output":"--- PASS: TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate","Output":"=== RUN   TestAggregate\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/empty_→_Healthy"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/empty_→_Healthy","Output":"=== RUN   TestAggregate/empty_→_Healthy\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/empty_→_Healthy","Output":"--- PASS: TestAggregate/empty_→_Healthy (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/empty_→_Healthy"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/all_Running_→_Healthy"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/all_Running_→_Healthy","Output":"=== RUN   TestAggregate/all_Running_→_Healthy\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/all_Running_→_Healthy","Output":"--- PASS: TestAggregate/all_Running_→_Healthy (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/all_Running_→_Healthy"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/some_Running_→_Partial"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/some_Running_→_Partial","Output":"=== RUN   TestAggregate/some_Running_→_Partial\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/some_Running_→_Partial","Output":"--- PASS: TestAggregate/some_Running_→_Partial (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/some_Running_→_Partial"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/none_Running_→_Down"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/none_Running_→_Down","Output":"=== RUN   TestAggregate/none_Running_→_Down\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/none_Running_→_Down","Output":"--- PASS: TestAggregate/none_Running_→_Down (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/none_Running_→_Down"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/any_LastResult_!=_0_→_Error_overrides_Partial"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/any_LastResult_!=_0_→_Error_overrides_Partial","Output":"=== RUN   TestAggregate/any_LastResult_!=_0_→_Error_overrides_Partial\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/any_LastResult_!=_0_→_Error_overrides_Partial","Output":"--- PASS: TestAggregate/any_LastResult_!=_0_→_Error_overrides_Partial (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/any_LastResult_!=_0_→_Error_overrides_Partial"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/any_LastResult_!=_0_→_Error_overrides_Healthy"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/any_LastResult_!=_0_→_Error_overrides_Healthy","Output":"=== RUN   TestAggregate/any_LastResult_!=_0_→_Error_overrides_Healthy\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/any_LastResult_!=_0_→_Error_overrides_Healthy","Output":"--- PASS: TestAggregate/any_LastResult_!=_0_→_Error_overrides_Healthy (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/any_LastResult_!=_0_→_Error_overrides_Healthy"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/Task_Scheduler_info_code_0x41300_(ready_to_run)_is_NOT_a_failure"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/Task_Scheduler_info_code_0x41300_(ready_to_run)_is_NOT_a_failure","Output":"=== RUN   TestAggregate/Task_Scheduler_info_code_0x41300_(ready_to_run)_is_NOT_a_failure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/Task_Scheduler_info_code_0x41300_(ready_to_run)_is_NOT_a_failure","Output":"--- PASS: TestAggregate/Task_Scheduler_info_code_0x41300_(ready_to_run)_is_NOT_a_failure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/Task_Scheduler_info_code_0x41300_(ready_to_run)_is_NOT_a_failure"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/Task_Scheduler_info_code_0x41301_(currently_running)_is_NOT_a_failure"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/Task_Scheduler_info_code_0x41301_(currently_running)_is_NOT_a_failure","Output":"=== RUN   TestAggregate/Task_Scheduler_info_code_0x41301_(currently_running)_is_NOT_a_failure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/Task_Scheduler_info_code_0x41301_(currently_running)_is_NOT_a_failure","Output":"--- PASS: TestAggregate/Task_Scheduler_info_code_0x41301_(currently_running)_is_NOT_a_failure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/Task_Scheduler_info_code_0x41301_(currently_running)_is_NOT_a_failure"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/Task_Scheduler_info_code_0x41303_(never_run)_is_NOT_a_failure_—_DM-1_orphan_case"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/Task_Scheduler_info_code_0x41303_(never_run)_is_NOT_a_failure_—_DM-1_orphan_case","Output":"=== RUN   TestAggregate/Task_Scheduler_info_code_0x41303_(never_run)_is_NOT_a_failure_—_DM-1_orphan_case\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/Task_Scheduler_info_code_0x41303_(never_run)_is_NOT_a_failure_—_DM-1_orphan_case","Output":"--- PASS: TestAggregate/Task_Scheduler_info_code_0x41303_(never_run)_is_NOT_a_failure_—_DM-1_orphan_case (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/Task_Scheduler_info_code_0x41303_(never_run)_is_NOT_a_failure_—_DM-1_orphan_case"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/-1_sentinel_(internal/scheduler_never-run_default)_is_NOT_a_failure_—_Codex_r2_P1"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/-1_sentinel_(internal/scheduler_never-run_default)_is_NOT_a_failure_—_Codex_r2_P1","Output":"=== RUN   TestAggregate/-1_sentinel_(internal/scheduler_never-run_default)_is_NOT_a_failure_—_Codex_r2_P1\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/-1_sentinel_(internal/scheduler_never-run_default)_is_NOT_a_failure_—_Codex_r2_P1","Output":"--- PASS: TestAggregate/-1_sentinel_(internal/scheduler_never-run_default)_is_NOT_a_failure_—_Codex_r2_P1 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/-1_sentinel_(internal/scheduler_never-run_default)_is_NOT_a_failure_—_Codex_r2_P1"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/HRESULT-shaped_failure_(high_bit_set,_negative_int32)_IS_a_failure"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/HRESULT-shaped_failure_(high_bit_set,_negative_int32)_IS_a_failure","Output":"=== RUN   TestAggregate/HRESULT-shaped_failure_(high_bit_set,_negative_int32)_IS_a_failure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/HRESULT-shaped_failure_(high_bit_set,_negative_int32)_IS_a_failure","Output":"--- PASS: TestAggregate/HRESULT-shaped_failure_(high_bit_set,_negative_int32)_IS_a_failure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/HRESULT-shaped_failure_(high_bit_set,_negative_int32)_IS_a_failure"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/state_containing_'fail'_→_Error"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/state_containing_'fail'_→_Error","Output":"=== RUN   TestAggregate/state_containing_'fail'_→_Error\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/state_containing_'fail'_→_Error","Output":"--- PASS: TestAggregate/state_containing_'fail'_→_Error (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/state_containing_'fail'_→_Error"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/maintenance_rows_skipped_(would_otherwise_look_Down)"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/maintenance_rows_skipped_(would_otherwise_look_Down)","Output":"=== RUN   TestAggregate/maintenance_rows_skipped_(would_otherwise_look_Down)\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/maintenance_rows_skipped_(would_otherwise_look_Down)","Output":"--- PASS: TestAggregate/maintenance_rows_skipped_(would_otherwise_look_Down) (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/maintenance_rows_skipped_(would_otherwise_look_Down)"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/only_maintenance_rows_→_Healthy_(no_real_daemons)"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/only_maintenance_rows_→_Healthy_(no_real_daemons)","Output":"=== RUN   TestAggregate/only_maintenance_rows_→_Healthy_(no_real_daemons)\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/only_maintenance_rows_→_Healthy_(no_real_daemons)","Output":"--- PASS: TestAggregate/only_maintenance_rows_→_Healthy_(no_real_daemons) (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/only_maintenance_rows_→_Healthy_(no_real_daemons)"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/maintenance_with_non-zero_LastResult_still_triggers_Error"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/maintenance_with_non-zero_LastResult_still_triggers_Error","Output":"=== RUN   TestAggregate/maintenance_with_non-zero_LastResult_still_triggers_Error\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/maintenance_with_non-zero_LastResult_still_triggers_Error","Output":"--- PASS: TestAggregate/maintenance_with_non-zero_LastResult_still_triggers_Error (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate/maintenance_with_non-zero_LastResult_still_triggers_Error"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate","Output":"--- PASS: TestAggregate (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestAggregate"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestTrayState_String"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestTrayState_String","Output":"=== RUN   TestTrayState_String\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestTrayState_String","Output":"--- PASS: TestTrayState_String (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestTrayState_String"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestPsEscape"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestPsEscape","Output":"=== RUN   TestPsEscape\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestPsEscape","Output":"--- PASS: TestPsEscape (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestPsEscape"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn","Output":"=== RUN   TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/served_cancellation"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/served_cancellation","Output":"=== RUN   TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/served_cancellation\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/served_cancellation","Output":"--- PASS: TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/served_cancellation (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/served_cancellation"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/served_stream_failure"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/served_stream_failure","Output":"=== RUN   TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/served_stream_failure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/served_stream_failure","Output":"--- PASS: TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/served_stream_failure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/served_stream_failure"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/unserved_cancellation"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/unserved_cancellation","Output":"=== RUN   TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/unserved_cancellation\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/unserved_cancellation","Output":"--- PASS: TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/unserved_cancellation (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/unserved_cancellation"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/unserved_drain_failure"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/unserved_drain_failure","Output":"=== RUN   TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/unserved_drain_failure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/unserved_drain_failure","Output":"--- PASS: TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/unserved_drain_failure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/unserved_drain_failure"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/blocked_writer_cancellation"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/blocked_writer_cancellation","Output":"=== RUN   TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/blocked_writer_cancellation\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/blocked_writer_cancellation","Output":"--- PASS: TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/blocked_writer_cancellation (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/blocked_writer_cancellation"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn","Output":"--- PASS: TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestRunRetriesWithExactBackoffAndThirtySecondReset"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunRetriesWithExactBackoffAndThirtySecondReset","Output":"=== RUN   TestRunRetriesWithExactBackoffAndThirtySecondReset\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunRetriesWithExactBackoffAndThirtySecondReset","Output":"--- PASS: TestRunRetriesWithExactBackoffAndThirtySecondReset (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestRunRetriesWithExactBackoffAndThirtySecondReset"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestRunShortLivedFailureDoesNotResetBackoffDuringSettlement"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunShortLivedFailureDoesNotResetBackoffDuringSettlement","Output":"=== RUN   TestRunShortLivedFailureDoesNotResetBackoffDuringSettlement\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunShortLivedFailureDoesNotResetBackoffDuringSettlement","Output":"--- PASS: TestRunShortLivedFailureDoesNotResetBackoffDuringSettlement (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestRunShortLivedFailureDoesNotResetBackoffDuringSettlement"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestRunReplaysLatestSnapshotAfterChildAbsence"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunReplaysLatestSnapshotAfterChildAbsence","Output":"=== RUN   TestRunReplaysLatestSnapshotAfterChildAbsence\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunReplaysLatestSnapshotAfterChildAbsence","Output":"--- PASS: TestRunReplaysLatestSnapshotAfterChildAbsence (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestRunReplaysLatestSnapshotAfterChildAbsence"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestRunRetriesZeroExitWhileContextAlive"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunRetriesZeroExitWhileContextAlive","Output":"=== RUN   TestRunRetriesZeroExitWhileContextAlive\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunRetriesZeroExitWhileContextAlive","Output":"--- PASS: TestRunRetriesZeroExitWhileContextAlive (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestRunRetriesZeroExitWhileContextAlive"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestRunCancellationAlreadyWonDoesNotReportFailure"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunCancellationAlreadyWonDoesNotReportFailure","Output":"=== RUN   TestRunCancellationAlreadyWonDoesNotReportFailure\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestRunCancellationAlreadyWonDoesNotReportFailure/launch_failure"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunCancellationAlreadyWonDoesNotReportFailure/launch_failure","Output":"=== RUN   TestRunCancellationAlreadyWonDoesNotReportFailure/launch_failure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunCancellationAlreadyWonDoesNotReportFailure/launch_failure","Output":"--- PASS: TestRunCancellationAlreadyWonDoesNotReportFailure/launch_failure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestRunCancellationAlreadyWonDoesNotReportFailure/launch_failure"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestRunCancellationAlreadyWonDoesNotReportFailure/child_exit"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunCancellationAlreadyWonDoesNotReportFailure/child_exit","Output":"=== RUN   TestRunCancellationAlreadyWonDoesNotReportFailure/child_exit\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunCancellationAlreadyWonDoesNotReportFailure/child_exit","Output":"--- PASS: TestRunCancellationAlreadyWonDoesNotReportFailure/child_exit (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestRunCancellationAlreadyWonDoesNotReportFailure/child_exit"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunCancellationAlreadyWonDoesNotReportFailure","Output":"--- PASS: TestRunCancellationAlreadyWonDoesNotReportFailure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestRunCancellationAlreadyWonDoesNotReportFailure"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestRunMalformedEventReportsRateLimitedProtocolWarning"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunMalformedEventReportsRateLimitedProtocolWarning","Output":"=== RUN   TestRunMalformedEventReportsRateLimitedProtocolWarning\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunMalformedEventReportsRateLimitedProtocolWarning","Output":"--- PASS: TestRunMalformedEventReportsRateLimitedProtocolWarning (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestRunMalformedEventReportsRateLimitedProtocolWarning"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestRunCancellationSettlesAttemptAndJoins"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunCancellationSettlesAttemptAndJoins","Output":"=== RUN   TestRunCancellationSettlesAttemptAndJoins\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestRunCancellationSettlesAttemptAndJoins/during_backoff"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunCancellationSettlesAttemptAndJoins/during_backoff","Output":"=== RUN   TestRunCancellationSettlesAttemptAndJoins/during_backoff\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunCancellationSettlesAttemptAndJoins/during_backoff","Output":"--- PASS: TestRunCancellationSettlesAttemptAndJoins/during_backoff (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestRunCancellationSettlesAttemptAndJoins/during_backoff"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestRunCancellationSettlesAttemptAndJoins/hung_child_input_closes_before_owned_kill_and_Wait_failure_survives"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunCancellationSettlesAttemptAndJoins/hung_child_input_closes_before_owned_kill_and_Wait_failure_survives","Output":"=== RUN   TestRunCancellationSettlesAttemptAndJoins/hung_child_input_closes_before_owned_kill_and_Wait_failure_survives\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunCancellationSettlesAttemptAndJoins/hung_child_input_closes_before_owned_kill_and_Wait_failure_survives","Output":"--- PASS: TestRunCancellationSettlesAttemptAndJoins/hung_child_input_closes_before_owned_kill_and_Wait_failure_survives (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestRunCancellationSettlesAttemptAndJoins/hung_child_input_closes_before_owned_kill_and_Wait_failure_survives"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunCancellationSettlesAttemptAndJoins","Output":"--- PASS: TestRunCancellationSettlesAttemptAndJoins (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestRunCancellationSettlesAttemptAndJoins"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestRunMainStateCloseIsTerminalButRelaxCloseIsNot"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunMainStateCloseIsTerminalButRelaxCloseIsNot","Output":"=== RUN   TestRunMainStateCloseIsTerminalButRelaxCloseIsNot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunMainStateCloseIsTerminalButRelaxCloseIsNot","Output":"--- PASS: TestRunMainStateCloseIsTerminalButRelaxCloseIsNot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestRunMainStateCloseIsTerminalButRelaxCloseIsNot"}
+{"Action":"run","Package":"mcp-local-hub/internal/tray","Test":"TestRunLifecycleDiagnosticsAreRateLimitedAndClassified"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunLifecycleDiagnosticsAreRateLimitedAndClassified","Output":"=== RUN   TestRunLifecycleDiagnosticsAreRateLimitedAndClassified\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Test":"TestRunLifecycleDiagnosticsAreRateLimitedAndClassified","Output":"--- PASS: TestRunLifecycleDiagnosticsAreRateLimitedAndClassified (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray","Test":"TestRunLifecycleDiagnosticsAreRateLimitedAndClassified"}
+{"Action":"output","Package":"mcp-local-hub/internal/tray","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/tray"}

@@ -1,0 +1,54 @@
+{
+    "schema":  "publication-original-root-data-audit-v1",
+    "status":  "PASS",
+    "physical_complete":  true,
+    "scope":  "cache-acceptance-stage-20261128-v19",
+    "config_sha256":  "6c5d70c92fc5c9fe017aad0e5954c6e24e587584e597e7e04fe85c2e2c8e129f",
+    "receipt_sha256":  "46ad49a9a3fcacefe01ab2bed7ae2f65ad185c8e6b62021893445e5b970c79ab",
+    "root_sha256":  "e8009e230d5ac02921a82d85a290fc096a26de84cdedd6a3a1f006d0e21498a9",
+    "outer_sha256":  "98512462cbf03bbac16e3fcd5e29f2ab22f04989e88609c30302bb6be0e6024c",
+    "commands_verified":  3,
+    "captures_verified":  6,
+    "results":  [
+                    {
+                        "name":  "head.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rev-parse",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.03381569997873157,
+                        "exit_code":  0,
+                        "stdout_sha256":  "fe69bf89766a772b8e2c0910d80842e23bd30ae77fd518c0ffa9240c0f12083d",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8\n"
+                    },
+                    {
+                        "name":  "closed-api-copy-sync-data-observation.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-copy-probe-v1\\namespace-copy-probe.exe"
+                                 ],
+                        "seconds":  0.6443062999751419,
+                        "exit_code":  0,
+                        "stdout_sha256":  "b6c58b89f636960f2d23b55472ed8c647e42a3aa9855a3cad9c060101d35a400",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "{\n  \"schema\": \"namespace-copy-sync-data-probe-v1\",\n  \"source\": \"@@RECOVERY_APPROVED_WORK_AREA_JSON2@@\\\\r7\\\\x149e4a76727c\\\\incoming-original.exe\",\n  \"expected_sha256\": \"d237704913484fe2931860793badbfdaadb3bb216f5c436b8d01bdf2301d3e60\",\n  \"source_before_sha256\": \"d237704913484fe2931860793badbfdaadb3bb216f5c436b8d01bdf2301d3e60\",\n  \"source_after_sha256\": \"d237704913484fe2931860793badbfdaadb3bb216f5c436b8d01bdf2301d3e60\",\n  \"source_bytes\": 38868992,\n  \"source_same_file\": true,\n  \"go_version\": \"go1.27.4\",\n  \"started_utc\": \"2026-11-28T15:38:44.9282932Z\",\n  \"finished_utc\": \"2026-11-28T15:38:45.4356056Z\",\n  \"samples\": [\n    {\n      \"mode\": \"with-sync\",\n      \"path\": \"@@RECOVERY_APPROVED_WORK_AREA_JSON2@@\\\\mcp-acceptance-rebuild-20261127-v1\\\\namespace-copy-probe-v1-data\\\\with-sync.exe\",\n      \"bytes\": 38868992,\n      \"copy_sha256\": \"d237704913484fe2931860793badbfdaadb3bb216f5c436b8d01bdf2301d3e60\",\n      \"readback_sha256\": \"d237704913484fe2931860793badbfdaadb3bb216f5c436b8d01bdf2301d3e60\",\n      \"copy_ns\": 36357600,\n      \"sync_requested\": true,\n      \"sync_called\": true,\n      \"sync_ns\": 255927800,\n      \"destination_close_ns\": 463100,\n      \"destination_close_returned\": true,\n      \"source_close_ns\": 0,\n      \"source_close_returned\": true,\n      \"readback_ns\": 22227200,\n      \"total_ns\": 314975700,\n      \"errors\": [],\n      \"data_checks_passed\": true\n    },\n    {\n      \"mode\": \"without-sync\",\n      \"path\": \"@@RECOVERY_APPROVED_WORK_AREA_JSON2@@\\\\mcp-acceptance-rebuild-20261127-v1\\\\namespace-copy-probe-v1-data\\\\without-sync.exe\",\n      \"bytes\": 38868992,\n      \"copy_sha256\": \"d237704913484fe2931860793badbfdaadb3bb216f5c436b8d01bdf2301d3e60\",\n      \"readback_sha256\": \"d237704913484fe2931860793badbfdaadb3bb216f5c436b8d01bdf2301d3e60\",\n      \"copy_ns\": 35418200,\n      \"sync_requested\": false,\n      \"sync_called\": false,\n      \"sync_ns\": 0,\n      \"destination_close_ns\": 0,\n      \"destination_close_returned\": true,\n      \"source_close_ns\": 0,\n      \"source_close_returned\": true,\n      \"readback_ns\": 133373500,\n      \"total_ns\": 168791700,\n      \"errors\": [],\n      \"data_checks_passed\": true\n    }\n  ],\n  \"errors\": [],\n  \"data_checks_passed\": true,\n  \"single_observation_per_mode\": true,\n  \"order_randomized\": false,\n  \"child_processes_started\": 0,\n  \"test_images_executed\": false,\n  \"network_used\": false,\n  \"namespace_qualification_claimed\": false\n}\n"
+                    },
+                    {
+                        "name":  "isolated-source-still-clean.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "status",
+                                     "--porcelain=v1",
+                                     "--untracked-files=all"
+                                 ],
+                        "seconds":  0.04851059999782592,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    }
+                ],
+    "tests_executed":  false,
+    "reviewed_utc":  "2026-11-28T15:38:59.9755010Z"
+}

@@ -1,0 +1,118 @@
+{
+  "run": "runs/cache-acceptance-stage-20261128-v13",
+  "source": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128",
+  "head": "04e5b4eadd6407cbff4e04ba453546d278314bd7",
+  "environment": {
+    "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_NO_REPLACE_OBJECTS": "1",
+    "GIT_NO_LAZY_FETCH": "1"
+  },
+  "observed_files": [
+    "internal/cli/migrate_serena_test.go",
+    "servers/serena/manifest.yaml",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\successor14-manifest-pin-v1\\migration-source-pin.patch",
+    "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\gofmt.exe"
+  ],
+  "steps": [
+    {
+      "name": "starting-worktree-state",
+      "argv": [
+        "git",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "reviewed-test-patch-check",
+      "argv": [
+        "git",
+        "apply",
+        "--check",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\successor14-manifest-pin-v1\\migration-source-pin.patch"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "apply-two-source-requirement-literals",
+      "argv": [
+        "git",
+        "apply",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\successor14-manifest-pin-v1\\migration-source-pin.patch"
+      ],
+      "timeout": 30,
+      "mutates_inputs": true
+    },
+    {
+      "name": "gofmt-read-only-check",
+      "argv": [
+        "gofmt",
+        "-l",
+        "internal/cli/migrate_serena_test.go"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "test-patch-whitespace",
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "stage-reviewed-test-input",
+      "argv": [
+        "git",
+        "add",
+        "--",
+        "internal/cli/migrate_serena_test.go"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "staged-name-status",
+      "argv": [
+        "git",
+        "diff",
+        "--cached",
+        "--name-status"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "reviewed-staged-tree",
+      "argv": [
+        "git",
+        "write-tree"
+      ],
+      "timeout": 30,
+      "stdout_contains": [
+        "bcf1bd3539a8ba5ab54cff123adbb4bc071276d3"
+      ]
+    },
+    {
+      "name": "staged-stat",
+      "argv": [
+        "git",
+        "diff",
+        "--cached",
+        "--stat"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "staged-worktree-state",
+      "argv": [
+        "git",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all"
+      ],
+      "timeout": 30
+    }
+  ]
+}

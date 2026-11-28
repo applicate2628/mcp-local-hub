@@ -1,0 +1,40 @@
+{
+  "schema": "successor33-full-environment-scaffold-v1",
+  "status": "PARTIAL_EXPLICIT_SCAFFOLD_NOT_A_LAUNCH_PLAN",
+  "literal_commands": [
+    "go build ./... && go vet ./... && go test -count=1 -timeout 5m ./...",
+    "go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/"
+  ],
+  "runs_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7",
+  "short_temp_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o7",
+  "explicit_additions": {
+    "ProgramFiles": "@@RECOVERY_PROGRAM_FILES_JSON@@",
+    "ProgramFiles(x86)": "@@RECOVERY_PROGRAM_FILES_X86_JSON@@"
+  },
+  "absent_keys": [
+    "GIT_ALLOW_PROTOCOL"
+  ],
+  "retained_git_controls": {
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": "NUL",
+    "GIT_TERMINAL_PROMPT": "0"
+  },
+  "construction": "Complete concrete environment is an explicit mapping passed to the original owner. Do not merge ambient os.environ. Omitting GIT_ALLOW_PROTOCOL is intentional; the old empty value denied every transport, including file tests.",
+  "path_requirements": {
+    "runs_root_exact_fresh": true,
+    "ordinary_ancestors": true,
+    "all_owner_raw_paths_within_runs_root": true,
+    "namespace_parent": "<runs_root>\\n<12hex>\\n",
+    "namespace_temp": "<runs_root>\\n<12hex>\\n\\r\\temp",
+    "namespace_temp_characters": 40,
+    "short_temp_child": "<short_temp_root>\\x<12hex>",
+    "short_temp_child_max_characters": 31,
+    "refresh_absence_before_launch": true
+  },
+  "changed_scope": "Source727 continuation was never selected or run; this scaffold names the new Source04e route. Product/caches and 14+2 CLI fixture bindings belong to their actual successor producers.",
+  "limitations": [
+    "Shorter native paths address a concrete propagation gap; the old Win32 error cause was not observed and is not claimed proven.",
+    "No timing limit or selector changes. API cache warming, if selected, uses an independently closed PASS donor and remains a separate producer.",
+    "Only environment deltas and path admission are supplied here; this partial scaffold cannot launch a test."
+  ]
+}

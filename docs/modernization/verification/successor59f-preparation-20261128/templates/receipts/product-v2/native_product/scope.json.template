@@ -1,0 +1,27 @@
+{
+  "schema": "successor-product-preparation-scope-v1",
+  "role": "native",
+  "source_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+  "source_tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+  "source_files_checked": 3369,
+  "tracked_source_unchanged": true,
+  "compiler_inputs_only": true,
+  "tests_executed": false,
+  "runtime_acceptance_granted": false,
+  "config": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\product-continuation-v2\\product-build-config-v2.json",
+    "sha256": "7117e3809763cf1b05145cd26fe56bba3586ce4650387647dba319de5228d484"
+  },
+  "source_map": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\source-binding\\source59f-input-sha256.json",
+    "sha256": "e8c3fc2f577a130f92ba4eee7f8eee7153afc032dee909557cf1156890917c06"
+  },
+  "source_snapshot": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer-candidate\\publisher-source-snapshot.json",
+    "sha256": "0249af1149b94877e011186a92ee05f104a9bd7afd0e1d676755ee190e64356e"
+  },
+  "fixture": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\native-inputs\\product-fixture.json",
+    "sha256": "485a85adfc59257ba62918270f5d9787aa5a9a0e055be14e3130c778e1394cbe"
+  }
+}

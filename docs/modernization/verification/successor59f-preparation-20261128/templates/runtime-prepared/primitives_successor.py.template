@@ -1,0 +1,184 @@
+"""Published full-v13 package inventory and ledger with current input binding."""
+import sys
+sys.dont_write_bytecode=True
+import collections,hashlib,importlib.util,json,os,re,subprocess,uuid
+from pathlib import Path
+CORE=Path('@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-prepared-v1\\core_successor.py')
+CORE_SHA='b1139de92f5d216737a1fd14e68a42b91979e3c924a72f6a7d9a6d9b6002ee3d'
+if hashlib.sha256(CORE.read_bytes()).hexdigest()!=CORE_SHA:
+    raise RuntimeError("current literal core changed")
+spec=importlib.util.spec_from_file_location("literal_current_core",CORE)
+core=importlib.util.module_from_spec(spec)
+exec(compile(CORE.read_bytes(),str(CORE),"exec"),core.__dict__)
+IMPORT="mcp-local-hub/"
+API,CLI,PROCESS=(IMPORT+"internal/"+name for name in ("api","cli","process"))
+JOB_TESTS=("TestJob_BreakawayEnabledDescendantEscapesClose","TestJobInformationTransportPreparationBoundary")
+NAMESPACE_TESTS=("TestSecretsInit_RecoveryNamespaceBoundary","TestSecretsInit_RecoveryNamespaceRetainedDirectory",
+                 "TestSecretsInit_RecoveryNamespaceFailurePaths")
+PEER_TESTS=("TestSupervisorPeerStrictControlConnections",)
+NAME=re.compile(r"^(Test|Example|Fuzz|Benchmark)\w*$")
+TERMINAL=("pass","fail","skip")
+RESOURCES={CLI:core.CLI_SYSO}
+SOURCE_RESOURCES=(core.API_SYSO,core.CLI_SYSO,core.PRODUCT_SYSO)
+def sha(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def command(run, argv, name, timeout=600, cwd=None, environment=None, stdin_path=None, *, physical_receiver=None):
+    original = run.env
+    actual = dict(original)
+    if environment:
+        actual.update(environment)
+    if len(subprocess.list2cmdline([str(x) for x in argv]).encode("utf-16-le"))//2 >= 32767:
+        raise RuntimeError("command line exceeds Windows process limit")
+    before = len(run.receipt["commands"])
+    run.env = actual
+    try:
+        output = run.command(argv,name,cwd=cwd or core.REPO,timeout=timeout,check=False,stdin_path=stdin_path,
+                             physical_receiver=physical_receiver)
+        return output,run.receipt["commands"][-1]["exit_code"]
+    finally:
+        if len(run.receipt["commands"]) > before:
+            run.receipt["commands"][-1]["environment_overrides"] = environment or {}
+            run.save()
+        run.env = original
+
+def required(run, argv, name, **kwargs):
+    output,code = command(run,argv,name,**kwargs)
+    if code:
+        raise RuntimeError(name+" exited "+str(code))
+    return output
+
+def objects(text):
+    decoder = json.JSONDecoder()
+    rows,position = [],0
+    while position < len(text):
+        while position < len(text) and text[position].isspace():
+            position += 1
+        if position == len(text):
+            break
+        value,position = decoder.raw_decode(text,position)
+        rows.append(value)
+    return rows
+
+def events(text):
+    return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+def package_manifest(run, packages, label, tagged=False):
+    argv = [core.GO,"list","-json=Dir,ImportPath,TestGoFiles,XTestGoFiles,SysoFiles,Error,Incomplete,DepsErrors"]
+    if tagged:
+        argv += ["-tags=test_state_path_env"]
+    rows = objects(required(run,[*argv,*packages],"packages-"+label,timeout=120))
+    result = {}
+    for row in rows:
+        package,directory = row["ImportPath"],core.ordinary(row["Dir"],True)
+        if row.get("Error") or package in result or not directory.is_relative_to(core.REPO):
+            raise RuntimeError("unexpected package manifest row")
+        result[package] = {"directory":str(directory),"test_go_files":row.get("TestGoFiles",[]),
+                           "external_test_go_files":row.get("XTestGoFiles",[])}
+    if not result:
+        raise RuntimeError("empty package manifest")
+    core.new_json(run.root/("packages-"+label+".json"),result)
+    return result
+
+
+def ledger(run, lane, expected, rows, exit_code, mandatory=()):
+    selected = {(p,t) for p,names in expected.items() for t in names}
+    outcomes,started,package_ends = {},collections.Counter(),{}
+    package_terminal_counts = collections.Counter()
+    duplicates = []
+    for event in rows:
+        package,test,action = event.get("Package"),event.get("Test"),event.get("Action")
+        if test:
+            key = (package,test)
+            if action == "run":
+                started[key] += 1
+            if action in TERMINAL:
+                if key in outcomes:
+                    duplicates.append(key)
+                outcomes[key] = action
+        elif action in TERMINAL:
+            package_terminal_counts[package] += 1
+            package_ends[package] = action
+    top = {key:action for key,action in outcomes.items() if "/" not in key[1]}
+    missing = sorted(selected-set(top))
+    unexpected = sorted(set(top)-selected)
+    unsettled = sorted(set(started)-set(outcomes))
+    terminal_without_start = sorted(set(outcomes)-set(started))
+    duplicate_start = sorted(key for key,count in started.items() if count!=1)
+    duplicate_package_terminal = sorted(p for p,n in package_terminal_counts.items() if n!=1)
+    missing_packages = sorted(set(expected)-set(package_ends))
+    unexpected_packages = sorted(set(package_ends)-set(expected))
+    unexpected_roots = sorted(key for key in outcomes if (key[0],key[1].split("/",1)[0]) not in selected)
+    required_passes = all(outcomes.get(key) == "pass" for key in mandatory)
+    passed = (exit_code == 0 and not missing and not unexpected and not duplicates and not unsettled
+              and not missing_packages and not unexpected_packages and not unexpected_roots and not duplicate_package_terminal
+              and not terminal_without_start and not duplicate_start and required_passes and "fail" not in outcomes.values()
+              and "fail" not in package_ends.values())
+    result = {"lane":lane,"expected":expected,"exit_code":exit_code,"passed":passed,
+              "top_level":[{"package":p,"test":t,"outcome":top.get((p,t),"NOT_RUN")} for p,t in sorted(selected)],
+              "all_terminal":[{"package":p,"test":t,"outcome":action} for (p,t),action in sorted(outcomes.items())],
+              "started_without_terminal":unsettled,"missing_top_level":missing,"unexpected_top_level":unexpected,
+              "duplicate_terminal":duplicates,"duplicate_start":duplicate_start,"terminal_without_start":terminal_without_start,
+              "missing_package_terminal":missing_packages,"unexpected_package_terminal":unexpected_packages,"unexpected_test_roots":unexpected_roots,
+              "package_terminal":package_ends,"package_terminal_counts":dict(package_terminal_counts),
+              "duplicate_package_terminal":duplicate_package_terminal,"mandatory_passes":[list(x) for x in mandatory],
+              "mandatory_passes_satisfied":required_passes}
+    run.receipt.setdefault("coverage",[]).append(result)
+    core.new_json(run.root/("coverage-"+lane+".json"),result)
+    run.save()
+    return passed
+
+
+def restore_resource(run, path, digest):
+    if path not in RESOURCES.values() or sha(core.ordinary(path,False)) != digest:
+        raise RuntimeError("owned source resource changed; retained for review")
+    identity = uuid.uuid4().hex
+    preserved = run.root/"resource-cleanup-evidence"/identity/path.name
+    trash = Path(core.CFG["trash_root"])/("full-go-"+run.root.name)/identity/path.name
+    core.copy_file(path,preserved)
+    trash.parent.mkdir(parents=True,exist_ok=False)
+    path.rename(trash)
+    if path.exists() or sha(preserved)!=digest or sha(trash)!=digest:
+        raise RuntimeError("source resource restoration did not preserve original bytes")
+    row = {"source":str(path),"preserved":str(preserved),"trash":str(trash),"sha256":digest}
+    run.receipt.setdefault("resource_cleanup",[]).append(row)
+    core.new_json(run.root/"resource-cleanup-records"/(identity+".json"),row)
+
+
+def canonical_environment(record):
+    return {"MCPHUB_CANONICAL_ENTRY_FIXTURE":record["fixture"],"MCPHUB_CANONICAL_FIXTURE_TEST_PRODUCT":"1",
+            "MCPHUB_CANONICAL_ENTRY_FIXTURE_REQUIRED":"1","MCPHUB_CANONICAL_COMMAND_FIXTURE_REQUIRED":"1"}
+
+
+def begin(args,lane,retain=None):
+    if args.name!=core.FULL_RUN.name or args.commit!=core.CACHE_COMMIT:
+        raise RuntimeError("fixed current source and run name required")
+    producers=core.receive_closed_producers()
+    inputs=core.pinned_inputs()
+    root=core.private_run(args.name)
+    env=core.clean_environment(root)
+    run=core.Run(root,env)
+    if retain is not None: retain(run)
+    try:
+        run.receipt.update({"lane":lane,"input_files":inputs,"closed_producer_metadata":producers,
+                           "source_context":core.CFG["source_context"],
+                           "cache_bootstrap":{"owner":str(root),"path":str(root/"cache-bootstrap.json"),
+                                              "sha256":sha(root/"cache-bootstrap.json")},
+                           "ambient_opt_ins_absent":["MCPHUB_TARGET_SCHEDULER_QA","MCPHUB_GUI_SPAWN_TESTS"]})
+        for path in [Path(__file__),CORE,core.HELPER,core._guard_path,Path(core.CFG["windows_job"]["path"])]:
+            run.receipt["input_files"][str(path)]=sha(core.ordinary(path,False))
+        run.save()
+        run.receipt["source_before"]=core.source_snapshot(run,"before")
+        run.receipt["product_test_source_compatibility"]=core.receive_original_source_compatibility(run.receipt["source_before"])
+        short_pin,short_record=core.receive_short_temp(run)
+        run.receipt["short_temp"]={"input":short_pin,"record":short_record}
+        if required(run,[core.GIT,"-C",core.REPO,"status","--porcelain"],"status-before",timeout=30).strip():
+            raise RuntimeError("current TestSource must be clean")
+        if any(path.exists() for path in SOURCE_RESOURCES):
+            raise RuntimeError("pre-existing compiler resource is not owned by this run")
+        run.save()
+    except BaseException as exc:
+        run.finish("FAIL",exc)
+        raise
+    return run

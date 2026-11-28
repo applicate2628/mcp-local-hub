@@ -1,0 +1,72 @@
+{
+  "run": "runs/cache-acceptance-commit-20261128-v8",
+  "source": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128",
+  "head": "04e5b4eadd6407cbff4e04ba453546d278314bd7",
+  "environment": {
+    "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_NO_REPLACE_OBJECTS": "1",
+    "GIT_NO_LAZY_FETCH": "1"
+  },
+  "observed_files": [
+    "internal/cli/migrate_serena_test.go",
+    "servers/serena/manifest.yaml"
+  ],
+  "steps": [
+    {
+      "name": "reviewed-parent",
+      "argv": [
+        "git",
+        "show",
+        "-s",
+        "--format=%H%n%P"
+      ],
+      "timeout": 30,
+      "stdout_contains": [
+        "04e5b4eadd6407cbff4e04ba453546d278314bd7",
+        "33eaf8af8fc46cb231f48c70f4775922393245b1"
+      ]
+    },
+    {
+      "name": "reviewed-staged-tree",
+      "argv": [
+        "git",
+        "write-tree"
+      ],
+      "timeout": 30,
+      "stdout_contains": [
+        "bcf1bd3539a8ba5ab54cff123adbb4bc071276d3"
+      ]
+    },
+    {
+      "name": "commit-pinned-migration-fixtures",
+      "argv": [
+        "git",
+        "commit",
+        "-m",
+        "test: pin migration fixture source to the Serena catalog revision"
+      ],
+      "timeout": 60
+    },
+    {
+      "name": "committed-identity",
+      "argv": [
+        "git",
+        "show",
+        "-s",
+        "--format=%H%n%T%n%P"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "committed-worktree-state",
+      "argv": [
+        "git",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all"
+      ],
+      "timeout": 30
+    }
+  ]
+}

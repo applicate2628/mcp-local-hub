@@ -1,0 +1,29 @@
+--- producer/copy_closed_warm_caches.py
++++ runtime/copy_closed_runtime_caches.py
+@@ -15,6 +15,7 @@
+ 
+ TASK = Path(r"@@RECOVERY_APPROVED_WORK_AREA_RAW@@\mcp-acceptance-rebuild-20261127-v1")
+ PRIOR = TASK / "original-helper-cache-warm-v7"
++RUNTIME_OUTPUT = Path(r"@@RECOVERY_APPROVED_WORK_AREA_RAW@@\r7\full59f")
+ PLAN = TASK / "inputs-successor33-v1" / "warm-cache" / "helper-cache-warm-v7-plan.json"
+ PLAN_SHA = "bf28e617ee0e319ec4c085d13ee0c16b7536552bac92f28070138835d8286fb6"
+ EXECUTION = PRIOR / "commands" / "execution.json"
+@@ -94,9 +95,9 @@
+     need(os.name == "nt", "closed cache copying requires Windows")
+     output = ordinary(output, True)
+     need(re.fullmatch(r"[0-9a-f]{64}", parent_sha) is not None, "exact prior parent pin required")
+-    need(output != TASK and output.is_relative_to(TASK)
++    need(output == RUNTIME_OUTPUT
+          and not output.is_relative_to(PRIOR) and not PRIOR.is_relative_to(output),
+-         "new output must be a separate fresh task run")
++         "new output must be the exact approved fresh r7/full59f runtime owner")
+     parent_path = PRIOR / "parent.json"
+     parent = json.loads(pinned(parent_path, parent_sha))
+     need(parent.get("schema") == SCHEMA + "-parent" and parent.get("status") == "PASS"
+@@ -207,5 +208,5 @@
+ 
+ 
+ if __name__ == "__main__":
+-    need(len(sys.argv)==3,"usage: copy_closed_warm_caches.py NEW_OUTPUT PRIOR_PARENT_SHA256")
++    need(len(sys.argv)==3,"usage: copy_closed_runtime_caches.py NEW_OUTPUT PRIOR_PARENT_SHA256")
+     print(json.dumps(copy_closed_caches(sys.argv[1],sys.argv[2],dict(os.environ))))

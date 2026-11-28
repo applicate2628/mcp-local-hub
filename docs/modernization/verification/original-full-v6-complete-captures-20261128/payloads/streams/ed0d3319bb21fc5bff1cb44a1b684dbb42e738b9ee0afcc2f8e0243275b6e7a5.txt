@@ -1,0 +1,139 @@
+{
+	"GoVersion": "go1.27.4",
+	"Path": "mcp-local-hub/internal/e2e.test",
+	"Main": {
+		"Path": "mcp-local-hub",
+		"Version": "(devel)"
+	},
+	"Deps": [
+		{
+			"Path": "filippo.io/age",
+			"Version": "v1.3.1",
+			"Sum": "h1:hbzdQOJkuaMEpRCLSN1/C5DX74RPcNCk6oqhKMXmZi0="
+		},
+		{
+			"Path": "filippo.io/hpke",
+			"Version": "v0.4.0",
+			"Sum": "h1:p575VVQ6ted4pL+it6M00V/f2qTZITO0zgmdKCkd5+A="
+		},
+		{
+			"Path": "github.com/Microsoft/go-winio",
+			"Version": "v0.6.2",
+			"Sum": "h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERoyfY="
+		},
+		{
+			"Path": "github.com/gofrs/flock",
+			"Version": "v0.13.0",
+			"Replace": {
+				"Path": "./third_party/gofrs-flock",
+				"Version": "(devel)"
+			}
+		},
+		{
+			"Path": "github.com/inconshreveable/mousetrap",
+			"Version": "v1.1.0",
+			"Sum": "h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8="
+		},
+		{
+			"Path": "github.com/pelletier/go-toml/v2",
+			"Version": "v2.4.3",
+			"Sum": "h1:GTRvJQutkOSftxIFD5xw9aepkYNuPWmVJpffdDPYVpY="
+		},
+		{
+			"Path": "github.com/spf13/cobra",
+			"Version": "v1.10.2",
+			"Sum": "h1:DMTTonx5m65Ic0GOoRY2c16WCbHxOOw6xxezuLaBpcU="
+		},
+		{
+			"Path": "github.com/spf13/pflag",
+			"Version": "v1.0.10",
+			"Sum": "h1:4EBh2KAYBwaONj6b2Ye1GiHfwjqyROoF4RwYO+vPwFk="
+		},
+		{
+			"Path": "github.com/tailscale/hujson",
+			"Version": "v0.0.0-20260727124030-b80ff77dac4f",
+			"Sum": "h1:9hiVElpCmKzsBKQHkBqZ8LGzt82iLfM8egxr4sew+Ys="
+		},
+		{
+			"Path": "golang.org/x/crypto",
+			"Version": "v0.54.0",
+			"Sum": "h1:YLIA59K4fiNzHzjnZt2tUJQjQtUWfWbeHBqKtk3eScw="
+		},
+		{
+			"Path": "golang.org/x/net",
+			"Version": "v0.57.0",
+			"Sum": "h1:K5+3DljvIuDG9/Jv9rvyMywYNFCQ9RSUY6OOTTkT+tE="
+		},
+		{
+			"Path": "golang.org/x/sync",
+			"Version": "v0.22.0",
+			"Sum": "h1:SZjpbeLmrCk4xhRSZFNZW5gFUeCeFgjekvI/+gfScek="
+		},
+		{
+			"Path": "golang.org/x/sys",
+			"Version": "v0.47.0",
+			"Sum": "h1:o7XGOvZQCADBQQ4Y7VNq2dRWQR7JmOUW8Kxx4ZsNgWs="
+		},
+		{
+			"Path": "golang.org/x/term",
+			"Version": "v0.45.0",
+			"Sum": "h1:NwWyBmoJCbfTHpxrWoZ9C6/VxOf7ic219I8xZZFdrf0="
+		},
+		{
+			"Path": "golang.org/x/text",
+			"Version": "v0.40.0",
+			"Sum": "h1:Ub2Z6/xjgF1WrYQz2nuITOEegKFtiIy+rieRJ5lHZKs="
+		},
+		{
+			"Path": "gopkg.in/yaml.v3",
+			"Version": "v3.0.1",
+			"Sum": "h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA="
+		}
+	],
+	"Settings": [
+		{
+			"Key": "-buildmode",
+			"Value": "exe"
+		},
+		{
+			"Key": "-compiler",
+			"Value": "gc"
+		},
+		{
+			"Key": "-ldflags",
+			"Value": "mcp-local-hub/internal/cli=-H=windowsgui -s -w -X=mcp-local-hub/internal/buildinfo.version=0.4.60 -X=mcp-local-hub/internal/buildinfo.commit=727d66753814dc218e26d699e57402db2d13190a -X=mcp-local-hub/internal/buildinfo.date=2026-11-27T02:27:42Z -X=mcp-local-hub/internal/buildinfo.publisherSourceEpoch=5c3f54e2359b33266afb0dd52488c01ab0114af1370376492b8186e6ae74cf89"
+		},
+		{
+			"Key": "DefaultGODEBUG",
+			"Value": "tracebacklabels=0,x509sslcertoverrideplatform=0"
+		},
+		{
+			"Key": "CGO_ENABLED",
+			"Value": "1"
+		},
+		{
+			"Key": "CGO_CFLAGS"
+		},
+		{
+			"Key": "CGO_CPPFLAGS"
+		},
+		{
+			"Key": "CGO_CXXFLAGS"
+		},
+		{
+			"Key": "CGO_LDFLAGS"
+		},
+		{
+			"Key": "GOARCH",
+			"Value": "amd64"
+		},
+		{
+			"Key": "GOOS",
+			"Value": "windows"
+		},
+		{
+			"Key": "GOAMD64",
+			"Value": "v1"
+		}
+	]
+}

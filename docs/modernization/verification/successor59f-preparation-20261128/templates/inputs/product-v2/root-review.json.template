@@ -1,0 +1,29 @@
+{
+    "schema":  "successor-product-continuation-root-review-v2",
+    "status":  "REVIEWED_NOT_EXECUTED",
+    "candidate":  {
+                      "sha256":  "38c5e7dc49b46be7f9b2f6c04834b6656e6861bb1ac4dfa5ed04858ab4d2a8dd",
+                      "path":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\product-continuation-v2\\successor-product-only-inputs-v2-plan.candidate.json"
+                  },
+    "plan":  {
+                 "sha256":  "f6fd52b9a3d653b87bae7e51c1264ee27bb2a5b692219b36c9213a59a8b7fca5",
+                 "path":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\product-continuation-v2\\successor-product-only-inputs-v2-plan.json"
+             },
+    "source_commit":  "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+    "source_tree":  "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+    "source_files":  3369,
+    "actual_input_pins_verified":  3397,
+    "commands":  4,
+    "required_seconds":  1990,
+    "parent_seconds":  2100,
+    "own_review":  [
+                       "Fresh exact Source export helper 217 lines and four actual command arguments",
+                       "Closed original v1 FAIL preserved; first nine helper commands individually PASS",
+                       "Original private native parent identity and ACL verified read-only by export helper",
+                       "Exactly one reviewed wrapper command-resolution block; default resolver requires one pinned Application",
+                       "Original warm PASS donor, explicit unchanged tool environment and new output roots"
+                   ],
+    "source_tracked_mutation_performed":  false,
+    "native_or_test_execution":  false,
+    "qualification_passed":  false
+}

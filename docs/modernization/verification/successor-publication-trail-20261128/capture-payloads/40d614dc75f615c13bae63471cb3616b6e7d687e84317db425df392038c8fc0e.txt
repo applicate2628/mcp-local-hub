@@ -1,0 +1,7 @@
+M  internal/cli/attach_client_real_supervisor_windows_test.go
+M  internal/cli/supervisor_launch_successor_runtime_windows_test.go
+M  internal/cli/upgrade_gui_qualified_fixture_windows_test.go
+M  internal/cli/windows_canonical_entry_gui_native_replay_windows_test.go
+M  internal/cli/windows_product_preflight_original_windows_test.go
+M  internal/process/jobobject_windows_test.go
+M  internal/process/run_strictly_contained_windows_test.go

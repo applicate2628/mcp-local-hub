@@ -1,0 +1,131 @@
+{"Action":"start","Package":"mcp-local-hub/internal/releasegen/serena"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestSerenaReleaseProjectionParity"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestSerenaReleaseProjectionParity","Output":"=== RUN   TestSerenaReleaseProjectionParity\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestSerenaReleaseProjectionParity","Output":"--- PASS: TestSerenaReleaseProjectionParity (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestSerenaReleaseProjectionParity"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestReleaseCatalogsPassProductionSchema"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestReleaseCatalogsPassProductionSchema","Output":"=== RUN   TestReleaseCatalogsPassProductionSchema\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestReleaseCatalogsPassProductionSchema","Output":"--- PASS: TestReleaseCatalogsPassProductionSchema (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestReleaseCatalogsPassProductionSchema"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestSerenaDescriptorAcceptsChangedValidPinWithoutGoConstant"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestSerenaDescriptorAcceptsChangedValidPinWithoutGoConstant","Output":"=== RUN   TestSerenaDescriptorAcceptsChangedValidPinWithoutGoConstant\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestSerenaDescriptorAcceptsChangedValidPinWithoutGoConstant","Output":"--- PASS: TestSerenaDescriptorAcceptsChangedValidPinWithoutGoConstant (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestSerenaDescriptorAcceptsChangedValidPinWithoutGoConstant"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestCheckRequiresEveryDeclaredManifest"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestCheckRequiresEveryDeclaredManifest","Output":"=== RUN   TestCheckRequiresEveryDeclaredManifest\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestCheckRequiresEveryDeclaredManifest/serena"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestCheckRequiresEveryDeclaredManifest/serena","Output":"=== RUN   TestCheckRequiresEveryDeclaredManifest/serena\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestCheckRequiresEveryDeclaredManifest/serena","Output":"--- PASS: TestCheckRequiresEveryDeclaredManifest/serena (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestCheckRequiresEveryDeclaredManifest/serena"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestCheckRequiresEveryDeclaredManifest/fetch"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestCheckRequiresEveryDeclaredManifest/fetch","Output":"=== RUN   TestCheckRequiresEveryDeclaredManifest/fetch\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestCheckRequiresEveryDeclaredManifest/fetch","Output":"--- PASS: TestCheckRequiresEveryDeclaredManifest/fetch (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestCheckRequiresEveryDeclaredManifest/fetch"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestCheckRequiresEveryDeclaredManifest/sequential-thinking"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestCheckRequiresEveryDeclaredManifest/sequential-thinking","Output":"=== RUN   TestCheckRequiresEveryDeclaredManifest/sequential-thinking\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestCheckRequiresEveryDeclaredManifest/sequential-thinking","Output":"--- PASS: TestCheckRequiresEveryDeclaredManifest/sequential-thinking (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestCheckRequiresEveryDeclaredManifest/sequential-thinking"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestCheckRequiresEveryDeclaredManifest","Output":"--- PASS: TestCheckRequiresEveryDeclaredManifest (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestCheckRequiresEveryDeclaredManifest"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateRequiresEveryDeclaredManifestWithoutMutation"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateRequiresEveryDeclaredManifestWithoutMutation","Output":"=== RUN   TestGenerateRequiresEveryDeclaredManifestWithoutMutation\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateRequiresEveryDeclaredManifestWithoutMutation/serena"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateRequiresEveryDeclaredManifestWithoutMutation/serena","Output":"=== RUN   TestGenerateRequiresEveryDeclaredManifestWithoutMutation/serena\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateRequiresEveryDeclaredManifestWithoutMutation/serena","Output":"--- PASS: TestGenerateRequiresEveryDeclaredManifestWithoutMutation/serena (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateRequiresEveryDeclaredManifestWithoutMutation/serena"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateRequiresEveryDeclaredManifestWithoutMutation/fetch"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateRequiresEveryDeclaredManifestWithoutMutation/fetch","Output":"=== RUN   TestGenerateRequiresEveryDeclaredManifestWithoutMutation/fetch\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateRequiresEveryDeclaredManifestWithoutMutation/fetch","Output":"--- PASS: TestGenerateRequiresEveryDeclaredManifestWithoutMutation/fetch (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateRequiresEveryDeclaredManifestWithoutMutation/fetch"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateRequiresEveryDeclaredManifestWithoutMutation/sequential-thinking"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateRequiresEveryDeclaredManifestWithoutMutation/sequential-thinking","Output":"=== RUN   TestGenerateRequiresEveryDeclaredManifestWithoutMutation/sequential-thinking\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateRequiresEveryDeclaredManifestWithoutMutation/sequential-thinking","Output":"--- PASS: TestGenerateRequiresEveryDeclaredManifestWithoutMutation/sequential-thinking (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateRequiresEveryDeclaredManifestWithoutMutation/sequential-thinking"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateRequiresEveryDeclaredManifestWithoutMutation","Output":"--- PASS: TestGenerateRequiresEveryDeclaredManifestWithoutMutation (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateRequiresEveryDeclaredManifestWithoutMutation"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestDeclaredReleaseProjectionRegistryIsUniqueAndComplete"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestDeclaredReleaseProjectionRegistryIsUniqueAndComplete","Output":"=== RUN   TestDeclaredReleaseProjectionRegistryIsUniqueAndComplete\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestDeclaredReleaseProjectionRegistryIsUniqueAndComplete","Output":"--- PASS: TestDeclaredReleaseProjectionRegistryIsUniqueAndComplete (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestDeclaredReleaseProjectionRegistryIsUniqueAndComplete"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestCheckRejectsFetchProjectionDrift"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestCheckRejectsFetchProjectionDrift","Output":"=== RUN   TestCheckRejectsFetchProjectionDrift\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestCheckRejectsFetchProjectionDrift","Output":"--- PASS: TestCheckRejectsFetchProjectionDrift (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestCheckRejectsFetchProjectionDrift"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestFetchDescriptorRejectsMCP2"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestFetchDescriptorRejectsMCP2","Output":"=== RUN   TestFetchDescriptorRejectsMCP2\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestFetchDescriptorRejectsMCP2","Output":"--- PASS: TestFetchDescriptorRejectsMCP2 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestFetchDescriptorRejectsMCP2"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateDerivesFetchProjections"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateDerivesFetchProjections","Output":"=== RUN   TestGenerateDerivesFetchProjections\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateDerivesFetchProjections","Output":"--- PASS: TestGenerateDerivesFetchProjections (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateDerivesFetchProjections"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestCheckRejectsSequentialProjectionDrift"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestCheckRejectsSequentialProjectionDrift","Output":"=== RUN   TestCheckRejectsSequentialProjectionDrift\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestCheckRejectsSequentialProjectionDrift","Output":"--- PASS: TestCheckRejectsSequentialProjectionDrift (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestCheckRejectsSequentialProjectionDrift"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateDerivesSequentialProjections"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateDerivesSequentialProjections","Output":"=== RUN   TestGenerateDerivesSequentialProjections\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateDerivesSequentialProjections/legacy-calendar"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateDerivesSequentialProjections/legacy-calendar","Output":"=== RUN   TestGenerateDerivesSequentialProjections/legacy-calendar\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateDerivesSequentialProjections/legacy-calendar","Output":"--- PASS: TestGenerateDerivesSequentialProjections/legacy-calendar (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateDerivesSequentialProjections/legacy-calendar"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateDerivesSequentialProjections/numeric-triple"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateDerivesSequentialProjections/numeric-triple","Output":"=== RUN   TestGenerateDerivesSequentialProjections/numeric-triple\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateDerivesSequentialProjections/numeric-triple","Output":"--- PASS: TestGenerateDerivesSequentialProjections/numeric-triple (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateDerivesSequentialProjections/numeric-triple"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateDerivesSequentialProjections/another-numeric-triple"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateDerivesSequentialProjections/another-numeric-triple","Output":"=== RUN   TestGenerateDerivesSequentialProjections/another-numeric-triple\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateDerivesSequentialProjections/another-numeric-triple","Output":"--- PASS: TestGenerateDerivesSequentialProjections/another-numeric-triple (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateDerivesSequentialProjections/another-numeric-triple"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateDerivesSequentialProjections/rejects-version-range"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateDerivesSequentialProjections/rejects-version-range","Output":"=== RUN   TestGenerateDerivesSequentialProjections/rejects-version-range\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateDerivesSequentialProjections/rejects-version-range","Output":"--- PASS: TestGenerateDerivesSequentialProjections/rejects-version-range (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateDerivesSequentialProjections/rejects-version-range"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateDerivesSequentialProjections","Output":"--- PASS: TestGenerateDerivesSequentialProjections (0.06s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateDerivesSequentialProjections"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGeneratePreservesManifestWhitespaceOutsideSerenaFields"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGeneratePreservesManifestWhitespaceOutsideSerenaFields","Output":"=== RUN   TestGeneratePreservesManifestWhitespaceOutsideSerenaFields\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGeneratePreservesManifestWhitespaceOutsideSerenaFields","Output":"--- PASS: TestGeneratePreservesManifestWhitespaceOutsideSerenaFields (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGeneratePreservesManifestWhitespaceOutsideSerenaFields"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateRepairsOnlyTheDriftedProjection"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateRepairsOnlyTheDriftedProjection","Output":"=== RUN   TestGenerateRepairsOnlyTheDriftedProjection\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateRepairsOnlyTheDriftedProjection","Output":"--- PASS: TestGenerateRepairsOnlyTheDriftedProjection (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateRepairsOnlyTheDriftedProjection"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateNormalizesV2CatalogLineEndings"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateNormalizesV2CatalogLineEndings","Output":"=== RUN   TestGenerateNormalizesV2CatalogLineEndings\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateNormalizesV2CatalogLineEndings","Output":"--- PASS: TestGenerateNormalizesV2CatalogLineEndings (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestGenerateNormalizesV2CatalogLineEndings"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestPublishTargetsRollsBackAndCleansTempsOnLateRenameFailure"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestPublishTargetsRollsBackAndCleansTempsOnLateRenameFailure","Output":"=== RUN   TestPublishTargetsRollsBackAndCleansTempsOnLateRenameFailure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestPublishTargetsRollsBackAndCleansTempsOnLateRenameFailure","Output":"--- PASS: TestPublishTargetsRollsBackAndCleansTempsOnLateRenameFailure (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestPublishTargetsRollsBackAndCleansTempsOnLateRenameFailure"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestPublishTargetsCleansTempsWhenLaterPreimageReadFails"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestPublishTargetsCleansTempsWhenLaterPreimageReadFails","Output":"=== RUN   TestPublishTargetsCleansTempsWhenLaterPreimageReadFails\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestPublishTargetsCleansTempsWhenLaterPreimageReadFails","Output":"--- PASS: TestPublishTargetsCleansTempsWhenLaterPreimageReadFails (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestPublishTargetsCleansTempsWhenLaterPreimageReadFails"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestPublishTargetsRollsBackNewFileOnLateFailure"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestPublishTargetsRollsBackNewFileOnLateFailure","Output":"=== RUN   TestPublishTargetsRollsBackNewFileOnLateFailure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestPublishTargetsRollsBackNewFileOnLateFailure","Output":"--- PASS: TestPublishTargetsRollsBackNewFileOnLateFailure (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestPublishTargetsRollsBackNewFileOnLateFailure"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestPublishTargetsJoinsCreateAndPriorCleanupFailures"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestPublishTargetsJoinsCreateAndPriorCleanupFailures","Output":"=== RUN   TestPublishTargetsJoinsCreateAndPriorCleanupFailures\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestPublishTargetsJoinsCreateAndPriorCleanupFailures","Output":"--- PASS: TestPublishTargetsJoinsCreateAndPriorCleanupFailures (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestPublishTargetsJoinsCreateAndPriorCleanupFailures"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestPublishTargetsJoinsWriteAndCleanupFailures"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestPublishTargetsJoinsWriteAndCleanupFailures","Output":"=== RUN   TestPublishTargetsJoinsWriteAndCleanupFailures\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestPublishTargetsJoinsWriteAndCleanupFailures","Output":"--- PASS: TestPublishTargetsJoinsWriteAndCleanupFailures (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestPublishTargetsJoinsWriteAndCleanupFailures"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestRestorePublishedJoinsRestoreAndTempCleanupFailures"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestRestorePublishedJoinsRestoreAndTempCleanupFailures","Output":"=== RUN   TestRestorePublishedJoinsRestoreAndTempCleanupFailures\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestRestorePublishedJoinsRestoreAndTempCleanupFailures/write"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestRestorePublishedJoinsRestoreAndTempCleanupFailures/write","Output":"=== RUN   TestRestorePublishedJoinsRestoreAndTempCleanupFailures/write\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestRestorePublishedJoinsRestoreAndTempCleanupFailures/write","Output":"--- PASS: TestRestorePublishedJoinsRestoreAndTempCleanupFailures/write (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestRestorePublishedJoinsRestoreAndTempCleanupFailures/write"}
+{"Action":"run","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestRestorePublishedJoinsRestoreAndTempCleanupFailures/rename"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestRestorePublishedJoinsRestoreAndTempCleanupFailures/rename","Output":"=== RUN   TestRestorePublishedJoinsRestoreAndTempCleanupFailures/rename\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestRestorePublishedJoinsRestoreAndTempCleanupFailures/rename","Output":"--- PASS: TestRestorePublishedJoinsRestoreAndTempCleanupFailures/rename (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestRestorePublishedJoinsRestoreAndTempCleanupFailures/rename"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestRestorePublishedJoinsRestoreAndTempCleanupFailures","Output":"--- PASS: TestRestorePublishedJoinsRestoreAndTempCleanupFailures (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena","Test":"TestRestorePublishedJoinsRestoreAndTempCleanupFailures"}
+{"Action":"output","Package":"mcp-local-hub/internal/releasegen/serena","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/releasegen/serena"}

@@ -1,0 +1,10 @@
+{
+  "package": "mcp-local-hub/internal/api",
+  "run": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c",
+  "receipt_sha256": "e1cba7d99294f4e18816ebc91a8fd137c3533be5d9ed433071de4c89b66fc709",
+  "exit_code": 1,
+  "native_custody_settled": true,
+  "commands_quiescent": true,
+  "request_sha256": "95f2051d09ef350bf010d0b2f7c49db1ba0c73a4e12d230bb09c5c7c2ce01d8b",
+  "request_nonce": "9b430e467cf04d64a33db3d9d4445b72"
+}

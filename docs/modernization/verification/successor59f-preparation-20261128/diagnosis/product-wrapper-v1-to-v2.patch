@@ -1,0 +1,19 @@
+diff --git a/build_successor_products.ps1 b/build_successor_products.ps1
+index 5362394f70c88e974a3c97ba0b32c6744850f526..3ac329324f2bb9e9d7f9325a6c0dc8f56869dc98 100644
+--- a/build_successor_products.ps1
++++ b/build_successor_products.ps1
+@@ -94,7 +94,13 @@
+ $successorGo=Require-SuccessorPin $successorCfg.tools.go
+ $successorGit=Require-SuccessorPin $successorCfg.tools.git
+ foreach ($successorTool in @(@('go',$successorGo),@('git',$successorGit))) {
+-    $resolved=(Get-Command $successorTool[0] -CommandType Application -ErrorAction Stop).Source
++    # A typed application listing can contain multiple PATH hits; resolve the actual command.
++    $resolvedCommands=@(Get-Command -Name $successorTool[0] -ErrorAction Stop)
++    if ($resolvedCommands.Count -ne 1 -or
++        $resolvedCommands[0].CommandType -ne [Management.Automation.CommandTypes]::Application) {
++        throw 'Builder command must resolve to one application'
++    }
++    $resolved=$resolvedCommands[0].Source
+     if (-not [string]::Equals((Get-SuccessorFullPath $resolved),(Get-SuccessorFullPath $successorTool[1]),[StringComparison]::OrdinalIgnoreCase)) {
+         throw 'Builder PATH does not resolve the pinned tool'
+     }

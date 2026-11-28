@@ -1,0 +1,14 @@
+{
+    "schema":  "successor-product-helper-original-parent-v1",
+    "plan_sha256":  "99333ab4cb43f9a01720c70e567782475065b0f7077d70a3f157dca475c9c15a",
+    "same_process_start_object":  true,
+    "original_pid":  168396,
+    "exit_code":  1,
+    "wait_returned":  true,
+    "original_process_object_disposed":  true,
+    "new_job_or_tree_wait":  false,
+    "create_no_window":  true,
+    "wait_errors":  [
+
+                    ]
+}

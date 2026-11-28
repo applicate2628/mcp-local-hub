@@ -1,0 +1,147 @@
+{"Action":"start","Package":"mcp-local-hub/internal/gdb"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestStartTool"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestStartTool","Output":"=== RUN   TestStartTool\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestStartTool","Output":"--- PASS: TestStartTool (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestStartTool"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestStartVersionProbeWired"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestStartVersionProbeWired","Output":"=== RUN   TestStartVersionProbeWired\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestStartVersionProbeWired","Output":"--- PASS: TestStartVersionProbeWired (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestStartVersionProbeWired"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestStartTool_HonorsGdbPathOverride"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestStartTool_HonorsGdbPathOverride","Output":"=== RUN   TestStartTool_HonorsGdbPathOverride\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestStartTool_HonorsGdbPathOverride","Output":"--- PASS: TestStartTool_HonorsGdbPathOverride (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestStartTool_HonorsGdbPathOverride"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestCommandTool"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestCommandTool","Output":"=== RUN   TestCommandTool\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestCommandTool","Output":"--- PASS: TestCommandTool (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestCommandTool"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestCommandTool_UnknownSession"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestCommandTool_UnknownSession","Output":"=== RUN   TestCommandTool_UnknownSession\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestCommandTool_UnknownSession","Output":"--- PASS: TestCommandTool_UnknownSession (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestCommandTool_UnknownSession"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestCommandTool_GdbError"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestCommandTool_GdbError","Output":"=== RUN   TestCommandTool_GdbError\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestCommandTool_GdbError","Output":"--- PASS: TestCommandTool_GdbError (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestCommandTool_GdbError"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestListAndTerminate"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestListAndTerminate","Output":"=== RUN   TestListAndTerminate\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestListAndTerminate","Output":"--- PASS: TestListAndTerminate (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestListAndTerminate"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestStatusTool_Available"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestStatusTool_Available","Output":"=== RUN   TestStatusTool_Available\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestStatusTool_Available","Output":"--- PASS: TestStatusTool_Available (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestStatusTool_Available"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestStatusTool_Unavailable"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestStatusTool_Unavailable","Output":"=== RUN   TestStatusTool_Unavailable\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestStatusTool_Unavailable","Output":"--- PASS: TestStatusTool_Unavailable (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestStatusTool_Unavailable"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestStartTool_StartFailureSurfaced"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestStartTool_StartFailureSurfaced","Output":"=== RUN   TestStartTool_StartFailureSurfaced\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestStartTool_StartFailureSurfaced","Output":"--- PASS: TestStartTool_StartFailureSurfaced (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestStartTool_StartFailureSurfaced"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString","Output":"=== RUN   TestUnescapeMIString\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/plain_quoted"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/plain_quoted","Output":"=== RUN   TestUnescapeMIString/plain_quoted\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/plain_quoted","Output":"--- PASS: TestUnescapeMIString/plain_quoted (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/plain_quoted"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/newline"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/newline","Output":"=== RUN   TestUnescapeMIString/newline\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/newline","Output":"--- PASS: TestUnescapeMIString/newline (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/newline"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/tab"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/tab","Output":"=== RUN   TestUnescapeMIString/tab\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/tab","Output":"--- PASS: TestUnescapeMIString/tab (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/tab"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/escaped_quote"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/escaped_quote","Output":"=== RUN   TestUnescapeMIString/escaped_quote\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/escaped_quote","Output":"--- PASS: TestUnescapeMIString/escaped_quote (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/escaped_quote"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/backslash"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/backslash","Output":"=== RUN   TestUnescapeMIString/backslash\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/backslash","Output":"--- PASS: TestUnescapeMIString/backslash (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/backslash"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/esc_octal"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/esc_octal","Output":"=== RUN   TestUnescapeMIString/esc_octal\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/esc_octal","Output":"--- PASS: TestUnescapeMIString/esc_octal (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/esc_octal"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/carriage_return"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/carriage_return","Output":"=== RUN   TestUnescapeMIString/carriage_return\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/carriage_return","Output":"--- PASS: TestUnescapeMIString/carriage_return (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/carriage_return"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/unknown_escape_passes_byte"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/unknown_escape_passes_byte","Output":"=== RUN   TestUnescapeMIString/unknown_escape_passes_byte\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/unknown_escape_passes_byte","Output":"--- PASS: TestUnescapeMIString/unknown_escape_passes_byte (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/unknown_escape_passes_byte"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/no_surrounding_quotes"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/no_surrounding_quotes","Output":"=== RUN   TestUnescapeMIString/no_surrounding_quotes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/no_surrounding_quotes","Output":"--- PASS: TestUnescapeMIString/no_surrounding_quotes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/no_surrounding_quotes"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/missing_closing_quote"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/missing_closing_quote","Output":"=== RUN   TestUnescapeMIString/missing_closing_quote\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/missing_closing_quote","Output":"--- PASS: TestUnescapeMIString/missing_closing_quote (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/missing_closing_quote"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/empty_quotes"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/empty_quotes","Output":"=== RUN   TestUnescapeMIString/empty_quotes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/empty_quotes","Output":"--- PASS: TestUnescapeMIString/empty_quotes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/empty_quotes"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/bell+backspace"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/bell+backspace","Output":"=== RUN   TestUnescapeMIString/bell+backspace\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/bell+backspace","Output":"--- PASS: TestUnescapeMIString/bell+backspace (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/bell+backspace"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/stops_at_field_boundary_in_record"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/stops_at_field_boundary_in_record","Output":"=== RUN   TestUnescapeMIString/stops_at_field_boundary_in_record\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/stops_at_field_boundary_in_record","Output":"--- PASS: TestUnescapeMIString/stops_at_field_boundary_in_record (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/stops_at_field_boundary_in_record"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/escaped_quote_then_field_boundary"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/escaped_quote_then_field_boundary","Output":"=== RUN   TestUnescapeMIString/escaped_quote_then_field_boundary\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/escaped_quote_then_field_boundary","Output":"--- PASS: TestUnescapeMIString/escaped_quote_then_field_boundary (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString/escaped_quote_then_field_boundary"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString","Output":"--- PASS: TestUnescapeMIString (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestUnescapeMIString"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestCommand_ConsoleThenDone"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestCommand_ConsoleThenDone","Output":"=== RUN   TestCommand_ConsoleThenDone\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestCommand_ConsoleThenDone","Output":"--- PASS: TestCommand_ConsoleThenDone (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestCommand_ConsoleThenDone"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestCommand_StreamKinds"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestCommand_StreamKinds","Output":"=== RUN   TestCommand_StreamKinds\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestCommand_StreamKinds","Output":"--- PASS: TestCommand_StreamKinds (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestCommand_StreamKinds"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestCommand_Error"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestCommand_Error","Output":"=== RUN   TestCommand_Error\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestCommand_Error","Output":"--- PASS: TestCommand_Error (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestCommand_Error"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestCommand_RunningThenStopped"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestCommand_RunningThenStopped","Output":"=== RUN   TestCommand_RunningThenStopped\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestCommand_RunningThenStopped","Output":"--- PASS: TestCommand_RunningThenStopped (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestCommand_RunningThenStopped"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestCommand_RunningThenExit"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestCommand_RunningThenExit","Output":"=== RUN   TestCommand_RunningThenExit\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestCommand_RunningThenExit","Output":"--- PASS: TestCommand_RunningThenExit (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestCommand_RunningThenExit"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestReadUntilPrompt"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestReadUntilPrompt","Output":"=== RUN   TestReadUntilPrompt\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestReadUntilPrompt","Output":"--- PASS: TestReadUntilPrompt (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestReadUntilPrompt"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestCommand_EOFBeforeResult"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestCommand_EOFBeforeResult","Output":"=== RUN   TestCommand_EOFBeforeResult\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestCommand_EOFBeforeResult","Output":"--- PASS: TestCommand_EOFBeforeResult (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestCommand_EOFBeforeResult"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestAsyncSummary"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestAsyncSummary","Output":"=== RUN   TestAsyncSummary\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestAsyncSummary","Output":"--- PASS: TestAsyncSummary (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestAsyncSummary"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestDefaultStartVersion_ProbeFailureReturnsEmpty"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestDefaultStartVersion_ProbeFailureReturnsEmpty","Output":"=== RUN   TestDefaultStartVersion_ProbeFailureReturnsEmpty\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestDefaultStartVersion_ProbeFailureReturnsEmpty","Output":"--- PASS: TestDefaultStartVersion_ProbeFailureReturnsEmpty (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestDefaultStartVersion_ProbeFailureReturnsEmpty"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestGdbStartArgs_ProgramUsesArgsTerminator"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestGdbStartArgs_ProgramUsesArgsTerminator","Output":"=== RUN   TestGdbStartArgs_ProgramUsesArgsTerminator\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestGdbStartArgs_ProgramUsesArgsTerminator","Output":"--- PASS: TestGdbStartArgs_ProgramUsesArgsTerminator (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestGdbStartArgs_ProgramUsesArgsTerminator"}
+{"Action":"run","Package":"mcp-local-hub/internal/gdb","Test":"TestGdbStartArgs_NoProgramKeepsOriginalStartupArgs"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestGdbStartArgs_NoProgramKeepsOriginalStartupArgs","Output":"=== RUN   TestGdbStartArgs_NoProgramKeepsOriginalStartupArgs\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Test":"TestGdbStartArgs_NoProgramKeepsOriginalStartupArgs","Output":"--- PASS: TestGdbStartArgs_NoProgramKeepsOriginalStartupArgs (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb","Test":"TestGdbStartArgs_NoProgramKeepsOriginalStartupArgs"}
+{"Action":"output","Package":"mcp-local-hub/internal/gdb","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/gdb"}

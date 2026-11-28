@@ -1,0 +1,1024 @@
+{"Action":"start","Package":"mcp-local-hub/internal/archguard"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestApplyOwnersUsesFirstMatchAndMetricCeiling"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestApplyOwnersUsesFirstMatchAndMetricCeiling","Output":"=== RUN   TestApplyOwnersUsesFirstMatchAndMetricCeiling\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestApplyOwnersUsesFirstMatchAndMetricCeiling","Output":"--- PASS: TestApplyOwnersUsesFirstMatchAndMetricCeiling (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestApplyOwnersUsesFirstMatchAndMetricCeiling"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestApplyOwnersRejectsUnmatched"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestApplyOwnersRejectsUnmatched","Output":"=== RUN   TestApplyOwnersRejectsUnmatched\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestApplyOwnersRejectsUnmatched","Output":"--- PASS: TestApplyOwnersRejectsUnmatched (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestApplyOwnersRejectsUnmatched"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyAcceptsVersionOne"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyAcceptsVersionOne","Output":"=== RUN   TestLoadPolicyAcceptsVersionOne\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyAcceptsVersionOne","Output":"--- PASS: TestLoadPolicyAcceptsVersionOne (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyAcceptsVersionOne"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsMissingBudgets"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsMissingBudgets","Output":"=== RUN   TestLoadPolicyRejectsMissingBudgets\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsMissingBudgets","Output":"--- PASS: TestLoadPolicyRejectsMissingBudgets (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsMissingBudgets"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsUnknownFields"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsUnknownFields","Output":"=== RUN   TestLoadPolicyRejectsUnknownFields\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsUnknownFields","Output":"--- PASS: TestLoadPolicyRejectsUnknownFields (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsUnknownFields"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsEmptyConstructorSymbol"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsEmptyConstructorSymbol","Output":"=== RUN   TestLoadPolicyRejectsEmptyConstructorSymbol\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsEmptyConstructorSymbol","Output":"--- PASS: TestLoadPolicyRejectsEmptyConstructorSymbol (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsEmptyConstructorSymbol"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadOwnersRejectsIncompleteRule"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadOwnersRejectsIncompleteRule","Output":"=== RUN   TestLoadOwnersRejectsIncompleteRule\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadOwnersRejectsIncompleteRule","Output":"--- PASS: TestLoadOwnersRejectsIncompleteRule (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadOwnersRejectsIncompleteRule"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRenderJSONIsDeterministic"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRenderJSONIsDeterministic","Output":"=== RUN   TestRenderJSONIsDeterministic\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRenderJSONIsDeterministic","Output":"--- PASS: TestRenderJSONIsDeterministic (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRenderJSONIsDeterministic"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRenderMarkdownLinksSummaryAndEscapesTables"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRenderMarkdownLinksSummaryAndEscapesTables","Output":"=== RUN   TestRenderMarkdownLinksSummaryAndEscapesTables\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRenderMarkdownLinksSummaryAndEscapesTables","Output":"--- PASS: TestRenderMarkdownLinksSummaryAndEscapesTables (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRenderMarkdownLinksSummaryAndEscapesTables"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleAllowedGlobalRequiresPolicyRegex"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleAllowedGlobalRequiresPolicyRegex","Output":"=== RUN   TestRuleAllowedGlobalRequiresPolicyRegex\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleAllowedGlobalRequiresPolicyRegex","Output":"--- PASS: TestRuleAllowedGlobalRequiresPolicyRegex (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleAllowedGlobalRequiresPolicyRegex"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleBlankInterfaceAssertionIsNotMutableGlobal"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleBlankInterfaceAssertionIsNotMutableGlobal","Output":"=== RUN   TestRuleBlankInterfaceAssertionIsNotMutableGlobal\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleBlankInterfaceAssertionIsNotMutableGlobal","Output":"--- PASS: TestRuleBlankInterfaceAssertionIsNotMutableGlobal (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleBlankInterfaceAssertionIsNotMutableGlobal"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleGenericPackageDetectedWithoutImports"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleGenericPackageDetectedWithoutImports","Output":"=== RUN   TestRuleGenericPackageDetectedWithoutImports\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleGenericPackageDetectedWithoutImports","Output":"--- PASS: TestRuleGenericPackageDetectedWithoutImports (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleGenericPackageDetectedWithoutImports"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleAPIConstructorResolvesAliasAndIgnoresOtherPackage"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleAPIConstructorResolvesAliasAndIgnoresOtherPackage","Output":"=== RUN   TestRuleAPIConstructorResolvesAliasAndIgnoresOtherPackage\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleAPIConstructorResolvesAliasAndIgnoresOtherPackage","Output":"--- PASS: TestRuleAPIConstructorResolvesAliasAndIgnoresOtherPackage (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleAPIConstructorResolvesAliasAndIgnoresOtherPackage"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleTestHookIgnoredInTestFile"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleTestHookIgnoredInTestFile","Output":"=== RUN   TestRuleTestHookIgnoredInTestFile\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleTestHookIgnoredInTestFile","Output":"--- PASS: TestRuleTestHookIgnoredInTestFile (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleTestHookIgnoredInTestFile"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleGeneratedFileExcludedFromGlobalsCommentsAndBudget"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleGeneratedFileExcludedFromGlobalsCommentsAndBudget","Output":"=== RUN   TestRuleGeneratedFileExcludedFromGlobalsCommentsAndBudget\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleGeneratedFileExcludedFromGlobalsCommentsAndBudget","Output":"--- PASS: TestRuleGeneratedFileExcludedFromGlobalsCommentsAndBudget (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleGeneratedFileExcludedFromGlobalsCommentsAndBudget"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleGoStatementsCaptureEnclosingFunctionAndCall"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleGoStatementsCaptureEnclosingFunctionAndCall","Output":"=== RUN   TestRuleGoStatementsCaptureEnclosingFunctionAndCall\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleGoStatementsCaptureEnclosingFunctionAndCall","Output":"--- PASS: TestRuleGoStatementsCaptureEnclosingFunctionAndCall (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleGoStatementsCaptureEnclosingFunctionAndCall"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleHistoryCommentAllowedOnlyByGlob"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleHistoryCommentAllowedOnlyByGlob","Output":"=== RUN   TestRuleHistoryCommentAllowedOnlyByGlob\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleHistoryCommentAllowedOnlyByGlob","Output":"--- PASS: TestRuleHistoryCommentAllowedOnlyByGlob (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleHistoryCommentAllowedOnlyByGlob"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleEmbeddedDocumentThreshold"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleEmbeddedDocumentThreshold","Output":"=== RUN   TestRuleEmbeddedDocumentThreshold\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleEmbeddedDocumentThreshold","Output":"--- PASS: TestRuleEmbeddedDocumentThreshold (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleEmbeddedDocumentThreshold"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleFileBudgetUsesStableClassEvidence"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleFileBudgetUsesStableClassEvidence","Output":"=== RUN   TestRuleFileBudgetUsesStableClassEvidence\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleFileBudgetUsesStableClassEvidence","Output":"--- PASS: TestRuleFileBudgetUsesStableClassEvidence (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleFileBudgetUsesStableClassEvidence"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestScanDetectsEveryArchitectureCategory"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestScanDetectsEveryArchitectureCategory","Output":"=== RUN   TestScanDetectsEveryArchitectureCategory\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestScanDetectsEveryArchitectureCategory","Output":"--- PASS: TestScanDetectsEveryArchitectureCategory (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestScanDetectsEveryArchitectureCategory"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFingerprintIgnoresLineMovement"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFingerprintIgnoresLineMovement","Output":"=== RUN   TestFingerprintIgnoresLineMovement\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFingerprintIgnoresLineMovement","Output":"--- PASS: TestFingerprintIgnoresLineMovement (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFingerprintIgnoresLineMovement"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestScanIsDeterministic"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestScanIsDeterministic","Output":"=== RUN   TestScanIsDeterministic\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestScanIsDeterministic","Output":"--- PASS: TestScanIsDeterministic (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestScanIsDeterministic"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRejectsNewViolation"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRejectsNewViolation","Output":"=== RUN   TestVerifyRejectsNewViolation\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRejectsNewViolation","Output":"--- PASS: TestVerifyRejectsNewViolation (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRejectsNewViolation"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRejectsMetricGrowth"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRejectsMetricGrowth","Output":"=== RUN   TestVerifyRejectsMetricGrowth\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRejectsMetricGrowth","Output":"--- PASS: TestVerifyRejectsMetricGrowth (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRejectsMetricGrowth"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRejectsExpiredEntry"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRejectsExpiredEntry","Output":"=== RUN   TestVerifyRejectsExpiredEntry\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRejectsExpiredEntry","Output":"--- PASS: TestVerifyRejectsExpiredEntry (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRejectsExpiredEntry"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRejectsStaleBaselineEntry"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRejectsStaleBaselineEntry","Output":"=== RUN   TestVerifyRejectsStaleBaselineEntry\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRejectsStaleBaselineEntry","Output":"--- PASS: TestVerifyRejectsStaleBaselineEntry (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRejectsStaleBaselineEntry"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRejectsUnownedEntry"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRejectsUnownedEntry","Output":"=== RUN   TestVerifyRejectsUnownedEntry\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRejectsUnownedEntry","Output":"--- PASS: TestVerifyRejectsUnownedEntry (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRejectsUnownedEntry"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyAcceptsExactBaseline"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyAcceptsExactBaseline","Output":"=== RUN   TestVerifyAcceptsExactBaseline\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyAcceptsExactBaseline","Output":"--- PASS: TestVerifyAcceptsExactBaseline (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyAcceptsExactBaseline"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRequiresWorkerRegistry"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRequiresWorkerRegistry","Output":"=== RUN   TestVerifyRequiresWorkerRegistry\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRequiresWorkerRegistry","Output":"--- PASS: TestVerifyRequiresWorkerRegistry (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRequiresWorkerRegistry"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestTestOnlyBuildSourceRequiresConfiguredTagReference"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestTestOnlyBuildSourceRequiresConfiguredTagReference","Output":"=== RUN   TestTestOnlyBuildSourceRequiresConfiguredTagReference\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestTestOnlyBuildSourceRequiresConfiguredTagReference","Output":"--- PASS: TestTestOnlyBuildSourceRequiresConfiguredTagReference (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestTestOnlyBuildSourceRequiresConfiguredTagReference"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestTestOnlyBuildSourceRecognizesConjunction"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestTestOnlyBuildSourceRecognizesConjunction","Output":"=== RUN   TestTestOnlyBuildSourceRecognizesConjunction\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestTestOnlyBuildSourceRecognizesConjunction","Output":"--- PASS: TestTestOnlyBuildSourceRecognizesConjunction (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestTestOnlyBuildSourceRecognizesConjunction"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestScanRejectsMissingConfiguredSourceRoot"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestScanRejectsMissingConfiguredSourceRoot","Output":"=== RUN   TestScanRejectsMissingConfiguredSourceRoot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestScanRejectsMissingConfiguredSourceRoot","Output":"--- PASS: TestScanRejectsMissingConfiguredSourceRoot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestScanRejectsMissingConfiguredSourceRoot"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestScanRejectsNonDirectoryConfiguredSourceRoot"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestScanRejectsNonDirectoryConfiguredSourceRoot","Output":"=== RUN   TestScanRejectsNonDirectoryConfiguredSourceRoot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestScanRejectsNonDirectoryConfiguredSourceRoot","Output":"--- PASS: TestScanRejectsNonDirectoryConfiguredSourceRoot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestScanRejectsNonDirectoryConfiguredSourceRoot"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestConstructorRuleIgnoresShadowedImportAlias"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestConstructorRuleIgnoresShadowedImportAlias","Output":"=== RUN   TestConstructorRuleIgnoresShadowedImportAlias\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestConstructorRuleIgnoresShadowedImportAlias","Output":"--- PASS: TestConstructorRuleIgnoresShadowedImportAlias (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestConstructorRuleIgnoresShadowedImportAlias"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestConstructorRuleDetectsDotImportedConstructor"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestConstructorRuleDetectsDotImportedConstructor","Output":"=== RUN   TestConstructorRuleDetectsDotImportedConstructor\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestConstructorRuleDetectsDotImportedConstructor","Output":"--- PASS: TestConstructorRuleDetectsDotImportedConstructor (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestConstructorRuleDetectsDotImportedConstructor"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadBaselineCanonicalizesFingerprint"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadBaselineCanonicalizesFingerprint","Output":"=== RUN   TestLoadBaselineCanonicalizesFingerprint\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadBaselineCanonicalizesFingerprint","Output":"--- PASS: TestLoadBaselineCanonicalizesFingerprint (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadBaselineCanonicalizesFingerprint"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadWorkersCanonicalizesFingerprint"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadWorkersCanonicalizesFingerprint","Output":"=== RUN   TestLoadWorkersCanonicalizesFingerprint\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadWorkersCanonicalizesFingerprint","Output":"--- PASS: TestLoadWorkersCanonicalizesFingerprint (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadWorkersCanonicalizesFingerprint"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestGenericPackageExternalTestEmitsOneFinding"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestGenericPackageExternalTestEmitsOneFinding","Output":"=== RUN   TestGenericPackageExternalTestEmitsOneFinding\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestGenericPackageExternalTestEmitsOneFinding","Output":"--- PASS: TestGenericPackageExternalTestEmitsOneFinding (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestGenericPackageExternalTestEmitsOneFinding"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestTestOnlyBuildTagExcludesProductionRules"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestTestOnlyBuildTagExcludesProductionRules","Output":"=== RUN   TestTestOnlyBuildTagExcludesProductionRules\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestTestOnlyBuildTagExcludesProductionRules","Output":"--- PASS: TestTestOnlyBuildTagExcludesProductionRules (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestTestOnlyBuildTagExcludesProductionRules"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestAlternativeProductionBuildDoesNotBecomeTestOnly"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestAlternativeProductionBuildDoesNotBecomeTestOnly","Output":"=== RUN   TestAlternativeProductionBuildDoesNotBecomeTestOnly\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestAlternativeProductionBuildDoesNotBecomeTestOnly","Output":"--- PASS: TestAlternativeProductionBuildDoesNotBecomeTestOnly (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestAlternativeProductionBuildDoesNotBecomeTestOnly"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitArchitectureFeatureTagCanBeEnabledThroughTags"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitArchitectureFeatureTagCanBeEnabledThroughTags","Output":"=== RUN   TestExplicitArchitectureFeatureTagCanBeEnabledThroughTags\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitArchitectureFeatureTagCanBeEnabledThroughTags","Output":"--- PASS: TestExplicitArchitectureFeatureTagCanBeEnabledThroughTags (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitArchitectureFeatureTagCanBeEnabledThroughTags"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestUnresolvedConstructorReferencesAreCounted"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnresolvedConstructorReferencesAreCounted","Output":"=== RUN   TestUnresolvedConstructorReferencesAreCounted\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnresolvedConstructorReferencesAreCounted","Output":"--- PASS: TestUnresolvedConstructorReferencesAreCounted (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestUnresolvedConstructorReferencesAreCounted"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestNestedProductionHookFieldsAreDetected"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestNestedProductionHookFieldsAreDetected","Output":"=== RUN   TestNestedProductionHookFieldsAreDetected\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestNestedProductionHookFieldsAreDetected","Output":"--- PASS: TestNestedProductionHookFieldsAreDetected (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestNestedProductionHookFieldsAreDetected"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestConstructorUseInsideDefiningPackageIsDetected"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestConstructorUseInsideDefiningPackageIsDetected","Output":"=== RUN   TestConstructorUseInsideDefiningPackageIsDetected\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestConstructorUseInsideDefiningPackageIsDetected","Output":"--- PASS: TestConstructorUseInsideDefiningPackageIsDetected (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestConstructorUseInsideDefiningPackageIsDetected"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsDuplicateConstructorRules"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsDuplicateConstructorRules","Output":"=== RUN   TestPolicyRejectsDuplicateConstructorRules\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsDuplicateConstructorRules/api"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsDuplicateConstructorRules/api","Output":"=== RUN   TestPolicyRejectsDuplicateConstructorRules/api\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsDuplicateConstructorRules/api","Output":"--- PASS: TestPolicyRejectsDuplicateConstructorRules/api (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsDuplicateConstructorRules/api"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsDuplicateConstructorRules/production"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsDuplicateConstructorRules/production","Output":"=== RUN   TestPolicyRejectsDuplicateConstructorRules/production\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsDuplicateConstructorRules/production","Output":"--- PASS: TestPolicyRejectsDuplicateConstructorRules/production (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsDuplicateConstructorRules/production"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsDuplicateConstructorRules","Output":"--- PASS: TestPolicyRejectsDuplicateConstructorRules (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsDuplicateConstructorRules"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestUnixBackslashPathRemainsDistinct"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnixBackslashPathRemainsDistinct","Output":"=== RUN   TestUnixBackslashPathRemainsDistinct\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnixBackslashPathRemainsDistinct","Output":"    codex_round10_test.go:132: backslash is a path separator on Windows\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnixBackslashPathRemainsDistinct","Output":"--- SKIP: TestUnixBackslashPathRemainsDistinct (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/archguard","Test":"TestUnixBackslashPathRemainsDistinct"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRepeatedHistoryCommentsAreCounted"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepeatedHistoryCommentsAreCounted","Output":"=== RUN   TestRepeatedHistoryCommentsAreCounted\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepeatedHistoryCommentsAreCounted","Output":"--- PASS: TestRepeatedHistoryCommentsAreCounted (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRepeatedHistoryCommentsAreCounted"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestLocalEmbeddedDocumentsAreQualifiedByFunction"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLocalEmbeddedDocumentsAreQualifiedByFunction","Output":"=== RUN   TestLocalEmbeddedDocumentsAreQualifiedByFunction\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLocalEmbeddedDocumentsAreQualifiedByFunction","Output":"--- PASS: TestLocalEmbeddedDocumentsAreQualifiedByFunction (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestLocalEmbeddedDocumentsAreQualifiedByFunction"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitARM64VersionTagsCanBeEnabledThroughTags"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitARM64VersionTagsCanBeEnabledThroughTags","Output":"=== RUN   TestExplicitARM64VersionTagsCanBeEnabledThroughTags\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitARM64VersionTagsCanBeEnabledThroughTags","Output":"--- PASS: TestExplicitARM64VersionTagsCanBeEnabledThroughTags (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitARM64VersionTagsCanBeEnabledThroughTags"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRenderMarkdownEscapesBackslashBeforePipe"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRenderMarkdownEscapesBackslashBeforePipe","Output":"=== RUN   TestRenderMarkdownEscapesBackslashBeforePipe\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRenderMarkdownEscapesBackslashBeforePipe","Output":"--- PASS: TestRenderMarkdownEscapesBackslashBeforePipe (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRenderMarkdownEscapesBackslashBeforePipe"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesIntegerToStringConversion"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesIntegerToStringConversion","Output":"=== RUN   TestEmbeddedDocumentResolvesIntegerToStringConversion\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesIntegerToStringConversion","Output":"--- PASS: TestEmbeddedDocumentResolvesIntegerToStringConversion (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesIntegerToStringConversion"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestPackageStringEvaluationKeysAreSorted"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPackageStringEvaluationKeysAreSorted","Output":"=== RUN   TestPackageStringEvaluationKeysAreSorted\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPackageStringEvaluationKeysAreSorted","Output":"--- PASS: TestPackageStringEvaluationKeysAreSorted (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestPackageStringEvaluationKeysAreSorted"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFunctionSignatureNestedTypesAreInspectedForProductionHooks"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFunctionSignatureNestedTypesAreInspectedForProductionHooks","Output":"=== RUN   TestFunctionSignatureNestedTypesAreInspectedForProductionHooks\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFunctionSignatureNestedTypesAreInspectedForProductionHooks","Output":"--- PASS: TestFunctionSignatureNestedTypesAreInspectedForProductionHooks (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFunctionSignatureNestedTypesAreInspectedForProductionHooks"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesIotaStringConversion"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesIotaStringConversion","Output":"=== RUN   TestEmbeddedDocumentResolvesIotaStringConversion\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesIotaStringConversion","Output":"--- PASS: TestEmbeddedDocumentResolvesIotaStringConversion (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesIotaStringConversion"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsDuplicateHistoryPatterns"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsDuplicateHistoryPatterns","Output":"=== RUN   TestPolicyRejectsDuplicateHistoryPatterns\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsDuplicateHistoryPatterns","Output":"--- PASS: TestPolicyRejectsDuplicateHistoryPatterns (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsDuplicateHistoryPatterns"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestUnusedConfiguredTestTagsDoNotPreventTestOnlyClassification"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnusedConfiguredTestTagsDoNotPreventTestOnlyClassification","Output":"=== RUN   TestUnusedConfiguredTestTagsDoNotPreventTestOnlyClassification\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnusedConfiguredTestTagsDoNotPreventTestOnlyClassification","Output":"--- PASS: TestUnusedConfiguredTestTagsDoNotPreventTestOnlyClassification (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestUnusedConfiguredTestTagsDoNotPreventTestOnlyClassification"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkerOccurrencesAreNumberedInOneTraversalOrder"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkerOccurrencesAreNumberedInOneTraversalOrder","Output":"=== RUN   TestWorkerOccurrencesAreNumberedInOneTraversalOrder\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkerOccurrencesAreNumberedInOneTraversalOrder","Output":"--- PASS: TestWorkerOccurrencesAreNumberedInOneTraversalOrder (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkerOccurrencesAreNumberedInOneTraversalOrder"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestImplicitRepeatedConstEmbeddedDocumentsAreScanned"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestImplicitRepeatedConstEmbeddedDocumentsAreScanned","Output":"=== RUN   TestImplicitRepeatedConstEmbeddedDocumentsAreScanned\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestImplicitRepeatedConstEmbeddedDocumentsAreScanned","Output":"--- PASS: TestImplicitRepeatedConstEmbeddedDocumentsAreScanned (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestImplicitRepeatedConstEmbeddedDocumentsAreScanned"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestGenericTypeArgumentsAreInspectedForProductionHooks"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestGenericTypeArgumentsAreInspectedForProductionHooks","Output":"=== RUN   TestGenericTypeArgumentsAreInspectedForProductionHooks\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestGenericTypeArgumentsAreInspectedForProductionHooks","Output":"--- PASS: TestGenericTypeArgumentsAreInspectedForProductionHooks (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestGenericTypeArgumentsAreInspectedForProductionHooks"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedMarkdownMarkersRecognizeAllATXHeadingLevels"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedMarkdownMarkersRecognizeAllATXHeadingLevels","Output":"=== RUN   TestEmbeddedMarkdownMarkersRecognizeAllATXHeadingLevels\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedMarkdownMarkersRecognizeAllATXHeadingLevels","Output":"--- PASS: TestEmbeddedMarkdownMarkersRecognizeAllATXHeadingLevels (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedMarkdownMarkersRecognizeAllATXHeadingLevels"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag","Output":"=== RUN   TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/amd64.foo"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/amd64.foo","Output":"=== RUN   TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/amd64.foo\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/amd64.foo","Output":"--- PASS: TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/amd64.foo (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/amd64.foo"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/amd64.v99"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/amd64.v99","Output":"=== RUN   TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/amd64.v99\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/amd64.v99","Output":"--- PASS: TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/amd64.v99 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/amd64.v99"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/arm.8"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/arm.8","Output":"=== RUN   TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/arm.8\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/arm.8","Output":"--- PASS: TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/arm.8 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/arm.8"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/ppc64.power11"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/ppc64.power11","Output":"=== RUN   TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/ppc64.power11\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/ppc64.power11","Output":"--- PASS: TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/ppc64.power11 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/ppc64.power11"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/riscv64.rva21u64"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/riscv64.rva21u64","Output":"=== RUN   TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/riscv64.rva21u64\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/riscv64.rva21u64","Output":"--- PASS: TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/riscv64.rva21u64 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/riscv64.rva21u64"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_amd64.v2"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_amd64.v2","Output":"=== RUN   TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_amd64.v2\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_amd64.v2","Output":"--- PASS: TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_amd64.v2 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_amd64.v2"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_arm.7"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_arm.7","Output":"=== RUN   TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_arm.7\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_arm.7","Output":"--- PASS: TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_arm.7 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_arm.7"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_ppc64.power10"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_ppc64.power10","Output":"=== RUN   TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_ppc64.power10\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_ppc64.power10","Output":"--- PASS: TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_ppc64.power10 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_ppc64.power10"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_riscv64.rva23u64"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_riscv64.rva23u64","Output":"=== RUN   TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_riscv64.rva23u64\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_riscv64.rva23u64","Output":"--- PASS: TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_riscv64.rva23u64 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_riscv64.rva23u64"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag","Output":"--- PASS: TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingMayBeConfiguredAsCustomTestTag"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingMayBeConfiguredAsCustomTestTag","Output":"=== RUN   TestUnknownArchitectureFeatureSpellingMayBeConfiguredAsCustomTestTag\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingMayBeConfiguredAsCustomTestTag","Output":"--- PASS: TestUnknownArchitectureFeatureSpellingMayBeConfiguredAsCustomTestTag (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestUnknownArchitectureFeatureSpellingMayBeConfiguredAsCustomTestTag"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesDefinedIntegerConversion"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesDefinedIntegerConversion","Output":"=== RUN   TestEmbeddedDocumentResolvesDefinedIntegerConversion\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesDefinedIntegerConversion","Output":"--- PASS: TestEmbeddedDocumentResolvesDefinedIntegerConversion (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesDefinedIntegerConversion"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestSiblingBlockEmbeddedDocumentsHaveDistinctSymbols"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestSiblingBlockEmbeddedDocumentsHaveDistinctSymbols","Output":"=== RUN   TestSiblingBlockEmbeddedDocumentsHaveDistinctSymbols\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestSiblingBlockEmbeddedDocumentsHaveDistinctSymbols","Output":"--- PASS: TestSiblingBlockEmbeddedDocumentsHaveDistinctSymbols (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestSiblingBlockEmbeddedDocumentsHaveDistinctSymbols"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsBoringCryptoAsTestOnlyTag"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsBoringCryptoAsTestOnlyTag","Output":"=== RUN   TestPolicyRejectsBoringCryptoAsTestOnlyTag\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsBoringCryptoAsTestOnlyTag","Output":"--- PASS: TestPolicyRejectsBoringCryptoAsTestOnlyTag (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsBoringCryptoAsTestOnlyTag"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestDescendantTestdataIsSkippedButExplicitRootIsScanned"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestDescendantTestdataIsSkippedButExplicitRootIsScanned","Output":"=== RUN   TestDescendantTestdataIsSkippedButExplicitRootIsScanned\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestDescendantTestdataIsSkippedButExplicitRootIsScanned","Output":"--- PASS: TestDescendantTestdataIsSkippedButExplicitRootIsScanned (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestDescendantTestdataIsSkippedButExplicitRootIsScanned"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkerEvidencePreservesLiteralBackslashes"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkerEvidencePreservesLiteralBackslashes","Output":"=== RUN   TestWorkerEvidencePreservesLiteralBackslashes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkerEvidencePreservesLiteralBackslashes","Output":"--- PASS: TestWorkerEvidencePreservesLiteralBackslashes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkerEvidencePreservesLiteralBackslashes"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesImportedStringType"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesImportedStringType","Output":"=== RUN   TestEmbeddedDocumentResolvesImportedStringType\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesImportedStringType","Output":"--- PASS: TestEmbeddedDocumentResolvesImportedStringType (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesImportedStringType"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesImportedIntegerType"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesImportedIntegerType","Output":"=== RUN   TestEmbeddedDocumentResolvesImportedIntegerType\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesImportedIntegerType","Output":"--- PASS: TestEmbeddedDocumentResolvesImportedIntegerType (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesImportedIntegerType"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesImportedStringConstant"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesImportedStringConstant","Output":"=== RUN   TestEmbeddedDocumentResolvesImportedStringConstant\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesImportedStringConstant","Output":"--- PASS: TestEmbeddedDocumentResolvesImportedStringConstant (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesImportedStringConstant"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedMarkdownRecognizesTildeFenceAndSetextHeading"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedMarkdownRecognizesTildeFenceAndSetextHeading","Output":"=== RUN   TestEmbeddedMarkdownRecognizesTildeFenceAndSetextHeading\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedMarkdownRecognizesTildeFenceAndSetextHeading","Output":"--- PASS: TestEmbeddedMarkdownRecognizesTildeFenceAndSetextHeading (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedMarkdownRecognizesTildeFenceAndSetextHeading"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestGo126TargetMatrixMatchesToolchain"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestGo126TargetMatrixMatchesToolchain","Output":"=== RUN   TestGo126TargetMatrixMatchesToolchain\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestGo126TargetMatrixMatchesToolchain","Output":"--- PASS: TestGo126TargetMatrixMatchesToolchain (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestGo126TargetMatrixMatchesToolchain"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestHistoricalFilenameTagsRemainRecognizedWithoutExpandingTargets"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestHistoricalFilenameTagsRemainRecognizedWithoutExpandingTargets","Output":"=== RUN   TestHistoricalFilenameTagsRemainRecognizedWithoutExpandingTargets\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestHistoricalFilenameTagsRemainRecognizedWithoutExpandingTargets","Output":"--- PASS: TestHistoricalFilenameTagsRemainRecognizedWithoutExpandingTargets (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestHistoricalFilenameTagsRemainRecognizedWithoutExpandingTargets"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestGo126FeatureModesMatchToolchain"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestGo126FeatureModesMatchToolchain","Output":"=== RUN   TestGo126FeatureModesMatchToolchain\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestGo126FeatureModesMatchToolchain","Output":"--- PASS: TestGo126FeatureModesMatchToolchain (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestGo126FeatureModesMatchToolchain"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestKnownBrokenGoTargetsParticipateInOverlap"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestKnownBrokenGoTargetsParticipateInOverlap","Output":"=== RUN   TestKnownBrokenGoTargetsParticipateInOverlap\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestKnownBrokenGoTargetsParticipateInOverlap","Output":"--- PASS: TestKnownBrokenGoTargetsParticipateInOverlap (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestKnownBrokenGoTargetsParticipateInOverlap"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitTestdataRootWinsOverBroaderSourceRoot"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitTestdataRootWinsOverBroaderSourceRoot","Output":"=== RUN   TestExplicitTestdataRootWinsOverBroaderSourceRoot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitTestdataRootWinsOverBroaderSourceRoot","Output":"--- PASS: TestExplicitTestdataRootWinsOverBroaderSourceRoot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitTestdataRootWinsOverBroaderSourceRoot"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestDescendantVendorIsSkippedButExplicitRootIsScanned"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestDescendantVendorIsSkippedButExplicitRootIsScanned","Output":"=== RUN   TestDescendantVendorIsSkippedButExplicitRootIsScanned\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestDescendantVendorIsSkippedButExplicitRootIsScanned","Output":"--- PASS: TestDescendantVendorIsSkippedButExplicitRootIsScanned (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestDescendantVendorIsSkippedButExplicitRootIsScanned"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitVendorRootPreservesCustomDescendantExclusions"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitVendorRootPreservesCustomDescendantExclusions","Output":"=== RUN   TestExplicitVendorRootPreservesCustomDescendantExclusions\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitVendorRootPreservesCustomDescendantExclusions","Output":"--- PASS: TestExplicitVendorRootPreservesCustomDescendantExclusions (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitVendorRootPreservesCustomDescendantExclusions"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestNormalizeEvidencePreservesSourceBackslashes"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestNormalizeEvidencePreservesSourceBackslashes","Output":"=== RUN   TestNormalizeEvidencePreservesSourceBackslashes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestNormalizeEvidencePreservesSourceBackslashes","Output":"--- PASS: TestNormalizeEvidencePreservesSourceBackslashes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestNormalizeEvidencePreservesSourceBackslashes"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestImportedTypeResolutionRejectsShadowedAlias"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestImportedTypeResolutionRejectsShadowedAlias","Output":"=== RUN   TestImportedTypeResolutionRejectsShadowedAlias\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestImportedTypeResolutionRejectsShadowedAlias","Output":"--- PASS: TestImportedTypeResolutionRejectsShadowedAlias (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestImportedTypeResolutionRejectsShadowedAlias"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestTargetSpecificPackageConflictCoversBrokenPorts"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestTargetSpecificPackageConflictCoversBrokenPorts","Output":"=== RUN   TestTargetSpecificPackageConflictCoversBrokenPorts\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestTargetSpecificPackageConflictCoversBrokenPorts","Output":"--- PASS: TestTargetSpecificPackageConflictCoversBrokenPorts (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestTargetSpecificPackageConflictCoversBrokenPorts"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags","Output":"=== RUN   TestExplicitAutomaticTagsMayBeSuppliedThroughTags\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/goos"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/goos","Output":"=== RUN   TestExplicitAutomaticTagsMayBeSuppliedThroughTags/goos\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/goos","Output":"--- PASS: TestExplicitAutomaticTagsMayBeSuppliedThroughTags/goos (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/goos"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/goarch"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/goarch","Output":"=== RUN   TestExplicitAutomaticTagsMayBeSuppliedThroughTags/goarch\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/goarch","Output":"--- PASS: TestExplicitAutomaticTagsMayBeSuppliedThroughTags/goarch (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/goarch"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/unix"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/unix","Output":"=== RUN   TestExplicitAutomaticTagsMayBeSuppliedThroughTags/unix\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/unix","Output":"--- PASS: TestExplicitAutomaticTagsMayBeSuppliedThroughTags/unix (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/unix"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/compiler"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/compiler","Output":"=== RUN   TestExplicitAutomaticTagsMayBeSuppliedThroughTags/compiler\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/compiler","Output":"--- PASS: TestExplicitAutomaticTagsMayBeSuppliedThroughTags/compiler (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/compiler"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/cgo"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/cgo","Output":"=== RUN   TestExplicitAutomaticTagsMayBeSuppliedThroughTags/cgo\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/cgo","Output":"--- PASS: TestExplicitAutomaticTagsMayBeSuppliedThroughTags/cgo (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/cgo"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/release"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/release","Output":"=== RUN   TestExplicitAutomaticTagsMayBeSuppliedThroughTags/release\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/release","Output":"--- PASS: TestExplicitAutomaticTagsMayBeSuppliedThroughTags/release (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/release"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/architecture_feature"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/architecture_feature","Output":"=== RUN   TestExplicitAutomaticTagsMayBeSuppliedThroughTags/architecture_feature\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/architecture_feature","Output":"--- PASS: TestExplicitAutomaticTagsMayBeSuppliedThroughTags/architecture_feature (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags/architecture_feature"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags","Output":"--- PASS: TestExplicitAutomaticTagsMayBeSuppliedThroughTags (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitAutomaticTagsMayBeSuppliedThroughTags"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenamePlatformConstraintsHonorAdditionalTags"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenamePlatformConstraintsHonorAdditionalTags","Output":"=== RUN   TestFilenamePlatformConstraintsHonorAdditionalTags\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenamePlatformConstraintsHonorAdditionalTags","Output":"--- PASS: TestFilenamePlatformConstraintsHonorAdditionalTags (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenamePlatformConstraintsHonorAdditionalTags"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestNegatedExplicitAutomaticTagHonorsTagsOverride"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestNegatedExplicitAutomaticTagHonorsTagsOverride","Output":"=== RUN   TestNegatedExplicitAutomaticTagHonorsTagsOverride\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestNegatedExplicitAutomaticTagHonorsTagsOverride","Output":"--- PASS: TestNegatedExplicitAutomaticTagHonorsTagsOverride (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestNegatedExplicitAutomaticTagHonorsTagsOverride"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyAcceptsWorkerClassifiedOnlyInRegistry"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyAcceptsWorkerClassifiedOnlyInRegistry","Output":"=== RUN   TestVerifyAcceptsWorkerClassifiedOnlyInRegistry\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyAcceptsWorkerClassifiedOnlyInRegistry","Output":"--- PASS: TestVerifyAcceptsWorkerClassifiedOnlyInRegistry (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyAcceptsWorkerClassifiedOnlyInRegistry"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestGeneratedMarkerInsideBlockCommentDoesNotSuppressProductionRules"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestGeneratedMarkerInsideBlockCommentDoesNotSuppressProductionRules","Output":"=== RUN   TestGeneratedMarkerInsideBlockCommentDoesNotSuppressProductionRules\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestGeneratedMarkerInsideBlockCommentDoesNotSuppressProductionRules","Output":"--- PASS: TestGeneratedMarkerInsideBlockCommentDoesNotSuppressProductionRules (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestGeneratedMarkerInsideBlockCommentDoesNotSuppressProductionRules"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestBuildDirectiveInsideBlockCommentDoesNotMarkFileTestOnly"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestBuildDirectiveInsideBlockCommentDoesNotMarkFileTestOnly","Output":"=== RUN   TestBuildDirectiveInsideBlockCommentDoesNotMarkFileTestOnly\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestBuildDirectiveInsideBlockCommentDoesNotMarkFileTestOnly","Output":"--- PASS: TestBuildDirectiveInsideBlockCommentDoesNotMarkFileTestOnly (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestBuildDirectiveInsideBlockCommentDoesNotMarkFileTestOnly"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestScanRejectsPolicyModuleMismatch"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestScanRejectsPolicyModuleMismatch","Output":"=== RUN   TestScanRejectsPolicyModuleMismatch\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestScanRejectsPolicyModuleMismatch","Output":"--- PASS: TestScanRejectsPolicyModuleMismatch (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestScanRejectsPolicyModuleMismatch"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestUnaliasedLocalImportUsesDeclaredPackageName"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnaliasedLocalImportUsesDeclaredPackageName","Output":"=== RUN   TestUnaliasedLocalImportUsesDeclaredPackageName\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnaliasedLocalImportUsesDeclaredPackageName","Output":"--- PASS: TestUnaliasedLocalImportUsesDeclaredPackageName (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestUnaliasedLocalImportUsesDeclaredPackageName"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestExternalConstructorPackageRequiresExplicitAlias"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExternalConstructorPackageRequiresExplicitAlias","Output":"=== RUN   TestExternalConstructorPackageRequiresExplicitAlias\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExternalConstructorPackageRequiresExplicitAlias","Output":"--- PASS: TestExternalConstructorPackageRequiresExplicitAlias (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestExternalConstructorPackageRequiresExplicitAlias"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitExternalConstructorAliasStillMatchesCalls"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitExternalConstructorAliasStillMatchesCalls","Output":"=== RUN   TestExplicitExternalConstructorAliasStillMatchesCalls\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitExternalConstructorAliasStillMatchesCalls","Output":"--- PASS: TestExplicitExternalConstructorAliasStillMatchesCalls (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitExternalConstructorAliasStillMatchesCalls"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestConfiguredSourceRootSymlinkIsRejected"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestConfiguredSourceRootSymlinkIsRejected","Output":"=== RUN   TestConfiguredSourceRootSymlinkIsRejected\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestConfiguredSourceRootSymlinkIsRejected","Output":"--- PASS: TestConfiguredSourceRootSymlinkIsRejected (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestConfiguredSourceRootSymlinkIsRejected"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestLeadingBlockCommentBeforeBuildConstraintRemainsTestOnly"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLeadingBlockCommentBeforeBuildConstraintRemainsTestOnly","Output":"=== RUN   TestLeadingBlockCommentBeforeBuildConstraintRemainsTestOnly\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLeadingBlockCommentBeforeBuildConstraintRemainsTestOnly","Output":"--- PASS: TestLeadingBlockCommentBeforeBuildConstraintRemainsTestOnly (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestLeadingBlockCommentBeforeBuildConstraintRemainsTestOnly"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestWrappedConstructorCalleesAreDetected"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestWrappedConstructorCalleesAreDetected","Output":"=== RUN   TestWrappedConstructorCalleesAreDetected\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestWrappedConstructorCalleesAreDetected","Output":"--- PASS: TestWrappedConstructorCalleesAreDetected (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestWrappedConstructorCalleesAreDetected"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRootPackageImportRuleMatchesDotSelector"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRootPackageImportRuleMatchesDotSelector","Output":"=== RUN   TestRootPackageImportRuleMatchesDotSelector\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRootPackageImportRuleMatchesDotSelector","Output":"--- PASS: TestRootPackageImportRuleMatchesDotSelector (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRootPackageImportRuleMatchesDotSelector"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestGenericPackageNamesAreTrimmedAndValidated"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestGenericPackageNamesAreTrimmedAndValidated","Output":"=== RUN   TestGenericPackageNamesAreTrimmedAndValidated\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestGenericPackageNamesAreTrimmedAndValidated","Output":"--- PASS: TestGenericPackageNamesAreTrimmedAndValidated (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestGenericPackageNamesAreTrimmedAndValidated"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestReportRootUsesFilesystemPathSemantics"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestReportRootUsesFilesystemPathSemantics","Output":"=== RUN   TestReportRootUsesFilesystemPathSemantics\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestReportRootUsesFilesystemPathSemantics","Output":"--- PASS: TestReportRootUsesFilesystemPathSemantics (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestReportRootUsesFilesystemPathSemantics"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestSourceRootRejectsSymlinkedAncestor"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestSourceRootRejectsSymlinkedAncestor","Output":"=== RUN   TestSourceRootRejectsSymlinkedAncestor\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestSourceRootRejectsSymlinkedAncestor","Output":"--- PASS: TestSourceRootRejectsSymlinkedAncestor (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestSourceRootRejectsSymlinkedAncestor"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorSymbol"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorSymbol","Output":"=== RUN   TestPolicyRejectsInvalidConstructorSymbol\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorSymbol","Output":"--- PASS: TestPolicyRejectsInvalidConstructorSymbol (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorSymbol"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestConstructorFunctionValueReferenceIsDetected"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestConstructorFunctionValueReferenceIsDetected","Output":"=== RUN   TestConstructorFunctionValueReferenceIsDetected\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestConstructorFunctionValueReferenceIsDetected","Output":"--- PASS: TestConstructorFunctionValueReferenceIsDetected (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestConstructorFunctionValueReferenceIsDetected"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestPlatformPackageNamesCanOverlapThroughAdditionalTags"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPlatformPackageNamesCanOverlapThroughAdditionalTags","Output":"=== RUN   TestPlatformPackageNamesCanOverlapThroughAdditionalTags\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPlatformPackageNamesCanOverlapThroughAdditionalTags","Output":"--- PASS: TestPlatformPackageNamesCanOverlapThroughAdditionalTags (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestPlatformPackageNamesCanOverlapThroughAdditionalTags"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestBuildCompatibilityUsesValidTargetAndCompilerDimensions"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestBuildCompatibilityUsesValidTargetAndCompilerDimensions","Output":"=== RUN   TestBuildCompatibilityUsesValidTargetAndCompilerDimensions\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestBuildCompatibilityUsesValidTargetAndCompilerDimensions","Output":"--- PASS: TestBuildCompatibilityUsesValidTargetAndCompilerDimensions (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestBuildCompatibilityUsesValidTargetAndCompilerDimensions"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestGoIgnoredSourceNamesAreNotScanned"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestGoIgnoredSourceNamesAreNotScanned","Output":"=== RUN   TestGoIgnoredSourceNamesAreNotScanned\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestGoIgnoredSourceNamesAreNotScanned","Output":"--- PASS: TestGoIgnoredSourceNamesAreNotScanned (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestGoIgnoredSourceNamesAreNotScanned"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestSymlinkedRepositoryRootIsRejected"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestSymlinkedRepositoryRootIsRejected","Output":"=== RUN   TestSymlinkedRepositoryRootIsRejected\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestSymlinkedRepositoryRootIsRejected","Output":"--- PASS: TestSymlinkedRepositoryRootIsRejected (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestSymlinkedRepositoryRootIsRejected"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestEffectiveBuildConstraintTreatsExplicitPlatformTagAsProductionAlternative"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEffectiveBuildConstraintTreatsExplicitPlatformTagAsProductionAlternative","Output":"=== RUN   TestEffectiveBuildConstraintTreatsExplicitPlatformTagAsProductionAlternative\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEffectiveBuildConstraintTreatsExplicitPlatformTagAsProductionAlternative","Output":"--- PASS: TestEffectiveBuildConstraintTreatsExplicitPlatformTagAsProductionAlternative (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestEffectiveBuildConstraintTreatsExplicitPlatformTagAsProductionAlternative"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestEffectiveBuildConstraintRetainsRealPlatformAlternative"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEffectiveBuildConstraintRetainsRealPlatformAlternative","Output":"=== RUN   TestEffectiveBuildConstraintRetainsRealPlatformAlternative\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEffectiveBuildConstraintRetainsRealPlatformAlternative","Output":"--- PASS: TestEffectiveBuildConstraintRetainsRealPlatformAlternative (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestEffectiveBuildConstraintRetainsRealPlatformAlternative"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestGlobCharacterClassesMatchPolicyPaths"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestGlobCharacterClassesMatchPolicyPaths","Output":"=== RUN   TestGlobCharacterClassesMatchPolicyPaths\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestGlobCharacterClassesMatchPolicyPaths","Output":"--- PASS: TestGlobCharacterClassesMatchPolicyPaths (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestGlobCharacterClassesMatchPolicyPaths"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesNamedStringConstants"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesNamedStringConstants","Output":"=== RUN   TestEmbeddedDocumentResolvesNamedStringConstants\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesNamedStringConstants","Output":"--- PASS: TestEmbeddedDocumentResolvesNamedStringConstants (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesNamedStringConstants"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesLocalNamedStringConstants"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesLocalNamedStringConstants","Output":"=== RUN   TestEmbeddedDocumentResolvesLocalNamedStringConstants\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesLocalNamedStringConstants","Output":"--- PASS: TestEmbeddedDocumentResolvesLocalNamedStringConstants (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesLocalNamedStringConstants"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesSiblingPackageConstants"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesSiblingPackageConstants","Output":"=== RUN   TestEmbeddedDocumentResolvesSiblingPackageConstants\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesSiblingPackageConstants","Output":"--- PASS: TestEmbeddedDocumentResolvesSiblingPackageConstants (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesSiblingPackageConstants"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsMalformedGlobClass"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsMalformedGlobClass","Output":"=== RUN   TestPolicyRejectsMalformedGlobClass\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsMalformedGlobClass","Output":"--- PASS: TestPolicyRejectsMalformedGlobClass (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsMalformedGlobClass"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkerDeadlineWhitespaceIsCanonicalizedAndAccepted"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkerDeadlineWhitespaceIsCanonicalizedAndAccepted","Output":"=== RUN   TestWorkerDeadlineWhitespaceIsCanonicalizedAndAccepted\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkerDeadlineWhitespaceIsCanonicalizedAndAccepted","Output":"--- PASS: TestWorkerDeadlineWhitespaceIsCanonicalizedAndAccepted (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkerDeadlineWhitespaceIsCanonicalizedAndAccepted"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags","Output":"=== RUN   TestPolicyRejectsReservedTestOnlyBuildTags\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/linux"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/linux","Output":"=== RUN   TestPolicyRejectsReservedTestOnlyBuildTags/linux\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/linux","Output":"--- PASS: TestPolicyRejectsReservedTestOnlyBuildTags/linux (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/linux"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/amd64"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/amd64","Output":"=== RUN   TestPolicyRejectsReservedTestOnlyBuildTags/amd64\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/amd64","Output":"--- PASS: TestPolicyRejectsReservedTestOnlyBuildTags/amd64 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/amd64"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/gc"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/gc","Output":"=== RUN   TestPolicyRejectsReservedTestOnlyBuildTags/gc\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/gc","Output":"--- PASS: TestPolicyRejectsReservedTestOnlyBuildTags/gc (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/gc"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/cgo"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/cgo","Output":"=== RUN   TestPolicyRejectsReservedTestOnlyBuildTags/cgo\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/cgo","Output":"--- PASS: TestPolicyRejectsReservedTestOnlyBuildTags/cgo (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/cgo"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/go1.23"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/go1.23","Output":"=== RUN   TestPolicyRejectsReservedTestOnlyBuildTags/go1.23\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/go1.23","Output":"--- PASS: TestPolicyRejectsReservedTestOnlyBuildTags/go1.23 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/go1.23"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/goexperiment.regabi"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/goexperiment.regabi","Output":"=== RUN   TestPolicyRejectsReservedTestOnlyBuildTags/goexperiment.regabi\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/goexperiment.regabi","Output":"--- PASS: TestPolicyRejectsReservedTestOnlyBuildTags/goexperiment.regabi (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/goexperiment.regabi"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/amd64.v3"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/amd64.v3","Output":"=== RUN   TestPolicyRejectsReservedTestOnlyBuildTags/amd64.v3\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/amd64.v3","Output":"--- PASS: TestPolicyRejectsReservedTestOnlyBuildTags/amd64.v3 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags/amd64.v3"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags","Output":"--- PASS: TestPolicyRejectsReservedTestOnlyBuildTags (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsReservedTestOnlyBuildTags"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestZeroLengthHistoryRegexProducesFinding"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestZeroLengthHistoryRegexProducesFinding","Output":"=== RUN   TestZeroLengthHistoryRegexProducesFinding\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestZeroLengthHistoryRegexProducesFinding","Output":"--- PASS: TestZeroLengthHistoryRegexProducesFinding (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestZeroLengthHistoryRegexProducesFinding"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestProductionTypeFieldsAndInterfaceMethodsAreCheckedForTestHooks"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestProductionTypeFieldsAndInterfaceMethodsAreCheckedForTestHooks","Output":"=== RUN   TestProductionTypeFieldsAndInterfaceMethodsAreCheckedForTestHooks\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestProductionTypeFieldsAndInterfaceMethodsAreCheckedForTestHooks","Output":"--- PASS: TestProductionTypeFieldsAndInterfaceMethodsAreCheckedForTestHooks (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestProductionTypeFieldsAndInterfaceMethodsAreCheckedForTestHooks"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestOwnersRejectMalformedGlobClass"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestOwnersRejectMalformedGlobClass","Output":"=== RUN   TestOwnersRejectMalformedGlobClass\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestOwnersRejectMalformedGlobClass","Output":"--- PASS: TestOwnersRejectMalformedGlobClass (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestOwnersRejectMalformedGlobClass"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestScanRejectsProgrammaticMalformedGlobClass"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestScanRejectsProgrammaticMalformedGlobClass","Output":"=== RUN   TestScanRejectsProgrammaticMalformedGlobClass\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestScanRejectsProgrammaticMalformedGlobClass","Output":"--- PASS: TestScanRejectsProgrammaticMalformedGlobClass (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestScanRejectsProgrammaticMalformedGlobClass"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestProductionPackageNameEndingTestIsIndexed"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestProductionPackageNameEndingTestIsIndexed","Output":"=== RUN   TestProductionPackageNameEndingTestIsIndexed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestProductionPackageNameEndingTestIsIndexed","Output":"--- PASS: TestProductionPackageNameEndingTestIsIndexed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestProductionPackageNameEndingTestIsIndexed"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestScanRejectsEmptyProgrammaticSourceRoots"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestScanRejectsEmptyProgrammaticSourceRoots","Output":"=== RUN   TestScanRejectsEmptyProgrammaticSourceRoots\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestScanRejectsEmptyProgrammaticSourceRoots","Output":"--- PASS: TestScanRejectsEmptyProgrammaticSourceRoots (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestScanRejectsEmptyProgrammaticSourceRoots"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestStringEvaluationPreservesASTSourceSpans"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestStringEvaluationPreservesASTSourceSpans","Output":"=== RUN   TestStringEvaluationPreservesASTSourceSpans\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestStringEvaluationPreservesASTSourceSpans","Output":"--- PASS: TestStringEvaluationPreservesASTSourceSpans (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestStringEvaluationPreservesASTSourceSpans"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesAdditionalTagCompatibleBuildVariant"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesAdditionalTagCompatibleBuildVariant","Output":"=== RUN   TestEmbeddedDocumentResolvesAdditionalTagCompatibleBuildVariant\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesAdditionalTagCompatibleBuildVariant","Output":"--- PASS: TestEmbeddedDocumentResolvesAdditionalTagCompatibleBuildVariant (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesAdditionalTagCompatibleBuildVariant"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRepeatedConstructorCallsIncreaseRatchetedMetric"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepeatedConstructorCallsIncreaseRatchetedMetric","Output":"=== RUN   TestRepeatedConstructorCallsIncreaseRatchetedMetric\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepeatedConstructorCallsIncreaseRatchetedMetric","Output":"--- PASS: TestRepeatedConstructorCallsIncreaseRatchetedMetric (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRepeatedConstructorCallsIncreaseRatchetedMetric"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestUnicodeLiteralGlobMatchesImportRule"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnicodeLiteralGlobMatchesImportRule","Output":"=== RUN   TestUnicodeLiteralGlobMatchesImportRule\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnicodeLiteralGlobMatchesImportRule","Output":"--- PASS: TestUnicodeLiteralGlobMatchesImportRule (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestUnicodeLiteralGlobMatchesImportRule"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths","Output":"=== RUN   TestPolicyRejectsInvalidConstructorImportPaths\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths/example.com/api/"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths/example.com/api/","Output":"=== RUN   TestPolicyRejectsInvalidConstructorImportPaths/example.com/api/\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths/example.com/api/","Output":"--- PASS: TestPolicyRejectsInvalidConstructorImportPaths/example.com/api/ (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths/example.com/api/"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths/example.com/new_api"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths/example.com/new_api","Output":"=== RUN   TestPolicyRejectsInvalidConstructorImportPaths/example.com/new_api\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths/example.com/new_api","Output":"--- PASS: TestPolicyRejectsInvalidConstructorImportPaths/example.com/new_api (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths/example.com/new_api"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths//absolute"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths//absolute","Output":"=== RUN   TestPolicyRejectsInvalidConstructorImportPaths//absolute\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths//absolute","Output":"--- PASS: TestPolicyRejectsInvalidConstructorImportPaths//absolute (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths//absolute"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths/example.com//api"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths/example.com//api","Output":"=== RUN   TestPolicyRejectsInvalidConstructorImportPaths/example.com//api\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths/example.com//api","Output":"--- PASS: TestPolicyRejectsInvalidConstructorImportPaths/example.com//api (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths/example.com//api"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths/CON/pkg"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths/CON/pkg","Output":"=== RUN   TestPolicyRejectsInvalidConstructorImportPaths/CON/pkg\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths/CON/pkg","Output":"--- PASS: TestPolicyRejectsInvalidConstructorImportPaths/CON/pkg (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths/CON/pkg"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths/example.com/foo~1"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths/example.com/foo~1","Output":"=== RUN   TestPolicyRejectsInvalidConstructorImportPaths/example.com/foo~1\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths/example.com/foo~1","Output":"--- PASS: TestPolicyRejectsInvalidConstructorImportPaths/example.com/foo~1 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths/example.com/foo~1"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths","Output":"--- PASS: TestPolicyRejectsInvalidConstructorImportPaths (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestPolicyRejectsInvalidConstructorImportPaths"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestUnresolvedExternalConstructorCallsAreCounted"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnresolvedExternalConstructorCallsAreCounted","Output":"=== RUN   TestUnresolvedExternalConstructorCallsAreCounted\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestUnresolvedExternalConstructorCallsAreCounted","Output":"--- PASS: TestUnresolvedExternalConstructorCallsAreCounted (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestUnresolvedExternalConstructorCallsAreCounted"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitGoReleaseTagCanBeEnabledThroughTags"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitGoReleaseTagCanBeEnabledThroughTags","Output":"=== RUN   TestExplicitGoReleaseTagCanBeEnabledThroughTags\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitGoReleaseTagCanBeEnabledThroughTags","Output":"--- PASS: TestExplicitGoReleaseTagCanBeEnabledThroughTags (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestExplicitGoReleaseTagCanBeEnabledThroughTags"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestGoBuildDirectiveWithoutBlankLineIsApplied"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestGoBuildDirectiveWithoutBlankLineIsApplied","Output":"=== RUN   TestGoBuildDirectiveWithoutBlankLineIsApplied\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestGoBuildDirectiveWithoutBlankLineIsApplied","Output":"--- PASS: TestGoBuildDirectiveWithoutBlankLineIsApplied (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestGoBuildDirectiveWithoutBlankLineIsApplied"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesDefinedStringConversion"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesDefinedStringConversion","Output":"=== RUN   TestEmbeddedDocumentResolvesDefinedStringConversion\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesDefinedStringConversion","Output":"--- PASS: TestEmbeddedDocumentResolvesDefinedStringConversion (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentResolvesDefinedStringConversion"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestOwnersRejectUnknownViolationKind"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestOwnersRejectUnknownViolationKind","Output":"=== RUN   TestOwnersRejectUnknownViolationKind\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestOwnersRejectUnknownViolationKind","Output":"--- PASS: TestOwnersRejectUnknownViolationKind (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestOwnersRejectUnknownViolationKind"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRenderMarkdownUsesSafeCodeSpanForRoot"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRenderMarkdownUsesSafeCodeSpanForRoot","Output":"=== RUN   TestRenderMarkdownUsesSafeCodeSpanForRoot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRenderMarkdownUsesSafeCodeSpanForRoot","Output":"--- PASS: TestRenderMarkdownUsesSafeCodeSpanForRoot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRenderMarkdownUsesSafeCodeSpanForRoot"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestBuildCompatibilitySolvesMoreThanTenCustomTags"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestBuildCompatibilitySolvesMoreThanTenCustomTags","Output":"=== RUN   TestBuildCompatibilitySolvesMoreThanTenCustomTags\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestBuildCompatibilitySolvesMoreThanTenCustomTags","Output":"--- PASS: TestBuildCompatibilitySolvesMoreThanTenCustomTags (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestBuildCompatibilitySolvesMoreThanTenCustomTags"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestConstraintSATPrunesLargeDisjunction"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestConstraintSATPrunesLargeDisjunction","Output":"=== RUN   TestConstraintSATPrunesLargeDisjunction\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestConstraintSATPrunesLargeDisjunction","Output":"--- PASS: TestConstraintSATPrunesLargeDisjunction (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestConstraintSATPrunesLargeDisjunction"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-0"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-0","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-0\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-0","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-0 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-0"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-1"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-1","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-1\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-1","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-1 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-1"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-2"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-2","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-2\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-2","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-2 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-2"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-3"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-3","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-3\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-3","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-3 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-3"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-4"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-4","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-4\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-4","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-4 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-4"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-5"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-5","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-5\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-5","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-5 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-5"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-6"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-6","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-6\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-6","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-6 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-6"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-0"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-0","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-0\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-0","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-0 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-0"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-1"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-1","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-1\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-1","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-1 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-1"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-2"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-2","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-2\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-2","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-2 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-2"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-3"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-3","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-3\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-3","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-3 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-3"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-4"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-4","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-4\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-4","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-4 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-4"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-5"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-5","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-5\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-5","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-5 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-5"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-6"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-6","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-6\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-6","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-6 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-6"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-0"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-0","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-0\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-0","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-0 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-0"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-1"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-1","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-1\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-1","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-1 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-1"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-2"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-2","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-2\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-2","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-2 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-2"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-3"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-3","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-3\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-3","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-3 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-3"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-4"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-4","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-4\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-4","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-4 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-4"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-5"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-5","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-5\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-5","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-5 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-5"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-6"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-6","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-6\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-6","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-6 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-6"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-0"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-0","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-0\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-0","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-0 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-0"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-1"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-1","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-1\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-1","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-1 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-1"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-2"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-2","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-2\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-2","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-2 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-2"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-3"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-3","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-3\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-3","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-3 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-3"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-4"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-4","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-4\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-4","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-4 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-4"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-5"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-5","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-5\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-5","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-5 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-5"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-6"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-6","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-6\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-6","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-6 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-6"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-0"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-0","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-0\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-0","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-0 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-0"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-1"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-1","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-1\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-1","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-1 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-1"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-2"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-2","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-2\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-2","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-2 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-2"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-3"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-3","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-3\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-3","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-3 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-3"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-4"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-4","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-4\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-4","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-4 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-4"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-5"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-5","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-5\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-5","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-5 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-5"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-6"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-6","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-6\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-6","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-6 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-6"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-0"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-0","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-0\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-0","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-0 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-0"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-1"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-1","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-1\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-1","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-1 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-1"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-2"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-2","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-2\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-2","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-2 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-2"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-3"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-3","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-3\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-3","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-3 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-3"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-4"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-4","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-4\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-4","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-4 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-4"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-5"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-5","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-5\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-5","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-5 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-5"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-6"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-6","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-6\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-6","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-6 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-6"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-0"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-0","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-0\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-0","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-0 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-0"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-1"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-1","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-1\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-1","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-1 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-1"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-2"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-2","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-2\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-2","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-2 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-2"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-3"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-3","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-3\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-3","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-3 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-3"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-4"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-4","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-4\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-4","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-4 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-4"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-5"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-5","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-5\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-5","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-5 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-5"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-6"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-6","Output":"=== RUN   TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-6\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-6","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-6 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-6"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild","Output":"--- PASS: TestFilenameBuildConstraintMatchesGoBuild (0.04s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameBuildConstraintMatchesGoBuild"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameAndDirectiveShareTagIdentity"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameAndDirectiveShareTagIdentity","Output":"=== RUN   TestFilenameAndDirectiveShareTagIdentity\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameAndDirectiveShareTagIdentity/windows"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameAndDirectiveShareTagIdentity/windows","Output":"=== RUN   TestFilenameAndDirectiveShareTagIdentity/windows\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameAndDirectiveShareTagIdentity/windows","Output":"--- PASS: TestFilenameAndDirectiveShareTagIdentity/windows (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameAndDirectiveShareTagIdentity/windows"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameAndDirectiveShareTagIdentity/!windows"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameAndDirectiveShareTagIdentity/!windows","Output":"=== RUN   TestFilenameAndDirectiveShareTagIdentity/!windows\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameAndDirectiveShareTagIdentity/!windows","Output":"--- PASS: TestFilenameAndDirectiveShareTagIdentity/!windows (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameAndDirectiveShareTagIdentity/!windows"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameAndDirectiveShareTagIdentity/windows_||_linux"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameAndDirectiveShareTagIdentity/windows_||_linux","Output":"=== RUN   TestFilenameAndDirectiveShareTagIdentity/windows_||_linux\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameAndDirectiveShareTagIdentity/windows_||_linux","Output":"--- PASS: TestFilenameAndDirectiveShareTagIdentity/windows_||_linux (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameAndDirectiveShareTagIdentity/windows_||_linux"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameAndDirectiveShareTagIdentity/!(windows_\u0026\u0026_arm64)"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameAndDirectiveShareTagIdentity/!(windows_\u0026\u0026_arm64)","Output":"=== RUN   TestFilenameAndDirectiveShareTagIdentity/!(windows_\u0026\u0026_arm64)\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameAndDirectiveShareTagIdentity/!(windows_\u0026\u0026_arm64)","Output":"--- PASS: TestFilenameAndDirectiveShareTagIdentity/!(windows_\u0026\u0026_arm64) (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameAndDirectiveShareTagIdentity/!(windows_\u0026\u0026_arm64)"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameAndDirectiveShareTagIdentity","Output":"--- PASS: TestFilenameAndDirectiveShareTagIdentity (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFilenameAndDirectiveShareTagIdentity"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestScanDoesNotMutateCallerPolicySlices"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestScanDoesNotMutateCallerPolicySlices","Output":"=== RUN   TestScanDoesNotMutateCallerPolicySlices\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestScanDoesNotMutateCallerPolicySlices","Output":"--- PASS: TestScanDoesNotMutateCallerPolicySlices (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestScanDoesNotMutateCallerPolicySlices"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestScanRejectsEmptyProgrammaticRoot"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestScanRejectsEmptyProgrammaticRoot","Output":"=== RUN   TestScanRejectsEmptyProgrammaticRoot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestScanRejectsEmptyProgrammaticRoot","Output":"--- PASS: TestScanRejectsEmptyProgrammaticRoot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestScanRejectsEmptyProgrammaticRoot"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts","Output":"=== RUN   TestRepositoryArchitectureContracts\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators","Output":"=== RUN   TestRepositoryArchitectureContracts/validators\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators/valid"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators/valid","Output":"=== RUN   TestRepositoryArchitectureContracts/validators/valid\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators/valid","Output":"--- PASS: TestRepositoryArchitectureContracts/validators/valid (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators/valid"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators/wp-cycle"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators/wp-cycle","Output":"=== RUN   TestRepositoryArchitectureContracts/validators/wp-cycle\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators/wp-cycle","Output":"--- PASS: TestRepositoryArchitectureContracts/validators/wp-cycle (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators/wp-cycle"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators/mixed-cycle"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators/mixed-cycle","Output":"=== RUN   TestRepositoryArchitectureContracts/validators/mixed-cycle\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators/mixed-cycle","Output":"--- PASS: TestRepositoryArchitectureContracts/validators/mixed-cycle (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators/mixed-cycle"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators/self-package-gate"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators/self-package-gate","Output":"=== RUN   TestRepositoryArchitectureContracts/validators/self-package-gate\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators/self-package-gate","Output":"--- PASS: TestRepositoryArchitectureContracts/validators/self-package-gate (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators/self-package-gate"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators/pr-cycle"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators/pr-cycle","Output":"=== RUN   TestRepositoryArchitectureContracts/validators/pr-cycle\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators/pr-cycle","Output":"--- PASS: TestRepositoryArchitectureContracts/validators/pr-cycle (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators/pr-cycle"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators/unknown-pr"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators/unknown-pr","Output":"=== RUN   TestRepositoryArchitectureContracts/validators/unknown-pr\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators/unknown-pr","Output":"--- PASS: TestRepositoryArchitectureContracts/validators/unknown-pr (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators/unknown-pr"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators","Output":"--- PASS: TestRepositoryArchitectureContracts/validators (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/validators"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/traceability"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/traceability","Output":"=== RUN   TestRepositoryArchitectureContracts/traceability\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/traceability","Output":"--- PASS: TestRepositoryArchitectureContracts/traceability (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/traceability"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/policy"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/policy","Output":"=== RUN   TestRepositoryArchitectureContracts/policy\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/policy","Output":"--- PASS: TestRepositoryArchitectureContracts/policy (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/policy"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/baseline"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/baseline","Output":"=== RUN   TestRepositoryArchitectureContracts/baseline\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/baseline","Output":"--- PASS: TestRepositoryArchitectureContracts/baseline (0.05s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts/baseline"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts","Output":"--- PASS: TestRepositoryArchitectureContracts (0.05s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRepositoryArchitectureContracts"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsTrailingDocument"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsTrailingDocument","Output":"=== RUN   TestLoadPolicyRejectsTrailingDocument\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsTrailingDocument","Output":"--- PASS: TestLoadPolicyRejectsTrailingDocument (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsTrailingDocument"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsSourceRootEscape"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsSourceRootEscape","Output":"=== RUN   TestLoadPolicyRejectsSourceRootEscape\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsSourceRootEscape","Output":"--- PASS: TestLoadPolicyRejectsSourceRootEscape (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsSourceRootEscape"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestGeneratedMarkerBeforePackageIsRecognized"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestGeneratedMarkerBeforePackageIsRecognized","Output":"=== RUN   TestGeneratedMarkerBeforePackageIsRecognized\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestGeneratedMarkerBeforePackageIsRecognized","Output":"--- PASS: TestGeneratedMarkerBeforePackageIsRecognized (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestGeneratedMarkerBeforePackageIsRecognized"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentAggregatesStringConcatenation"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentAggregatesStringConcatenation","Output":"=== RUN   TestEmbeddedDocumentAggregatesStringConcatenation\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentAggregatesStringConcatenation","Output":"--- PASS: TestEmbeddedDocumentAggregatesStringConcatenation (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestEmbeddedDocumentAggregatesStringConcatenation"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkersIgnoreTestAndGeneratedFiles"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkersIgnoreTestAndGeneratedFiles","Output":"=== RUN   TestWorkersIgnoreTestAndGeneratedFiles\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkersIgnoreTestAndGeneratedFiles","Output":"--- PASS: TestWorkersIgnoreTestAndGeneratedFiles (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkersIgnoreTestAndGeneratedFiles"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkerRuleDistinguishesAnonymousWorkersInOneFunction"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkerRuleDistinguishesAnonymousWorkersInOneFunction","Output":"=== RUN   TestWorkerRuleDistinguishesAnonymousWorkersInOneFunction\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkerRuleDistinguishesAnonymousWorkersInOneFunction","Output":"--- PASS: TestWorkerRuleDistinguishesAnonymousWorkersInOneFunction (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkerRuleDistinguishesAnonymousWorkersInOneFunction"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyAcceptsLegacyWorkerInBaseline"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyAcceptsLegacyWorkerInBaseline","Output":"=== RUN   TestVerifyAcceptsLegacyWorkerInBaseline\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyAcceptsLegacyWorkerInBaseline","Output":"--- PASS: TestVerifyAcceptsLegacyWorkerInBaseline (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyAcceptsLegacyWorkerInBaseline"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRejectsWorkerInBaselineAndRegistry"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRejectsWorkerInBaselineAndRegistry","Output":"=== RUN   TestVerifyRejectsWorkerInBaselineAndRegistry\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRejectsWorkerInBaselineAndRegistry","Output":"--- PASS: TestVerifyRejectsWorkerInBaselineAndRegistry (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestVerifyRejectsWorkerInBaselineAndRegistry"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestGlobTrailingDoubleStarMatchesPackageRoot"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestGlobTrailingDoubleStarMatchesPackageRoot","Output":"=== RUN   TestGlobTrailingDoubleStarMatchesPackageRoot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestGlobTrailingDoubleStarMatchesPackageRoot","Output":"--- PASS: TestGlobTrailingDoubleStarMatchesPackageRoot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestGlobTrailingDoubleStarMatchesPackageRoot"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestImportRuleUsesRepositoryRelativeLocalImportPath"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestImportRuleUsesRepositoryRelativeLocalImportPath","Output":"=== RUN   TestImportRuleUsesRepositoryRelativeLocalImportPath\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestImportRuleUsesRepositoryRelativeLocalImportPath","Output":"--- PASS: TestImportRuleUsesRepositoryRelativeLocalImportPath (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestImportRuleUsesRepositoryRelativeLocalImportPath"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestFileBudgetFingerprintSurvivesThresholdClassChange"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFileBudgetFingerprintSurvivesThresholdClassChange","Output":"=== RUN   TestFileBudgetFingerprintSurvivesThresholdClassChange\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestFileBudgetFingerprintSurvivesThresholdClassChange","Output":"--- PASS: TestFileBudgetFingerprintSurvivesThresholdClassChange (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestFileBudgetFingerprintSurvivesThresholdClassChange"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsEmbeddedParentTraversal"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsEmbeddedParentTraversal","Output":"=== RUN   TestLoadPolicyRejectsEmbeddedParentTraversal\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsEmbeddedParentTraversal","Output":"--- PASS: TestLoadPolicyRejectsEmbeddedParentTraversal (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsEmbeddedParentTraversal"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkerFingerprintsDistinguishMethodsWithSameName"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkerFingerprintsDistinguishMethodsWithSameName","Output":"=== RUN   TestWorkerFingerprintsDistinguishMethodsWithSameName\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkerFingerprintsDistinguishMethodsWithSameName","Output":"--- PASS: TestWorkerFingerprintsDistinguishMethodsWithSameName (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkerFingerprintsDistinguishMethodsWithSameName"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleDetectsProductionTestHookMethod"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleDetectsProductionTestHookMethod","Output":"=== RUN   TestRuleDetectsProductionTestHookMethod\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleDetectsProductionTestHookMethod","Output":"--- PASS: TestRuleDetectsProductionTestHookMethod (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestRuleDetectsProductionTestHookMethod"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadBaselineRejectsMissingGeneratedFrom"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadBaselineRejectsMissingGeneratedFrom","Output":"=== RUN   TestLoadBaselineRejectsMissingGeneratedFrom\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadBaselineRejectsMissingGeneratedFrom","Output":"--- PASS: TestLoadBaselineRejectsMissingGeneratedFrom (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadBaselineRejectsMissingGeneratedFrom"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadBaselineRejectsFingerprintMismatch"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadBaselineRejectsFingerprintMismatch","Output":"=== RUN   TestLoadBaselineRejectsFingerprintMismatch\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadBaselineRejectsFingerprintMismatch","Output":"--- PASS: TestLoadBaselineRejectsFingerprintMismatch (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadBaselineRejectsFingerprintMismatch"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsEmptyImportRule"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsEmptyImportRule","Output":"=== RUN   TestLoadPolicyRejectsEmptyImportRule\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsEmptyImportRule","Output":"--- PASS: TestLoadPolicyRejectsEmptyImportRule (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsEmptyImportRule"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkerFingerprintsDistinguishPackageLevelFunctionLiterals"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkerFingerprintsDistinguishPackageLevelFunctionLiterals","Output":"=== RUN   TestWorkerFingerprintsDistinguishPackageLevelFunctionLiterals\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkerFingerprintsDistinguishPackageLevelFunctionLiterals","Output":"--- PASS: TestWorkerFingerprintsDistinguishPackageLevelFunctionLiterals (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestWorkerFingerprintsDistinguishPackageLevelFunctionLiterals"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestGlobPatternsUsedByRepositoryPolicy"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestGlobPatternsUsedByRepositoryPolicy","Output":"=== RUN   TestGlobPatternsUsedByRepositoryPolicy\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestGlobPatternsUsedByRepositoryPolicy","Output":"--- PASS: TestGlobPatternsUsedByRepositoryPolicy (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestGlobPatternsUsedByRepositoryPolicy"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsEmptyRegexPattern"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsEmptyRegexPattern","Output":"=== RUN   TestLoadPolicyRejectsEmptyRegexPattern\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsEmptyRegexPattern","Output":"--- PASS: TestLoadPolicyRejectsEmptyRegexPattern (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestLoadPolicyRejectsEmptyRegexPattern"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestBoringCryptoLegacyAliasSharesToolTagState"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestBoringCryptoLegacyAliasSharesToolTagState","Output":"=== RUN   TestBoringCryptoLegacyAliasSharesToolTagState\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestBoringCryptoLegacyAliasSharesToolTagState","Output":"--- PASS: TestBoringCryptoLegacyAliasSharesToolTagState (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestBoringCryptoLegacyAliasSharesToolTagState"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestCgoTagHonorsTargetSupport"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestCgoTagHonorsTargetSupport","Output":"=== RUN   TestCgoTagHonorsTargetSupport\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestCgoTagHonorsTargetSupport","Output":"--- PASS: TestCgoTagHonorsTargetSupport (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestCgoTagHonorsTargetSupport"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestBuildCompatibleLocalConstantShadowsDotImport"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestBuildCompatibleLocalConstantShadowsDotImport","Output":"=== RUN   TestBuildCompatibleLocalConstantShadowsDotImport\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestBuildCompatibleLocalConstantShadowsDotImport","Output":"--- PASS: TestBuildCompatibleLocalConstantShadowsDotImport (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestBuildCompatibleLocalConstantShadowsDotImport"}
+{"Action":"run","Package":"mcp-local-hub/internal/archguard","Test":"TestAdditionalTagCompatibleLocalConstantShadowsDotImport"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestAdditionalTagCompatibleLocalConstantShadowsDotImport","Output":"=== RUN   TestAdditionalTagCompatibleLocalConstantShadowsDotImport\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Test":"TestAdditionalTagCompatibleLocalConstantShadowsDotImport","Output":"--- PASS: TestAdditionalTagCompatibleLocalConstantShadowsDotImport (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard","Test":"TestAdditionalTagCompatibleLocalConstantShadowsDotImport"}
+{"Action":"output","Package":"mcp-local-hub/internal/archguard","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/archguard"}

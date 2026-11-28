@@ -1,0 +1,211 @@
+=== RUN   TestCmakeCleanRejectsUnboundPreset
+=== RUN   TestCmakeCleanRejectsUnboundPreset/dev_bound_false/purge_false
+--- PASS: TestCmakeCleanRejectsUnboundPreset/dev_bound_false/purge_false (0.01s)
+=== NAME  TestCmakeCleanRejectsUnboundPreset
+=== RUN   TestCmakeCleanRejectsUnboundPreset/dev_bound_false/purge_true
+--- PASS: TestCmakeCleanRejectsUnboundPreset/dev_bound_false/purge_true (0.00s)
+=== NAME  TestCmakeCleanRejectsUnboundPreset
+=== RUN   TestCmakeCleanRejectsUnboundPreset/dev_bound_true/purge_false
+--- PASS: TestCmakeCleanRejectsUnboundPreset/dev_bound_true/purge_false (0.00s)
+=== NAME  TestCmakeCleanRejectsUnboundPreset
+=== RUN   TestCmakeCleanRejectsUnboundPreset/dev_bound_true/purge_true
+--- PASS: TestCmakeCleanRejectsUnboundPreset/dev_bound_true/purge_true (0.00s)
+=== NAME  TestCmakeCleanRejectsUnboundPreset
+--- PASS: TestCmakeCleanRejectsUnboundPreset (0.02s)
+=== NAME  
+=== RUN   TestCmakeCleanUsesOnlySettledPreset
+--- PASS: TestCmakeCleanUsesOnlySettledPreset (0.01s)
+=== NAME  
+=== RUN   TestCmakeCleanRevalidatesSettledCache
+--- PASS: TestCmakeCleanRevalidatesSettledCache (0.00s)
+=== NAME  
+=== RUN   TestPurgeRefusesExpiredBudgetAfterBindingWait
+--- PASS: TestPurgeRefusesExpiredBudgetAfterBindingWait (1.10s)
+=== NAME  
+=== RUN   TestParseDiagnostics
+=== RUN   TestParseDiagnostics/msvc_error_with_code_and_col
+--- PASS: TestParseDiagnostics/msvc_error_with_code_and_col (0.00s)
+=== NAME  TestParseDiagnostics
+=== RUN   TestParseDiagnostics/msvc_warning_without_col
+--- PASS: TestParseDiagnostics/msvc_warning_without_col (0.00s)
+=== NAME  TestParseDiagnostics
+=== RUN   TestParseDiagnostics/msvc_fatal_error_normalizes_to_error
+--- PASS: TestParseDiagnostics/msvc_fatal_error_normalizes_to_error (0.00s)
+=== NAME  TestParseDiagnostics
+=== RUN   TestParseDiagnostics/gcc_clang_error_with_col
+--- PASS: TestParseDiagnostics/gcc_clang_error_with_col (0.00s)
+=== NAME  TestParseDiagnostics
+=== RUN   TestParseDiagnostics/gcc_clang_warning_captures_-W_flag_as_code
+--- PASS: TestParseDiagnostics/gcc_clang_warning_captures_-W_flag_as_code (0.00s)
+=== NAME  TestParseDiagnostics
+=== RUN   TestParseDiagnostics/gcc_clang_note_without_col
+--- PASS: TestParseDiagnostics/gcc_clang_note_without_col (0.00s)
+=== NAME  TestParseDiagnostics
+=== RUN   TestParseDiagnostics/cmake_error_with_location
+--- PASS: TestParseDiagnostics/cmake_error_with_location (0.00s)
+=== NAME  TestParseDiagnostics
+=== RUN   TestParseDiagnostics/cmake_warning_without_location
+--- PASS: TestParseDiagnostics/cmake_warning_without_location (0.00s)
+=== NAME  TestParseDiagnostics
+=== RUN   TestParseDiagnostics/msvc_linker_LNK_error
+--- PASS: TestParseDiagnostics/msvc_linker_LNK_error (0.00s)
+=== NAME  TestParseDiagnostics
+=== RUN   TestParseDiagnostics/msvc_linker_LINK_label_is_file-less
+--- PASS: TestParseDiagnostics/msvc_linker_LINK_label_is_file-less (0.00s)
+=== NAME  TestParseDiagnostics
+=== RUN   TestParseDiagnostics/gnu_ld_undefined_reference_best_effort
+--- PASS: TestParseDiagnostics/gnu_ld_undefined_reference_best_effort (0.00s)
+=== NAME  TestParseDiagnostics
+=== RUN   TestParseDiagnostics/unrecognized_lines_are_dropped
+--- PASS: TestParseDiagnostics/unrecognized_lines_are_dropped (0.00s)
+=== NAME  TestParseDiagnostics
+=== RUN   TestParseDiagnostics/order_preserved_across_mixed_formats
+--- PASS: TestParseDiagnostics/order_preserved_across_mixed_formats (0.00s)
+=== NAME  TestParseDiagnostics
+--- PASS: TestParseDiagnostics (0.00s)
+=== NAME  
+=== RUN   TestBoundedBufferCaps
+--- PASS: TestBoundedBufferCaps (0.00s)
+=== NAME  
+=== RUN   TestPurgeBuildDirWithinSourceSymlinkEscape
+--- PASS: TestPurgeBuildDirWithinSourceSymlinkEscape (0.00s)
+=== NAME  
+=== RUN   TestRunCommandTimeoutReturnsPromptly
+--- PASS: TestRunCommandTimeoutReturnsPromptly (0.50s)
+=== NAME  
+=== RUN   TestProcGroupStartDisablesJobAfterOpenProcessFailure
+--- PASS: TestProcGroupStartDisablesJobAfterOpenProcessFailure (0.01s)
+=== NAME  
+=== RUN   TestCmakeBuildRejectsFlagTarget
+--- PASS: TestCmakeBuildRejectsFlagTarget (0.00s)
+=== NAME  
+=== RUN   TestVcpkgSearchRejectsFlagQuery
+--- PASS: TestVcpkgSearchRejectsFlagQuery (0.00s)
+=== NAME  
+=== RUN   TestPresetFlagEqualsForm
+--- PASS: TestPresetFlagEqualsForm (0.00s)
+=== NAME  
+=== RUN   TestCmakeListPresetsDelegatesToCMake
+--- PASS: TestCmakeListPresetsDelegatesToCMake (2.09s)
+=== NAME  
+=== RUN   TestCmakeListPresetsRefusesUnknownOutput
+--- PASS: TestCmakeListPresetsRefusesUnknownOutput (0.00s)
+=== NAME  
+=== RUN   TestSettleConfiguredCacheFailureClearsPriorMapping
+--- PASS: TestSettleConfiguredCacheFailureClearsPriorMapping (0.00s)
+=== NAME  
+=== RUN   TestPresetArgvWiring
+cbuild: configured-cache identity unavailable: CMake completion line not found
+--- PASS: TestPresetArgvWiring (2.52s)
+=== NAME  
+=== RUN   TestCmakeCleanPurgeRefusesNonDirectoryTarget
+--- PASS: TestCmakeCleanPurgeRefusesNonDirectoryTarget (0.00s)
+=== NAME  
+=== RUN   TestExecutionResultsRetainRawTailInMCPChannels
+=== RUN   TestExecutionResultsRetainRawTailInMCPChannels/configure
+--- PASS: TestExecutionResultsRetainRawTailInMCPChannels/configure (0.00s)
+=== NAME  TestExecutionResultsRetainRawTailInMCPChannels
+=== RUN   TestExecutionResultsRetainRawTailInMCPChannels/build
+--- PASS: TestExecutionResultsRetainRawTailInMCPChannels/build (0.00s)
+=== NAME  TestExecutionResultsRetainRawTailInMCPChannels
+=== RUN   TestExecutionResultsRetainRawTailInMCPChannels/test
+--- PASS: TestExecutionResultsRetainRawTailInMCPChannels/test (0.00s)
+=== NAME  TestExecutionResultsRetainRawTailInMCPChannels
+=== RUN   TestExecutionResultsRetainRawTailInMCPChannels/workflow
+--- PASS: TestExecutionResultsRetainRawTailInMCPChannels/workflow (0.00s)
+=== NAME  TestExecutionResultsRetainRawTailInMCPChannels
+=== RUN   TestExecutionResultsRetainRawTailInMCPChannels/clean
+--- PASS: TestExecutionResultsRetainRawTailInMCPChannels/clean (0.00s)
+=== NAME  TestExecutionResultsRetainRawTailInMCPChannels
+=== RUN   TestExecutionResultsRetainRawTailInMCPChannels/vcpkg_install
+--- PASS: TestExecutionResultsRetainRawTailInMCPChannels/vcpkg_install (0.00s)
+=== NAME  TestExecutionResultsRetainRawTailInMCPChannels
+=== RUN   TestExecutionResultsRetainRawTailInMCPChannels/vcpkg_list
+--- PASS: TestExecutionResultsRetainRawTailInMCPChannels/vcpkg_list (0.00s)
+=== NAME  TestExecutionResultsRetainRawTailInMCPChannels
+=== RUN   TestExecutionResultsRetainRawTailInMCPChannels/vcpkg_search
+--- PASS: TestExecutionResultsRetainRawTailInMCPChannels/vcpkg_search (0.00s)
+=== NAME  TestExecutionResultsRetainRawTailInMCPChannels
+=== RUN   TestExecutionResultsRetainRawTailInMCPChannels/nonempty
+--- PASS: TestExecutionResultsRetainRawTailInMCPChannels/nonempty (0.00s)
+=== NAME  TestExecutionResultsRetainRawTailInMCPChannels
+--- PASS: TestExecutionResultsRetainRawTailInMCPChannels (0.00s)
+=== NAME  
+=== RUN   TestProjectOperationWaitIsCancellableAndIsolated
+--- PASS: TestProjectOperationWaitIsCancellableAndIsolated (0.02s)
+=== NAME  
+=== RUN   TestMutatingToolsWaitForProjectOperation
+=== RUN   TestMutatingToolsWaitForProjectOperation/configure
+--- PASS: TestMutatingToolsWaitForProjectOperation/configure (0.03s)
+=== NAME  TestMutatingToolsWaitForProjectOperation
+=== RUN   TestMutatingToolsWaitForProjectOperation/build
+--- PASS: TestMutatingToolsWaitForProjectOperation/build (0.02s)
+=== NAME  TestMutatingToolsWaitForProjectOperation
+=== RUN   TestMutatingToolsWaitForProjectOperation/test
+--- PASS: TestMutatingToolsWaitForProjectOperation/test (0.02s)
+=== NAME  TestMutatingToolsWaitForProjectOperation
+=== RUN   TestMutatingToolsWaitForProjectOperation/clean
+--- PASS: TestMutatingToolsWaitForProjectOperation/clean (0.02s)
+=== NAME  TestMutatingToolsWaitForProjectOperation
+=== RUN   TestMutatingToolsWaitForProjectOperation/purge
+--- PASS: TestMutatingToolsWaitForProjectOperation/purge (0.02s)
+=== NAME  TestMutatingToolsWaitForProjectOperation
+=== RUN   TestMutatingToolsWaitForProjectOperation/workflow
+--- PASS: TestMutatingToolsWaitForProjectOperation/workflow (0.04s)
+=== NAME  TestMutatingToolsWaitForProjectOperation
+=== RUN   TestMutatingToolsWaitForProjectOperation/vcpkg_install
+--- PASS: TestMutatingToolsWaitForProjectOperation/vcpkg_install (0.02s)
+=== NAME  TestMutatingToolsWaitForProjectOperation
+--- PASS: TestMutatingToolsWaitForProjectOperation (0.25s)
+=== NAME  
+=== RUN   TestConfigureInvalidatesBindingsBeforeUnsettledResult
+cbuild: configured-cache identity unavailable: CMake completion line not found
+--- PASS: TestConfigureInvalidatesBindingsBeforeUnsettledResult (1.13s)
+=== NAME  
+=== RUN   TestParseCTest
+--- PASS: TestParseCTest (0.00s)
+=== NAME  
+=== RUN   TestParseCTestEmpty
+--- PASS: TestParseCTestEmpty (0.00s)
+=== NAME  
+=== RUN   TestParseVcpkgList
+--- PASS: TestParseVcpkgList (0.00s)
+=== NAME  
+=== RUN   TestParseVcpkgInstalled
+--- PASS: TestParseVcpkgInstalled (0.00s)
+=== NAME  
+=== RUN   TestParseVcpkgSearch
+--- PASS: TestParseVcpkgSearch (0.00s)
+=== NAME  
+=== RUN   TestParseVcpkgSearchGarbageSafe
+--- PASS: TestParseVcpkgSearchGarbageSafe (0.00s)
+=== NAME  
+=== RUN   TestValidateConfiguredCacheRejectsBinaryDirOnly
+--- PASS: TestValidateConfiguredCacheRejectsBinaryDirOnly (0.00s)
+=== NAME  
+=== RUN   TestCTestReportsCaptureTruncation
+=== RUN   TestCTestReportsCaptureTruncation/small
+--- PASS: TestCTestReportsCaptureTruncation/small (1.88s)
+=== NAME  TestCTestReportsCaptureTruncation
+=== RUN   TestCTestReportsCaptureTruncation/large
+--- PASS: TestCTestReportsCaptureTruncation/large (0.12s)
+=== NAME  TestCTestReportsCaptureTruncation
+--- PASS: TestCTestReportsCaptureTruncation (2.46s)
+=== NAME  
+=== RUN   TestProjectPathKeyCasePolicy
+--- PASS: TestProjectPathKeyCasePolicy (0.00s)
+=== NAME  
+=== RUN   TestConfiguredBindingUsesNormalizedSourceKey
+--- PASS: TestConfiguredBindingUsesNormalizedSourceKey (0.00s)
+=== NAME  
+=== RUN   TestCMakeIntegration
+--- PASS: TestCMakeIntegration (8.24s)
+=== NAME  
+=== RUN   TestVcpkgIntegration
+    integration_test.go:230: VCPKG_ROOT not set; skipping vcpkg integration test
+--- SKIP: TestVcpkgIntegration (0.00s)
+=== NAME  
+=== RUN   TestStdioProtocolRoundTrip
+--- PASS: TestStdioProtocolRoundTrip (0.88s)
+=== NAME  
+PASS
