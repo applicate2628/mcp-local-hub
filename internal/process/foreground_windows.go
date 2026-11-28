@@ -45,7 +45,10 @@ type ForegroundResult struct {
 // An incomplete result retains its original owners for the caller to inspect;
 // this operation never retries creation or a failed native terminal action.
 func RunForeground(ctx context.Context, cmd *exec.Cmd, stdin, stdout, stderr *os.File) (ForegroundResult, error) {
-	return runForeground(ctx, cmd, stdin, stdout, stderr, foregroundDependencies{newJob: NewJobObserved, start: StartWithJobFilesOriginal})
+	return runForeground(ctx, cmd, stdin, stdout, stderr, foregroundDependencies{newJob: NewJobObserved,
+		start: func(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File) (*AtCreateJobProcess, error) {
+			return startWithJobFilesOriginalCore(job, cmd, stdin, stdout, stderr, &startWithJobObserverOptions{foreground: true}, nil, nil)
+		}})
 }
 
 // RunForegroundAdmitted uses the same foreground lifecycle with a required
@@ -56,7 +59,7 @@ func RunForegroundAdmitted(ctx context.Context, cmd *exec.Cmd, stdin, stdout, st
 	}
 	return runForeground(ctx, cmd, stdin, stdout, stderr, foregroundDependencies{newJob: NewJobObserved, admission: admission,
 		start: func(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File) (*AtCreateJobProcess, error) {
-			return startWithJobFilesOriginalAdmittedContext(ctx, job, cmd, stdin, stdout, stderr, admission)
+			return startWithJobFilesOriginalCore(job, cmd, stdin, stdout, stderr, &startWithJobObserverOptions{foreground: true}, admission, ctx)
 		}})
 }
 

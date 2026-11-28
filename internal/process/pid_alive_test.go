@@ -26,6 +26,7 @@ func TestProcessQueryPidState_TristateClassification(t *testing.T) {
 	}
 
 	cmd := exec.Command(os.Args[0], "-test.run=TestProcessQueryPidState_HelperSleep")
+	NoConsole(cmd)
 	cmd.Env = append(os.Environ(), "MCPHUB_QUERY_PID_STATE_HELPER=1")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start helper child: %v", err)
@@ -71,6 +72,7 @@ func TestProcessQueryPidState_TristateClassification(t *testing.T) {
 
 func TestTerminatePID(t *testing.T) {
 	cmd := exec.Command(os.Args[0], "-test.run=TestTerminatePID_HelperSleep")
+	NoConsole(cmd)
 	cmd.Env = append(os.Environ(), "MCPHUB_TERMINATE_PID_HELPER=1")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start helper child: %v", err)
@@ -133,6 +135,7 @@ func exitedProcessPID(t *testing.T) int {
 	} else {
 		cmd = exec.Command("sh", "-c", "exit 0")
 	}
+	NoConsole(cmd)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start short-lived child: %v", err)
 	}
