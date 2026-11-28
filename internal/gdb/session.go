@@ -267,6 +267,27 @@ func (s *session) Command(ctx context.Context, command string) (string, error) {
 	return reply.output, err
 }
 
+// commandTiming holds elapsed milestones for one diagnostic request. Writes
+// and reads overlap; neither is assumed to complete first.
+type commandTiming struct {
+	entered, acquired, written, replied time.Time
+}
+
+type commandTimingKey struct{}
+
+func (t *commandTiming) report(w io.Writer) {
+	elapsed := func(at time.Time) int64 {
+		if at.IsZero() {
+			return -1
+		}
+		return at.Sub(t.entered).Microseconds()
+	}
+	// Fixed keys and durations only. Never include requests, session identity,
+	// commands, output, paths, error strings, or wall-clock values.
+	_, _ = fmt.Fprintf(w, "gdb-command-timing acquired_us=%d write_done_us=%d reply_done_us=%d total_us=%d\n",
+		elapsed(t.acquired), elapsed(t.written), elapsed(t.replied), elapsed(time.Now()))
+}
+
 func (s *session) command(ctx context.Context, command string, console *strings.Builder) (miReply, error) {
 	if s.isClosing() {
 		return miReply{}, errSessionClosing
@@ -274,7 +295,11 @@ func (s *session) command(ctx context.Context, command string, console *strings.
 	if err := s.acquireReader(ctx); err != nil {
 		return miReply{}, err
 	}
-	reply, err := s.runCommand(ctx, command, console)
+	timing, _ := ctx.Value(commandTimingKey{}).(*commandTiming)
+	if timing != nil {
+		timing.acquired = time.Now()
+	}
+	reply, err := s.runCommand(ctx, command, console, timing)
 	s.releaseReader()
 	if !s.isClosing() {
 		return reply, err
@@ -290,7 +315,7 @@ func (s *session) command(ctx context.Context, command string, console *strings.
 }
 
 // runCommand owns the serialized MI reader for the entire write/read exchange.
-func (s *session) runCommand(ctx context.Context, command string, console *strings.Builder) (miReply, error) {
+func (s *session) runCommand(ctx context.Context, command string, console *strings.Builder, timing *commandTiming) (miReply, error) {
 	ctx, cancel := context.WithTimeout(ctx, runResultDeadline)
 	defer cancel()
 	if s.isClosing() {
@@ -309,6 +334,9 @@ func (s *session) runCommand(ctx context.Context, command string, console *strin
 	writeDone := make(chan error, 1)
 	go func() {
 		err := write()
+		if timing != nil {
+			timing.written = time.Now() // published through writeDone before reporting
+		}
 		if err != nil {
 			cancel()
 		}
@@ -325,6 +353,9 @@ func (s *session) runCommand(ctx context.Context, command string, console *strin
 		s.beginClosing()
 	}
 	reply, readErr := s.readResult(ctx, console, closeAfterWrite)
+	if timing != nil {
+		timing.replied = time.Now()
+	}
 	return reply, errors.Join(readErr, awaitWrite(), finish())
 }
 

@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -44,6 +47,7 @@ type GdbServer struct {
 	resolveGdbPath func() string
 	startSession   startSessionFunc
 	probeVersion   versionProbeFunc
+	commandTimings io.Writer // explicit diagnostic opt-in, never protocol stdout
 
 	mu       sync.Mutex
 	sessions map[string]*session
@@ -54,7 +58,11 @@ type GdbServer struct {
 // and serves the MCP protocol over stdio until ctx is cancelled or the transport
 // closes. Single source of truth for every entry point.
 func Run(ctx context.Context) error {
-	return newServer().run(ctx, &mcp.StdioTransport{})
+	gs := newServer()
+	if os.Getenv("MCPHUB_GDB_COMMAND_TIMING") == "1" {
+		gs.commandTimings = os.Stderr
+	}
+	return gs.run(ctx, &mcp.StdioTransport{})
 }
 
 func (gs *GdbServer) run(ctx context.Context, transport mcp.Transport) error {
@@ -262,6 +270,11 @@ func (gs *GdbServer) trackSession(sess *session) string {
 // returning the console output (or a tool error for an unknown session / a gdb
 // error result).
 func (gs *GdbServer) commandTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if sink := gs.commandTimings; sink != nil {
+		timing := &commandTiming{entered: time.Now()}
+		defer timing.report(sink)
+		ctx = context.WithValue(ctx, commandTimingKey{}, timing)
+	}
 	var args struct {
 		SessionID string `json:"session_id"`
 		Command   string `json:"command"`
