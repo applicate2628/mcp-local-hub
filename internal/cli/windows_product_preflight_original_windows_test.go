@@ -67,7 +67,7 @@ func newOriginalPreflightFixture(t *testing.T, built *windowsCanonicalEntryFixtu
 	if _, err := source.acquirePrior(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	return &WindowsProductTxn{Opts: WindowsProductTxnOpts{
+	return &WindowsProductTxn{Opts: WindowsProductTxnOpts{JournalAllowance: productJournalFixtureAllowance(),
 		Context: t.Context(), Mode: WindowsProductPairModeUpgrade, EntrySet: source,
 		CanonicalEntryPath: targets.CanonicalEntryPath, ProductPath: targets.ProductPath, IdentityPath: targets.IdentityPath,
 		StagedProduct: paths.ProductPath, LegacyWindowlessPath: filepath.Join(root, "mcphub-windowless.exe"),

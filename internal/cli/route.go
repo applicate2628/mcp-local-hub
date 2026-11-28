@@ -35,22 +35,6 @@
 //     maintenance mechanisms: session-expiry sweeps and Serena backend-loss
 //     reconciliation. Both mutate only this route process's in-memory stores
 //     and stop with runRoute's context.
-//
-// Implementation note (Adjacent finding, see the Increment-1 implementation
-// report): the serena/LSP router HANDLER itself (internal/gui/serena_router.go
-// + lsp_router.go) was not relocated into a GUI-independent package this
-// increment — a verified, evidenced dependency/test-coupling conflict (not a
-// judgment call) blocks a clean literal move within this phase's scope. This
-// command therefore reuses the existing, UNCHANGED gui.Server construction and
-// handler wiring directly via the new gui.Server.RouteHandler() adapter
-// (internal/gui/route_adapter.go), which mounts ONLY /serena/mcp and
-// /lsp/<language>/mcp — none of the GUI's other HTTP surface (dashboard,
-// settings, secrets, migration, hub-aggregate, tray) is reachable through it.
-// What this command deliberately does NOT do is call gui.Server.Start /
-// ContinueWithGUIListener (which also binds the hub-aggregate listener, reads
-// gui-preferences.yaml, and starts several GUI-only background goroutines) or
-// composeGuiServerRestartV3 (RestartV3 + single-instance lock) — this process
-// is a bare HTTP listener serving RouteHandler() and nothing more.
 package cli
 
 import (
@@ -70,7 +54,7 @@ import (
 	"mcp-local-hub/internal/api/lsp_routing"
 	"mcp-local-hub/internal/api/serena_routing"
 	"mcp-local-hub/internal/config"
-	"mcp-local-hub/internal/gui"
+	"mcp-local-hub/internal/mcproute"
 )
 
 // DefaultRouteDaemonPort is the fixed secondary port `mcphub route` binds by
@@ -141,11 +125,11 @@ func routeSerenaBackendStatus(ctx context.Context) ([]api.DaemonStatus, error) {
 // add a second reconciliation engine or a detached poll: cancellation is the
 // route daemon context, and ReconcileSerenaBackendLossViaIPC remains the sole
 // owner of first-observation, idle-grace, PID-change, and absence semantics.
-func startRouteSerenaBackendLossReconcile(ctx context.Context, s *gui.Server, interval time.Duration) {
+func startRouteSerenaBackendLossReconcile(ctx context.Context, s *mcproute.WorkspaceRoutes, interval time.Duration) {
 	if s == nil {
 		return
 	}
-	gui.SetSerenaBackendStatusFn(routeSerenaBackendStatus)
+	mcproute.SetSerenaBackendStatusFn(routeSerenaBackendStatus)
 	go runSerenaBackendLossReconcileTicker(ctx, s, interval)
 }
 
@@ -199,52 +183,15 @@ and RestartV3 handoff are untouched.`,
 	return cmd
 }
 
-// runRoute is the body shared between the cobra command and (later, if the
-// supervisor descriptor wiring needs it) a programmatic entry point. It binds
-// its OWN listener before constructing gui.Server so an ephemeral (--port 0)
-// bind resolves to a concrete port BEFORE Config.Port is set — the DNS-rebind
-// / same-origin guard (gui.Server.allowedHost/allowedOrigin, delegating to
-// internal/mcproute) reads Config.Port when the Server's own listener-bound
-// atomic is unset (which it always is here, since this command never calls
-// gui.Server.Start/ContinueWithGUIListener), so the guard needs a concrete,
-// already-resolved port at construction time.
-// buildRouteServer constructs the gui.Server the route daemon serves,
-// wired EXACTLY the way runRoute wires it (read-only serena+LSP routers, no
-// cutover primitives, no GUI-owned background tickers). Extracted (sub-increment 2a)
-// so a test can exercise the real, shipped construction path via
-// s.RouteHandler() without needing a real TCP listener/goroutine — see
-// route_i6_readonly_test.go's mutation-proven regression guard for the F1
-// no-mutation invariant (registry + supervisor-intent untouched on an
-// unregistered-workspace tool-call), which this increment's new
-// --reconcile-mcp-front command makes reachable from a second, additional
-// client-facing port.
-// routeSessionStores are the session routers buildRouteServer created, handed
-// back so the caller can drive their periodic expiry.
-//
-// WHY THEY ARE RETURNED (codex bot PR #588). These maps are OWNED by this
-// process: `mcphub route` constructs its own serena and LSP SessionRouters, and
-// the sweeps that expire them (runSessionCleanupTicker /
-// runLSPSessionCleanupTicker) live in the GUI's lifecycle and drive the GUI's
-// OWN routers. Nothing expired these, so a long-lived route daemon — which is
-// exactly what this process is designed to be, supervisor-managed and always
-// on — accumulated one binding per MCP session for its entire uptime and never
-// released any. The file header's GUI-owned-loop restriction is about not
-// performing shared-state work; expiring and reconciling this process's own
-// in-memory maps are neither.
-//
-// lsp may be nil: the LSP router is only wired when the mcp-language-server
-// manifest loads and parses.
+// routeSessionStores holds this daemon's workspace bindings for expiry.
+// lsp is nil when the mcp-language-server manifest fails to load or parse.
 type routeSessionStores struct {
 	serena *serena_routing.SessionRouter
 	lsp    *lsp_routing.SessionRouter
 }
 
-func buildRouteServer(cmd *cobra.Command, port int) (*gui.Server, *routeSessionStores, error) {
-	s := gui.NewServer(gui.Config{
-		Port:    port,
-		Version: versionString(),
-		PID:     os.Getpid(),
-	})
+func buildRouteServer(cmd *cobra.Command, port int) (*mcproute.WorkspaceRoutes, *routeSessionStores, error) {
+	s := mcproute.NewWorkspaceRoutes(func() int { return port }, time.Now())
 	stores := &routeSessionStores{}
 
 	registryPath, regErr := api.DefaultRegistryPath()
@@ -283,7 +230,7 @@ func buildRouteServer(cmd *cobra.Command, port int) (*gui.Server, *routeSessionS
 		lspResolver := lsp_routing.NewWorkspaceResolverWithObserver(registryObserver, m.Languages)
 		lspSessions := lsp_routing.NewSessionRouter()
 		// Read-only wiring (F1): nils AutoRegisterFn — see
-		// gui.Server.SetLSPRouterReadOnly's doc comment and the file header.
+		// mcproute.WorkspaceRoutes.SetLSPRouterReadOnly's doc comment and the file header.
 		s.SetLSPRouterReadOnly(lspResolver, lspSessions, m.Languages)
 		stores.lsp = lspSessions
 	}
@@ -291,10 +238,10 @@ func buildRouteServer(cmd *cobra.Command, port int) (*gui.Server, *routeSessionS
 }
 
 // runRouteSessionExpiry starts the periodic session sweeps for the routers
-// THIS process owns, reusing the GUI's own ticker drivers.
+// this process owns, using the same ticker drivers as the GUI listener.
 //
 // Both goroutines stop with ctx, which runRoute cancels on SIGINT/SIGTERM, so
-// they cannot outlive the daemon. The serena sweep is passed the gui.Server so
+// they cannot outlive the daemon. The serena sweep is passed the workspace router so
 // it also reclaims the server's two router-owned session stores — those are
 // in-memory maps belonging to THIS process's handler, and SweepSerenaSessions
 // touches nothing else (no registry, no supervisor-intent, no shared log), so
@@ -306,7 +253,7 @@ func buildRouteServer(cmd *cobra.Command, port int) (*gui.Server, *routeSessionS
 // (serena_routing.DefaultSessionTTL == lsp_routing.DefaultSessionTTL ==
 // daemonSessionTTL == 24h) — the same single-ttl shape runSessionCleanupTicker
 // already uses for the sticky router and the server-owned stores.
-func runRouteSessionExpiry(ctx context.Context, s *gui.Server, stores *routeSessionStores, interval, ttl time.Duration) {
+func runRouteSessionExpiry(ctx context.Context, s *mcproute.WorkspaceRoutes, stores *routeSessionStores, interval, ttl time.Duration) {
 	if stores == nil {
 		return
 	}
@@ -318,6 +265,8 @@ func runRouteSessionExpiry(ctx context.Context, s *gui.Server, stores *routeSess
 	}
 }
 
+// runRoute binds before constructing the router so the Host and Origin
+// guards receive the actual port when the listener uses --port 0.
 func runRoute(ctx context.Context, cmd *cobra.Command, port int) error {
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
@@ -336,8 +285,8 @@ func runRoute(ctx context.Context, cmd *cobra.Command, port int) error {
 	// GUI-owned sweeps drive the GUI's routers, not these (codex bot PR #588).
 	runRouteSessionExpiry(ctx, s, sessionStores, sessionCleanupInterval, serena_routing.DefaultSessionTTL)
 	// Reconcile only this route server's in-memory session stores against the
-	// supervisor's durable daemon generation. The reconciler is the existing GUI
-	// lifecycle owner; it has no registry/intent writes and exits with ctx.
+	// supervisor's durable daemon generation. The reconciler is the workspace router's
+	// session owner; it has no registry/intent writes and exits with ctx.
 	startRouteSerenaBackendLossReconcile(ctx, s, routeBackendLossReconcileInterval)
 
 	// Deliberately absent (Increment 1 constraint — see file header):
@@ -362,6 +311,11 @@ func runRoute(ctx context.Context, cmd *cobra.Command, port int) error {
 	errCh := make(chan error, 1)
 	go func() { errCh <- httpSrv.Serve(ln) }()
 
+	// This composition owns only the workspace HTTP server. The separate
+	// aggregate remains owned by the legacy GUI composition.
+	stopAggregateStatus := startRouteAggregateStatus(ctx, cmd.ErrOrStderr(), func() string { return api.RouteAggregateNotOwner })
+	defer stopAggregateStatus()
+
 	fmt.Fprintf(cmd.OutOrStdout(),
 		"mcphub route: serving /serena/mcp + /lsp/<language>/mcp on 127.0.0.1:%d (pid %d)\n",
 		actualPort, os.Getpid())
@@ -385,7 +339,7 @@ func runRoute(ctx context.Context, cmd *cobra.Command, port int) error {
 func newRouteHTTPServer(handler http.Handler) *http.Server {
 	return &http.Server{
 		Handler:           handler,
-		ReadHeaderTimeout: gui.GUIReadHeaderTimeout,
+		ReadHeaderTimeout: mcproute.ReadHeaderTimeout,
 		ReadTimeout:       routeRequestReadTimeout,
 	}
 }

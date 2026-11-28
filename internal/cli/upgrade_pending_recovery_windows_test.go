@@ -107,7 +107,8 @@ func TestPendingRecoveryEngineBindsOwnJournalReadBeforeEffects(t *testing.T) {
 		t.Fatal("journal mismatch opened task/lifecycle owner")
 		return nil, nil
 	}
-	if _, err := reconcileWindowsProductRecovery(req); !errors.Is(err, ErrWindowsProductRecoveryIdentity) {
+	if _, err := reconcileWindowsProductRecovery(req); !errors.Is(err, ErrWindowsProductRecoveryIdentity) ||
+		!strings.Contains(err.Error(), "expected V3 journal changed before recovery") {
 		t.Fatalf("journal conflict=%v", err)
 	}
 	assertPairFile(t, f.product, f.newProduct)

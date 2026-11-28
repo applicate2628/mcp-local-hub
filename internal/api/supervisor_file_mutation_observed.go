@@ -461,8 +461,10 @@ func preflightPreparedSupervisorIntentLockHeld(ctx context.Context, path string,
 		return errors.New("prepared canonical intent admission missing")
 	}
 	prepare := prepareObservedSupervisorIntent(path, func(current *SupervisorIntentFile) (bool, error) {
-		replacement := cloneSupervisorIntentFile(desired)
-		replacement.IntentGeneration = current.IntentGeneration
+		replacement, err := cloneSupervisorIntentReplacement(current, desired)
+		if err != nil {
+			return false, err
+		}
 		*current = *replacement
 		return true, nil
 	})
