@@ -1,0 +1,1277 @@
+{
+  "commands": [
+    {
+      "argv": [
+        "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+        "rev-parse",
+        "HEAD"
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub664-363b",
+      "stdout": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v20\\head.stdout.txt",
+      "stderr": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v20\\head.stderr.txt",
+      "captures_measured": true,
+      "command_success": true,
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 41,
+          "bytes_stored": 41,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 594263.7508484
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 594263.7508112
+        }
+      },
+      "work_seconds": 30,
+      "cleanup_seconds": 10,
+      "native_owner": {
+        "path": "@@RECOVERY_ORCHESTRARIUM_INSTALLATION_ROOT_JSON@@\\releases\\dad4875f\\app\\scripts\\process_supervision\\windows_job.py",
+        "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+      },
+      "console": {
+        "attached": true,
+        "visible": false
+      },
+      "stdin_mode": "null",
+      "before_resume_entered": true,
+      "before_resume_returned": true,
+      "before_resume_deadline_exceeded": false,
+      "phases_elapsed_seconds": {
+        "initial_save_started": 2.7099973522126675e-05,
+        "initial_save_finished": 0.0006092999828979373,
+        "launch_entered": 0.0006107999943196774,
+        "before_resume_entered": 0.004919899976812303,
+        "before_resume_returned": 0.0049211999867111444,
+        "launch_returned": 0.004937299992889166,
+        "launch_exception": null,
+        "external_settle_end": 0.03642190003301948
+      },
+      "quiescence_state": "complete",
+      "original_pid": 336588,
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "work_elapsed_seconds": 0.036237800028175116,
+      "cleanup_interval_seconds": 10.0,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "exit_code": 0,
+      "worker_join_observations": [
+        {
+          "name": "head-stdout",
+          "ident": 344208,
+          "native_id": 344208,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.03648410004097968,
+          "remaining_seconds": 9.999753699987195,
+          "last_entered_seconds": 0.03648410004097968,
+          "last_remaining_seconds": 9.999753699987195,
+          "returned_seconds": 0.03649590001441538,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.0358123000478372
+        },
+        {
+          "name": "head-stderr",
+          "ident": 108516,
+          "native_id": 108516,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.03650319995358586,
+          "remaining_seconds": 9.99973460007459,
+          "last_entered_seconds": 0.03650319995358586,
+          "last_remaining_seconds": 9.99973460007459,
+          "returned_seconds": 0.036510600009933114,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.03577509999740869
+        }
+      ],
+      "seconds": 0.03653129993472248,
+      "cleanup_deadline_exceeded": false,
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "original_input_writers_retained": true,
+      "original_input_writer_joined": false,
+      "completion_receiving": {
+        "schema": "ordinary-original-native-io-completion-v1",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "io": {
+          "stdout": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 41,
+            "bytes_stored": 41,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 594263.7508484
+          },
+          "stderr": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 0,
+            "bytes_stored": 0,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 594263.7508112
+          }
+        },
+        "stdin_mode": "null",
+        "stdin": {},
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "original_input_writer_joined": false,
+        "lifecycle_state": "CLOSED"
+      },
+      "stdout_sha256": "6286fde56a4136dea90ff072f706018088d3eef7a22ae5bbdd05d0df13770e8f",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all"
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub664-363b",
+      "stdout": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v20\\publication-worktree-status-before.stdout.txt",
+      "stderr": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v20\\publication-worktree-status-before.stderr.txt",
+      "captures_measured": true,
+      "command_success": true,
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 594263.8061522
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 594263.8061244
+        }
+      },
+      "work_seconds": 30,
+      "cleanup_seconds": 10,
+      "native_owner": {
+        "path": "@@RECOVERY_ORCHESTRARIUM_INSTALLATION_ROOT_JSON@@\\releases\\dad4875f\\app\\scripts\\process_supervision\\windows_job.py",
+        "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+      },
+      "console": {
+        "attached": true,
+        "visible": false
+      },
+      "stdin_mode": "null",
+      "before_resume_entered": true,
+      "before_resume_returned": true,
+      "before_resume_deadline_exceeded": false,
+      "phases_elapsed_seconds": {
+        "initial_save_started": 2.3699947632849216e-05,
+        "initial_save_finished": 0.00035589991603046656,
+        "launch_entered": 0.00035719992592930794,
+        "before_resume_entered": 0.003989699995145202,
+        "before_resume_returned": 0.003991499892435968,
+        "launch_returned": 0.004009899916127324,
+        "launch_exception": null,
+        "external_settle_end": 0.053122299956157804
+      },
+      "quiescence_state": "complete",
+      "original_pid": 263432,
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "work_elapsed_seconds": 0.05293759994674474,
+      "cleanup_interval_seconds": 10.0,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "exit_code": 0,
+      "worker_join_observations": [
+        {
+          "name": "publication-worktree-status-before-stdout",
+          "ident": 391768,
+          "native_id": 391768,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.053215399966575205,
+          "remaining_seconds": 9.99972219998017,
+          "last_entered_seconds": 0.053215399966575205,
+          "last_remaining_seconds": 9.99972219998017,
+          "returned_seconds": 0.053221099893562496,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.05249139992520213
+        },
+        {
+          "name": "publication-worktree-status-before-stderr",
+          "ident": 305100,
+          "native_id": 305100,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.053224399918690324,
+          "remaining_seconds": 9.999713200028054,
+          "last_entered_seconds": 0.053224399918690324,
+          "last_remaining_seconds": 9.999713200028054,
+          "returned_seconds": 0.05322539992630482,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.05246359994634986
+        }
+      ],
+      "seconds": 0.05323949991725385,
+      "cleanup_deadline_exceeded": false,
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "original_input_writers_retained": true,
+      "original_input_writer_joined": false,
+      "completion_receiving": {
+        "schema": "ordinary-original-native-io-completion-v1",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "io": {
+          "stdout": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 0,
+            "bytes_stored": 0,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 594263.8061522
+          },
+          "stderr": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 0,
+            "bytes_stored": 0,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 594263.8061244
+          }
+        },
+        "stdin_mode": "null",
+        "stdin": {},
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "original_input_writer_joined": false,
+        "lifecycle_state": "CLOSED"
+      },
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+        "fetch",
+        "origin",
+        "27d90e626465dc9a3a012e50785d62785d4c5e7e"
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub664-363b",
+      "stdout": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v20\\fetch-published-docs-checkpoint.stdout.txt",
+      "stderr": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v20\\fetch-published-docs-checkpoint.stderr.txt",
+      "captures_measured": true,
+      "command_success": true,
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 594264.5819927
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 130,
+          "bytes_stored": 130,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 594264.5820283
+        }
+      },
+      "work_seconds": 120,
+      "cleanup_seconds": 10,
+      "native_owner": {
+        "path": "@@RECOVERY_ORCHESTRARIUM_INSTALLATION_ROOT_JSON@@\\releases\\dad4875f\\app\\scripts\\process_supervision\\windows_job.py",
+        "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+      },
+      "console": {
+        "attached": true,
+        "visible": false
+      },
+      "stdin_mode": "null",
+      "before_resume_entered": true,
+      "before_resume_returned": true,
+      "before_resume_deadline_exceeded": false,
+      "phases_elapsed_seconds": {
+        "initial_save_started": 3.550003748387098e-05,
+        "initial_save_finished": 0.0005144000751897693,
+        "launch_entered": 0.000515500083565712,
+        "before_resume_entered": 0.004302600049413741,
+        "before_resume_returned": 0.004303900059312582,
+        "launch_returned": 0.004321400076150894,
+        "launch_exception": null,
+        "external_settle_end": 0.7728800000622869
+      },
+      "quiescence_state": "complete",
+      "original_pid": 289344,
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "work_elapsed_seconds": 0.7727300000842661,
+      "cleanup_interval_seconds": 10.0,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "exit_code": 0,
+      "worker_join_observations": [
+        {
+          "name": "fetch-published-docs-checkpoint-stdout",
+          "ident": 20112,
+          "native_id": 20112,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.7729150999803096,
+          "remaining_seconds": 9.999814900103956,
+          "last_entered_seconds": 0.7729150999803096,
+          "last_remaining_seconds": 9.999814900103956,
+          "returned_seconds": 0.7729229000397027,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.7722332000266761
+        },
+        {
+          "name": "fetch-published-docs-checkpoint-stderr",
+          "ident": 75540,
+          "native_id": 75540,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.7729283000808209,
+          "remaining_seconds": 9.999801700003445,
+          "last_entered_seconds": 0.7729283000808209,
+          "last_remaining_seconds": 9.999801700003445,
+          "returned_seconds": 0.7729305999819189,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.7722688000649214
+        }
+      ],
+      "seconds": 0.77294759999495,
+      "cleanup_deadline_exceeded": false,
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "original_input_writers_retained": true,
+      "original_input_writer_joined": false,
+      "completion_receiving": {
+        "schema": "ordinary-original-native-io-completion-v1",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "io": {
+          "stdout": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 0,
+            "bytes_stored": 0,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 594264.5819927
+          },
+          "stderr": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 130,
+            "bytes_stored": 130,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 594264.5820283
+          }
+        },
+        "stdin_mode": "null",
+        "stdin": {},
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "original_input_writer_joined": false,
+        "lifecycle_state": "CLOSED"
+      },
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "cefd724b4bea4c9fc652b26be72f981b528c99b52fbd7aac01c1eed95fdd3efc"
+    },
+    {
+      "argv": [
+        "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+        "merge",
+        "--ff-only",
+        "27d90e626465dc9a3a012e50785d62785d4c5e7e"
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub664-363b",
+      "stdout": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v20\\fast-forward-preserve-published-docs.stdout.txt",
+      "stderr": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v20\\fast-forward-preserve-published-docs.stderr.txt",
+      "captures_measured": true,
+      "command_success": true,
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 3133,
+          "bytes_stored": 3133,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 594264.7084822
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 594264.7085073
+        }
+      },
+      "work_seconds": 60,
+      "cleanup_seconds": 10,
+      "native_owner": {
+        "path": "@@RECOVERY_ORCHESTRARIUM_INSTALLATION_ROOT_JSON@@\\releases\\dad4875f\\app\\scripts\\process_supervision\\windows_job.py",
+        "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+      },
+      "console": {
+        "attached": true,
+        "visible": false
+      },
+      "stdin_mode": "null",
+      "before_resume_entered": true,
+      "before_resume_returned": true,
+      "before_resume_deadline_exceeded": false,
+      "phases_elapsed_seconds": {
+        "initial_save_started": 3.69000481441617e-05,
+        "initial_save_finished": 0.00046300003305077553,
+        "launch_entered": 0.0004643000429496169,
+        "before_resume_entered": 0.004563900060020387,
+        "before_resume_returned": 0.0045652000699192286,
+        "launch_returned": 0.004580900073051453,
+        "launch_exception": null,
+        "external_settle_end": 0.12277910008560866
+      },
+      "quiescence_state": "complete",
+      "original_pid": 185912,
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "work_elapsed_seconds": 0.12223640002775937,
+      "cleanup_interval_seconds": 10.0,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "exit_code": 0,
+      "worker_join_observations": [
+        {
+          "name": "fast-forward-preserve-published-docs-stdout",
+          "ident": 120192,
+          "native_id": 120192,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.12280370004009455,
+          "remaining_seconds": 9.999432699987665,
+          "last_entered_seconds": 0.12280370004009455,
+          "last_remaining_seconds": 9.999432699987665,
+          "returned_seconds": 0.12280920008197427,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.12178610009141266
+        },
+        {
+          "name": "fast-forward-preserve-published-docs-stderr",
+          "ident": 172156,
+          "native_id": 172156,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.12281229998916388,
+          "remaining_seconds": 9.999424100038595,
+          "last_entered_seconds": 0.12281229998916388,
+          "last_remaining_seconds": 9.999424100038595,
+          "returned_seconds": 0.12281339999753982,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.1218112000497058
+        }
+      ],
+      "seconds": 0.12282340007368475,
+      "cleanup_deadline_exceeded": false,
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "original_input_writers_retained": true,
+      "original_input_writer_joined": false,
+      "completion_receiving": {
+        "schema": "ordinary-original-native-io-completion-v1",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "io": {
+          "stdout": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 3133,
+            "bytes_stored": 3133,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 594264.7084822
+          },
+          "stderr": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 0,
+            "bytes_stored": 0,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 594264.7085073
+          }
+        },
+        "stdin_mode": "null",
+        "stdin": {},
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "original_input_writer_joined": false,
+        "lifecycle_state": "CLOSED"
+      },
+      "stdout_sha256": "bec56f94c5a9070c4eb8432cceb0875c1ea8e1c69a577f7ea77ce9edeab4afc2",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+        "rev-parse",
+        "HEAD"
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub664-363b",
+      "stdout": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v20\\publication-head-after.stdout.txt",
+      "stderr": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v20\\publication-head-after.stderr.txt",
+      "captures_measured": true,
+      "command_success": true,
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 41,
+          "bytes_stored": 41,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 594264.7498162
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 594264.7497727
+        }
+      },
+      "work_seconds": 30,
+      "cleanup_seconds": 10,
+      "native_owner": {
+        "path": "@@RECOVERY_ORCHESTRARIUM_INSTALLATION_ROOT_JSON@@\\releases\\dad4875f\\app\\scripts\\process_supervision\\windows_job.py",
+        "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+      },
+      "console": {
+        "attached": true,
+        "visible": false
+      },
+      "stdin_mode": "null",
+      "before_resume_entered": true,
+      "before_resume_returned": true,
+      "before_resume_deadline_exceeded": false,
+      "phases_elapsed_seconds": {
+        "initial_save_started": 2.1400046534836292e-05,
+        "initial_save_finished": 0.0004080000799149275,
+        "launch_entered": 0.0004094000905752182,
+        "before_resume_entered": 0.0029103000415489078,
+        "before_resume_returned": 0.0029117000522091985,
+        "launch_returned": 0.0029282000614330173,
+        "launch_exception": null,
+        "external_settle_end": 0.038536100066266954
+      },
+      "quiescence_state": "complete",
+      "original_pid": 183420,
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "work_elapsed_seconds": 0.038254500017501414,
+      "cleanup_interval_seconds": 10.0,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "exit_code": 0,
+      "worker_join_observations": [
+        {
+          "name": "publication-head-after-stdout",
+          "ident": 358952,
+          "native_id": 358952,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.03857070009689778,
+          "remaining_seconds": 9.999683799920604,
+          "last_entered_seconds": 0.03857070009689778,
+          "last_remaining_seconds": 9.999683799920604,
+          "returned_seconds": 0.038578900042921305,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.037829200038686395
+        },
+        {
+          "name": "publication-head-after-stderr",
+          "ident": 85708,
+          "native_id": 85708,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.03858450008556247,
+          "remaining_seconds": 9.999669999931939,
+          "last_entered_seconds": 0.03858450008556247,
+          "last_remaining_seconds": 9.999669999931939,
+          "returned_seconds": 0.03858689998742193,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.0377857000567019
+        }
+      ],
+      "seconds": 0.03860299999359995,
+      "cleanup_deadline_exceeded": false,
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "original_input_writers_retained": true,
+      "original_input_writer_joined": false,
+      "completion_receiving": {
+        "schema": "ordinary-original-native-io-completion-v1",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "io": {
+          "stdout": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 41,
+            "bytes_stored": 41,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 594264.7498162
+          },
+          "stderr": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 0,
+            "bytes_stored": 0,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 594264.7497727
+          }
+        },
+        "stdin_mode": "null",
+        "stdin": {},
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "original_input_writer_joined": false,
+        "lifecycle_state": "CLOSED"
+      },
+      "stdout_sha256": "73aa24f699b6c06ce27e215551c8b246f45f00183a079260aed1401b22a07bb0",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all"
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub664-363b",
+      "stdout": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v20\\publication-worktree-status-after.stdout.txt",
+      "stderr": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v20\\publication-worktree-status-after.stderr.txt",
+      "captures_measured": true,
+      "command_success": true,
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 594264.8125244
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 594264.8124936
+        }
+      },
+      "work_seconds": 30,
+      "cleanup_seconds": 10,
+      "native_owner": {
+        "path": "@@RECOVERY_ORCHESTRARIUM_INSTALLATION_ROOT_JSON@@\\releases\\dad4875f\\app\\scripts\\process_supervision\\windows_job.py",
+        "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+      },
+      "console": {
+        "attached": true,
+        "visible": false
+      },
+      "stdin_mode": "null",
+      "before_resume_entered": true,
+      "before_resume_returned": true,
+      "before_resume_deadline_exceeded": false,
+      "phases_elapsed_seconds": {
+        "initial_save_started": 2.0600040443241596e-05,
+        "initial_save_finished": 0.0004520000657066703,
+        "launch_entered": 0.00045300007332116365,
+        "before_resume_entered": 0.0029072000179439783,
+        "before_resume_returned": 0.0029088000301271677,
+        "launch_returned": 0.0029242000309750438,
+        "launch_exception": null,
+        "external_settle_end": 0.0595531000290066
+      },
+      "quiescence_state": "complete",
+      "original_pid": 141980,
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "work_elapsed_seconds": 0.05938280001282692,
+      "cleanup_interval_seconds": 10.0,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "exit_code": 0,
+      "worker_join_observations": [
+        {
+          "name": "publication-worktree-status-after-stdout",
+          "ident": 288608,
+          "native_id": 288608,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.05958860006649047,
+          "remaining_seconds": 9.999794199946336,
+          "last_entered_seconds": 0.05958860006649047,
+          "last_remaining_seconds": 9.999794199946336,
+          "returned_seconds": 0.059596600010991096,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.05896529997698963
+        },
+        {
+          "name": "publication-worktree-status-after-stderr",
+          "ident": 469028,
+          "native_id": 469028,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.05960210005287081,
+          "remaining_seconds": 9.999780699959956,
+          "last_entered_seconds": 0.05960210005287081,
+          "last_remaining_seconds": 9.999780699959956,
+          "returned_seconds": 0.059604400070384145,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.058934499975293875
+        }
+      ],
+      "seconds": 0.05961970007047057,
+      "cleanup_deadline_exceeded": false,
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "original_input_writers_retained": true,
+      "original_input_writer_joined": false,
+      "completion_receiving": {
+        "schema": "ordinary-original-native-io-completion-v1",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "io": {
+          "stdout": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 0,
+            "bytes_stored": 0,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 594264.8125244
+          },
+          "stderr": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 0,
+            "bytes_stored": 0,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 594264.8124936
+          }
+        },
+        "stdin_mode": "null",
+        "stdin": {},
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "original_input_writer_joined": false,
+        "lifecycle_state": "CLOSED"
+      },
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "guard_sha256": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2",
+  "config_sha256": "88a377967e63e11bd8c6ac81e177ae66903d9a7d1a12f73e9fcb103b5d4baaf5",
+  "expected_head": "05fbffa30f99914c8174966525a70bc9984e7038",
+  "source": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub664-363b",
+  "status": "PASS",
+  "command_quiescence": {
+    "complete": true,
+    "commands": [
+      {
+        "name": "head",
+        "state": "complete",
+        "reason": "",
+        "direct_exit_known": true
+      },
+      {
+        "name": "publication-worktree-status-before",
+        "state": "complete",
+        "reason": "",
+        "direct_exit_known": true
+      },
+      {
+        "name": "fetch-published-docs-checkpoint",
+        "state": "complete",
+        "reason": "",
+        "direct_exit_known": true
+      },
+      {
+        "name": "fast-forward-preserve-published-docs",
+        "state": "complete",
+        "reason": "",
+        "direct_exit_known": true
+      },
+      {
+        "name": "publication-head-after",
+        "state": "complete",
+        "reason": "",
+        "direct_exit_known": true
+      },
+      {
+        "name": "publication-worktree-status-after",
+        "state": "complete",
+        "reason": "",
+        "direct_exit_known": true
+      }
+    ]
+  },
+  "step_inputs": [
+    {
+      "name": "publication-worktree-status-before",
+      "files": {}
+    },
+    {
+      "name": "fetch-published-docs-checkpoint",
+      "files": {}
+    },
+    {
+      "name": "fast-forward-preserve-published-docs",
+      "files": {}
+    },
+    {
+      "name": "publication-head-after",
+      "files": {}
+    },
+    {
+      "name": "publication-worktree-status-after",
+      "files": {}
+    }
+  ],
+  "steps_received": [
+    "publication-worktree-status-before",
+    "fetch-published-docs-checkpoint",
+    "fast-forward-preserve-published-docs",
+    "publication-head-after",
+    "publication-worktree-status-after"
+  ]
+}

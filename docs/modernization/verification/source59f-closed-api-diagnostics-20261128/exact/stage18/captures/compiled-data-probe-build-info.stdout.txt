@@ -1,0 +1,35 @@
+{
+	"GoVersion": "go1.27.4",
+	"Path": "command-line-arguments",
+	"Main": {},
+	"Settings": [
+		{
+			"Key": "-buildmode",
+			"Value": "exe"
+		},
+		{
+			"Key": "-compiler",
+			"Value": "gc"
+		},
+		{
+			"Key": "DefaultGODEBUG",
+			"Value": "tracebacklabels=0,x509sslcertoverrideplatform=0"
+		},
+		{
+			"Key": "CGO_ENABLED",
+			"Value": "0"
+		},
+		{
+			"Key": "GOARCH",
+			"Value": "amd64"
+		},
+		{
+			"Key": "GOOS",
+			"Value": "windows"
+		},
+		{
+			"Key": "GOAMD64",
+			"Value": "v1"
+		}
+	]
+}

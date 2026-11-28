@@ -1,0 +1,473 @@
+{
+  "schema": "nested-recovery-publication-and-readback-v1",
+  "evidence_commit": "29ce732d80b08ab808f04c84e46d917d0ed825a4",
+  "parent_commit": "5a15e4f4bbf64442677e3443054a1bdb277505bd",
+  "git_tree": "29ddc5d65ac226b8465d2a62511ce6fabf1c08be",
+  "repository": "applicate2628/mcp-local-hub",
+  "pull_request": 664,
+  "branch": "fix/p0-test-entry-preserve-20261121",
+  "scope": "34 recovery evidence files and only section 3 of the existing A-D plan; no product implementation change by this publication",
+  "parallel_public_change": {
+    "commit": "5a15e4f4bbf64442677e3443054a1bdb277505bd",
+    "meaning": "Earlier inclusion of PR 628 preserved; new public code composition does not inherit Source52 acceptance"
+  },
+  "github_readback": {
+    "schema": "recovery-github-byte-readback-v1",
+    "commit": "29ce732d80b08ab808f04c84e46d917d0ed825a4",
+    "status": "PASS",
+    "files": [
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/.gitattributes",
+        "bytes": 8,
+        "sha256": "705fd4d6451a31d36b3df7de96f83f30ac976c9b4a6d1e51671d8e2f33e2d0da",
+        "git_blob_sha1": "fa1385d99a319b43c06f5309d1aae9fdd3adea46",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/README.md",
+        "bytes": 26177,
+        "sha256": "3e924d627420cebc6bdc752440aa4e5ce4ddf72b597e8cf5865a03beb6c9aa7e",
+        "git_blob_sha1": "2db3e1aa8fd067046a85728aa16cb6e5b8d2e2cf",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/checkpoint-envelopes.json",
+        "bytes": 3276,
+        "sha256": "1dd311dcecbadb2a762d33fe5f865ddb4c4843e2f993fe207f8f780d6351c91a",
+        "git_blob_sha1": "d562cc7770e22c497cebcc1f5efd7acbb8e9fcc2",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/checkpoint-summary.json",
+        "bytes": 12718,
+        "sha256": "1760f05599d0b7b8cec63a5828c50b2eb44287b523251290a40edeca82602d71",
+        "git_blob_sha1": "42cbf7a490dd8a8ccb74291f5c95d4d7755171b6",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/execution-receipt.json",
+        "bytes": 212353,
+        "sha256": "4d5865b3278c88edbf89f2942b04b540e43930e4667d529c7ee2069ff6f83cc3",
+        "git_blob_sha1": "9f88c031136f9fee6ae40785f2035d4c08dea14a",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/operational-limits.json",
+        "bytes": 2351,
+        "sha256": "3dbf1465dc8ebde0f6da7e0b30ec5d4f7cda5dcd94cd17781cc45395495c3528",
+        "git_blob_sha1": "05a21e6a41715a3c1f51f6b35fcdc7beed189be2",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/primary/CHECKPOINT-MANIFEST.json",
+        "bytes": 152029,
+        "sha256": "d30fde83e1473f795296b5dec613c7b7cd8f3956938a936ded5f4911818000c5",
+        "git_blob_sha1": "9af9f58a29125b7d0947c01ab2708a45ed8061a1",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/primary/CHECKPOINT.md",
+        "bytes": 2237,
+        "sha256": "ecd76a5654dfda7d6095e6e4cba9d25e06d3007ba06ca2f0defebd89aabad4e3",
+        "git_blob_sha1": "973099d2a01964b09566490c76c6440128e35c0c",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/primary/external-references.json",
+        "bytes": 29292,
+        "sha256": "3de64e04a97ddda68a5289590ce57e6535cb85b7b8e19ce0068e776f046df81d",
+        "git_blob_sha1": "4bdb184c3e5e2290de5bb3ffad5c1116d9d373f0",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/primary/local-validation.json",
+        "bytes": 3872,
+        "sha256": "c82094188f8169971afaba97e4c627c2550bc4a8ccf2d9d0ef680c7f6872c5a3",
+        "git_blob_sha1": "d8d9648a980626610da4b99ae7c88599f2a973e3",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/primary/ordinary-review-README.md",
+        "bytes": 2253,
+        "sha256": "ae006ad44e8554b60c5755b41c77bcaf4f9d60c35939081eb2e0f0639d390805",
+        "git_blob_sha1": "0ee9423ebe88b0e0683a4f07858ad5485fba70e8",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/primary/ordinary-review.json",
+        "bytes": 2191,
+        "sha256": "e081745ec6b9bf322878569d5c831504f241489d7ce763411a591aceaa11c791",
+        "git_blob_sha1": "5792ac71b1838645900bea256d1123051732a445",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/primary/product-source-admission-review.json",
+        "bytes": 4511,
+        "sha256": "bca77f438b8d6e959e6d8dba1b2c1cb976a3628dead7246f751dfe8312a6f19c",
+        "git_blob_sha1": "ded3f89367b09cfcc1f957cae70fa30c814f4dae",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/producer-chain.json",
+        "bytes": 14253,
+        "sha256": "7b5275959b9926f51487041afd61472b2444b0af3aa02e6996091b5db99fc9dc",
+        "git_blob_sha1": "3ac37202d85d9843408f236226308799bded5f3d",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/producer-stage-decoded-edits.json",
+        "bytes": 12540,
+        "sha256": "3431205cb1cd70a7dd79248bda3f5482b836662b1b610b5c0da876390e4e77d7",
+        "git_blob_sha1": "2f769faa56bbbca9dd85cab4c8cd92091d3ea6dd",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/scripts/build_checkpoint_summary.py.txt",
+        "bytes": 11336,
+        "sha256": "b1539b56743372bb05b69512df6172783f782b95c69534312484b0e4a59316e7",
+        "git_blob_sha1": "f995a64b82546c6197689fb0b27ac05cf132c3b6",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/scripts/build_producer_chain_report.py.txt",
+        "bytes": 11067,
+        "sha256": "7dc8a80f46ae70f8f9b82a21a523b0cc7dae8279743c95aea0e39cafa2ecb305",
+        "git_blob_sha1": "08dccb26c5d92875168fce3e2d183102b15fd602",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/scripts/extract_checkpoint_evidence.py.txt",
+        "bytes": 2840,
+        "sha256": "d0cbd065ee2d20dfaed91a768927be9792924c5972e602f75ca25bf12307f5ec",
+        "git_blob_sha1": "665855c2ac022a1165bff18aa7b21c87ff7b09a9",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/scripts/inputs-v3.json",
+        "bytes": 9204,
+        "sha256": "709d7c7c690e1223b573c2eb5d45ff08aca0b83e9bf38eed792c9df5ae2a31b5",
+        "git_blob_sha1": "20b3c27a37d7cdd55c18c02a76c307daf0444bb2",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/scripts/inputs.json",
+        "bytes": 11532,
+        "sha256": "c8cdfb43d23e466df81d573d8224eb6bc00d7924f1df792011b22b5ae5bf29cf",
+        "git_blob_sha1": "a207b9d5dc20738e17a32d306fbba148803b0190",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/scripts/inspect_nested.py",
+        "bytes": 31155,
+        "sha256": "6d0d1a68da00c3567beda01b53506e551e7346f6879a2b517f56d34cdc886da3",
+        "git_blob_sha1": "e785363adb63ae699b50c1405aa5507619daaf6c",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/scripts/regression_stat_ctime.py",
+        "bytes": 2604,
+        "sha256": "16746f764ffdc5ca1ecdf8fc7d01f54e0c5498053424f7f118136dc2bd62c109",
+        "git_blob_sha1": "5657452ae9b31df8f162abbd89c6bacab0b60a34",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/scripts/scan_checkpoint_data.py.txt",
+        "bytes": 15190,
+        "sha256": "243033caeb24e5c73d6efb5361789294a20d1e59b8d7d3a71515128a02ead098",
+        "git_blob_sha1": "38040b2332a20e122d9db3338592f23d626cc51d",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/scripts/smoke_inspector.py",
+        "bytes": 3861,
+        "sha256": "494f0e3670e6ab157f146dbcc7b1ba1d5b6c0d5d7a15f0acf4f87b824f469ce5",
+        "git_blob_sha1": "8e7216677e794ab062bbab05dc670ddef10d0112",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/scripts/v1-to-v2.patch",
+        "bytes": 780,
+        "sha256": "8113d35ff4f0282373fb4c527981ab88242497146eddf1c88bb5c22ed02b3163",
+        "git_blob_sha1": "32d521a9a38f224116e1e4511ec25314b1a607b5",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/scripts/v2-to-v3.patch",
+        "bytes": 800,
+        "sha256": "0fc562de2754fae4025e3962a6959473464ddb41f9762872acb399a5f81c519c",
+        "git_blob_sha1": "92be14e8aaa7a681284b7be2fe5437ecf8cc7254",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/scripts/versions.json",
+        "bytes": 998,
+        "sha256": "258269cc7d77b5a8340b87d65ca9304cc25cd874d07c4592053e1f859ed57f5a",
+        "git_blob_sha1": "185d7cdbd1aa5e31f0d1a8639814699dbf47ae47",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/source-evidence.json",
+        "bytes": 24508,
+        "sha256": "63b13c4fa66e242a367cb139d089cbedfc0c9927506de5c785e9f8924b56a184",
+        "git_blob_sha1": "644740e9e41c41607ea91868cd374d178bc890a2",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/archive-report-v2.json.gz.base64.txt",
+        "bytes": 573079,
+        "sha256": "cd39c3186870bdfee51e48078de7411c286b05160297d30382ede59b9e402b9a",
+        "git_blob_sha1": "bf951bd24b9e99a539f6cc2ce7691b93daa11c8a",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/archive-coverage-v2.json",
+        "bytes": 21405,
+        "sha256": "bcc03a17a8e47aff9521ed5cd2d66bff63d3cba6fa4efaabe6979a65d0fbbf41",
+        "git_blob_sha1": "bb44f2976cbcc4d7385df92326d7237da73ed42f",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/archive-report-v3.json.gz.base64.txt",
+        "bytes": 257310,
+        "sha256": "462cbd67668e86d06e1059617678ac32b32a2b67c16e74ee162faef98cdc2c2f",
+        "git_blob_sha1": "fe4f4c0c0cebe7d4efe359b5ad9b60c01b613d85",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/archive-coverage-v3.json",
+        "bytes": 17171,
+        "sha256": "542232f05fed66133c3e8b256c55ad9d199a87423614c2b38a68b5ccf288cc0b",
+        "git_blob_sha1": "3c2acf9278b94b246fbfdbf0ceb0afc01d5c5e49",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/archive-package-bindings.json",
+        "bytes": 6639,
+        "sha256": "6f1da6e317bab10fe9b5895761dc6c54530b795acc6c94372b37e08bcfe2f450",
+        "git_blob_sha1": "42be0f24021957d0e44500b3571cf9c175665679",
+        "match": true
+      },
+      {
+        "path": ".plans/2026-11/open-pr-integration-20261117.md",
+        "bytes": 270670,
+        "sha256": "8216b153960bdf40d657618ae7369b1c4157d18598f0b9426fb833593795eb2a",
+        "git_blob_sha1": "353cd48942db7af6d2439858e1f487dd754864dd",
+        "match": true
+      },
+      {
+        "path": "docs/modernization/verification/failed-owner-receiving-20261126/recovery-nested-20261128/artifact-bindings.json",
+        "bytes": 11792,
+        "sha256": "316051fd2981a1e37284618e680d3254f2c1e72c123d00d4b5f86ee7525f0a48",
+        "git_blob_sha1": "4053977f993a25b1e2603d9a6a66949e012db6fd",
+        "match": true
+      }
+    ],
+    "files_count": 35,
+    "bytes": 1764002,
+    "errors": []
+  },
+  "native_publication": {
+    "status": "PASS/CLOSED",
+    "gate_source_sha256": "04285948382b6e42c2a1fed826ea98fec3ca5ff98373549361da7ad363f72c7f",
+    "gate_unchanged": true,
+    "range_and_native_receipts": [
+      "publication-safety: clean (range, receipt=v3, commits=1, commit-set=27fe5fa8db17037735f2d726fa581dbe0befed2fb66219f1dd0f86ffd780bc23, messages=complete, objects=45, object-set=26aa0669cc087a293da8e44aa37f76f65e290e49c4374de0c5b5883fd3119b72, blobs=34, blob-set=2541cf43e9e907e4d34a49675683f40a414703bbc5d26bf733c866482d2729c7, blob-bytes=1763994, text=34, binary=0, subjects=34, subject-set=6a6c31736f73bfce0451c63632536b2d02417a5deb5485cf5b1caba90e3b9b39, paths=34, path-set=d1a9b948df35ffc7a859c9caaf3883c77b0a2b140c3f072c04cb567e0c21f950, history=complete, remote=origin, dst=refs%2Fheads%2Ffix%2Fp0-test-entry-preserve-20261121, src=29ce732d80b08ab808f04c84e46d917d0ed825a4, tip=29ce732d80b08ab808f04c84e46d917d0ed825a4)",
+      "{\"binary\":0,\"blobBytes\":1763994,\"blobSetSha256\":\"2541cf43e9e907e4d34a49675683f40a414703bbc5d26bf733c866482d2729c7\",\"blobs\":34,\"commitSetSha256\":\"27fe5fa8db17037735f2d726fa581dbe0befed2fb66219f1dd0f86ffd780bc23\",\"commits\":1,\"coverageKind\":\"objects\",\"coverageSha256\":\"8c2abf1e2ae39922a2e4cc618055aea28429bd9db865abe65cf04816ab3d706b\",\"endpointIdentity\":\"sha256:ec6e8b135f9ba57a21a2b523646572e00d39bdfdd9d936611c543d9b5b07c08b\",\"inputSha256\":\"c26dbff63bbf02e69ea69733e4d6d32012432fa626ce1c0453af2719b5ea9983\",\"kind\":\"publication-safety-native\",\"objectFormat\":\"sha1\",\"objectSetSha256\":\"26aa0669cc087a293da8e44aa37f76f65e290e49c4374de0c5b5883fd3119b72\",\"objects\":45,\"pathSetSha256\":\"d1a9b948df35ffc7a859c9caaf3883c77b0a2b140c3f072c04cb567e0c21f950\",\"paths\":34,\"repositoryObservationSha256\":\"edfa10487d85ac3c2684625895383419daf9cdea9e24a2dec2fad21682e07211\",\"review\":null,\"selectionSha256\":\"ebd694735e89045269961f22d12ae4d990dc9d40cb4c6e0b2902b5e1df062ee5\",\"status\":\"clean\",\"subjectSetSha256\":\"6a6c31736f73bfce0451c63632536b2d02417a5deb5485cf5b1caba90e3b9b39\",\"subjects\":34,\"tags\":0,\"text\":34,\"updateSetSha256\":\"0881ebc50b666910cf4abd5dd1af60f8f9358253058b3a5b51bc39ac4ca794a8\",\"updates\":1,\"version\":4}"
+    ],
+    "received_remote_head": "29ce732d80b08ab808f04c84e46d917d0ed825a4"
+  },
+  "publication_preparation_executions": [
+    {
+      "run": "ad664-next-head-refresh-20261128-v1",
+      "status": "PASS",
+      "error": null,
+      "original_commands": 7,
+      "original_readers": 14,
+      "all_closed": true,
+      "nonzero_commands": [],
+      "root_receiving": {
+        "controller_exit_code": 0,
+        "original_controller_reaped": true,
+        "controller_capture_handles_closed": true,
+        "seconds": 1.9940658999839798,
+        "receipt_sha256": "8d97beda3462295171fc420f92e0f2ef369dbfbad868935f2154e0679e2f2fea"
+      },
+      "original_receipt": "{TASK_ROOT}/functional-route-20261126/runs/ad664-next-head-refresh-20261128-v1/receipt.json"
+    },
+    {
+      "run": "ad664-next-stage-20261128-v1",
+      "status": "PASS",
+      "error": null,
+      "original_commands": 4,
+      "original_readers": 8,
+      "all_closed": true,
+      "nonzero_commands": [],
+      "root_receiving": {
+        "controller_exit_code": 0,
+        "original_controller_reaped": true,
+        "controller_capture_handles_closed": true,
+        "seconds": 5.455467400024645,
+        "receipt_sha256": "ea0c5fc0953a491b9a9d836eb737daa1d8b275064bd096417a9e6c84c8f651fe"
+      },
+      "original_receipt": "{TASK_ROOT}/functional-route-20261126/runs/ad664-next-stage-20261128-v1/receipt.json"
+    },
+    {
+      "run": "ad664-next-commit-20261128-v1",
+      "status": "FAIL",
+      "error": "RuntimeError: cached-diff-check exit 2 expected 0",
+      "original_commands": 3,
+      "original_readers": 6,
+      "all_closed": true,
+      "nonzero_commands": [
+        {
+          "command": "cached-diff-check",
+          "exit_code": 2,
+          "timed_out": false
+        }
+      ],
+      "root_receiving": {
+        "controller_exit_code": 1,
+        "original_controller_reaped": true,
+        "controller_capture_handles_closed": true,
+        "seconds": 1.2111543000210077,
+        "receipt_sha256": "67f53dbd93dd77189826b1240c7bbd0319a7d3aa44d998a446250db325f7266b"
+      },
+      "original_receipt": "{TASK_ROOT}/functional-route-20261126/runs/ad664-next-commit-20261128-v1/receipt.json"
+    },
+    {
+      "run": "ad664-next-commit-20261128-v2",
+      "status": "PASS",
+      "error": null,
+      "original_commands": 11,
+      "original_readers": 22,
+      "all_closed": true,
+      "nonzero_commands": [],
+      "root_receiving": {
+        "controller_exit_code": 0,
+        "original_controller_reaped": true,
+        "controller_capture_handles_closed": true,
+        "seconds": 2.070506599964574,
+        "receipt_sha256": "422346245c5df12182d09ad3abe79fefa9e3fbcc178e2678cb29abb7708c7962"
+      },
+      "original_receipt": "{TASK_ROOT}/functional-route-20261126/runs/ad664-next-commit-20261128-v2/receipt.json"
+    },
+    {
+      "run": "ad664-next-push-20261128-v1",
+      "status": "FAIL",
+      "error": "RuntimeError: native-publication-gate exit 1 expected 0",
+      "original_commands": 3,
+      "original_readers": 6,
+      "all_closed": true,
+      "nonzero_commands": [
+        {
+          "command": "native-publication-gate",
+          "exit_code": 1,
+          "timed_out": false
+        }
+      ],
+      "root_receiving": {
+        "controller_exit_code": 1,
+        "original_controller_reaped": true,
+        "controller_capture_handles_closed": true,
+        "seconds": 7.676346700056456,
+        "receipt_sha256": "c8a755503bf6e8bff6d2b1473248f5697bce7c5e4558edc74702dfafbbcf8c88"
+      },
+      "original_receipt": "{TASK_ROOT}/functional-route-20261126/runs/ad664-next-push-20261128-v1/receipt.json"
+    },
+    {
+      "run": "ad664-next-publication-diagnostic-20261128-v1",
+      "status": "PASS",
+      "error": null,
+      "original_commands": 3,
+      "original_readers": 6,
+      "all_closed": true,
+      "nonzero_commands": [
+        {
+          "command": "closed-range-diagnostic",
+          "exit_code": 1,
+          "timed_out": false
+        },
+        {
+          "command": "new-report-path-diagnostic",
+          "exit_code": 1,
+          "timed_out": false
+        }
+      ],
+      "root_receiving": {
+        "controller_exit_code": 0,
+        "original_controller_reaped": true,
+        "controller_capture_handles_closed": true,
+        "seconds": 4.15054910001345,
+        "receipt_sha256": "58b85437595329f89e40b8caf812d00dff26e913bb7d25f71b820af48d6d1e08"
+      },
+      "original_receipt": "{TASK_ROOT}/functional-route-20261126/runs/ad664-next-publication-diagnostic-20261128-v1/receipt.json"
+    },
+    {
+      "run": "ad664-next-metadata-amend-20261128-v1",
+      "status": "PASS",
+      "error": null,
+      "original_commands": 14,
+      "original_readers": 28,
+      "all_closed": true,
+      "nonzero_commands": [],
+      "root_receiving": {
+        "controller_exit_code": 0,
+        "original_controller_reaped": true,
+        "controller_capture_handles_closed": true,
+        "seconds": 3.8688790999585763,
+        "receipt_sha256": "e86828c29009de25f4fb31e34f3193e834f5ff51cda5d3ec118f1905ef5d91b7"
+      },
+      "original_receipt": "{TASK_ROOT}/functional-route-20261126/runs/ad664-next-metadata-amend-20261128-v1/receipt.json"
+    },
+    {
+      "run": "ad664-next-push-20261128-v2",
+      "status": "PASS",
+      "error": null,
+      "original_commands": 4,
+      "original_readers": 8,
+      "all_closed": true,
+      "nonzero_commands": [],
+      "root_receiving": {
+        "controller_exit_code": 0,
+        "original_controller_reaped": true,
+        "controller_capture_handles_closed": true,
+        "seconds": 12.280802300083451,
+        "receipt_sha256": "2917c2408ff47b535933b07afb12cb0cf1e950cf09fba17d84182c90b911c278"
+      },
+      "original_receipt": "{TASK_ROOT}/functional-route-20261126/runs/ad664-next-push-20261128-v2/receipt.json"
+    }
+  ],
+  "metadata_correction": {
+    "initial_rejected_commit": "b1bb971cf02c7a990426916741e05546367f3fa2",
+    "preserved_local_ref": "refs/heads/preserve/ad664-recovery-20261128-b1bb971c",
+    "canonical_diagnostic": {
+      "finding_class": "machine-path",
+      "findings": 2,
+      "report_complete": true,
+      "commit_message_findings": 0,
+      "publication_authority": false
+    },
+    "correction": "Two public DATA projections have 16 explicit path-prefix replacements. Exact source bytes and hashes remain preserved. Corrected path scan and original native publication gate passed.",
+    "source_provenance": "recovery-nested-20261128/source-evidence.json"
+  },
+  "patch_representation_correction": {
+    "initial_status": "FAIL/CLOSED",
+    "reason": "git diff --check rejected space-only context lines in a newly added patch file",
+    "correction": "Zero-context unified patch; source bytes unchanged",
+    "reverse_restoration_verified_sha256": [
+      "3c880b1625c1b7b8695493730354a09c6599b504ba5adac01bb2d0b44a766422",
+      "f86636d9f02be91d739c7c9a030c279e43bf070a71b80b388e51257b60120e33"
+    ]
+  },
+  "accepted_results_repeated": false,
+  "product_gates_completed_by_this_publication": false,
+  "remaining_blocker": "Exact receiver or preimage+patch, full-identity template and canonical manifest bytes, then canonical binding of 12 recovered Go controller/owner files",
+  "retention": {
+    "checkpoint_original_retained": true,
+    "native_originals_retained": true,
+    "unknown_custody_artifacts_retained": true,
+    "trash_emptied": false,
+    "publication_worktree_disposition": "Pending final receipt publication/readback and clean/quiescent verification"
+  },
+  "self_scope": "This receipt records the earlier evidence commit and its complete GitHub readback; its own later publication and readback are not asserted within itself."
+}

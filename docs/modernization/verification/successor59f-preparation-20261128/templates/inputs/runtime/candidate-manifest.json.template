@@ -1,0 +1,86 @@
+{
+  "schema": "successor-runtime-source-candidate-v1",
+  "state": "FROZEN_FOR_REVIEW_NOT_EXECUTED",
+  "source_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+  "source_tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+  "runtime_owner": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\full59f",
+  "short_temp_parent": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o7",
+  "files": {
+    "adapter-vs-v6.patch": {
+      "bytes": 49849,
+      "sha256": "ab5bfb1609f06fba1209b28c801aa8f1cbde3161cf5d9d77d7886f67399d7eaa"
+    },
+    "adapter_successor.py.in": {
+      "bytes": 85963,
+      "sha256": "48c5d6af30d62c1e63c1455689a19c1ce0b67ab761fc9b1683e5a522494b98bd"
+    },
+    "copy_closed_runtime_caches.py": {
+      "bytes": 11354,
+      "sha256": "1a0314874d6141f56d960c431ca27e6ddef518b7b5b83878793f8fb0fb443d79"
+    },
+    "core-primitives-vs-v6.patch": {
+      "bytes": 24182,
+      "sha256": "2c69a182e8cdeee4f98ea542bddc8f15f37f19f3a35c0a7882f0ca8acf46c139"
+    },
+    "core_successor.py.in": {
+      "bytes": 32674,
+      "sha256": "fcd8fadd43744d94426f59780028cef98d7b3c968dc42df200f9130b1e589991"
+    },
+    "driver-vs-v6.patch": {
+      "bytes": 31662,
+      "sha256": "017089f1b4adeaf52d98c4a2af6f937981732175c9425f2b3bf8109f43f99227"
+    },
+    "driver_successor.py.in": {
+      "bytes": 38786,
+      "sha256": "c29938a6c6570aa417c933bc7ce92ef44ced42e37727999ae46a115d758b6787"
+    },
+    "foreground_receiving.fragment.py": {
+      "bytes": 16018,
+      "sha256": "64ecdeecfc635e1de41ef09ac1f5b0a0639f1a1ff87184c180dbe5b2dd419076"
+    },
+    "owner_receiving.fragment.py": {
+      "bytes": 5489,
+      "sha256": "fa8c35962f31ab576242dba4fbb76c23131dec06db1a429e710d724d343e1b7b"
+    },
+    "prepare_successor.py": {
+      "bytes": 12625,
+      "sha256": "fe840964c1079ceac56f38ab16a4cf130d0ca8d59c6bd1b72d46099347a01c17"
+    },
+    "primitives_successor.py.in": {
+      "bytes": 9841,
+      "sha256": "4dd6ea68986a8cda1da65373dad3077340a7483be15128f443d2657ca5a0483a"
+    },
+    "README.md": {
+      "bytes": 9287,
+      "sha256": "5d39e2c59879df1031453c0dac0f08918635397190fe0d347663e1836b14bbfc"
+    },
+    "runtime-cache-copy-vs-producer.patch": {
+      "bytes": 1546,
+      "sha256": "1870b248cb77bad1caad3440694915cdac5b9ae601ef48616ffaa3b7cd4dc82b"
+    },
+    "static-receiving.json": {
+      "bytes": 8036,
+      "sha256": "6530437aa172d0bc7b1bb802efc92cd6948d827798a6b57b6834db9534b68d51"
+    },
+    "templates-manifest.candidate.json": {
+      "bytes": 2240,
+      "sha256": "7eb9d0a93ce8d9ba6bc17a78037c9a1d072b919bc881d8ea7f3e2c5c965290c4"
+    }
+  },
+  "file_count": 15,
+  "static_receiving": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-candidate\\static-receiving.json",
+    "sha256": "6530437aa172d0bc7b1bb802efc92cd6948d827798a6b57b6834db9534b68d51"
+  },
+  "template_manifest": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-candidate\\templates-manifest.candidate.json",
+    "sha256": "7eb9d0a93ce8d9ba6bc17a78037c9a1d072b919bc881d8ea7f3e2c5c965290c4"
+  },
+  "launch_ready": false,
+  "remaining": [
+    "root review",
+    "actual closed helper/Product pins",
+    "concrete configuration",
+    "DATA composition receiving"
+  ]
+}

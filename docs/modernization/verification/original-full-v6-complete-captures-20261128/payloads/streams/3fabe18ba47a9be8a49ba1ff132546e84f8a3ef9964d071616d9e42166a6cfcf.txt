@@ -1,0 +1,4 @@
+TestDiscover_FoundInFirstHint
+TestDiscover_Missing
+TestDiscover_WalksInOrder
+TestDefaultHints_NonEmpty

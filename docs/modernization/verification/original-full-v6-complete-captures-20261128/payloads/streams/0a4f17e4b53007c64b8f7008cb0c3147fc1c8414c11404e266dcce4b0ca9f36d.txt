@@ -1,0 +1,19 @@
+=== RUN   TestDebuggerDirs_OverrideDetectsAndSkips
+--- PASS: TestDebuggerDirs_OverrideDetectsAndSkips (0.00s)
+=== NAME  
+=== RUN   TestDebuggerDirs_Dedup
+--- PASS: TestDebuggerDirs_Dedup (0.00s)
+=== NAME  
+=== RUN   TestDefaultLldbPath_AbsoluteWhenDetected
+--- PASS: TestDefaultLldbPath_AbsoluteWhenDetected (0.00s)
+=== NAME  
+=== RUN   TestDefaultLldbPath_BareFallback
+--- PASS: TestDefaultLldbPath_BareFallback (0.00s)
+=== NAME  
+=== RUN   TestDefaultGdbPath_AbsoluteWhenDetected
+--- PASS: TestDefaultGdbPath_AbsoluteWhenDetected (0.00s)
+=== NAME  
+=== RUN   TestDefaultGdbPath_BareFallback
+--- PASS: TestDefaultGdbPath_BareFallback (0.00s)
+=== NAME  
+PASS

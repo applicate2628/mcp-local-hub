@@ -1,0 +1,10 @@
+=== RUN   TestMarketplaceURLForErrorRedactsSchemeRelativeUserinfo
+--- PASS: TestMarketplaceURLForErrorRedactsSchemeRelativeUserinfo (0.00s)
+=== NAME  
+=== RUN   TestScrubParseErrorRedactsCredentialsInURLParseError
+--- PASS: TestScrubParseErrorRedactsCredentialsInURLParseError (0.00s)
+=== NAME  
+=== RUN   TestScrubParseErrorPassesThroughNonURLErrors
+--- PASS: TestScrubParseErrorPassesThroughNonURLErrors (0.00s)
+=== NAME  
+PASS

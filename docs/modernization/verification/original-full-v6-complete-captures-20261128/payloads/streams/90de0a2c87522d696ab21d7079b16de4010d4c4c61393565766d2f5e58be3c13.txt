@@ -1,0 +1,319 @@
+{"Action":"start","Package":"mcp-local-hub/internal/perftools"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestClangTidyTool_RejectsOversizedOutput"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestClangTidyTool_RejectsOversizedOutput","Output":"=== RUN   TestClangTidyTool_RejectsOversizedOutput\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestClangTidyTool_RejectsOversizedOutput","Output":"    clangtidy_test.go:20: bash-script fake clang-tidy not executable on Windows\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestClangTidyTool_RejectsOversizedOutput","Output":"--- SKIP: TestClangTidyTool_RejectsOversizedOutput (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/perftools","Test":"TestClangTidyTool_RejectsOversizedOutput"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestRunCaptureLimited_EnforcesStdoutLimit"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestRunCaptureLimited_EnforcesStdoutLimit","Output":"=== RUN   TestRunCaptureLimited_EnforcesStdoutLimit\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestRunCaptureLimited_EnforcesStdoutLimit","Output":"--- PASS: TestRunCaptureLimited_EnforcesStdoutLimit (0.29s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestRunCaptureLimited_EnforcesStdoutLimit"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestDetectTools_ReportsInstalledWithVersion"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestDetectTools_ReportsInstalledWithVersion","Output":"=== RUN   TestDetectTools_ReportsInstalledWithVersion\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestDetectTools_ReportsInstalledWithVersion","Output":"--- PASS: TestDetectTools_ReportsInstalledWithVersion (0.15s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestDetectTools_ReportsInstalledWithVersion"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestListToolsTool_MirrorsResourceCatalog"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestListToolsTool_MirrorsResourceCatalog","Output":"=== RUN   TestListToolsTool_MirrorsResourceCatalog\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestListToolsTool_MirrorsResourceCatalog","Output":"--- PASS: TestListToolsTool_MirrorsResourceCatalog (0.12s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestListToolsTool_MirrorsResourceCatalog"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestListToolsTool_HidesHyperfineWhenGateClosed"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestListToolsTool_HidesHyperfineWhenGateClosed","Output":"=== RUN   TestListToolsTool_HidesHyperfineWhenGateClosed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestListToolsTool_HidesHyperfineWhenGateClosed","Output":"--- PASS: TestListToolsTool_HidesHyperfineWhenGateClosed (0.11s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestListToolsTool_HidesHyperfineWhenGateClosed"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestToolsResource_ReturnsJSONCatalog"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestToolsResource_ReturnsJSONCatalog","Output":"=== RUN   TestToolsResource_ReturnsJSONCatalog\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestToolsResource_ReturnsJSONCatalog","Output":"--- PASS: TestToolsResource_ReturnsJSONCatalog (0.11s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestToolsResource_ReturnsJSONCatalog"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestToolsResource_HidesHyperfineWhenGateClosed"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestToolsResource_HidesHyperfineWhenGateClosed","Output":"=== RUN   TestToolsResource_HidesHyperfineWhenGateClosed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestToolsResource_HidesHyperfineWhenGateClosed","Output":"--- PASS: TestToolsResource_HidesHyperfineWhenGateClosed (0.10s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestToolsResource_HidesHyperfineWhenGateClosed"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestClangTidy_ParsesRealOutput"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestClangTidy_ParsesRealOutput","Output":"=== RUN   TestClangTidy_ParsesRealOutput\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestClangTidy_ParsesRealOutput","Output":"--- PASS: TestClangTidy_ParsesRealOutput (0.32s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestClangTidy_ParsesRealOutput"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateClangTidyInputs_DisallowedExtraArgs"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateClangTidyInputs_DisallowedExtraArgs","Output":"=== RUN   TestValidateClangTidyInputs_DisallowedExtraArgs\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateClangTidyInputs_DisallowedExtraArgs","Output":"--- PASS: TestValidateClangTidyInputs_DisallowedExtraArgs (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateClangTidyInputs_DisallowedExtraArgs"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateClangTidyInputs_RejectsDashPrefixedFiles"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateClangTidyInputs_RejectsDashPrefixedFiles","Output":"=== RUN   TestValidateClangTidyInputs_RejectsDashPrefixedFiles\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateClangTidyInputs_RejectsDashPrefixedFiles","Output":"--- PASS: TestValidateClangTidyInputs_RejectsDashPrefixedFiles (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateClangTidyInputs_RejectsDashPrefixedFiles"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateClangTidyInputs_AllowsSafeArgs"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateClangTidyInputs_AllowsSafeArgs","Output":"=== RUN   TestValidateClangTidyInputs_AllowsSafeArgs\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateClangTidyInputs_AllowsSafeArgs","Output":"--- PASS: TestValidateClangTidyInputs_AllowsSafeArgs (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateClangTidyInputs_AllowsSafeArgs"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag","Output":"=== RUN   TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/build-id-eq"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/build-id-eq","Output":"=== RUN   TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/build-id-eq\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/build-id-eq","Output":"--- PASS: TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/build-id-eq (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/build-id-eq"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/build-id-bare"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/build-id-bare","Output":"=== RUN   TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/build-id-bare\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/build-id-bare","Output":"--- PASS: TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/build-id-bare (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/build-id-bare"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/debug-file-directory-eq"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/debug-file-directory-eq","Output":"=== RUN   TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/debug-file-directory-eq\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/debug-file-directory-eq","Output":"--- PASS: TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/debug-file-directory-eq (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/debug-file-directory-eq"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/dsym-eq"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/dsym-eq","Output":"=== RUN   TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/dsym-eq\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/dsym-eq","Output":"--- PASS: TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/dsym-eq (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/dsym-eq"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag","Output":"--- PASS: TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfine_ComparesTwoCommands"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfine_ComparesTwoCommands","Output":"=== RUN   TestHyperfine_ComparesTwoCommands\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfine_ComparesTwoCommands","Output":"--- PASS: TestHyperfine_ComparesTwoCommands (0.60s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfine_ComparesTwoCommands"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdump_DisassemblesBinary"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdump_DisassemblesBinary","Output":"=== RUN   TestLLVMObjdump_DisassemblesBinary\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdump_DisassemblesBinary","Output":"--- PASS: TestLLVMObjdump_DisassemblesBinary (1.22s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdump_DisassemblesBinary"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYU_ParsesSuggestions"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYU_ParsesSuggestions","Output":"=== RUN   TestIWYU_ParsesSuggestions\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYU_ParsesSuggestions","Output":"    handlers_test.go:469: reports[] is empty — iwyu produced no parseable output for the test file\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYU_ParsesSuggestions","Output":"--- SKIP: TestIWYU_ParsesSuggestions (0.36s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYU_ParsesSuggestions"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn","Output":"=== RUN   TestHyperfineEnabled_RequiresExactOptIn\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/unset"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/unset","Output":"=== RUN   TestHyperfineEnabled_RequiresExactOptIn/unset\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/unset","Output":"--- PASS: TestHyperfineEnabled_RequiresExactOptIn/unset (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/unset"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/empty-explicit"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/empty-explicit","Output":"=== RUN   TestHyperfineEnabled_RequiresExactOptIn/empty-explicit\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/empty-explicit","Output":"--- PASS: TestHyperfineEnabled_RequiresExactOptIn/empty-explicit (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/empty-explicit"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/literal-one"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/literal-one","Output":"=== RUN   TestHyperfineEnabled_RequiresExactOptIn/literal-one\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/literal-one","Output":"--- PASS: TestHyperfineEnabled_RequiresExactOptIn/literal-one (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/literal-one"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/literal-zero"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/literal-zero","Output":"=== RUN   TestHyperfineEnabled_RequiresExactOptIn/literal-zero\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/literal-zero","Output":"--- PASS: TestHyperfineEnabled_RequiresExactOptIn/literal-zero (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/literal-zero"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/truthy-true"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/truthy-true","Output":"=== RUN   TestHyperfineEnabled_RequiresExactOptIn/truthy-true\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/truthy-true","Output":"--- PASS: TestHyperfineEnabled_RequiresExactOptIn/truthy-true (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/truthy-true"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/truthy-yes"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/truthy-yes","Output":"=== RUN   TestHyperfineEnabled_RequiresExactOptIn/truthy-yes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/truthy-yes","Output":"--- PASS: TestHyperfineEnabled_RequiresExactOptIn/truthy-yes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/truthy-yes"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/typo-whitespace"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/typo-whitespace","Output":"=== RUN   TestHyperfineEnabled_RequiresExactOptIn/typo-whitespace\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/typo-whitespace","Output":"--- PASS: TestHyperfineEnabled_RequiresExactOptIn/typo-whitespace (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/typo-whitespace"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/typo-newline"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/typo-newline","Output":"=== RUN   TestHyperfineEnabled_RequiresExactOptIn/typo-newline\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/typo-newline","Output":"--- PASS: TestHyperfineEnabled_RequiresExactOptIn/typo-newline (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/typo-newline"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/quoted"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/quoted","Output":"=== RUN   TestHyperfineEnabled_RequiresExactOptIn/quoted\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/quoted","Output":"--- PASS: TestHyperfineEnabled_RequiresExactOptIn/quoted (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn/quoted"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn","Output":"--- PASS: TestHyperfineEnabled_RequiresExactOptIn (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestHyperfineEnabled_RequiresExactOptIn"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsOversizedStdout"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsOversizedStdout","Output":"=== RUN   TestIWYUTool_RejectsOversizedStdout\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsOversizedStdout","Output":"--- PASS: TestIWYUTool_RejectsOversizedStdout (0.13s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsOversizedStdout"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsOversizedStderr"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsOversizedStderr","Output":"=== RUN   TestIWYUTool_RejectsOversizedStderr\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsOversizedStderr","Output":"--- PASS: TestIWYUTool_RejectsOversizedStderr (0.12s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsOversizedStderr"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUHelperProcess"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUHelperProcess","Output":"=== RUN   TestIWYUHelperProcess\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUHelperProcess","Output":"--- PASS: TestIWYUHelperProcess (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUHelperProcess"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RequiresProjectRoot"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RequiresProjectRoot","Output":"=== RUN   TestIWYUTool_RequiresProjectRoot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RequiresProjectRoot","Output":"--- PASS: TestIWYUTool_RequiresProjectRoot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RequiresProjectRoot"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsFileOutsideProjectRoot"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsFileOutsideProjectRoot","Output":"=== RUN   TestIWYUTool_RejectsFileOutsideProjectRoot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsFileOutsideProjectRoot","Output":"--- PASS: TestIWYUTool_RejectsFileOutsideProjectRoot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsFileOutsideProjectRoot"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsSymlinkEscape"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsSymlinkEscape","Output":"=== RUN   TestIWYUTool_RejectsSymlinkEscape\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsSymlinkEscape","Output":"    iwyu_test.go:137: Windows symlink creation requires privileges on many hosts\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsSymlinkEscape","Output":"--- SKIP: TestIWYUTool_RejectsSymlinkEscape (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsSymlinkEscape"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsExtraArgsPositional"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsExtraArgsPositional","Output":"=== RUN   TestIWYUTool_RejectsExtraArgsPositional\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsExtraArgsPositional","Output":"--- PASS: TestIWYUTool_RejectsExtraArgsPositional (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsExtraArgsPositional"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsExtraArgsResponseFile"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsExtraArgsResponseFile","Output":"=== RUN   TestIWYUTool_RejectsExtraArgsResponseFile\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsExtraArgsResponseFile","Output":"--- PASS: TestIWYUTool_RejectsExtraArgsResponseFile (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsExtraArgsResponseFile"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateIWYUExtraArgs_AllowsBenignClangFlags"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateIWYUExtraArgs_AllowsBenignClangFlags","Output":"=== RUN   TestValidateIWYUExtraArgs_AllowsBenignClangFlags\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateIWYUExtraArgs_AllowsBenignClangFlags","Output":"--- PASS: TestValidateIWYUExtraArgs_AllowsBenignClangFlags (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateIWYUExtraArgs_AllowsBenignClangFlags"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateIWYUExtraArgs_RejectsPathValuedIWYUFlags"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateIWYUExtraArgs_RejectsPathValuedIWYUFlags","Output":"=== RUN   TestValidateIWYUExtraArgs_RejectsPathValuedIWYUFlags\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateIWYUExtraArgs_RejectsPathValuedIWYUFlags","Output":"--- PASS: TestValidateIWYUExtraArgs_RejectsPathValuedIWYUFlags (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateIWYUExtraArgs_RejectsPathValuedIWYUFlags"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateIWYUExtraArgs_RejectsPositionalAndResponseFile"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateIWYUExtraArgs_RejectsPositionalAndResponseFile","Output":"=== RUN   TestValidateIWYUExtraArgs_RejectsPositionalAndResponseFile\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateIWYUExtraArgs_RejectsPositionalAndResponseFile","Output":"--- PASS: TestValidateIWYUExtraArgs_RejectsPositionalAndResponseFile (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateIWYUExtraArgs_RejectsPositionalAndResponseFile"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsExtraArgsPathValuedFlag"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsExtraArgsPathValuedFlag","Output":"=== RUN   TestIWYUTool_RejectsExtraArgsPathValuedFlag\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsExtraArgsPathValuedFlag","Output":"--- PASS: TestIWYUTool_RejectsExtraArgsPathValuedFlag (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestIWYUTool_RejectsExtraArgsPathValuedFlag"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_NotInstalled"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_NotInstalled","Output":"=== RUN   TestLLVMNMTool_NotInstalled\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_NotInstalled","Output":"--- PASS: TestLLVMNMTool_NotInstalled (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_NotInstalled"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RequiresProjectRoot"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RequiresProjectRoot","Output":"=== RUN   TestLLVMNMTool_RequiresProjectRoot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RequiresProjectRoot","Output":"--- PASS: TestLLVMNMTool_RequiresProjectRoot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RequiresProjectRoot"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSizeTool_RequiresProjectRoot"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSizeTool_RequiresProjectRoot","Output":"=== RUN   TestLLVMSizeTool_RequiresProjectRoot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSizeTool_RequiresProjectRoot","Output":"--- PASS: TestLLVMSizeTool_RequiresProjectRoot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSizeTool_RequiresProjectRoot"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RejectsExtraArgsBypass"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RejectsExtraArgsBypass","Output":"=== RUN   TestLLVMNMTool_RejectsExtraArgsBypass\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RejectsExtraArgsBypass/response-file"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RejectsExtraArgsBypass/response-file","Output":"=== RUN   TestLLVMNMTool_RejectsExtraArgsBypass/response-file\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RejectsExtraArgsBypass/response-file","Output":"--- PASS: TestLLVMNMTool_RejectsExtraArgsBypass/response-file (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RejectsExtraArgsBypass/response-file"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RejectsExtraArgsBypass/positional-absolute"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RejectsExtraArgsBypass/positional-absolute","Output":"=== RUN   TestLLVMNMTool_RejectsExtraArgsBypass/positional-absolute\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RejectsExtraArgsBypass/positional-absolute","Output":"--- PASS: TestLLVMNMTool_RejectsExtraArgsBypass/positional-absolute (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RejectsExtraArgsBypass/positional-absolute"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RejectsExtraArgsBypass/positional-relative"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RejectsExtraArgsBypass/positional-relative","Output":"=== RUN   TestLLVMNMTool_RejectsExtraArgsBypass/positional-relative\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RejectsExtraArgsBypass/positional-relative","Output":"--- PASS: TestLLVMNMTool_RejectsExtraArgsBypass/positional-relative (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RejectsExtraArgsBypass/positional-relative"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RejectsExtraArgsBypass/flag-then-positional"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RejectsExtraArgsBypass/flag-then-positional","Output":"=== RUN   TestLLVMNMTool_RejectsExtraArgsBypass/flag-then-positional\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RejectsExtraArgsBypass/flag-then-positional","Output":"--- PASS: TestLLVMNMTool_RejectsExtraArgsBypass/flag-then-positional (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RejectsExtraArgsBypass/flag-then-positional"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RejectsExtraArgsBypass/path-valued-flag"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RejectsExtraArgsBypass/path-valued-flag","Output":"=== RUN   TestLLVMNMTool_RejectsExtraArgsBypass/path-valued-flag\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RejectsExtraArgsBypass/path-valued-flag","Output":"--- PASS: TestLLVMNMTool_RejectsExtraArgsBypass/path-valued-flag (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RejectsExtraArgsBypass/path-valued-flag"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RejectsExtraArgsBypass","Output":"--- PASS: TestLLVMNMTool_RejectsExtraArgsBypass (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNMTool_RejectsExtraArgsBypass"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSizeTool_RejectsExtraArgsBypass"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSizeTool_RejectsExtraArgsBypass","Output":"=== RUN   TestLLVMSizeTool_RejectsExtraArgsBypass\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSizeTool_RejectsExtraArgsBypass/response-file"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSizeTool_RejectsExtraArgsBypass/response-file","Output":"=== RUN   TestLLVMSizeTool_RejectsExtraArgsBypass/response-file\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSizeTool_RejectsExtraArgsBypass/response-file","Output":"--- PASS: TestLLVMSizeTool_RejectsExtraArgsBypass/response-file (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSizeTool_RejectsExtraArgsBypass/response-file"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSizeTool_RejectsExtraArgsBypass/positional-absolute"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSizeTool_RejectsExtraArgsBypass/positional-absolute","Output":"=== RUN   TestLLVMSizeTool_RejectsExtraArgsBypass/positional-absolute\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSizeTool_RejectsExtraArgsBypass/positional-absolute","Output":"--- PASS: TestLLVMSizeTool_RejectsExtraArgsBypass/positional-absolute (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSizeTool_RejectsExtraArgsBypass/positional-absolute"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSizeTool_RejectsExtraArgsBypass/flag-then-positional"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSizeTool_RejectsExtraArgsBypass/flag-then-positional","Output":"=== RUN   TestLLVMSizeTool_RejectsExtraArgsBypass/flag-then-positional\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSizeTool_RejectsExtraArgsBypass/flag-then-positional","Output":"--- PASS: TestLLVMSizeTool_RejectsExtraArgsBypass/flag-then-positional (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSizeTool_RejectsExtraArgsBypass/flag-then-positional"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSizeTool_RejectsExtraArgsBypass/path-valued-flag"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSizeTool_RejectsExtraArgsBypass/path-valued-flag","Output":"=== RUN   TestLLVMSizeTool_RejectsExtraArgsBypass/path-valued-flag\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSizeTool_RejectsExtraArgsBypass/path-valued-flag","Output":"--- PASS: TestLLVMSizeTool_RejectsExtraArgsBypass/path-valued-flag (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSizeTool_RejectsExtraArgsBypass/path-valued-flag"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSizeTool_RejectsExtraArgsBypass","Output":"--- PASS: TestLLVMSizeTool_RejectsExtraArgsBypass (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSizeTool_RejectsExtraArgsBypass"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNM_DumpsSymbols"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNM_DumpsSymbols","Output":"=== RUN   TestLLVMNM_DumpsSymbols\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNM_DumpsSymbols","Output":"--- PASS: TestLLVMNM_DumpsSymbols (1.08s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMNM_DumpsSymbols"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSize_DumpsSections"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSize_DumpsSections","Output":"=== RUN   TestLLVMSize_DumpsSections\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSize_DumpsSections","Output":"--- PASS: TestLLVMSize_DumpsSections (1.22s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMSize_DumpsSections"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RequiresProjectRoot"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RequiresProjectRoot","Output":"=== RUN   TestLLVMObjdumpTool_RequiresProjectRoot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RequiresProjectRoot","Output":"--- PASS: TestLLVMObjdumpTool_RequiresProjectRoot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RequiresProjectRoot"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpBinaryPath_AllowsBinaryInsideProjectRoot"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpBinaryPath_AllowsBinaryInsideProjectRoot","Output":"=== RUN   TestValidateLLVMObjdumpBinaryPath_AllowsBinaryInsideProjectRoot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpBinaryPath_AllowsBinaryInsideProjectRoot","Output":"--- PASS: TestValidateLLVMObjdumpBinaryPath_AllowsBinaryInsideProjectRoot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpBinaryPath_AllowsBinaryInsideProjectRoot"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpBinaryPath_RejectsBinaryOutsideProjectRoot"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpBinaryPath_RejectsBinaryOutsideProjectRoot","Output":"=== RUN   TestValidateLLVMObjdumpBinaryPath_RejectsBinaryOutsideProjectRoot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpBinaryPath_RejectsBinaryOutsideProjectRoot","Output":"--- PASS: TestValidateLLVMObjdumpBinaryPath_RejectsBinaryOutsideProjectRoot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpBinaryPath_RejectsBinaryOutsideProjectRoot"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpBinaryPath_RejectsSymlinkEscape"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpBinaryPath_RejectsSymlinkEscape","Output":"=== RUN   TestValidateLLVMObjdumpBinaryPath_RejectsSymlinkEscape\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpBinaryPath_RejectsSymlinkEscape","Output":"    llvmobjdump_test.go:85: Windows symlink creation requires privileges on many hosts\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpBinaryPath_RejectsSymlinkEscape","Output":"--- SKIP: TestValidateLLVMObjdumpBinaryPath_RejectsSymlinkEscape (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpBinaryPath_RejectsSymlinkEscape"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpExtraArgs_AllowsFlags"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpExtraArgs_AllowsFlags","Output":"=== RUN   TestValidateLLVMObjdumpExtraArgs_AllowsFlags\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpExtraArgs_AllowsFlags","Output":"--- PASS: TestValidateLLVMObjdumpExtraArgs_AllowsFlags (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpExtraArgs_AllowsFlags"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpExtraArgs_RejectsResponseFile"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpExtraArgs_RejectsResponseFile","Output":"=== RUN   TestValidateLLVMObjdumpExtraArgs_RejectsResponseFile\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpExtraArgs_RejectsResponseFile","Output":"--- PASS: TestValidateLLVMObjdumpExtraArgs_RejectsResponseFile (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpExtraArgs_RejectsResponseFile"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpExtraArgs_RejectsPositional"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpExtraArgs_RejectsPositional","Output":"=== RUN   TestValidateLLVMObjdumpExtraArgs_RejectsPositional\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpExtraArgs_RejectsPositional","Output":"--- PASS: TestValidateLLVMObjdumpExtraArgs_RejectsPositional (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpExtraArgs_RejectsPositional"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpExtraArgs_RejectsPathValuedFlags"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpExtraArgs_RejectsPathValuedFlags","Output":"=== RUN   TestValidateLLVMObjdumpExtraArgs_RejectsPathValuedFlags\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpExtraArgs_RejectsPathValuedFlags","Output":"--- PASS: TestValidateLLVMObjdumpExtraArgs_RejectsPathValuedFlags (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateLLVMObjdumpExtraArgs_RejectsPathValuedFlags"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestMatchesForbiddenFlagPrefix_DoesNotFalseMatch"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestMatchesForbiddenFlagPrefix_DoesNotFalseMatch","Output":"=== RUN   TestMatchesForbiddenFlagPrefix_DoesNotFalseMatch\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestMatchesForbiddenFlagPrefix_DoesNotFalseMatch","Output":"--- PASS: TestMatchesForbiddenFlagPrefix_DoesNotFalseMatch (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestMatchesForbiddenFlagPrefix_DoesNotFalseMatch"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsBypass"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsBypass","Output":"=== RUN   TestLLVMObjdumpTool_RejectsExtraArgsBypass\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsBypass/response-file"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsBypass/response-file","Output":"=== RUN   TestLLVMObjdumpTool_RejectsExtraArgsBypass/response-file\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsBypass/response-file","Output":"--- PASS: TestLLVMObjdumpTool_RejectsExtraArgsBypass/response-file (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsBypass/response-file"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsBypass/positional-absolute"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsBypass/positional-absolute","Output":"=== RUN   TestLLVMObjdumpTool_RejectsExtraArgsBypass/positional-absolute\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsBypass/positional-absolute","Output":"--- PASS: TestLLVMObjdumpTool_RejectsExtraArgsBypass/positional-absolute (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsBypass/positional-absolute"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsBypass/positional-relative"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsBypass/positional-relative","Output":"=== RUN   TestLLVMObjdumpTool_RejectsExtraArgsBypass/positional-relative\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsBypass/positional-relative","Output":"--- PASS: TestLLVMObjdumpTool_RejectsExtraArgsBypass/positional-relative (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsBypass/positional-relative"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsBypass/flag-then-positional"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsBypass/flag-then-positional","Output":"=== RUN   TestLLVMObjdumpTool_RejectsExtraArgsBypass/flag-then-positional\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsBypass/flag-then-positional","Output":"--- PASS: TestLLVMObjdumpTool_RejectsExtraArgsBypass/flag-then-positional (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsBypass/flag-then-positional"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsBypass","Output":"--- PASS: TestLLVMObjdumpTool_RejectsExtraArgsBypass (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestLLVMObjdumpTool_RejectsExtraArgsBypass"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_ResolvesRealPath"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_ResolvesRealPath","Output":"=== RUN   TestValidateBinaryInsideRoot_ResolvesRealPath\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_ResolvesRealPath","Output":"--- PASS: TestValidateBinaryInsideRoot_ResolvesRealPath (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_ResolvesRealPath"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_RejectsMissingProjectRoot"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_RejectsMissingProjectRoot","Output":"=== RUN   TestValidateBinaryInsideRoot_RejectsMissingProjectRoot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_RejectsMissingProjectRoot","Output":"--- PASS: TestValidateBinaryInsideRoot_RejectsMissingProjectRoot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_RejectsMissingProjectRoot"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_RejectsMissingTarget"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_RejectsMissingTarget","Output":"=== RUN   TestValidateBinaryInsideRoot_RejectsMissingTarget\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_RejectsMissingTarget","Output":"--- PASS: TestValidateBinaryInsideRoot_RejectsMissingTarget (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_RejectsMissingTarget"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_RejectsFilesystemRoot"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_RejectsFilesystemRoot","Output":"=== RUN   TestValidateBinaryInsideRoot_RejectsFilesystemRoot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_RejectsFilesystemRoot","Output":"--- PASS: TestValidateBinaryInsideRoot_RejectsFilesystemRoot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_RejectsFilesystemRoot"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_RejectsDirectoryTarget"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_RejectsDirectoryTarget","Output":"=== RUN   TestValidateBinaryInsideRoot_RejectsDirectoryTarget\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_RejectsDirectoryTarget","Output":"--- PASS: TestValidateBinaryInsideRoot_RejectsDirectoryTarget (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_RejectsDirectoryTarget"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_RejectsParentTraversal"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_RejectsParentTraversal","Output":"=== RUN   TestValidateBinaryInsideRoot_RejectsParentTraversal\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_RejectsParentTraversal","Output":"--- PASS: TestValidateBinaryInsideRoot_RejectsParentTraversal (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_RejectsParentTraversal"}
+{"Action":"run","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_KindWordingPropagated"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_KindWordingPropagated","Output":"=== RUN   TestValidateBinaryInsideRoot_KindWordingPropagated\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_KindWordingPropagated","Output":"--- PASS: TestValidateBinaryInsideRoot_KindWordingPropagated (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools","Test":"TestValidateBinaryInsideRoot_KindWordingPropagated"}
+{"Action":"output","Package":"mcp-local-hub/internal/perftools","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/perftools"}

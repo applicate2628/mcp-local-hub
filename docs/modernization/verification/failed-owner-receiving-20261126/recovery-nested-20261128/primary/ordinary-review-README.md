@@ -1,0 +1,11 @@
+# Independent review — ordinary path type contract
+
+**Scoped static PASS; no blocking defect found in the exact two-function correction.** The frozen candidate is `b-five-test-source-ordinary-type-candidate-v1/PACKAGE.json` SHA `ddcba8dddee43bfc2a0d0f410142a954c2780c2bab2dac07e97f1c0df020ec11`. This review changed none of its bytes, flags, native files or owners.
+
+The complete 1,099-byte patch was read together with `ordinary`, `pinned`, all four call sites and the full worktree/current-source receiving context. Independently reversing/reapplying the two substitutions reproduces the exact before/after files. All 12 package pins and three external pins match. The other 20 function source segments and all module-level data remain identical.
+
+`ordinary` now accepts only a regular file or directory after the existing complete ancestor/target symlink and reparse checks. Directory callers still require a directory. The refs traversal can therefore process its actual roots, nested directories and files; it still rejects ref locks and special objects. `pinned` explicitly requires a file before opening it, so the broader ordinary-path return type does not permit directory reads. Its disabled flag, required hash, byte limit and content hash checks are unchanged.
+
+The complete local harness and 27-case PASS record were read. The checks exercise the exact extracted functions and unchanged refs-loop fragment, including before-fix directory rejection, after-fix directory acceptance, file-only pinned reads, links, FIFO, missing paths, flags/pins/limits and nested refs/locks. The independent reviewer did not rerun the harness or import the full receiver. Injected Windows reparse bits are clearly limited to local predicate evidence. The initial optional socket-fixture EPERM occurred before any cases; the failure and omission are preserved and no socket coverage is claimed.
+
+The full module remains `REVIEW_COMPLETE=False`. Layout, exact five TestSource paths, role bindings, process receiving, budgets and native source observations remain separate. This review supports integrating the minimal disabled correction into a separately pinned successor; it is not native worktree execution, source qualification or full-route activation.

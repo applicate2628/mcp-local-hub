@@ -1,0 +1,99 @@
+{
+  "schema": "independent-canonical-Product-source-admission-static-review-v1",
+  "status": "PASS_SCOPED_STATIC_NO_BLOCKING_FINDING",
+  "target_manifest": {
+    "file": "b-functional-product-source-admission-b8d-candidate-v1/MANIFEST.json",
+    "bytes": 3225,
+    "sha256": "4bfbc423202eadd68a20b8983e725b7c4ee62626fcfd44eb6b1cb282484f363d"
+  },
+  "reviewer": "/root/measurements_inventory",
+  "review_scope": "Entire frozen17-file canonical Product source-admission candidate, exact donor/control reconstruction, and both controlling existing receiver functions. No native execution/import or new gate.",
+  "verified_package_files": 17,
+  "verified_preimage_pins": 9,
+  "source_identity": {
+    "commit": "b8d44b8cdfa2f57d17d80a2a59f3f7b6a6ec4647",
+    "tree": "20073292f09ba34bb225ae1cda82da0eba0782de",
+    "root": "{TASK_ROOT}\\lf363b-functional-product-v1",
+    "source_files": 3867,
+    "actual_map_sha256": "630d9ed98a073bc033a388e987038f91c9e686943e68eecc576976519ac19bc1"
+  },
+  "config": {
+    "sha256": "935cbf8b4bc24b1c7ddc7768578f83bf65a3a40a9b1025076cb1eb0510f58135",
+    "exact_source_order_preserved": true,
+    "only_five_child_control_paths_rebound": true,
+    "common_five_control_paths_identical": true,
+    "all14_Git_environment_values_identical": true,
+    "all_three_explicit_commands_and30s_identical": true,
+    "planned_original_commands": 4,
+    "planned_original_readers": 8,
+    "original_cleanup_seconds": 10
+  },
+  "outer": {
+    "sha256": "13bc339c4490e0ea4bedb83a02b600f2f6824109624c1fda57f39476b1130ac4",
+    "whole_equals_canonical_f65_with_declared_bindings_only": true,
+    "source_pin_loop_GetSHA_and_original_Process_wait_dispose_and_final_record_equal": true,
+    "scalar_helper_pin_removal_restores_exact_existing_canonical_inventory": true
+  },
+  "DATA": {
+    "command_characters": 5046,
+    "readable_inline_AST_equal": true,
+    "exact_three_input_and_two_output_pins": true,
+    "both_output_payloads_reconstructed_independently": true,
+    "all_literal_occurrence_counts_exact": true,
+    "CreateNew_flush_fsync_close_readback_body_identical": true,
+    "result_record_tail_identical": true,
+    "shared_map_read_only_single_writer": true,
+    "no_subprocess_or_decoded_code_execution": true
+  },
+  "receiver_compatibility": {
+    "current_binding_four_keys_exact": true,
+    "parent_and_receipt_actual_hashes_null": true,
+    "REVIEW_COMPLETE_false_unchanged": true,
+    "complete_census_and_three_equal_input_maps_still_required": true,
+    "explicit_git_controls_refs_absence_detached_HEAD_still_required": true,
+    "actual_dynamic_controls_not_inferred_from_declared_layout": true,
+    "Product_no_source_parent_matches_existing_contract": true,
+    "Test_five_file_delta_unchanged": true,
+    "coverage": [
+      {
+        "file": "b-five-test-source-admission-candidate-v2/receive_fresh_full_inputs_v1.py",
+        "function": "receive_worktree_controls",
+        "first_line": 905,
+        "last_line": 967
+      },
+      {
+        "file": "b-five-test-source-admission-candidate-v2/receive_fresh_full_inputs_v1.py",
+        "function": "receive_current_source",
+        "first_line": 970,
+        "last_line": 1097
+      }
+    ]
+  },
+  "blocking_findings": [],
+  "limits": [
+    "Static review does not prove native invocation, all4/8closure, current ref inventory/absence, postcommit index/HEAD pins or full-route qualification.",
+    "Frozen shared-map pending annotation is a preparation snapshot; parent separately reports actual DATA3 closed writers/readback with transport61988UNKNOWN preserved.",
+    "Root own receiving/release remains required by the active task; this review adds no new gate.",
+    "Existing missing-object maintenance warning and all historical FAIL/UNKNOWN remain untouched."
+  ],
+  "candidate_modified": false,
+  "native_actions": false,
+  "root_proof_replaced": false,
+  "inputs": [
+    {
+      "file": "b-five-test-source-admission-candidate-v2/receive_fresh_full_inputs_v1.py",
+      "bytes": 125057,
+      "sha256": "4cdb508e655527b0372a5726f2753f6163ee50ed25b52546ff86e85682a6185a"
+    },
+    {
+      "file": "b-functional-product-scalar-commit-execution-v1/root-source-admission.json",
+      "bytes": 3125,
+      "sha256": "bec1bbef8af4e870659e6389b6523abc0359fdd127567fac1ae3819ad2539ec1"
+    },
+    {
+      "file": "b-functional-product-child-controls-execution-v1/child-controls-observation.json",
+      "bytes": 5921,
+      "sha256": "b214ad201e541268844b33f7619da59ac448523bc8cc4d184270efd7b86a333c"
+    }
+  ]
+}

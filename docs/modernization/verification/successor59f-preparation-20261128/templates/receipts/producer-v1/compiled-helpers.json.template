@@ -1,0 +1,133 @@
+{
+  "schema": "successor-compiled-helper-receiving-v1",
+  "status": "COMPILED_DATA_ONLY",
+  "physical_complete": true,
+  "source_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+  "source_tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+  "source_file_count": 3369,
+  "root_receiving": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer-candidate\\successor-product-helper-inputs-v1-root-receiving.json",
+    "sha256": "6e8568fd054048a082fe48feea83069e5759289b733294e534169d2fd5b77743"
+  },
+  "original_producer_status": "FAIL",
+  "original_producer_closure": "CLOSED",
+  "original_failure_preserved": true,
+  "binding": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer-candidate\\helper-build-bindings-v2.json",
+    "sha256": "d078d88d6455056efc71fd5dfa800d1bd2dd026b8debb41997445590f58b1b01"
+  },
+  "preparation": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\source-helper-preparation.json",
+    "bytes": 11213,
+    "sha256": "90417ae2198018c16e9e4c990dd1844d3600ec07dc95a126dff41a20ebb3e970"
+  },
+  "successful_original_commands": [
+    "copy-closed-warm-caches",
+    "stage-exact-source-and-helpers",
+    "build-validator",
+    "build-test2json",
+    "build-job",
+    "build-contained",
+    "build-namespace",
+    "build-cli",
+    "check-foreground-framed-parser"
+  ],
+  "staged_sources": {
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-job\\main_windows.go": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-job\\main_windows.go",
+      "bytes": 32466,
+      "sha256": "74c4cebbc91337eacabc113cb1f772589e0c823777c5f2ed734757647fc05977"
+    },
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-job\\owner_windows.go": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-job\\owner_windows.go",
+      "bytes": 4891,
+      "sha256": "7200935baff50c05b5f1893e87aac01768ee1d98ca85fcad5e655ca016b2264e"
+    },
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-contained\\main_windows.go": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-contained\\main_windows.go",
+      "bytes": 17383,
+      "sha256": "59fa2cc432b887114497c3c6625731d4dcde207e38b412371eb5fa83b39ed8a9"
+    },
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-namespace\\main_windows.go": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-namespace\\main_windows.go",
+      "bytes": 24227,
+      "sha256": "4e91b8ce877400a91a4f315b68a166ae3d2c7c19d4963d52ade521f03f2ac4b4"
+    },
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-namespace\\prebuilt_windows.go": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-namespace\\prebuilt_windows.go",
+      "bytes": 19606,
+      "sha256": "2fc1016b4eff51c77a3c0e342de14d938b3f39b6a67c438b04ef262e09d8eeed"
+    },
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-cli\\main_windows.go": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-cli\\main_windows.go",
+      "bytes": 27303,
+      "sha256": "77949871b3c0cbea570241409cd40840be9c88db9f4e83fe71044db80f2155d7"
+    },
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-cli\\main_windows_test.go": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-cli\\main_windows_test.go",
+      "bytes": 2772,
+      "sha256": "9712a445ce383ce89ec3a6051d7eb11dee5cf29a08ba93854d0c85fa8c142a0b"
+    }
+  },
+  "binaries": {
+    "validator": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\windows-product-validate.exe",
+      "bytes": 6268928,
+      "sha256": "fef7b603642ea3de8e693c1075c32ddc4f76383fd3ad42e9b145c7e6a588f924"
+    },
+    "test2json": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\test2json.exe",
+      "bytes": 4952576,
+      "sha256": "ce7091b85741dd4b5ab1f2f278670e4f2ea0485faddaaed36967409a9ddf2c85"
+    },
+    "job": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\test-job-entry.exe",
+      "bytes": 6127616,
+      "sha256": "5f196daba403c4c344b9c63c192f5bd48993bcf6d8aea3b96f1eb4e94c7fe759"
+    },
+    "contained": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\literal-contained.exe",
+      "bytes": 5826048,
+      "sha256": "25e0f779c6ecf3ee25bc9899d332037f42fa0e01d6b6d10db52d57520bcaf345"
+    },
+    "namespace": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\test-recovery-namespace.exe",
+      "bytes": 6546432,
+      "sha256": "d8792a15c78975234274a1eed09f002fb8ee8a863fe9e036236e1244a26f48ba"
+    },
+    "cli": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\literal-foreground-cli.exe",
+      "bytes": 5999104,
+      "sha256": "21f006f6765f018f7f0169e28258656756cf2dd03085cb4900b5f50f7312de01"
+    }
+  },
+  "foreground_parser_unit_check": {
+    "command": {
+      "name": "check-foreground-framed-parser",
+      "seconds": 5.578471900080331,
+      "exit_code": 0,
+      "closure": "CLOSED",
+      "command_passed": true,
+      "captures": {
+        "stdout": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\commands\\check-foreground-framed-parser.stdout.txt",
+          "bytes": 59,
+          "sha256": "8d050ef0f0d591a48e34a5566f4633dfc83dca837ffeb9005f09b202f8b7cac9"
+        },
+        "stderr": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\commands\\check-foreground-framed-parser.stderr.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    "scope": "Five original auxiliary parser tests only; no full CLI execution"
+  },
+  "product_inputs_received": false,
+  "full_acceptance_executed": false,
+  "full_acceptance_pass": false,
+  "helper_runtime_qualification_passed": false,
+  "native_authority_transferred": false,
+  "failed_run_cache_reused": false,
+  "receiving_utc": "2026-11-28T14:02:27.0174115Z"
+}

@@ -1,0 +1,14 @@
+{
+    "mode":  "cache-acceptance-stage-20261128-v16.json",
+    "config_sha256":  "bf5e6f4abbab9f0d8abfcedb4eb127661e92e38361dc0e71d836fd955506cfc1",
+    "expected_start_head":  "27d90e626465dc9a3a012e50785d62785d4c5e7e",
+    "same_process_start_object":  true,
+    "original_pid":  56632,
+    "exit_code":  1,
+    "wait_returned":  true,
+    "original_process_object_disposed":  true,
+    "new_job_or_tree_wait":  false,
+    "wait_errors":  [
+
+                    ]
+}

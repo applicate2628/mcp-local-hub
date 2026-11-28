@@ -1,0 +1,27 @@
+{"Action":"start","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult","Test":"TestProjectionAdmissionDoesNotMarshalTailAfterSaturation"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult","Test":"TestProjectionAdmissionDoesNotMarshalTailAfterSaturation","Output":"=== RUN   TestProjectionAdmissionDoesNotMarshalTailAfterSaturation\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult","Test":"TestProjectionAdmissionDoesNotMarshalTailAfterSaturation","Output":"--- PASS: TestProjectionAdmissionDoesNotMarshalTailAfterSaturation (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult","Test":"TestProjectionAdmissionDoesNotMarshalTailAfterSaturation"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult","Test":"TestMarshalIndentProjectsBeforeFullMarshalWhenAdmissionRejects"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult","Test":"TestMarshalIndentProjectsBeforeFullMarshalWhenAdmissionRejects","Output":"=== RUN   TestMarshalIndentProjectsBeforeFullMarshalWhenAdmissionRejects\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult","Test":"TestMarshalIndentProjectsBeforeFullMarshalWhenAdmissionRejects","Output":"--- PASS: TestMarshalIndentProjectsBeforeFullMarshalWhenAdmissionRejects (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult","Test":"TestMarshalIndentProjectsBeforeFullMarshalWhenAdmissionRejects"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult","Test":"TestMarshalIndentExactEncodedBoundary"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult","Test":"TestMarshalIndentExactEncodedBoundary","Output":"=== RUN   TestMarshalIndentExactEncodedBoundary\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult","Test":"TestMarshalIndentExactEncodedBoundary/N-1"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult","Test":"TestMarshalIndentExactEncodedBoundary/N-1","Output":"=== RUN   TestMarshalIndentExactEncodedBoundary/N-1\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult","Test":"TestMarshalIndentExactEncodedBoundary/N-1","Output":"--- PASS: TestMarshalIndentExactEncodedBoundary/N-1 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult","Test":"TestMarshalIndentExactEncodedBoundary/N-1"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult","Test":"TestMarshalIndentExactEncodedBoundary/N"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult","Test":"TestMarshalIndentExactEncodedBoundary/N","Output":"=== RUN   TestMarshalIndentExactEncodedBoundary/N\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult","Test":"TestMarshalIndentExactEncodedBoundary/N","Output":"--- PASS: TestMarshalIndentExactEncodedBoundary/N (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult","Test":"TestMarshalIndentExactEncodedBoundary/N"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult","Test":"TestMarshalIndentExactEncodedBoundary/N+1"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult","Test":"TestMarshalIndentExactEncodedBoundary/N+1","Output":"=== RUN   TestMarshalIndentExactEncodedBoundary/N+1\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult","Test":"TestMarshalIndentExactEncodedBoundary/N+1","Output":"--- PASS: TestMarshalIndentExactEncodedBoundary/N+1 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult","Test":"TestMarshalIndentExactEncodedBoundary/N+1"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult","Test":"TestMarshalIndentExactEncodedBoundary","Output":"--- PASS: TestMarshalIndentExactEncodedBoundary (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult","Test":"TestMarshalIndentExactEncodedBoundary"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/publicresult"}

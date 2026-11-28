@@ -1,0 +1,195 @@
+{
+  "schema": "successor59f-compiled-data-provenance-v1",
+  "source_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+  "source_tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+  "qualification": "COMPILED_INPUT_DATA_ONLY",
+  "native_binary_or_cache_payloads_published": false,
+  "helper_receiving": {
+    "artifact": "templates/receipts/producer-v1/compiled-helpers.json.template",
+    "original_bytes": 6775,
+    "original_sha256": "4778c49ae9d57f83a6e0eb4227b294a4ce459f20cf760c05ddf1fbbbdb7f0e2c"
+  },
+  "helpers": {
+    "validator": {
+      "bytes": 6268928,
+      "sha256": "fef7b603642ea3de8e693c1075c32ddc4f76383fd3ad42e9b145c7e6a588f924",
+      "producer": "helper-and-product-v1",
+      "producer_overall_status": "FAIL",
+      "original_command_status": "PASS",
+      "source": "Source59f or pinned original Go distribution"
+    },
+    "test2json": {
+      "bytes": 4952576,
+      "sha256": "ce7091b85741dd4b5ab1f2f278670e4f2ea0485faddaaed36967409a9ddf2c85",
+      "producer": "helper-and-product-v1",
+      "producer_overall_status": "FAIL",
+      "original_command_status": "PASS",
+      "source": "Source59f or pinned original Go distribution"
+    },
+    "job": {
+      "bytes": 6127616,
+      "sha256": "5f196daba403c4c344b9c63c192f5bd48993bcf6d8aea3b96f1eb4e94c7fe759",
+      "producer": "helper-and-product-v1",
+      "producer_overall_status": "FAIL",
+      "original_command_status": "PASS",
+      "source": {
+        "artifact": "sources/inputs/producer-v1/job-entry-whole-suite-main_windows.go.txt",
+        "original_bytes": 32466,
+        "original_sha256": "74c4cebbc91337eacabc113cb1f772589e0c823777c5f2ed734757647fc05977"
+      }
+    },
+    "contained": {
+      "bytes": 5826048,
+      "sha256": "25e0f779c6ecf3ee25bc9899d332037f42fa0e01d6b6d10db52d57520bcaf345",
+      "producer": "helper-and-product-v1",
+      "producer_overall_status": "FAIL",
+      "original_command_status": "PASS",
+      "source": {
+        "artifact": "templates/inputs/producer-v1/literal-contained-receiver.go.txt.template",
+        "original_bytes": 17383,
+        "original_sha256": "59fa2cc432b887114497c3c6625731d4dcde207e38b412371eb5fa83b39ed8a9"
+      }
+    },
+    "namespace": {
+      "bytes": 6546432,
+      "sha256": "d8792a15c78975234274a1eed09f002fb8ee8a863fe9e036236e1244a26f48ba",
+      "producer": "helper-and-product-v1",
+      "producer_overall_status": "FAIL",
+      "original_command_status": "PASS",
+      "source": [
+        {
+          "artifact": "sources/inputs/namespace/main_windows.go",
+          "original_bytes": 24227,
+          "original_sha256": "4e91b8ce877400a91a4f315b68a166ae3d2c7c19d4963d52ade521f03f2ac4b4"
+        },
+        {
+          "artifact": "templates/inputs/namespace/prebuilt_windows.go.template",
+          "original_bytes": 19606,
+          "original_sha256": "2fc1016b4eff51c77a3c0e342de14d938b3f39b6a67c438b04ef262e09d8eeed"
+        }
+      ]
+    },
+    "cli": {
+      "bytes": 5999104,
+      "sha256": "21f006f6765f018f7f0169e28258656756cf2dd03085cb4900b5f50f7312de01",
+      "producer": "helper-and-product-v1",
+      "producer_overall_status": "FAIL",
+      "original_command_status": "PASS",
+      "source": {
+        "artifact": "templates/inputs/foreground/main_windows.go.template",
+        "original_bytes": 27303,
+        "original_sha256": "77949871b3c0cbea570241409cd40840be9c88db9f4e83fe71044db80f2155d7"
+      }
+    }
+  },
+  "products": {
+    "product": {
+      "source_epoch": "861852f807c36673755014ef4657bf10252b4e75505bc8b73819bcf8cded7a3a",
+      "qualification": "COMPILED_INPUT_DATA_ONLY",
+      "producer": "product-only-v2",
+      "inputs": {
+        "artifact": "templates/receipts/product-v2/product/inputs.json.template",
+        "original_bytes": 7147,
+        "original_sha256": "60f9308d92756d75961a47af9272bcef95ac64cdc1d65bc9d2d90f8a6b37d7ac"
+      },
+      "build_plan": {
+        "artifact": "templates/receipts/product-v2/product/build_plan.json.template",
+        "original_bytes": 5183,
+        "original_sha256": "6f62dd9c5883e761db19e2c1a23b99c9a6c1561eb6781a24e4eacc723cf79929"
+      },
+      "fixture": {
+        "artifact": "templates/receipts/product-v2/product/fixture.json.template",
+        "original_bytes": 616,
+        "original_sha256": "90c0b9181d2806bed6135cb57c6feb16485dcd2585405a2d2f9269bdc09d5e1e"
+      },
+      "entry_observation": {
+        "artifact": "sources/receipts/product-v2/product/entry_observation.json",
+        "original_bytes": 580,
+        "original_sha256": "5211717ccd51b64b9e3220432ef3579be61398a016aee1d5606225a3aacfa007"
+      },
+      "scope": {
+        "artifact": "templates/receipts/product-v2/product/scope.json.template",
+        "original_bytes": 1371,
+        "original_sha256": "3a41729d9b80a3af1619ce22dc58758540281d14990f6e4590badc7f574098d0"
+      },
+      "files": {
+        "mcphub.exe": {
+          "bytes": 10280448,
+          "sha256": "f1be7e81c0d82e6d61b8f636c9c3632073e33221cc251a5936bc51890aa1805e"
+        },
+        "windows-product-identity.json": {
+          "bytes": 295,
+          "sha256": "f7efd7f6388ec8b74b57eeaa2af5afd9094c65affcc82eff57ca86a9157905bc"
+        },
+        "mcphub-product/mcphub.exe": {
+          "bytes": 46520320,
+          "sha256": "87754b24016dc201e178fb37ecec0a5af52db70e55ed46c0436d219814e0a7a2"
+        }
+      }
+    },
+    "native_product": {
+      "source_epoch": "",
+      "qualification": "COMPILED_INPUT_DATA_ONLY",
+      "producer": "product-only-v2",
+      "inputs": {
+        "artifact": "templates/receipts/product-v2/native_product/inputs.json.template",
+        "original_bytes": 5904,
+        "original_sha256": "0e0da8b092a1a8ece718ff283ba8fccedb6eeeed1f788832143f064045dece05"
+      },
+      "build_plan": {
+        "artifact": "templates/receipts/product-v2/native_product/build_plan.json.template",
+        "original_bytes": 4516,
+        "original_sha256": "579a06abc87434b78b0d05e118e7dd36286e602584752dd0ebddfa7ebab83c7c"
+      },
+      "fixture": {
+        "artifact": "templates/receipts/product-v2/native_product/fixture.json.template",
+        "original_bytes": 548,
+        "original_sha256": "485a85adfc59257ba62918270f5d9787aa5a9a0e055be14e3130c778e1394cbe"
+      },
+      "entry_observation": {
+        "artifact": "sources/receipts/product-v2/native_product/entry_observation.json",
+        "original_bytes": 516,
+        "original_sha256": "d0a444d1205c59c71d0a19347783d4c14add6bae2668b1214c687e699c0518c1"
+      },
+      "scope": {
+        "artifact": "templates/receipts/product-v2/native_product/scope.json.template",
+        "original_bytes": 1371,
+        "original_sha256": "f8695061a831c4667af5daa143d836d4d48867b9c26e1a1bf5d4fd20f2a4ed78"
+      },
+      "files": {
+        "mcphub.exe": {
+          "bytes": 10280448,
+          "sha256": "c8785e92541f041a4bce1d1abf62fbc2dae87e7682f119e675e4a599902dd40d"
+        },
+        "windows-product-identity.json": {
+          "bytes": 295,
+          "sha256": "868f33dedef8bc1a4f9083f40710d9f5ab35423d34ada364f25c79cdb70a953f"
+        },
+        "mcphub-product/mcphub.exe": {
+          "bytes": 46527488,
+          "sha256": "bc73231cfde8d390f2e95f6b6adfdd718df5db0f8ca5643126d8772e7e73578d"
+        }
+      }
+    }
+  },
+  "compiler_resource": {
+    "bytes": 4558,
+    "sha256": "01b7cbe350e811495e5fe8f38c94a0398201d2d564e0592aca6f9905c515ef69",
+    "payload_published": false,
+    "origin": "Actual marked Product generator configuration and original build.ps1, captured after the closed Product-only phase."
+  },
+  "warm_cache": {
+    "donor_scope": "source04e compiled cache DATA, not Source59f qualification",
+    "parent_sha256": "119d72b5603cd078d538c0e396d7e6fcfee592daa1c851f8aa59a1d15a5e697c",
+    "execution_sha256": "7f6cd144b02ecc796a5fa1506c19b72d50a6a65816b508a902689535c13671cd",
+    "root_receiving_sha256": "9e418d2bcf526571331b1052b8660070e159978fcc4fddeccee9213474a1a3ce",
+    "original_status": "PASS",
+    "original_closure": "CLOSED",
+    "failed_producer_cache_reused": false,
+    "new_product_cache_copy_receipt": {
+      "artifact": "templates/receipts/product-v2/cache_copy.json.template",
+      "original_bytes": 2458,
+      "original_sha256": "ee016e7cbe3398b17c996865862a45dd232784c26d6f8871f4648e1f7541e0bd"
+    }
+  }
+}

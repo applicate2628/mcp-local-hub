@@ -1,0 +1,99 @@
+{"Action":"start","Package":"mcp-local-hub/tools/archcheck"}
+{"Action":"run","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunWorkersUnclassifiedTreatsBaselineWorkerAsClassified"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunWorkersUnclassifiedTreatsBaselineWorkerAsClassified","Output":"=== RUN   TestRunWorkersUnclassifiedTreatsBaselineWorkerAsClassified\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunWorkersUnclassifiedTreatsBaselineWorkerAsClassified","Output":"--- PASS: TestRunWorkersUnclassifiedTreatsBaselineWorkerAsClassified (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunWorkersUnclassifiedTreatsBaselineWorkerAsClassified"}
+{"Action":"run","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunRejectsCollidingReportOutputPathsBeforeWriting"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunRejectsCollidingReportOutputPathsBeforeWriting","Output":"=== RUN   TestRunRejectsCollidingReportOutputPathsBeforeWriting\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunRejectsCollidingReportOutputPathsBeforeWriting","Output":"--- PASS: TestRunRejectsCollidingReportOutputPathsBeforeWriting (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunRejectsCollidingReportOutputPathsBeforeWriting"}
+{"Action":"run","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunPropagatesStdoutWriteFailures"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunPropagatesStdoutWriteFailures","Output":"=== RUN   TestRunPropagatesStdoutWriteFailures\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunPropagatesStdoutWriteFailures/writer_error"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunPropagatesStdoutWriteFailures/writer_error","Output":"=== RUN   TestRunPropagatesStdoutWriteFailures/writer_error\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunPropagatesStdoutWriteFailures/writer_error","Output":"--- PASS: TestRunPropagatesStdoutWriteFailures/writer_error (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunPropagatesStdoutWriteFailures/writer_error"}
+{"Action":"run","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunPropagatesStdoutWriteFailures/short_write"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunPropagatesStdoutWriteFailures/short_write","Output":"=== RUN   TestRunPropagatesStdoutWriteFailures/short_write\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunPropagatesStdoutWriteFailures/short_write","Output":"--- PASS: TestRunPropagatesStdoutWriteFailures/short_write (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunPropagatesStdoutWriteFailures/short_write"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunPropagatesStdoutWriteFailures","Output":"--- PASS: TestRunPropagatesStdoutWriteFailures (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunPropagatesStdoutWriteFailures"}
+{"Action":"run","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunBaselineRejectsOutputCollisionsBeforeWriting"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunBaselineRejectsOutputCollisionsBeforeWriting","Output":"=== RUN   TestRunBaselineRejectsOutputCollisionsBeforeWriting\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunBaselineRejectsOutputCollisionsBeforeWriting/--report-json"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunBaselineRejectsOutputCollisionsBeforeWriting/--report-json","Output":"=== RUN   TestRunBaselineRejectsOutputCollisionsBeforeWriting/--report-json\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunBaselineRejectsOutputCollisionsBeforeWriting/--report-json","Output":"--- PASS: TestRunBaselineRejectsOutputCollisionsBeforeWriting/--report-json (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunBaselineRejectsOutputCollisionsBeforeWriting/--report-json"}
+{"Action":"run","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunBaselineRejectsOutputCollisionsBeforeWriting/--report-md"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunBaselineRejectsOutputCollisionsBeforeWriting/--report-md","Output":"=== RUN   TestRunBaselineRejectsOutputCollisionsBeforeWriting/--report-md\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunBaselineRejectsOutputCollisionsBeforeWriting/--report-md","Output":"--- PASS: TestRunBaselineRejectsOutputCollisionsBeforeWriting/--report-md (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunBaselineRejectsOutputCollisionsBeforeWriting/--report-md"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunBaselineRejectsOutputCollisionsBeforeWriting","Output":"--- PASS: TestRunBaselineRejectsOutputCollisionsBeforeWriting (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunBaselineRejectsOutputCollisionsBeforeWriting"}
+{"Action":"run","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunRejectsOutputCollisionsWithInputFiles"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunRejectsOutputCollisionsWithInputFiles","Output":"=== RUN   TestRunRejectsOutputCollisionsWithInputFiles\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunRejectsOutputCollisionsWithInputFiles","Output":"--- PASS: TestRunRejectsOutputCollisionsWithInputFiles (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunRejectsOutputCollisionsWithInputFiles"}
+{"Action":"run","Package":"mcp-local-hub/tools/archcheck","Test":"TestValidateDistinctNamedPathsDetectsHardLinks"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestValidateDistinctNamedPathsDetectsHardLinks","Output":"=== RUN   TestValidateDistinctNamedPathsDetectsHardLinks\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestValidateDistinctNamedPathsDetectsHardLinks","Output":"--- PASS: TestValidateDistinctNamedPathsDetectsHardLinks (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/archcheck","Test":"TestValidateDistinctNamedPathsDetectsHardLinks"}
+{"Action":"run","Package":"mcp-local-hub/tools/archcheck","Test":"TestPathMatchesAnySupportsRecursiveDoubleStar"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestPathMatchesAnySupportsRecursiveDoubleStar","Output":"=== RUN   TestPathMatchesAnySupportsRecursiveDoubleStar\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestPathMatchesAnySupportsRecursiveDoubleStar","Output":"--- PASS: TestPathMatchesAnySupportsRecursiveDoubleStar (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/archcheck","Test":"TestPathMatchesAnySupportsRecursiveDoubleStar"}
+{"Action":"run","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunBaselineWritesRequestedReports"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunBaselineWritesRequestedReports","Output":"=== RUN   TestRunBaselineWritesRequestedReports\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunBaselineWritesRequestedReports","Output":"--- PASS: TestRunBaselineWritesRequestedReports (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunBaselineWritesRequestedReports"}
+{"Action":"run","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunRequiresExplicitPolicyPath"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunRequiresExplicitPolicyPath","Output":"=== RUN   TestRunRequiresExplicitPolicyPath\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunRequiresExplicitPolicyPath","Output":"--- PASS: TestRunRequiresExplicitPolicyPath (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunRequiresExplicitPolicyPath"}
+{"Action":"run","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunRejectsUnknownKindFilter"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunRejectsUnknownKindFilter","Output":"=== RUN   TestRunRejectsUnknownKindFilter\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunRejectsUnknownKindFilter","Output":"--- PASS: TestRunRejectsUnknownKindFilter (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunRejectsUnknownKindFilter"}
+{"Action":"run","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunAcceptsCanonicalKindFilter"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunAcceptsCanonicalKindFilter","Output":"=== RUN   TestRunAcceptsCanonicalKindFilter\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunAcceptsCanonicalKindFilter","Output":"--- PASS: TestRunAcceptsCanonicalKindFilter (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunAcceptsCanonicalKindFilter"}
+{"Action":"run","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunRejectsMalformedPathFilter"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunRejectsMalformedPathFilter","Output":"=== RUN   TestRunRejectsMalformedPathFilter\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunRejectsMalformedPathFilter","Output":"--- PASS: TestRunRejectsMalformedPathFilter (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunRejectsMalformedPathFilter"}
+{"Action":"run","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunRejectsEmptyPathFilter"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunRejectsEmptyPathFilter","Output":"=== RUN   TestRunRejectsEmptyPathFilter\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunRejectsEmptyPathFilter","Output":"--- PASS: TestRunRejectsEmptyPathFilter (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunRejectsEmptyPathFilter"}
+{"Action":"run","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunScanDotPathMatchesRepositoryRoot"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunScanDotPathMatchesRepositoryRoot","Output":"=== RUN   TestRunScanDotPathMatchesRepositoryRoot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunScanDotPathMatchesRepositoryRoot","Output":"--- PASS: TestRunScanDotPathMatchesRepositoryRoot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunScanDotPathMatchesRepositoryRoot"}
+{"Action":"run","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunScanReturnsZeroWhenViolationsExist"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunScanReturnsZeroWhenViolationsExist","Output":"=== RUN   TestRunScanReturnsZeroWhenViolationsExist\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunScanReturnsZeroWhenViolationsExist","Output":"--- PASS: TestRunScanReturnsZeroWhenViolationsExist (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunScanReturnsZeroWhenViolationsExist"}
+{"Action":"run","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunVerifyReturnsOneForArchitectureViolation"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunVerifyReturnsOneForArchitectureViolation","Output":"=== RUN   TestRunVerifyReturnsOneForArchitectureViolation\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunVerifyReturnsOneForArchitectureViolation","Output":"--- PASS: TestRunVerifyReturnsOneForArchitectureViolation (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunVerifyReturnsOneForArchitectureViolation"}
+{"Action":"run","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunVerifyRejectsPresentationFilters"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunVerifyRejectsPresentationFilters","Output":"=== RUN   TestRunVerifyRejectsPresentationFilters\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunVerifyRejectsPresentationFilters","Output":"--- PASS: TestRunVerifyRejectsPresentationFilters (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunVerifyRejectsPresentationFilters"}
+{"Action":"run","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunBaselineRequiresOwnerForEveryViolation"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunBaselineRequiresOwnerForEveryViolation","Output":"=== RUN   TestRunBaselineRequiresOwnerForEveryViolation\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunBaselineRequiresOwnerForEveryViolation","Output":"--- PASS: TestRunBaselineRequiresOwnerForEveryViolation (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunBaselineRequiresOwnerForEveryViolation"}
+{"Action":"run","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunBaselineRequiresGeneratedFrom"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunBaselineRequiresGeneratedFrom","Output":"=== RUN   TestRunBaselineRequiresGeneratedFrom\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunBaselineRequiresGeneratedFrom","Output":"--- PASS: TestRunBaselineRequiresGeneratedFrom (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunBaselineRequiresGeneratedFrom"}
+{"Action":"run","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunScanPathFilterSupportsRecursiveGlob"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunScanPathFilterSupportsRecursiveGlob","Output":"=== RUN   TestRunScanPathFilterSupportsRecursiveGlob\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunScanPathFilterSupportsRecursiveGlob","Output":"--- PASS: TestRunScanPathFilterSupportsRecursiveGlob (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/archcheck","Test":"TestRunScanPathFilterSupportsRecursiveGlob"}
+{"Action":"output","Package":"mcp-local-hub/tools/archcheck","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/archcheck"}

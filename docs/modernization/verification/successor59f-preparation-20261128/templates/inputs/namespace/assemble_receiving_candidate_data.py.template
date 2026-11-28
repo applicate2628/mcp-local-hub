@@ -1,0 +1,25 @@
+from pathlib import Path
+import ast, hashlib, json, difflib
+task=Path(r'@@RECOVERY_APPROVED_WORK_AREA_RAW@@\mcp-acceptance-rebuild-20261127-v1')
+out=task/'inputs-successor33-v1'/'namespace-candidate'
+original=(task/'inputs-original-v6'/'literal_go_exec_adapter_v6.py.in').read_bytes()
+assert hashlib.sha256(original).hexdigest()=='6ee83887864e3be983ccd31628926f4026007ba9df0f296e9cd5504faeefe886'
+text=original.decode('utf-8')
+start=text.index('def validate_namespace_terminal(')
+end=text.index('def finalize_owner_capture(',start)
+fragment=text[start:end]
+fragment=fragment.replace('api-namespace-full-suite-v1','api-namespace-full-suite-v2').replace('prebuilt-full-suite','incoming-go-image-copy')
+before='            or proof.get('+chr(34)+'binary_sha256'+chr(34)+') != binding['+chr(34)+'expected_sha256'+chr(34)+']\n'
+after=before+'            or proof.get('+chr(34)+'evidence_root'+chr(34)+') != str(Path(binding['+chr(34)+'parent'+chr(34)+'])/'+chr(34)+'r'+chr(34)+')\n'+'            or proof.get('+chr(34)+'execution_binary'+chr(34)+') != str(Path(binding['+chr(34)+'parent'+chr(34)+'])/'+chr(34)+'r'+chr(34)+'/'+chr(34)+'bin'+chr(34)+'/'+chr(34)+'api.test.exe'+chr(34)+')\n'+'            or proof.get('+chr(34)+'execution_sha256'+chr(34)+') != binding['+chr(34)+'expected_sha256'+chr(34)+']\n'
+assert fragment.count(before)==1
+fragment=fragment.replace(before,after,1)
+prefix='# Integration fragment: retain the existing adapter imports and flags_are_literal/native_settled helpers.\n# namespace_failed_receiver is byte-identical to v6; only terminal v2 image-copy binding changes.\n# No process creation, runtime import, or invocation occurs when this DATA file is prepared.\n\n'
+ast.parse(prefix+fragment)
+with (out/'namespace_receiving_v2.fragment.py').open('xb') as f:f.write((prefix+fragment).encode('utf-8'))
+patch=''.join(difflib.unified_diff(text[start:end].splitlines(keepends=True),fragment.splitlines(keepends=True),fromfile='original-v6/namespace-receiving',tofile='successor33/namespace-receiving-v2'))
+with (out/'receiving-vs-v6.patch').open('xb') as f:f.write(patch.encode('utf-8'))
+meta=json.loads((out/'unchanged-source33-inputs.json').read_bytes())
+meta['successor_commit']='04e5b4eadd6407cbff4e04ba453546d278314bd7'
+meta['successor_receiving_execution_sha256']='d94591a33c5de636849b07985529cedcd71b47ac6f5dbd8d40fd4032f08d9a93'
+(out/'unchanged-source33-inputs.json').write_bytes((json.dumps(meta,indent=2)+'\n').encode('utf-8'))
+print(json.dumps({n:{'bytes':(out/n).stat().st_size,'sha256':hashlib.sha256((out/n).read_bytes()).hexdigest()} for n in ['namespace_receiving_v2.fragment.py','receiving-vs-v6.patch','unchanged-source33-inputs.json']},indent=2))

@@ -1,0 +1,16 @@
+{
+  "schema": "source59f-diagnostics-author-DATA-preservation-v1",
+  "originals": 136,
+  "original_bytes": 2293303,
+  "all_in_memory_roundtrips_exact": true,
+  "three_Git_commit_object_SHA1_matches": true,
+  "pinned_original_receipt_SHA256_matches": true,
+  "host_absolute_path_residuals": 0,
+  "private_owner_SID_residuals": 0,
+  "private_role_values": 10,
+  "new_native_or_test_execution": false,
+  "current_UNKNOWN_payload_access": false,
+  "source_or_cache_payload_access": false,
+  "originals_modified": false,
+  "published_reconstructor_executed_by_author": false
+}

@@ -1,0 +1,1 @@
+{"auxiliary_files": 7, "status": "STAGED_DATA_ONLY", "tracked_files": 3369}

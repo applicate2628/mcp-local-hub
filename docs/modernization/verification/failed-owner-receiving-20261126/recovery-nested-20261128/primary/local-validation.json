@@ -1,0 +1,96 @@
+{
+  "status": "PASS_INDEPENDENT_LOCAL_DIFF_AND_DATA_VERIFICATION",
+  "candidate_manifest_sha256": "1bddfd40eddbb04b6e66e72f61735109d0e9900a7e1ada56d4a494ca168c5e5e",
+  "all_candidate_files_rehashed": 13,
+  "full_exact_three_file_diff_regenerated": true,
+  "comparisons": [
+    {
+      "file": "literal_migration_receiving_seed_v1.py",
+      "before_sha256": "5eafbb0b5335d4b02e1b018a09ac5f35c339e8367eda2267609f25f42d126815",
+      "after_sha256": "0d4e2011bd820f61a616324d49a1ea1ea0893666a1a91c06fcf32481c6cdb372",
+      "changed_functions": [
+        "receive_native_actor",
+        "receive_current_product_inputs",
+        "receive_current_private_lanes",
+        "receive_priors"
+      ],
+      "all_other_functions_classes_byte_identical": true,
+      "unchanged_count": 25,
+      "other_top_level_statements_AST_equal_except_probe_disable": true,
+      "numeric_constants_identical": true
+    },
+    {
+      "file": "qualified_windows_products_consumer_v1.py",
+      "before_sha256": "6eb602d1dfcaf9d2316b67f791cc13fd1b55bcd3e020732277808a81e7ed91cf",
+      "after_sha256": "b01ac3369bdd2b9d2d319831d317bc1a256454c125760b54af325d1fa65c8078",
+      "changed_functions": [
+        "receive_test_staging"
+      ],
+      "all_other_functions_classes_byte_identical": true,
+      "unchanged_count": 44,
+      "other_top_level_statements_AST_equal_except_probe_disable": true,
+      "numeric_constants_identical": true
+    },
+    {
+      "file": "qualify_runtime_custody.py",
+      "before_sha256": "ba80118ba168bfb132f58ce369361a2147ad91ba40c9872adcbddd156014a32a",
+      "after_sha256": "051927848f0624c0c89ee3df10f06b9369cd484ce5445e2ae5b514e6149b1a71",
+      "changed_functions": [
+        "native_runtime"
+      ],
+      "all_other_functions_classes_byte_identical": true,
+      "unchanged_count": 9,
+      "other_top_level_statements_AST_equal_except_probe_disable": true,
+      "numeric_constants_identical": true
+    }
+  ],
+  "legacy_receive_priors_and_staging_tails_byte_equal": true,
+  "changed_probe_flag": "True to False only",
+  "local_DATA_script_exit_code": 0,
+  "local_DATA_cases": 36,
+  "stdout_bytes": 6499,
+  "stdout_sha256": "8634f455adeac86f23d3e5eec9971c4c895b0971360b5ccbd2f90d8b322110ec",
+  "stderr_bytes": 0,
+  "stdout_equal_author_attempt1": true,
+  "full_runtime_modules_imported": false,
+  "native_executed": false,
+  "frozen_inputs_modified": false,
+  "connected_source_pins": [
+    {
+      "role": "source_receiver",
+      "path": "b-five-test-source-ordinary-type-candidate-v1/after/receive_fresh_full_inputs_v1.py",
+      "bytes": 125176,
+      "sha256": "1f45b3ef0e9184cc66be002cb918eb38dad0560e86e0a4a2d5c31658f44c2891"
+    },
+    {
+      "role": "private_producer",
+      "path": "b-full-route-successor-candidate-v1/preparation-before/private_builder_current.py",
+      "bytes": 83879,
+      "sha256": "7dee97ed13a1ac838fa01ec32a88bd4a433873cd1dabb92cc161e385c27bae73"
+    },
+    {
+      "role": "private_receiver",
+      "path": "b-full-route-successor-candidate-v1/current-full-before/private_migration_receiving_current.py",
+      "bytes": 26572,
+      "sha256": "bb10ffaaf9579041b1ee66cbf928d1026f3ef1606700ec6f3540a1309d4e5467"
+    },
+    {
+      "role": "driver",
+      "path": "b-current-role-review-v1/after/run_literal_go_gate_ready_v1.py",
+      "bytes": 56043,
+      "sha256": "abf72cc401d18286977ddf72b2ee71357f717e5e509ca4b203b98d57fd449566"
+    },
+    {
+      "role": "adapter",
+      "path": "b-current-role-review-v1/after/literal_go_exec_adapter_ready_v1.py",
+      "bytes": 67840,
+      "sha256": "79c760a0e855381808712a8a8afe8ea65be25913c5c716b754df24b884ceb1e1"
+    },
+    {
+      "role": "terminal",
+      "path": "b-current-launcher-terminal-five-candidate-v1/after/launch_literal_final_v17.py",
+      "bytes": 28978,
+      "sha256": "0e2306e607bbdc840525a897f4c9485861ec1d18eec2f3a600e54ac4b029d87b"
+    }
+  ]
+}

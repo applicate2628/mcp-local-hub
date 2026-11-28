@@ -1,0 +1,152 @@
+# Successor04e API namespace auxiliary — candidate
+
+## Contents
+
+- [Scope and source](#scope-and-source)
+- [Image and fixture contract](#image-and-fixture-contract)
+- [Original custody](#original-custody)
+- [Integration and environment](#integration-and-environment)
+- [Verification and remaining work](#verification-and-remaining-work)
+
+## Scope and source
+
+This candidate prepares the API namespace owner for selected TestSource
+`04e5b4eadd6407cbff4e04ba453546d278314bd7`, tree
+`f68f7584dba7744e7607b07f615758f3ff633f54`, parent
+`33eaf8af8fc46cb231f48c70f4775922393245b1` (3369 paths).
+The root agent received its clean seven-test-file successor commit.
+The relevant API, original helper and production owner inputs were independently
+read, hashed and compared to the exact base33 Git blobs; those inputs are unchanged.
+See [unchanged source inputs](unchanged-source33-inputs.json).
+
+The two Go files are a separate auxiliary producer derived from the recovered727d
+namespace owner. They must be compiled against the selected successor's production
+packages. They are not tracked changes to TestSource and are not API test binaries.
+The [source delta](auxiliary-vs-source727.patch) contains the complete adaptation.
+No Source727 production package, private Serena publisher image, canonical
+controller, or `ResourcesFinalized` API is imported into Source04e.
+
+The copied [helper.ps1](helper.ps1) is exact Source33 data:
+23316 bytes, SHA-256
+`ce20de6a117350681b9db5979a67285b1d8d07ea7937ea912680b4e3d6a6fa32`.
+Runtime copies the corresponding pinned selected-source helper into its new private
+namespace; it does not execute an altered helper. Its SID, protected DACL,
+ordinary-path, native actor identity and handle checks remain unchanged.
+
+## Image and fixture contract
+
+Table 1 distinguishes the incoming Go executable from the actual execution file.
+
+| Role | Binding and use |
+| --- | --- |
+| Original input | The actual executable supplied by the original Go invocation; its hash, package path and compiled tags are checked and the file stays pinned. |
+| Execution image | An exclusive ordinary copy at `<parent>\r\bin\api.test.exe`; copied bytes and the pinned readback must equal the original input hash. No compiler runs in whole-suite mode. |
+| Working directory | The original selected-source `internal/api` directory. |
+| Arguments | All four incoming arguments, in their original order: paniconexit0, test2json verbosity, count 1 and the five-minute timeout. Selectors and extra arguments are refused. |
+| Namespace observations | Four original PID/birth/image/handle-count observations bind to the execution image. |
+| Tagged attach Product | A separate actual Product with its own expected hash and `test_state_path_env` build tag; its existing admission is preserved. This Product is not the API test executable. |
+
+Source33 API has no canonical three-file Product fixture requirement for its own
+test image. Its peer transport test explicitly uses ordinary Go helpers.
+The original helper's actor-image check requires `root\bin\api.test.exe`,
+so the new copy path satisfies that exact existing check. It does not rewrite
+the helper or turn its path comparison into a hash-only alternative.
+
+The new suite receipt is explicitly `api-namespace-full-suite-v2`,
+mode `incoming-go-image-copy`. It keeps original `binary`,
+`expected_sha256` and `binary_sha256`, and separately records
+`execution_binary`, `execution_sha256` and
+`execution_binary_unchanged`. Both images are rehashed after original settlement.
+
+The three original API stderr roots are included alongside the three namespace
+roots and the strict peer root in this auxiliary's seven-root receipt. They do
+not replace the user's 14 migration plus 2 canonical CLI acceptance roots.
+The extra three CLI stderr scenarios remain a separate outer acceptance set.
+
+## Original custody
+
+The existing `runStage` uses the selected production
+`RunContainedStreamObserved` owner. Its native and IO completeness predicates,
+five-second admission interval, five-minute test deadline and ten-second original
+cleanup interval are unchanged.
+
+- **Normal closed return:** original native and IO settlement is complete;
+  the original sinks are synchronized and closed. Only then are observations,
+  both images and raw stream bytes received. The same captured bytes are
+  forwarded once. Path pins close when `run` returns. Known nonzero test exits
+  and verification errors remain failures.
+- **UNKNOWN:** `namespaceStageCustody` retains the same receipt, original
+  error, returned joined error, borrowed sinks and original path-pin handles.
+  The original helper process stays alive in a sleep-only park. It does not
+  issue a new wait, cleanup, replay, PID lookup, capture read, or subsequent
+  command. The unresolved receipt is still UNKNOWN, never CLOSED/PASS.
+- **Late original activity:** any original worker can still finish on its
+  original object. This candidate does not invent a late-closure protocol or
+  substitute newly opened handles. With this source API, unresolved custody
+  remains retained until separately and legitimately received.
+
+This corrects a specific recovered727d lifetime defect: its global retained
+stage was followed by unconditional path-pin closes and `os.Exit`.
+The candidate's retaining branch precedes those actions. No new outer Job
+enclosure is introduced.
+
+## Integration and environment
+
+[namespace-contract.json](namespace-contract.json) contains exact roles,
+compile/launch templates and still-required concrete bindings.
+Stage only the two auxiliary Go files into one newly created private ignored
+scope under the selected module, for example
+`.scratch/qualified-successor33-namespace`. The controller agent owns that
+creation and compilation. This candidate has not created or modified any Source
+scope.
+
+[namespace_receiving_v2.fragment.py](namespace_receiving_v2.fragment.py)
+retains the v6 two-argument prebound failed receiver and one-shot result reader.
+The [receiving delta](receiving-vs-v6.patch) changes only the typed suite
+schema/mode and adds exact execution-copy path/hash checks. The unchanged
+pre-child refusal schema still requires the original request and nonzero original
+controller exit. Integrate
+[namespace_qualification.fragment.py](namespace_qualification.fragment.py)
+as the namespace success predicate, after physical receiving; an actual owner
+exit code of zero remains an additional outer requirement.
+
+Keep the callback bound before process creation. Normal completion and failure
+completion must share the same original result reader. Preserve every native/IO
+predicate and the fail-closed capture/source/cache gates.
+
+[environment-scaffold.json](environment-scaffold.json) records the concrete
+short-path and environment corrections. It is a partial input contract, not a
+launch plan. The full environment must be an explicit mapping without ambient
+inheritance. Omit `GIT_ALLOW_PROTOCOL` entirely; the previous empty allow-list
+denied the real-Git file transport tests. Include the independently observed
+`ProgramFiles` and `ProgramFiles(x86)` values.
+
+At 2026-11-28 12:56:18 UTC, `@@RECOVERY_APPROVED_WORK_AREA_RAW@@\r7` and
+`@@RECOVERY_APPROVED_WORK_AREA_RAW@@\o7` were absent, with ordinary non-reparse ancestors.
+See [DATA path readback](environment-paths-readback.json). Refresh this admission
+before creating them. Keeping namespace roots within the short RUNS root
+preserves the existing raw-capture ancestry check and shortens its TEMP to
+40 characters. The old compact-attempt Win32 cause was not observed; this
+candidate does not claim that cause proven.
+
+The user's literal commands remain exactly:
+
+```text
+go build ./... && go vet ./... && go test -count=1 -timeout 5m ./...
+go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/
+```
+
+## Verification and remaining work
+
+Completed DATA work: exact origin hashes checked, ten unchanged Source33 Git
+blobs independently recomputed, exact helper copied, complete Go adaptation
+delta read, Python fragments parsed without importing or running them, and the
+short-path/environment metadata received. The assembly scripts perform only
+data reconstruction and provenance checks; they are not runtime owners.
+
+No Go build, test, helper process, model, fixture mutation, or publication was
+performed for this candidate. Its Go syntax and native behavior have not yet
+been verified by compilation or execution. The final helper binary hash,
+closed producer receipt, selected-source whole map, actual tagged Product,
+full literal issuer binding and runtime composition are still required.
+All historical727d full FAIL results remain separate and unchanged.

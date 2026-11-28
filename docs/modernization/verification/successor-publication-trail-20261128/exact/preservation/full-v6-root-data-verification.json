@@ -1,0 +1,51 @@
+{
+  "schema": "closed-full-v6-data-verification-v1",
+  "status": "EXACT_CLOSED_FAILURE_DATA_VERIFIED",
+  "source_bindings_sha256": "4cdec1bc4436a72f7e75df04ee78c78082c3dc9f07fc24d6911267bc83cb6af9",
+  "original_files_verified": 20,
+  "primary_sha256": "6cd606a5ec4e6e1a3e74d4b8324786cc98dffe8cd587f4a41c89a751ea7f0c4a",
+  "classification": "FAIL/CLOSED",
+  "qualification_passed": false,
+  "original_failure_reclassified": false,
+  "frame_aware_checks": [
+    {
+      "role": "default-cli",
+      "terminal_records": 2533,
+      "exact_outcome_ledger": true
+    },
+    {
+      "role": "default-oneapi",
+      "terminal_records": 19,
+      "exact_outcome_ledger": true
+    },
+    {
+      "role": "default-daemon",
+      "terminal_records": 423,
+      "exact_outcome_ledger": true
+    },
+    {
+      "role": "default-process",
+      "terminal_records": 1205,
+      "exact_outcome_ledger": true
+    },
+    {
+      "role": "state-api",
+      "terminal_records": 6281,
+      "exact_outcome_ledger": true
+    }
+  ],
+  "terminal_records_checked": 10461,
+  "closed_run_commands_reexecuted": false,
+  "source_test_or_native_commands_executed": false,
+  "cache_qualification_inherited": false,
+  "original_566_capture_audit_reexecuted": false,
+  "original_root_audit_preserved": {
+    "commands_checked": 283,
+    "package_commands_checked": 272,
+    "command_captures_hashed": 566,
+    "package_receipts_hashed": 65,
+    "original_owner_receipts_hashed": 130,
+    "source_files_hashed": 3509,
+    "input_files_hashed": 115
+  }
+}

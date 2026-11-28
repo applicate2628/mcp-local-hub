@@ -1,0 +1,57 @@
+$ErrorActionPreference='Stop'
+$Task='@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1'
+$InputRoot=$Task+'\inputs-successor33-v1\warm-cache'
+$OutputRoot=$Task+'\original-helper-cache-warm-v7'
+function SHA([string]$Path) {$a=[Security.Cryptography.SHA256]::Create();try{[BitConverter]::ToString($a.ComputeHash([IO.File]::ReadAllBytes($Path))).Replace('-','').ToLowerInvariant()}finally{$a.Dispose()}}
+function Require($Value,[string]$Message){if(-not $Value){throw $Message}}
+$PlanPath=$InputRoot+'\helper-cache-warm-v7-plan.json'
+$ParentPath=$OutputRoot+'\parent.json'
+$OuterPath=$InputRoot+'\helper-cache-warm-v7-outer-original.json'
+$ReceiptPath=$OutputRoot+'\commands\execution.json'
+Require ((SHA $PlanPath)-eq'bf28e617ee0e319ec4c085d13ee0c16b7536552bac92f28070138835d8286fb6') 'plan hash'
+$p=[IO.File]::ReadAllText($PlanPath)|ConvertFrom-Json
+$parent=[IO.File]::ReadAllText($ParentPath)|ConvertFrom-Json
+$outer=[IO.File]::ReadAllText($OuterPath)|ConvertFrom-Json
+$r=[IO.File]::ReadAllText($ReceiptPath)|ConvertFrom-Json
+Require ($parent.status-eq'PASS' -and $parent.physical_complete-eq$true -and $parent.terminal_exit_received-eq$true -and $parent.parent_capture_files_closed-eq$true -and $parent.exit_code-eq0 -and $parent.deadline_exceeded-eq$false) 'parent closure'
+Require ($outer.same_process_start_object-eq$true -and $outer.exit_code-eq0 -and $outer.wait_returned-eq$true -and $outer.original_process_object_disposed-eq$true -and $outer.new_job_or_tree_wait-eq$false -and @($outer.wait_errors).Count-eq0) 'outer closure'
+Require ($parent.plan_sha256-eq(SHA $PlanPath) -and $outer.plan_sha256-eq(SHA $PlanPath) -and $parent.execution_sha256-eq(SHA $ReceiptPath)) 'original binding'
+Require ($r.status-eq'PASS' -and $r.plan_sha256-eq(SHA $PlanPath) -and $r.commands_quiescent-eq$true -and $r.command_quiescence.complete-eq$true -and $r.input_files_unchanged-eq$true -and @($r.commands).Count-eq4 -and @($r.step_inputs).Count-eq4) 'execution receipt'
+$rows=@()
+for($i=0;$i-lt4;$i++){
+ $c=$r.commands[$i];$planned=$p.commands[$i]
+ Require (($c.argv|ConvertTo-Json -Compress)-ceq($planned.argv|ConvertTo-Json -Compress)) ('argv '+$i)
+ Require ($c.cwd-ceq$planned.cwd) ('cwd '+$i)
+ Require ($c.command_success-eq$true -and $c.exit_code-eq0 -and $c.quiescence_state-eq'complete' -and $c.timed_out-eq$false -and $c.work_deadline_exceeded-eq$false -and $c.cleanup_deadline_exceeded-eq$false) ('command '+$i)
+ Require ($c.native.direct_exit_code-eq0 -and $c.native.direct_reaped-eq$true -and $c.native.active_zero-eq$true -and $c.native.handles_closed-eq$true -and $c.native.job_terminated-eq$false -and @($c.native.issues).Count-eq0) ('native '+$i)
+ Require ($c.completion_receiving.lifecycle_state-eq'CLOSED' -and $c.original_readers_joined-eq$true -and @($c.worker_join_observations).Count-eq2) ('receiving '+$i)
+ foreach($j in $c.worker_join_observations){Require ($j.joined-eq$true -and $j.alive_after-eq$false -and $j.join_error_count-eq0) ('join '+$i)}
+ foreach($stream in @('stdout','stderr')){
+  $io=$c.io.$stream
+  Require ($io.acquired-eq$true -and $io.worker_started-eq$true -and $io.worker_complete-eq$true -and $io.eof-eq$true -and $io.pipe_close_returned-eq$true -and $io.capture_close_returned-eq$true -and -not $io.error -and $io.limit_exceeded-eq$false) ('IO '+$i+' '+$stream)
+  $expected=$c.($stream+'_sha256')
+  Require ((SHA $c.$stream)-ceq$expected) ('capture '+$i+' '+$stream)
+  Require (([IO.FileInfo]$c.$stream).Length-eq$io.bytes_stored) ('capture length '+$i+' '+$stream)
+ }
+ $rows+= [pscustomobject]@{name=$planned.name;seconds=$c.seconds;exit_code=$c.exit_code;closure='CLOSED';stdout_sha256=$c.stdout_sha256;stderr_sha256=$c.stderr_sha256}
+}
+$Pins=@($p.input_files.PSObject.Properties)
+Require ($Pins.Count-eq3388) 'pin count'
+foreach($step in $r.step_inputs){
+ Require (@($step.before.PSObject.Properties).Count-eq3388 -and @($step.after.PSObject.Properties).Count-eq3388) 'step pin counts'
+ foreach($pin in $Pins){Require ($step.before.($pin.Name)-ceq$pin.Value -and $step.after.($pin.Name)-ceq$pin.Value) ('step pin '+$pin.Name)}
+}
+foreach($pin in $Pins){Require ((SHA $pin.Name)-ceq$pin.Value) ('actual pin '+$pin.Name)}
+foreach($stream in @('stdout','stderr')){
+ Require ((SHA ($OutputRoot+'\controller.'+$stream+'.txt'))-ceq$parent.parent_captures.$stream.sha256) ('parent capture '+$stream)
+}
+$products=@()
+foreach($leaf in @('provider-cwd-helper-386.exe','provider-cwd-helper-amd64.exe','cli-state-mcphub.exe')){
+ $path=$OutputRoot+'\'+$leaf;$products+=[pscustomobject]@{path=$path;bytes=([IO.FileInfo]$path).Length;sha256=(SHA $path);qualification='COMPILED_CACHE_INPUT_ONLY'}
+}
+$result=[ordered]@{schema='successor-helper-cache-warm-root-receiving-v1';status='PASS';physical_complete=$true;source_commit='04e5b4eadd6407cbff4e04ba453546d278314bd7';source_tree='f68f7584dba7744e7607b07f615758f3ff633f54';plan_sha256=(SHA $PlanPath);parent_sha256=(SHA $ParentPath);outer_sha256=(SHA $OuterPath);execution_sha256=(SHA $ReceiptPath);input_files_verified=$Pins.Count;step_maps_verified=8;command_captures_verified=8;parent_captures_verified=2;commands=$rows;compiled_outputs=$products;cache_copy_receipt_sha256=(SHA ($OutputRoot+'\cache-copy-receipt.json'));tests_executed=$false;full_acceptance_pass=$false;reviewed_utc=[DateTime]::UtcNow.ToString('o')}
+$Target=$InputRoot+'\warm-v7-root-receiving.json'
+Require (-not [IO.File]::Exists($Target)) 'fresh receiving path'
+[IO.File]::WriteAllText($Target,($result|ConvertTo-Json -Depth 10)+"`n",[Text.UTF8Encoding]::new($false))
+$result|ConvertTo-Json -Depth 10
+[pscustomobject]@{receiving_sha256=(SHA $Target)}|ConvertTo-Json

@@ -1,0 +1,10 @@
+{
+  "product_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\marked-bundle",
+  "source_epoch": "861852f807c36673755014ef4657bf10252b4e75505bc8b73819bcf8cded7a3a",
+  "product_version": "0.4.65",
+  "build_id": "85abd999a2fb449d9ce6b2a0c1aa791c",
+  "reverse_projection": "../mcphub.exe",
+  "canonical_entry_sha256": "f1be7e81c0d82e6d61b8f636c9c3632073e33221cc251a5936bc51890aa1805e",
+  "product_sha256": "87754b24016dc201e178fb37ecec0a5af52db70e55ed46c0436d219814e0a7a2",
+  "identity_sha256": "f7efd7f6388ec8b74b57eeaa2af5afd9094c65affcc82eff57ca86a9157905bc"
+}

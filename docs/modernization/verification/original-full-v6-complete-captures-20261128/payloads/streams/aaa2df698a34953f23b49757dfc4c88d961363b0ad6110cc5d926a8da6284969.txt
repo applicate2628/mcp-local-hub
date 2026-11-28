@@ -1,0 +1,717 @@
+{"Action":"start","Package":"mcp-local-hub/internal/scheduler"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestCanonicalEntrySetTaskProjectionPreservesUnrelatedXMLAndRestoresBothPriors"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestCanonicalEntrySetTaskProjectionPreservesUnrelatedXMLAndRestoresBothPriors","Output":"=== RUN   TestCanonicalEntrySetTaskProjectionPreservesUnrelatedXMLAndRestoresBothPriors\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestCanonicalEntrySetTaskProjectionPreservesUnrelatedXMLAndRestoresBothPriors","Output":"--- PASS: TestCanonicalEntrySetTaskProjectionPreservesUnrelatedXMLAndRestoresBothPriors (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestCanonicalEntrySetTaskProjectionPreservesUnrelatedXMLAndRestoresBothPriors"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestCanonicalEntrySetTaskProjectionRejectsUnqualifiedLegacyBeforeBackend"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestCanonicalEntrySetTaskProjectionRejectsUnqualifiedLegacyBeforeBackend","Output":"=== RUN   TestCanonicalEntrySetTaskProjectionRejectsUnqualifiedLegacyBeforeBackend\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestCanonicalEntrySetTaskProjectionRejectsUnqualifiedLegacyBeforeBackend","Output":"--- PASS: TestCanonicalEntrySetTaskProjectionRejectsUnqualifiedLegacyBeforeBackend (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestCanonicalEntrySetTaskProjectionRejectsUnqualifiedLegacyBeforeBackend"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestScanOwnedEntrypointTaskReferencesKeepsForeignTasksOutOfManagedInventory"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestScanOwnedEntrypointTaskReferencesKeepsForeignTasksOutOfManagedInventory","Output":"=== RUN   TestScanOwnedEntrypointTaskReferencesKeepsForeignTasksOutOfManagedInventory\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestScanOwnedEntrypointTaskReferencesKeepsForeignTasksOutOfManagedInventory","Output":"--- PASS: TestScanOwnedEntrypointTaskReferencesKeepsForeignTasksOutOfManagedInventory (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestScanOwnedEntrypointTaskReferencesKeepsForeignTasksOutOfManagedInventory"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnPreservesRawXMLOutsideCommand"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnPreservesRawXMLOutsideCommand","Output":"=== RUN   TestEntrypointTaskTxnPreservesRawXMLOutsideCommand\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnPreservesRawXMLOutsideCommand","Output":"=== PAUSE TestEntrypointTaskTxnPreservesRawXMLOutsideCommand\n","OutputType":"frame"}
+{"Action":"pause","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnPreservesRawXMLOutsideCommand"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnDigestUsesSortedCanonicalNamesAndExactLiveXML"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnDigestUsesSortedCanonicalNamesAndExactLiveXML","Output":"=== RUN   TestEntrypointTaskTxnDigestUsesSortedCanonicalNamesAndExactLiveXML\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnDigestUsesSortedCanonicalNamesAndExactLiveXML","Output":"--- PASS: TestEntrypointTaskTxnDigestUsesSortedCanonicalNamesAndExactLiveXML (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnDigestUsesSortedCanonicalNamesAndExactLiveXML"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnKeepsExistingRuntimeAndIgnoresOperatorCommand"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnKeepsExistingRuntimeAndIgnoresOperatorCommand","Output":"=== RUN   TestEntrypointTaskTxnKeepsExistingRuntimeAndIgnoresOperatorCommand\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnKeepsExistingRuntimeAndIgnoresOperatorCommand","Output":"=== PAUSE TestEntrypointTaskTxnKeepsExistingRuntimeAndIgnoresOperatorCommand\n","OutputType":"frame"}
+{"Action":"pause","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnKeepsExistingRuntimeAndIgnoresOperatorCommand"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnMigratesCaseVariantPriorPathButKeepsDifferentTarget"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnMigratesCaseVariantPriorPathButKeepsDifferentTarget","Output":"=== RUN   TestEntrypointTaskTxnMigratesCaseVariantPriorPathButKeepsDifferentTarget\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnMigratesCaseVariantPriorPathButKeepsDifferentTarget","Output":"--- PASS: TestEntrypointTaskTxnMigratesCaseVariantPriorPathButKeepsDifferentTarget (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnMigratesCaseVariantPriorPathButKeepsDifferentTarget"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRewriteFailureLeavesCompensationToCoordinator"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRewriteFailureLeavesCompensationToCoordinator","Output":"=== RUN   TestEntrypointTaskTxnRewriteFailureLeavesCompensationToCoordinator\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRewriteFailureLeavesCompensationToCoordinator","Output":"=== PAUSE TestEntrypointTaskTxnRewriteFailureLeavesCompensationToCoordinator\n","OutputType":"frame"}
+{"Action":"pause","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRewriteFailureLeavesCompensationToCoordinator"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnReopenRestoresRetainedXMLSnapshots"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnReopenRestoresRetainedXMLSnapshots","Output":"=== RUN   TestEntrypointTaskTxnReopenRestoresRetainedXMLSnapshots\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnReopenRestoresRetainedXMLSnapshots","Output":"=== PAUSE TestEntrypointTaskTxnReopenRestoresRetainedXMLSnapshots\n","OutputType":"frame"}
+{"Action":"pause","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnReopenRestoresRetainedXMLSnapshots"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation","Output":"=== RUN   TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation","Output":"=== PAUSE TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation\n","OutputType":"frame"}
+{"Action":"pause","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRetainFailurePreservesCause"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRetainFailurePreservesCause","Output":"=== RUN   TestEntrypointTaskTxnRetainFailurePreservesCause\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRetainFailurePreservesCause","Output":"=== PAUSE TestEntrypointTaskTxnRetainFailurePreservesCause\n","OutputType":"frame"}
+{"Action":"pause","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRetainFailurePreservesCause"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsEmptyRetainedReference"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsEmptyRetainedReference","Output":"=== RUN   TestEntrypointTaskTxnRejectsEmptyRetainedReference\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsEmptyRetainedReference","Output":"=== PAUSE TestEntrypointTaskTxnRejectsEmptyRetainedReference\n","OutputType":"frame"}
+{"Action":"pause","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsEmptyRetainedReference"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnReopenPreservesLoadCause"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnReopenPreservesLoadCause","Output":"=== RUN   TestEntrypointTaskTxnReopenPreservesLoadCause\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnReopenPreservesLoadCause","Output":"=== PAUSE TestEntrypointTaskTxnReopenPreservesLoadCause\n","OutputType":"frame"}
+{"Action":"pause","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnReopenPreservesLoadCause"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedRestoreBarrier"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedRestoreBarrier","Output":"=== RUN   TestEntrypointTaskExcludedRestoreBarrier\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedRestoreBarrier","Output":"--- PASS: TestEntrypointTaskExcludedRestoreBarrier (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedRestoreBarrier"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedCandidateFinalPreservesDisabledOriginal"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedCandidateFinalPreservesDisabledOriginal","Output":"=== RUN   TestEntrypointTaskExcludedCandidateFinalPreservesDisabledOriginal\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedCandidateFinalPreservesDisabledOriginal","Output":"--- PASS: TestEntrypointTaskExcludedCandidateFinalPreservesDisabledOriginal (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedCandidateFinalPreservesDisabledOriginal"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards","Output":"=== RUN   TestEntrypointTaskExcludedAdmissionGuards\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/apply"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/apply","Output":"=== RUN   TestEntrypointTaskExcludedAdmissionGuards/apply\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/apply","Output":"--- PASS: TestEntrypointTaskExcludedAdmissionGuards/apply (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/apply"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/nil-context"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/nil-context","Output":"=== RUN   TestEntrypointTaskExcludedAdmissionGuards/nil-context\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/nil-context","Output":"--- PASS: TestEntrypointTaskExcludedAdmissionGuards/nil-context (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/nil-context"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/cancelled-context"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/cancelled-context","Output":"=== RUN   TestEntrypointTaskExcludedAdmissionGuards/cancelled-context\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/cancelled-context","Output":"--- PASS: TestEntrypointTaskExcludedAdmissionGuards/cancelled-context (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/cancelled-context"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/nil-inventory"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/nil-inventory","Output":"=== RUN   TestEntrypointTaskExcludedAdmissionGuards/nil-inventory\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/nil-inventory","Output":"--- PASS: TestEntrypointTaskExcludedAdmissionGuards/nil-inventory (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/nil-inventory"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/empty-inventory"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/empty-inventory","Output":"=== RUN   TestEntrypointTaskExcludedAdmissionGuards/empty-inventory\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/empty-inventory","Output":"--- PASS: TestEntrypointTaskExcludedAdmissionGuards/empty-inventory (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/empty-inventory"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/store"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/store","Output":"=== RUN   TestEntrypointTaskExcludedAdmissionGuards/store\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/store","Output":"--- PASS: TestEntrypointTaskExcludedAdmissionGuards/store (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/store"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/backup"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/backup","Output":"=== RUN   TestEntrypointTaskExcludedAdmissionGuards/backup\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/backup","Output":"--- PASS: TestEntrypointTaskExcludedAdmissionGuards/backup (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/backup"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/backup-body"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/backup-body","Output":"=== RUN   TestEntrypointTaskExcludedAdmissionGuards/backup-body\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/backup-body","Output":"--- PASS: TestEntrypointTaskExcludedAdmissionGuards/backup-body (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/backup-body"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/equal-images"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/equal-images","Output":"=== RUN   TestEntrypointTaskExcludedAdmissionGuards/equal-images\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/equal-images","Output":"--- PASS: TestEntrypointTaskExcludedAdmissionGuards/equal-images (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/equal-images"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/closed"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/closed","Output":"=== RUN   TestEntrypointTaskExcludedAdmissionGuards/closed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/closed","Output":"--- PASS: TestEntrypointTaskExcludedAdmissionGuards/closed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/closed"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/nil-owner-context"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/nil-owner-context","Output":"=== RUN   TestEntrypointTaskExcludedAdmissionGuards/nil-owner-context\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/nil-owner-context","Output":"--- PASS: TestEntrypointTaskExcludedAdmissionGuards/nil-owner-context (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards/nil-owner-context"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards","Output":"--- PASS: TestEntrypointTaskExcludedAdmissionGuards (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedAdmissionGuards"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards","Output":"=== RUN   TestEntrypointTaskExcludedEnabledShapeGuards\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/missing"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/missing","Output":"=== RUN   TestEntrypointTaskExcludedEnabledShapeGuards/missing\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/missing","Output":"--- PASS: TestEntrypointTaskExcludedEnabledShapeGuards/missing (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/missing"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/duplicate"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/duplicate","Output":"=== RUN   TestEntrypointTaskExcludedEnabledShapeGuards/duplicate\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/duplicate","Output":"--- PASS: TestEntrypointTaskExcludedEnabledShapeGuards/duplicate (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/duplicate"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/nested"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/nested","Output":"=== RUN   TestEntrypointTaskExcludedEnabledShapeGuards/nested\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/nested","Output":"--- PASS: TestEntrypointTaskExcludedEnabledShapeGuards/nested (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/nested"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/namespace"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/namespace","Output":"=== RUN   TestEntrypointTaskExcludedEnabledShapeGuards/namespace\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/namespace","Output":"--- PASS: TestEntrypointTaskExcludedEnabledShapeGuards/namespace (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/namespace"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/settings-namespace"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/settings-namespace","Output":"=== RUN   TestEntrypointTaskExcludedEnabledShapeGuards/settings-namespace\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/settings-namespace","Output":"--- PASS: TestEntrypointTaskExcludedEnabledShapeGuards/settings-namespace (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/settings-namespace"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/boolean"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/boolean","Output":"=== RUN   TestEntrypointTaskExcludedEnabledShapeGuards/boolean\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/boolean","Output":"--- PASS: TestEntrypointTaskExcludedEnabledShapeGuards/boolean (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/boolean"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/empty"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/empty","Output":"=== RUN   TestEntrypointTaskExcludedEnabledShapeGuards/empty\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/empty","Output":"--- PASS: TestEntrypointTaskExcludedEnabledShapeGuards/empty (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/empty"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/entity"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/entity","Output":"=== RUN   TestEntrypointTaskExcludedEnabledShapeGuards/entity\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/entity","Output":"--- PASS: TestEntrypointTaskExcludedEnabledShapeGuards/entity (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/entity"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/duplicate-settings"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/duplicate-settings","Output":"=== RUN   TestEntrypointTaskExcludedEnabledShapeGuards/duplicate-settings\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/duplicate-settings","Output":"--- PASS: TestEntrypointTaskExcludedEnabledShapeGuards/duplicate-settings (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards/duplicate-settings"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards","Output":"--- PASS: TestEntrypointTaskExcludedEnabledShapeGuards (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedEnabledShapeGuards"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards","Output":"=== RUN   TestEntrypointTaskExcludedSetAndSourceDriftGuards\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards/extra"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards/extra","Output":"=== RUN   TestEntrypointTaskExcludedSetAndSourceDriftGuards/extra\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards/extra","Output":"--- PASS: TestEntrypointTaskExcludedSetAndSourceDriftGuards/extra (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards/extra"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards/missing"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards/missing","Output":"=== RUN   TestEntrypointTaskExcludedSetAndSourceDriftGuards/missing\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards/missing","Output":"--- PASS: TestEntrypointTaskExcludedSetAndSourceDriftGuards/missing (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards/missing"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards/duplicate"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards/duplicate","Output":"=== RUN   TestEntrypointTaskExcludedSetAndSourceDriftGuards/duplicate\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards/duplicate","Output":"--- PASS: TestEntrypointTaskExcludedSetAndSourceDriftGuards/duplicate (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards/duplicate"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards/owner"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards/owner","Output":"=== RUN   TestEntrypointTaskExcludedSetAndSourceDriftGuards/owner\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards/owner","Output":"--- PASS: TestEntrypointTaskExcludedSetAndSourceDriftGuards/owner (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards/owner"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards/source"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards/source","Output":"=== RUN   TestEntrypointTaskExcludedSetAndSourceDriftGuards/source\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards/source","Output":"--- PASS: TestEntrypointTaskExcludedSetAndSourceDriftGuards/source (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards/source"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards/command-drift"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards/command-drift","Output":"=== RUN   TestEntrypointTaskExcludedSetAndSourceDriftGuards/command-drift\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards/command-drift","Output":"--- PASS: TestEntrypointTaskExcludedSetAndSourceDriftGuards/command-drift (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards/command-drift"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards","Output":"--- PASS: TestEntrypointTaskExcludedSetAndSourceDriftGuards (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSetAndSourceDriftGuards"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy","Output":"=== RUN   TestEntrypointTaskExcludedSnapshotBindingAndCopy\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy/forged"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy/forged","Output":"=== RUN   TestEntrypointTaskExcludedSnapshotBindingAndCopy/forged\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy/forged","Output":"--- PASS: TestEntrypointTaskExcludedSnapshotBindingAndCopy/forged (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy/forged"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy/map"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy/map","Output":"=== RUN   TestEntrypointTaskExcludedSnapshotBindingAndCopy/map\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy/map","Output":"--- PASS: TestEntrypointTaskExcludedSnapshotBindingAndCopy/map (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy/map"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy/digest"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy/digest","Output":"=== RUN   TestEntrypointTaskExcludedSnapshotBindingAndCopy/digest\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy/digest","Output":"--- PASS: TestEntrypointTaskExcludedSnapshotBindingAndCopy/digest (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy/digest"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy/target"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy/target","Output":"=== RUN   TestEntrypointTaskExcludedSnapshotBindingAndCopy/target\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy/target","Output":"--- PASS: TestEntrypointTaskExcludedSnapshotBindingAndCopy/target (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy/target"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy/extra"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy/extra","Output":"=== RUN   TestEntrypointTaskExcludedSnapshotBindingAndCopy/extra\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy/extra","Output":"--- PASS: TestEntrypointTaskExcludedSnapshotBindingAndCopy/extra (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy/extra"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy/missing"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy/missing","Output":"=== RUN   TestEntrypointTaskExcludedSnapshotBindingAndCopy/missing\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy/missing","Output":"--- PASS: TestEntrypointTaskExcludedSnapshotBindingAndCopy/missing (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy/missing"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy","Output":"--- PASS: TestEntrypointTaskExcludedSnapshotBindingAndCopy (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedSnapshotBindingAndCopy"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards","Output":"=== RUN   TestEntrypointTaskExcludedReadinessGuards\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/request-apply"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/request-apply","Output":"=== RUN   TestEntrypointTaskExcludedReadinessGuards/request-apply\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/request-apply","Output":"--- PASS: TestEntrypointTaskExcludedReadinessGuards/request-apply (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/request-apply"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/target"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/target","Output":"=== RUN   TestEntrypointTaskExcludedReadinessGuards/target\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/target","Output":"--- PASS: TestEntrypointTaskExcludedReadinessGuards/target (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/target"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/path"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/path","Output":"=== RUN   TestEntrypointTaskExcludedReadinessGuards/path\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/path","Output":"--- PASS: TestEntrypointTaskExcludedReadinessGuards/path (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/path"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/hash"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/hash","Output":"=== RUN   TestEntrypointTaskExcludedReadinessGuards/hash\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/hash","Output":"--- PASS: TestEntrypointTaskExcludedReadinessGuards/hash (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/hash"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/zero-hash"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/zero-hash","Output":"=== RUN   TestEntrypointTaskExcludedReadinessGuards/zero-hash\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/zero-hash","Output":"--- PASS: TestEntrypointTaskExcludedReadinessGuards/zero-hash (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/zero-hash"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/pid"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/pid","Output":"=== RUN   TestEntrypointTaskExcludedReadinessGuards/pid\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/pid","Output":"--- PASS: TestEntrypointTaskExcludedReadinessGuards/pid (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/pid"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/started"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/started","Output":"=== RUN   TestEntrypointTaskExcludedReadinessGuards/started\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/started","Output":"--- PASS: TestEntrypointTaskExcludedReadinessGuards/started (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/started"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/zero-started"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/zero-started","Output":"=== RUN   TestEntrypointTaskExcludedReadinessGuards/zero-started\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/zero-started","Output":"--- PASS: TestEntrypointTaskExcludedReadinessGuards/zero-started (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/zero-started"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/fractional-started"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/fractional-started","Output":"=== RUN   TestEntrypointTaskExcludedReadinessGuards/fractional-started\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/fractional-started","Output":"--- PASS: TestEntrypointTaskExcludedReadinessGuards/fractional-started (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/fractional-started"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/nil-check"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/nil-check","Output":"=== RUN   TestEntrypointTaskExcludedReadinessGuards/nil-check\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/nil-check","Output":"--- PASS: TestEntrypointTaskExcludedReadinessGuards/nil-check (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/nil-check"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/callback-fail"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/callback-fail","Output":"=== RUN   TestEntrypointTaskExcludedReadinessGuards/callback-fail\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/callback-fail","Output":"--- PASS: TestEntrypointTaskExcludedReadinessGuards/callback-fail (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/callback-fail"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/callback-cancel"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/callback-cancel","Output":"=== RUN   TestEntrypointTaskExcludedReadinessGuards/callback-cancel\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/callback-cancel","Output":"--- PASS: TestEntrypointTaskExcludedReadinessGuards/callback-cancel (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/callback-cancel"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/proof-target"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/proof-target","Output":"=== RUN   TestEntrypointTaskExcludedReadinessGuards/proof-target\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/proof-target","Output":"--- PASS: TestEntrypointTaskExcludedReadinessGuards/proof-target (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/proof-target"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/proof-image"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/proof-image","Output":"=== RUN   TestEntrypointTaskExcludedReadinessGuards/proof-image\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/proof-image","Output":"--- PASS: TestEntrypointTaskExcludedReadinessGuards/proof-image (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/proof-image"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/proof-hash"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/proof-hash","Output":"=== RUN   TestEntrypointTaskExcludedReadinessGuards/proof-hash\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/proof-hash","Output":"--- PASS: TestEntrypointTaskExcludedReadinessGuards/proof-hash (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/proof-hash"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/proof-pid"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/proof-pid","Output":"=== RUN   TestEntrypointTaskExcludedReadinessGuards/proof-pid\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/proof-pid","Output":"--- PASS: TestEntrypointTaskExcludedReadinessGuards/proof-pid (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/proof-pid"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/proof-started"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/proof-started","Output":"=== RUN   TestEntrypointTaskExcludedReadinessGuards/proof-started\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/proof-started","Output":"--- PASS: TestEntrypointTaskExcludedReadinessGuards/proof-started (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/proof-started"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/proof-evidence"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/proof-evidence","Output":"=== RUN   TestEntrypointTaskExcludedReadinessGuards/proof-evidence\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/proof-evidence","Output":"--- PASS: TestEntrypointTaskExcludedReadinessGuards/proof-evidence (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/proof-evidence"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/empty-proof"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/empty-proof","Output":"=== RUN   TestEntrypointTaskExcludedReadinessGuards/empty-proof\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/empty-proof","Output":"--- PASS: TestEntrypointTaskExcludedReadinessGuards/empty-proof (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/empty-proof"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/post-callback-drift"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/post-callback-drift","Output":"=== RUN   TestEntrypointTaskExcludedReadinessGuards/post-callback-drift\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/post-callback-drift","Output":"--- PASS: TestEntrypointTaskExcludedReadinessGuards/post-callback-drift (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/post-callback-drift"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/post-callback-extra"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/post-callback-extra","Output":"=== RUN   TestEntrypointTaskExcludedReadinessGuards/post-callback-extra\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/post-callback-extra","Output":"--- PASS: TestEntrypointTaskExcludedReadinessGuards/post-callback-extra (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/post-callback-extra"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/post-callback-missing"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/post-callback-missing","Output":"=== RUN   TestEntrypointTaskExcludedReadinessGuards/post-callback-missing\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/post-callback-missing","Output":"--- PASS: TestEntrypointTaskExcludedReadinessGuards/post-callback-missing (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards/post-callback-missing"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards","Output":"--- PASS: TestEntrypointTaskExcludedReadinessGuards (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedReadinessGuards"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedRestoreContinuesAndRetainsCause"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedRestoreContinuesAndRetainsCause","Output":"=== RUN   TestEntrypointTaskExcludedRestoreContinuesAndRetainsCause\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedRestoreContinuesAndRetainsCause","Output":"--- PASS: TestEntrypointTaskExcludedRestoreContinuesAndRetainsCause (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedRestoreContinuesAndRetainsCause"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedDurableLoadCauseAndReadOnlyTarget"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedDurableLoadCauseAndReadOnlyTarget","Output":"=== RUN   TestEntrypointTaskExcludedDurableLoadCauseAndReadOnlyTarget\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedDurableLoadCauseAndReadOnlyTarget","Output":"--- PASS: TestEntrypointTaskExcludedDurableLoadCauseAndReadOnlyTarget (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedDurableLoadCauseAndReadOnlyTarget"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows","Output":"=== RUN   TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/import"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/import","Output":"=== RUN   TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/import\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/import","Output":"--- PASS: TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/import (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/import"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/readback"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/readback","Output":"=== RUN   TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/readback\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/readback","Output":"--- PASS: TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/readback (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/readback"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/foreign-drift"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/foreign-drift","Output":"=== RUN   TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/foreign-drift\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/foreign-drift","Output":"--- PASS: TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/foreign-drift (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/foreign-drift"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/compensation-fail"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/compensation-fail","Output":"=== RUN   TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/compensation-fail\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/compensation-fail","Output":"--- PASS: TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/compensation-fail (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/compensation-fail"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows","Output":"--- PASS: TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedCreatorContextCancellation"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedCreatorContextCancellation","Output":"=== RUN   TestEntrypointTaskExcludedCreatorContextCancellation\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedCreatorContextCancellation/callback"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedCreatorContextCancellation/callback","Output":"=== RUN   TestEntrypointTaskExcludedCreatorContextCancellation/callback\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedCreatorContextCancellation/callback","Output":"--- PASS: TestEntrypointTaskExcludedCreatorContextCancellation/callback (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedCreatorContextCancellation/callback"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedCreatorContextCancellation/post-readback"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedCreatorContextCancellation/post-readback","Output":"=== RUN   TestEntrypointTaskExcludedCreatorContextCancellation/post-readback\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedCreatorContextCancellation/post-readback","Output":"--- PASS: TestEntrypointTaskExcludedCreatorContextCancellation/post-readback (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedCreatorContextCancellation/post-readback"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedCreatorContextCancellation/between-imports"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedCreatorContextCancellation/between-imports","Output":"=== RUN   TestEntrypointTaskExcludedCreatorContextCancellation/between-imports\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedCreatorContextCancellation/between-imports","Output":"--- PASS: TestEntrypointTaskExcludedCreatorContextCancellation/between-imports (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedCreatorContextCancellation/between-imports"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedCreatorContextCancellation/final-readback"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedCreatorContextCancellation/final-readback","Output":"=== RUN   TestEntrypointTaskExcludedCreatorContextCancellation/final-readback\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedCreatorContextCancellation/final-readback","Output":"--- PASS: TestEntrypointTaskExcludedCreatorContextCancellation/final-readback (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedCreatorContextCancellation/final-readback"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedCreatorContextCancellation","Output":"--- PASS: TestEntrypointTaskExcludedCreatorContextCancellation (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskExcludedCreatorContextCancellation"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_ParsesMixedOwners"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_ParsesMixedOwners","Output":"=== RUN   TestEnumerateAllMcphubTasks_ParsesMixedOwners\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_ParsesMixedOwners","Output":"--- PASS: TestEnumerateAllMcphubTasks_ParsesMixedOwners (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_ParsesMixedOwners"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_FiltersByMcphubPrefix"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_FiltersByMcphubPrefix","Output":"=== RUN   TestEnumerateAllMcphubTasks_FiltersByMcphubPrefix\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_FiltersByMcphubPrefix","Output":"--- PASS: TestEnumerateAllMcphubTasks_FiltersByMcphubPrefix (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_FiltersByMcphubPrefix"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_EmptyTaskStore"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_EmptyTaskStore","Output":"=== RUN   TestEnumerateAllMcphubTasks_EmptyTaskStore\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_EmptyTaskStore/empty_body"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_EmptyTaskStore/empty_body","Output":"=== RUN   TestEnumerateAllMcphubTasks_EmptyTaskStore/empty_body\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_EmptyTaskStore/empty_body","Output":"--- PASS: TestEnumerateAllMcphubTasks_EmptyTaskStore/empty_body (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_EmptyTaskStore/empty_body"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_EmptyTaskStore/whitespace_only"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_EmptyTaskStore/whitespace_only","Output":"=== RUN   TestEnumerateAllMcphubTasks_EmptyTaskStore/whitespace_only\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_EmptyTaskStore/whitespace_only","Output":"--- PASS: TestEnumerateAllMcphubTasks_EmptyTaskStore/whitespace_only (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_EmptyTaskStore/whitespace_only"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_EmptyTaskStore/non-mcp_tasks_only"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_EmptyTaskStore/non-mcp_tasks_only","Output":"=== RUN   TestEnumerateAllMcphubTasks_EmptyTaskStore/non-mcp_tasks_only\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_EmptyTaskStore/non-mcp_tasks_only","Output":"--- PASS: TestEnumerateAllMcphubTasks_EmptyTaskStore/non-mcp_tasks_only (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_EmptyTaskStore/non-mcp_tasks_only"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_EmptyTaskStore","Output":"--- PASS: TestEnumerateAllMcphubTasks_EmptyTaskStore (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_EmptyTaskStore"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_MalformedXML"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_MalformedXML","Output":"=== RUN   TestEnumerateAllMcphubTasks_MalformedXML\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_MalformedXML","Output":"--- PASS: TestEnumerateAllMcphubTasks_MalformedXML (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_MalformedXML"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_ExtractsOwner"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_ExtractsOwner","Output":"=== RUN   TestEnumerateAllMcphubTasks_ExtractsOwner\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_ExtractsOwner","Output":"--- PASS: TestEnumerateAllMcphubTasks_ExtractsOwner (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_ExtractsOwner"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_NoPanicOnNilInput"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_NoPanicOnNilInput","Output":"=== RUN   TestEnumerateAllMcphubTasks_NoPanicOnNilInput\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_NoPanicOnNilInput","Output":"--- PASS: TestEnumerateAllMcphubTasks_NoPanicOnNilInput (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_NoPanicOnNilInput"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_HandlesDOMAINPrefix"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_HandlesDOMAINPrefix","Output":"=== RUN   TestEnumerateAllMcphubTasks_HandlesDOMAINPrefix\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_HandlesDOMAINPrefix","Output":"--- PASS: TestEnumerateAllMcphubTasks_HandlesDOMAINPrefix (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_HandlesDOMAINPrefix"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSplitConcatenatedTaskXML"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSplitConcatenatedTaskXML","Output":"=== RUN   TestSplitConcatenatedTaskXML\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSplitConcatenatedTaskXML/empty"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSplitConcatenatedTaskXML/empty","Output":"=== RUN   TestSplitConcatenatedTaskXML/empty\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSplitConcatenatedTaskXML/empty","Output":"--- PASS: TestSplitConcatenatedTaskXML/empty (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSplitConcatenatedTaskXML/empty"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSplitConcatenatedTaskXML/single_doc"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSplitConcatenatedTaskXML/single_doc","Output":"=== RUN   TestSplitConcatenatedTaskXML/single_doc\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSplitConcatenatedTaskXML/single_doc","Output":"--- PASS: TestSplitConcatenatedTaskXML/single_doc (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSplitConcatenatedTaskXML/single_doc"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSplitConcatenatedTaskXML/two_docs_back-to-back"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSplitConcatenatedTaskXML/two_docs_back-to-back","Output":"=== RUN   TestSplitConcatenatedTaskXML/two_docs_back-to-back\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSplitConcatenatedTaskXML/two_docs_back-to-back","Output":"--- PASS: TestSplitConcatenatedTaskXML/two_docs_back-to-back (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSplitConcatenatedTaskXML/two_docs_back-to-back"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSplitConcatenatedTaskXML/two_docs_with_extra_whitespace"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSplitConcatenatedTaskXML/two_docs_with_extra_whitespace","Output":"=== RUN   TestSplitConcatenatedTaskXML/two_docs_with_extra_whitespace\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSplitConcatenatedTaskXML/two_docs_with_extra_whitespace","Output":"--- PASS: TestSplitConcatenatedTaskXML/two_docs_with_extra_whitespace (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSplitConcatenatedTaskXML/two_docs_with_extra_whitespace"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSplitConcatenatedTaskXML","Output":"--- PASS: TestSplitConcatenatedTaskXML (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSplitConcatenatedTaskXML"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestParseTasksAtomicAcceptsAttributedWrapper"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestParseTasksAtomicAcceptsAttributedWrapper","Output":"=== RUN   TestParseTasksAtomicAcceptsAttributedWrapper\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestParseTasksAtomicAcceptsAttributedWrapper","Output":"--- PASS: TestParseTasksAtomicAcceptsAttributedWrapper (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestParseTasksAtomicAcceptsAttributedWrapper"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_BypassesSameUserFilter"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_BypassesSameUserFilter","Output":"=== RUN   TestEnumerateAllMcphubTasks_BypassesSameUserFilter\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_BypassesSameUserFilter","Output":"--- PASS: TestEnumerateAllMcphubTasks_BypassesSameUserFilter (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_BypassesSameUserFilter"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_ErrorIsTyped"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_ErrorIsTyped","Output":"=== RUN   TestEnumerateAllMcphubTasks_ErrorIsTyped\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_ErrorIsTyped","Output":"--- PASS: TestEnumerateAllMcphubTasks_ErrorIsTyped (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEnumerateAllMcphubTasks_ErrorIsTyped"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMTargetLifecycle"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMTargetLifecycle","Output":"=== RUN   TestSchedulerCOMTargetLifecycle\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMTargetLifecycle","Output":"    scheduler_com_target_windows_test.go:22: set MCPHUB_TARGET_SCHEDULER_QA=1 to run the target Scheduler COM smoke\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMTargetLifecycle","Output":"--- SKIP: TestSchedulerCOMTargetLifecycle (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMTargetLifecycle"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMTypedOutcomesIgnoreHostileLocalizedText"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMTypedOutcomesIgnoreHostileLocalizedText","Output":"=== RUN   TestSchedulerCOMTypedOutcomesIgnoreHostileLocalizedText\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMTypedOutcomesIgnoreHostileLocalizedText","Output":"--- PASS: TestSchedulerCOMTypedOutcomesIgnoreHostileLocalizedText (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMTypedOutcomesIgnoreHostileLocalizedText"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable","Output":"=== RUN   TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable/permission_denied"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable/permission_denied","Output":"=== RUN   TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable/permission_denied\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable/permission_denied","Output":"--- PASS: TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable/permission_denied (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable/permission_denied"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable/task_corrupt"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable/task_corrupt","Output":"=== RUN   TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable/task_corrupt\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable/task_corrupt","Output":"--- PASS: TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable/task_corrupt (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable/task_corrupt"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable/scheduler_unavailable"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable/scheduler_unavailable","Output":"=== RUN   TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable/scheduler_unavailable\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable/scheduler_unavailable","Output":"--- PASS: TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable/scheduler_unavailable (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable/scheduler_unavailable"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable","Output":"--- PASS: TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestTaskStatusFromCOMUsesNumericStateOnly"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestTaskStatusFromCOMUsesNumericStateOnly","Output":"=== RUN   TestTaskStatusFromCOMUsesNumericStateOnly\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestTaskStatusFromCOMUsesNumericStateOnly","Output":"--- PASS: TestTaskStatusFromCOMUsesNumericStateOnly (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestTaskStatusFromCOMUsesNumericStateOnly"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMScriptSerializesNegativeHRESULT"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMScriptSerializesNegativeHRESULT","Output":"=== RUN   TestSchedulerCOMScriptSerializesNegativeHRESULT\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMScriptSerializesNegativeHRESULT","Output":"--- PASS: TestSchedulerCOMScriptSerializesNegativeHRESULT (0.40s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMScriptSerializesNegativeHRESULT"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMScriptUTF8ConsoleRoundTripsUnicodeTaskJSON"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMScriptUTF8ConsoleRoundTripsUnicodeTaskJSON","Output":"=== RUN   TestSchedulerCOMScriptUTF8ConsoleRoundTripsUnicodeTaskJSON\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMScriptUTF8ConsoleRoundTripsUnicodeTaskJSON","Output":"--- PASS: TestSchedulerCOMScriptUTF8ConsoleRoundTripsUnicodeTaskJSON (0.35s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMScriptUTF8ConsoleRoundTripsUnicodeTaskJSON"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildLivenessXML_Contract"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildLivenessXML_Contract","Output":"=== RUN   TestBuildLivenessXML_Contract\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildLivenessXML_Contract","Output":"--- PASS: TestBuildLivenessXML_Contract (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildLivenessXML_Contract"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildLivenessXML_SeparatesEscapedPrincipalSIDAndLogonAccount"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildLivenessXML_SeparatesEscapedPrincipalSIDAndLogonAccount","Output":"=== RUN   TestBuildLivenessXML_SeparatesEscapedPrincipalSIDAndLogonAccount\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildLivenessXML_SeparatesEscapedPrincipalSIDAndLogonAccount","Output":"--- PASS: TestBuildLivenessXML_SeparatesEscapedPrincipalSIDAndLogonAccount (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildLivenessXML_SeparatesEscapedPrincipalSIDAndLogonAccount"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestWindowsLegacyEntrypointPathSelectsExactRetiredSibling"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestWindowsLegacyEntrypointPathSelectsExactRetiredSibling","Output":"=== RUN   TestWindowsLegacyEntrypointPathSelectsExactRetiredSibling\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestWindowsLegacyEntrypointPathSelectsExactRetiredSibling","Output":"--- PASS: TestWindowsLegacyEntrypointPathSelectsExactRetiredSibling (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestWindowsLegacyEntrypointPathSelectsExactRetiredSibling"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestNew_WithoutEnvReturnsPlatformImpl"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestNew_WithoutEnvReturnsPlatformImpl","Output":"=== RUN   TestNew_WithoutEnvReturnsPlatformImpl\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestNew_WithoutEnvReturnsPlatformImpl","Output":"--- PASS: TestNew_WithoutEnvReturnsPlatformImpl (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestNew_WithoutEnvReturnsPlatformImpl"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestNew_WithE2EEnvReturnsNoop"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestNew_WithE2EEnvReturnsNoop","Output":"=== RUN   TestNew_WithE2EEnvReturnsNoop\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestNew_WithE2EEnvReturnsNoop","Output":"warning: MCPHUB_E2E_SCHEDULER=none — scheduler returns empty/noop responses. This flag is for E2E tests only; never set it in production.\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestNew_WithE2EEnvReturnsNoop","Output":"--- PASS: TestNew_WithE2EEnvReturnsNoop (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestNew_WithE2EEnvReturnsNoop"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestNoopScheduler_StatusReturnsNotFound"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestNoopScheduler_StatusReturnsNotFound","Output":"=== RUN   TestNoopScheduler_StatusReturnsNotFound\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestNoopScheduler_StatusReturnsNotFound","Output":"--- PASS: TestNoopScheduler_StatusReturnsNotFound (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestNoopScheduler_StatusReturnsNotFound"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestNoopScheduler_MutationsAreRejected"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestNoopScheduler_MutationsAreRejected","Output":"=== RUN   TestNoopScheduler_MutationsAreRejected\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestNoopScheduler_MutationsAreRejected","Output":"--- PASS: TestNoopScheduler_MutationsAreRejected (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestNoopScheduler_MutationsAreRejected"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerRunOwnedAdmissionAndPositiveReply"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerRunOwnedAdmissionAndPositiveReply","Output":"=== RUN   TestSchedulerRunOwnedAdmissionAndPositiveReply\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerRunOwnedAdmissionAndPositiveReply","Output":"--- PASS: TestSchedulerRunOwnedAdmissionAndPositiveReply (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerRunOwnedAdmissionAndPositiveReply"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/matching"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/matching","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/matching\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/matching","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/matching (0.47s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/matching"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/omitted-enabled-defaults-true"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/omitted-enabled-defaults-true","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/omitted-enabled-defaults-true\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/omitted-enabled-defaults-true","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/omitted-enabled-defaults-true (0.50s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/omitted-enabled-defaults-true"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/numeric-true"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/numeric-true","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/numeric-true\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/numeric-true","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/numeric-true (0.47s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/numeric-true"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/xml-disabled"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/xml-disabled","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/xml-disabled\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/xml-disabled","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/xml-disabled (0.46s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/xml-disabled"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/numeric-false"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/numeric-false","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/numeric-false\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/numeric-false","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/numeric-false (0.45s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/numeric-false"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/empty-enabled"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/empty-enabled","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/empty-enabled\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/empty-enabled","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/empty-enabled (0.46s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/empty-enabled"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/malformed-enabled"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/malformed-enabled","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/malformed-enabled\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/malformed-enabled","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/malformed-enabled (0.43s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/malformed-enabled"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/duplicate-enabled"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/duplicate-enabled","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/duplicate-enabled\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/duplicate-enabled","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/duplicate-enabled (0.44s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/duplicate-enabled"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/nested-enabled"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/nested-enabled","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/nested-enabled\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/nested-enabled","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/nested-enabled (0.45s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/nested-enabled"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/foreign-enabled-namespace"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/foreign-enabled-namespace","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/foreign-enabled-namespace\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/foreign-enabled-namespace","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/foreign-enabled-namespace (0.43s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/foreign-enabled-namespace"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/native-disabled"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/native-disabled","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/native-disabled\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/native-disabled","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/native-disabled (0.44s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/native-disabled"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/creator-shape"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/creator-shape","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/creator-shape\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/creator-shape","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/creator-shape (0.45s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/creator-shape"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/strict-gui"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/strict-gui","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/strict-gui\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/strict-gui","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/strict-gui (0.48s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/strict-gui"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/foreign-target"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/foreign-target","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/foreign-target\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/foreign-target","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/foreign-target (0.44s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/foreign-target"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/wrong-native-owner"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/wrong-native-owner","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/wrong-native-owner\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/wrong-native-owner","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/wrong-native-owner (0.45s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/wrong-native-owner"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/wrong-xml-owner"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/wrong-xml-owner","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/wrong-xml-owner\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/wrong-xml-owner","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/wrong-xml-owner (0.45s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/wrong-xml-owner"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/wrong-uri"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/wrong-uri","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/wrong-uri\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/wrong-uri","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/wrong-uri (0.44s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/wrong-uri"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/wrong-role"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/wrong-role","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/wrong-role\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/wrong-role","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/wrong-role (0.44s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/wrong-role"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/extra-argument"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/extra-argument","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/extra-argument\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/extra-argument","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/extra-argument (0.44s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/extra-argument"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/multi-action"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/multi-action","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/multi-action\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/multi-action","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/multi-action (0.42s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/multi-action"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/malformed"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/malformed","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/malformed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/malformed","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/malformed (0.42s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/malformed"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/missing-expectation"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/missing-expectation","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/missing-expectation\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/missing-expectation","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/missing-expectation (0.41s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/missing-expectation"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/wrong-expected-role"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/wrong-expected-role","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/wrong-expected-role\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/wrong-expected-role","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/wrong-expected-role (0.38s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/wrong-expected-role"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/empty-expected-target"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/empty-expected-target","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/empty-expected-target\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/empty-expected-target","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/empty-expected-target (0.42s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/empty-expected-target"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/disabled"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/disabled","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/disabled\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/disabled","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/disabled (0.48s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/disabled"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/definition-drift"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/definition-drift","Output":"=== RUN   TestSchedulerCOMGuardedRunDefinition/definition-drift\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/definition-drift","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition/definition-drift (0.62s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition/definition-drift"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition","Output":"--- PASS: TestSchedulerCOMGuardedRunDefinition (11.73s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSchedulerCOMGuardedRunDefinition"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildCreateXML_Logon"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildCreateXML_Logon","Output":"=== RUN   TestBuildCreateXML_Logon\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildCreateXML_Logon","Output":"--- PASS: TestBuildCreateXML_Logon (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildCreateXML_Logon"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildCreateXML_Weekly"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildCreateXML_Weekly","Output":"=== RUN   TestBuildCreateXML_Weekly\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildCreateXML_Weekly","Output":"--- PASS: TestBuildCreateXML_Weekly (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildCreateXML_Weekly"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildCreateXML_QuotesArgsWithSpaces"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildCreateXML_QuotesArgsWithSpaces","Output":"=== RUN   TestBuildCreateXML_QuotesArgsWithSpaces\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildCreateXML_QuotesArgsWithSpaces","Output":"--- PASS: TestBuildCreateXML_QuotesArgsWithSpaces (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildCreateXML_QuotesArgsWithSpaces"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildCreateXML_HandlesInternalQuotes"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildCreateXML_HandlesInternalQuotes","Output":"=== RUN   TestBuildCreateXML_HandlesInternalQuotes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildCreateXML_HandlesInternalQuotes","Output":"--- PASS: TestBuildCreateXML_HandlesInternalQuotes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildCreateXML_HandlesInternalQuotes"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildCreateXML_HandlesTrailingBackslash"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildCreateXML_HandlesTrailingBackslash","Output":"=== RUN   TestBuildCreateXML_HandlesTrailingBackslash\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildCreateXML_HandlesTrailingBackslash","Output":"--- PASS: TestBuildCreateXML_HandlesTrailingBackslash (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestBuildCreateXML_HandlesTrailingBackslash"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSameWindowsUser"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSameWindowsUser","Output":"=== RUN   TestSameWindowsUser\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSameWindowsUser/exact"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSameWindowsUser/exact","Output":"=== RUN   TestSameWindowsUser/exact\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSameWindowsUser/exact","Output":"--- PASS: TestSameWindowsUser/exact (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSameWindowsUser/exact"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSameWindowsUser/domain_prefixed"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSameWindowsUser/domain_prefixed","Output":"=== RUN   TestSameWindowsUser/domain_prefixed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSameWindowsUser/domain_prefixed","Output":"--- PASS: TestSameWindowsUser/domain_prefixed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSameWindowsUser/domain_prefixed"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSameWindowsUser/case-insensitive"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSameWindowsUser/case-insensitive","Output":"=== RUN   TestSameWindowsUser/case-insensitive\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSameWindowsUser/case-insensitive","Output":"--- PASS: TestSameWindowsUser/case-insensitive (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSameWindowsUser/case-insensitive"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSameWindowsUser/different_user"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSameWindowsUser/different_user","Output":"=== RUN   TestSameWindowsUser/different_user\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSameWindowsUser/different_user","Output":"--- PASS: TestSameWindowsUser/different_user (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSameWindowsUser/different_user"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestSameWindowsUser/empty_owner"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSameWindowsUser/empty_owner","Output":"=== RUN   TestSameWindowsUser/empty_owner\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSameWindowsUser/empty_owner","Output":"--- PASS: TestSameWindowsUser/empty_owner (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSameWindowsUser/empty_owner"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestSameWindowsUser","Output":"--- PASS: TestSameWindowsUser (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestSameWindowsUser"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestResolveSchtasksPath"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestResolveSchtasksPath","Output":"=== RUN   TestResolveSchtasksPath\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestResolveSchtasksPath","Output":"--- PASS: TestResolveSchtasksPath (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestResolveSchtasksPath"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestResolveSchtasksPathFallbackAndMissing"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestResolveSchtasksPathFallbackAndMissing","Output":"=== RUN   TestResolveSchtasksPathFallbackAndMissing\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestResolveSchtasksPathFallbackAndMissing","Output":"--- PASS: TestResolveSchtasksPathFallbackAndMissing (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestResolveSchtasksPathFallbackAndMissing"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestPrepareTaskXMLForImportEncodesUnicodeUTF8AsUTF16LEBOM"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestPrepareTaskXMLForImportEncodesUnicodeUTF8AsUTF16LEBOM","Output":"=== RUN   TestPrepareTaskXMLForImportEncodesUnicodeUTF8AsUTF16LEBOM\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestPrepareTaskXMLForImportEncodesUnicodeUTF8AsUTF16LEBOM","Output":"--- PASS: TestPrepareTaskXMLForImportEncodesUnicodeUTF8AsUTF16LEBOM (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestPrepareTaskXMLForImportEncodesUnicodeUTF8AsUTF16LEBOM"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestPrepareTaskXMLForImportPreservesUTF16LEBOMBytes"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestPrepareTaskXMLForImportPreservesUTF16LEBOMBytes","Output":"=== RUN   TestPrepareTaskXMLForImportPreservesUTF16LEBOMBytes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestPrepareTaskXMLForImportPreservesUTF16LEBOMBytes","Output":"--- PASS: TestPrepareTaskXMLForImportPreservesUTF16LEBOMBytes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestPrepareTaskXMLForImportPreservesUTF16LEBOMBytes"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestPrepareTaskXMLForImportRejectsInvalidBytes"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestPrepareTaskXMLForImportRejectsInvalidBytes","Output":"=== RUN   TestPrepareTaskXMLForImportRejectsInvalidBytes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestPrepareTaskXMLForImportRejectsInvalidBytes","Output":"--- PASS: TestPrepareTaskXMLForImportRejectsInvalidBytes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestPrepareTaskXMLForImportRejectsInvalidBytes"}
+{"Action":"cont","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnPreservesRawXMLOutsideCommand"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnPreservesRawXMLOutsideCommand","Output":"=== CONT  TestEntrypointTaskTxnPreservesRawXMLOutsideCommand\n","OutputType":"frame"}
+{"Action":"cont","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRetainFailurePreservesCause"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRetainFailurePreservesCause","Output":"=== CONT  TestEntrypointTaskTxnRetainFailurePreservesCause\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRetainFailurePreservesCause/ref-present=false"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRetainFailurePreservesCause/ref-present=false","Output":"=== RUN   TestEntrypointTaskTxnRetainFailurePreservesCause/ref-present=false\n","OutputType":"frame"}
+{"Action":"cont","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnReopenRestoresRetainedXMLSnapshots"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnReopenRestoresRetainedXMLSnapshots","Output":"=== CONT  TestEntrypointTaskTxnReopenRestoresRetainedXMLSnapshots\n","OutputType":"frame"}
+{"Action":"cont","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnKeepsExistingRuntimeAndIgnoresOperatorCommand"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnKeepsExistingRuntimeAndIgnoresOperatorCommand","Output":"=== CONT  TestEntrypointTaskTxnKeepsExistingRuntimeAndIgnoresOperatorCommand\n","OutputType":"frame"}
+{"Action":"cont","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnReopenPreservesLoadCause"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnReopenPreservesLoadCause","Output":"=== CONT  TestEntrypointTaskTxnReopenPreservesLoadCause\n","OutputType":"frame"}
+{"Action":"cont","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsEmptyRetainedReference"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsEmptyRetainedReference","Output":"=== CONT  TestEntrypointTaskTxnRejectsEmptyRetainedReference\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsEmptyRetainedReference/bytes=0"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsEmptyRetainedReference/bytes=0","Output":"=== RUN   TestEntrypointTaskTxnRejectsEmptyRetainedReference/bytes=0\n","OutputType":"frame"}
+{"Action":"cont","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation","Output":"=== CONT  TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation\n","OutputType":"frame"}
+{"Action":"cont","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRewriteFailureLeavesCompensationToCoordinator"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRewriteFailureLeavesCompensationToCoordinator","Output":"=== CONT  TestEntrypointTaskTxnRewriteFailureLeavesCompensationToCoordinator\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation/foreign_owner"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation/foreign_owner","Output":"=== RUN   TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation/foreign_owner\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnPreservesRawXMLOutsideCommand","Output":"--- PASS: TestEntrypointTaskTxnPreservesRawXMLOutsideCommand (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnPreservesRawXMLOutsideCommand"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRewriteFailureLeavesCompensationToCoordinator","Output":"--- PASS: TestEntrypointTaskTxnRewriteFailureLeavesCompensationToCoordinator (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRewriteFailureLeavesCompensationToCoordinator"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnReopenRestoresRetainedXMLSnapshots","Output":"--- PASS: TestEntrypointTaskTxnReopenRestoresRetainedXMLSnapshots (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnReopenRestoresRetainedXMLSnapshots"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnKeepsExistingRuntimeAndIgnoresOperatorCommand","Output":"--- PASS: TestEntrypointTaskTxnKeepsExistingRuntimeAndIgnoresOperatorCommand (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnKeepsExistingRuntimeAndIgnoresOperatorCommand"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsEmptyRetainedReference/bytes=0","Output":"--- PASS: TestEntrypointTaskTxnRejectsEmptyRetainedReference/bytes=0 (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsEmptyRetainedReference/bytes=0"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsEmptyRetainedReference/bytes=2"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsEmptyRetainedReference/bytes=2","Output":"=== RUN   TestEntrypointTaskTxnRejectsEmptyRetainedReference/bytes=2\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnReopenPreservesLoadCause","Output":"--- PASS: TestEntrypointTaskTxnReopenPreservesLoadCause (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnReopenPreservesLoadCause"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation/foreign_owner","Output":"--- PASS: TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation/foreign_owner (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation/foreign_owner"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation/multiple_actions"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation/multiple_actions","Output":"=== RUN   TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation/multiple_actions\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRetainFailurePreservesCause/ref-present=false","Output":"--- PASS: TestEntrypointTaskTxnRetainFailurePreservesCause/ref-present=false (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRetainFailurePreservesCause/ref-present=false"}
+{"Action":"run","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRetainFailurePreservesCause/ref-present=true"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRetainFailurePreservesCause/ref-present=true","Output":"=== RUN   TestEntrypointTaskTxnRetainFailurePreservesCause/ref-present=true\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsEmptyRetainedReference/bytes=2","Output":"--- PASS: TestEntrypointTaskTxnRejectsEmptyRetainedReference/bytes=2 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsEmptyRetainedReference/bytes=2"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsEmptyRetainedReference","Output":"--- PASS: TestEntrypointTaskTxnRejectsEmptyRetainedReference (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsEmptyRetainedReference"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation/multiple_actions","Output":"--- PASS: TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation/multiple_actions (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation/multiple_actions"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation","Output":"--- PASS: TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRetainFailurePreservesCause/ref-present=true","Output":"--- PASS: TestEntrypointTaskTxnRetainFailurePreservesCause/ref-present=true (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRetainFailurePreservesCause/ref-present=true"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRetainFailurePreservesCause","Output":"--- PASS: TestEntrypointTaskTxnRetainFailurePreservesCause (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler","Test":"TestEntrypointTaskTxnRetainFailurePreservesCause"}
+{"Action":"output","Package":"mcp-local-hub/internal/scheduler","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/scheduler"}

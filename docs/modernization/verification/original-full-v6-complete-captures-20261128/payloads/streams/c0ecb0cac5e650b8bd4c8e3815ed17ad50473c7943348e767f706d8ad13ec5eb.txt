@@ -1,0 +1,313 @@
+=== RUN   TestBuiltinOnly
+--- PASS: TestBuiltinOnly (0.00s)
+=== NAME  
+=== RUN   TestOverlayWinsOverBuiltin
+--- PASS: TestOverlayWinsOverBuiltin (0.00s)
+=== NAME  
+=== RUN   TestFirstOverlayWinsOverSecond
+--- PASS: TestFirstOverlayWinsOverSecond (0.00s)
+=== NAME  
+=== RUN   TestPortNotFound
+--- PASS: TestPortNotFound (0.00s)
+=== NAME  
+=== RUN   TestNoRootsSupplied
+--- PASS: TestNoRootsSupplied (0.00s)
+=== NAME  
+=== RUN   TestPR591_BlankOnlyOverlaysAreNoRootsWithZeroIO
+--- PASS: TestPR591_BlankOnlyOverlaysAreNoRootsWithZeroIO (0.00s)
+=== NAME  
+=== RUN   TestPR591_MixedBlankOverlaysPreserveSourceIndices
+--- PASS: TestPR591_MixedBlankOverlaysPreserveSourceIndices (0.00s)
+=== NAME  
+=== RUN   TestPR591_WinnerSourceDocsMatchFormatter
+--- PASS: TestPR591_WinnerSourceDocsMatchFormatter (0.00s)
+=== NAME  
+=== RUN   TestCandidateDirWithoutManifest
+--- PASS: TestCandidateDirWithoutManifest (0.00s)
+=== NAME  
+=== RUN   TestBuiltinNotCheckedWhenVcpkgRootAbsent
+--- PASS: TestBuiltinNotCheckedWhenVcpkgRootAbsent (0.00s)
+=== NAME  
+=== RUN   TestEmptyPort
+--- PASS: TestEmptyPort (0.00s)
+=== NAME  
+=== RUN   TestPortWithWhitespace
+--- PASS: TestPortWithWhitespace (0.00s)
+=== NAME  
+=== RUN   TestShadowListOrder
+--- PASS: TestShadowListOrder (0.00s)
+=== NAME  
+=== RUN   TestAllCandidatesRecorded
+--- PASS: TestAllCandidatesRecorded (0.00s)
+=== NAME  
+=== RUN   TestEvidenceIncludesPaths
+--- PASS: TestEvidenceIncludesPaths (0.00s)
+=== NAME  
+=== RUN   TestOverlayToOverlayShadowingFlag
+--- PASS: TestOverlayToOverlayShadowingFlag (0.00s)
+=== NAME  
+=== RUN   TestNoOverlayToOverlayShadowingWhenUnique
+--- PASS: TestNoOverlayToOverlayShadowingWhenUnique (0.00s)
+=== NAME  
+=== RUN   TestHigherPrecedenceUnreadableOverlayFailsClosed
+--- PASS: TestHigherPrecedenceUnreadableOverlayFailsClosed (0.00s)
+=== NAME  
+=== RUN   TestHigherPrecedencePortCandidateReadErrorFailsClosed
+--- PASS: TestHigherPrecedencePortCandidateReadErrorFailsClosed (0.00s)
+=== NAME  
+=== RUN   TestBuiltinNotCheckedIsStructuredCandidateMetadata
+--- PASS: TestBuiltinNotCheckedIsStructuredCandidateMetadata (0.00s)
+=== NAME  
+=== RUN   TestRelativeRootsAreRejected
+=== RUN   TestRelativeRootsAreRejected/relative_root
+--- PASS: TestRelativeRootsAreRejected/relative_root (0.00s)
+=== NAME  TestRelativeRootsAreRejected
+=== RUN   TestRelativeRootsAreRejected/relative_root#01
+--- PASS: TestRelativeRootsAreRejected/relative_root#01 (0.00s)
+=== NAME  TestRelativeRootsAreRejected
+--- PASS: TestRelativeRootsAreRejected (0.00s)
+=== NAME  
+=== RUN   TestWhitespaceInAbsoluteOverlayPathIsPreserved
+--- PASS: TestWhitespaceInAbsoluteOverlayPathIsPreserved (0.00s)
+=== NAME  
+=== RUN   TestTraversalPortNameIsRefusedBeforeTheJoin
+=== RUN   TestTraversalPortNameIsRefusedBeforeTheJoin/../../outside
+--- PASS: TestTraversalPortNameIsRefusedBeforeTheJoin/../../outside (0.00s)
+=== NAME  TestTraversalPortNameIsRefusedBeforeTheJoin
+=== RUN   TestTraversalPortNameIsRefusedBeforeTheJoin/..
+--- PASS: TestTraversalPortNameIsRefusedBeforeTheJoin/.. (0.00s)
+=== NAME  TestTraversalPortNameIsRefusedBeforeTheJoin
+=== RUN   TestTraversalPortNameIsRefusedBeforeTheJoin/../sibling
+--- PASS: TestTraversalPortNameIsRefusedBeforeTheJoin/../sibling (0.00s)
+=== NAME  TestTraversalPortNameIsRefusedBeforeTheJoin
+=== RUN   TestTraversalPortNameIsRefusedBeforeTheJoin/..\windows-sibling
+--- PASS: TestTraversalPortNameIsRefusedBeforeTheJoin/..\windows-sibling (0.00s)
+=== NAME  TestTraversalPortNameIsRefusedBeforeTheJoin
+=== RUN   TestTraversalPortNameIsRefusedBeforeTheJoin/sub/nested
+--- PASS: TestTraversalPortNameIsRefusedBeforeTheJoin/sub/nested (0.00s)
+=== NAME  TestTraversalPortNameIsRefusedBeforeTheJoin
+=== RUN   TestTraversalPortNameIsRefusedBeforeTheJoin/UPPERCASE
+--- PASS: TestTraversalPortNameIsRefusedBeforeTheJoin/UPPERCASE (0.00s)
+=== NAME  TestTraversalPortNameIsRefusedBeforeTheJoin
+=== RUN   TestTraversalPortNameIsRefusedBeforeTheJoin/-leading-hyphen
+--- PASS: TestTraversalPortNameIsRefusedBeforeTheJoin/-leading-hyphen (0.00s)
+=== NAME  TestTraversalPortNameIsRefusedBeforeTheJoin
+=== RUN   TestTraversalPortNameIsRefusedBeforeTheJoin/trailing-hyphen-
+--- PASS: TestTraversalPortNameIsRefusedBeforeTheJoin/trailing-hyphen- (0.00s)
+=== NAME  TestTraversalPortNameIsRefusedBeforeTheJoin
+=== RUN   TestTraversalPortNameIsRefusedBeforeTheJoin/under_score
+--- PASS: TestTraversalPortNameIsRefusedBeforeTheJoin/under_score (0.00s)
+=== NAME  TestTraversalPortNameIsRefusedBeforeTheJoin
+--- PASS: TestTraversalPortNameIsRefusedBeforeTheJoin (0.00s)
+=== NAME  
+=== RUN   TestResolvePortRejectsTooManyRawOverlayRootsBeforeAllocationOrFilesystem
+--- PASS: TestResolvePortRejectsTooManyRawOverlayRootsBeforeAllocationOrFilesystem (0.00s)
+=== NAME  
+=== RUN   TestInspectPortCandidateValidatesManifestTargetMatrix
+=== RUN   TestInspectPortCandidateValidatesManifestTargetMatrix/symlink_regular_target
+--- PASS: TestInspectPortCandidateValidatesManifestTargetMatrix/symlink_regular_target (0.00s)
+=== NAME  TestInspectPortCandidateValidatesManifestTargetMatrix
+=== RUN   TestInspectPortCandidateValidatesManifestTargetMatrix/dangling_target
+--- PASS: TestInspectPortCandidateValidatesManifestTargetMatrix/dangling_target (0.00s)
+=== NAME  TestInspectPortCandidateValidatesManifestTargetMatrix
+=== RUN   TestInspectPortCandidateValidatesManifestTargetMatrix/directory_target
+--- PASS: TestInspectPortCandidateValidatesManifestTargetMatrix/directory_target (0.00s)
+=== NAME  TestInspectPortCandidateValidatesManifestTargetMatrix
+=== RUN   TestInspectPortCandidateValidatesManifestTargetMatrix/invalid_then_readable_sibling
+--- PASS: TestInspectPortCandidateValidatesManifestTargetMatrix/invalid_then_readable_sibling (0.00s)
+=== NAME  TestInspectPortCandidateValidatesManifestTargetMatrix
+--- PASS: TestInspectPortCandidateValidatesManifestTargetMatrix (0.00s)
+=== NAME  
+=== RUN   TestInspectRootReadabilityProbeRequestsOneEntryAndCloses
+=== RUN   TestInspectRootReadabilityProbeRequestsOneEntryAndCloses/success
+--- PASS: TestInspectRootReadabilityProbeRequestsOneEntryAndCloses/success (0.00s)
+=== NAME  TestInspectRootReadabilityProbeRequestsOneEntryAndCloses
+=== RUN   TestInspectRootReadabilityProbeRequestsOneEntryAndCloses/close_error
+--- PASS: TestInspectRootReadabilityProbeRequestsOneEntryAndCloses/close_error (0.00s)
+=== NAME  TestInspectRootReadabilityProbeRequestsOneEntryAndCloses
+--- PASS: TestInspectRootReadabilityProbeRequestsOneEntryAndCloses (0.00s)
+=== NAME  
+=== RUN   TestManifestProbeReadsOneSentinelByteAndCloses
+=== RUN   TestManifestProbeReadsOneSentinelByteAndCloses/success
+--- PASS: TestManifestProbeReadsOneSentinelByteAndCloses/success (0.00s)
+=== NAME  TestManifestProbeReadsOneSentinelByteAndCloses
+=== RUN   TestManifestProbeReadsOneSentinelByteAndCloses/read_error
+--- PASS: TestManifestProbeReadsOneSentinelByteAndCloses/read_error (0.00s)
+=== NAME  TestManifestProbeReadsOneSentinelByteAndCloses
+=== RUN   TestManifestProbeReadsOneSentinelByteAndCloses/close_error
+--- PASS: TestManifestProbeReadsOneSentinelByteAndCloses/close_error (0.00s)
+=== NAME  TestManifestProbeReadsOneSentinelByteAndCloses
+--- PASS: TestManifestProbeReadsOneSentinelByteAndCloses (0.00s)
+=== NAME  
+=== RUN   TestResolvePortContextCancellationNeverStartsNextProbe
+=== RUN   TestResolvePortContextCancellationNeverStartsNextProbe/post_overlay_root
+--- PASS: TestResolvePortContextCancellationNeverStartsNextProbe/post_overlay_root (0.00s)
+=== NAME  TestResolvePortContextCancellationNeverStartsNextProbe
+=== RUN   TestResolvePortContextCancellationNeverStartsNextProbe/post_overlay_manifest
+--- PASS: TestResolvePortContextCancellationNeverStartsNextProbe/post_overlay_manifest (0.00s)
+=== NAME  TestResolvePortContextCancellationNeverStartsNextProbe
+=== RUN   TestResolvePortContextCancellationNeverStartsNextProbe/post_builtin_root_without_overlay
+--- PASS: TestResolvePortContextCancellationNeverStartsNextProbe/post_builtin_root_without_overlay (0.00s)
+=== NAME  TestResolvePortContextCancellationNeverStartsNextProbe
+=== RUN   TestResolvePortContextCancellationNeverStartsNextProbe/post_builtin_root_with_overlay
+--- PASS: TestResolvePortContextCancellationNeverStartsNextProbe/post_builtin_root_with_overlay (0.00s)
+=== NAME  TestResolvePortContextCancellationNeverStartsNextProbe
+=== RUN   TestResolvePortContextCancellationNeverStartsNextProbe/during_builtin_manifest_without_overlay
+--- PASS: TestResolvePortContextCancellationNeverStartsNextProbe/during_builtin_manifest_without_overlay (0.00s)
+=== NAME  TestResolvePortContextCancellationNeverStartsNextProbe
+=== RUN   TestResolvePortContextCancellationNeverStartsNextProbe/during_builtin_manifest_with_overlay
+--- PASS: TestResolvePortContextCancellationNeverStartsNextProbe/during_builtin_manifest_with_overlay (0.00s)
+=== NAME  TestResolvePortContextCancellationNeverStartsNextProbe
+=== RUN   TestResolvePortContextCancellationNeverStartsNextProbe/post_builtin_manifest_without_overlay
+--- PASS: TestResolvePortContextCancellationNeverStartsNextProbe/post_builtin_manifest_without_overlay (0.00s)
+=== NAME  TestResolvePortContextCancellationNeverStartsNextProbe
+=== RUN   TestResolvePortContextCancellationNeverStartsNextProbe/post_builtin_manifest_with_overlay
+--- PASS: TestResolvePortContextCancellationNeverStartsNextProbe/post_builtin_manifest_with_overlay (0.00s)
+=== NAME  TestResolvePortContextCancellationNeverStartsNextProbe
+--- PASS: TestResolvePortContextCancellationNeverStartsNextProbe (0.01s)
+=== NAME  
+=== RUN   TestBuiltinUnreadabilityRespectsWinnerPrecedence
+=== RUN   TestBuiltinUnreadabilityRespectsWinnerPrecedence/root_no_winner
+--- PASS: TestBuiltinUnreadabilityRespectsWinnerPrecedence/root_no_winner (0.00s)
+=== NAME  TestBuiltinUnreadabilityRespectsWinnerPrecedence
+=== RUN   TestBuiltinUnreadabilityRespectsWinnerPrecedence/root_after_overlay
+--- PASS: TestBuiltinUnreadabilityRespectsWinnerPrecedence/root_after_overlay (0.00s)
+=== NAME  TestBuiltinUnreadabilityRespectsWinnerPrecedence
+=== RUN   TestBuiltinUnreadabilityRespectsWinnerPrecedence/manifest_no_winner
+--- PASS: TestBuiltinUnreadabilityRespectsWinnerPrecedence/manifest_no_winner (0.00s)
+=== NAME  TestBuiltinUnreadabilityRespectsWinnerPrecedence
+=== RUN   TestBuiltinUnreadabilityRespectsWinnerPrecedence/manifest_after_overlay
+--- PASS: TestBuiltinUnreadabilityRespectsWinnerPrecedence/manifest_after_overlay (0.00s)
+=== NAME  TestBuiltinUnreadabilityRespectsWinnerPrecedence
+=== RUN   TestBuiltinUnreadabilityRespectsWinnerPrecedence/absent_no_winner
+--- PASS: TestBuiltinUnreadabilityRespectsWinnerPrecedence/absent_no_winner (0.00s)
+=== NAME  TestBuiltinUnreadabilityRespectsWinnerPrecedence
+=== RUN   TestBuiltinUnreadabilityRespectsWinnerPrecedence/absent_after_overlay
+--- PASS: TestBuiltinUnreadabilityRespectsWinnerPrecedence/absent_after_overlay (0.00s)
+=== NAME  TestBuiltinUnreadabilityRespectsWinnerPrecedence
+--- PASS: TestBuiltinUnreadabilityRespectsWinnerPrecedence (0.01s)
+=== NAME  
+=== RUN   TestLegalPortNamesAreStillAccepted
+=== RUN   TestLegalPortNamesAreStillAccepted/zlib
+--- PASS: TestLegalPortNamesAreStillAccepted/zlib (0.00s)
+=== NAME  TestLegalPortNamesAreStillAccepted
+=== RUN   TestLegalPortNamesAreStillAccepted/mcp-language-server
+--- PASS: TestLegalPortNamesAreStillAccepted/mcp-language-server (0.00s)
+=== NAME  TestLegalPortNamesAreStillAccepted
+=== RUN   TestLegalPortNamesAreStillAccepted/abseil
+--- PASS: TestLegalPortNamesAreStillAccepted/abseil (0.00s)
+=== NAME  TestLegalPortNamesAreStillAccepted
+=== RUN   TestLegalPortNamesAreStillAccepted/libpng16
+--- PASS: TestLegalPortNamesAreStillAccepted/libpng16 (0.00s)
+=== NAME  TestLegalPortNamesAreStillAccepted
+=== RUN   TestLegalPortNamesAreStillAccepted/a-b-c
+--- PASS: TestLegalPortNamesAreStillAccepted/a-b-c (0.00s)
+=== NAME  TestLegalPortNamesAreStillAccepted
+=== RUN   TestLegalPortNamesAreStillAccepted/x264
+--- PASS: TestLegalPortNamesAreStillAccepted/x264 (0.00s)
+=== NAME  TestLegalPortNamesAreStillAccepted
+--- PASS: TestLegalPortNamesAreStillAccepted (0.00s)
+=== NAME  
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/blocking.reason/ascii
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/blocking.reason/ascii (0.00s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/blocking.reason/control
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/blocking.reason/control (0.00s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/blocking.reason/invalid_utf8
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/blocking.reason/invalid_utf8 (0.01s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/blocking.reason/unicode
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/blocking.reason/unicode (0.00s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/invalid_root/invalid_utf8
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/invalid_root/invalid_utf8 (0.00s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/invalid_root/unicode
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/invalid_root/unicode (0.00s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/invalid_root/ascii
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/invalid_root/ascii (0.00s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/invalid_root/control
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/invalid_root/control (0.00s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/invalid_port/ascii
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/invalid_port/ascii (0.00s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/invalid_port/control
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/invalid_port/control (0.00s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/invalid_port/invalid_utf8
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/invalid_port/invalid_utf8 (0.00s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/invalid_port/unicode
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/invalid_port/unicode (0.00s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/winner.directory/ascii
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/winner.directory/ascii (0.00s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/winner.directory/control
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/winner.directory/control (0.00s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/winner.directory/invalid_utf8
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/winner.directory/invalid_utf8 (0.01s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/winner.directory/unicode
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/winner.directory/unicode (0.00s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/winner.source/unicode
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/winner.source/unicode (0.00s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/winner.source/ascii
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/winner.source/ascii (0.00s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/winner.source/control
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/winner.source/control (0.00s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/winner.source/invalid_utf8
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/winner.source/invalid_utf8 (0.01s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/blocking.directory/ascii
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/blocking.directory/ascii (0.00s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/blocking.directory/control
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/blocking.directory/control (0.00s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/blocking.directory/invalid_utf8
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/blocking.directory/invalid_utf8 (0.01s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/blocking.directory/unicode
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/blocking.directory/unicode (0.00s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/blocking.source/ascii
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/blocking.source/ascii (0.00s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/blocking.source/control
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/blocking.source/control (0.00s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/blocking.source/invalid_utf8
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/blocking.source/invalid_utf8 (0.00s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+=== RUN   TestPortProjectionBoundsEveryRetainedScalarIndependently/blocking.source/unicode
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently/blocking.source/unicode (0.00s)
+=== NAME  TestPortProjectionBoundsEveryRetainedScalarIndependently
+--- PASS: TestPortProjectionBoundsEveryRetainedScalarIndependently (0.09s)
+=== NAME  
+=== RUN   TestPortProjectionCombinedWorstCaseAndLegacyCompatibility
+--- PASS: TestPortProjectionCombinedWorstCaseAndLegacyCompatibility (0.03s)
+=== NAME  
+=== RUN   TestR27ProjectionPreservesShadowingAndNamesEveryOmittedCollection
+--- PASS: TestR27ProjectionPreservesShadowingAndNamesEveryOmittedCollection (0.00s)
+=== NAME  
+=== RUN   TestR20IndividualPortOverlayWinsBeforeBuiltin
+--- PASS: TestR20IndividualPortOverlayWinsBeforeBuiltin (0.00s)
+=== NAME  
+=== RUN   TestR25CancellationHasDedicatedReason
+--- PASS: TestR25CancellationHasDedicatedReason (0.00s)
+=== NAME  
+=== RUN   TestR33OverlayWhitespaceIsPreservedAfterBlankFiltering
+--- PASS: TestR33OverlayWhitespaceIsPreservedAfterBlankFiltering (0.00s)
+=== NAME  
+PASS

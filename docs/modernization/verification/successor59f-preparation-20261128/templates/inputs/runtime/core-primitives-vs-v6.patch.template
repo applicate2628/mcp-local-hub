@@ -1,0 +1,350 @@
+--- v6/core
++++ successor/core
+@@ -1,6 +1,6 @@
+-"""Recovered-original composition of the published full-v13 and ns1 literal core.
+-Only current explicit DATA bindings replace historical source/Product/cache pins.
+-The original native command guard and failed-owner retention are reused.
++"""Successor-source literal core using the original native guard and issuer lifetime.
++Receives one marked CLI Product, a separate unmarked native Product, and exact
++same-source byte maps. No recovered727 private publisher protocol is imported.
+ """
+ import sys
+ sys.dont_write_bytecode = True
+@@ -20,14 +20,13 @@
+ FULL_RUN = RUNS / CFG["run_name"]
+ FOCUSED_RUN = RUNS / "not-enabled-focused"
+ CACHE_COMMIT = CFG["source_commit"]
+-PRODUCT_SOURCE_COMMIT = CFG["product_source_commit"]
++PRODUCT_SOURCE_COMMIT = CFG["source_commit"]
+ GO, GIT, CC, PWSH, PYTHON = (Path(CFG["tools"][key]["path"]) for key in ("go","git","gcc","pwsh","python"))
+ WINPS = Path(CFG["canonical_tools"]["powershell"]["path"])
+ HELPER = Path(@@SCOPE_PATH_REPR@@)
+ HELPER_SHA = @@SCOPE_SHA_REPR@@
+ REPARSE = 0x400
+-BUNDLE_FILES = ("mcphub.exe", "windows-product-identity.json", "mcphub-product/mcphub.exe",
+-                "mcphub-product/mcphub-owner.dll", "mcphub-product/mcphub-owner-identity.json")
++BUNDLE_FILES = ("mcphub.exe", "windows-product-identity.json", "mcphub-product/mcphub.exe")
+ PRODUCT_SYSO = REPO / "cmd/mcphub/zz_product_versioninfo.syso"
+ CLI_SYSO = REPO / "internal/cli/zz_qualified_cli_versioninfo_windows_amd64.syso"
+ API_SYSO = REPO / "internal/api/zz_qualified_api_versioninfo_windows_amd64.syso"
+@@ -243,16 +242,21 @@
+     result={str(CONFIG):CONFIG_SHA256}
+     pairs=[*CFG["tools"].values(),*CFG["controllers"].values(),*CFG["canonical_tools"].values(),
+            *CFG["serena_preparation_tools"].values(),*CFG["closed_producer_receipts"],
+-           *CFG["source_evidence"].values(),CFG["legacy"]["build_plan"],CFG["legacy"]["native_actor_fixture"],
+-           CFG["marked"]["inputs"],CFG["marked"]["compiler_resource"],CFG["marked"]["build_plan"],
+-           CFG["source_context"],CFG["guard"],CFG["windows_job"],CFG["cache_copy"],CFG["cache_parent"],
+-           *CFG["migration"].values()]
++           CFG["source_context"],CFG["source_snapshot"],CFG["product_snapshot"],
++           CFG["guard"],CFG["windows_job"],CFG["cache_copy"],CFG["cache_parent"]]
++    for role in ("product","native_product"):
++        entry=CFG[role]
++        pairs.extend(entry[key] for key in ("inputs","build_plan","fixture"))
++        if role=="product": pairs.append(entry["compiler_resource"])
++    if CFG["acceptance"]["migration_fixture"] is not None:
++        pairs.append(CFG["acceptance"]["migration_fixture"])
+     pairs += [{"path":path,"sha256":digest} for path,digest in CFG["input_files"].items()]
+     for row in pairs:
+         checked_input(row); result[row["path"]]=row["sha256"]
+-    require(CACHE_COMMIT=="727d66753814dc218e26d699e57402db2d13190a"
+-            and PRODUCT_SOURCE_COMMIT=="3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+-            "exact original TestSource and separate Product source required")
++    require(re.fullmatch("[0-9a-f]{40}",CACHE_COMMIT)
++            and re.fullmatch("[0-9a-f]{40}",CFG["source_tree"])
++            and CFG["source_file_count"]==3369,
++            "concrete reviewed successor commit/tree and complete 3369-path map required")
+     return result
+ 
+ def unique_object(pairs):
+@@ -316,11 +320,12 @@
+ def copy_closed_cache_inputs(owner,environment):
+     pin=CFG["cache_copy"]
+     raw=checked_input(pin).read_bytes()
+-    module=SimpleNamespace(__file__=pin["path"],__name__="literal_original_closed_cache_copy")
++    module=SimpleNamespace(__file__=pin["path"],__name__="literal_successor_closed_cache_copy")
+     exec(compile(raw,pin["path"],"exec"),module.__dict__)
+-    checked_input(CFG["cache_parent"])
+-    expected=WORK/"serena-product-inputs-v2/parent.json"
+-    require(Path(CFG["cache_parent"]["path"])==expected,"only the current closed cache donor is configured")
++    parent=checked_input(CFG["cache_parent"])
++    require(parent.is_relative_to(WORK),"explicit original closed cache producer must be in the task scope")
++    # The independently reviewed donor-copy helper receives its exact PASS
++    # producer, full byte inventory and fresh target before copying any cache.
+     return module.copy_closed_caches(owner,CFG["cache_parent"]["sha256"],environment)
+ 
+ def snapshot_files(value,expected_count):
+@@ -334,105 +339,67 @@
+     return files
+ 
+ def receive_original_source_compatibility(snapshot):
+-    evidence=CFG["source_evidence"]
+-    original=read_input(evidence["test_snapshot"])
+-    product=read_input(evidence["product_snapshot"])
+-    current_files=snapshot_files(original,3509)
+-    product_files=snapshot_files(product,3508)
+-    require(snapshot=={"head":CACHE_COMMIT,"files":current_files},
+-            "fresh actual TestSource is not the exact recovered 727d source map")
+-    changes=sorted(name for name in current_files if current_files[name]!=product_files.get(name))
+-    tool_paths={"tools/test-recovery-namespace/main_windows.go","tools/test-recovery-namespace/prebuilt_windows.go"}
+-    require(len(changes)==31 and {name for name in changes if not name.endswith("_test.go")}==tool_paths
+-            and set(current_files)-set(product_files)=={"tools/test-recovery-namespace/prechild_refusal_windows_test.go"}
+-            and not set(product_files)-set(current_files)
+-            and sum(not name.endswith("_test.go") and current_files[name]==digest
+-                    for name,digest in product_files.items())==2010,
+-            "recovered source differs from the reviewed 29 test and two namespace tool changes")
+-    proof=read_input(evidence["compatibility"])
+-    graph=read_input(evidence["selected_inputs"])
+-    expected_delta={name:{"before_sha256":product_files[name],"after_sha256":current_files[name]} for name in tool_paths}
+-    require(proof.get("schema")=="namespace-tool-product-source-compatibility-v1"
+-            and proof.get("product_source_commit")==PRODUCT_SOURCE_COMMIT
+-            and proof.get("current_source_commit")==CACHE_COMMIT
+-            and proof.get("archival_source_file_count")==3508 and proof.get("source_file_count")==3509
+-            and proof.get("unchanged_existing_non_test_paths")==2010
+-            and proof.get("tool_source_delta")==expected_delta
+-            and proof.get("runtime_qualification_reused") is False and proof.get("donor_identity_rewritten") is False
+-            and proof.get("selected_input_observation",{}).get("sha256")==evidence["selected_inputs"]["sha256"],
+-            "original selected Product source compatibility metadata differs")
+-    original_root=Path(graph["source"])
+-    require(graph.get("schema")=="go-declared-input-observation-v1"
+-            and graph.get("packages")==["./tools/windows-product-validate","./cmd/mcphub","./cmd/mcphub-launcher"]
+-            and graph.get("rows") and isinstance(graph.get("files"),dict),
+-            "original selected Go input producer metadata differs")
+-    selected={Path(path).relative_to(original_root).as_posix():digest
+-              for path,digest in graph["files"].items() if Path(path).is_relative_to(original_root)}
+-    require(selected and selected==proof.get("selected_repository_inputs")
+-            and not set(selected).intersection(tool_paths) and {"go.mod","go.sum"}.issubset(selected)
+-            and all(current_files.get(name)==product_files.get(name)==digest for name,digest in selected.items()),
+-            "selected Product source/module/embed inputs differ")
+-    return {"schema":"acceptance-product-test-source-compatibility-v2",
+-        "product_source_commit":PRODUCT_SOURCE_COMMIT,"test_source_commit":CACHE_COMMIT,
+-        "source_file_count":3509,"changed_paths":changes,"changed_file_count":len(changes),
+-        "unchanged_non_test_path_count":2010,"unchanged_non_test_paths":False,
+-        "namespace_tool_delta":expected_delta,"product_selected_repository_inputs_unchanged":True,
+-        "source_evidence":evidence,"historical_runtime_qualification_inherited":False}
+-
+-def receive_marked_inputs():
+-    cfg=CFG["marked"]
++    expected=read_input(CFG["source_snapshot"])
++    require(set(expected)=={"head","files"} and expected["head"]==CACHE_COMMIT
++            and isinstance(expected["files"],dict) and len(expected["files"])==CFG["source_file_count"]
++            and all(isinstance(name,str) and not Path(name).is_absolute() and ".." not in Path(name).parts
++                    and isinstance(digest,str) and re.fullmatch("[0-9a-f]{64}",digest)
++                    for name,digest in expected["files"].items()),
++            "complete current TestSource map required")
++    product=snapshot_files(read_input(CFG["product_snapshot"]),CFG["source_file_count"])
++    require(snapshot==expected and product==expected["files"],
++            "actual TestSource and marked Product source bytes are not identical")
++    return {"schema":"successor-product-test-source-identity-v1",
++        "test_source_commit":CACHE_COMMIT,"product_source_commit":PRODUCT_SOURCE_COMMIT,
++        "source_tree":CFG["source_tree"],"source_file_count":CFG["source_file_count"],
++        "all_source_bytes_identical":True,"source_snapshot":CFG["source_snapshot"],
++        "product_snapshot":CFG["product_snapshot"],"historical_runtime_qualification_inherited":False}
++
++def receive_product_inputs(role):
++    require(role in ("product","native_product"),"one of the two explicit Product roles required")
++    cfg=CFG[role]
+     value=read_input(cfg["inputs"])
+     plan=read_input(cfg["build_plan"])
++    marked=role=="product"
+     require(value.get("schema")=="current-source-product-receiver-inputs-v1"
+             and value.get("source_commit")==CACHE_COMMIT and value.get("build_plan")==plan
+-            and value.get("receiver_linker_flags")==["-s","-w"]
+-            and plan.get("commit")==CACHE_COMMIT and plan.get("testOnly") is False and plan.get("buildTags")==[]
+             and value.get("build_plan_file",{}).get("sha256")==cfg["build_plan"]["sha256"]
+-            and value.get("resource",{}).get("sha256")==cfg["compiler_resource"]["sha256"],
+-            "exact original marked727d compiler metadata/resource differs")
++            and plan.get("commit")==CACHE_COMMIT
++            and plan.get("testOnly") is (not marked)
++            and plan.get("buildTags")==([] if marked else ["test_state_path_env"]),
++            "actual same-source marked or isolated-native Product producer differs")
+     publisher=value.get("publisher_source",{})
+-    require(publisher==plan.get("publisherSource") and publisher.get("file_count")==3509
+-            and publisher.get("source_snapshot_sha256")==CFG["source_evidence"]["test_snapshot"]["sha256"]
+-            and isinstance(publisher.get("source_epoch"),str)
+-            and re.fullmatch("[0-9a-f]{64}",publisher["source_epoch"]),
+-            "marked receiver epoch differs from the exact recovered source")
++    if marked:
++        require(value.get("receiver_linker_flags")==["-s","-w"]
++                and value.get("resource",{}).get("sha256")==cfg["compiler_resource"]["sha256"]
++                and publisher==plan.get("publisherSource")
++                and publisher.get("file_count")==CFG["source_file_count"]
++                and publisher.get("source_snapshot_sha256")==CFG["product_snapshot"]["sha256"]
++                and isinstance(publisher.get("source_epoch"),str)
++                and re.fullmatch("[0-9a-f]{64}",publisher["source_epoch"]),
++                "incoming CLI resource/source epoch differs from the actual complete Product issuance")
++    else:
++        require(not publisher and not plan.get("publisherSource"),
++                "native actor Product must be the separate unmarked tagged build")
+     root=ordinary(cfg["bundle_root"],True)
+     files=tree(root)
+-    require(set(files)==set(BUNDLE_FILES) and files==value["actual_product"]["files"]
+-            and files["mcphub-product/mcphub-owner.dll"]["sha256"]==value["native_input_sha256"],
+-            "independent marked727d companion bundle is not byte-identical")
+-    # Historical paths remain immutable DATA. Only actual current copy operands change.
++    require(set(files)==set(BUNDLE_FILES) and files==value["actual_product"]["files"],
++            "complete original three-file Product bundle differs")
++    fixture=read_input(cfg["fixture"])
++    expected={"product_root":str(root),"source_epoch":publisher["source_epoch"] if marked else "",
++              "product_version":plan["version"],"build_id":plan["entrySetBuildID"],
++              "reverse_projection":"../mcphub.exe",
++              "canonical_entry_sha256":files["mcphub.exe"]["sha256"],
++              "product_sha256":files["mcphub-product/mcphub.exe"]["sha256"],
++              "identity_sha256":files["windows-product-identity.json"]["sha256"]}
++    require(fixture==expected,"Product fixture does not bind its exact original three files")
+     result=dict(value)
+-    result["actual_product"]=dict(value["actual_product"],path=str(root))
+-    result["resource"]=cfg["compiler_resource"]
+-    result["source_inputs"]={key:cfg[key] for key in ("inputs","build_plan","compiler_resource")}
++    result["actual_product"]={"path":str(root),"files":files,"fixture":cfg["fixture"]["path"]}
++    result["source_inputs"]={key:cfg[key] for key in ("inputs","build_plan","fixture")}
++    if marked: result["resource"]=cfg["compiler_resource"]
+     return result
+ 
+-def receive_migration_parent_binding(outer):
+-    phase=outer.get("phase")
+-    require(phase in ("default","state") and outer.get("package")=="mcp-local-hub/internal/cli",
+-            "one actual current CLI migration parent required")
+-    pair={"path":outer.get("plan"),"sha256":outer.get("plan_sha256")}
+-    plan=read_input(pair)
+-    require(Path(pair["path"])==FULL_RUN/("plan-"+phase+".json")
+-            and plan.get("schema")=="literal-go-test-plan-v1" and plan.get("phase")==phase
+-            and plan.get("driver_root")==str(FULL_RUN)
+-            and plan.get("commit")==plan.get("test_source_commit")==outer.get("test_source_commit")==CACHE_COMMIT
+-            and plan.get("product_source_commit")==outer.get("product_source_commit")==PRODUCT_SOURCE_COMMIT,
+-            "actual current parent and separate publisher source binding differ")
+-    marked=read_input({"path":plan["build_receipt"],"sha256":plan["input_files"][plan["build_receipt"]]})
+-    expected={"publisher_inputs":CFG["marked"]["inputs"],"product_source_commit":CACHE_COMMIT,
+-              "publisher_source":marked["publisher_source"],"receiver_linker_flags":["-s","-w"],
+-              "new_product_qualification":True}
+-    require(plan.get("marked_product_inputs")==CFG["marked"]["inputs"]
+-            and plan.get("receiver_product_source_commit")==CACHE_COMMIT
+-            and plan.get("receiver_publisher_source")==marked["publisher_source"]
+-            and plan.get("receiver_linker_flags")==["-s","-w"]
+-            and outer.get("marked_receiver_source")==expected,
+-            "actual outer CLI receiver lost the exact marked727d binding")
+-    build=marked["build_plan"]
+-    return {"commit":CACHE_COMMIT,"version":build["version"],"build_date":build["buildDate"],
+-            "source_epoch":marked["publisher_source"]["source_epoch"]}
++
+ 
+ def clean_environment(run, cache_owner=None, *, cache_bootstrap=None):
+     run=ordinary(run,True)
+@@ -440,8 +407,12 @@
+     require(owner==FULL_RUN and (run==owner or run.parent==RUNS and re.fullmatch("x[0-9a-f]{12}",run.name)),
+             "one original driver and its explicit original receiver scope required")
+     env=dict(CFG["environment"])
+-    require(not any(key.upper().startswith(("MCPHUB_","PYTHON")) or key.upper() in ("SERENA_HOME","TEST_TELEMETRY_DIR")
+-                    for key in env),"caller environment contains an ambient test/runtime opt-in")
++    require(not any(key.upper().startswith(("MCPHUB_","PYTHON")) or key.upper() in
++                    ("SERENA_HOME","TEST_TELEMETRY_DIR","GIT_ALLOW_PROTOCOL") for key in env),
++            "caller environment contains an ambient test/runtime opt-in or Git transport deny-list")
++    require(env.get("ProgramFiles")==r"@@RECOVERY_PROGRAM_FILES_RAW@@"
++            and env.get("ProgramFiles(x86)")==r"@@RECOVERY_PROGRAM_FILES_X86_RAW@@",
++            "explicit received Windows Program Files operands are required")
+     temporary=create_short_temp(run,owner,scope_helper())
+     directories={"TEMP":temporary,"TMP":temporary,"TMPDIR":temporary,"GOTMPDIR":temporary,
+                  "HOME":run/"profile","USERPROFILE":run/"profile","APPDATA":run/"appdata",
+@@ -452,7 +423,7 @@
+         ordinary(path,True); env[key]=str(path)
+     if run==owner:
+         copied=copy_closed_cache_inputs(owner,env)
+-        new_json(owner/"cache-bootstrap.json",{"schema":"literal-independent-cache-copy-v6","owner":str(owner),
++        new_json(owner/"cache-bootstrap.json",{"schema":"literal-independent-cache-copy-successor-v1","owner":str(owner),
+              "GOCACHE":env["GOCACHE"],"GOMODCACHE":env["GOMODCACHE"],
+              "copy_receipt":{"path":str(owner/"cache-copy-receipt.json"),"sha256":sha(owner/"cache-copy-receipt.json")},
+              "original_donor_closed":True,"byte_inventory_received":copied,
+@@ -473,7 +444,7 @@
+ class OriginalRun:
+     def __init__(self,root,env):
+         self.root,self.env=ordinary(root,True),dict(env)
+-        self.receipt={"schema":"original-literal-original-run-v6","run":str(root),"commands":[],
++        self.receipt={"schema":"original-literal-successor-run-v1","run":str(root),"commands":[],
+                       "status":"RUNNING","started_utc":time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime()),
+                       "read_only_tool_aliases":TOOL_RECORDS}
+         self.save()
+@@ -586,40 +557,38 @@
+     new_json(run.root/("source-"+suffix+".json"),snapshot)
+     return snapshot
+ 
+-def bundle_admission(run, bundle, plan, name, native_sha, *, source_epoch=None):
+-    if source_epoch is not None and (not re.fullmatch(r"[0-9a-f]{64}", source_epoch)
+-            or plan.get("publisherSource", {}).get("source_epoch") != source_epoch):
++def bundle_admission(run, bundle, plan, name, *, source_epoch=None):
++    if source_epoch is not None and (not re.fullmatch(r"[0-9a-f]{64}",source_epoch)
++            or plan.get("publisherSource",{}).get("source_epoch")!=source_epoch):
+         raise RuntimeError("marked bundle requires its exact original issued source epoch")
+-    launcher = bundle/"mcphub.exe"
+-    product = bundle/"mcphub-product"/"mcphub.exe"
+-    identity = bundle/"windows-product-identity.json"
+-    native = bundle/"mcphub-product"/"mcphub-owner.dll"
+-    expected = {"build_id":plan["entrySetBuildID"],"canonical_entry_sha256":sha(launcher),
+-                "product_sha256":sha(product),"identity_sha256":sha(identity)}
+-    if expected["canonical_entry_sha256"] != plan["canonicalEntry"]["expectedCanonicalEntrySHA256"] or sha(native) != native_sha:
+-        raise RuntimeError("copied bundle differs from its original launcher or native owner")
+-    common = ["--expected-entry-set-build-id",expected["build_id"],
+-              "--expected-canonical-entry-sha256",expected["canonical_entry_sha256"],
+-              "--canonical-entry-reverse-projection","../mcphub.exe",
+-              "--expected-version",plan["version"],"--expected-commit",plan["commit"],"--expected-build-date",plan["buildDate"]]
+-    observations = {}
+-    for mode, schema in (("validate-entry-set-build","windows-canonical-entry-build-observation-v1"),("validate-entry-set","windows-canonical-entry-set-v1")):
+-        flags = ["--"+mode, str(launcher), *common]
+-        if mode == "validate-entry-set-build" and source_epoch is not None:
+-            flags += ["--expected-source-epoch", source_epoch]
+-        observed = run.validator(flags, name+"-"+mode)
+-        if mode == "validate-entry-set-build" and source_epoch is not None and observed.get("source_epoch") != source_epoch:
++    launcher=bundle/"mcphub.exe"
++    product=bundle/"mcphub-product/mcphub.exe"
++    identity=bundle/"windows-product-identity.json"
++    expected={"build_id":plan["entrySetBuildID"],"canonical_entry_sha256":sha(launcher),
++              "product_sha256":sha(product),"identity_sha256":sha(identity)}
++    if (set(tree(bundle))!=set(BUNDLE_FILES)
++            or expected["canonical_entry_sha256"]!=plan["canonicalEntry"]["expectedCanonicalEntrySHA256"]):
++        raise RuntimeError("copied three-file bundle differs from its original launcher")
++    common=["--expected-entry-set-build-id",expected["build_id"],
++            "--expected-canonical-entry-sha256",expected["canonical_entry_sha256"],
++            "--canonical-entry-reverse-projection","../mcphub.exe",
++            "--expected-version",plan["version"],"--expected-commit",plan["commit"],"--expected-build-date",plan["buildDate"]]
++    observations={}
++    for mode,schema in (("validate-entry-set-build","windows-canonical-entry-build-observation-v1"),
++                        ("validate-entry-set","windows-canonical-entry-set-v1")):
++        flags=["--"+mode,str(launcher),*common]
++        if mode=="validate-entry-set-build" and source_epoch is not None:
++            flags += ["--expected-source-epoch",source_epoch]
++        observed=run.validator(flags,name+"-"+mode)
++        if mode=="validate-entry-set-build" and source_epoch is not None and observed.get("source_epoch")!=source_epoch:
+             raise RuntimeError("portable entry set lost its original source epoch")
+-        if observed.get("schema") != schema or any(observed.get(k) != v for k,v in expected.items()):
++        if observed.get("schema")!=schema or any(observed.get(k)!=v for k,v in expected.items()):
+             raise RuntimeError("complete entry-set admission disagrees with original bytes")
+-        observations[mode] = observed
+-    native_identity = run.validator(["--runtime-library",str(native),"--runtime-library-profile","owner-v1-members-v1-borrow-v1","--expected-commit",plan["commit"]], name+"-native")
+-    adjacent_identity = json.loads((native.parent/"mcphub-owner-identity.json").read_text(encoding="utf-8-sig"))
+-    if native_identity != adjacent_identity or native_identity.get("sha256") != native_sha or native_identity.get("sourceCommit") != plan["commit"]:
+-        raise RuntimeError("native admission differs from the copied exact-profile receipt")
+-    fixture = {"product_root":str(bundle),"source_epoch":source_epoch or "","product_version":plan["version"],
+-               "build_id":expected["build_id"],"reverse_projection":"../mcphub.exe",
+-               "canonical_entry_sha256":expected["canonical_entry_sha256"],"product_sha256":expected["product_sha256"],
+-               "identity_sha256":expected["identity_sha256"]}
+-    new_json(run.root/(name+"-fixture.json"), fixture)
+-    return {"path":str(bundle),"files":tree(bundle),"fixture":str(run.root/(name+"-fixture.json")),"observations":observations,"native_identity":native_identity}
++        observations[mode]=observed
++    fixture={"product_root":str(bundle),"source_epoch":source_epoch or "","product_version":plan["version"],
++             "build_id":expected["build_id"],"reverse_projection":"../mcphub.exe",
++             "canonical_entry_sha256":expected["canonical_entry_sha256"],"product_sha256":expected["product_sha256"],
++             "identity_sha256":expected["identity_sha256"]}
++    new_json(run.root/(name+"-fixture.json"),fixture)
++    return {"path":str(bundle),"files":tree(bundle),"fixture":str(run.root/(name+"-fixture.json")),"observations":observations}
++
+--- v6/primitives
++++ successor/primitives
+@@ -18,8 +18,8 @@
+ PEER_TESTS=("TestSupervisorPeerStrictControlConnections",)
+ NAME=re.compile(r"^(Test|Example|Fuzz|Benchmark)\w*$")
+ TERMINAL=("pass","fail","skip")
+-RESOURCES={API:core.API_SYSO,CLI:core.CLI_SYSO}
+-SOURCE_RESOURCES=(*RESOURCES.values(),core.PRODUCT_SYSO)
++RESOURCES={CLI:core.CLI_SYSO}
++SOURCE_RESOURCES=(core.API_SYSO,core.CLI_SYSO,core.PRODUCT_SYSO)
+ def sha(path):
+     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+ 

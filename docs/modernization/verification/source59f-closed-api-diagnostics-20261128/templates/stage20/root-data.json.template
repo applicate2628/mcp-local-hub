@@ -1,0 +1,98 @@
+{
+    "schema":  "publication-original-root-data-audit-v1",
+    "status":  "PASS",
+    "physical_complete":  true,
+    "scope":  "cache-acceptance-stage-20261128-v20",
+    "config_sha256":  "88a377967e63e11bd8c6ac81e177ae66903d9a7d1a12f73e9fcb103b5d4baaf5",
+    "receipt_sha256":  "2ba4f760ea9aedaeeea2de4accc6946ad2933d782f95b680f9f29605b66758bb",
+    "root_sha256":  "4fc8196e910ccef6d7c9d2b6cd0e22e7cbe276190a90a269830d242d865f711c",
+    "outer_sha256":  "24269b97fe609e0f071592e542a3c8c998b520d3f60e3aa4859a51acf2b56dc4",
+    "commands_verified":  6,
+    "captures_verified":  12,
+    "results":  [
+                    {
+                        "name":  "head.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rev-parse",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.03653129993472248,
+                        "exit_code":  0,
+                        "stdout_sha256":  "6286fde56a4136dea90ff072f706018088d3eef7a22ae5bbdd05d0df13770e8f",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "05fbffa30f99914c8174966525a70bc9984e7038\n"
+                    },
+                    {
+                        "name":  "publication-worktree-status-before.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "status",
+                                     "--porcelain=v1",
+                                     "--untracked-files=all"
+                                 ],
+                        "seconds":  0.05323949991725385,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "fetch-published-docs-checkpoint.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "fetch",
+                                     "origin",
+                                     "27d90e626465dc9a3a012e50785d62785d4c5e7e"
+                                 ],
+                        "seconds":  0.77294759999495,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "cefd724b4bea4c9fc652b26be72f981b528c99b52fbd7aac01c1eed95fdd3efc",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "fast-forward-preserve-published-docs.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "merge",
+                                     "--ff-only",
+                                     "27d90e626465dc9a3a012e50785d62785d4c5e7e"
+                                 ],
+                        "seconds":  0.12282340007368475,
+                        "exit_code":  0,
+                        "stdout_sha256":  "bec56f94c5a9070c4eb8432cceb0875c1ea8e1c69a577f7ea77ce9edeab4afc2",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "Updating 05fbffa3..27d90e62\nFast-forward\n .plans/2026-11/open-pr-integration-20261117.md     |    14 +-\n .../recovery-search-20261128/.gitattributes        |     2 +\n .../recovery-search-20261128/README.md             |   113 +\n .../archive-content-v1.json                        | 96992 +++++++++++++++++++\n .../archive-content-v2.json                        |   185 +\n .../archive-evidence-schema-v1.md                  |    30 +\n .../archive-recovery-summary-v2.json               |   219 +\n .../archive-selection-v1.json                      |  1396 +\n .../archive-transformation-manifest-v1.json        |    99 +\n .../artifact-bindings.json                         |   132 +\n .../git-recovery-readset.jsonl                     |  5985 ++\n .../git-recovery-report.json                       |   983 +\n .../publication-and-disposition.json               |   328 +\n .../structural-verification.json                   |   308 +\n .../transport-inputs-v1.json                       |  1844 +\n .../transport-inputs-v2.json                       |   630 +\n 16 files changed, 109255 insertions(+), 5 deletions(-)\n create mode 100644 docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/.gitattributes\n create mode 100644 docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/README.md\n create mode 100644 docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-content-v1.json\n create mode 100644 docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-content-v2.json\n create mode 100644 docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-evidence-schema-v1.md\n create mode 100644 docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-recovery-summary-v2.json\n create mode 100644 docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-selection-v1.json\n create mode 100644 docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-transformation-manifest-v1.json\n create mode 100644 docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/artifact-bindings.json\n create mode 100644 docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/git-recovery-readset.jsonl\n create mode 100644 docs/modernization/verificati"
+                    },
+                    {
+                        "name":  "publication-head-after.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rev-parse",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.03860299999359995,
+                        "exit_code":  0,
+                        "stdout_sha256":  "73aa24f699b6c06ce27e215551c8b246f45f00183a079260aed1401b22a07bb0",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "27d90e626465dc9a3a012e50785d62785d4c5e7e\n"
+                    },
+                    {
+                        "name":  "publication-worktree-status-after.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "status",
+                                     "--porcelain=v1",
+                                     "--untracked-files=all"
+                                 ],
+                        "seconds":  0.05961970007047057,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    }
+                ],
+    "tests_executed":  false,
+    "reviewed_utc":  "2026-11-28T15:41:51.7074540Z"
+}

@@ -1,0 +1,64 @@
+=== RUN   TestGodboltDisabled_BlocksOutboundRequests
+--- PASS: TestGodboltDisabled_BlocksOutboundRequests (0.00s)
+=== NAME  
+=== RUN   TestGodboltDisabled_BlocksFormatToolOutboundRequests
+--- PASS: TestGodboltDisabled_BlocksFormatToolOutboundRequests (0.00s)
+=== NAME  
+=== RUN   TestCompileTool_SendsAcceptJSON
+--- PASS: TestCompileTool_SendsAcceptJSON (0.00s)
+=== NAME  
+=== RUN   TestInvokeCompile_RejectsOversizedResponse
+--- PASS: TestInvokeCompile_RejectsOversizedResponse (0.01s)
+=== NAME  
+=== RUN   TestCompileTool_PassesFiltersExecuteParametersAndTools
+--- PASS: TestCompileTool_PassesFiltersExecuteParametersAndTools (0.00s)
+=== NAME  
+=== RUN   TestFormatTool_RejectsOversizedResponse
+--- PASS: TestFormatTool_RejectsOversizedResponse (0.00s)
+=== NAME  
+=== RUN   TestFormatTool_ForwardsStyleOptions
+--- PASS: TestFormatTool_ForwardsStyleOptions (0.00s)
+=== NAME  
+=== RUN   TestFormatTool_OmitsUnsetStyleOptions
+--- PASS: TestFormatTool_OmitsUnsetStyleOptions (0.00s)
+=== NAME  
+=== RUN   TestFormatTool_ForwardsExplicitZeroValues
+--- PASS: TestFormatTool_ForwardsExplicitZeroValues (0.00s)
+=== NAME  
+=== RUN   TestShortlinkInfoTool_DelegatesToResource
+--- PASS: TestShortlinkInfoTool_DelegatesToResource (0.00s)
+=== NAME  
+=== RUN   TestShortlinkInfoTool_MissingLinkIDReturnsError
+--- PASS: TestShortlinkInfoTool_MissingLinkIDReturnsError (0.00s)
+=== NAME  
+=== RUN   TestGetShortlinkInfo_ExtractsLinkID
+--- PASS: TestGetShortlinkInfo_ExtractsLinkID (0.00s)
+=== NAME  
+=== RUN   TestGetPopularArguments
+--- PASS: TestGetPopularArguments (0.00s)
+=== NAME  
+=== RUN   TestGetCompilers_ExtractsLanguageID
+--- PASS: TestGetCompilers_ExtractsLanguageID (0.00s)
+=== NAME  
+=== RUN   TestGetLibraries_ExtractsLanguageID
+--- PASS: TestGetLibraries_ExtractsLanguageID (0.00s)
+=== NAME  
+=== RUN   TestGetInstructionInfo_ExtractsBothParams
+--- PASS: TestGetInstructionInfo_ExtractsBothParams (0.00s)
+=== NAME  
+=== RUN   TestListCompilersTool_DelegatesToResource
+--- PASS: TestListCompilersTool_DelegatesToResource (0.00s)
+=== NAME  
+=== RUN   TestListCompilersTool_MissingLanguageIDReturnsError
+--- PASS: TestListCompilersTool_MissingLanguageIDReturnsError (0.00s)
+=== NAME  
+=== RUN   TestGetVersionTool_DelegatesToResource
+--- PASS: TestGetVersionTool_DelegatesToResource (0.00s)
+=== NAME  
+=== RUN   TestLookupInstructionTool_RequiresBothParams
+--- PASS: TestLookupInstructionTool_RequiresBothParams (0.00s)
+=== NAME  
+=== RUN   TestCompileCMakeTool_MirrorsCompileToolSurface
+--- PASS: TestCompileCMakeTool_MirrorsCompileToolSurface (0.00s)
+=== NAME  
+PASS

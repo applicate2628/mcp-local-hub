@@ -1,0 +1,428 @@
+{
+  "schema": "closed-full-v6-explicit-fixture-template-plan-v2",
+  "purpose": "Create a new DATA-only evidence capsule from the frozen v1. Remove only scanner-identified fixture values from public projections; preserve every runtime original byte and historical result.",
+  "original_source_commit": "727d66753814dc218e26d699e57402db2d13190a",
+  "publication_candidate_commit": "264a0601b7d027652c12ec88ae4debd6c3bfb69f",
+  "original_capsule_manifest_sha256": "957bd9669689fa1d7aef5efebe7e97758b040a34ccfbd72aa366d5dfc6fb99a9",
+  "original_binding_sha256": "19bd638d59031a7c8db0752135bd98075a2aa3cd96ff7ceaf4423187120ad6bd",
+  "original_role_file_sha256": "db97ad441312eaa7423abed8db49714441612256b51740dc7fd4b6921813c5a8",
+  "canonical_locations_sha256": "89ee95d6088435f1c21174fb1319c8d38eefc9b6104a0539693a9307612995da",
+  "expected_original_file_count": 333,
+  "expected_original_public_file_count": 346,
+  "old_role_count": 22,
+  "new_role_count": 24,
+  "source_provenance_receipt_sha256": "a3483e469b606fa297a4b33698cd22db7bf25493023f3117feeafb52bb9db5f1",
+  "sources": {
+    "internal/gui/catalog_manifest_get_test.go": {
+      "bytes": 6325,
+      "git_blob": "ca6dfd361d7682563ce76a10947188e7ee7f78b3",
+      "mode": "100644",
+      "sha256": "c1de2803efaf3bff838431ef29dcd943aebd32bde07b42444f7a9253713b2114",
+      "public_git_blob_url": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/blobs/ca6dfd361d7682563ce76a10947188e7ee7f78b3",
+      "public_readback_verified": true
+    },
+    "internal/gui/status_test.go": {
+      "bytes": 9171,
+      "git_blob": "d5f5329baa3a062c573f4a038af4ed5abfa63647",
+      "mode": "100644",
+      "sha256": "8c2fb1ee10870665366e1938c1fd5bc5714c7695cc3bfb3aefe31c17fec0f9ec",
+      "public_git_blob_url": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/blobs/d5f5329baa3a062c573f4a038af4ed5abfa63647",
+      "public_readback_verified": true
+    },
+    "internal/gui/lsp_register_response_test.go": {
+      "bytes": 9253,
+      "git_blob": "01511c54f3b316a2e7a8ad87c18e3f4862df02b4",
+      "mode": "100644",
+      "sha256": "e14efb884b775673a62a753b397574bcc2ed7e3b3a4a84c08d4740eb273dca82",
+      "public_git_blob_url": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/blobs/01511c54f3b316a2e7a8ad87c18e3f4862df02b4",
+      "public_readback_verified": true
+    },
+    "internal/gui/projects_toggle_test.go": {
+      "bytes": 31619,
+      "git_blob": "ab6af062252118019398ee01fdb6e5307fa92f1e",
+      "mode": "100644",
+      "sha256": "522214845cf76ca37375cd1793ee70ffa515bd2dec0d11ccf0f39b799b87baaa",
+      "public_git_blob_url": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/blobs/ab6af062252118019398ee01fdb6e5307fa92f1e",
+      "public_readback_verified": true
+    },
+    "internal/gui/manifest_test.go": {
+      "bytes": 38251,
+      "git_blob": "d636073616286f7366a406b3456ff099e7d6d2e2",
+      "mode": "100644",
+      "sha256": "74476960ea1c0984735caca9fe5147c1bae884a9c633b4c33a0488e477013123",
+      "public_git_blob_url": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/blobs/d636073616286f7366a406b3456ff099e7d6d2e2",
+      "public_readback_verified": true
+    }
+  },
+  "roles": {
+    "synthetic_gui_posix_home_prefix": {
+      "marker": "@@RECOVERY_SYNTHETIC_GUI_POSIX_HOME_PREFIX@@",
+      "description": "Source-defined POSIX home-prefix fixture used by the GUI catalog and status error tests; not an observed host home.",
+      "bytes": 11,
+      "sha256": "612b6fc44e3094a36043870b929ac5fb00daf8513229001e92a639fb827cac26",
+      "rule_id": "machine-path-prefix-v1",
+      "selectors": [
+        {
+          "source": "internal/gui/catalog_manifest_get_test.go",
+          "line": 136,
+          "kind": "quoted_prefix",
+          "start": 5,
+          "count": 11,
+          "test": "TestCatalogManifestGetHandler_BackendError_500Sanitized"
+        },
+        {
+          "source": "internal/gui/status_test.go",
+          "line": 181,
+          "kind": "raw_prefix",
+          "start": 0,
+          "count": 11,
+          "test": "TestStatusEndpoint_RedactsSetupFailurePath"
+        }
+      ]
+    },
+    "synthetic_gui_password_assignment": {
+      "marker": "@@RECOVERY_SYNTHETIC_GUI_PASSWORD_ASSIGNMENT@@",
+      "description": "Source-defined diagnostic password-assignment sentinel used by two GUI redaction tests; not an account credential.",
+      "bytes": 16,
+      "sha256": "42c842031e73fa74cb753b09101a15f4c0d7844be5f37bfa4af9b9ac435c6ca4",
+      "rule_id": "value-password-v1",
+      "selectors": [
+        {
+          "source": "internal/gui/lsp_register_response_test.go",
+          "line": 197,
+          "kind": "quoted_concat_suffix",
+          "count": 16,
+          "test": "TestLSPRegisterTopLevelErrorUsesFixedUnknownProjection"
+        },
+        {
+          "source": "internal/gui/projects_toggle_test.go",
+          "line": 41,
+          "kind": "raw_suffix",
+          "count": 16,
+          "test": "TestProjectsToggleRegistrationErrorUsesFixedProjector"
+        }
+      ]
+    }
+  },
+  "regions": [
+    {
+      "path": "docs/modernization/verification/original-full-v6-complete-captures-20261128/payloads/streams/45af06f5c68f57875281c179eeb30a0143d5d6826e3f90c7a3cefac3af877c4d.txt.template",
+      "path_in_reviewed_checkpoint": true,
+      "path_sha256": "8e8d3a34b5fa5760f8fa4d5cadb8b5045c0ca9d50045273d642852fb40c9bcfb",
+      "occurrence_id": "finding-06888d1bf839296ab9b555b03dee45b5e873cba534d7ddd0162eb18a70a7bae9",
+      "blob_oid": "68273f9ebe2c1bab663f8a971ba851a061fd5052",
+      "blob_sha256": "2e26374ec0cbecc44b52551c751cd6c8758321fac82ffd7cb9a96abb5cd678cd",
+      "blob_bytes": 14250,
+      "git_mode": "100644",
+      "rule_id": "machine-path-prefix-v1",
+      "rule_meaning_sha256": "99b2ba95d5986407a96b9246f5499f24eba89e6c0bb23a746290b3cb766ab0f5",
+      "region_start_byte": 13640,
+      "region_end_byte_exclusive": 13651,
+      "region_sha256": "612b6fc44e3094a36043870b929ac5fb00daf8513229001e92a639fb827cac26",
+      "capsule_path": "payloads/streams/45af06f5c68f57875281c179eeb30a0143d5d6826e3f90c7a3cefac3af877c4d.txt.template",
+      "line": 115,
+      "role": "synthetic_gui_posix_home_prefix",
+      "source_proof": "status"
+    },
+    {
+      "path": "docs/modernization/verification/original-full-v6-complete-captures-20261128/payloads/streams/45af06f5c68f57875281c179eeb30a0143d5d6826e3f90c7a3cefac3af877c4d.txt.template",
+      "path_in_reviewed_checkpoint": true,
+      "path_sha256": "8e8d3a34b5fa5760f8fa4d5cadb8b5045c0ca9d50045273d642852fb40c9bcfb",
+      "occurrence_id": "finding-1fce5e3427e5fb687605a43dd5c931bbda25bbaa85bbe1a635f0c57f275b7bf2",
+      "blob_oid": "68273f9ebe2c1bab663f8a971ba851a061fd5052",
+      "blob_sha256": "2e26374ec0cbecc44b52551c751cd6c8758321fac82ffd7cb9a96abb5cd678cd",
+      "blob_bytes": 14250,
+      "git_mode": "100644",
+      "rule_id": "value-password-v1",
+      "rule_meaning_sha256": "bfc87be78817db8f2b4ff0ebbb2ae54cad1fbd70d374d2b809033974212af244",
+      "region_start_byte": 9147,
+      "region_end_byte_exclusive": 9163,
+      "region_sha256": "42c842031e73fa74cb753b09101a15f4c0d7844be5f37bfa4af9b9ac435c6ca4",
+      "capsule_path": "payloads/streams/45af06f5c68f57875281c179eeb30a0143d5d6826e3f90c7a3cefac3af877c4d.txt.template",
+      "line": 72,
+      "role": "synthetic_gui_password_assignment",
+      "source_proof": "toggle"
+    },
+    {
+      "path": "docs/modernization/verification/original-full-v6-complete-captures-20261128/source-fixture-provenance.json",
+      "path_in_reviewed_checkpoint": true,
+      "path_sha256": "c7a51bc540aceb0149219141bc623c6a09022165d9c15295d2a0ad6a217d7945",
+      "occurrence_id": "finding-210e3e4236cd5afaa8c0f3f54f9905875e4d25edf2ea1b796f3a491a2607370d",
+      "blob_oid": "da83b5a6cf29fca7983b9113e20312d9d2a4dbde",
+      "blob_sha256": "f38ec8d84c07125184cf1ee3d4e25df3bfd50410e76a8f7232f2d19c090b6f9a",
+      "blob_bytes": 1516,
+      "git_mode": "100644",
+      "rule_id": "value-password-v1",
+      "rule_meaning_sha256": "bfc87be78817db8f2b4ff0ebbb2ae54cad1fbd70d374d2b809033974212af244",
+      "region_start_byte": 1411,
+      "region_end_byte_exclusive": 1427,
+      "region_sha256": "42c842031e73fa74cb753b09101a15f4c0d7844be5f37bfa4af9b9ac435c6ca4",
+      "capsule_path": "source-fixture-provenance.json",
+      "line": 29,
+      "role": "synthetic_gui_password_assignment",
+      "source_proof": "toggle"
+    },
+    {
+      "path": "docs/modernization/verification/original-full-v6-complete-captures-20261128/payloads/streams/4e7148e7fd547cd3478473b3b8432dfa98edba574fc5c880a1f258bac6074d74.txt.template",
+      "path_in_reviewed_checkpoint": true,
+      "path_sha256": "4754f8bce8c0dc07be19441da4c2d28b37fcb94b6e980fe03fcef31b66ef08fa",
+      "occurrence_id": "finding-31263e683311a1239c2a1243077819eb410ddd835fe21a888e38c48e90327622",
+      "blob_oid": "37b021e915a1a78d548f5c40efb5df91dc01af27",
+      "blob_sha256": "bbf39b32722164dd297ab5df354fadffb8b7b70906ddfd854c592153667adf08",
+      "blob_bytes": 16636324,
+      "git_mode": "100644",
+      "rule_id": "value-password-v1",
+      "rule_meaning_sha256": "bfc87be78817db8f2b4ff0ebbb2ae54cad1fbd70d374d2b809033974212af244",
+      "region_start_byte": 13397626,
+      "region_end_byte_exclusive": 13397642,
+      "region_sha256": "42c842031e73fa74cb753b09101a15f4c0d7844be5f37bfa4af9b9ac435c6ca4",
+      "capsule_path": "payloads/streams/4e7148e7fd547cd3478473b3b8432dfa98edba574fc5c880a1f258bac6074d74.txt.template",
+      "line": 58588,
+      "role": "synthetic_gui_password_assignment",
+      "source_proof": "lsp"
+    },
+    {
+      "path": "docs/modernization/verification/original-full-v6-complete-captures-20261128/payloads/streams/4e7148e7fd547cd3478473b3b8432dfa98edba574fc5c880a1f258bac6074d74.txt.template",
+      "path_in_reviewed_checkpoint": true,
+      "path_sha256": "4754f8bce8c0dc07be19441da4c2d28b37fcb94b6e980fe03fcef31b66ef08fa",
+      "occurrence_id": "finding-4aaf4d43f0cafa2982f47c39cb5718397e74721237a69c11bb097dfd7761ff70",
+      "blob_oid": "37b021e915a1a78d548f5c40efb5df91dc01af27",
+      "blob_sha256": "bbf39b32722164dd297ab5df354fadffb8b7b70906ddfd854c592153667adf08",
+      "blob_bytes": 16636324,
+      "git_mode": "100644",
+      "rule_id": "value-password-v1",
+      "rule_meaning_sha256": "bfc87be78817db8f2b4ff0ebbb2ae54cad1fbd70d374d2b809033974212af244",
+      "region_start_byte": 13403601,
+      "region_end_byte_exclusive": 13403617,
+      "region_sha256": "42c842031e73fa74cb753b09101a15f4c0d7844be5f37bfa4af9b9ac435c6ca4",
+      "capsule_path": "payloads/streams/4e7148e7fd547cd3478473b3b8432dfa98edba574fc5c880a1f258bac6074d74.txt.template",
+      "line": 58615,
+      "role": "synthetic_gui_password_assignment",
+      "source_proof": "toggle"
+    },
+    {
+      "path": "docs/modernization/verification/original-full-v6-complete-captures-20261128/payloads/streams/4e7148e7fd547cd3478473b3b8432dfa98edba574fc5c880a1f258bac6074d74.txt.template",
+      "path_in_reviewed_checkpoint": true,
+      "path_sha256": "4754f8bce8c0dc07be19441da4c2d28b37fcb94b6e980fe03fcef31b66ef08fa",
+      "occurrence_id": "finding-6a2c217b5b21af489672bc688b47dccd00950006484dbc3a821669d6163eb309",
+      "blob_oid": "37b021e915a1a78d548f5c40efb5df91dc01af27",
+      "blob_sha256": "bbf39b32722164dd297ab5df354fadffb8b7b70906ddfd854c592153667adf08",
+      "blob_bytes": 16636324,
+      "git_mode": "100644",
+      "rule_id": "machine-path-prefix-v1",
+      "rule_meaning_sha256": "99b2ba95d5986407a96b9246f5499f24eba89e6c0bb23a746290b3cb766ab0f5",
+      "region_start_byte": 13413088,
+      "region_end_byte_exclusive": 13413099,
+      "region_sha256": "612b6fc44e3094a36043870b929ac5fb00daf8513229001e92a639fb827cac26",
+      "capsule_path": "payloads/streams/4e7148e7fd547cd3478473b3b8432dfa98edba574fc5c880a1f258bac6074d74.txt.template",
+      "line": 58658,
+      "role": "synthetic_gui_posix_home_prefix",
+      "source_proof": "status"
+    },
+    {
+      "path": "docs/modernization/verification/original-full-v6-complete-captures-20261128/payloads/streams/4e7148e7fd547cd3478473b3b8432dfa98edba574fc5c880a1f258bac6074d74.txt.template",
+      "path_in_reviewed_checkpoint": true,
+      "path_sha256": "4754f8bce8c0dc07be19441da4c2d28b37fcb94b6e980fe03fcef31b66ef08fa",
+      "occurrence_id": "finding-9c33f3b620da00a2ee20e0d6c3ca1cb1994d6387fcc0b44f45e0fa169543b07a",
+      "blob_oid": "37b021e915a1a78d548f5c40efb5df91dc01af27",
+      "blob_sha256": "bbf39b32722164dd297ab5df354fadffb8b7b70906ddfd854c592153667adf08",
+      "blob_bytes": 16636324,
+      "git_mode": "100644",
+      "rule_id": "machine-path-prefix-v1",
+      "rule_meaning_sha256": "99b2ba95d5986407a96b9246f5499f24eba89e6c0bb23a746290b3cb766ab0f5",
+      "region_start_byte": 13391588,
+      "region_end_byte_exclusive": 13391599,
+      "region_sha256": "612b6fc44e3094a36043870b929ac5fb00daf8513229001e92a639fb827cac26",
+      "capsule_path": "payloads/streams/4e7148e7fd547cd3478473b3b8432dfa98edba574fc5c880a1f258bac6074d74.txt.template",
+      "line": 58563,
+      "role": "synthetic_gui_posix_home_prefix",
+      "source_proof": "catalog"
+    },
+    {
+      "path": "docs/modernization/verification/original-full-v6-complete-captures-20261128/payloads/streams/45af06f5c68f57875281c179eeb30a0143d5d6826e3f90c7a3cefac3af877c4d.txt.template",
+      "path_in_reviewed_checkpoint": true,
+      "path_sha256": "8e8d3a34b5fa5760f8fa4d5cadb8b5045c0ca9d50045273d642852fb40c9bcfb",
+      "occurrence_id": "finding-b19813804b344da46c6df934686e54009b95520f4bba5f4a2f797582d9668b1f",
+      "blob_oid": "68273f9ebe2c1bab663f8a971ba851a061fd5052",
+      "blob_sha256": "2e26374ec0cbecc44b52551c751cd6c8758321fac82ffd7cb9a96abb5cd678cd",
+      "blob_bytes": 14250,
+      "git_mode": "100644",
+      "rule_id": "value-password-v1",
+      "rule_meaning_sha256": "bfc87be78817db8f2b4ff0ebbb2ae54cad1fbd70d374d2b809033974212af244",
+      "region_start_byte": 6329,
+      "region_end_byte_exclusive": 6345,
+      "region_sha256": "42c842031e73fa74cb753b09101a15f4c0d7844be5f37bfa4af9b9ac435c6ca4",
+      "capsule_path": "payloads/streams/45af06f5c68f57875281c179eeb30a0143d5d6826e3f90c7a3cefac3af877c4d.txt.template",
+      "line": 45,
+      "role": "synthetic_gui_password_assignment",
+      "source_proof": "lsp"
+    },
+    {
+      "path": "docs/modernization/verification/original-full-v6-complete-captures-20261128/payloads/streams/45af06f5c68f57875281c179eeb30a0143d5d6826e3f90c7a3cefac3af877c4d.txt.template",
+      "path_in_reviewed_checkpoint": true,
+      "path_sha256": "8e8d3a34b5fa5760f8fa4d5cadb8b5045c0ca9d50045273d642852fb40c9bcfb",
+      "occurrence_id": "finding-feb0f6145ca167f26b61e0d90b9448bb9a4d48dd6cb40e952356274043bf882e",
+      "blob_oid": "68273f9ebe2c1bab663f8a971ba851a061fd5052",
+      "blob_sha256": "2e26374ec0cbecc44b52551c751cd6c8758321fac82ffd7cb9a96abb5cd678cd",
+      "blob_bytes": 14250,
+      "git_mode": "100644",
+      "rule_id": "machine-path-prefix-v1",
+      "rule_meaning_sha256": "99b2ba95d5986407a96b9246f5499f24eba89e6c0bb23a746290b3cb766ab0f5",
+      "region_start_byte": 3224,
+      "region_end_byte_exclusive": 3235,
+      "region_sha256": "612b6fc44e3094a36043870b929ac5fb00daf8513229001e92a639fb827cac26",
+      "capsule_path": "payloads/streams/45af06f5c68f57875281c179eeb30a0143d5d6826e3f90c7a3cefac3af877c4d.txt.template",
+      "line": 20,
+      "role": "synthetic_gui_posix_home_prefix",
+      "source_proof": "catalog"
+    }
+  ],
+  "all_unix_fixture_inventory": [
+    {
+      "fixture_id": "UNIX_FIXTURE_1",
+      "value_sha256": "c01a5d4638b8f58d5d67c68611bb003a05b62b5879ea08df1668562c60f84ed7",
+      "value_bytes": 61,
+      "source_matches": [
+        {
+          "file": "internal/gui/catalog_manifest_get_test.go",
+          "line": 136,
+          "test": "TestCatalogManifestGetHandler_BackendError_500Sanitized",
+          "literal_path_bytes_equal": true,
+          "full_source_sha256": "c1de2803efaf3bff838431ef29dcd943aebd32bde07b42444f7a9253713b2114"
+        }
+      ],
+      "capture_occurrences": [
+        {
+          "path": "payloads/streams/45af06f5c68f57875281c179eeb30a0143d5d6826e3f90c7a3cefac3af877c4d.txt.template",
+          "line": 20
+        },
+        {
+          "path": "payloads/streams/4e7148e7fd547cd3478473b3b8432dfa98edba574fc5c880a1f258bac6074d74.txt.template",
+          "line": 58563
+        }
+      ],
+      "classification": "SOURCE_PROVEN_SYNTHETIC_FIXTURE"
+    },
+    {
+      "fixture_id": "UNIX_FIXTURE_2",
+      "value_sha256": "1ebe927bcffd48bb62dcbacc907bf8b437527027431b8d91a32b7ad7e937e37f",
+      "value_bytes": 49,
+      "source_matches": [
+        {
+          "file": "internal/gui/manifest_test.go",
+          "line": 447,
+          "test": "TestManifestEditHandler_NotFound_Returns404",
+          "literal_path_bytes_equal": true,
+          "full_source_sha256": "74476960ea1c0984735caca9fe5147c1bae884a9c633b4c33a0488e477013123"
+        }
+      ],
+      "capture_occurrences": [
+        {
+          "path": "payloads/streams/45af06f5c68f57875281c179eeb30a0143d5d6826e3f90c7a3cefac3af877c4d.txt.template",
+          "line": 49
+        },
+        {
+          "path": "payloads/streams/4e7148e7fd547cd3478473b3b8432dfa98edba574fc5c880a1f258bac6074d74.txt.template",
+          "line": 58592
+        }
+      ],
+      "classification": "SOURCE_PROVEN_SYNTHETIC_FIXTURE"
+    },
+    {
+      "fixture_id": "UNIX_FIXTURE_3",
+      "value_sha256": "be8b3d5e5b56722351406b745b4f9ac4caffdf3d0bba06ea489ea0267961ff16",
+      "value_bytes": 50,
+      "source_matches": [
+        {
+          "file": "internal/gui/manifest_test.go",
+          "line": 480,
+          "test": "TestManifestGetHandler_500DoesNotLeakErrorDetails",
+          "literal_path_bytes_equal": true,
+          "full_source_sha256": "74476960ea1c0984735caca9fe5147c1bae884a9c633b4c33a0488e477013123"
+        }
+      ],
+      "capture_occurrences": [
+        {
+          "path": "payloads/streams/45af06f5c68f57875281c179eeb30a0143d5d6826e3f90c7a3cefac3af877c4d.txt.template",
+          "line": 51
+        },
+        {
+          "path": "payloads/streams/4e7148e7fd547cd3478473b3b8432dfa98edba574fc5c880a1f258bac6074d74.txt.template",
+          "line": 58594
+        }
+      ],
+      "classification": "SOURCE_PROVEN_SYNTHETIC_FIXTURE"
+    },
+    {
+      "fixture_id": "UNIX_FIXTURE_4",
+      "value_sha256": "5ea6b15b656fb866bd0d15799a917e93e797a7bdf62f9ae21e5376f86ac72342",
+      "value_bytes": 41,
+      "source_matches": [
+        {
+          "file": "internal/gui/manifest_test.go",
+          "line": 733,
+          "test": "TestManifestListHandler_BackendError_500Sanitized",
+          "literal_path_bytes_equal": true,
+          "full_source_sha256": "74476960ea1c0984735caca9fe5147c1bae884a9c633b4c33a0488e477013123"
+        },
+        {
+          "file": "internal/gui/manifest_test.go",
+          "line": 825,
+          "test": "TestCatalogHandler_BackendError_500Sanitized",
+          "literal_path_bytes_equal": true,
+          "full_source_sha256": "74476960ea1c0984735caca9fe5147c1bae884a9c633b4c33a0488e477013123"
+        }
+      ],
+      "capture_occurrences": [
+        {
+          "path": "payloads/streams/45af06f5c68f57875281c179eeb30a0143d5d6826e3f90c7a3cefac3af877c4d.txt.template",
+          "line": 54
+        },
+        {
+          "path": "payloads/streams/45af06f5c68f57875281c179eeb30a0143d5d6826e3f90c7a3cefac3af877c4d.txt.template",
+          "line": 55
+        },
+        {
+          "path": "payloads/streams/4e7148e7fd547cd3478473b3b8432dfa98edba574fc5c880a1f258bac6074d74.txt.template",
+          "line": 58597
+        },
+        {
+          "path": "payloads/streams/4e7148e7fd547cd3478473b3b8432dfa98edba574fc5c880a1f258bac6074d74.txt.template",
+          "line": 58598
+        }
+      ],
+      "classification": "SOURCE_PROVEN_SYNTHETIC_FIXTURE"
+    },
+    {
+      "fixture_id": "UNIX_FIXTURE_5",
+      "value_sha256": "d0abc130b2ca11d6b16d1ef69eb7a958362f44b1c54c4aa4220f7390e218b389",
+      "value_bytes": 38,
+      "source_matches": [
+        {
+          "file": "internal/gui/status_test.go",
+          "line": 181,
+          "test": "TestStatusEndpoint_RedactsSetupFailurePath",
+          "literal_path_bytes_equal": true,
+          "full_source_sha256": "8c2fb1ee10870665366e1938c1fd5bc5714c7695cc3bfb3aefe31c17fec0f9ec"
+        }
+      ],
+      "capture_occurrences": [
+        {
+          "path": "payloads/streams/45af06f5c68f57875281c179eeb30a0143d5d6826e3f90c7a3cefac3af877c4d.txt.template",
+          "line": 115
+        },
+        {
+          "path": "payloads/streams/4e7148e7fd547cd3478473b3b8432dfa98edba574fc5c880a1f258bac6074d74.txt.template",
+          "line": 58658
+        }
+      ],
+      "classification": "SOURCE_PROVEN_SYNTHETIC_FIXTURE"
+    }
+  ],
+  "source727_commit_ref_is_public": false,
+  "public_recovery_route": "Read each exact public Git blob above and verify full source byte count and SHA-256. Four current public05fb files match727; the historical toggle file must use its exact old Git blob, not current05fb.",
+  "old_historical_classification": "FAIL/CLOSED",
+  "new_native_or_test_execution": false,
+  "policy_or_scanner_changed": false,
+  "publication_authority": false
+}

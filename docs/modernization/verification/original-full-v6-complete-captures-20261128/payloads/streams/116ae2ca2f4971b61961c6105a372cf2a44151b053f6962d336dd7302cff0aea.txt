@@ -1,0 +1,91 @@
+{"Action":"start","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedFileIngressRequests"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedFileIngressRequests","Output":"=== RUN   TestBoundedFileIngressRequests\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedFileIngressRequests","Output":"--- PASS: TestBoundedFileIngressRequests (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedFileIngressRequests"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestReadFileRejectsEveryNonRegularTypeFromOpenedHandle"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestReadFileRejectsEveryNonRegularTypeFromOpenedHandle","Output":"=== RUN   TestReadFileRejectsEveryNonRegularTypeFromOpenedHandle\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestReadFileRejectsEveryNonRegularTypeFromOpenedHandle","Output":"--- PASS: TestReadFileRejectsEveryNonRegularTypeFromOpenedHandle (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestReadFileRejectsEveryNonRegularTypeFromOpenedHandle"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedDirectoryIngressRequests"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedDirectoryIngressRequests","Output":"=== RUN   TestBoundedDirectoryIngressRequests\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedDirectoryIngressRequests","Output":"--- PASS: TestBoundedDirectoryIngressRequests (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedDirectoryIngressRequests"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedDirectoryAdmissionNoArbitraryPrefix"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedDirectoryAdmissionNoArbitraryPrefix","Output":"=== RUN   TestBoundedDirectoryAdmissionNoArbitraryPrefix\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedDirectoryAdmissionNoArbitraryPrefix","Output":"--- PASS: TestBoundedDirectoryAdmissionNoArbitraryPrefix (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedDirectoryAdmissionNoArbitraryPrefix"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressCancellationCheckpoints"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressCancellationCheckpoints","Output":"=== RUN   TestBoundedIngressCancellationCheckpoints\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressCancellationCheckpoints/file"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressCancellationCheckpoints/file","Output":"=== RUN   TestBoundedIngressCancellationCheckpoints/file\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressCancellationCheckpoints/file","Output":"--- PASS: TestBoundedIngressCancellationCheckpoints/file (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressCancellationCheckpoints/file"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressCancellationCheckpoints/directory"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressCancellationCheckpoints/directory","Output":"=== RUN   TestBoundedIngressCancellationCheckpoints/directory\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressCancellationCheckpoints/directory","Output":"--- PASS: TestBoundedIngressCancellationCheckpoints/directory (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressCancellationCheckpoints/directory"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressCancellationCheckpoints","Output":"--- PASS: TestBoundedIngressCancellationCheckpoints (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressCancellationCheckpoints"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath","Output":"=== RUN   TestBoundedIngressClosesEveryReturnPath\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath/file_success"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath/file_success","Output":"=== RUN   TestBoundedIngressClosesEveryReturnPath/file_success\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath/file_success","Output":"--- PASS: TestBoundedIngressClosesEveryReturnPath/file_success (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath/file_success"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath/file_overflow"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath/file_overflow","Output":"=== RUN   TestBoundedIngressClosesEveryReturnPath/file_overflow\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath/file_overflow","Output":"--- PASS: TestBoundedIngressClosesEveryReturnPath/file_overflow (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath/file_overflow"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath/file_read_error"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath/file_read_error","Output":"=== RUN   TestBoundedIngressClosesEveryReturnPath/file_read_error\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath/file_read_error","Output":"--- PASS: TestBoundedIngressClosesEveryReturnPath/file_read_error (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath/file_read_error"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath/directory_success"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath/directory_success","Output":"=== RUN   TestBoundedIngressClosesEveryReturnPath/directory_success\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath/directory_success","Output":"--- PASS: TestBoundedIngressClosesEveryReturnPath/directory_success (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath/directory_success"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath/directory_overflow"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath/directory_overflow","Output":"=== RUN   TestBoundedIngressClosesEveryReturnPath/directory_overflow\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath/directory_overflow","Output":"--- PASS: TestBoundedIngressClosesEveryReturnPath/directory_overflow (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath/directory_overflow"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath/directory_read_error"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath/directory_read_error","Output":"=== RUN   TestBoundedIngressClosesEveryReturnPath/directory_read_error\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath/directory_read_error","Output":"--- PASS: TestBoundedIngressClosesEveryReturnPath/directory_read_error (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath/directory_read_error"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath","Output":"--- PASS: TestBoundedIngressClosesEveryReturnPath (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressClosesEveryReturnPath"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressJoinsOperationAndCloseErrors"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressJoinsOperationAndCloseErrors","Output":"=== RUN   TestBoundedIngressJoinsOperationAndCloseErrors\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressJoinsOperationAndCloseErrors","Output":"--- PASS: TestBoundedIngressJoinsOperationAndCloseErrors (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedIngressJoinsOperationAndCloseErrors"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter","Output":"=== RUN   TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_minus_one_payload_plus_newline"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_minus_one_payload_plus_newline","Output":"=== RUN   TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_minus_one_payload_plus_newline\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_minus_one_payload_plus_newline","Output":"--- PASS: TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_minus_one_payload_plus_newline (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_minus_one_payload_plus_newline"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_final_line"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_final_line","Output":"=== RUN   TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_final_line\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_final_line","Output":"--- PASS: TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_final_line (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_final_line"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_payload_plus_newline"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_payload_plus_newline","Output":"=== RUN   TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_payload_plus_newline\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_payload_plus_newline","Output":"--- PASS: TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_payload_plus_newline (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_payload_plus_newline"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_plus_one_final_line"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_plus_one_final_line","Output":"=== RUN   TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_plus_one_final_line\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_plus_one_final_line","Output":"--- PASS: TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_plus_one_final_line (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_plus_one_final_line"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter","Output":"--- PASS: TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderSequentialLinesPreservePrefetchedBytes"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderSequentialLinesPreservePrefetchedBytes","Output":"=== RUN   TestBoundedLineReaderSequentialLinesPreservePrefetchedBytes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderSequentialLinesPreservePrefetchedBytes","Output":"--- PASS: TestBoundedLineReaderSequentialLinesPreservePrefetchedBytes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderSequentialLinesPreservePrefetchedBytes"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderNeverRequestsMoreThanLimitPlusOne"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderNeverRequestsMoreThanLimitPlusOne","Output":"=== RUN   TestBoundedLineReaderNeverRequestsMoreThanLimitPlusOne\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderNeverRequestsMoreThanLimitPlusOne","Output":"--- PASS: TestBoundedLineReaderNeverRequestsMoreThanLimitPlusOne (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Test":"TestBoundedLineReaderNeverRequestsMoreThanLimitPlusOne"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/boundedio"}

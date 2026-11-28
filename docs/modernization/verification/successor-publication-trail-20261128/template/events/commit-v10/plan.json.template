@@ -1,0 +1,71 @@
+{
+  "run": "runs/cache-acceptance-commit-20261128-v10",
+  "source": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128",
+  "head": "74e7563db244ede5984834233ce8d59072e92c0a",
+  "environment": {
+    "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_NO_REPLACE_OBJECTS": "1",
+    "GIT_NO_LAZY_FETCH": "1"
+  },
+  "observed_files": [
+    "internal/cli/supervisor_spawn_breakaway_windows_test.go"
+  ],
+  "steps": [
+    {
+      "name": "reviewed-parent",
+      "argv": [
+        "git",
+        "show",
+        "-s",
+        "--format=%H%n%P"
+      ],
+      "timeout": 30,
+      "stdout_contains": [
+        "74e7563db244ede5984834233ce8d59072e92c0a",
+        "04e5b4eadd6407cbff4e04ba453546d278314bd7"
+      ]
+    },
+    {
+      "name": "reviewed-staged-tree",
+      "argv": [
+        "git",
+        "write-tree"
+      ],
+      "timeout": 30,
+      "stdout_contains": [
+        "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1"
+      ]
+    },
+    {
+      "name": "commit-original-breakaway-wait-assertion",
+      "argv": [
+        "git",
+        "commit",
+        "-m",
+        "test: receive the original breakaway process wait error"
+      ],
+      "timeout": 60
+    },
+    {
+      "name": "committed-identity",
+      "argv": [
+        "git",
+        "show",
+        "-s",
+        "--format=%H%n%T%n%P"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "committed-worktree-state",
+      "argv": [
+        "git",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all"
+      ],
+      "timeout": 30
+    }
+  ]
+}

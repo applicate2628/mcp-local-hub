@@ -1,0 +1,33 @@
+{
+  "cache_consumer_execution_performed": false,
+  "caches": {
+    "GOCACHE": {
+      "bytes": 1167838447,
+      "destination": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\private\\go-build",
+      "files": 7200,
+      "source": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-helper-cache-warm-v7\\private\\go-build"
+    },
+    "GOMODCACHE": {
+      "bytes": 105167881,
+      "destination": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\private\\go-mod",
+      "files": 3778,
+      "source": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-helper-cache-warm-v7\\private\\go-mod"
+    }
+  },
+  "inventory": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\cache-copy-inventory.json",
+  "inventory_sha256": "ad4774616bb14b4d157605d8e30f575b882a90394f6c0193ec1c3794515e0a4f",
+  "prior_control_pins": {
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-error-dword-v4\\run_owned_commands.py": "6d16652d4893273b7e9d584920892ce5f5917622e7e242a62eb78ec824bcfb93",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer-candidate\\copy_closed_warm_caches.py": "cce49070461341d585ee32f0128f9c61a89cae637c09278c6074732a81cd07eb",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\warm-cache\\helper-cache-warm-v7-plan.json": "bf28e617ee0e319ec4c085d13ee0c16b7536552bac92f28070138835d8286fb6",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\warm-cache\\source04e-input-sha256.json": "0469ae9723b651dad46cc35b1e2365a3325785264c2b5d6ad8fe44d28c109697",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\warm-cache\\warm-v7-root-receiving.json": "9e418d2bcf526571331b1052b8660070e159978fcc4fddeccee9213474a1a3ce",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-helper-cache-warm-v7\\commands\\execution.json": "7f6cd144b02ecc796a5fa1506c19b72d50a6a65816b508a902689535c13671cd",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-helper-cache-warm-v7\\parent.json": "119d72b5603cd078d538c0e396d7e6fcfee592daa1c851f8aa59a1d15a5e697c"
+  },
+  "prior_modified": false,
+  "prior_original_receiver": "PASS",
+  "schema": "fresh-closed-cache-copy-v1",
+  "source_and_destination_byte_inventories_equal": true,
+  "status": "COPIED"
+}

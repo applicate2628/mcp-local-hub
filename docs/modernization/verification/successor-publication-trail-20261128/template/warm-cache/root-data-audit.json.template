@@ -1,0 +1,73 @@
+{
+    "schema":  "successor-helper-cache-warm-root-receiving-v1",
+    "status":  "PASS",
+    "physical_complete":  true,
+    "source_commit":  "04e5b4eadd6407cbff4e04ba453546d278314bd7",
+    "source_tree":  "f68f7584dba7744e7607b07f615758f3ff633f54",
+    "plan_sha256":  "bf28e617ee0e319ec4c085d13ee0c16b7536552bac92f28070138835d8286fb6",
+    "parent_sha256":  "119d72b5603cd078d538c0e396d7e6fcfee592daa1c851f8aa59a1d15a5e697c",
+    "outer_sha256":  "3f07c4eab0445beb0140749186fc8a3bb906dfb628da584756ec59d4c96274cb",
+    "execution_sha256":  "7f6cd144b02ecc796a5fa1506c19b72d50a6a65816b508a902689535c13671cd",
+    "input_files_verified":  3388,
+    "step_maps_verified":  8,
+    "command_captures_verified":  8,
+    "parent_captures_verified":  2,
+    "commands":  [
+                     {
+                         "name":  "copy-original-pass-donor-caches",
+                         "seconds":  150.29063730000053,
+                         "exit_code":  0,
+                         "closure":  "CLOSED",
+                         "stdout_sha256":  "103346ede5c029a958fa69f2723aa70571487ab424549152c3ab1adaaba474aa",
+                         "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                     },
+                     {
+                         "name":  "build-provider-386",
+                         "seconds":  29.012311300029978,
+                         "exit_code":  0,
+                         "closure":  "CLOSED",
+                         "stdout_sha256":  "44c557213016406a9f0e8ac72569500aa864f13cb879dda151b6c37aeddb9425",
+                         "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                     },
+                     {
+                         "name":  "build-provider-amd64",
+                         "seconds":  9.87087069998961,
+                         "exit_code":  0,
+                         "closure":  "CLOSED",
+                         "stdout_sha256":  "840420bc10b1c8877744acbf01e44af90e11107d0f1bc187a3979284d394a3bf",
+                         "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                     },
+                     {
+                         "name":  "build-cli-state",
+                         "seconds":  69.32841359998565,
+                         "exit_code":  0,
+                         "closure":  "CLOSED",
+                         "stdout_sha256":  "331cf4f0ec54dce741b506f1762178e2b563a6750ec467f8a43caa1fb6f5ea13",
+                         "stderr_sha256":  "6a19eaf3a9431d6d8e0fa675a44df0df271ebc655f9a9f5eb6aec89e9d1b316d"
+                     }
+                 ],
+    "compiled_outputs":  [
+                             {
+                                 "path":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-helper-cache-warm-v7\\provider-cwd-helper-386.exe",
+                                 "bytes":  2817536,
+                                 "sha256":  "fce0d60916bf45c965053c48e379faae2b5c8245facf61b3a8d04dbbbee736f8",
+                                 "qualification":  "COMPILED_CACHE_INPUT_ONLY"
+                             },
+                             {
+                                 "path":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-helper-cache-warm-v7\\provider-cwd-helper-amd64.exe",
+                                 "bytes":  2976768,
+                                 "sha256":  "b8e516dc0617c822fceec21c53366883fd64fad1b6211f68ec5c3f873605eb64",
+                                 "qualification":  "COMPILED_CACHE_INPUT_ONLY"
+                             },
+                             {
+                                 "path":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-helper-cache-warm-v7\\cli-state-mcphub.exe",
+                                 "bytes":  46608896,
+                                 "sha256":  "914fd41c200e13eca13ab6dc033063d80fd05d1679ff461e25a4d4712407ac14",
+                                 "qualification":  "COMPILED_CACHE_INPUT_ONLY"
+                             }
+                         ],
+    "cache_copy_receipt_sha256":  "e930b1cd6ed2a386b2d3b79185a72bf1c50b409c9de0f57ef2b294696c49a763",
+    "tests_executed":  false,
+    "full_acceptance_pass":  false,
+    "reviewed_utc":  "2026-11-28T13:13:11.0965404Z"
+}

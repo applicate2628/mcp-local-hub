@@ -1,0 +1,31 @@
+=== RUN   TestAssertJSONGoldenStableAndReadOnly
+=== RUN   TestAssertJSONGoldenStableAndReadOnly/LF
+--- PASS: TestAssertJSONGoldenStableAndReadOnly/LF (0.00s)
+=== NAME  TestAssertJSONGoldenStableAndReadOnly
+=== RUN   TestAssertJSONGoldenStableAndReadOnly/CRLF
+--- PASS: TestAssertJSONGoldenStableAndReadOnly/CRLF (0.00s)
+=== NAME  TestAssertJSONGoldenStableAndReadOnly
+--- PASS: TestAssertJSONGoldenStableAndReadOnly (0.00s)
+=== NAME  
+=== RUN   TestAssertJSONGoldenRejectsWithoutUpdating
+=== RUN   TestAssertJSONGoldenRejectsWithoutUpdating/missing
+--- PASS: TestAssertJSONGoldenRejectsWithoutUpdating/missing (0.11s)
+=== NAME  TestAssertJSONGoldenRejectsWithoutUpdating
+=== RUN   TestAssertJSONGoldenRejectsWithoutUpdating/changed
+--- PASS: TestAssertJSONGoldenRejectsWithoutUpdating/changed (0.12s)
+=== NAME  TestAssertJSONGoldenRejectsWithoutUpdating
+=== RUN   TestAssertJSONGoldenRejectsWithoutUpdating/array-order
+--- PASS: TestAssertJSONGoldenRejectsWithoutUpdating/array-order (0.12s)
+=== NAME  TestAssertJSONGoldenRejectsWithoutUpdating
+=== RUN   TestAssertJSONGoldenRejectsWithoutUpdating/precision
+--- PASS: TestAssertJSONGoldenRejectsWithoutUpdating/precision (0.13s)
+=== NAME  TestAssertJSONGoldenRejectsWithoutUpdating
+=== RUN   TestAssertJSONGoldenRejectsWithoutUpdating/null-vs-empty
+--- PASS: TestAssertJSONGoldenRejectsWithoutUpdating/null-vs-empty (0.13s)
+=== NAME  TestAssertJSONGoldenRejectsWithoutUpdating
+=== RUN   TestAssertJSONGoldenRejectsWithoutUpdating/marshal
+--- PASS: TestAssertJSONGoldenRejectsWithoutUpdating/marshal (0.12s)
+=== NAME  TestAssertJSONGoldenRejectsWithoutUpdating
+--- PASS: TestAssertJSONGoldenRejectsWithoutUpdating (0.72s)
+=== NAME  
+PASS

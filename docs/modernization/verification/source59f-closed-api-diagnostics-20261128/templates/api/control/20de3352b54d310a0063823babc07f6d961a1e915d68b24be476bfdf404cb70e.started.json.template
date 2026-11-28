@@ -1,0 +1,15 @@
+{
+  "package": "mcp-local-hub/internal/api",
+  "run": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c",
+  "input": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o7\\d\\go-build383425964\\b412\\api.test.exe",
+  "input_sha256": "d237704913484fe2931860793badbfdaadb3bb216f5c436b8d01bdf2301d3e60",
+  "args": [
+    "-test.paniconexit0",
+    "-test.v=test2json",
+    "-test.count=1",
+    "-test.timeout=5m0s"
+  ],
+  "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\internal\\api",
+  "request_sha256": "95f2051d09ef350bf010d0b2f7c49db1ba0c73a4e12d230bb09c5c7c2ce01d8b",
+  "request_nonce": "9b430e467cf04d64a33db3d9d4445b72"
+}

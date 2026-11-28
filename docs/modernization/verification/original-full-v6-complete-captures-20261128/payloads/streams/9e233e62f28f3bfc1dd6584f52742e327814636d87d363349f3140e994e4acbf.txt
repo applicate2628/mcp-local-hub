@@ -1,0 +1,19 @@
+{"Action":"start","Package":"mcp-local-hub/internal/mcpcompat"}
+{"Action":"run","Package":"mcp-local-hub/internal/mcpcompat","Test":"TestResolveProtocolCompatibilityProfile"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat","Test":"TestResolveProtocolCompatibilityProfile","Output":"=== RUN   TestResolveProtocolCompatibilityProfile\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/mcpcompat","Test":"TestResolveProtocolCompatibilityProfile/zero_value_is_strict"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat","Test":"TestResolveProtocolCompatibilityProfile/zero_value_is_strict","Output":"=== RUN   TestResolveProtocolCompatibilityProfile/zero_value_is_strict\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat","Test":"TestResolveProtocolCompatibilityProfile/zero_value_is_strict","Output":"--- PASS: TestResolveProtocolCompatibilityProfile/zero_value_is_strict (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/mcpcompat","Test":"TestResolveProtocolCompatibilityProfile/zero_value_is_strict"}
+{"Action":"run","Package":"mcp-local-hub/internal/mcpcompat","Test":"TestResolveProtocolCompatibilityProfile/legacy_stdio_profile_adds_only_2024"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat","Test":"TestResolveProtocolCompatibilityProfile/legacy_stdio_profile_adds_only_2024","Output":"=== RUN   TestResolveProtocolCompatibilityProfile/legacy_stdio_profile_adds_only_2024\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat","Test":"TestResolveProtocolCompatibilityProfile/legacy_stdio_profile_adds_only_2024","Output":"--- PASS: TestResolveProtocolCompatibilityProfile/legacy_stdio_profile_adds_only_2024 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/mcpcompat","Test":"TestResolveProtocolCompatibilityProfile/legacy_stdio_profile_adds_only_2024"}
+{"Action":"run","Package":"mcp-local-hub/internal/mcpcompat","Test":"TestResolveProtocolCompatibilityProfile/unknown_profile"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat","Test":"TestResolveProtocolCompatibilityProfile/unknown_profile","Output":"=== RUN   TestResolveProtocolCompatibilityProfile/unknown_profile\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat","Test":"TestResolveProtocolCompatibilityProfile/unknown_profile","Output":"--- PASS: TestResolveProtocolCompatibilityProfile/unknown_profile (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/mcpcompat","Test":"TestResolveProtocolCompatibilityProfile/unknown_profile"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat","Test":"TestResolveProtocolCompatibilityProfile","Output":"--- PASS: TestResolveProtocolCompatibilityProfile (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/mcpcompat","Test":"TestResolveProtocolCompatibilityProfile"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/mcpcompat"}

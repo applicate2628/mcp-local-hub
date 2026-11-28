@@ -1,0 +1,286 @@
+{
+  "all_export_source_bytes_equal": true,
+  "binding": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer-candidate\\helper-build-bindings-v2.json",
+    "sha256": "d078d88d6455056efc71fd5dfa800d1bd2dd026b8debb41997445590f58b1b01"
+  },
+  "export_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\source",
+  "native_builds_or_tests_executed": false,
+  "publisher_snapshot": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer-candidate\\publisher-source-snapshot.json",
+    "sha256": "0249af1149b94877e011186a92ee05f104a9bd7afd0e1d676755ee190e64356e"
+  },
+  "qualification_passed": false,
+  "runtime_snapshot": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer-candidate\\runtime-source-snapshot.json",
+    "sha256": "894f8279e51f2c3fa81e404b37be71f3ff9bad26c39ab1afd382d5814a9382a3"
+  },
+  "schema": "successor-source-helper-preparation-v1",
+  "scope_security": {
+    "cli": {
+      "directories": [
+        {
+          "created_exclusively": true,
+          "dacl_protected": true,
+          "file_index": 4785074609237402,
+          "owner_sid": "@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@",
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-cli",
+          "rules": [
+            {
+              "flags": 3,
+              "mask": 2032127,
+              "sid": "@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@"
+            },
+            {
+              "flags": 3,
+              "mask": 2032127,
+              "sid": "S-1-5-18"
+            },
+            {
+              "flags": 3,
+              "mask": 2032127,
+              "sid": "S-1-5-32-544"
+            }
+          ],
+          "sddl": "O:@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@D:P(A;OICI;FA;;;@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+          "volume_serial": 275429471
+        }
+      ],
+      "existing_objects_mutated": false,
+      "recursive_acl_operations": false,
+      "scope": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-cli",
+      "token": {
+        "default_owner_sid": "S-1-5-32-544",
+        "user_sid": "@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@"
+      }
+    },
+    "contained": {
+      "directories": [
+        {
+          "created_exclusively": true,
+          "dacl_protected": true,
+          "file_index": 2533274795552136,
+          "owner_sid": "@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@",
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-contained",
+          "rules": [
+            {
+              "flags": 3,
+              "mask": 2032127,
+              "sid": "@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@"
+            },
+            {
+              "flags": 3,
+              "mask": 2032127,
+              "sid": "S-1-5-18"
+            },
+            {
+              "flags": 3,
+              "mask": 2032127,
+              "sid": "S-1-5-32-544"
+            }
+          ],
+          "sddl": "O:@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@D:P(A;OICI;FA;;;@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+          "volume_serial": 275429471
+        }
+      ],
+      "existing_objects_mutated": false,
+      "recursive_acl_operations": false,
+      "scope": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-contained",
+      "token": {
+        "default_owner_sid": "S-1-5-32-544",
+        "user_sid": "@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@"
+      }
+    },
+    "job": {
+      "directories": [
+        {
+          "created_exclusively": true,
+          "dacl_protected": true,
+          "file_index": 2814749772262783,
+          "owner_sid": "@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@",
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-job",
+          "rules": [
+            {
+              "flags": 3,
+              "mask": 2032127,
+              "sid": "@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@"
+            },
+            {
+              "flags": 3,
+              "mask": 2032127,
+              "sid": "S-1-5-18"
+            },
+            {
+              "flags": 3,
+              "mask": 2032127,
+              "sid": "S-1-5-32-544"
+            }
+          ],
+          "sddl": "O:@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@D:P(A;OICI;FA;;;@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+          "volume_serial": 275429471
+        }
+      ],
+      "existing_objects_mutated": false,
+      "recursive_acl_operations": false,
+      "scope": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-job",
+      "token": {
+        "default_owner_sid": "S-1-5-32-544",
+        "user_sid": "@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@"
+      }
+    },
+    "namespace": {
+      "directories": [
+        {
+          "created_exclusively": true,
+          "dacl_protected": true,
+          "file_index": 2533274795552138,
+          "owner_sid": "@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@",
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-namespace",
+          "rules": [
+            {
+              "flags": 3,
+              "mask": 2032127,
+              "sid": "@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@"
+            },
+            {
+              "flags": 3,
+              "mask": 2032127,
+              "sid": "S-1-5-18"
+            },
+            {
+              "flags": 3,
+              "mask": 2032127,
+              "sid": "S-1-5-32-544"
+            }
+          ],
+          "sddl": "O:@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@D:P(A;OICI;FA;;;@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+          "volume_serial": 275429471
+        }
+      ],
+      "existing_objects_mutated": false,
+      "recursive_acl_operations": false,
+      "scope": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-namespace",
+      "token": {
+        "default_owner_sid": "S-1-5-32-544",
+        "user_sid": "@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@"
+      }
+    },
+    "native_product": {
+      "directories": [
+        {
+          "created_exclusively": true,
+          "dacl_protected": true,
+          "file_index": 2533274795552160,
+          "owner_sid": "@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@",
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-native-product",
+          "rules": [
+            {
+              "flags": 3,
+              "mask": 2032127,
+              "sid": "@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@"
+            },
+            {
+              "flags": 3,
+              "mask": 2032127,
+              "sid": "S-1-5-18"
+            },
+            {
+              "flags": 3,
+              "mask": 2032127,
+              "sid": "S-1-5-32-544"
+            }
+          ],
+          "sddl": "O:@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@D:P(A;OICI;FA;;;@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+          "volume_serial": 275429471
+        }
+      ],
+      "existing_objects_mutated": false,
+      "recursive_acl_operations": false,
+      "scope": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-native-product",
+      "token": {
+        "default_owner_sid": "S-1-5-32-544",
+        "user_sid": "@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@"
+      }
+    },
+    "parent": {
+      "directories": [
+        {
+          "created_exclusively": true,
+          "dacl_protected": true,
+          "file_index": 3096224748973438,
+          "owner_sid": "@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@",
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch",
+          "rules": [
+            {
+              "flags": 3,
+              "mask": 2032127,
+              "sid": "@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@"
+            },
+            {
+              "flags": 3,
+              "mask": 2032127,
+              "sid": "S-1-5-18"
+            },
+            {
+              "flags": 3,
+              "mask": 2032127,
+              "sid": "S-1-5-32-544"
+            }
+          ],
+          "sddl": "O:@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@D:P(A;OICI;FA;;;@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+          "volume_serial": 275429471
+        }
+      ],
+      "existing_objects_mutated": false,
+      "recursive_acl_operations": false,
+      "scope": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch",
+      "token": {
+        "default_owner_sid": "S-1-5-32-544",
+        "user_sid": "@@RECOVERY_PRIVATE_SCOPE_OWNER_SID_JSON@@"
+      }
+    }
+  },
+  "source_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+  "source_file_count": 3369,
+  "source_git_map": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\source-binding\\source59f-git-map.json",
+    "sha256": "2f85b5e27243da8c853f20600df576b51fd60fea2fa420509a331b538dc8c547"
+  },
+  "source_map": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\source-binding\\source59f-input-sha256.json",
+    "sha256": "e8c3fc2f577a130f92ba4eee7f8eee7153afc032dee909557cf1156890917c06"
+  },
+  "source_tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+  "staged_sources": {
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-cli\\main_windows.go": {
+      "bytes": 27303,
+      "sha256": "77949871b3c0cbea570241409cd40840be9c88db9f4e83fe71044db80f2155d7"
+    },
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-cli\\main_windows_test.go": {
+      "bytes": 2772,
+      "sha256": "9712a445ce383ce89ec3a6051d7eb11dee5cf29a08ba93854d0c85fa8c142a0b"
+    },
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-contained\\main_windows.go": {
+      "bytes": 17383,
+      "sha256": "59fa2cc432b887114497c3c6625731d4dcde207e38b412371eb5fa83b39ed8a9"
+    },
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-job\\main_windows.go": {
+      "bytes": 32466,
+      "sha256": "74c4cebbc91337eacabc113cb1f772589e0c823777c5f2ed734757647fc05977"
+    },
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-job\\owner_windows.go": {
+      "bytes": 4891,
+      "sha256": "7200935baff50c05b5f1893e87aac01768ee1d98ca85fcad5e655ca016b2264e"
+    },
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-namespace\\main_windows.go": {
+      "bytes": 24227,
+      "sha256": "4e91b8ce877400a91a4f315b68a166ae3d2c7c19d4963d52ade521f03f2ac4b4"
+    },
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-namespace\\prebuilt_windows.go": {
+      "bytes": 19606,
+      "sha256": "2fc1016b4eff51c77a3c0e342de14d938b3f39b6a67c438b04ef262e09d8eeed"
+    }
+  },
+  "status": "STAGED_DATA_ONLY",
+  "tracked_source_mutated": false
+}

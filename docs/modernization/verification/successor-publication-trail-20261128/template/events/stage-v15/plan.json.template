@@ -1,0 +1,117 @@
+{
+  "run": "runs/cache-acceptance-stage-20261128-v15",
+  "source": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128",
+  "head": "74e7563db244ede5984834233ce8d59072e92c0a",
+  "environment": {
+    "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_NO_REPLACE_OBJECTS": "1",
+    "GIT_NO_LAZY_FETCH": "1"
+  },
+  "observed_files": [
+    "internal/cli/supervisor_spawn_breakaway_windows_test.go",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\successor-breakaway-wait-v1\\original-breakaway-wait.patch",
+    "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\gofmt.exe"
+  ],
+  "steps": [
+    {
+      "name": "starting-worktree-state",
+      "argv": [
+        "git",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "reviewed-test-patch-check",
+      "argv": [
+        "git",
+        "apply",
+        "--check",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\successor-breakaway-wait-v1\\original-breakaway-wait.patch"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "receive-existing-original-breakaway-wait-error",
+      "argv": [
+        "git",
+        "apply",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\successor-breakaway-wait-v1\\original-breakaway-wait.patch"
+      ],
+      "timeout": 30,
+      "mutates_inputs": true
+    },
+    {
+      "name": "gofmt-read-only-check",
+      "argv": [
+        "gofmt",
+        "-l",
+        "internal/cli/supervisor_spawn_breakaway_windows_test.go"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "test-patch-whitespace",
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "stage-reviewed-test-input",
+      "argv": [
+        "git",
+        "add",
+        "--",
+        "internal/cli/supervisor_spawn_breakaway_windows_test.go"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "staged-name-status",
+      "argv": [
+        "git",
+        "diff",
+        "--cached",
+        "--name-status"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "reviewed-staged-tree",
+      "argv": [
+        "git",
+        "write-tree"
+      ],
+      "timeout": 30,
+      "stdout_contains": [
+        "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1"
+      ]
+    },
+    {
+      "name": "staged-stat",
+      "argv": [
+        "git",
+        "diff",
+        "--cached",
+        "--stat"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "staged-worktree-state",
+      "argv": [
+        "git",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all"
+      ],
+      "timeout": 30
+    }
+  ]
+}

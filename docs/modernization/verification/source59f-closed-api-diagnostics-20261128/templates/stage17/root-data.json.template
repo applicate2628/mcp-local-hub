@@ -1,0 +1,197 @@
+{
+    "schema":  "isolated-source-worktree-root-receiving-v1",
+    "status":  "PASS/CLOSED",
+    "physical_complete":  true,
+    "source":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-acceptance-20261128-v2",
+    "commit":  "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+    "tree":  "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+    "tracked_worktree_clean":  true,
+    "config_sha256":  "464c83ed73130d82849bc7761dbf7f44c26f8301380ce26f474f424ae24a428a",
+    "receipt_sha256":  "3306b225d524cc8ebdb474de1aefe30f090fa40752dcc6e7a364a677a50496bb",
+    "parent_sha256":  "aa6a0b94818c89aaa9eb8f9649f54e8dbee436c62c42e5d84563d575f09dd8a0",
+    "outer_sha256":  "8f58aa96f10144a102c02138943023031e4ac5e777e71d7a2473ff32f111d7ef",
+    "commands":  [
+                     {
+                         "argv":  [
+                                      "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                      "rev-parse",
+                                      "HEAD"
+                                  ],
+                         "exit_code":  0,
+                         "expected_exit":  0,
+                         "physical_complete":  true,
+                         "streams":  [
+                                         {
+                                             "path":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v17\\head.stdout.txt",
+                                             "bytes":  41,
+                                             "sha256":  "6286fde56a4136dea90ff072f706018088d3eef7a22ae5bbdd05d0df13770e8f"
+                                         },
+                                         {
+                                             "path":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v17\\head.stderr.txt",
+                                             "bytes":  0,
+                                             "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                                         }
+                                     ]
+                     },
+                     {
+                         "argv":  [
+                                      "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                      "--git-dir",
+                                      "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-product-rust-custody-retry-20261119\\.git",
+                                      "cat-file",
+                                      "-e",
+                                      "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8^{commit}"
+                                  ],
+                         "exit_code":  0,
+                         "expected_exit":  0,
+                         "physical_complete":  true,
+                         "streams":  [
+                                         {
+                                             "path":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v17\\verify-frozen-source-commit-object.stdout.txt",
+                                             "bytes":  0,
+                                             "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                                         },
+                                         {
+                                             "path":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v17\\verify-frozen-source-commit-object.stderr.txt",
+                                             "bytes":  0,
+                                             "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                                         }
+                                     ]
+                     },
+                     {
+                         "argv":  [
+                                      "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                      "--git-dir",
+                                      "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-product-rust-custody-retry-20261119\\.git",
+                                      "worktree",
+                                      "list",
+                                      "--porcelain"
+                                  ],
+                         "exit_code":  0,
+                         "expected_exit":  0,
+                         "physical_complete":  true,
+                         "streams":  [
+                                         {
+                                             "path":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v17\\existing-worktree-metadata.stdout.txt",
+                                             "bytes":  1626,
+                                             "sha256":  "06642b0cfbb56e23aa7fd61a4841c338449ca5b40c3339dd590c54a1bfab2576"
+                                         },
+                                         {
+                                             "path":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v17\\existing-worktree-metadata.stderr.txt",
+                                             "bytes":  0,
+                                             "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                                         }
+                                     ]
+                     },
+                     {
+                         "argv":  [
+                                      "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                      "--git-dir",
+                                      "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-product-rust-custody-retry-20261119\\.git",
+                                      "show-ref",
+                                      "--verify",
+                                      "--quiet",
+                                      "refs/heads/work/recovered-cli-acceptance-20261128-v2"
+                                  ],
+                         "exit_code":  1,
+                         "expected_exit":  1,
+                         "physical_complete":  true,
+                         "streams":  [
+                                         {
+                                             "path":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v17\\new-local-branch-must-be-absent.stdout.txt",
+                                             "bytes":  0,
+                                             "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                                         },
+                                         {
+                                             "path":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v17\\new-local-branch-must-be-absent.stderr.txt",
+                                             "bytes":  0,
+                                             "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                                         }
+                                     ]
+                     },
+                     {
+                         "argv":  [
+                                      "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                      "--git-dir",
+                                      "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-product-rust-custody-retry-20261119\\.git",
+                                      "worktree",
+                                      "add",
+                                      "-b",
+                                      "work/recovered-cli-acceptance-20261128-v2",
+                                      "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-acceptance-20261128-v2",
+                                      "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8"
+                                  ],
+                         "exit_code":  0,
+                         "expected_exit":  0,
+                         "physical_complete":  true,
+                         "streams":  [
+                                         {
+                                             "path":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v17\\isolate-frozen-source-from-unknown-run.stdout.txt",
+                                             "bytes":  80,
+                                             "sha256":  "2b90687ac648df0f86023dd07c61c469067f025638ca03a0b87e8c538a64d035"
+                                         },
+                                         {
+                                             "path":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v17\\isolate-frozen-source-from-unknown-run.stderr.txt",
+                                             "bytes":  2195,
+                                             "sha256":  "738ab9ab6064f21c2b74ce3bf81f84eb43efc55b0908b1725acd2e384fcc66c9"
+                                         }
+                                     ]
+                     },
+                     {
+                         "argv":  [
+                                      "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                      "-C",
+                                      "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-acceptance-20261128-v2",
+                                      "show",
+                                      "-s",
+                                      "--format=%H%n%T%n%P"
+                                  ],
+                         "exit_code":  0,
+                         "expected_exit":  0,
+                         "physical_complete":  true,
+                         "streams":  [
+                                         {
+                                             "path":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v17\\new-source-identity.stdout.txt",
+                                             "bytes":  123,
+                                             "sha256":  "5b27cd5753ddda1601ab2c4e312e4255186bb7e4a2b93bd79a1202e9ce8220e3"
+                                         },
+                                         {
+                                             "path":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v17\\new-source-identity.stderr.txt",
+                                             "bytes":  0,
+                                             "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                                         }
+                                     ]
+                     },
+                     {
+                         "argv":  [
+                                      "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                      "-C",
+                                      "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-acceptance-20261128-v2",
+                                      "status",
+                                      "--porcelain=v1",
+                                      "--untracked-files=all"
+                                  ],
+                         "exit_code":  0,
+                         "expected_exit":  0,
+                         "physical_complete":  true,
+                         "streams":  [
+                                         {
+                                             "path":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v17\\new-worktree-state.stdout.txt",
+                                             "bytes":  0,
+                                             "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                                         },
+                                         {
+                                             "path":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v17\\new-worktree-state.stderr.txt",
+                                             "bytes":  0,
+                                             "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                                         }
+                                     ]
+                     }
+                 ],
+    "command_count":  7,
+    "capture_count":  14,
+    "tests_executed":  false,
+    "full_qualification_passed":  false,
+    "original_unknown_scope_modified":  false,
+    "original_expected_refusal_satisfied":  false
+}

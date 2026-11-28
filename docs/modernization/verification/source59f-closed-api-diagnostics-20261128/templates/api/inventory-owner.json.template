@@ -1,0 +1,98 @@
+{
+  "custody_retained": false,
+  "binary_after_measured": true,
+  "schema": "literal-contained-test-run-v1",
+  "binary": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o7\\d\\go-build383425964\\b412\\api.test.exe",
+  "binary_sha256": "d237704913484fe2931860793badbfdaadb3bb216f5c436b8d01bdf2301d3e60",
+  "source_dir": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\internal\\api",
+  "args": [
+    "-test.list=."
+  ],
+  "started_utc": "2026-11-28T14:40:56.759451Z",
+  "finished_utc": "2026-11-28T14:40:57.8494513Z",
+  "root": {
+    "Known": true,
+    "PID": 473724,
+    "StartedAt": "2026-11-28T14:40:56.7844627Z",
+    "NativeBirthFILETIME": 134403504567844627
+  },
+  "native": {
+    "RootIdentity": {
+      "Known": true,
+      "PID": 473724,
+      "StartedAt": "2026-11-28T14:40:56.7844627Z",
+      "NativeBirthFILETIME": 134403504567844627
+    },
+    "NoChildKnown": false,
+    "RootWaitKnown": true,
+    "RootExitCode": 0,
+    "TerminalAction": "not-requested",
+    "MembersExited": true,
+    "AccountingKnown": true,
+    "InitialTotal": 1,
+    "FinalActive": 0,
+    "CapturedMemberPIDs": null,
+    "HandlesClosed": true,
+    "Error": null
+  },
+  "io": {
+    "Stdin": {
+      "Acquired": true,
+      "CloseAttempted": true,
+      "Closed": true,
+      "CloseError": null
+    },
+    "StdoutRead": {
+      "Acquired": true,
+      "CloseAttempted": true,
+      "Closed": true,
+      "CloseError": null
+    },
+    "StdoutWrite": {
+      "Acquired": true,
+      "CloseAttempted": true,
+      "Closed": true,
+      "CloseError": null
+    },
+    "StderrRead": {
+      "Acquired": true,
+      "CloseAttempted": true,
+      "Closed": true,
+      "CloseError": null
+    },
+    "StderrWrite": {
+      "Acquired": true,
+      "CloseAttempted": true,
+      "Closed": true,
+      "CloseError": null
+    },
+    "Stdout": {
+      "WorkerStarted": true,
+      "WorkerComplete": true,
+      "EOF": true,
+      "Bytes": 183767,
+      "Limit": 16777216,
+      "LimitExceeded": false,
+      "Error": null
+    },
+    "Stderr": {
+      "WorkerStarted": true,
+      "WorkerComplete": true,
+      "EOF": true,
+      "Bytes": 0,
+      "Limit": 16777216,
+      "LimitExceeded": false,
+      "Error": null
+    }
+  },
+  "stage": "",
+  "root_wait_known": true,
+  "root_exit_code": 0,
+  "settlement_complete": true,
+  "inventory": true,
+  "work_deadline": "2026-11-28T14:42:31.759451Z",
+  "cleanup_deadline": "2026-11-28T14:42:41.759451Z",
+  "test_timeout": "1m30s",
+  "bootstrap_budget": "5s",
+  "binary_unchanged": true
+}

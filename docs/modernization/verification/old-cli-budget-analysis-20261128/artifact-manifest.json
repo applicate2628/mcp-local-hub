@@ -1,0 +1,34 @@
+{
+  "schema": "old-closed-cli-budget-artifact-manifest-v1",
+  "scope": "Historical Source727d DATA only; no Source59f qualification",
+  "files": {
+    ".gitattributes": {
+      "bytes": 8,
+      "sha256": "705fd4d6451a31d36b3df7de96f83f30ac976c9b4a6d1e51671d8e2f33e2d0da"
+    },
+    "README.md": {
+      "bytes": 18843,
+      "sha256": "6ba57460c3a545340968d6c2ef9b3a7d186061af6e87004973ca591423783518"
+    },
+    "analysis.json": {
+      "bytes": 11895,
+      "sha256": "6d0e7b807fc54c73bf6563f3dd564d92cab42701e68dd2d25126e39377089290"
+    },
+    "not-started-or-paused.json": {
+      "bytes": 25072,
+      "sha256": "4b003070cc1220978155c901a5b7aee870dcda199dc5182ef093f42bd3d8a1fa"
+    },
+    "parse_closed_cli_durations.py": {
+      "bytes": 9156,
+      "sha256": "4d5422763fc3a3f55fd52bc14506aa10fb669c8b3eb491661e593696e7db6414"
+    },
+    "source-correspondence.json": {
+      "bytes": 5104,
+      "sha256": "a9405b3b2a522fba4400cee65e096ccebe2f3c015af84b4663a2bfb64cf5063e"
+    },
+    "top-level-terminal-ledger.json": {
+      "bytes": 456870,
+      "sha256": "6a687a7e45efcf069e46e0bbafd36edcf09247e8f09e49467c59278925c34ea8"
+    }
+  }
+}

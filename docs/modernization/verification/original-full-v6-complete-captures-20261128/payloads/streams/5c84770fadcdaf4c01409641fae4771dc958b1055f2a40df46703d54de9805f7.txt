@@ -1,0 +1,844 @@
+=== RUN   TestWalkPortfileDefersPatchesInsideUnsupportedLoops
+--- PASS: TestWalkPortfileDefersPatchesInsideUnsupportedLoops (0.00s)
+=== NAME  
+=== RUN   TestParseTripletFactsRejectsMismatchedControlFlow
+--- PASS: TestParseTripletFactsRejectsMismatchedControlFlow (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_UnreadablePatchPath_NotReportedAsMissing
+--- PASS: TestApplyOrder_UnreadablePatchPath_NotReportedAsMissing (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_GenuinelyAbsentPatchStillMissing
+--- PASS: TestApplyOrder_GenuinelyAbsentPatchStillMissing (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_UnreadableOrphanDir_ReportsIncompleteScan
+--- PASS: TestApplyOrder_UnreadableOrphanDir_ReportsIncompleteScan (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_UnreadableTripletFile_ReportsUnknown
+=== RUN   TestApplyOrder_UnreadableTripletFile_ReportsUnknown/parser_stop_retains_triplet_evidence_and_precedence
+--- PASS: TestApplyOrder_UnreadableTripletFile_ReportsUnknown/parser_stop_retains_triplet_evidence_and_precedence (0.00s)
+=== NAME  TestApplyOrder_UnreadableTripletFile_ReportsUnknown
+--- PASS: TestApplyOrder_UnreadableTripletFile_ReportsUnknown (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_FlatLiteralList
+--- PASS: TestApplyOrder_FlatLiteralList (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_Python3StyleConditionalAccumulation
+=== RUN   TestApplyOrder_Python3StyleConditionalAccumulation/mingw_triplet
+--- PASS: TestApplyOrder_Python3StyleConditionalAccumulation/mingw_triplet (0.01s)
+=== NAME  TestApplyOrder_Python3StyleConditionalAccumulation
+=== RUN   TestApplyOrder_Python3StyleConditionalAccumulation/windows_non_mingw_triplet
+--- PASS: TestApplyOrder_Python3StyleConditionalAccumulation/windows_non_mingw_triplet (0.41s)
+=== NAME  TestApplyOrder_Python3StyleConditionalAccumulation
+=== RUN   TestApplyOrder_Python3StyleConditionalAccumulation/static_triplet
+--- PASS: TestApplyOrder_Python3StyleConditionalAccumulation/static_triplet (0.01s)
+=== NAME  TestApplyOrder_Python3StyleConditionalAccumulation
+--- PASS: TestApplyOrder_Python3StyleConditionalAccumulation (0.42s)
+=== NAME  
+=== RUN   TestApplyOrder_NonliteralSetListThenAppend_LibmysqlShape
+--- PASS: TestApplyOrder_NonliteralSetListThenAppend_LibmysqlShape (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_NestedCrossCompilingPicksExactlyOne
+=== RUN   TestApplyOrder_NestedCrossCompilingPicksExactlyOne/crosscompiling_on
+--- PASS: TestApplyOrder_NestedCrossCompilingPicksExactlyOne/crosscompiling_on (0.00s)
+=== NAME  TestApplyOrder_NestedCrossCompilingPicksExactlyOne
+=== RUN   TestApplyOrder_NestedCrossCompilingPicksExactlyOne/crosscompiling_off
+--- PASS: TestApplyOrder_NestedCrossCompilingPicksExactlyOne/crosscompiling_off (0.00s)
+=== NAME  TestApplyOrder_NestedCrossCompilingPicksExactlyOne
+--- PASS: TestApplyOrder_NestedCrossCompilingPicksExactlyOne (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_PathResolvedOutsidePortDir_LicensePPShape
+=== RUN   TestApplyOrder_PathResolvedOutsidePortDir_LicensePPShape/unresolvable_without_vcpkg_root
+--- PASS: TestApplyOrder_PathResolvedOutsidePortDir_LicensePPShape/unresolvable_without_vcpkg_root (0.00s)
+=== NAME  TestApplyOrder_PathResolvedOutsidePortDir_LicensePPShape
+--- PASS: TestApplyOrder_PathResolvedOutsidePortDir_LicensePPShape (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_AllCapsExtensionlessPatchIsNotDropped
+--- PASS: TestApplyOrder_AllCapsExtensionlessPatchIsNotDropped (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_BracketArgumentOpeningNewlineIgnored
+--- PASS: TestApplyOrder_BracketArgumentOpeningNewlineIgnored (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_OrphanedFile
+--- PASS: TestApplyOrder_OrphanedFile (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_OrphanedNestedFile
+--- PASS: TestApplyOrder_OrphanedNestedFile (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_MissingReferencedPatch
+--- PASS: TestApplyOrder_MissingReferencedPatch (0.00s)
+=== NAME  
+=== RUN   TestR26OnlyDefinitelyAppliedAbsentPatchIsMissing
+=== RUN   TestR26OnlyDefinitelyAppliedAbsentPatchIsMissing/false_guard
+--- PASS: TestR26OnlyDefinitelyAppliedAbsentPatchIsMissing/false_guard (0.00s)
+=== NAME  TestR26OnlyDefinitelyAppliedAbsentPatchIsMissing
+=== RUN   TestR26OnlyDefinitelyAppliedAbsentPatchIsMissing/unknown_guard
+--- PASS: TestR26OnlyDefinitelyAppliedAbsentPatchIsMissing/unknown_guard (0.00s)
+=== NAME  TestR26OnlyDefinitelyAppliedAbsentPatchIsMissing
+--- PASS: TestR26OnlyDefinitelyAppliedAbsentPatchIsMissing (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_DiffExtension
+--- PASS: TestApplyOrder_DiffExtension (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_NoPatchesDeclared_NetgenShape
+--- PASS: TestApplyOrder_NoPatchesDeclared_NetgenShape (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_UnresolvableGuard_Undecidable
+--- PASS: TestApplyOrder_UnresolvableGuard_Undecidable (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_EmptyPortDir_Failed
+--- PASS: TestApplyOrder_EmptyPortDir_Failed (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_EmptyTriplet_Failed
+--- PASS: TestApplyOrder_EmptyTriplet_Failed (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_PortDirMissing_Unknown
+--- PASS: TestApplyOrder_PortDirMissing_Unknown (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_PortfileUnreadable_Unknown
+--- PASS: TestApplyOrder_PortfileUnreadable_Unknown (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_UnbalancedParens_Unparsable
+--- PASS: TestApplyOrder_UnbalancedParens_Unparsable (0.00s)
+=== NAME  
+=== RUN   TestKleeneLogic_TruthTables
+=== RUN   TestKleeneLogic_TruthTables/and_true_true
+--- PASS: TestKleeneLogic_TruthTables/and_true_true (0.00s)
+=== NAME  TestKleeneLogic_TruthTables
+=== RUN   TestKleeneLogic_TruthTables/and_true_false
+--- PASS: TestKleeneLogic_TruthTables/and_true_false (0.00s)
+=== NAME  TestKleeneLogic_TruthTables
+=== RUN   TestKleeneLogic_TruthTables/and_unknown_false
+--- PASS: TestKleeneLogic_TruthTables/and_unknown_false (0.00s)
+=== NAME  TestKleeneLogic_TruthTables
+=== RUN   TestKleeneLogic_TruthTables/and_unknown_true
+--- PASS: TestKleeneLogic_TruthTables/and_unknown_true (0.00s)
+=== NAME  TestKleeneLogic_TruthTables
+=== RUN   TestKleeneLogic_TruthTables/and_unknown_unknown
+--- PASS: TestKleeneLogic_TruthTables/and_unknown_unknown (0.00s)
+=== NAME  TestKleeneLogic_TruthTables
+=== RUN   TestKleeneLogic_TruthTables/or_false_false
+--- PASS: TestKleeneLogic_TruthTables/or_false_false (0.00s)
+=== NAME  TestKleeneLogic_TruthTables
+=== RUN   TestKleeneLogic_TruthTables/or_unknown_true
+--- PASS: TestKleeneLogic_TruthTables/or_unknown_true (0.00s)
+=== NAME  TestKleeneLogic_TruthTables
+=== RUN   TestKleeneLogic_TruthTables/or_unknown_false
+--- PASS: TestKleeneLogic_TruthTables/or_unknown_false (0.00s)
+=== NAME  TestKleeneLogic_TruthTables
+=== RUN   TestKleeneLogic_TruthTables/not_true
+--- PASS: TestKleeneLogic_TruthTables/not_true (0.00s)
+=== NAME  TestKleeneLogic_TruthTables
+=== RUN   TestKleeneLogic_TruthTables/not_unknown
+--- PASS: TestKleeneLogic_TruthTables/not_unknown (0.00s)
+=== NAME  TestKleeneLogic_TruthTables
+--- PASS: TestKleeneLogic_TruthTables (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_BracketCommentDecoyIgnored
+--- PASS: TestApplyOrder_BracketCommentDecoyIgnored (0.00s)
+=== NAME  
+=== RUN   TestTokenize_BracketArgument_LiteralDoubleCloseBracketNotTerminator
+--- PASS: TestTokenize_BracketArgument_LiteralDoubleCloseBracketNotTerminator (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_BracketArgumentNeverExpanded
+--- PASS: TestApplyOrder_BracketArgumentNeverExpanded (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_QuotedArgumentLineContinuation
+--- PASS: TestApplyOrder_QuotedArgumentLineContinuation (0.00s)
+=== NAME  
+=== RUN   TestUnescapeQuoted_EncodedEscapesAndContinuation
+--- PASS: TestUnescapeQuoted_EncodedEscapesAndContinuation (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_CustomTripletFileEstablishesLinkage
+--- PASS: TestApplyOrder_CustomTripletFileEstablishesLinkage (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_NoTripletFile_LeavesGuardUndecidable
+--- PASS: TestApplyOrder_NoTripletFile_LeavesGuardUndecidable (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_VarOverridesStillWinOverTripletFile
+--- PASS: TestApplyOrder_VarOverridesStillWinOverTripletFile (0.00s)
+=== NAME  
+=== RUN   TestParseTripletFacts_ConditionalSetIsNotAFact
+--- PASS: TestParseTripletFacts_ConditionalSetIsNotAFact (0.00s)
+=== NAME  
+=== RUN   TestParseTripletFacts_UnresolvedExpansionIsDropped
+--- PASS: TestParseTripletFacts_UnresolvedExpansionIsDropped (0.00s)
+=== NAME  
+=== RUN   TestResolveTripletFile_OverlayPrecedesBuiltin
+--- PASS: TestResolveTripletFile_OverlayPrecedesBuiltin (0.00s)
+=== NAME  
+=== RUN   TestResolveTripletFile_TraversingNameFindsNothing
+--- PASS: TestResolveTripletFile_TraversingNameFindsNothing (0.00s)
+=== NAME  
+=== RUN   TestApplyOrder_RelativeOverlayTripletIsTerminal
+--- PASS: TestApplyOrder_RelativeOverlayTripletIsTerminal (0.00s)
+=== NAME  
+=== RUN   TestConditionallyAssignedScalarKeepsItsUnknownGuard
+--- PASS: TestConditionallyAssignedScalarKeepsItsUnknownGuard (0.00s)
+=== NAME  
+=== RUN   TestUnconditionallyAssignedScalarStillApplies
+--- PASS: TestUnconditionallyAssignedScalarStillApplies (0.00s)
+=== NAME  
+=== RUN   TestUnconditionalReassignmentClearsAPriorConditionalTaint
+--- PASS: TestUnconditionalReassignmentClearsAPriorConditionalTaint (0.00s)
+=== NAME  
+=== RUN   TestUpperCaseIfIsAGuardNotAnOrdinaryCall
+--- PASS: TestUpperCaseIfIsAGuardNotAnOrdinaryCall (0.00s)
+=== NAME  
+=== RUN   TestRelativePortDirIsRefusedNotBoundToTheDaemonWorkingDirectory
+--- PASS: TestRelativePortDirIsRefusedNotBoundToTheDaemonWorkingDirectory (0.00s)
+=== NAME  
+=== RUN   TestCompareVersionsMatchesCMakeComponentSemantics
+=== RUN   TestCompareVersionsMatchesCMakeComponentSemantics/omitted_component_is_zero
+--- PASS: TestCompareVersionsMatchesCMakeComponentSemantics/omitted_component_is_zero (0.00s)
+=== NAME  TestCompareVersionsMatchesCMakeComponentSemantics
+=== RUN   TestCompareVersionsMatchesCMakeComponentSemantics/non-integer_tail_truncates
+--- PASS: TestCompareVersionsMatchesCMakeComponentSemantics/non-integer_tail_truncates (0.00s)
+=== NAME  TestCompareVersionsMatchesCMakeComponentSemantics
+=== RUN   TestCompareVersionsMatchesCMakeComponentSemantics/truncated_side_has_zero_later_component
+--- PASS: TestCompareVersionsMatchesCMakeComponentSemantics/truncated_side_has_zero_later_component (0.00s)
+=== NAME  TestCompareVersionsMatchesCMakeComponentSemantics
+=== RUN   TestCompareVersionsMatchesCMakeComponentSemantics/components_past_tweak_follow_CMake_runtime
+--- PASS: TestCompareVersionsMatchesCMakeComponentSemantics/components_past_tweak_follow_CMake_runtime (0.00s)
+=== NAME  TestCompareVersionsMatchesCMakeComponentSemantics
+=== RUN   TestCompareVersionsMatchesCMakeComponentSemantics/huge_integer_component_does_not_overflow
+--- PASS: TestCompareVersionsMatchesCMakeComponentSemantics/huge_integer_component_does_not_overflow (0.00s)
+=== NAME  TestCompareVersionsMatchesCMakeComponentSemantics
+=== RUN   TestCompareVersionsMatchesCMakeComponentSemantics/leading_zeros_are_ignored
+--- PASS: TestCompareVersionsMatchesCMakeComponentSemantics/leading_zeros_are_ignored (0.00s)
+=== NAME  TestCompareVersionsMatchesCMakeComponentSemantics
+=== RUN   TestCompareVersionsMatchesCMakeComponentSemantics/non-integer_first_component_truncates_to_zero
+--- PASS: TestCompareVersionsMatchesCMakeComponentSemantics/non-integer_first_component_truncates_to_zero (0.00s)
+=== NAME  TestCompareVersionsMatchesCMakeComponentSemantics
+--- PASS: TestCompareVersionsMatchesCMakeComponentSemantics (0.00s)
+=== NAME  
+=== RUN   TestEveryVersionComparisonOperatorUsesCMakeOrdering
+=== RUN   TestEveryVersionComparisonOperatorUsesCMakeOrdering/VERSION_EQUAL
+--- PASS: TestEveryVersionComparisonOperatorUsesCMakeOrdering/VERSION_EQUAL (0.00s)
+=== NAME  TestEveryVersionComparisonOperatorUsesCMakeOrdering
+=== RUN   TestEveryVersionComparisonOperatorUsesCMakeOrdering/VERSION_GREATER
+--- PASS: TestEveryVersionComparisonOperatorUsesCMakeOrdering/VERSION_GREATER (0.00s)
+=== NAME  TestEveryVersionComparisonOperatorUsesCMakeOrdering
+=== RUN   TestEveryVersionComparisonOperatorUsesCMakeOrdering/VERSION_GREATER_EQUAL
+--- PASS: TestEveryVersionComparisonOperatorUsesCMakeOrdering/VERSION_GREATER_EQUAL (0.00s)
+=== NAME  TestEveryVersionComparisonOperatorUsesCMakeOrdering
+=== RUN   TestEveryVersionComparisonOperatorUsesCMakeOrdering/VERSION_LESS
+--- PASS: TestEveryVersionComparisonOperatorUsesCMakeOrdering/VERSION_LESS (0.00s)
+=== NAME  TestEveryVersionComparisonOperatorUsesCMakeOrdering
+=== RUN   TestEveryVersionComparisonOperatorUsesCMakeOrdering/VERSION_LESS_EQUAL
+--- PASS: TestEveryVersionComparisonOperatorUsesCMakeOrdering/VERSION_LESS_EQUAL (0.00s)
+=== NAME  TestEveryVersionComparisonOperatorUsesCMakeOrdering
+--- PASS: TestEveryVersionComparisonOperatorUsesCMakeOrdering (0.00s)
+=== NAME  
+=== RUN   TestUnreadablePortDirIsDistinctFromAMissingOne
+--- PASS: TestUnreadablePortDirIsDistinctFromAMissingOne (0.00s)
+=== NAME  
+=== RUN   TestAbsentPortDirStillReportsMissing
+--- PASS: TestAbsentPortDirStillReportsMissing (0.00s)
+=== NAME  
+=== RUN   TestPR591_PortfileReadStopsAtPackageByteCap
+--- PASS: TestPR591_PortfileReadStopsAtPackageByteCap (0.00s)
+=== NAME  
+=== RUN   TestCurrentHeadControlFlowAndValueRegressionsFailClosed
+=== RUN   TestCurrentHeadControlFlowAndValueRegressionsFailClosed/orphaned_conditional_markers
+--- PASS: TestCurrentHeadControlFlowAndValueRegressionsFailClosed/orphaned_conditional_markers (0.00s)
+=== NAME  TestCurrentHeadControlFlowAndValueRegressionsFailClosed
+=== RUN   TestCurrentHeadControlFlowAndValueRegressionsFailClosed/unsupported_list_mutation_taints_prior_binding
+--- PASS: TestCurrentHeadControlFlowAndValueRegressionsFailClosed/unsupported_list_mutation_taints_prior_binding (0.00s)
+=== NAME  TestCurrentHeadControlFlowAndValueRegressionsFailClosed
+=== RUN   TestCurrentHeadControlFlowAndValueRegressionsFailClosed/numeric_zero_spellings_are_false
+--- PASS: TestCurrentHeadControlFlowAndValueRegressionsFailClosed/numeric_zero_spellings_are_false (0.00s)
+=== NAME  TestCurrentHeadControlFlowAndValueRegressionsFailClosed
+--- PASS: TestCurrentHeadControlFlowAndValueRegressionsFailClosed (0.00s)
+=== NAME  
+=== RUN   TestOrphanScanRejectsSymlinkDirectoryAsIncomplete
+--- PASS: TestOrphanScanRejectsSymlinkDirectoryAsIncomplete (0.00s)
+=== NAME  
+=== RUN   TestPR591_OrphanScanBudgetsAndCancellationAreBounded
+=== RUN   TestPR591_OrphanScanBudgetsAndCancellationAreBounded/entry_limit
+--- PASS: TestPR591_OrphanScanBudgetsAndCancellationAreBounded/entry_limit (0.00s)
+=== NAME  TestPR591_OrphanScanBudgetsAndCancellationAreBounded
+=== RUN   TestPR591_OrphanScanBudgetsAndCancellationAreBounded/cancellation
+--- PASS: TestPR591_OrphanScanBudgetsAndCancellationAreBounded/cancellation (0.00s)
+=== NAME  TestPR591_OrphanScanBudgetsAndCancellationAreBounded
+--- PASS: TestPR591_OrphanScanBudgetsAndCancellationAreBounded (0.00s)
+=== NAME  
+=== RUN   TestPR591_DeferredFunctionAndMacroPatchesAreNotExecuted
+--- PASS: TestPR591_DeferredFunctionAndMacroPatchesAreNotExecuted (0.00s)
+=== NAME  
+=== RUN   TestPR591_CMakeListTokenSemanticsForPatchEntries
+--- PASS: TestPR591_CMakeListTokenSemanticsForPatchEntries (0.00s)
+=== NAME  
+=== RUN   TestPR591_CMakeListBackslashAndBracketBalanceMatchesCMake440
+=== RUN   TestPR591_CMakeListBackslashAndBracketBalanceMatchesCMake440/one_direct_backslash
+--- PASS: TestPR591_CMakeListBackslashAndBracketBalanceMatchesCMake440/one_direct_backslash (0.00s)
+=== NAME  TestPR591_CMakeListBackslashAndBracketBalanceMatchesCMake440
+=== RUN   TestPR591_CMakeListBackslashAndBracketBalanceMatchesCMake440/two_direct_backslashes
+--- PASS: TestPR591_CMakeListBackslashAndBracketBalanceMatchesCMake440/two_direct_backslashes (0.00s)
+=== NAME  TestPR591_CMakeListBackslashAndBracketBalanceMatchesCMake440
+=== RUN   TestPR591_CMakeListBackslashAndBracketBalanceMatchesCMake440/three_direct_backslashes
+--- PASS: TestPR591_CMakeListBackslashAndBracketBalanceMatchesCMake440/three_direct_backslashes (0.00s)
+=== NAME  TestPR591_CMakeListBackslashAndBracketBalanceMatchesCMake440
+=== RUN   TestPR591_CMakeListBackslashAndBracketBalanceMatchesCMake440/four_direct_backslashes
+--- PASS: TestPR591_CMakeListBackslashAndBracketBalanceMatchesCMake440/four_direct_backslashes (0.00s)
+=== NAME  TestPR591_CMakeListBackslashAndBracketBalanceMatchesCMake440
+=== RUN   TestPR591_CMakeListBackslashAndBracketBalanceMatchesCMake440/one_serialized_backslash
+--- PASS: TestPR591_CMakeListBackslashAndBracketBalanceMatchesCMake440/one_serialized_backslash (0.00s)
+=== NAME  TestPR591_CMakeListBackslashAndBracketBalanceMatchesCMake440
+=== RUN   TestPR591_CMakeListBackslashAndBracketBalanceMatchesCMake440/two_serialized_backslashes
+--- PASS: TestPR591_CMakeListBackslashAndBracketBalanceMatchesCMake440/two_serialized_backslashes (0.00s)
+=== NAME  TestPR591_CMakeListBackslashAndBracketBalanceMatchesCMake440
+=== RUN   TestPR591_CMakeListBackslashAndBracketBalanceMatchesCMake440/three_serialized_backslashes
+--- PASS: TestPR591_CMakeListBackslashAndBracketBalanceMatchesCMake440/three_serialized_backslashes (0.00s)
+=== NAME  TestPR591_CMakeListBackslashAndBracketBalanceMatchesCMake440
+--- PASS: TestPR591_CMakeListBackslashAndBracketBalanceMatchesCMake440 (0.00s)
+=== NAME  
+=== RUN   TestPR591_ExactVariableCopyResplitsAndPreservesGuardProvenance
+--- PASS: TestPR591_ExactVariableCopyResplitsAndPreservesGuardProvenance (0.00s)
+=== NAME  
+=== RUN   TestPR591_DeclaredInvocationPatchesForwardingFailsClosed
+--- PASS: TestPR591_DeclaredInvocationPatchesForwardingFailsClosed (0.01s)
+=== NAME  
+=== RUN   TestPR591_NestedVariableNameAndPatchValueResolve
+--- PASS: TestPR591_NestedVariableNameAndPatchValueResolve (0.00s)
+=== NAME  
+=== RUN   TestPR591_BalancedReferenceScannerFailsClosed
+=== RUN   TestPR591_BalancedReferenceScannerFailsClosed/literal
+--- PASS: TestPR591_BalancedReferenceScannerFailsClosed/literal (0.00s)
+=== NAME  TestPR591_BalancedReferenceScannerFailsClosed
+=== RUN   TestPR591_BalancedReferenceScannerFailsClosed/${NAME}
+--- PASS: TestPR591_BalancedReferenceScannerFailsClosed/${NAME} (0.00s)
+=== NAME  TestPR591_BalancedReferenceScannerFailsClosed
+=== RUN   TestPR591_BalancedReferenceScannerFailsClosed/pre${${NAME}}post
+--- PASS: TestPR591_BalancedReferenceScannerFailsClosed/pre${${NAME}}post (0.00s)
+=== NAME  TestPR591_BalancedReferenceScannerFailsClosed
+=== RUN   TestPR591_BalancedReferenceScannerFailsClosed/pre${$ENV{${ENV_NAME}}}post
+--- PASS: TestPR591_BalancedReferenceScannerFailsClosed/pre${$ENV{${ENV_NAME}}}post (0.00s)
+=== NAME  TestPR591_BalancedReferenceScannerFailsClosed
+=== RUN   TestPR591_BalancedReferenceScannerFailsClosed/$ENV{${ENV_NAME}}
+--- PASS: TestPR591_BalancedReferenceScannerFailsClosed/$ENV{${ENV_NAME}} (0.00s)
+=== NAME  TestPR591_BalancedReferenceScannerFailsClosed
+=== RUN   TestPR591_BalancedReferenceScannerFailsClosed/$ENV{$ENV{VCPKG_ROOT}}
+--- PASS: TestPR591_BalancedReferenceScannerFailsClosed/$ENV{$ENV{VCPKG_ROOT}} (0.00s)
+=== NAME  TestPR591_BalancedReferenceScannerFailsClosed
+=== RUN   TestPR591_BalancedReferenceScannerFailsClosed/pre${NAME}post
+--- PASS: TestPR591_BalancedReferenceScannerFailsClosed/pre${NAME}post (0.00s)
+=== NAME  TestPR591_BalancedReferenceScannerFailsClosed
+=== RUN   TestPR591_BalancedReferenceScannerFailsClosed/${${NAME}
+--- PASS: TestPR591_BalancedReferenceScannerFailsClosed/${${NAME} (0.00s)
+=== NAME  TestPR591_BalancedReferenceScannerFailsClosed
+=== RUN   TestPR591_BalancedReferenceScannerFailsClosed/${$ENV{${ENV_NAME}}
+--- PASS: TestPR591_BalancedReferenceScannerFailsClosed/${$ENV{${ENV_NAME}} (0.00s)
+=== NAME  TestPR591_BalancedReferenceScannerFailsClosed
+=== RUN   TestPR591_BalancedReferenceScannerFailsClosed/$ENV{VCPKG_ROOT
+--- PASS: TestPR591_BalancedReferenceScannerFailsClosed/$ENV{VCPKG_ROOT (0.00s)
+=== NAME  TestPR591_BalancedReferenceScannerFailsClosed
+--- PASS: TestPR591_BalancedReferenceScannerFailsClosed (0.00s)
+=== NAME  
+=== RUN   TestPR591_EnvironmentReferenceNamesShareResolutionState
+=== RUN   TestPR591_EnvironmentReferenceNamesShareResolutionState/depth_32
+--- PASS: TestPR591_EnvironmentReferenceNamesShareResolutionState/depth_32 (0.00s)
+=== NAME  TestPR591_EnvironmentReferenceNamesShareResolutionState
+=== RUN   TestPR591_EnvironmentReferenceNamesShareResolutionState/depth_33
+--- PASS: TestPR591_EnvironmentReferenceNamesShareResolutionState/depth_33 (0.00s)
+=== NAME  TestPR591_EnvironmentReferenceNamesShareResolutionState
+=== RUN   TestPR591_EnvironmentReferenceNamesShareResolutionState/mixed_depth_32
+--- PASS: TestPR591_EnvironmentReferenceNamesShareResolutionState/mixed_depth_32 (0.00s)
+=== NAME  TestPR591_EnvironmentReferenceNamesShareResolutionState
+=== RUN   TestPR591_EnvironmentReferenceNamesShareResolutionState/mixed_depth_33
+--- PASS: TestPR591_EnvironmentReferenceNamesShareResolutionState/mixed_depth_33 (0.00s)
+=== NAME  TestPR591_EnvironmentReferenceNamesShareResolutionState
+--- PASS: TestPR591_EnvironmentReferenceNamesShareResolutionState (0.00s)
+=== NAME  
+=== RUN   TestPR591_SharedReferenceDepthBudget
+--- PASS: TestPR591_SharedReferenceDepthBudget (0.00s)
+=== NAME  
+=== RUN   TestPR591_NestedSelectorProvenanceMerge
+--- PASS: TestPR591_NestedSelectorProvenanceMerge (0.00s)
+=== NAME  
+=== RUN   TestPR591_ExactReferenceShapeControlsDisplay
+=== RUN   TestPR591_ExactReferenceShapeControlsDisplay/${X}
+--- PASS: TestPR591_ExactReferenceShapeControlsDisplay/${X} (0.00s)
+=== NAME  TestPR591_ExactReferenceShapeControlsDisplay
+=== RUN   TestPR591_ExactReferenceShapeControlsDisplay/${${NAME}}
+--- PASS: TestPR591_ExactReferenceShapeControlsDisplay/${${NAME}} (0.00s)
+=== NAME  TestPR591_ExactReferenceShapeControlsDisplay
+=== RUN   TestPR591_ExactReferenceShapeControlsDisplay/${X}${X}
+--- PASS: TestPR591_ExactReferenceShapeControlsDisplay/${X}${X} (0.00s)
+=== NAME  TestPR591_ExactReferenceShapeControlsDisplay
+=== RUN   TestPR591_ExactReferenceShapeControlsDisplay/${X}suffix
+--- PASS: TestPR591_ExactReferenceShapeControlsDisplay/${X}suffix (0.00s)
+=== NAME  TestPR591_ExactReferenceShapeControlsDisplay
+=== RUN   TestPR591_ExactReferenceShapeControlsDisplay/prefix${X}
+--- PASS: TestPR591_ExactReferenceShapeControlsDisplay/prefix${X} (0.00s)
+=== NAME  TestPR591_ExactReferenceShapeControlsDisplay
+=== RUN   TestPR591_ExactReferenceShapeControlsDisplay/"${X}"
+--- PASS: TestPR591_ExactReferenceShapeControlsDisplay/"${X}" (0.00s)
+=== NAME  TestPR591_ExactReferenceShapeControlsDisplay
+=== RUN   TestPR591_ExactReferenceShapeControlsDisplay/[=[${X}]=]
+--- PASS: TestPR591_ExactReferenceShapeControlsDisplay/[=[${X}]=] (0.00s)
+=== NAME  TestPR591_ExactReferenceShapeControlsDisplay
+--- PASS: TestPR591_ExactReferenceShapeControlsDisplay (0.00s)
+=== NAME  
+=== RUN   TestPR591_CMakeLanguageCallClassificationFailsClosed
+--- PASS: TestPR591_CMakeLanguageCallClassificationFailsClosed (0.02s)
+=== NAME  
+=== RUN   TestPR591_NestedExpansionFailuresFailClosed
+=== RUN   TestPR591_NestedExpansionFailuresFailClosed/cycle
+--- PASS: TestPR591_NestedExpansionFailuresFailClosed/cycle (0.00s)
+=== NAME  TestPR591_NestedExpansionFailuresFailClosed
+=== RUN   TestPR591_NestedExpansionFailuresFailClosed/unknown_nested_name
+--- PASS: TestPR591_NestedExpansionFailuresFailClosed/unknown_nested_name (0.00s)
+=== NAME  TestPR591_NestedExpansionFailuresFailClosed
+=== RUN   TestPR591_NestedExpansionFailuresFailClosed/environment_nested_name_clears_first_issue
+--- PASS: TestPR591_NestedExpansionFailuresFailClosed/environment_nested_name_clears_first_issue (0.00s)
+=== NAME  TestPR591_NestedExpansionFailuresFailClosed
+=== RUN   TestPR591_NestedExpansionFailuresFailClosed/stored_set_and_list_issues
+--- PASS: TestPR591_NestedExpansionFailuresFailClosed/stored_set_and_list_issues (0.00s)
+=== NAME  TestPR591_NestedExpansionFailuresFailClosed
+=== RUN   TestPR591_NestedExpansionFailuresFailClosed/unused_stored_issue_remains_inert
+--- PASS: TestPR591_NestedExpansionFailuresFailClosed/unused_stored_issue_remains_inert (0.00s)
+=== NAME  TestPR591_NestedExpansionFailuresFailClosed
+=== RUN   TestPR591_NestedExpansionFailuresFailClosed/depth_boundary
+--- PASS: TestPR591_NestedExpansionFailuresFailClosed/depth_boundary (0.00s)
+=== NAME  TestPR591_NestedExpansionFailuresFailClosed
+=== RUN   TestPR591_NestedExpansionFailuresFailClosed/expanded_byte_budget
+--- PASS: TestPR591_NestedExpansionFailuresFailClosed/expanded_byte_budget (0.15s)
+=== NAME  TestPR591_NestedExpansionFailuresFailClosed
+--- PASS: TestPR591_NestedExpansionFailuresFailClosed (0.16s)
+=== NAME  
+=== RUN   TestTripletReadBoundaryNAndNPlusOne
+--- PASS: TestTripletReadBoundaryNAndNPlusOne (0.00s)
+=== NAME  
+=== RUN   TestWalkPortfileRejectsUnclosedIfFunctionAndMacro
+--- PASS: TestWalkPortfileRejectsUnclosedIfFunctionAndMacro (0.00s)
+=== NAME  
+=== RUN   TestApplyOrderUnclosedScopeStopsBeforePatchAndOrphanProbes
+=== RUN   TestApplyOrderUnclosedScopeStopsBeforePatchAndOrphanProbes/if
+--- PASS: TestApplyOrderUnclosedScopeStopsBeforePatchAndOrphanProbes/if (0.00s)
+=== NAME  TestApplyOrderUnclosedScopeStopsBeforePatchAndOrphanProbes
+=== RUN   TestApplyOrderUnclosedScopeStopsBeforePatchAndOrphanProbes/function
+--- PASS: TestApplyOrderUnclosedScopeStopsBeforePatchAndOrphanProbes/function (0.00s)
+=== NAME  TestApplyOrderUnclosedScopeStopsBeforePatchAndOrphanProbes
+=== RUN   TestApplyOrderUnclosedScopeStopsBeforePatchAndOrphanProbes/macro
+--- PASS: TestApplyOrderUnclosedScopeStopsBeforePatchAndOrphanProbes/macro (0.00s)
+=== NAME  TestApplyOrderUnclosedScopeStopsBeforePatchAndOrphanProbes
+--- PASS: TestApplyOrderUnclosedScopeStopsBeforePatchAndOrphanProbes (0.00s)
+=== NAME  
+=== RUN   TestPR591_MalformedBracketFailsClosed
+--- PASS: TestPR591_MalformedBracketFailsClosed (0.00s)
+=== NAME  
+=== RUN   TestPR591_PatchesProjectionBoundsOversizedIdentity
+--- PASS: TestPR591_PatchesProjectionBoundsOversizedIdentity (0.00s)
+=== NAME  
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-00
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-00 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-01
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-01 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-02
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-02 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-03
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-03 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-04
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-04 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-05
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-05 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-06
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-06 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-07
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-07 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-08
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-08 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-09
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-09 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-10
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-10 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-11
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-11 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-12
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-12 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-13
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-13 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-14
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-14 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-15
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-15 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-16
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-16 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-17
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-17 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-18
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-18 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-19
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-19 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-20
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-20 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-21
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-21 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-22
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-22 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-23
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-23 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-24
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-24 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-25
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-25 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-26
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-26 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-27
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-27 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-28
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-28 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-29
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-29 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-30
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-30 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-31
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-31 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-32
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-32 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-33
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-33 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-34
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-34 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-35
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-35 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-36
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-36 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-37
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-37 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-38
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-38 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-39
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-39 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-40
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-40 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-41
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-41 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-42
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-42 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-43
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-43 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-44
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-44 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-45
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-45 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-46
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-46 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-47
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-47 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-48
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-48 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-49
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-49 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-50
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-50 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-51
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-51 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-52
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-52 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-53
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-53 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-54
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-54 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-55
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-55 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-56
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-56 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-57
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-57 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-58
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-58 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-59
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-59 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-60
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-60 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-61
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-61 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-62
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-62 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+=== RUN   TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-63
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall/relative-overlay-63 (0.00s)
+=== NAME  TestTripletRootChainAdmissionPrecedesEveryFilesystemCall
+--- PASS: TestTripletRootChainAdmissionPrecedesEveryFilesystemCall (0.00s)
+=== NAME  
+=== RUN   TestR16WalkStopsAfterDefinitelyActiveReturn
+--- PASS: TestR16WalkStopsAfterDefinitelyActiveReturn (0.00s)
+=== NAME  
+=== RUN   TestR16WalkFailsClosedAfterConditionallyActiveReturn
+--- PASS: TestR16WalkFailsClosedAfterConditionallyActiveReturn (0.00s)
+=== NAME  
+=== RUN   TestR16ApplyOrderReportsConditionalReturnUncertainty
+--- PASS: TestR16ApplyOrderReportsConditionalReturnUncertainty (0.00s)
+=== NAME  
+=== RUN   TestR16UnresolvedPatchIdentitySuppressesOrphanConclusions
+--- PASS: TestR16UnresolvedPatchIdentitySuppressesOrphanConclusions (0.00s)
+=== NAME  
+=== RUN   TestR17WalkRejectsDuplicateElseAndElseifAfterElse
+=== RUN   TestR17WalkRejectsDuplicateElseAndElseifAfterElse/duplicate_else
+--- PASS: TestR17WalkRejectsDuplicateElseAndElseifAfterElse/duplicate_else (0.00s)
+=== NAME  TestR17WalkRejectsDuplicateElseAndElseifAfterElse
+=== RUN   TestR17WalkRejectsDuplicateElseAndElseifAfterElse/elseif_after_else
+--- PASS: TestR17WalkRejectsDuplicateElseAndElseifAfterElse/elseif_after_else (0.00s)
+=== NAME  TestR17WalkRejectsDuplicateElseAndElseifAfterElse
+--- PASS: TestR17WalkRejectsDuplicateElseAndElseifAfterElse (0.00s)
+=== NAME  
+=== RUN   TestR17UnquotedEscapesRemainInsideOnePatchArgument
+--- PASS: TestR17UnquotedEscapesRemainInsideOnePatchArgument (0.00s)
+=== NAME  
+=== RUN   TestR17VarOverridesAreAdmittedBeforeFilesystemWork
+=== RUN   TestR17VarOverridesAreAdmittedBeforeFilesystemWork/name
+--- PASS: TestR17VarOverridesAreAdmittedBeforeFilesystemWork/name (0.00s)
+=== NAME  TestR17VarOverridesAreAdmittedBeforeFilesystemWork
+=== RUN   TestR17VarOverridesAreAdmittedBeforeFilesystemWork/value
+--- PASS: TestR17VarOverridesAreAdmittedBeforeFilesystemWork/value (0.00s)
+=== NAME  TestR17VarOverridesAreAdmittedBeforeFilesystemWork
+=== RUN   TestR17VarOverridesAreAdmittedBeforeFilesystemWork/aggregate
+--- PASS: TestR17VarOverridesAreAdmittedBeforeFilesystemWork/aggregate (0.00s)
+=== NAME  TestR17VarOverridesAreAdmittedBeforeFilesystemWork
+=== RUN   TestR17VarOverridesAreAdmittedBeforeFilesystemWork/count
+--- PASS: TestR17VarOverridesAreAdmittedBeforeFilesystemWork/count (0.00s)
+=== NAME  TestR17VarOverridesAreAdmittedBeforeFilesystemWork
+--- PASS: TestR17VarOverridesAreAdmittedBeforeFilesystemWork (0.00s)
+=== NAME  
+=== RUN   TestR18WalkIgnoresPatchesKeywordOutsideSourceHelpers
+--- PASS: TestR18WalkIgnoresPatchesKeywordOutsideSourceHelpers (0.00s)
+=== NAME  
+=== RUN   TestR18QuotedNonBooleanConditionIsFalse
+--- PASS: TestR18QuotedNonBooleanConditionIsFalse (0.00s)
+=== NAME  
+=== RUN   TestR19ExpandedUnquotedOperandIsReclassified
+--- PASS: TestR19ExpandedUnquotedOperandIsReclassified (0.00s)
+=== NAME  
+=== RUN   TestR20DeclarationTerminatorMustMatchOpener
+--- PASS: TestR20DeclarationTerminatorMustMatchOpener (0.00s)
+=== NAME  
+=== RUN   TestR20TripletUnsetInvalidatesFact
+--- PASS: TestR20TripletUnsetInvalidatesFact (0.00s)
+=== NAME  
+=== RUN   TestR21PortfileUnsetInvalidatesRetainedPatchVariable
+--- PASS: TestR21PortfileUnsetInvalidatesRetainedPatchVariable (0.00s)
+=== NAME  
+=== RUN   TestR21LogicalANDAndORShareLeftToRightPrecedence
+--- PASS: TestR21LogicalANDAndORShareLeftToRightPrecedence (0.00s)
+=== NAME  
+=== RUN   TestR21ConditionalTripletMutationInvalidatesEarlierFact
+--- PASS: TestR21ConditionalTripletMutationInvalidatesEarlierFact (0.00s)
+=== NAME  
+=== RUN   TestR22WalkRecognizesLegacyArchiveExtractionHelper
+--- PASS: TestR22WalkRecognizesLegacyArchiveExtractionHelper (0.00s)
+=== NAME  
+=== RUN   TestR22WalkBoundsExpandedPatchDeclarations
+--- PASS: TestR22WalkBoundsExpandedPatchDeclarations (0.29s)
+=== NAME  
+=== RUN   TestR22DeclarationLimitIsExposedWithoutPatchProbes
+--- PASS: TestR22DeclarationLimitIsExposedWithoutPatchProbes (0.32s)
+=== NAME  
+=== RUN   TestR23ExecutableLoopMutationInvalidatesPatchList
+=== RUN   TestR23ExecutableLoopMutationInvalidatesPatchList/set(PATCH_LIST_loop.patch)
+--- PASS: TestR23ExecutableLoopMutationInvalidatesPatchList/set(PATCH_LIST_loop.patch) (0.00s)
+=== NAME  TestR23ExecutableLoopMutationInvalidatesPatchList
+=== RUN   TestR23ExecutableLoopMutationInvalidatesPatchList/unset(PATCH_LIST)
+--- PASS: TestR23ExecutableLoopMutationInvalidatesPatchList/unset(PATCH_LIST) (0.00s)
+=== NAME  TestR23ExecutableLoopMutationInvalidatesPatchList
+=== RUN   TestR23ExecutableLoopMutationInvalidatesPatchList/list(APPEND_PATCH_LIST_loop.patch)
+--- PASS: TestR23ExecutableLoopMutationInvalidatesPatchList/list(APPEND_PATCH_LIST_loop.patch) (0.00s)
+=== NAME  TestR23ExecutableLoopMutationInvalidatesPatchList
+--- PASS: TestR23ExecutableLoopMutationInvalidatesPatchList (0.00s)
+=== NAME  
+=== RUN   TestR24ComparisonUsesUndefinedPlainOperandAsLiteral
+--- PASS: TestR24ComparisonUsesUndefinedPlainOperandAsLiteral (0.00s)
+=== NAME  
+=== RUN   TestR24InactiveSetReferenceIsNotAnOrphan
+--- PASS: TestR24InactiveSetReferenceIsNotAnOrphan (0.00s)
+=== NAME  
+=== RUN   TestR24ActiveExternalCMakeLoadFailsClosed
+=== RUN   TestR24ActiveExternalCMakeLoadFailsClosed/include(patches.cmake)
+--- PASS: TestR24ActiveExternalCMakeLoadFailsClosed/include(patches.cmake) (0.00s)
+=== NAME  TestR24ActiveExternalCMakeLoadFailsClosed
+=== RUN   TestR24ActiveExternalCMakeLoadFailsClosed/add_subdirectory(patches)
+--- PASS: TestR24ActiveExternalCMakeLoadFailsClosed/add_subdirectory(patches) (0.00s)
+=== NAME  TestR24ActiveExternalCMakeLoadFailsClosed
+--- PASS: TestR24ActiveExternalCMakeLoadFailsClosed (0.00s)
+=== NAME  
+=== RUN   TestR24ParentScopeSetPreservesLocalBinding
+--- PASS: TestR24ParentScopeSetPreservesLocalBinding (0.00s)
+=== NAME  
+=== RUN   TestR24GetFilenameComponentHonorsBaseDir
+--- PASS: TestR24GetFilenameComponentHonorsBaseDir (0.00s)
+=== NAME  
+=== RUN   TestR25ZeroValueTripletSetRemovesFact
+--- PASS: TestR25ZeroValueTripletSetRemovesFact (0.00s)
+=== NAME  
+=== RUN   TestR25QuotedEmptyTripletSetRetainsEmptyFact
+--- PASS: TestR25QuotedEmptyTripletSetRetainsEmptyFact (0.00s)
+=== NAME  
+=== RUN   TestR27ExecutableTripletIncludeInvalidatesRetainedFacts
+--- PASS: TestR27ExecutableTripletIncludeInvalidatesRetainedFacts (0.00s)
+=== NAME  
+=== RUN   TestR27AuthorizationTokenTerminatesPatchesWithoutEcho
+--- PASS: TestR27AuthorizationTokenTerminatesPatchesWithoutEcho (0.00s)
+=== NAME  
+=== RUN   TestR28EqualParsesCMakeRealNumbers
+--- PASS: TestR28EqualParsesCMakeRealNumbers (0.00s)
+=== NAME  
+=== RUN   TestR28ActiveStringMutationInvalidatesStalePatchBinding
+--- PASS: TestR28ActiveStringMutationInvalidatesStalePatchBinding (0.00s)
+=== NAME  
+=== RUN   TestR29UnsupportedGetFilenameComponentInvalidatesDestination
+--- PASS: TestR29UnsupportedGetFilenameComponentInvalidatesDestination (0.00s)
+=== NAME  
+=== RUN   TestR30CommandNameCannotCrossLineEnding
+--- PASS: TestR30CommandNameCannotCrossLineEnding (0.00s)
+=== NAME  
+=== RUN   TestR31StoredCMakeValueIsNotRecursivelyExpanded
+--- PASS: TestR31StoredCMakeValueIsNotRecursivelyExpanded (0.00s)
+=== NAME  
+=== RUN   TestR31StoredLiteralReferenceDoesNotProtectSiblingValue
+--- PASS: TestR31StoredLiteralReferenceDoesNotProtectSiblingValue (0.00s)
+=== NAME  
+=== RUN   TestR33TripletTopLevelReturnStopsFactParsing
+--- PASS: TestR33TripletTopLevelReturnStopsFactParsing (0.00s)
+=== NAME  
+=== RUN   TestR33TripletConditionalReturnFailsClosed
+--- PASS: TestR33TripletConditionalReturnFailsClosed (0.00s)
+=== NAME  
+=== RUN   TestR33TripletDeclarationBodyReturnIsNotExecuted
+--- PASS: TestR33TripletDeclarationBodyReturnIsNotExecuted (0.00s)
+=== NAME  
+=== RUN   TestR33BareNonConstantConditionIsFalse
+--- PASS: TestR33BareNonConstantConditionIsFalse (0.00s)
+=== NAME  
+=== RUN   TestR33VariableDerivedNonConstantConditionIsTrue
+--- PASS: TestR33VariableDerivedNonConstantConditionIsTrue (0.00s)
+=== NAME  
+=== RUN   TestR34TripletStringMutationInvalidatesRetainedFact
+--- PASS: TestR34TripletStringMutationInvalidatesRetainedFact (0.00s)
+=== NAME  
+=== RUN   TestR34TripletStandardMutatorsInvalidateRetainedFacts
+=== RUN   TestR34TripletStandardMutatorsInvalidateRetainedFacts/filename_output
+--- PASS: TestR34TripletStandardMutatorsInvalidateRetainedFacts/filename_output (0.00s)
+=== NAME  TestR34TripletStandardMutatorsInvalidateRetainedFacts
+=== RUN   TestR34TripletStandardMutatorsInvalidateRetainedFacts/filename_secondary
+--- PASS: TestR34TripletStandardMutatorsInvalidateRetainedFacts/filename_secondary (0.00s)
+=== NAME  TestR34TripletStandardMutatorsInvalidateRetainedFacts
+=== RUN   TestR34TripletStandardMutatorsInvalidateRetainedFacts/list_in-place_mutation
+--- PASS: TestR34TripletStandardMutatorsInvalidateRetainedFacts/list_in-place_mutation (0.00s)
+=== NAME  TestR34TripletStandardMutatorsInvalidateRetainedFacts
+=== RUN   TestR34TripletStandardMutatorsInvalidateRetainedFacts/list_output
+--- PASS: TestR34TripletStandardMutatorsInvalidateRetainedFacts/list_output (0.00s)
+=== NAME  TestR34TripletStandardMutatorsInvalidateRetainedFacts
+=== RUN   TestR34TripletStandardMutatorsInvalidateRetainedFacts/file_output
+--- PASS: TestR34TripletStandardMutatorsInvalidateRetainedFacts/file_output (0.00s)
+=== NAME  TestR34TripletStandardMutatorsInvalidateRetainedFacts
+=== RUN   TestR34TripletStandardMutatorsInvalidateRetainedFacts/math_output
+--- PASS: TestR34TripletStandardMutatorsInvalidateRetainedFacts/math_output (0.00s)
+=== NAME  TestR34TripletStandardMutatorsInvalidateRetainedFacts
+--- PASS: TestR34TripletStandardMutatorsInvalidateRetainedFacts (0.00s)
+=== NAME  
+=== RUN   TestR34ProjectionAdmissionBoundsRetainedAggregateWithoutMarshal
+--- PASS: TestR34ProjectionAdmissionBoundsRetainedAggregateWithoutMarshal (0.00s)
+=== NAME  
+=== RUN   TestR34PortfileFileOutputInvalidatesRetainedPatchBinding
+--- PASS: TestR34PortfileFileOutputInvalidatesRetainedPatchBinding (0.00s)
+=== NAME  
+=== RUN   TestR34PortfileStandardOutputsInvalidateRetainedPatchBinding
+=== RUN   TestR34PortfileStandardOutputsInvalidateRetainedPatchBinding/file_read
+--- PASS: TestR34PortfileStandardOutputsInvalidateRetainedPatchBinding/file_read (0.00s)
+=== NAME  TestR34PortfileStandardOutputsInvalidateRetainedPatchBinding
+=== RUN   TestR34PortfileStandardOutputsInvalidateRetainedPatchBinding/list_length
+--- PASS: TestR34PortfileStandardOutputsInvalidateRetainedPatchBinding/list_length (0.00s)
+=== NAME  TestR34PortfileStandardOutputsInvalidateRetainedPatchBinding
+=== RUN   TestR34PortfileStandardOutputsInvalidateRetainedPatchBinding/math_expr
+--- PASS: TestR34PortfileStandardOutputsInvalidateRetainedPatchBinding/math_expr (0.00s)
+=== NAME  TestR34PortfileStandardOutputsInvalidateRetainedPatchBinding
+=== RUN   TestR34PortfileStandardOutputsInvalidateRetainedPatchBinding/filename_secondary
+--- PASS: TestR34PortfileStandardOutputsInvalidateRetainedPatchBinding/filename_secondary (0.00s)
+=== NAME  TestR34PortfileStandardOutputsInvalidateRetainedPatchBinding
+--- PASS: TestR34PortfileStandardOutputsInvalidateRetainedPatchBinding (0.00s)
+=== NAME  
+=== RUN   TestR34PortfileHarmlessFileModePreservesBinding
+--- PASS: TestR34PortfileHarmlessFileModePreservesBinding (0.00s)
+=== NAME  
+=== RUN   TestR34KnownVariableTruthPreservesWhitespace
+--- PASS: TestR34KnownVariableTruthPreservesWhitespace (0.00s)
+=== NAME  
+=== RUN   TestR34OrphanReferencesUseFilesystemIdentity
+--- PASS: TestR34OrphanReferencesUseFilesystemIdentity (0.00s)
+=== NAME  
+=== RUN   TestOperandFromExpansion_UnresolvedReferenceYieldsNoValue
+=== RUN   TestOperandFromExpansion_UnresolvedReferenceYieldsNoValue/quoted_comparison_operand_—_the_shape_the_operator_hit
+--- PASS: TestOperandFromExpansion_UnresolvedReferenceYieldsNoValue/quoted_comparison_operand_—_the_shape_the_operator_hit (0.00s)
+=== NAME  TestOperandFromExpansion_UnresolvedReferenceYieldsNoValue
+=== RUN   TestOperandFromExpansion_UnresolvedReferenceYieldsNoValue/reference_embedded_in_surrounding_text
+--- PASS: TestOperandFromExpansion_UnresolvedReferenceYieldsNoValue/reference_embedded_in_surrounding_text (0.00s)
+=== NAME  TestOperandFromExpansion_UnresolvedReferenceYieldsNoValue
+--- PASS: TestOperandFromExpansion_UnresolvedReferenceYieldsNoValue (0.00s)
+=== NAME  
+=== RUN   TestOperandFromExpansion_ResolvedReferenceStillYieldsItsValue
+--- PASS: TestOperandFromExpansion_ResolvedReferenceStillYieldsItsValue (0.00s)
+=== NAME  
+PASS

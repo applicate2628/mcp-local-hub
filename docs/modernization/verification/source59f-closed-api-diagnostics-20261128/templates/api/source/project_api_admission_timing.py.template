@@ -1,0 +1,9 @@
+import hashlib,json
+from pathlib import Path
+path=Path(r"@@RECOVERY_APPROVED_WORK_AREA@@\r7\x149e4a76727c\receipt.json")
+raw=path.read_bytes()
+assert hashlib.sha256(raw).hexdigest()=="e1cba7d99294f4e18816ebc91a8fd137c3533be5d9ed433071de4c89b66fc709"
+r=json.loads(raw)
+assert r["native_custody_settled"] is True and r["commands_quiescent"] is True
+rows=[{k:c.get(k) for k in ("stdout","exit_code","seconds","work_elapsed_seconds","phases_elapsed_seconds","quiescence_state","captures_measured")} for c in r["commands"]]
+print(json.dumps({"original_receipt_sha256":hashlib.sha256(raw).hexdigest(),"status":r["status"],"preparation_seconds":r.get("preparation_seconds"),"total_seconds":r.get("seconds"),"budgets_seconds":r.get("budgets_seconds"),"commands":rows,"data_projection_only":True},indent=2))

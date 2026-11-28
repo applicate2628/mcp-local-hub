@@ -1,0 +1,43 @@
+{"Action":"start","Package":"mcp-local-hub/internal/testkit"}
+{"Action":"run","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenStableAndReadOnly"}
+{"Action":"output","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenStableAndReadOnly","Output":"=== RUN   TestAssertJSONGoldenStableAndReadOnly\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenStableAndReadOnly/LF"}
+{"Action":"output","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenStableAndReadOnly/LF","Output":"=== RUN   TestAssertJSONGoldenStableAndReadOnly/LF\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenStableAndReadOnly/LF","Output":"--- PASS: TestAssertJSONGoldenStableAndReadOnly/LF (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenStableAndReadOnly/LF"}
+{"Action":"run","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenStableAndReadOnly/CRLF"}
+{"Action":"output","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenStableAndReadOnly/CRLF","Output":"=== RUN   TestAssertJSONGoldenStableAndReadOnly/CRLF\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenStableAndReadOnly/CRLF","Output":"--- PASS: TestAssertJSONGoldenStableAndReadOnly/CRLF (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenStableAndReadOnly/CRLF"}
+{"Action":"output","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenStableAndReadOnly","Output":"--- PASS: TestAssertJSONGoldenStableAndReadOnly (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenStableAndReadOnly"}
+{"Action":"run","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating"}
+{"Action":"output","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating","Output":"=== RUN   TestAssertJSONGoldenRejectsWithoutUpdating\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating/missing"}
+{"Action":"output","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating/missing","Output":"=== RUN   TestAssertJSONGoldenRejectsWithoutUpdating/missing\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating/missing","Output":"--- PASS: TestAssertJSONGoldenRejectsWithoutUpdating/missing (0.11s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating/missing"}
+{"Action":"run","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating/changed"}
+{"Action":"output","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating/changed","Output":"=== RUN   TestAssertJSONGoldenRejectsWithoutUpdating/changed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating/changed","Output":"--- PASS: TestAssertJSONGoldenRejectsWithoutUpdating/changed (0.12s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating/changed"}
+{"Action":"run","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating/array-order"}
+{"Action":"output","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating/array-order","Output":"=== RUN   TestAssertJSONGoldenRejectsWithoutUpdating/array-order\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating/array-order","Output":"--- PASS: TestAssertJSONGoldenRejectsWithoutUpdating/array-order (0.12s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating/array-order"}
+{"Action":"run","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating/precision"}
+{"Action":"output","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating/precision","Output":"=== RUN   TestAssertJSONGoldenRejectsWithoutUpdating/precision\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating/precision","Output":"--- PASS: TestAssertJSONGoldenRejectsWithoutUpdating/precision (0.13s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating/precision"}
+{"Action":"run","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating/null-vs-empty"}
+{"Action":"output","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating/null-vs-empty","Output":"=== RUN   TestAssertJSONGoldenRejectsWithoutUpdating/null-vs-empty\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating/null-vs-empty","Output":"--- PASS: TestAssertJSONGoldenRejectsWithoutUpdating/null-vs-empty (0.13s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating/null-vs-empty"}
+{"Action":"run","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating/marshal"}
+{"Action":"output","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating/marshal","Output":"=== RUN   TestAssertJSONGoldenRejectsWithoutUpdating/marshal\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating/marshal","Output":"--- PASS: TestAssertJSONGoldenRejectsWithoutUpdating/marshal (0.12s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating/marshal"}
+{"Action":"output","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating","Output":"--- PASS: TestAssertJSONGoldenRejectsWithoutUpdating (0.72s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/testkit","Test":"TestAssertJSONGoldenRejectsWithoutUpdating"}
+{"Action":"output","Package":"mcp-local-hub/internal/testkit","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/testkit"}

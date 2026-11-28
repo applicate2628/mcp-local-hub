@@ -1,0 +1,127 @@
+{"Action":"start","Package":"mcp-local-hub/internal/drmemory"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestFindDrMemory_NotFoundMessageNamesSearchLocations"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestFindDrMemory_NotFoundMessageNamesSearchLocations","Output":"=== RUN   TestFindDrMemory_NotFoundMessageNamesSearchLocations\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestFindDrMemory_NotFoundMessageNamesSearchLocations","Output":"--- PASS: TestFindDrMemory_NotFoundMessageNamesSearchLocations (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestFindDrMemory_NotFoundMessageNamesSearchLocations"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestFindDrMemory_DrMemoryHomeMiss"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestFindDrMemory_DrMemoryHomeMiss","Output":"=== RUN   TestFindDrMemory_DrMemoryHomeMiss\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestFindDrMemory_DrMemoryHomeMiss","Output":"--- PASS: TestFindDrMemory_DrMemoryHomeMiss (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestFindDrMemory_DrMemoryHomeMiss"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestFirstNonEmptyLine"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestFirstNonEmptyLine","Output":"=== RUN   TestFirstNonEmptyLine\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestFirstNonEmptyLine","Output":"--- PASS: TestFirstNonEmptyLine (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestFirstNonEmptyLine"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestIsExecutableFile"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestIsExecutableFile","Output":"=== RUN   TestIsExecutableFile\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestIsExecutableFile","Output":"--- PASS: TestIsExecutableFile (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestIsExecutableFile"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_ParsesInjectedResults"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_ParsesInjectedResults","Output":"=== RUN   TestRunTool_ParsesInjectedResults\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_ParsesInjectedResults","Output":"--- PASS: TestRunTool_ParsesInjectedResults (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_ParsesInjectedResults"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_DrMemoryNotFound"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_DrMemoryNotFound","Output":"=== RUN   TestRunTool_DrMemoryNotFound\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_DrMemoryNotFound","Output":"--- PASS: TestRunTool_DrMemoryNotFound (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_DrMemoryNotFound"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_MissingExe"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_MissingExe","Output":"=== RUN   TestRunTool_MissingExe\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_MissingExe","Output":"--- PASS: TestRunTool_MissingExe (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_MissingExe"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_DefaultsCheckUninitializedTrue"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_DefaultsCheckUninitializedTrue","Output":"=== RUN   TestRunTool_DefaultsCheckUninitializedTrue\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_DefaultsCheckUninitializedTrue","Output":"--- PASS: TestRunTool_DefaultsCheckUninitializedTrue (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_DefaultsCheckUninitializedTrue"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_RunnerFailureSurfaces"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_RunnerFailureSurfaces","Output":"=== RUN   TestRunTool_RunnerFailureSurfaces\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_RunnerFailureSurfaces","Output":"--- PASS: TestRunTool_RunnerFailureSurfaces (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_RunnerFailureSurfaces"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_PanicRecoveredToStructuredError"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_PanicRecoveredToStructuredError","Output":"=== RUN   TestRunTool_PanicRecoveredToStructuredError\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_PanicRecoveredToStructuredError","Output":"--- PASS: TestRunTool_PanicRecoveredToStructuredError (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_PanicRecoveredToStructuredError"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_NoResultsTxtSurfacesError"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_NoResultsTxtSurfacesError","Output":"=== RUN   TestRunTool_NoResultsTxtSurfacesError\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_NoResultsTxtSurfacesError","Output":"--- PASS: TestRunTool_NoResultsTxtSurfacesError (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestRunTool_NoResultsTxtSurfacesError"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestStatusTool_Available"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestStatusTool_Available","Output":"=== RUN   TestStatusTool_Available\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestStatusTool_Available","Output":"--- PASS: TestStatusTool_Available (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestStatusTool_Available"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestStatusTool_Unavailable"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestStatusTool_Unavailable","Output":"=== RUN   TestStatusTool_Unavailable\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestStatusTool_Unavailable","Output":"--- PASS: TestStatusTool_Unavailable (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestStatusTool_Unavailable"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestStatusTool_AvailableVersionUnknown"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestStatusTool_AvailableVersionUnknown","Output":"=== RUN   TestStatusTool_AvailableVersionUnknown\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestStatusTool_AvailableVersionUnknown","Output":"--- PASS: TestStatusTool_AvailableVersionUnknown (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestStatusTool_AvailableVersionUnknown"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestDrmemoryEnabledRequiresExplicitOptIn"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestDrmemoryEnabledRequiresExplicitOptIn","Output":"=== RUN   TestDrmemoryEnabledRequiresExplicitOptIn\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestDrmemoryEnabledRequiresExplicitOptIn","Output":"--- PASS: TestDrmemoryEnabledRequiresExplicitOptIn (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestDrmemoryEnabledRequiresExplicitOptIn"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestParseResults_StructuredErrorsAndCounts"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestParseResults_StructuredErrorsAndCounts","Output":"=== RUN   TestParseResults_StructuredErrorsAndCounts\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestParseResults_StructuredErrorsAndCounts","Output":"--- PASS: TestParseResults_StructuredErrorsAndCounts (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestParseResults_StructuredErrorsAndCounts"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestParseResults_PossibleLeakClassifiedAsLeak"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestParseResults_PossibleLeakClassifiedAsLeak","Output":"=== RUN   TestParseResults_PossibleLeakClassifiedAsLeak\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestParseResults_PossibleLeakClassifiedAsLeak","Output":"--- PASS: TestParseResults_PossibleLeakClassifiedAsLeak (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestParseResults_PossibleLeakClassifiedAsLeak"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestParseResults_NoErrors"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestParseResults_NoErrors","Output":"=== RUN   TestParseResults_NoErrors\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestParseResults_NoErrors","Output":"--- PASS: TestParseResults_NoErrors (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestParseResults_NoErrors"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestParseResults_InvalidHeapArgument"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestParseResults_InvalidHeapArgument","Output":"=== RUN   TestParseResults_InvalidHeapArgument\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestParseResults_InvalidHeapArgument","Output":"--- PASS: TestParseResults_InvalidHeapArgument (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestParseResults_InvalidHeapArgument"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs","Output":"=== RUN   TestBuildDrMemoryArgs\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs/defaults"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs/defaults","Output":"=== RUN   TestBuildDrMemoryArgs/defaults\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs/defaults","Output":"--- PASS: TestBuildDrMemoryArgs/defaults (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs/defaults"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs/light"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs/light","Output":"=== RUN   TestBuildDrMemoryArgs/light\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs/light","Output":"--- PASS: TestBuildDrMemoryArgs/light (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs/light"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs/no-uninit"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs/no-uninit","Output":"=== RUN   TestBuildDrMemoryArgs/no-uninit\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs/no-uninit","Output":"--- PASS: TestBuildDrMemoryArgs/no-uninit (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs/no-uninit"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs/light+no-uninit"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs/light+no-uninit","Output":"=== RUN   TestBuildDrMemoryArgs/light+no-uninit\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs/light+no-uninit","Output":"--- PASS: TestBuildDrMemoryArgs/light+no-uninit (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs/light+no-uninit"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs/with-symcache"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs/with-symcache","Output":"=== RUN   TestBuildDrMemoryArgs/with-symcache\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs/with-symcache","Output":"--- PASS: TestBuildDrMemoryArgs/with-symcache (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs/with-symcache"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs/empty-symcache-omits-flag"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs/empty-symcache-omits-flag","Output":"=== RUN   TestBuildDrMemoryArgs/empty-symcache-omits-flag\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs/empty-symcache-omits-flag","Output":"--- PASS: TestBuildDrMemoryArgs/empty-symcache-omits-flag (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs/empty-symcache-omits-flag"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs","Output":"--- PASS: TestBuildDrMemoryArgs (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestBuildDrMemoryArgs"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestReadResultsTxt_FindsPerRunSubdir"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestReadResultsTxt_FindsPerRunSubdir","Output":"=== RUN   TestReadResultsTxt_FindsPerRunSubdir\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestReadResultsTxt_FindsPerRunSubdir","Output":"--- PASS: TestReadResultsTxt_FindsPerRunSubdir (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestReadResultsTxt_FindsPerRunSubdir"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestReadResultsTxt_EmptyLogdir"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestReadResultsTxt_EmptyLogdir","Output":"=== RUN   TestReadResultsTxt_EmptyLogdir\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestReadResultsTxt_EmptyLogdir","Output":"--- PASS: TestReadResultsTxt_EmptyLogdir (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestReadResultsTxt_EmptyLogdir"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestReadResultsTxt_PicksNewestSubdir"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestReadResultsTxt_PicksNewestSubdir","Output":"=== RUN   TestReadResultsTxt_PicksNewestSubdir\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestReadResultsTxt_PicksNewestSubdir","Output":"--- PASS: TestReadResultsTxt_PicksNewestSubdir (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestReadResultsTxt_PicksNewestSubdir"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestFormatCommandLine"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestFormatCommandLine","Output":"=== RUN   TestFormatCommandLine\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestFormatCommandLine","Output":"--- PASS: TestFormatCommandLine (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestFormatCommandLine"}
+{"Action":"run","Package":"mcp-local-hub/internal/drmemory","Test":"TestTruncate"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestTruncate","Output":"=== RUN   TestTruncate\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Test":"TestTruncate","Output":"--- PASS: TestTruncate (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory","Test":"TestTruncate"}
+{"Action":"output","Package":"mcp-local-hub/internal/drmemory","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/drmemory"}

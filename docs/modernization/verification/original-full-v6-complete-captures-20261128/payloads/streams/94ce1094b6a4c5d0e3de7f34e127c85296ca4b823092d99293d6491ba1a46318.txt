@@ -1,0 +1,142 @@
+=== RUN   TestFixturePEAdmissionRequiresGUISubsystem
+=== RUN   TestFixturePEAdmissionRequiresGUISubsystem/gui
+--- PASS: TestFixturePEAdmissionRequiresGUISubsystem/gui (0.00s)
+=== NAME  TestFixturePEAdmissionRequiresGUISubsystem
+=== RUN   TestFixturePEAdmissionRequiresGUISubsystem/console
+--- PASS: TestFixturePEAdmissionRequiresGUISubsystem/console (0.00s)
+=== NAME  TestFixturePEAdmissionRequiresGUISubsystem
+=== RUN   TestFixturePEAdmissionRequiresGUISubsystem/native
+--- PASS: TestFixturePEAdmissionRequiresGUISubsystem/native (0.00s)
+=== NAME  TestFixturePEAdmissionRequiresGUISubsystem
+=== RUN   TestFixturePEAdmissionRequiresGUISubsystem/missing-optional-header
+--- PASS: TestFixturePEAdmissionRequiresGUISubsystem/missing-optional-header (0.00s)
+=== NAME  TestFixturePEAdmissionRequiresGUISubsystem
+=== RUN   TestFixturePEAdmissionRequiresGUISubsystem/malformed
+--- PASS: TestFixturePEAdmissionRequiresGUISubsystem/malformed (0.00s)
+=== NAME  TestFixturePEAdmissionRequiresGUISubsystem
+--- PASS: TestFixturePEAdmissionRequiresGUISubsystem (0.00s)
+=== NAME  
+=== RUN   TestCanonicalReceiverFramesRejectAmbiguity
+=== RUN   TestCanonicalReceiverFramesRejectAmbiguity/nonascii
+--- PASS: TestCanonicalReceiverFramesRejectAmbiguity/nonascii (0.00s)
+=== NAME  TestCanonicalReceiverFramesRejectAmbiguity
+=== RUN   TestCanonicalReceiverFramesRejectAmbiguity/case
+--- PASS: TestCanonicalReceiverFramesRejectAmbiguity/case (0.00s)
+=== NAME  TestCanonicalReceiverFramesRejectAmbiguity
+=== RUN   TestCanonicalReceiverFramesRejectAmbiguity/float
+--- PASS: TestCanonicalReceiverFramesRejectAmbiguity/float (0.00s)
+=== NAME  TestCanonicalReceiverFramesRejectAmbiguity
+=== RUN   TestCanonicalReceiverFramesRejectAmbiguity/overflow
+--- PASS: TestCanonicalReceiverFramesRejectAmbiguity/overflow (0.00s)
+=== NAME  TestCanonicalReceiverFramesRejectAmbiguity
+=== RUN   TestCanonicalReceiverFramesRejectAmbiguity/extra
+--- PASS: TestCanonicalReceiverFramesRejectAmbiguity/extra (0.00s)
+=== NAME  TestCanonicalReceiverFramesRejectAmbiguity
+=== RUN   TestCanonicalReceiverFramesRejectAmbiguity/whitespace
+--- PASS: TestCanonicalReceiverFramesRejectAmbiguity/whitespace (0.00s)
+=== NAME  TestCanonicalReceiverFramesRejectAmbiguity
+=== RUN   TestCanonicalReceiverFramesRejectAmbiguity/duplicate
+--- PASS: TestCanonicalReceiverFramesRejectAmbiguity/duplicate (0.00s)
+=== NAME  TestCanonicalReceiverFramesRejectAmbiguity
+=== RUN   TestCanonicalReceiverFramesRejectAmbiguity/duplicate-nested
+--- PASS: TestCanonicalReceiverFramesRejectAmbiguity/duplicate-nested (0.00s)
+=== NAME  TestCanonicalReceiverFramesRejectAmbiguity
+=== RUN   TestCanonicalReceiverFramesRejectAmbiguity/missing
+--- PASS: TestCanonicalReceiverFramesRejectAmbiguity/missing (0.00s)
+=== NAME  TestCanonicalReceiverFramesRejectAmbiguity
+=== RUN   TestCanonicalReceiverFramesRejectAmbiguity/null
+--- PASS: TestCanonicalReceiverFramesRejectAmbiguity/null (0.00s)
+=== NAME  TestCanonicalReceiverFramesRejectAmbiguity
+=== RUN   TestCanonicalReceiverFramesRejectAmbiguity/trailing
+--- PASS: TestCanonicalReceiverFramesRejectAmbiguity/trailing (0.00s)
+=== NAME  TestCanonicalReceiverFramesRejectAmbiguity
+--- PASS: TestCanonicalReceiverFramesRejectAmbiguity (0.00s)
+=== NAME  
+=== RUN   TestReadyAndAckRequireExactRunAndGrant
+=== RUN   TestReadyAndAckRequireExactRunAndGrant/run
+--- PASS: TestReadyAndAckRequireExactRunAndGrant/run (0.00s)
+=== NAME  TestReadyAndAckRequireExactRunAndGrant
+=== RUN   TestReadyAndAckRequireExactRunAndGrant/pid
+--- PASS: TestReadyAndAckRequireExactRunAndGrant/pid (0.00s)
+=== NAME  TestReadyAndAckRequireExactRunAndGrant
+=== RUN   TestReadyAndAckRequireExactRunAndGrant/generation-leading-zero
+--- PASS: TestReadyAndAckRequireExactRunAndGrant/generation-leading-zero (0.00s)
+=== NAME  TestReadyAndAckRequireExactRunAndGrant
+=== RUN   TestReadyAndAckRequireExactRunAndGrant/generation-zero
+--- PASS: TestReadyAndAckRequireExactRunAndGrant/generation-zero (0.00s)
+=== NAME  TestReadyAndAckRequireExactRunAndGrant
+=== RUN   TestReadyAndAckRequireExactRunAndGrant/challenge
+--- PASS: TestReadyAndAckRequireExactRunAndGrant/challenge (0.00s)
+=== NAME  TestReadyAndAckRequireExactRunAndGrant
+=== RUN   TestReadyAndAckRequireExactRunAndGrant/nonce
+--- PASS: TestReadyAndAckRequireExactRunAndGrant/nonce (0.00s)
+=== NAME  TestReadyAndAckRequireExactRunAndGrant
+=== RUN   TestReadyAndAckRequireExactRunAndGrant/challenge#01
+--- PASS: TestReadyAndAckRequireExactRunAndGrant/challenge#01 (0.00s)
+=== NAME  TestReadyAndAckRequireExactRunAndGrant
+=== RUN   TestReadyAndAckRequireExactRunAndGrant/owner
+--- PASS: TestReadyAndAckRequireExactRunAndGrant/owner (0.00s)
+=== NAME  TestReadyAndAckRequireExactRunAndGrant
+=== RUN   TestReadyAndAckRequireExactRunAndGrant/payload
+--- PASS: TestReadyAndAckRequireExactRunAndGrant/payload (0.00s)
+=== NAME  TestReadyAndAckRequireExactRunAndGrant
+=== RUN   TestReadyAndAckRequireExactRunAndGrant/confirmation
+--- PASS: TestReadyAndAckRequireExactRunAndGrant/confirmation (0.00s)
+=== NAME  TestReadyAndAckRequireExactRunAndGrant
+--- PASS: TestReadyAndAckRequireExactRunAndGrant (0.00s)
+=== NAME  
+=== RUN   TestCaptureRequiresBoundedCompleteControlFrames
+=== RUN   TestCaptureRequiresBoundedCompleteControlFrames/complete
+--- PASS: TestCaptureRequiresBoundedCompleteControlFrames/complete (0.00s)
+=== NAME  TestCaptureRequiresBoundedCompleteControlFrames
+=== RUN   TestCaptureRequiresBoundedCompleteControlFrames/truncated
+--- PASS: TestCaptureRequiresBoundedCompleteControlFrames/truncated (0.00s)
+=== NAME  TestCaptureRequiresBoundedCompleteControlFrames
+=== RUN   TestCaptureRequiresBoundedCompleteControlFrames/extra
+--- PASS: TestCaptureRequiresBoundedCompleteControlFrames/extra (0.00s)
+=== NAME  TestCaptureRequiresBoundedCompleteControlFrames
+=== RUN   TestCaptureRequiresBoundedCompleteControlFrames/oversized-frame
+--- PASS: TestCaptureRequiresBoundedCompleteControlFrames/oversized-frame (0.00s)
+=== NAME  TestCaptureRequiresBoundedCompleteControlFrames
+=== RUN   TestCaptureRequiresBoundedCompleteControlFrames/oversized-line
+--- PASS: TestCaptureRequiresBoundedCompleteControlFrames/oversized-line (0.00s)
+=== NAME  TestCaptureRequiresBoundedCompleteControlFrames
+=== RUN   TestCaptureRequiresBoundedCompleteControlFrames/oversized-stream
+--- PASS: TestCaptureRequiresBoundedCompleteControlFrames/oversized-stream (0.05s)
+=== NAME  TestCaptureRequiresBoundedCompleteControlFrames
+--- PASS: TestCaptureRequiresBoundedCompleteControlFrames (0.05s)
+=== NAME  
+=== RUN   TestFixtureEnvironmentExcludesInheritedHelperModes
+--- PASS: TestFixtureEnvironmentExcludesInheritedHelperModes (0.00s)
+=== NAME  
+=== RUN   TestFullSuiteArgumentsPreserveExactDriverContract
+=== RUN   TestFullSuiteArgumentsPreserveExactDriverContract/unbounded
+--- PASS: TestFullSuiteArgumentsPreserveExactDriverContract/unbounded (0.00s)
+=== NAME  TestFullSuiteArgumentsPreserveExactDriverContract
+=== RUN   TestFullSuiteArgumentsPreserveExactDriverContract/plain-verbose
+--- PASS: TestFullSuiteArgumentsPreserveExactDriverContract/plain-verbose (0.00s)
+=== NAME  TestFullSuiteArgumentsPreserveExactDriverContract
+=== RUN   TestFullSuiteArgumentsPreserveExactDriverContract/missing
+--- PASS: TestFullSuiteArgumentsPreserveExactDriverContract/missing (0.00s)
+=== NAME  TestFullSuiteArgumentsPreserveExactDriverContract
+=== RUN   TestFullSuiteArgumentsPreserveExactDriverContract/duplicate
+--- PASS: TestFullSuiteArgumentsPreserveExactDriverContract/duplicate (0.00s)
+=== NAME  TestFullSuiteArgumentsPreserveExactDriverContract
+=== RUN   TestFullSuiteArgumentsPreserveExactDriverContract/selector
+--- PASS: TestFullSuiteArgumentsPreserveExactDriverContract/selector (0.00s)
+=== NAME  TestFullSuiteArgumentsPreserveExactDriverContract
+=== RUN   TestFullSuiteArgumentsPreserveExactDriverContract/skip
+--- PASS: TestFullSuiteArgumentsPreserveExactDriverContract/skip (0.00s)
+=== NAME  TestFullSuiteArgumentsPreserveExactDriverContract
+=== RUN   TestFullSuiteArgumentsPreserveExactDriverContract/list
+--- PASS: TestFullSuiteArgumentsPreserveExactDriverContract/list (0.00s)
+=== NAME  TestFullSuiteArgumentsPreserveExactDriverContract
+=== RUN   TestFullSuiteArgumentsPreserveExactDriverContract/repeat
+--- PASS: TestFullSuiteArgumentsPreserveExactDriverContract/repeat (0.00s)
+=== NAME  TestFullSuiteArgumentsPreserveExactDriverContract
+--- PASS: TestFullSuiteArgumentsPreserveExactDriverContract (0.00s)
+=== NAME  
+=== RUN   TestCaptureTest2JSONFramingPreservesOriginalBytes
+--- PASS: TestCaptureTest2JSONFramingPreservesOriginalBytes (0.00s)
+=== NAME  
+PASS

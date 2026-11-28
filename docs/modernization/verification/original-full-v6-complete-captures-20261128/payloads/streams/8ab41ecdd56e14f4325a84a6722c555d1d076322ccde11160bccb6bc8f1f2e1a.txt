@@ -1,0 +1,19 @@
+=== RUN   TestPlainPairsRequireSettledFailureThenSameGenerationRecovery
+--- PASS: TestPlainPairsRequireSettledFailureThenSameGenerationRecovery (0.00s)
+=== NAME  
+=== RUN   TestPairRejectsHealthyOnlyWrongIdentityAndMissingFailure
+--- PASS: TestPairRejectsHealthyOnlyWrongIdentityAndMissingFailure (0.00s)
+=== NAME  
+=== RUN   TestFocusOnlyFixtureRows
+--- PASS: TestFocusOnlyFixtureRows (0.00s)
+=== NAME  
+=== RUN   TestFocusedReceiptExcludesUnrelatedDiagnosticAndClientRawData
+--- PASS: TestFocusedReceiptExcludesUnrelatedDiagnosticAndClientRawData (0.00s)
+=== NAME  
+=== RUN   TestFocusedPlainStatusDoesNotInventScanOnlyGeneration
+--- PASS: TestFocusedPlainStatusDoesNotInventScanOnlyGeneration (0.00s)
+=== NAME  
+=== RUN   TestClosedWitnessIsDurableAndRedactedBeforeRelease
+--- PASS: TestClosedWitnessIsDurableAndRedactedBeforeRelease (0.01s)
+=== NAME  
+PASS

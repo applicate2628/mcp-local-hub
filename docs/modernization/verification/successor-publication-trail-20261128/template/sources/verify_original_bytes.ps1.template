@@ -1,0 +1,25 @@
+$ErrorActionPreference='Stop'
+$Base='@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\recovery-inputs-v1\successor-publication-trail-private-v1'
+function SHA([string]$path){$h=[Security.Cryptography.SHA256]::Create();try{[BitConverter]::ToString($h.ComputeHash([IO.File]::ReadAllBytes($path))).Replace('-','').ToLowerInvariant()}finally{$h.Dispose()}}
+$SpecPath=$Base+'\original-byte-inputs.json'
+if((SHA $SpecPath) -cne 'f4bb396ec5436ed104ce3602c01d0dd11a66abe355d3cbcb8a3364160e248945'){throw 'Original DATA specification changed'}
+$Spec=Get-Content -Raw -LiteralPath $SpecPath|ConvertFrom-Json
+if($Spec.schema -cne 'closed-trail-original-byte-verification-input-v1' -or $Spec.original_files.Count -ne 209){throw 'Unexpected historical DATA scope'}
+$Rows=@()
+foreach($row in $Spec.original_files){
+ $path=[IO.Path]::GetFullPath($row.path)
+ if(-not $path.StartsWith('@@RECOVERY_APPROVED_WORK_AREA@@\',[StringComparison]::OrdinalIgnoreCase) -or $path.Contains('\successor-product-helper-inputs-v1\')){throw 'Unreviewed or active input path'}
+ $before=Get-Item -LiteralPath $path
+ if($before.PSIsContainer -or ($before.Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Not ordinary file'}
+ $actual=SHA $path
+ $after=Get-Item -LiteralPath $path
+ if($before.Length -ne $after.Length -or $before.LastWriteTimeUtc -ne $after.LastWriteTimeUtc){throw 'DATA input changed during read'}
+ $Rows += [ordered]@{role_path=$row.role_path;expected_bytes=$row.bytes;actual_bytes=$after.Length;expected_sha256=$row.sha256;actual_sha256=$actual;matched=($row.sha256 -ceq $actual -and $row.bytes -eq $after.Length);basis=$row.basis}
+}
+$Bad=@($Rows|Where-Object{-not $_.matched})
+$Result=[ordered]@{schema='closed-trail-root-original-byte-verification-v1';status=$(if($Bad.Count){'MISMATCH'}else{'MATCH'});spec_sha256=(SHA $SpecPath);files=$Rows.Count;matched=$Rows.Count-$Bad.Count;rows=$Rows;native_or_test_execution=$false;qualification_passed=$false}
+$Output=$Base+'\root-original-byte-verification.json'
+$Bytes=(New-Object Text.UTF8Encoding($false)).GetBytes(($Result|ConvertTo-Json -Depth 8)+[char]10)
+$Stream=[IO.File]::Open($Output,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+try{$Stream.Write($Bytes,0,$Bytes.Length);$Stream.Flush($true)}finally{$Stream.Dispose()}
+[ordered]@{status=$Result.status;files=$Rows.Count;matched=$Rows.Count-$Bad.Count;mismatches=$Bad;output=$Output;sha256=(SHA $Output)}|ConvertTo-Json -Depth 8 -Compress

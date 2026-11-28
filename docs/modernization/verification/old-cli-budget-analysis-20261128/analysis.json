@@ -1,0 +1,373 @@
+{
+  "schema": "old-closed-cli-budget-data-v1",
+  "scope": "HISTORICAL_SOURCE727D_ONLY",
+  "status": "DATA_ANALYSIS_COMPLETE_NOT_TEST_QUALIFICATION",
+  "test_source_commit": "727d66753814dc218e26d699e57402db2d13190a",
+  "product_source_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+  "original_status": "FAIL/CLOSED",
+  "original_exit_code": 2,
+  "root_receiving_sha256": "f02bf04c80d0e84a5989297f742662ea874bbf7743c78ab3da947305004849d5",
+  "receipt_sha256": "a5bd2bae2fd38c7c28ef516840f613852d211b4c407fa62b0944c10a2c92fc8b",
+  "stdout_sha256": "d680bab54bba9cd6043a1f46359076d650a08d9061d550ceee54bff8019f787f",
+  "stdout_bytes": 516257,
+  "original_child_args": [
+    "-test.paniconexit0",
+    "-test.v=test2json",
+    "-test.count=1",
+    "-test.timeout=5m0s"
+  ],
+  "framing": "Only SYN 0x16 frames; the marker may follow a prompt in the middle of a physical line.",
+  "frames": 7642,
+  "total_pass_terminals": 2516,
+  "top_level": {
+    "inventory": 1988,
+    "runs": 1614,
+    "pass": 1585,
+    "skip": 14,
+    "fail": 0,
+    "printed_completed_seconds": 299.3,
+    "paused": [
+      "TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds",
+      "TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite",
+      "TestMigrateSerena_DrivesSupervisorRestart",
+      "TestMigrateSerena_NilSpecRowsHealedBeforeSpawn",
+      "TestMigrateSerena_LiveSupervisor_ReapClearsTheGateBeforeWrite",
+      "TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry",
+      "TestMigrateSerena_PostCommitReconcileReadyTimeout_ExitsZeroWithWarning",
+      "TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud",
+      "TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts",
+      "TestMigrateSerena_ConcurrentRegisterInWindow_AppearsInCommittedIntent",
+      "TestMigrateSerena_EmptyFirstSnapshot_WorkspaceRegisteredInWindow_RecomputesStart",
+      "TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut",
+      "TestMigrateSerena_EmptyFirstSnapshot_SupervisorRunning_LateReapClearsGate",
+      "TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow"
+    ],
+    "continuations": 0,
+    "unfinished_active": [
+      "TestRunSupervisorHeartbeat_StopsOnDone"
+    ],
+    "never_started": 374,
+    "not_completed": 389,
+    "overlapping_active_roots": [],
+    "transition_issues": []
+  },
+  "top20": [
+    {
+      "ordinal": 661,
+      "test": "TestPidMatchesMcphub_RejectsForeignPathSameBasename",
+      "outcome": "PASS",
+      "printed_seconds": 26.91,
+      "cumulative_printed_seconds": 138.49,
+      "stdout_line": 4283,
+      "frame_index": 3835,
+      "byte_offset": 271312
+    },
+    {
+      "ordinal": 662,
+      "test": "TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID",
+      "outcome": "PASS",
+      "printed_seconds": 19.03,
+      "cumulative_printed_seconds": 157.52,
+      "stdout_line": 4286,
+      "frame_index": 3838,
+      "byte_offset": 271462
+    },
+    {
+      "ordinal": 931,
+      "test": "TestGUIOwnerUnknownConfirmationMarkerWorker_HeldLockBoundsAllWriteSites",
+      "outcome": "PASS",
+      "printed_seconds": 15.35,
+      "cumulative_printed_seconds": 207.57,
+      "stdout_line": 5761,
+      "frame_index": 4999,
+      "byte_offset": 358268
+    },
+    {
+      "ordinal": 129,
+      "test": "TestReliability_VersionCommandExitsZero",
+      "outcome": "PASS",
+      "printed_seconds": 12.63,
+      "cumulative_printed_seconds": 18.57,
+      "stdout_line": 711,
+      "frame_index": 616,
+      "byte_offset": 44480
+    },
+    {
+      "ordinal": 610,
+      "test": "TestMigrateSerena_RegistryRollback_SkipsConcurrentlyUnregisteredKey",
+      "outcome": "PASS",
+      "printed_seconds": 7.41,
+      "cumulative_printed_seconds": 102.82,
+      "stdout_line": 3814,
+      "frame_index": 3370,
+      "byte_offset": 241100
+    },
+    {
+      "ordinal": 378,
+      "test": "TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade",
+      "outcome": "PASS",
+      "printed_seconds": 6.11,
+      "cumulative_printed_seconds": 68.12,
+      "stdout_line": 2362,
+      "frame_index": 1918,
+      "byte_offset": 142799
+    },
+    {
+      "ordinal": 224,
+      "test": "TestForce_KillRaceLost",
+      "outcome": "PASS",
+      "printed_seconds": 5.88,
+      "cumulative_printed_seconds": 44.7,
+      "stdout_line": 1374,
+      "frame_index": 1021,
+      "byte_offset": 85247
+    },
+    {
+      "ordinal": 929,
+      "test": "TestGUIOwnerUnknownConfirmationMarkerWorker_HeldLockTimesOutAndReaps",
+      "outcome": "PASS",
+      "printed_seconds": 5.11,
+      "cumulative_printed_seconds": 192.12,
+      "stdout_line": 5746,
+      "frame_index": 4984,
+      "byte_offset": 357044
+    },
+    {
+      "ordinal": 908,
+      "test": "TestAcceptLoop_BudgetBreakerExitsOnFlood",
+      "outcome": "PASS",
+      "printed_seconds": 5.02,
+      "cumulative_printed_seconds": 186.42,
+      "stdout_line": 5620,
+      "frame_index": 4858,
+      "byte_offset": 347808
+    },
+    {
+      "ordinal": 438,
+      "test": "TestRunReconcileMCPFront_ForwardThenRollback_RoundTrip",
+      "outcome": "PASS",
+      "printed_seconds": 4.29,
+      "cumulative_printed_seconds": 84.08,
+      "stdout_line": 2680,
+      "frame_index": 2236,
+      "byte_offset": 163698
+    },
+    {
+      "ordinal": 1029,
+      "test": "TestSupervisorLivenessSweepConcurrentWithHandlerNoRace",
+      "outcome": "PASS",
+      "printed_seconds": 4.15,
+      "cumulative_printed_seconds": 227.75,
+      "stdout_line": 6217,
+      "frame_index": 5455,
+      "byte_offset": 388165
+    },
+    {
+      "ordinal": 253,
+      "test": "TestRestartV3_SamePortStandbyBindWaitsForParentClose",
+      "outcome": "PASS",
+      "printed_seconds": 4.11,
+      "cumulative_printed_seconds": 50.68,
+      "stdout_line": 1788,
+      "frame_index": 1351,
+      "byte_offset": 110156
+    },
+    {
+      "ordinal": 696,
+      "test": "TestWorkspacesCmd_JSONSerenaProjectionMatchesClientEndpointContract",
+      "outcome": "PASS",
+      "printed_seconds": 3.61,
+      "cumulative_printed_seconds": 167.23,
+      "stdout_line": 4457,
+      "frame_index": 4009,
+      "byte_offset": 281964
+    },
+    {
+      "ordinal": 1318,
+      "test": "TestSupervisorController_HandleEvChildExit_RetriesOnSpawnFailure",
+      "outcome": "PASS",
+      "printed_seconds": 3.6,
+      "cumulative_printed_seconds": 267.74,
+      "stdout_line": 7360,
+      "frame_index": 6559,
+      "byte_offset": 450995
+    },
+    {
+      "ordinal": 215,
+      "test": "TestForce_KillHappyPath_SeamMocked",
+      "outcome": "PASS",
+      "printed_seconds": 3.36,
+      "cumulative_printed_seconds": 33.87,
+      "stdout_line": 1113,
+      "frame_index": 994,
+      "byte_offset": 68934
+    },
+    {
+      "ordinal": 674,
+      "test": "TestReconcileIPC_DryRunPreviewFailureIsReported",
+      "outcome": "PASS",
+      "printed_seconds": 3.27,
+      "cumulative_printed_seconds": 162.32,
+      "stdout_line": 4340,
+      "frame_index": 3892,
+      "byte_offset": 274408
+    },
+    {
+      "ordinal": 631,
+      "test": "TestMigrateSerena_Interlock_AcquiredImmediatelyAfterReap_ClosesPostReapGap",
+      "outcome": "PASS",
+      "printed_seconds": 3.04,
+      "cumulative_printed_seconds": 109.35,
+      "stdout_line": 3925,
+      "frame_index": 3481,
+      "byte_offset": 247171
+    },
+    {
+      "ordinal": 1303,
+      "test": "TestProductionTerminateFn_IdentityMismatchAtEntry",
+      "outcome": "PASS",
+      "printed_seconds": 2.95,
+      "cumulative_printed_seconds": 258.82,
+      "stdout_line": 7315,
+      "frame_index": 6514,
+      "byte_offset": 448808
+    },
+    {
+      "ordinal": 576,
+      "test": "TestWindowsMappedImageRenameRequiresExactGenerationReceipt",
+      "outcome": "PASS",
+      "printed_seconds": 2.72,
+      "cumulative_printed_seconds": 93.81,
+      "stdout_line": 3634,
+      "frame_index": 3190,
+      "byte_offset": 230114
+    },
+    {
+      "ordinal": 1319,
+      "test": "TestStateMachineWiring_DoesNotDoubleRespawnWithLegacyDispatcher",
+      "outcome": "PASS",
+      "printed_seconds": 2.5,
+      "cumulative_printed_seconds": 270.24,
+      "stdout_line": 7363,
+      "frame_index": 6562,
+      "byte_offset": 451166
+    }
+  ],
+  "sum_top5_seconds": 81.33,
+  "sum_top10_seconds": 107.74,
+  "sum_top20_seconds": 141.05,
+  "sum_top50_seconds": 194.29,
+  "roots_at_least_one_second": 58,
+  "sum_roots_at_least_one_second": 203.16,
+  "last10": [
+    {
+      "ordinal": 1590,
+      "test": "TestSupervisorStderrSink_CapturesRuntimePanic",
+      "outcome": "PASS",
+      "printed_seconds": 0.11,
+      "cumulative_printed_seconds": 299.14,
+      "stdout_line": 8439,
+      "frame_index": 7612,
+      "byte_offset": 514801
+    },
+    {
+      "ordinal": 1591,
+      "test": "TestSupervisorStderrSink_CapturesMainGoroutinePanic",
+      "outcome": "PASS",
+      "printed_seconds": 0.12,
+      "cumulative_printed_seconds": 299.26,
+      "stdout_line": 8442,
+      "frame_index": 7615,
+      "byte_offset": 514941
+    },
+    {
+      "ordinal": 1592,
+      "test": "TestSupervisorStderrSink_RecordsErrorExit",
+      "outcome": "PASS",
+      "printed_seconds": 0,
+      "cumulative_printed_seconds": 299.26,
+      "stdout_line": 8445,
+      "frame_index": 7618,
+      "byte_offset": 515077
+    },
+    {
+      "ordinal": 1593,
+      "test": "TestSupervisorStderrSink_ReleaseOnExitCleanPathReleases",
+      "outcome": "PASS",
+      "printed_seconds": 0,
+      "cumulative_printed_seconds": 299.26,
+      "stdout_line": 8448,
+      "frame_index": 7621,
+      "byte_offset": 515217
+    },
+    {
+      "ordinal": 1594,
+      "test": "TestSupervisorStderrSink_DevNullIsNotInteractive",
+      "outcome": "PASS",
+      "printed_seconds": 0,
+      "cumulative_printed_seconds": 299.26,
+      "stdout_line": 8451,
+      "frame_index": 7624,
+      "byte_offset": 515364
+    },
+    {
+      "ordinal": 1595,
+      "test": "TestSupervisorStderrSink_OwnsProcessStderrFDPredicate",
+      "outcome": "PASS",
+      "printed_seconds": 0,
+      "cumulative_printed_seconds": 299.26,
+      "stdout_line": 8454,
+      "frame_index": 7627,
+      "byte_offset": 515509
+    },
+    {
+      "ordinal": 1596,
+      "test": "TestSupervisorStderrSink_RotatesAtOpenBoundary",
+      "outcome": "PASS",
+      "printed_seconds": 0,
+      "cumulative_printed_seconds": 299.26,
+      "stdout_line": 8457,
+      "frame_index": 7630,
+      "byte_offset": 515652
+    },
+    {
+      "ordinal": 1597,
+      "test": "TestSupervisorStderrSink_WritesSessionBanner",
+      "outcome": "PASS",
+      "printed_seconds": 0,
+      "cumulative_printed_seconds": 299.26,
+      "stdout_line": 8460,
+      "frame_index": 7633,
+      "byte_offset": 515786
+    },
+    {
+      "ordinal": 1598,
+      "test": "TestSupervisorStderrSink_RestoreLeavesProcessStderrUsable",
+      "outcome": "PASS",
+      "printed_seconds": 0,
+      "cumulative_printed_seconds": 299.26,
+      "stdout_line": 8464,
+      "frame_index": 7636,
+      "byte_offset": 515964
+    },
+    {
+      "ordinal": 1599,
+      "test": "TestRunSupervisorHeartbeat_BeatsImmediatelyAndOnCadence",
+      "outcome": "PASS",
+      "printed_seconds": 0.04,
+      "cumulative_printed_seconds": 299.3,
+      "stdout_line": 8467,
+      "frame_index": 7639,
+      "byte_offset": 516120
+    }
+  ],
+  "limits": [
+    "Printed durations are rounded by Go; their sum is a lower-resolution measurement, not an independent wall-clock trace.",
+    "Nested test durations are not added because the top-level duration includes them.",
+    "Paused roots with no CONT are not counted as executed bodies or assigned completion duration.",
+    "The timeout stack identifies the interrupted test, not a demonstrated deadlock.",
+    "Current Source59f CLI captures, active Source/cache and UNKNOWN owners were not read or changed.",
+    "Matching test source hashes do not transfer timing or qualification across differing production code and environments."
+  ],
+  "current_source59f_qualification_inherited": false
+}

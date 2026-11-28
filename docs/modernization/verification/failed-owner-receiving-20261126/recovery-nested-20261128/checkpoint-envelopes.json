@@ -1,0 +1,85 @@
+{
+  "schema": "checkpoint-explicit-envelope-resolution-v1",
+  "initial_attempts": [
+    {
+      "member": "b-functional-product-materialization-execution-v1/m7/normal-receiving-tool.json",
+      "text_chars": 1202050,
+      "error": {
+        "type": "JSONDecodeError",
+        "message": "Invalid control character at: line 1 column 1048577 (char 1048576)"
+      }
+    },
+    {
+      "member": "b-functional-product-scalar-commit-execution-v1/normal-receiving-tool.json",
+      "text_chars": 2035818,
+      "error": {
+        "type": "JSONDecodeError",
+        "message": "Invalid control character at: line 1 column 1048577 (char 1048576)"
+      }
+    }
+  ],
+  "resolved_explicit_envelopes": [
+    {
+      "member": "b-functional-product-materialization-execution-v1/m7/normal-receiving-tool.json",
+      "text_chars": 1202050,
+      "transformation": "JSONDecoder(strict=False) for raw control character in embedded envelope; remove only ASCII space/tab/CR/LF from explicitly declared base64 data; validate base64 and exact decoded bytes+SHA256",
+      "keys": [
+        "codec",
+        "bytes",
+        "sha256",
+        "data"
+      ],
+      "codec": "xz+base64",
+      "declared_bytes": 6619665,
+      "declared_sha256": "e3de50e5f659b10978d52e3a14d97151206357db65640eb49f2d75fb77247c82",
+      "payload_chars": 1201825,
+      "nonalphabet_char_counts": {
+        "\n": 1
+      },
+      "nonalphabet_positions": [
+        1048448
+      ],
+      "compressed_bytes": 901368,
+      "compressed_sha256": "e92fe7ae6ce5154f8f1068e59cc0a36367b42e3fa012eb533fa2302f20170228",
+      "decoded_bytes": 6619665,
+      "eof": true,
+      "unused_data_bytes": 0,
+      "decoded_sha256": "e3de50e5f659b10978d52e3a14d97151206357db65640eb49f2d75fb77247c82",
+      "size_match": true,
+      "sha_match": true,
+      "saved_path": "{CURRENT_WORKSPACE}/library-recovery-next/decoded-envelopes/e3de50e5f659b10978d52e3a14d97151206357db65640eb49f2d75fb77247c82"
+    },
+    {
+      "member": "b-functional-product-scalar-commit-execution-v1/normal-receiving-tool.json",
+      "text_chars": 2035818,
+      "transformation": "JSONDecoder(strict=False) for raw control character in embedded envelope; remove only ASCII space/tab/CR/LF from explicitly declared base64 data; validate base64 and exact decoded bytes+SHA256",
+      "keys": [
+        "codec",
+        "bytes",
+        "sha256",
+        "data"
+      ],
+      "codec": "xz+base64",
+      "declared_bytes": 7313595,
+      "declared_sha256": "977cf98a45d58050935fdfad0df62852356bc828e67edb0bfdbc66170d37cedb",
+      "payload_chars": 2035593,
+      "nonalphabet_char_counts": {
+        "\n": 1
+      },
+      "nonalphabet_positions": [
+        1048448
+      ],
+      "compressed_bytes": 1526692,
+      "compressed_sha256": "c0b53d7e654c6f1cb7ec2ca5d76194c388756ff76c9d77d45044527fa2e3b09f",
+      "decoded_bytes": 7313595,
+      "eof": true,
+      "unused_data_bytes": 0,
+      "decoded_sha256": "977cf98a45d58050935fdfad0df62852356bc828e67edb0bfdbc66170d37cedb",
+      "size_match": true,
+      "sha_match": true,
+      "saved_path": "{CURRENT_WORKSPACE}/library-recovery-next/decoded-envelopes/977cf98a45d58050935fdfad0df62852356bc828e67edb0bfdbc66170d37cedb"
+    }
+  ],
+  "decoded_payloads_public": false,
+  "source_execution": false
+}

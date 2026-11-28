@@ -1,0 +1,11 @@
+{"Action":"start","Package":"mcp-local-hub/internal/unsafegate"}
+{"Action":"run","Package":"mcp-local-hub/internal/unsafegate","Test":"TestEnabled_ExactOneOnly"}
+{"Action":"output","Package":"mcp-local-hub/internal/unsafegate","Test":"TestEnabled_ExactOneOnly","Output":"=== RUN   TestEnabled_ExactOneOnly\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/unsafegate","Test":"TestEnabled_ExactOneOnly","Output":"--- PASS: TestEnabled_ExactOneOnly (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/unsafegate","Test":"TestEnabled_ExactOneOnly"}
+{"Action":"run","Package":"mcp-local-hub/internal/unsafegate","Test":"TestRegisterAllowed_LogsWhenDisabled"}
+{"Action":"output","Package":"mcp-local-hub/internal/unsafegate","Test":"TestRegisterAllowed_LogsWhenDisabled","Output":"=== RUN   TestRegisterAllowed_LogsWhenDisabled\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/unsafegate","Test":"TestRegisterAllowed_LogsWhenDisabled","Output":"--- PASS: TestRegisterAllowed_LogsWhenDisabled (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/unsafegate","Test":"TestRegisterAllowed_LogsWhenDisabled"}
+{"Action":"output","Package":"mcp-local-hub/internal/unsafegate","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/unsafegate"}

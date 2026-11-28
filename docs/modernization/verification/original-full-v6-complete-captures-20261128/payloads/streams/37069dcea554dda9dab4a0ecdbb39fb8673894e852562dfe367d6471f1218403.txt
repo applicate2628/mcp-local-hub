@@ -1,0 +1,116 @@
+=== RUN   TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper
+=== RUN   TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/depth
+--- PASS: TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/depth (0.00s)
+=== NAME  TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper
+=== RUN   TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/nodes
+--- PASS: TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/nodes (0.00s)
+=== NAME  TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper
+=== RUN   TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/file-bytes
+--- PASS: TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/file-bytes (0.00s)
+=== NAME  TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper
+=== RUN   TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/roots
+--- PASS: TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper/roots (0.00s)
+=== NAME  TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper
+--- PASS: TestOptionsRejectEveryHardMaximumPlusOneBeforeWork_Wrapper (0.00s)
+=== NAME  
+=== RUN   TestR15RunForwardsAggregateEdgeCoverage
+--- PASS: TestR15RunForwardsAggregateEdgeCoverage (0.00s)
+=== NAME  
+=== RUN   TestR17ProjectionRetainsBoundedCausalCoverageAndEnumeratesOmissions
+--- PASS: TestR17ProjectionRetainsBoundedCausalCoverageAndEnumeratesOmissions (0.00s)
+=== NAME  
+=== RUN   TestR17RunForwardsCoverageAggregateAccounting
+--- PASS: TestR17RunForwardsCoverageAggregateAccounting (0.00s)
+=== NAME  
+=== RUN   TestR27GraphEvidenceIsLinearUniqueAndCancellationAware
+--- PASS: TestR27GraphEvidenceIsLinearUniqueAndCancellationAware (0.01s)
+=== NAME  
+=== RUN   TestR31RunPreservesWhitespaceInFilesystemPaths
+--- PASS: TestR31RunPreservesWhitespaceInFilesystemPaths (0.00s)
+=== NAME  
+=== RUN   TestR31RunRejectsNegativeGraphLimitsBeforeTraversal
+=== RUN   TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/depth
+--- PASS: TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/depth (0.00s)
+=== NAME  TestR31RunRejectsNegativeGraphLimitsBeforeTraversal
+=== RUN   TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/nodes
+--- PASS: TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/nodes (0.00s)
+=== NAME  TestR31RunRejectsNegativeGraphLimitsBeforeTraversal
+=== RUN   TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/file-bytes
+--- PASS: TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/file-bytes (0.00s)
+=== NAME  TestR31RunRejectsNegativeGraphLimitsBeforeTraversal
+=== RUN   TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/roots
+--- PASS: TestR31RunRejectsNegativeGraphLimitsBeforeTraversal/roots (0.00s)
+=== NAME  TestR31RunRejectsNegativeGraphLimitsBeforeTraversal
+--- PASS: TestR31RunRejectsNegativeGraphLimitsBeforeTraversal (0.00s)
+=== NAME  
+=== RUN   TestRunGraph_RealWalkTree
+--- PASS: TestRunGraph_RealWalkTree (0.00s)
+=== NAME  
+=== RUN   TestRunGraph_RealWalk_SingleFile
+--- PASS: TestRunGraph_RealWalk_SingleFile (0.00s)
+=== NAME  
+=== RUN   TestRun_ArgsInvalid_NeitherRootNorFile
+--- PASS: TestRun_ArgsInvalid_NeitherRootNorFile (0.00s)
+=== NAME  
+=== RUN   TestRun_WalkFailed_PropagatesAsUnknown
+--- PASS: TestRun_WalkFailed_PropagatesAsUnknown (0.00s)
+=== NAME  
+=== RUN   TestRun_HistogramIsVerbatimNotRederived
+--- PASS: TestRun_HistogramIsVerbatimNotRederived (0.00s)
+=== NAME  
+=== RUN   TestF19_BothRootAndFileIsRefusedNotSilentlyResolvedInRootsFavour
+--- PASS: TestF19_BothRootAndFileIsRefusedNotSilentlyResolvedInRootsFavour (0.00s)
+=== NAME  
+=== RUN   TestF20_WorkspaceRootIsForwardedInRootMode
+--- PASS: TestF20_WorkspaceRootIsForwardedInRootMode (0.00s)
+=== NAME  
+=== RUN   TestF20_OmittedWorkspaceRootStillDefaultsToRoot
+--- PASS: TestF20_OmittedWorkspaceRootStillDefaultsToRoot (0.00s)
+=== NAME  
+=== RUN   TestF21_RootLevelFileYieldsAValidDefaultWorkspace
+=== RUN   TestF21_RootLevelFileYieldsAValidDefaultWorkspace/windows_drive_root
+--- PASS: TestF21_RootLevelFileYieldsAValidDefaultWorkspace/windows_drive_root (0.00s)
+=== NAME  TestF21_RootLevelFileYieldsAValidDefaultWorkspace
+=== RUN   TestF21_RootLevelFileYieldsAValidDefaultWorkspace/posix_style_root
+    tool_test.go:216: "/CMakeLists.txt" is not absolute under this host's filepath semantics
+--- SKIP: TestF21_RootLevelFileYieldsAValidDefaultWorkspace/posix_style_root (0.00s)
+=== NAME  TestF21_RootLevelFileYieldsAValidDefaultWorkspace
+--- PASS: TestF21_RootLevelFileYieldsAValidDefaultWorkspace (0.00s)
+=== NAME  
+=== RUN   TestRun_CanceledContextIsItsOwnReason
+--- PASS: TestRun_CanceledContextIsItsOwnReason (0.00s)
+=== NAME  
+=== RUN   TestPR591_RelativeGraphPathsRejectedBeforeTraversal
+=== RUN   TestPR591_RelativeGraphPathsRejectedBeforeTraversal/relative_root
+--- PASS: TestPR591_RelativeGraphPathsRejectedBeforeTraversal/relative_root (0.00s)
+=== NAME  TestPR591_RelativeGraphPathsRejectedBeforeTraversal
+=== RUN   TestPR591_RelativeGraphPathsRejectedBeforeTraversal/drive-relative_root
+--- PASS: TestPR591_RelativeGraphPathsRejectedBeforeTraversal/drive-relative_root (0.00s)
+=== NAME  TestPR591_RelativeGraphPathsRejectedBeforeTraversal
+=== RUN   TestPR591_RelativeGraphPathsRejectedBeforeTraversal/relative_file
+--- PASS: TestPR591_RelativeGraphPathsRejectedBeforeTraversal/relative_file (0.00s)
+=== NAME  TestPR591_RelativeGraphPathsRejectedBeforeTraversal
+=== RUN   TestPR591_RelativeGraphPathsRejectedBeforeTraversal/explicit_relative_workspace_root
+--- PASS: TestPR591_RelativeGraphPathsRejectedBeforeTraversal/explicit_relative_workspace_root (0.00s)
+=== NAME  TestPR591_RelativeGraphPathsRejectedBeforeTraversal
+=== RUN   TestPR591_RelativeGraphPathsRejectedBeforeTraversal/absolute_root_control
+--- PASS: TestPR591_RelativeGraphPathsRejectedBeforeTraversal/absolute_root_control (0.00s)
+=== NAME  TestPR591_RelativeGraphPathsRejectedBeforeTraversal
+=== RUN   TestPR591_RelativeGraphPathsRejectedBeforeTraversal/absolute_file_control
+--- PASS: TestPR591_RelativeGraphPathsRejectedBeforeTraversal/absolute_file_control (0.00s)
+=== NAME  TestPR591_RelativeGraphPathsRejectedBeforeTraversal
+--- PASS: TestPR591_RelativeGraphPathsRejectedBeforeTraversal (0.00s)
+=== NAME  
+=== RUN   TestPR591_CMakeWrapPublicDocsMatchAbsolutePathContract
+--- PASS: TestPR591_CMakeWrapPublicDocsMatchAbsolutePathContract (0.00s)
+=== NAME  
+=== RUN   TestRunGraph_ForwardsRootEnumerationCapVerbatim
+--- PASS: TestRunGraph_ForwardsRootEnumerationCapVerbatim (0.00s)
+=== NAME  
+=== RUN   TestF20_Field_EchoedWorkspaceRootEqualsTheSuppliedOne
+--- PASS: TestF20_Field_EchoedWorkspaceRootEqualsTheSuppliedOne (0.01s)
+=== NAME  
+=== RUN   TestF20_Field_RootOutsideSuppliedWorkspaceFailsLoudlyNotSilently
+--- PASS: TestF20_Field_RootOutsideSuppliedWorkspaceFailsLoudlyNotSilently (0.00s)
+=== NAME  
+PASS

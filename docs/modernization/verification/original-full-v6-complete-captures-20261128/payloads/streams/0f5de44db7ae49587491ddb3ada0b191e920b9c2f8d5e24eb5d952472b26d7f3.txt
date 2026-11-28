@@ -1,0 +1,67 @@
+=== RUN   TestBoundedFileIngressRequests
+--- PASS: TestBoundedFileIngressRequests (0.00s)
+=== NAME  
+=== RUN   TestReadFileRejectsEveryNonRegularTypeFromOpenedHandle
+--- PASS: TestReadFileRejectsEveryNonRegularTypeFromOpenedHandle (0.00s)
+=== NAME  
+=== RUN   TestBoundedDirectoryIngressRequests
+--- PASS: TestBoundedDirectoryIngressRequests (0.00s)
+=== NAME  
+=== RUN   TestBoundedDirectoryAdmissionNoArbitraryPrefix
+--- PASS: TestBoundedDirectoryAdmissionNoArbitraryPrefix (0.00s)
+=== NAME  
+=== RUN   TestBoundedIngressCancellationCheckpoints
+=== RUN   TestBoundedIngressCancellationCheckpoints/file
+--- PASS: TestBoundedIngressCancellationCheckpoints/file (0.00s)
+=== NAME  TestBoundedIngressCancellationCheckpoints
+=== RUN   TestBoundedIngressCancellationCheckpoints/directory
+--- PASS: TestBoundedIngressCancellationCheckpoints/directory (0.00s)
+=== NAME  TestBoundedIngressCancellationCheckpoints
+--- PASS: TestBoundedIngressCancellationCheckpoints (0.00s)
+=== NAME  
+=== RUN   TestBoundedIngressClosesEveryReturnPath
+=== RUN   TestBoundedIngressClosesEveryReturnPath/file_success
+--- PASS: TestBoundedIngressClosesEveryReturnPath/file_success (0.00s)
+=== NAME  TestBoundedIngressClosesEveryReturnPath
+=== RUN   TestBoundedIngressClosesEveryReturnPath/file_overflow
+--- PASS: TestBoundedIngressClosesEveryReturnPath/file_overflow (0.00s)
+=== NAME  TestBoundedIngressClosesEveryReturnPath
+=== RUN   TestBoundedIngressClosesEveryReturnPath/file_read_error
+--- PASS: TestBoundedIngressClosesEveryReturnPath/file_read_error (0.00s)
+=== NAME  TestBoundedIngressClosesEveryReturnPath
+=== RUN   TestBoundedIngressClosesEveryReturnPath/directory_success
+--- PASS: TestBoundedIngressClosesEveryReturnPath/directory_success (0.00s)
+=== NAME  TestBoundedIngressClosesEveryReturnPath
+=== RUN   TestBoundedIngressClosesEveryReturnPath/directory_overflow
+--- PASS: TestBoundedIngressClosesEveryReturnPath/directory_overflow (0.00s)
+=== NAME  TestBoundedIngressClosesEveryReturnPath
+=== RUN   TestBoundedIngressClosesEveryReturnPath/directory_read_error
+--- PASS: TestBoundedIngressClosesEveryReturnPath/directory_read_error (0.00s)
+=== NAME  TestBoundedIngressClosesEveryReturnPath
+--- PASS: TestBoundedIngressClosesEveryReturnPath (0.00s)
+=== NAME  
+=== RUN   TestBoundedIngressJoinsOperationAndCloseErrors
+--- PASS: TestBoundedIngressJoinsOperationAndCloseErrors (0.00s)
+=== NAME  
+=== RUN   TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter
+=== RUN   TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_minus_one_payload_plus_newline
+--- PASS: TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_minus_one_payload_plus_newline (0.00s)
+=== NAME  TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter
+=== RUN   TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_final_line
+--- PASS: TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_final_line (0.00s)
+=== NAME  TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter
+=== RUN   TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_payload_plus_newline
+--- PASS: TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_payload_plus_newline (0.00s)
+=== NAME  TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter
+=== RUN   TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_plus_one_final_line
+--- PASS: TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter/N_plus_one_final_line (0.00s)
+=== NAME  TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter
+--- PASS: TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter (0.00s)
+=== NAME  
+=== RUN   TestBoundedLineReaderSequentialLinesPreservePrefetchedBytes
+--- PASS: TestBoundedLineReaderSequentialLinesPreservePrefetchedBytes (0.00s)
+=== NAME  
+=== RUN   TestBoundedLineReaderNeverRequestsMoreThanLimitPlusOne
+--- PASS: TestBoundedLineReaderNeverRequestsMoreThanLimitPlusOne (0.00s)
+=== NAME  
+PASS
