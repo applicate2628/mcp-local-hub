@@ -141,7 +141,7 @@ func TestWindowsProductTxnCommitsV3AfterTaskReadbackAndLegacyRetirement(t *testi
 	var order []string
 	tasks := &productPairTaskFake{order: &order}
 	deps := productTxnTestDeps(&order)
-	txn := &WindowsProductTxn{Opts: WindowsProductTxnOpts{
+	txn := &WindowsProductTxn{Opts: WindowsProductTxnOpts{JournalAllowance: productJournalFixtureAllowance(), Context: productJournalFixtureContext(),
 		StateDir: stateDir, ProductPath: product, LegacyWindowlessPath: legacy,
 		StagedProduct: staged, Mode: WindowsProductPairModeCanonicalize,
 		ReplacementAuthority: windowsProductReplacementAuthority{
@@ -174,7 +174,7 @@ func TestWindowsProductTxnCommitsV3AfterTaskReadbackAndLegacyRetirement(t *testi
 
 func TestWindowsProductTxnPrePrepareStoreDisposition(t *testing.T) {
 	stateDir := t.TempDir()
-	req := windowsProductTxnRequest{
+	req := windowsProductTxnRequest{JournalAllowance: productJournalFixtureAllowance(),
 		Context:              context.Background(),
 		StateDir:             stateDir,
 		ProductPath:          filepath.Join(stateDir, "mcphub.exe"),
@@ -223,7 +223,7 @@ func TestWindowsProductTxnPrePrepareStoreDisposition(t *testing.T) {
 
 func TestWindowsProductTxnClosePreservesStoreOnAmbiguousJournalPopulation(t *testing.T) {
 	stateDir := t.TempDir()
-	req := windowsProductTxnRequest{
+	req := windowsProductTxnRequest{JournalAllowance: productJournalFixtureAllowance(),
 		Context: context.Background(), StateDir: stateDir,
 		ProductPath:          filepath.Join(stateDir, "mcphub.exe"),
 		LegacyWindowlessPath: filepath.Join(stateDir, "mcphub-windowless.exe"),
@@ -256,7 +256,7 @@ func TestWindowsProductTxnConstructorJoinsStoreCleanupFailure(t *testing.T) {
 		stateDir := t.TempDir()
 		beginErr := errors.New("test-owned task begin refusal")
 		var storeRoot string
-		_, err := newWindowsProductTxnWith(windowsProductTxnRequest{
+		_, err := newWindowsProductTxnWith(windowsProductTxnRequest{JournalAllowance: productJournalFixtureAllowance(),
 			Context: context.Background(), StateDir: stateDir,
 			ProductPath:          filepath.Join(stateDir, "mcphub.exe"),
 			LegacyWindowlessPath: filepath.Join(stateDir, "mcphub-windowless.exe"),
@@ -289,7 +289,7 @@ func TestWindowsProductTxnConstructorJoinsStoreCleanupFailure(t *testing.T) {
 		retainedXML := []byte("<Task><RegistrationInfo><URI>owned</URI></RegistrationInfo></Task>")
 		var storeRoot, retainedRef string
 		var partialStore *windowsProductPairTaskStore
-		_, err := newWindowsProductTxnWith(windowsProductTxnRequest{
+		_, err := newWindowsProductTxnWith(windowsProductTxnRequest{JournalAllowance: productJournalFixtureAllowance(),
 			Context: context.Background(), StateDir: stateDir,
 			ProductPath:          filepath.Join(stateDir, "mcphub.exe"),
 			LegacyWindowlessPath: filepath.Join(stateDir, "mcphub-windowless.exe"),
@@ -362,7 +362,7 @@ func TestWindowsProductTxnPredecisionFaultRestoresProductTasksLegacyAndReceipt(t
 		}
 		return nil
 	}
-	txn := &WindowsProductTxn{Opts: WindowsProductTxnOpts{
+	txn := &WindowsProductTxn{Opts: WindowsProductTxnOpts{JournalAllowance: productJournalFixtureAllowance(), Context: productJournalFixtureContext(),
 		StateDir: stateDir, ProductPath: product, LegacyWindowlessPath: legacy,
 		StagedProduct: staged, Mode: WindowsProductPairModeCanonicalize,
 		ReplacementAuthority: windowsProductReplacementAuthority{
@@ -469,7 +469,7 @@ func newProductTxnFixture(t *testing.T) (*WindowsProductTxn, productTxnFixturePa
 	order := new([]string)
 	tasks := &productPairTaskFake{order: order}
 	deps := productTxnTestDeps(order)
-	txn := &WindowsProductTxn{Opts: WindowsProductTxnOpts{
+	txn := &WindowsProductTxn{Opts: WindowsProductTxnOpts{JournalAllowance: productJournalFixtureAllowance(), Context: productJournalFixtureContext(),
 		StateDir: paths.stateDir, ProductPath: paths.product,
 		LegacyWindowlessPath: paths.legacy, StagedProduct: paths.staged,
 		Mode: WindowsProductPairModeCanonicalize,
@@ -664,7 +664,7 @@ func TestRunInstallUpgradePersistsInitialV3JournalBeforeLifecycleMutation(t *tes
 		}
 		return writeJournal(path, raw)
 	}
-	txn := &WindowsProductTxn{Opts: WindowsProductTxnOpts{
+	txn := &WindowsProductTxn{Opts: WindowsProductTxnOpts{JournalAllowance: productJournalFixtureAllowance(), Context: productJournalFixtureContext(),
 		StateDir: stateDir, ProductPath: product, LegacyWindowlessPath: legacy,
 		StagedProduct: staged, Mode: WindowsProductPairModeUpgrade,
 		Tasks: tasks, Deps: deps,
@@ -945,7 +945,7 @@ func TestWindowsProductPairTaskStorePrivateJournalClosePreservesBytes(t *testing
 				t.Fatal(err)
 			}
 			tasks := &productPairTaskFake{}
-			txn := &WindowsProductTxn{constructorStore: store, Opts: WindowsProductTxnOpts{StateDir: stateDir, Tasks: tasks}}
+			txn := &WindowsProductTxn{constructorStore: store, Opts: WindowsProductTxnOpts{JournalAllowance: productJournalFixtureAllowance(), Context: productJournalFixtureContext(), StateDir: stateDir, Tasks: tasks}}
 			closeErr := txn.Close()
 			if uncertain && (closeErr == nil || !strings.Contains(closeErr.Error(), "UPGRADE_GUI_TASK_STORE_CLEANUP_UNCONFIRMED")) {
 				t.Fatalf("uncertain journal cleanup was accepted: %v", closeErr)

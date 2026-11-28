@@ -57,22 +57,63 @@ func ensureAliveTestStateDir(t *testing.T) string {
 }
 
 func TestEnsureAliveStoppedGUIRefusesFinalOwnerRelaunch(t *testing.T) {
-	stateDir := ensureAliveTestStateDir(t)
-	previousGUI, previousLaunch := guiOwnerAliveFn, livenessRelaunchFn
-	guiOwnerAliveFn = func() (guiOwnerProbeState, int, int) { return guiOwnerStateConfirmedDead, 0, 0 }
-	launches := 0
-	livenessRelaunchFn = func() error { launches++; return nil }
-	t.Cleanup(func() { guiOwnerAliveFn, livenessRelaunchFn = previousGUI, previousLaunch })
-	stopped, err := api.NewAPI().RecordGUIStop(context.Background(), strings.Repeat("c", 64), "tray-quit")
-	if err != nil || !stopped.Applied {
-		t.Fatalf("stop=%#v %v", stopped, err)
+	cases := []struct {
+		name      string
+		guiState  guiOwnerProbeState
+		guiPID    int
+		guiPort   int
+		ownerMode api.OwnerMode
+	}{
+		{name: "confirmed-dead-gui", guiState: guiOwnerStateConfirmedDead},
+		{name: "live-gui", guiState: guiOwnerStateAlive, guiPID: 9999, guiPort: 9125},
+		{name: "unknown-gui", guiState: guiOwnerStateUnknown},
+		{name: "verified-headless-task", ownerMode: api.OwnerModeSupervise, guiState: guiOwnerStateUnknown},
 	}
-	var output bytes.Buffer
-	if err := runEnsureAlive(stateDir, &output); err != nil {
-		t.Fatal(err)
-	}
-	if launches != 0 || !strings.Contains(output.String(), "GUI_STOPPED_BY_USER") {
-		t.Fatalf("resurrected: launches=%d output=%s", launches, output.String())
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := ensureAliveTestStateDir(t)
+			if tc.ownerMode == api.OwnerModeSupervise {
+				intent := &api.SupervisorIntentFile{Version: 1, OwnerMode: tc.ownerMode}
+				if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
+					t.Fatalf("seed supervise owner mode: %v", err)
+				}
+			}
+			t.Cleanup(setEnsureAliveOwnerTaskStateForTest(func(autostart.Options) (autostart.State, error) {
+				return autostart.StateEnabledStopped, nil
+			}))
+			t.Cleanup(setGUIOwnerAliveFnForTest(func() (guiOwnerProbeState, int, int) {
+				return tc.guiState, tc.guiPID, tc.guiPort
+			}))
+			// Keep marker recovery and its worker outside this stopped-state check.
+			t.Cleanup(setEnsureAliveGUIRecoveryDependenciesForTest(ensureAliveGUIRecoveryDependencies{
+				restartV3Enabled: func() bool { return false },
+			}))
+			t.Cleanup(setGUIOwnerUnknownConfirmationResetFnForTest(func(string, time.Time) error {
+				return nil
+			}))
+
+			taskLaunches, standaloneLaunches := 0, 0
+			t.Cleanup(setLivenessRelaunchFnForTest(func() error {
+				taskLaunches++
+				return nil
+			}))
+			t.Cleanup(setStandaloneRelaunchFnForTest(func() error {
+				standaloneLaunches++
+				return nil
+			}))
+
+			stopped, err := api.NewAPI().RecordGUIStop(context.Background(), strings.Repeat("c", 64), "tray-quit")
+			if err != nil || !stopped.Applied || stopped.Control.RunDesired != api.GUIRunStopped {
+				t.Fatalf("record desired stopped: result=%#v err=%v", stopped, err)
+			}
+			var output bytes.Buffer
+			if err := runEnsureAlive(stateDir, &output); err != nil {
+				t.Fatal(err)
+			}
+			if taskLaunches != 0 || standaloneLaunches != 0 || !strings.Contains(output.String(), "GUI_STOPPED_BY_USER") {
+				t.Fatalf("want stopped diagnostic and no relaunches: task=%d standalone=%d output=%q", taskLaunches, standaloneLaunches, output.String())
+			}
+		})
 	}
 }
 

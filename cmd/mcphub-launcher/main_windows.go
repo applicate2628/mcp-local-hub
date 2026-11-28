@@ -39,6 +39,23 @@ type dispatchEntrySet interface {
 	Close() error
 }
 
+// currentDispatchEntrySet supplies only the two path fields this caller uses.
+// The embedded owner retains V2 verification, process-handle admission, and close.
+type currentDispatchEntrySet struct {
+	*binaryadmission.WindowsCanonicalEntryDispatchSetV2
+}
+
+func (s currentDispatchEntrySet) Snapshot() (binaryadmission.WindowsCanonicalEntrySetSnapshotV1, error) {
+	snapshot, err := s.DispatchSnapshot()
+	if err != nil {
+		return binaryadmission.WindowsCanonicalEntrySetSnapshotV1{}, err
+	}
+	var result binaryadmission.WindowsCanonicalEntrySetSnapshotV1
+	result.CanonicalEntry.Path = snapshot.CanonicalEntry.Path
+	result.Product.Path = snapshot.Product.Path
+	return result, nil
+}
+
 type dispatchFence interface{ Release() error }
 
 // dispatchAdmission owns the acquired original set and the borrowed upgrade
@@ -103,9 +120,22 @@ func runLauncher(ctx context.Context, args []string, stdin, stdout, stderr *os.F
 			return lease, acquired, err
 		},
 		acquire: func(ctx context.Context, buildID string) (dispatchEntrySet, error) {
+			if _, err := binaryadmission.CompiledWindowsProductRegistry(); !errors.Is(err, binaryadmission.ErrCompiledWindowsProductRegistryAbsent) {
+				if err != nil {
+					return nil, err
+				}
+				set, err := binaryadmission.AcquireDispatchWindowsCanonicalEntrySetV2(ctx, buildID)
+				if set == nil {
+					return nil, err
+				}
+				return currentDispatchEntrySet{set}, err
+			}
 			set, err := binaryadmission.AcquireDispatchWindowsCanonicalEntrySetV1(ctx, buildID)
 			if set == nil {
 				return nil, err
+			}
+			if err == nil {
+				err = set.VerifyLegacyProductBuild(ctx)
 			}
 			return set, err
 		},
