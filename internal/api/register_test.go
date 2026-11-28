@@ -8395,7 +8395,7 @@ func TestUnregister_PreservesUnprovenLegacyClientEntries(t *testing.T) {
 			a := mustNewAPI(t)
 			var warnings []string
 			if tc.throughPrune {
-				report, err := a.PruneWorkspace(workspace, "lsp")
+				report, err := a.PruneWorkspace(workspace, "lsp", PrunePurposeExplicit)
 				if err != nil || report == nil {
 					t.Fatalf("PruneWorkspace report=%+v err=%v", report, err)
 				}
@@ -8457,5 +8457,184 @@ func TestUnregister_PreservesUnprovenLegacyClientEntries(t *testing.T) {
 				t.Errorf("claimed retired descriptor still present: %+v", descriptor)
 			}
 		})
+	}
+}
+
+// TestAutomaticPrunePreservesWorkspaceIntent uses the existing hermetic
+// scheduler/client harness, including an un-stopped registration.
+func TestAutomaticPrunePreservesWorkspaceIntent(t *testing.T) {
+	h := newRegisterHarness(t)
+	t.Cleanup(h.restore)
+	workspace := t.TempDir()
+	canonical := mustCanonical(t, workspace)
+	key := WorkspaceKey(canonical)
+	goRow := WorkspaceEntry{WorkspaceKey: key, WorkspacePath: canonical, Language: "go", Backend: "gopls-mcp", Port: 9424, TaskName: LSPTaskNameForWorkspaceLanguage(key, "go"), Lifecycle: LifecycleConfigured}
+	pyRow := WorkspaceEntry{WorkspaceKey: key, WorkspacePath: canonical, Language: "python", Backend: "mcp-language-server", Port: 9425, TaskName: LSPTaskNameForWorkspaceLanguage(key, "python"), Lifecycle: LifecycleConfigured}
+	serenaRow := WorkspaceEntry{WorkspaceKey: key, WorkspacePath: canonical, Language: SerenaLanguageSentinel, Backend: "serena", Port: 9426, TaskName: SerenaTaskNameForWorkspace(canonical)}
+	reg := NewRegistry(h.regPath)
+	for _, row := range []WorkspaceEntry{goRow, pyRow} {
+		if err := reg.PutLSP(row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := reg.PutSerena(serenaRow); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamp := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
+	stop := DaemonIntent{Desired: "stopped", Reason: "user-stop", UpdatedAt: stamp}
+	intent := &SupervisorIntentFile{Version: 1, Daemons: []SupervisorDaemon{BuildSupervisorDaemonForLSP(goRow, testCanonicalMcphubPathOverride), BuildSupervisorDaemonForLSP(pyRow, testCanonicalMcphubPathOverride), {TaskName: serenaRow.TaskName, Server: "serena", Daemon: key, Workspace: canonical, Command: testCanonicalMcphubPathOverride}}, Stops: map[string]DaemonIntent{LSPIntentTaskNameForWorkspaceLanguage(key, "go"): stop, serenaRow.TaskName: stop}, LegacyStopWatermarks: map[string]DaemonIntent{LSPIntentTaskNameForWorkspaceLanguage(key, "python"): stop}}
+	writeSupervisorIntentForRegisterTest(t, intentPath, intent)
+	beforeReg, err := os.ReadFile(h.regPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeIntent, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	oldKill, oldForce, oldReconcile := killByPortFn, forceKillByPortFn, registerSupervisorReconcileFn
+	killByPortFn = func(int, time.Duration) error { calls++; return nil }
+	forceKillByPortFn = func(int, time.Duration) (portKillOutcome, error) { calls++; return portKillNoListener, nil }
+	registerSupervisorReconcileFn = func(context.Context, bool) (ReconcileResponse, error) { calls++; return ReconcileResponse{}, nil }
+	t.Cleanup(func() {
+		killByPortFn, forceKillByPortFn, registerSupervisorReconcileFn = oldKill, oldForce, oldReconcile
+	})
+	report, err := mustNewAPI(t).PruneWorkspace(workspace, "all", PrunePurposeAutomatic)
+	afterReg, rerr := os.ReadFile(h.regPath)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	afterIntent, ierr := os.ReadFile(intentPath)
+	if ierr != nil {
+		t.Fatal(ierr)
+	}
+	if err != nil || report == nil {
+		t.Errorf("automatic report=%+v err=%v", report, err)
+	}
+	if !bytes.Equal(beforeReg, afterReg) || !bytes.Equal(beforeIntent, afterIntent) {
+		t.Error("automatic pruning changed durable registry or intent")
+	}
+	if calls != 0 || len(h.fakeSch.deleteNames) != 0 {
+		t.Errorf("automatic pruning entered teardown: calls=%d scheduler deletes=%v", calls, h.fakeSch.deleteNames)
+	}
+}
+
+func TestPruneWorkspaceRejectsMissingOrUnknownPurpose(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	for _, purpose := range []PrunePurpose{"", "unrecognized"} {
+		report, err := mustNewAPI(t).PruneWorkspace(t.TempDir(), "all", purpose)
+		if err == nil || report != nil {
+			t.Errorf("purpose %q report=%+v err=%v", purpose, report, err)
+		}
+	}
+}
+
+func TestAutomaticPruneBackendAndLegacyCoverage(t *testing.T) {
+	for _, tc := range []struct {
+		name, backend      string
+		lsp, serena, alias bool
+	}{
+		{name: "lsp only", backend: "lsp", lsp: true},
+		{name: "serena only", backend: "serena", serena: true},
+		{name: "mixed legacy keys", backend: "all", lsp: true, serena: true, alias: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newRegisterHarness(t)
+			t.Cleanup(h.restore)
+			path := t.TempDir()
+			canonical := mustCanonical(t, path)
+			legacy := canonical
+			if tc.alias {
+				path, canonical, legacy = mixedKeyWorkspaceAliasForUnregister(t)
+			}
+			reg := NewRegistry(h.regPath)
+			if tc.lsp {
+				e := WorkspaceEntry{WorkspaceKey: WorkspaceKey(canonical), WorkspacePath: canonical, Language: "go", Backend: "gopls-mcp"}
+				if err := reg.PutLSP(e); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.serena {
+				e := WorkspaceEntry{WorkspaceKey: WorkspaceKey(legacy), WorkspacePath: legacy, Language: SerenaLanguageSentinel, Backend: "serena"}
+				if err := reg.PutSerena(e); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := reg.Save(); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(h.regPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			report, err := mustNewAPI(t).PruneWorkspace(path, tc.backend, PrunePurposeAutomatic)
+			after, rerr := os.ReadFile(h.regPath)
+			if rerr != nil {
+				t.Fatal(rerr)
+			}
+			if err != nil || report == nil || report.PreservedReason != PrunePreservedAutomatic {
+				t.Errorf("report=%+v err=%v", report, err)
+			}
+			if !bytes.Equal(before, after) || len(h.fakeSch.deleteNames) != 0 {
+				t.Error("automatic maintenance changed registration or entered scheduler")
+			}
+		})
+	}
+}
+
+func TestPruneReportRetainedJSONAndErrors(t *testing.T) {
+	h := newRegisterHarness(t)
+	t.Cleanup(h.restore)
+	for _, backend := range []string{"", "unknown"} {
+		if report, err := mustNewAPI(t).PruneWorkspace(t.TempDir(), backend, PrunePurposeAutomatic); err == nil || report != nil {
+			t.Errorf("backend=%q report=%+v err=%v", backend, report, err)
+		}
+	}
+	if err := os.WriteFile(h.regPath, []byte("["), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if report, err := mustNewAPI(t).PruneWorkspace(t.TempDir(), "all", PrunePurposeAutomatic); err == nil || report != nil {
+		t.Errorf("malformed registry report=%+v err=%v", report, err)
+	}
+	reg := NewRegistry(h.regPath)
+	if err := reg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	workspace := t.TempDir()
+	report, err := mustNewAPI(t).PruneWorkspace(workspace, "all", PrunePurposeAutomatic)
+	if err != nil || report == nil {
+		t.Fatalf("automatic report=%+v err=%v", report, err)
+	}
+	raw, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if wire["preserved_reason"] != "automatic_maintenance" || wire["workspace"] != report.Workspace || wire["serena_removed"] != float64(0) {
+		t.Errorf("retained wire=%s", raw)
+	}
+	report.PreservedReason = ""
+	raw, err = json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var explicit map[string]any
+	if err := json.Unmarshal(raw, &explicit); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := explicit["preserved_reason"]; ok {
+		t.Errorf("explicit report unexpectedly changed wire: %s", raw)
 	}
 }
