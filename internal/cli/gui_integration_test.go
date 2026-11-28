@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/gui"
+	"mcp-local-hub/internal/process"
 )
 
 // TestActivateWindowNoBrowserHandlerWiring exercises the production Server
@@ -150,6 +151,7 @@ func TestGuiCmd_SecondInstanceActivates(t *testing.T) {
 	}
 	root := repoRoot(t)
 	first := exec.Command(exe, goRunArgsWithTestTag("./cmd/mcphub", "gui", "--no-browser", "--no-tray", "--port", "0")...)
+	process.HideToolConsole(first)
 	first.Dir = root
 	first.Env = append(os.Environ(), childStateEnv(childState)...)
 	// Pipe child I/O into io.Discard and arm WaitDelay so Wait cannot
@@ -220,6 +222,7 @@ func TestGuiCmd_SecondInstanceActivates(t *testing.T) {
 	}
 
 	second := exec.Command(exe, goRunArgsWithTestTag("./cmd/mcphub", "gui", "--no-browser", "--no-tray")...)
+	process.HideToolConsole(second)
 	second.Dir = root
 	second.Env = append(os.Environ(), childStateEnv(childState)...)
 	out, err := second.CombinedOutput()
@@ -317,6 +320,7 @@ func TestGuiCmd_RejectsExplicitPrivilegedPort(t *testing.T) {
 	defer cancel()
 	childState := t.TempDir()
 	cmd := exec.CommandContext(ctx, exe, goRunArgsWithTestTag("./cmd/mcphub", "gui", "--port", "80", "--no-browser", "--no-tray")...)
+	process.HideToolConsole(cmd)
 	cmd.Dir = repoRoot(t)
 	cmd.Env = append(os.Environ(), childStateEnv(childState)...)
 	cmd.WaitDelay = 2 * time.Second

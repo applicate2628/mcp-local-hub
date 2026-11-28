@@ -22,6 +22,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/process"
 	"mcp-local-hub/internal/scheduler"
 )
 
@@ -1305,7 +1306,9 @@ func mixedKeyWorkspaceAliasForUnregisterCmd(t *testing.T) (string, string, strin
 			{label: "junction", flag: "/J"},
 		} {
 			alias := filepath.Join(t.TempDir(), "alias")
-			out, err := exec.Command("cmd", "/c", "mklink", attempt.flag, alias, realDir).CombinedOutput()
+			cmd := exec.Command("cmd", "/c", "mklink", attempt.flag, alias, realDir)
+			process.NoConsole(cmd)
+			out, err := cmd.CombinedOutput()
 			if err != nil {
 				diagnostics = append(diagnostics, attempt.label+" failed: "+err.Error()+" output="+strings.TrimSpace(string(out)))
 				continue

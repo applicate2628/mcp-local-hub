@@ -18,6 +18,7 @@ import (
 	"github.com/gofrs/flock"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/process"
 )
 
 // ---------------------------------------------------------------------------
@@ -452,6 +453,7 @@ func TestSupervisorStderrSink_CapturesRuntimePanic(t *testing.T) {
 	stateDir := t.TempDir()
 
 	cmd := exec.Command(os.Args[0], "-test.run=TestSupervisorStderrSink_CapturesRuntimePanic")
+	process.NoConsole(cmd)
 	cmd.Env = append(os.Environ(), forensicsSinkChildEnv+"="+stateDir)
 	out, err := cmd.CombinedOutput()
 
@@ -501,6 +503,7 @@ func TestSupervisorStderrSink_CapturesMainGoroutinePanic(t *testing.T) {
 	stateDir := t.TempDir()
 
 	cmd := exec.Command(os.Args[0], "-test.run=TestSupervisorStderrSink_CapturesMainGoroutinePanic")
+	process.NoConsole(cmd)
 	cmd.Env = append(os.Environ(),
 		forensicsSinkChildEnv+"="+stateDir,
 		forensicsSinkChildModeEnv+"=main",

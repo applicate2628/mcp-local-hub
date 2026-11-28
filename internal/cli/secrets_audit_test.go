@@ -317,12 +317,9 @@ func TestCLISecretsEdit_FailedImportEmitsNoAuditEvent(t *testing.T) {
 // lands on disk WHILE the operator's editor session is open (before
 // `secrets edit` acquires the flock).
 //
-// It uses EXPLICIT vault/key paths passed via MCPHUB_TEST_VAULT_PATH /
-// MCPHUB_TEST_KEY_PATH rather than secrets.Default*Path(): the cli test binary's
-// own TestMain (settings_registry_test.go) re-points LOCALAPPDATA to a fresh
-// per-invocation fence dir, so a subprocess that resolved Default*Path() would
-// write to a DIFFERENT vault than the parent. The explicit paths bypass that
-// re-resolution so the concurrent write lands in the parent's vault.
+// Explicit vault/key paths select the parent's fixture. TestMain admits this
+// role before allocating its own root and binds API state to their parent;
+// native vault readers and writers must not consult another process's state.
 func TestSecretsConcurrentSetHelperProcess(t *testing.T) {
 	key := os.Getenv("MCPHUB_TEST_CONCURRENT_SET")
 	if key == "" {
@@ -331,6 +328,11 @@ func TestSecretsConcurrentSetHelperProcess(t *testing.T) {
 	val := os.Getenv("MCPHUB_TEST_CONCURRENT_VAL")
 	vaultPath := os.Getenv("MCPHUB_TEST_VAULT_PATH")
 	keyPath := os.Getenv("MCPHUB_TEST_KEY_PATH")
+	stateDir, stateErr := api.DaemonStateDirReadOnly()
+	if stateErr != nil || stateDir != filepath.Dir(vaultPath) {
+		_, _ = os.Stderr.WriteString("concurrent secrets helper: API state root differs from caller vault root\n")
+		os.Exit(3)
+	}
 	err := secrets.WithVaultLock(vaultPath, func() error {
 		v, oerr := secrets.OpenVault(keyPath, vaultPath)
 		if oerr != nil {

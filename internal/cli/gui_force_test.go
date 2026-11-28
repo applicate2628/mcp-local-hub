@@ -24,6 +24,7 @@ import (
 
 	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/gui"
+	"mcp-local-hub/internal/process"
 )
 
 // startForceKillTestSleeper keeps the fixture's original Cmd and one Wait.
@@ -45,6 +46,7 @@ func startForceKillTestSleeper(t *testing.T) (*exec.Cmd, func() error, <-chan st
 	}
 	childCtx, cancelChild := context.WithTimeout(context.Background(), 30*time.Second)
 	cmd := exec.CommandContext(childCtx, image, args...)
+	process.NoConsole(cmd)
 	if err := cmd.Start(); err != nil {
 		cancelChild()
 		t.Fatalf("start force-kill fixture %q: %v", image, err)
@@ -329,6 +331,7 @@ func TestForce_KillHappyPath_SeamMocked(t *testing.T) {
 	} else {
 		sleepCmd = exec.Command("sleep", "60")
 	}
+	process.NoConsole(sleepCmd)
 	if err := sleepCmd.Start(); err != nil {
 		t.Skipf("cannot spawn sleep helper: %v", err)
 	}
@@ -755,6 +758,7 @@ func TestForce_KillDeadPID_NoPromptExits3(t *testing.T) {
 	} else {
 		deadCmd = exec.Command("sh", "-c", "exit 0")
 	}
+	process.NoConsole(deadCmd)
 	if err := deadCmd.Run(); err != nil {
 		t.Skipf("cannot spawn short-lived child: %v", err)
 	}
@@ -1044,6 +1048,7 @@ func TestForce_RealSubprocessE2E(t *testing.T) {
 	pidport := filepath.Join(dir, "gui.pidport")
 	// Phase A: spawn a first mcphub gui that holds the lock.
 	first := exec.Command(bin, "gui", "--port", "0", "--no-browser", "--no-tray")
+	process.NoConsole(first)
 	first.Env = append(os.Environ(), "MCPHUB_GUI_TEST_PIDPORT_DIR="+dir)
 	if err := first.Start(); err != nil {
 		t.Fatalf("spawn first gui: %v", err)
@@ -1076,6 +1081,7 @@ func TestForce_RealSubprocessE2E(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	second := exec.CommandContext(ctx, bin, "gui", "--port", "0", "--no-browser", "--no-tray", "--force", "--kill", "--yes")
+	process.NoConsole(second)
 	second.Env = append(os.Environ(), "MCPHUB_GUI_TEST_PIDPORT_DIR="+dir)
 	out, err := second.CombinedOutput()
 	t.Logf("second gui output:\n%s", string(out))
@@ -1329,6 +1335,7 @@ func TestExecExitError_DoesNotShortCircuitMain(t *testing.T) {
 	} else {
 		cmd = exec.Command("sh", "-c", "exit 7")
 	}
+	process.NoConsole(cmd)
 	runErr := cmd.Run()
 	if runErr == nil {
 		t.Fatal("child process exited 0; expected non-zero exit for *exec.ExitError")

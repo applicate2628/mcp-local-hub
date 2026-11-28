@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/process"
 )
 
 func TestCLITestBinaryRejectsMalformedHelperDispatch(t *testing.T) {
@@ -28,6 +30,7 @@ func TestCLITestBinaryRejectsMalformedHelperDispatch(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := exec.Command(os.Args[0], tc.args...)
+			process.NoConsole(cmd)
 			cmd.Env = append(withoutCLITestHelperEnvironment(os.Environ()), tc.env...)
 			var stderr bytes.Buffer
 			cmd.Stderr = &stderr
@@ -50,6 +53,13 @@ func withoutCLITestHelperEnvironment(env []string) []string {
 		forensicsSinkChildEnv,
 		forensicsSinkChildModeEnv,
 		cliProductionArgvHelperEnv,
+		"MCPHUB_CODEGRAPH_COMPAT_HELPER",
+		"MCPHUB_TEST_CONCURRENT_SET",
+		"MCPHUB_TEST_CONCURRENT_VAL",
+		"MCPHUB_TEST_VAULT_PATH",
+		"MCPHUB_TEST_KEY_PATH",
+		"MCPHUB_MAPPED_IMAGE_RENAME_HELPER",
+		"MCPHUB_TEST_OWNED_PRECONTROL_CHILD",
 	}
 	result := make([]string, 0, len(env))
 	for _, entry := range env {
@@ -135,6 +145,7 @@ func TestCLITestBinaryHelpers_BypassPackageStateRoot(t *testing.T) {
 			}
 
 			cmd := exec.Command(os.Args[0], tc.args...)
+			process.NoConsole(cmd)
 			cmd.Env = append(os.Environ(), env...)
 			if err := cmd.Start(); err != nil {
 				t.Fatalf("start helper child: %v", err)

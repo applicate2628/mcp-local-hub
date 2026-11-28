@@ -352,7 +352,7 @@ args = ["version"]
 	var stdout, stderr bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
-	cmd.SetArgs([]string{entry, "--client", "codex-cli", "--port", "9342", "--yes"})
+	cmd.SetArgs([]string{entry, "--client", "codex-cli", "--yes"})
 	err := cmd.Execute()
 	if err == nil || err.Error() != "E_ADOPT_LEASE_CLEANUP" {
 		t.Fatalf("CLI exit error=%v, want E_ADOPT_LEASE_CLEANUP", err)
@@ -428,7 +428,7 @@ func TestAdoptCLI_GlobalCodexSameNamePathHasNoHSettlement(t *testing.T) {
 	cmd := newAdoptCmdWithDeps(api.NewAPI, nil, func(context.Context, *api.API, *api.AdoptPlan, *api.AdoptProvenanceRecord) error { return nil })
 	var out bytes.Buffer
 	cmd.SetOut(&out)
-	cmd.SetArgs([]string{entry, "--client", "codex-cli", "--port", "9344", "--yes"})
+	cmd.SetArgs([]string{entry, "--client", "codex-cli", "--yes"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("global-only adopt: %v\n%s", err, out.String())
 	}

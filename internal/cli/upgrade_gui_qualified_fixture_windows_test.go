@@ -412,11 +412,15 @@ func startQualifiedUpgradeGUIActors(t *testing.T, f *qualifiedUpgradeGUICommandF
 		_ = a.supervisor.Close()
 		t.Fatal("native supervisor observation lacks Job membership evidence")
 	}
+	details, err := process.LookupProcessIdentitiesContext(ctx, []int{pids.GUI, pids.Tray, pids.Supervisor})
+	if err != nil {
+		t.Fatalf("fresh native actor identities: %v", err)
+	}
 	a.held.Identity = upgradeGUIIdentitySnapshot{
 		Target:     f.target,
-		GUI:        qualifiedUpgradeGUIActorIdentity(t, ctx, a.held.GUI, pids.GUI, f.target, "gui"),
-		Tray:       qualifiedUpgradeGUIActorIdentity(t, ctx, a.held.Tray, pids.Tray, f.target, "tray"),
-		Supervisor: qualifiedUpgradeGUIActorIdentity(t, ctx, a.held.Supervisor, pids.Supervisor, f.target, "supervise"),
+		GUI:        qualifiedUpgradeGUIActorIdentity(t, ctx, details, a.held.GUI, pids.GUI, f.target, "gui"),
+		Tray:       qualifiedUpgradeGUIActorIdentity(t, ctx, details, a.held.Tray, pids.Tray, f.target, "tray"),
+		Supervisor: qualifiedUpgradeGUIActorIdentity(t, ctx, details, a.held.Supervisor, pids.Supervisor, f.target, "supervise"),
 	}
 	a.held.Identity.SupervisorInAnyJob, err = a.held.Supervisor.InAnyJob()
 	if err != nil {
@@ -429,7 +433,7 @@ func startQualifiedUpgradeGUIActors(t *testing.T, f *qualifiedUpgradeGUICommandF
 	return a
 }
 
-func qualifiedUpgradeGUIActorIdentity(t *testing.T, ctx context.Context, held interface {
+func qualifiedUpgradeGUIActorIdentity(t *testing.T, ctx context.Context, details map[int]process.ProcessIdentity, held interface {
 	VerifyIdentity(process.PIDIdentityProof) error
 }, pid int, target, role string) upgradeGUIProcessIdentity {
 	t.Helper()
@@ -437,9 +441,12 @@ func qualifiedUpgradeGUIActorIdentity(t *testing.T, ctx context.Context, held in
 	if err != nil {
 		t.Fatal(err)
 	}
-	detail, err := process.LookupProcessIdentityContext(ctx, pid)
-	if err != nil || !samePath(detail.ExecutablePath, target) || detail.CreationDateUnix != id.StartedAt.Unix() || supervisorCommandLineSubcommand(detail.CommandLine) != role {
-		t.Fatalf("native %s command generation differs: %v", role, err)
+	if err := ctx.Err(); err != nil {
+		t.Fatal(err)
+	}
+	detail, found := details[pid]
+	if !found || detail.PID != pid || !samePath(detail.ExecutablePath, target) || detail.CreationDateUnix != id.StartedAt.Unix() || supervisorCommandLineSubcommand(detail.CommandLine) != role {
+		t.Fatalf("native %s command generation differs: PID %d present=%t", role, pid, found)
 	}
 	sameUser, err := process.ProcessOwnerSIDMatchesCurrent(pid)
 	if err != nil || !sameUser {

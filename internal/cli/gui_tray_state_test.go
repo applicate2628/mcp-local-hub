@@ -767,9 +767,9 @@ collectLoop:
 // degrade to a timeout error.
 //
 // This pins the improved contract: holding the legacy daemon-intent.json lock
-// for 3s leaves defaultIntentReader unaffected (prompt return, graceful "no
-// stops" with nil Err since there is genuinely no contention on the sub-block
-// read).
+// until cleanup (with a 3s fallback) leaves defaultIntentReader unaffected:
+// prompt return and graceful "no stops" with nil Err, since there is no
+// contention on the sub-block read.
 func TestDefaultIntentReader_DoesNotBlockOnHeldDaemonIntentLock(t *testing.T) {
 	root := apitest.HardenedTempDir(t)
 	restore := api.SetDaemonStateRootForTest(root)
@@ -779,21 +779,27 @@ func TestDefaultIntentReader_DoesNotBlockOnHeldDaemonIntentLock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("api.DaemonStateDir: %v", err)
 	}
-	// Hold the LEGACY daemon-intent.json lock for 3s — it must be irrelevant
-	// to the E2 tray read (which reads the supervisor-intent.json sub-block).
+	// Keep the LEGACY lock held through the reader assertions. The 3s
+	// fallback still bounds a broken reader that blocks on that lock.
 	lockPath := filepath.Join(stateDir, "daemon-intent.json.lock")
 	holder := flock.New(lockPath)
 	if err := holder.Lock(); err != nil {
 		t.Fatalf("holder lock: %v", err)
 	}
 	holderDone := make(chan struct{})
+	releaseHolder := make(chan struct{})
 	go func() {
 		defer close(holderDone)
-		time.Sleep(3 * time.Second)
+		fallback := time.NewTimer(3 * time.Second)
+		defer fallback.Stop()
+		select {
+		case <-releaseHolder:
+		case <-fallback.C:
+		}
 		_ = holder.Unlock()
 	}()
 	t.Cleanup(func() {
-		_ = holder.Unlock()
+		close(releaseHolder)
 		<-holderDone
 	})
 
