@@ -50,12 +50,14 @@ func prepareHubStdioSessions(ctx context.Context, a *api.API, prepare HubStdioPr
 			Operation: 60 * time.Second, Idle: 30 * time.Minute,
 			Teardown: 5 * time.Second, EOFGrace: time.Second,
 		}
-		provider, err := launch.NewIsolatedStdioSessions(cfg, limits, func(r *http.Request) daemon.IsolatedStdioAuthorization {
+		provider, err := launch.NewObservedIsolatedStdioSessions(cfg, limits, func(r *http.Request) daemon.IsolatedStdioAuthorization {
 			grant, _ := r.Context().Value(hubStdioRequestKey{}).(*hubStdioRequest)
 			if grant == nil || grant.owner != owner || grant.endpoint != endpoint || grant.session == nil || grant.current == nil || !grant.current() {
 				return daemon.IsolatedStdioAuthorization{}
 			}
 			return daemon.IsolatedStdioAuthorization{Role: daemon.IsolatedStdioHub, Session: grant.session}
+		}, func(d daemon.IsolatedStdioSettlementDiagnostic) {
+			_ = routeReadOnlySink("info", "private_stdio_settlement", hubStdioSettlementFields(d))
 		})
 		if err != nil {
 			return owner, err
@@ -63,6 +65,20 @@ func prepareHubStdioSessions(ctx context.Context, a *api.API, prepare HubStdioPr
 		owner.providers[endpoint] = provider
 	}
 	return owner, nil
+}
+
+// hubStdioSettlementFields permits only receipt metadata; it has no access to
+// a session token, context, launch inputs or endpoint configuration.
+func hubStdioSettlementFields(d daemon.IsolatedStdioSettlementDiagnostic) map[string]any {
+	known := d.OriginalPID > 0 && d.OriginalBirthFILETIME > 0
+	fields := map[string]any{
+		"role": "hub", "session_sequence": d.Sequence, "complete": d.Complete, "original_known": known,
+	}
+	if known {
+		fields["original_pid"] = d.OriginalPID
+		fields["original_birth_filetime"] = d.OriginalBirthFILETIME
+	}
+	return fields
 }
 
 func (p *hubStdioSessions) Allows(endpoint api.HubStdioEndpoint) bool {

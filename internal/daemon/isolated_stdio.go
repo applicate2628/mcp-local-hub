@@ -63,6 +63,7 @@ type IsolatedStdioSessions struct {
 	cfg       HostConfig
 	limits    IsolatedStdioLimits
 	authorize func(*http.Request) IsolatedStdioAuthorization
+	observe   func(IsolatedStdioSettlementDiagnostic)
 	protocol  *StdioHost
 
 	mu           sync.Mutex
@@ -105,6 +106,25 @@ func (s *StdioLaunchContext) NewIsolatedStdioSessions(
 	limits IsolatedStdioLimits,
 	authorize func(*http.Request) IsolatedStdioAuthorization,
 ) (*IsolatedStdioSessions, error) {
+	return s.NewObservedIsolatedStdioSessions(cfg, limits, authorize, nil)
+}
+
+// IsolatedStdioSettlementDiagnostic is a redacted terminal observation, not an authority receipt.
+type IsolatedStdioSettlementDiagnostic struct {
+	Sequence              uint64
+	Complete              bool
+	OriginalPID           int
+	OriginalBirthFILETIME uint64
+}
+
+// NewObservedIsolatedStdioSessions supplies an optional observation after receipt
+// publication and reservation accounting. The observer does not decide cleanup.
+func (s *StdioLaunchContext) NewObservedIsolatedStdioSessions(
+	cfg HostConfig,
+	limits IsolatedStdioLimits,
+	authorize func(*http.Request) IsolatedStdioAuthorization,
+	observe func(IsolatedStdioSettlementDiagnostic),
+) (*IsolatedStdioSessions, error) {
 	// Only Windows currently supplies the existing at-create native owner.
 	if s.valid() != nil || s.ctx.Err() != nil || s.ctx.Done() == nil ||
 		runtime.GOOS != "windows" || cfg.LaunchCapability != nil ||
@@ -119,7 +139,7 @@ func (s *StdioLaunchContext) NewIsolatedStdioSessions(
 		return nil, ErrIsolatedStdioUnavailable
 	}
 	p := &IsolatedStdioSessions{
-		launch: s, cfg: host.cfg, limits: limits, authorize: authorize, protocol: host,
+		launch: s, cfg: host.cfg, limits: limits, authorize: authorize, observe: observe, protocol: host,
 		sessions: make(map[string]*isolatedStdioSession), changed: make(chan struct{}),
 	}
 	p.stopLifetime = context.AfterFunc(s.ctx, p.revoke)
@@ -405,6 +425,19 @@ func (s *isolatedStdioSession) run() {
 	close(p.changed)
 	p.changed = make(chan struct{})
 	p.mu.Unlock()
+	if p.observe != nil {
+		p.observe(isolatedStdioSettlementDiagnostic(s.sequence, s.receipt))
+	}
+}
+
+func isolatedStdioSettlementDiagnostic(sequence uint64, receipt StdioHostSettlement) IsolatedStdioSettlementDiagnostic {
+	d := IsolatedStdioSettlementDiagnostic{Sequence: sequence, Complete: receipt.Complete()}
+	original := receipt.OriginalIdentity
+	if !receipt.NoNativeAttempt && original.Known && original.PID > 0 && original.NativeBirthFILETIME > 0 {
+		d.OriginalPID = original.PID
+		d.OriginalBirthFILETIME = original.NativeBirthFILETIME
+	}
+	return d
 }
 
 // Retirement returns the existing receipt holder for an exact SID. The
