@@ -1,0 +1,89 @@
+{
+  "schema": "installed-liveness-evidence-bindings-v1",
+  "source_comparison_commit": "a706b5b2a71ca850136398f7d4a45e624d107151",
+  "observation_status": "OBSERVED_INSTALLED",
+  "product_execution": false,
+  "scheduler_mutation": false,
+  "complete_A_acceptance": false,
+  "original_receipt": {
+    "bytes": 15566,
+    "sha256": "d84c16782007865c40de2ea98c4a367d3fc50740de97a96054724eb723f0f605"
+  },
+  "receipt_representation": "All JSON fields retained; only explicitly recorded machine path substrings replaced with logical role tokens. Serialization is UTF-8 LF with two-space indentation; this file is not the original receipt byte sequence.",
+  "copied_originals": [
+    "observation.json",
+    "observe_installed_liveness.ps1",
+    "root-receiving.json"
+  ],
+  "provenance": {
+    "producer": "root",
+    "independent_verifier": "next_functional_boundary",
+    "execution_path": "internal collaboration and Remote Desktop Commander",
+    "external_provider": "none",
+    "model_profile": "unspecified by runtime"
+  },
+  "path_role_replacements": [
+    {
+      "role": "@@FUNCTIONAL_RUN_ROOT@@",
+      "original_prefix_sha256": "d0134d8ac8c98ae6d5efc2e35bc661a21539f6e2445243943dac73a2993e34fe",
+      "replacements": 6
+    },
+    {
+      "role": "@@OBSERVED_REPOSITORY@@",
+      "original_prefix_sha256": "04687a675dd26a25d67c54a90f633441b75b14315882a037e55843d538b3ef96",
+      "replacements": 3
+    },
+    {
+      "role": "@@INSTALLED_ORCHE_RUNTIME@@",
+      "original_prefix_sha256": "3ee2cfd78c3dda91c08abca4c027581b65993c24b9431845c6e6a869c32e263a",
+      "replacements": 2
+    },
+    {
+      "role": "@@WINDOWS_POWERSHELL@@",
+      "original_prefix_sha256": "53dadc40bb276161fbb4864750877d9641ebe8a5dee5ce338d2554171eebc6d1",
+      "replacements": 1
+    },
+    {
+      "role": "@@GIT_EXECUTABLE@@",
+      "original_prefix_sha256": "6150ff2962014c83de3d991e1d5571eb9e6471ee59d10d34819056e8875c0c03",
+      "replacements": 1
+    }
+  ],
+  "files": [
+    {
+      "path": "docs/qualification/install-scheduler-generation-20261123/remaining-scheduler-owners.md",
+      "bytes": 33513,
+      "sha256": "26aa2e507cfcaa7998b2d05b53322d38bbc0e75e24481b24e7a2fa3f41727b04"
+    },
+    {
+      "path": "docs/qualification/install-scheduler-generation-20261123/installed-liveness-20261128/.gitattributes",
+      "bytes": 87,
+      "sha256": "36984213a43a734e5a609359fdb6e0d54a8b8c63c6204daa11e772a153e16d21"
+    },
+    {
+      "path": "docs/qualification/install-scheduler-generation-20261123/installed-liveness-20261128/README.md",
+      "bytes": 14443,
+      "sha256": "2237057ffb4664968570bbbdb42d855d410765eaf7be260f1085b76a17f0403c"
+    },
+    {
+      "path": "docs/qualification/install-scheduler-generation-20261123/installed-liveness-20261128/execution-receipt.json",
+      "bytes": 14898,
+      "sha256": "04ff69ad36af9345c2bda20a991842bfa2db579106f90b1158e77a55f312fcec"
+    },
+    {
+      "path": "docs/qualification/install-scheduler-generation-20261123/installed-liveness-20261128/observation.json",
+      "bytes": 8540,
+      "sha256": "97fc9668067b6c53c123cd6c9c333bd284f0bf21a9f8a08da0d370b1d58a9c57"
+    },
+    {
+      "path": "docs/qualification/install-scheduler-generation-20261123/installed-liveness-20261128/observe_installed_liveness.ps1",
+      "bytes": 5885,
+      "sha256": "7e0d3fd5ff98ba71dcb11271e511db12f5a6a338b88bd017e1b441dcd3ab7a4a"
+    },
+    {
+      "path": "docs/qualification/install-scheduler-generation-20261123/installed-liveness-20261128/root-receiving.json",
+      "bytes": 243,
+      "sha256": "b234b3d2e332774b92ce923992ce6b5c35eb6d845a350548c218c4c7c1310c22"
+    }
+  ]
+}
