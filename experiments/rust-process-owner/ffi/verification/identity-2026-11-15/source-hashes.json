@@ -1,0 +1,192 @@
+[
+    {
+        "path":  "experiments/rust-process-owner/Cargo.lock",
+        "bytes":  633,
+        "sha256":  "4198fa4fdbc041142493b86b1183f3446b1e5c24236cfab1020a888bbb46c63c"
+    },
+    {
+        "path":  "experiments/rust-process-owner/Cargo.toml",
+        "bytes":  349,
+        "sha256":  "24fab44254b52380042697c7050aa24905d1d1e7ea3f8bcbeef49bd81637169b"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/Cargo.lock",
+        "bytes":  746,
+        "sha256":  "76b59b101ff09d63eca5fe56751167ef2dab1cbf1dfded80c771e0f7c475e30d"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/Cargo.toml",
+        "bytes":  257,
+        "sha256":  "2fde14f2248eeed1aaebe61bceabe9324bbc53ed63bcc887496e4b849f7e8659"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/admission_windows.go",
+        "bytes":  2439,
+        "sha256":  "4a3185d4edd221e943ffae73192c7a4b75501c9a80624426612ce88078e939c2"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/admission_windows_test.go",
+        "bytes":  7843,
+        "sha256":  "650c67c78d4a69d999493735a05e6203859f8805c5f64b95d2d41e8226da9575"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/bridge_windows.go",
+        "bytes":  16602,
+        "sha256":  "fa1168cfd51bd6f3a01f2e332b5c560715536fdb521d0ff10ad8e4b48d88bc5c"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/bridge_windows_test.go",
+        "bytes":  9104,
+        "sha256":  "6dff0a3d8d8bbdd8e7e61e827347dc9ffbcb256c15aa4c6ddf32761532c59bef"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/environment_windows.go",
+        "bytes":  718,
+        "sha256":  "668c882783b0a9120a6e706652bd2fce25e435be846a2f03ef6319abc17b011f"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/environment_windows_test.go",
+        "bytes":  10010,
+        "sha256":  "b09048f7ce6fb84430c91dc27211fefbd514ca89404893bc1ae30e8f341b2860"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/faults_windows_test.go",
+        "bytes":  6759,
+        "sha256":  "34419e6249fcc08b4a2fd7a0db022ec6cd14ad039afcd60c68af3497b0f5b3fc"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/finish_context_windows.go",
+        "bytes":  2581,
+        "sha256":  "64046068cab96d7a0e587091a3e0b2a7909a8870ddc7ccbfa28d1bdbe43a271d"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/finish_context_windows_test.go",
+        "bytes":  8915,
+        "sha256":  "aadfaccf34fe5b69a7b7f2e3f9e600544a843ca0dbdcdaeb0777722c6dcc1cad"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/go.mod",
+        "bytes":  42,
+        "sha256":  "99502c9ced07df2ba8052a397081e34f6254cd91c7f0d3d47388a060538bef93"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/identity_faults_windows_test.go",
+        "bytes":  2826,
+        "sha256":  "e3bd5b296d13915f4d2d21748fea401e58f3f6301dea96006a53c1710696c997"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/identity_legacy_windows_test.go",
+        "bytes":  1329,
+        "sha256":  "6021fbefba3b648901452f653aa0f5cf4b40490a8fd85965f0f4b4b917d74e7b"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/identity_windows.go",
+        "bytes":  7516,
+        "sha256":  "99c0de8b9c4b7c898b702b8bf2bfa2f2de27b3d372de8e0e76dd00cfbff4980e"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/identity_windows_test.go",
+        "bytes":  7666,
+        "sha256":  "cf95db6c1a2882e379d266f5f7862ec459655abd5796e1ef211313380e60201e"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/io_lifecycle_windows_test.go",
+        "bytes":  8881,
+        "sha256":  "797fdd4b33b40e14264d8e107d488a649e14cad500f9002f60803d21a970f74b"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/loader_windows_test.go",
+        "bytes":  8468,
+        "sha256":  "41a0450e6d0096f95b1514af3807deb0ace9474f7bb749c58cf04af7cd1e9263"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/native_cleanup_windows_test.go",
+        "bytes":  8644,
+        "sha256":  "69be43ea2c6e56fc0dad4f9ff0aea314830c571f2f0f5885a9a954f11f5eb58d"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/outcome_faults_windows_test.go",
+        "bytes":  4776,
+        "sha256":  "85d7340070eb96c24ee9406484c57dc0e338b57b9d12912de0425a996a58cfea"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/outcome_windows.go",
+        "bytes":  2115,
+        "sha256":  "6ce7b2f82c52f163b6a17e93fef66cf65e76f2ee41cfdaa619e045cca0cb0448"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/outcome_windows_test.go",
+        "bytes":  2815,
+        "sha256":  "0627df97b50054cc9382e35e461b8e28a6d5dbcb5407a35a56b2fccf78f41f18"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/stdio_windows.go",
+        "bytes":  3148,
+        "sha256":  "d1fada91384230ff84d68dd3359ce5f066637cf0ca6448976d078f37bd11a2d9"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/stdio_windows_test.go",
+        "bytes":  14079,
+        "sha256":  "5c1d333eabd8c700c343f2c415d859e022add6a91db1494a737858946837c68f"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/include/identity_v1.h",
+        "bytes":  4569,
+        "sha256":  "5a31bf4a6f4a22e52534d292cf32257b2e07097b29abca423656d5069a2b2ba2"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/include/owner_v1.h",
+        "bytes":  6461,
+        "sha256":  "f688e8372bf6290f9b411e52bef9a07c9650ef389b6d361a0107ea0be4fe7ded"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/src/identity.rs",
+        "bytes":  17584,
+        "sha256":  "9bb8e19703220f3f7eb1b5782203234d4d715fd6e4a293b749ab1bad84e030e1"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/src/lib.rs",
+        "bytes":  20639,
+        "sha256":  "a3526d3c00ff66a2501fa6355a4556e4f527c74d71b011b12762d349c370fc9b"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/src/tests.rs",
+        "bytes":  11152,
+        "sha256":  "ef9429d63295c50f93b44cc11c3be2b7350df3c0d7d69b646cd36ddca9c355bd"
+    },
+    {
+        "path":  "experiments/rust-process-owner/src/bin/owner_child.rs",
+        "bytes":  8470,
+        "sha256":  "0a9931d3e3a441e068b093036b2973c8f616884b83932a0d1b10349bbdf47b24"
+    },
+    {
+        "path":  "experiments/rust-process-owner/src/bin/owner_crash_fixture.rs",
+        "bytes":  9044,
+        "sha256":  "12b12ec814778c6de86eb7cf959c4d5f24f94bad785437f878862e4bb073323e"
+    },
+    {
+        "path":  "experiments/rust-process-owner/src/launch_context.rs",
+        "bytes":  7707,
+        "sha256":  "be4874f76d694b9cada9aceb31c3e77954cdbff4b1af408b30cce60f5fe4c207"
+    },
+    {
+        "path":  "experiments/rust-process-owner/src/lib.rs",
+        "bytes":  1562,
+        "sha256":  "2866937f43f9ae35bb6b7743e0d1c92a4b669fad009baf9604e8666d0a9f855f"
+    },
+    {
+        "path":  "experiments/rust-process-owner/src/native_failure_tests.rs",
+        "bytes":  27256,
+        "sha256":  "4c2e03f67491c289e6b74f4a8ec959a5dccf42eafd8468fd599225056d6cc83c"
+    },
+    {
+        "path":  "experiments/rust-process-owner/src/token_user.rs",
+        "bytes":  13337,
+        "sha256":  "e42eb6063b51e7b8e7284c460548b3f182ff4f9097880e379370e989cb44f839"
+    },
+    {
+        "path":  "experiments/rust-process-owner/src/windows.rs",
+        "bytes":  29646,
+        "sha256":  "b7279ff2ceea4be02b10a46bb7217098ec0b1eff6e0d348c10ac1e9fc3749a41"
+    }
+]

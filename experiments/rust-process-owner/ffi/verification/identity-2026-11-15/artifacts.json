@@ -1,0 +1,32 @@
+[
+    {
+        "path":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\target\\debug\\mcphub_owner_ffi_spike.dll",
+        "bytes":  270336,
+        "sha256":  "f87027915e60020457495d9c5a67548152e69559ca9b9a8fdf53305815417b1b"
+    },
+    {
+        "path":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\target\\release\\mcphub_owner_ffi_spike.dll",
+        "bytes":  158720,
+        "sha256":  "16d0f866842d0d75fcbfde021cccaa4730e74109f82fdb39e071a56f36e17614"
+    },
+    {
+        "path":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\target\\debug\\owner_child.exe",
+        "bytes":  330752,
+        "sha256":  "176d91c6687feb0bbb69e08eda3c072d84ef85ec9b0d76691b2f1d95bc94ddfa"
+    },
+    {
+        "path":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\compatibility\\target\\debug\\mcphub_owner_ffi_spike.dll",
+        "bytes":  246272,
+        "sha256":  "32276f47f356cb7473f06a6bb5bba1a89d1545f3986ce9f640013c72b41047f1"
+    },
+    {
+        "path":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\compatibility\\native.zip",
+        "bytes":  30226,
+        "sha256":  "3f0a246b37ef1f6ea49251a3e18d54455ac70f3989aec580155250a092660ba1"
+    },
+    {
+        "path":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\compatibility\\foreign.zip",
+        "bytes":  55268,
+        "sha256":  "642136a21dc1b1f7c0b60bfb5210df61db55c09321b0c19d24890edc856c0284"
+    }
+]

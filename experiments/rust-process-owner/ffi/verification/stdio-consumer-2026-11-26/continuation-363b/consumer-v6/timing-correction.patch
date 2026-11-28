@@ -1,0 +1,48 @@
+--- a/control/rust_runner.py
++++ b/control/rust_runner.py
+@@ -20,7 +20,7 @@
+ import subprocess
+ import time
+ 
+-SPEC_SHA = "04c81c242424cfc76340c96aca9add0d06b6e3f9d930d4b2cd417f447ef7adb8"
++SPEC_SHA = "fc60974ab502787a39aadf61267565a798b83eb270d17989727240b9f347d5d0"
+ 
+ 
+ def load_frozen(name, pin):
+@@ -281,7 +281,7 @@
+                 and row["files_closed"] == 6 and row["owned_completion_signals_received"] == 8 and row["final_active"] == 0
+                 and row["go_job_selected"] == (arm == "go") and row["primary_canceled"] == (row["name"] == "lifetime-cancel")
+                 and (row["original_job_exited"] or row["members_exited"] and row["accounting_known"]), "Original process/tree/readers settlement incomplete")
+-        require(all(type(row[name]) is int and row[name] > 0 for name in ("start_ns", "rpc_ns", "stop_ns", "case_ns")), "Actual positive timings required")
++        require(all(type(row[name]) is int and row[name] >= 0 for name in ("start_ns", "rpc_ns", "stop_ns", "case_ns")), "Actual nonnegative integer elapsed samples required")
+         identity = row["original_identity"]
+         require(identity["Known"] is True and identity["PID"] > 0 and identity["NativeBirthFILETIME"] > 0, "Original creation identity missing")
+         identities.add((identity["PID"], identity["NativeBirthFILETIME"]))
+@@ -289,6 +289,19 @@
+             require(row["original_exit_code"] == 0, "Natural final-reply exit differs")
+     require(len(identities) == 3, "Three original helper creations required")
+     return result
++
++
++def elapsed_timing_metadata(result):
++    return {
++        "schema": "consumer-elapsed-clock-observation-v1",
++        "measurement_source": "Go time.Since(...).Nanoseconds()", "unit": "ns",
++        "zero_interpretation": "resolution_unresolved",
++        "zero_samples": [{"case": row["name"], "metric": name, "raw_value": row[name]}
++                         for row in result["cases"]
++                         for name in ("start_ns", "rpc_ns", "stop_ns", "case_ns") if row[name] == 0],
++        "clock_quantum_measured": False, "zero_latency_claimed": False,
++        "speed_ratio_from_zero_permitted": False,
++    }
+ 
+ 
+ def execute(run, inputs, phase, command):
+@@ -327,6 +340,7 @@
+     elif command["kind"] == "consumer":
+         require(not stderr, "Consumer stderr must be preserved and reviewed")
+         row["consumer_receipt"] = receive_consumer(raw, command["arm"], helper_sha)
++        row["elapsed_timing"] = elapsed_timing_metadata(row["consumer_receipt"])
+         row["arm"] = command["arm"]
+     elif command["kind"] == "prepare":
+         report = json.loads(ordinary(SCOPE / "materialization.json").read_text())

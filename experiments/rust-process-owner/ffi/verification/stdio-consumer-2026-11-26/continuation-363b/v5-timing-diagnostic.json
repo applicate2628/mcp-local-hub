@@ -1,0 +1,116 @@
+{
+  "schema": "consumer-elapsed-timing-failure-analysis-v1",
+  "source_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+  "producer": {
+    "path": "internal/daemon/zz_rust_adoption_stdio_consumer_windows_test.go",
+    "sha256": "c7218f274e9ef00906eff79975ca439f48974ef0fd9593f7198fc27a65a7b6c8",
+    "lines": [
+      185,
+      189,
+      259
+    ],
+    "expression": "time.Since(rpcStarted).Nanoseconds()",
+    "placeholders": false
+  },
+  "validator": {
+    "path": "control/rust_runner.py",
+    "sha256": "6ac50a80fae6e6d0d2752c002729e39d044086307c9f89b5c82cd85e519274d7",
+    "line": 284,
+    "condition": "type(value) is int and value > 0 for all four elapsed fields"
+  },
+  "installed_toolchain_source_pins": [
+    {
+      "role": "go-time-source",
+      "bytes": 63257,
+      "sha256": "7d992810b162f65e02cea4d60fd0d90af59b3cafa2c8926ca08083d5c73451dc"
+    },
+    {
+      "role": "go-windows-clock-source",
+      "bytes": 6807,
+      "sha256": "24efe0d0cc1f7743cd4bfc889fbc6dabb73409bd865c7ec7a1e86eaa01863516"
+    }
+  ],
+  "clock_source": {
+    "time_since_lines": [
+      1214,
+      1222,
+      1227,
+      1232
+    ],
+    "windows_nanotime_lines": [
+      200,
+      205
+    ],
+    "description": "Monotonic subtraction returns zero unchanged; Windows amd64 nanotime reads shared _INTERRUPT_TIME and scales by 100.",
+    "exact_clock_quantum_measured": false
+  },
+  "controlled_downstream_census": [
+    {
+      "file": "bind_next_plan.py",
+      "bytes": 6659,
+      "sha256": "0085822dfe4f2e29f5eded814254d59d84cdc80f5117e2be08f2536dbe0c186b",
+      "timing_references": []
+    },
+    {
+      "file": "campaign_spec.py",
+      "bytes": 6220,
+      "sha256": "04c81c242424cfc76340c96aca9add0d06b6e3f9d930d4b2cd417f447ef7adb8",
+      "timing_references": []
+    },
+    {
+      "file": "export_original_phase.py",
+      "bytes": 5545,
+      "sha256": "7387d8c92861a315bfa8e5e905aaa856d0ffd176d0de6bd489117a7c05c5076c",
+      "timing_references": []
+    },
+    {
+      "file": "focused_runner.py",
+      "bytes": 39492,
+      "sha256": "7c509aefed299c536587455c4ebe146b0f1666e9e3f16381a62491c7f271f517",
+      "timing_references": []
+    },
+    {
+      "file": "guard-candidate.py",
+      "bytes": 38589,
+      "sha256": "70c7a4b607351fa7d3468fb1b8fe0923af3e212b213ad048acc3333ac5f60eed",
+      "timing_references": []
+    },
+    {
+      "file": "materialize_rust_inputs.py",
+      "bytes": 19071,
+      "sha256": "7f8b98df5b02016b02a9545f8fa185827743bd5b085902b5947b27cda3b42643",
+      "timing_references": []
+    },
+    {
+      "file": "rust_runner.py",
+      "bytes": 33693,
+      "sha256": "6ac50a80fae6e6d0d2752c002729e39d044086307c9f89b5c82cd85e519274d7",
+      "timing_references": [
+        {
+          "line": 284,
+          "text": "        require(all(type(row[name]) is int and row[name] > 0 for name in (\"start_ns\", \"rpc_ns\", \"stop_ns\", \"case_ns\")), \"Actual positive timings required\")"
+        },
+        {
+          "line": 329,
+          "text": "        row[\"consumer_receipt\"] = receive_consumer(raw, command[\"arm\"], helper_sha)"
+        }
+      ]
+    }
+  ],
+  "zero_samples": [
+    {
+      "case": "final-reply",
+      "metric": "rpc_ns",
+      "raw_value": 0,
+      "state": "resolution_unresolved"
+    },
+    {
+      "case": "lifetime-cancel",
+      "metric": "rpc_ns",
+      "raw_value": 0,
+      "state": "resolution_unresolved"
+    }
+  ],
+  "original_result_preserved": "FAIL",
+  "next_correction": "Accept only integer nonnegative elapsed fields; retain exact zero values with explicit resolution-unresolved metadata; no speed ratio from zero. No successor native run authorized by this analysis."
+}

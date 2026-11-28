@@ -1,0 +1,127 @@
+{
+  "recordedUtc": "2026-11-14 21:52:04 UTC",
+  "query": "is:pr is:open repo:applicate2628/mcp-local-hub",
+  "items": [
+    {
+      "number": 623,
+      "title": "docs: cross-platform Rust roadmap, COM boundaries and targeted Python reduction",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/623"
+    },
+    {
+      "number": 624,
+      "title": "test(perf): expand CMake trace benchmarks through bounded public output",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/624"
+    },
+    {
+      "number": 625,
+      "title": "spike(rust): qualify process-owner lifecycle, launch context and native failures",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/625"
+    },
+    {
+      "number": 626,
+      "title": "test(perf): relay workload and executable-size control before Rust migration",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/626"
+    },
+    {
+      "number": 627,
+      "title": "spike(rust): anchored verified file reader with native replacement and cap tests",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/627"
+    },
+    {
+      "number": 628,
+      "title": "test(perf): native process observation handle-reuse baseline without COM",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/628"
+    },
+    {
+      "number": 629,
+      "title": "fix(relay): retain output failures and join owner-authorized stdin interruption",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/629"
+    },
+    {
+      "number": 631,
+      "title": "spike(ffi): validate cross-language outcomes without losing resource ownership",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/631"
+    },
+    {
+      "number": 632,
+      "title": "fix(serena): discover UV from the qualified execution PATH",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/632"
+    },
+    {
+      "number": 633,
+      "title": "test(cli): use valid v2 intents in strict-mode preservation fixtures",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/633"
+    },
+    {
+      "number": 634,
+      "title": "test(process): separate concurrent closure refusal from cached settlement",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/634"
+    },
+    {
+      "number": 635,
+      "title": "test(serena): build a source-issued native qualification publisher",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/635"
+    },
+    {
+      "number": 636,
+      "title": "test(serena): retain a private native qualification namespace",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/636"
+    },
+    {
+      "number": 637,
+      "title": "test(serena): run positive migration fixtures through real preparation",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/637"
+    },
+    {
+      "number": 638,
+      "title": "fix(tray): treat warning-stream cancellation as normal shutdown",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/638"
+    },
+    {
+      "number": 639,
+      "title": "fix(serena): keep Python output buffering outside build inputs",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/639"
+    },
+    {
+      "number": 640,
+      "title": "test(vtune): verify shared shutdown context without disk timing",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/640"
+    },
+    {
+      "number": 641,
+      "title": "test(recovery): synchronize late audit completion with a virtual clock",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/641"
+    },
+    {
+      "number": 642,
+      "title": "test(daemon): synchronize readiness acknowledgement and cleanup",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/642"
+    },
+    {
+      "number": 643,
+      "title": "fix(serena): keep cleanup within its captured parent lifetime",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/643"
+    },
+    {
+      "number": 644,
+      "title": "spike(rust): observe original process identity while retaining ownership",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/644"
+    },
+    {
+      "number": 645,
+      "title": "fix(serena): accept native empty stream enumeration",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/645"
+    },
+    {
+      "number": 646,
+      "title": "fix(serena): prefer qualified system Python discovery",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/646"
+    },
+    {
+      "number": 647,
+      "title": "fix(serena): own Windows Git subprocess environment",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/647"
+    }
+  ],
+  "count": 24
+}

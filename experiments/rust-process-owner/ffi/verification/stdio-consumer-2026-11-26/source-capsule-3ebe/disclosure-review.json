@@ -1,0 +1,227 @@
+{
+  "schema": "exact-source-capsule-disclosure-review-v1",
+  "result": "NO_BLOCKING_FINDING_IN_REVIEWED_SCOPE",
+  "initial_exact_payload_scan": {
+    "file_count": 7,
+    "bytes_scanned": 4241675,
+    "files": [
+      {
+        "path": "README.md",
+        "bytes": 5148,
+        "sha256": "de6250eab81015f13e32cefaf6b6c2c24a2a1578db1151d40f5955993a88a33d"
+      },
+      {
+        "path": "changed-files.json",
+        "bytes": 110269,
+        "sha256": "7ce07caf650432ad2e614070b80bd979d57939b0eb42660f6131f77d503c5628"
+      },
+      {
+        "path": "export-provenance.json",
+        "bytes": 887,
+        "sha256": "0ea9b08377d353cf817415dae4fdd1e475c6f69e5565c64cfc5e358ab70fe669"
+      },
+      {
+        "path": "manifest.json",
+        "bytes": 1160,
+        "sha256": "a03775c2d17bd61817072c0c3bd47d8cc52d5c8a5c7922d69208d6fa8c451662"
+      },
+      {
+        "path": "source-files.json",
+        "bytes": 652739,
+        "sha256": "706c4f284ff9ec4aefd8c61ee18809a6e5424d350206d1403b96006468b78c00"
+      },
+      {
+        "path": "source.commit",
+        "bytes": 276,
+        "sha256": "a951fc2799e12e93e118ea1251438fb8ca908c86786f0bf65a4e522e04bfe537"
+      },
+      {
+        "path": "source.patch",
+        "bytes": 3471196,
+        "sha256": "10af6f1b1b179c04299c13024ca75b4dc868fb945574a3e941b34ac343d7c03e"
+      }
+    ],
+    "scope": "Every byte of every exact staged capsule file, including added/removed/context patch lines and raw commit",
+    "pattern_count": 16,
+    "pattern_categories": [
+      "private_key_marker",
+      "github_token_shape",
+      "sk_token_shape",
+      "aws_access_id_shape",
+      "google_api_key_shape",
+      "slack_token_shape",
+      "jwt_shape",
+      "credential_in_url",
+      "signature_query",
+      "bearer_literal",
+      "basic_literal",
+      "credential_literal_assignment",
+      "windows_user_path",
+      "unix_user_path",
+      "private_ipv4",
+      "email_address"
+    ],
+    "candidate_count": 10,
+    "counts_by_category": {
+      "email_address": 10
+    }
+  },
+  "manual_candidate_review": [
+    {
+      "id": 1,
+      "category": "email_address",
+      "artifact": "source.commit",
+      "line": 3,
+      "candidate_sha256": "0d30e740e84a1ca715315f0bf3f33ffcdc3b2ebf41d6610c22fc8cf06df03a16",
+      "location": null,
+      "disposition": "SYNTHETIC_COMMIT_IDENTITY",
+      "reason": "Raw author/committer is ChatGPT <chatgpt@local.invalid>; exact commit metadata, not a credential.",
+      "manual_context_inspected": true
+    },
+    {
+      "id": 2,
+      "category": "email_address",
+      "artifact": "source.commit",
+      "line": 4,
+      "candidate_sha256": "0d30e740e84a1ca715315f0bf3f33ffcdc3b2ebf41d6610c22fc8cf06df03a16",
+      "location": null,
+      "disposition": "SYNTHETIC_COMMIT_IDENTITY",
+      "reason": "Raw author/committer is ChatGPT <chatgpt@local.invalid>; exact commit metadata, not a credential.",
+      "manual_context_inspected": true
+    },
+    {
+      "id": 3,
+      "category": "email_address",
+      "artifact": "source.patch",
+      "line": 190,
+      "candidate_sha256": "8119b251554ff7ba7b2b86ea8d89096ce65ef44c9d3806c432cd3b969603f87e",
+      "location": {
+        "source_path": "build.ps1",
+        "side": "context",
+        "source_line": 20
+      },
+      "disposition": "FALSE_POSITIVE_MODULE_VERSION",
+      "reason": "Go module/version string in build code, assertions or dependency documentation; @ separates module and version.",
+      "manual_context_inspected": true
+    },
+    {
+      "id": 4,
+      "category": "email_address",
+      "artifact": "source.patch",
+      "line": 450,
+      "candidate_sha256": "8119b251554ff7ba7b2b86ea8d89096ce65ef44c9d3806c432cd3b969603f87e",
+      "location": {
+        "source_path": "build.ps1",
+        "side": "added",
+        "source_line": 406
+      },
+      "disposition": "FALSE_POSITIVE_MODULE_VERSION",
+      "reason": "Go module/version string in build code, assertions or dependency documentation; @ separates module and version.",
+      "manual_context_inspected": true
+    },
+    {
+      "id": 5,
+      "category": "email_address",
+      "artifact": "source.patch",
+      "line": 1382,
+      "candidate_sha256": "bacee95a3f4ac8d1d1c293f4bcd355de9cafee31708e424c8aa2036a33363196",
+      "location": {
+        "source_path": "docs/modernization/verification/rust-owner-custody-retry-audit-2026-11-19.md",
+        "side": "added",
+        "source_line": 114
+      },
+      "disposition": "FALSE_POSITIVE_MODULE_VERSION",
+      "reason": "Go module/version string in build code, assertions or dependency documentation; @ separates module and version.",
+      "manual_context_inspected": true
+    },
+    {
+      "id": 6,
+      "category": "email_address",
+      "artifact": "source.patch",
+      "line": 1382,
+      "candidate_sha256": "522b844ed0b418e887fc25846f2ecc43c8d26cbeafa18eac57fa8257d3a57a10",
+      "location": {
+        "source_path": "docs/modernization/verification/rust-owner-custody-retry-audit-2026-11-19.md",
+        "side": "added",
+        "source_line": 114
+      },
+      "disposition": "FALSE_POSITIVE_MODULE_VERSION",
+      "reason": "Go module/version string in build code, assertions or dependency documentation; @ separates module and version.",
+      "manual_context_inspected": true
+    },
+    {
+      "id": 7,
+      "category": "email_address",
+      "artifact": "source.patch",
+      "line": 10488,
+      "candidate_sha256": "b398d2860c5990ae7dd6530a357b341374fd98d785aebf32a38ba4a0c8462659",
+      "location": {
+        "source_path": "experiments/rust-process-owner/ffi/verification/stdio-consumer-2026-11-26/testdata/zz_rust_adoption_stdio_consumer_windows_test.go",
+        "side": "removed",
+        "source_line": 121
+      },
+      "disposition": "FALSE_POSITIVE_DOCUMENTATION_URL",
+      "reason": "Version-qualified Go context documentation URL; @ is part of the documentation reference.",
+      "manual_context_inspected": true
+    },
+    {
+      "id": 8,
+      "category": "email_address",
+      "artifact": "source.patch",
+      "line": 69362,
+      "candidate_sha256": "8119b251554ff7ba7b2b86ea8d89096ce65ef44c9d3806c432cd3b969603f87e",
+      "location": {
+        "source_path": "scripts/test-windows-product-build.ps1",
+        "side": "added",
+        "source_line": 673
+      },
+      "disposition": "FALSE_POSITIVE_MODULE_VERSION",
+      "reason": "Go module/version string in build code, assertions or dependency documentation; @ separates module and version.",
+      "manual_context_inspected": true
+    },
+    {
+      "id": 9,
+      "category": "email_address",
+      "artifact": "source.patch",
+      "line": 69430,
+      "candidate_sha256": "8119b251554ff7ba7b2b86ea8d89096ce65ef44c9d3806c432cd3b969603f87e",
+      "location": {
+        "source_path": "scripts/test-windows-product-build.ps1",
+        "side": "added",
+        "source_line": 741
+      },
+      "disposition": "FALSE_POSITIVE_MODULE_VERSION",
+      "reason": "Go module/version string in build code, assertions or dependency documentation; @ separates module and version.",
+      "manual_context_inspected": true
+    },
+    {
+      "id": 10,
+      "category": "email_address",
+      "artifact": "source.patch",
+      "line": 69492,
+      "candidate_sha256": "8119b251554ff7ba7b2b86ea8d89096ce65ef44c9d3806c432cd3b969603f87e",
+      "location": {
+        "source_path": "scripts/test-windows-product-build.ps1",
+        "side": "added",
+        "source_line": 803
+      },
+      "disposition": "FALSE_POSITIVE_MODULE_VERSION",
+      "reason": "Go module/version string in build code, assertions or dependency documentation; @ separates module and version.",
+      "manual_context_inspected": true
+    }
+  ],
+  "manual_candidates_reviewed": 10,
+  "confirmed_credential_findings": 0,
+  "confirmed_private_key_findings": 0,
+  "full_manual_review_of_418_changed_postimages": false,
+  "full_source_code_audit_performed": false,
+  "full_changed_postimage_bytes_separately_scanned": false,
+  "unchanged_source_relation": "3090 target files inherit exact blob contents from public base62c853; newly disclosed Source bytes are carried in the scanned exact patch.",
+  "final_generated_metadata": "Checked separately at final package sealing; source.patch/source.commit/inventories retain the exact scanned hashes.",
+  "native_publication_gate": "Separate repository gate; not claimed by this static Source disclosure review.",
+  "limitations": [
+    "Heuristic byte-pattern scan is not a proof that every possible secret encoding is absent.",
+    "Manual inspection covered all ten reported candidates and their surrounding context, not every changed postimage.",
+    "The separate full64 a217 static review and native runtime qualification are not implied by this disclosure review."
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "schema": "exact-source-capsule-manifest-v1",
+  "base_commit": "62c853e8a9e9b2817f5fcaf15018450b76798690",
+  "base_tree": "32b55d2e5708462a2bf4cddb4a5cc7143ddf59e4",
+  "target_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+  "target_tree": "67c13b8fc1317b4fd60e3135a3eb8a376fe01817",
+  "reconstruction_status": "PASS",
+  "record_scope": "Exact sealed capsule bytes; original native publication gate and public readback are separate.",
+  "files": [
+    {
+      "path": ".gitattributes",
+      "bytes": 8,
+      "sha256": "705fd4d6451a31d36b3df7de96f83f30ac976c9b4a6d1e51671d8e2f33e2d0da",
+      "git_blob_sha1": "fa1385d99a319b43c06f5309d1aae9fdd3adea46"
+    },
+    {
+      "path": "README.md",
+      "bytes": 9124,
+      "sha256": "72f96713ced445cfea441f709c3fad73330bd13720dc836f0961bfc9edb1cac7",
+      "git_blob_sha1": "885bafa6cef4c6c82ced49080decd5266194e1b9"
+    },
+    {
+      "path": "changed-files.json",
+      "bytes": 110269,
+      "sha256": "7ce07caf650432ad2e614070b80bd979d57939b0eb42660f6131f77d503c5628",
+      "git_blob_sha1": "ecebbcc709e7e51f71d2fb873144568f3d626f11"
+    },
+    {
+      "path": "disclosure-review.json",
+      "bytes": 8765,
+      "sha256": "1b7e5e1ce80d7fe5a3cc268bf30bb2d5a30cec8da990220294e80c0c41a7b070",
+      "git_blob_sha1": "e483573d1e26989202736de6580e9b53a8cf3762"
+    },
+    {
+      "path": "export-provenance.json",
+      "bytes": 1470,
+      "sha256": "dbbaa89abb25abac734d729de8079cb64ad30a7409f4dbf65f9fba5f21088b0d",
+      "git_blob_sha1": "e3835303226743d41abc52e4092000e1f11e7325"
+    },
+    {
+      "path": "reconstruction.json",
+      "bytes": 2020,
+      "sha256": "d5a3a8d2a1370f0632868a8b0503cde0b5d952095b921ed351ed0818774c8ac0",
+      "git_blob_sha1": "1baf579f0754817c8d3faba5b7bcc9c837a53abb"
+    },
+    {
+      "path": "source-files.json",
+      "bytes": 652739,
+      "sha256": "706c4f284ff9ec4aefd8c61ee18809a6e5424d350206d1403b96006468b78c00",
+      "git_blob_sha1": "91f7b3fa3488fffbac58283bd9b750a3bdf641d0"
+    },
+    {
+      "path": "source.commit",
+      "bytes": 276,
+      "sha256": "a951fc2799e12e93e118ea1251438fb8ca908c86786f0bf65a4e522e04bfe537",
+      "git_blob_sha1": "82e7cc2ae51a31df33801fd08f385bf6a776e6d1"
+    },
+    {
+      "path": "source.patch",
+      "bytes": 3471196,
+      "sha256": "10af6f1b1b179c04299c13024ca75b4dc868fb945574a3e941b34ac343d7c03e",
+      "git_blob_sha1": "4e3de11f96f0b3136b7f749f1319f9d5f11e8be6"
+    },
+    {
+      "path": "verify_capsule.py",
+      "bytes": 3844,
+      "sha256": "83142a14a81e41747ee2b1d82d2a99c217446f1b45ce1a9d799909bb27a95e1f",
+      "git_blob_sha1": "1ecc574a93d60334517d3030a4587cc21d28eb70"
+    }
+  ]
+}

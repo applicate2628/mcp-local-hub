@@ -1,0 +1,1128 @@
+{
+    "schema":  1,
+    "createdUtc":  "2026-11-15T11:36:55.3609722Z",
+    "runtimeCommit":  "e69bc4c14bae2f76ef451bad69a2129345d43c8f",
+    "nativeRuntimeCommit":  "7f99d4001c43c77c0fab478566e42b8bfb4d12e1",
+    "verifiedRuntimeFiles":  45,
+    "entryCount":  123,
+    "entries":  [
+                    {
+                        "entry":  "qualification/archive-old-go.log",
+                        "originalBytes":  0,
+                        "originalSHA256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "publishedBytes":  0,
+                        "publishedSHA256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "qualification/artifacts.json",
+                        "originalBytes":  1443,
+                        "originalSHA256":  "56ce2e7d5065e7ffe165f17d87e2e10a9419b9464929245b77614393b767b00a",
+                        "publishedBytes":  1443,
+                        "publishedSHA256":  "56ce2e7d5065e7ffe165f17d87e2e10a9419b9464929245b77614393b767b00a",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "qualification/dll-debug.log",
+                        "originalBytes":  782,
+                        "originalSHA256":  "ed963c66fd7b919548ee09eaa0bf15f26ea574d849d4afee17d0fecfdbc99366",
+                        "publishedBytes":  766,
+                        "publishedSHA256":  "a29b3d2ce9d1cb6af3291d2cbbdc71d05ff259744f2505e5b95ab9bcb560970a",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "qualification/dll-release.log",
+                        "originalBytes":  772,
+                        "originalSHA256":  "7fd336c0ecf622bfa9d59da5c23a9fd1419314e2e55027ea645208338ab3e269",
+                        "publishedBytes":  756,
+                        "publishedSHA256":  "cc0b7913043e0d47bd450e1be3bc49590c4cbf82d49202c1c6255e1b51edf1c1",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "qualification/go-cgocheck2-debug.log",
+                        "originalBytes":  114301,
+                        "originalSHA256":  "f3f9c8eb9a9c7c5945efb5edb60bff28df7a6e2888fdc4729b0afd220a43eb5d",
+                        "publishedBytes":  113778,
+                        "publishedSHA256":  "c4289a57198b3e1ace3aa5fb42a55003acf4907e38d52683eaaf70be56b2ddfb",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "qualification/go-cgocheck2-release.log",
+                        "originalBytes":  114276,
+                        "originalSHA256":  "3091592b5a00497fcd5d1bef602742fb6361587893a4a476a93b6bf17e1ee036",
+                        "publishedBytes":  113753,
+                        "publishedSHA256":  "72a86f2ce14dc6149b942101e041520401e884a95cc6358898c36bfe3f305ddb",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "qualification/go-format.log",
+                        "originalBytes":  0,
+                        "originalSHA256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "publishedBytes":  0,
+                        "publishedSHA256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "qualification/go-race-debug.log",
+                        "originalBytes":  114269,
+                        "originalSHA256":  "9160c6d4ad34111b7860545fbcacf4ae0e1cb781a73b590f46d7cb25fc9eedbf",
+                        "publishedBytes":  113746,
+                        "publishedSHA256":  "358c1e637008745756c919a1af5fba7e38201aac92304f9bb8afb5ff2b3e035c",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "qualification/go-race-release.log",
+                        "originalBytes":  114271,
+                        "originalSHA256":  "7c06668a34ba242f2a4521b5ba4ca493fc044d8d05c6bf9caec604e5b155f49b",
+                        "publishedBytes":  113748,
+                        "publishedSHA256":  "87d547a44e894f11428349d1158dc94baf739f639966b1e10f200001ef20f54c",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "qualification/go-vet.log",
+                        "originalBytes":  0,
+                        "originalSHA256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "publishedBytes":  0,
+                        "publishedSHA256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "qualification/new-go-abi1-dll.log",
+                        "originalBytes":  1378,
+                        "originalSHA256":  "6dd7d58a8ceefacc8776381a85fbfe7dd5ac8294c233abd1234120fc15c95444",
+                        "publishedBytes":  1367,
+                        "publishedSHA256":  "4c6d13e4fad6c2ded3314e17c7052bb3393e27c0326a619da8e8ff834de52c57",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "qualification/new-go-admission-dll.log",
+                        "originalBytes":  1376,
+                        "originalSHA256":  "e89a4f10912832f318a215f977c4bdc3a5a276616ae59c5cb2875329c96cde53",
+                        "publishedBytes":  1365,
+                        "publishedSHA256":  "1fcab98b7160e54572a2eea05e718b79acb1b8e2f3c3cf752225f717472b6cc8",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "qualification/old-go-new-dll.log",
+                        "originalBytes":  108420,
+                        "originalSHA256":  "eddc6016a342186aec0ebf3c9085fa60c3adb8f99b80a02a33335481cc281118",
+                        "publishedBytes":  107925,
+                        "publishedSHA256":  "174751c1f4fe9703b3169ffb442f2312178879a69dbadff8cabdd67b7cd94c47",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "qualification/rust-clippy.log",
+                        "originalBytes":  782,
+                        "originalSHA256":  "7ece3fe286754965b047144f5ea1011321d7289d81a4b4653206d6dd69da1f40",
+                        "publishedBytes":  766,
+                        "publishedSHA256":  "0f45bb6302d4cab07eb5fe8c8e4de2845990cc5e1cdece6572e32e0e61f3dc85",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "qualification/rust-fmt.log",
+                        "originalBytes":  0,
+                        "originalSHA256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "publishedBytes":  0,
+                        "publishedSHA256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "qualification/rust-tests-debug.log",
+                        "originalBytes":  2853,
+                        "originalSHA256":  "2146cad6c506dc2338e9c8e15dce4e323188e51bc91f95fb5c280b7547870648",
+                        "publishedBytes":  2804,
+                        "publishedSHA256":  "c5900c48c5eeaa6b0a86f1fb4e8968b59feaafeda130716543fc7ea19a7d3bde",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "qualification/rust-tests-release.log",
+                        "originalBytes":  2844,
+                        "originalSHA256":  "fffb89223c42a4c819cda198c57a293c55e0fef099b43a90b732dfc64f2252c6",
+                        "publishedBytes":  2795,
+                        "publishedSHA256":  "74dcf7d516ea36730cdfa7cefd1edee751acc05aed25699c155c29b740c3dd15",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "qualification/source-hashes.json",
+                        "originalBytes":  9032,
+                        "originalSHA256":  "7f8e50addccbb6cb52b534bc2f014db4bc51d49516802858d79005d8302241ce",
+                        "publishedBytes":  9032,
+                        "publishedSHA256":  "7f8e50addccbb6cb52b534bc2f014db4bc51d49516802858d79005d8302241ce",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "qualification/source-identity.json",
+                        "originalBytes":  462,
+                        "originalSHA256":  "5c46eda0b2dcb3f116307c580f4210f909261752feadaf76da7d947e9a0761f7",
+                        "publishedBytes":  462,
+                        "publishedSHA256":  "5c46eda0b2dcb3f116307c580f4210f909261752feadaf76da7d947e9a0761f7",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "qualification/steps.json",
+                        "originalBytes":  10865,
+                        "originalSHA256":  "510f8b0797ff1a7e4ae986eba7262a9ce54f8e6af2ad2a81545ac17204adeaee",
+                        "publishedBytes":  10865,
+                        "publishedSHA256":  "510f8b0797ff1a7e4ae986eba7262a9ce54f8e6af2ad2a81545ac17204adeaee",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "repository-gates/build.log",
+                        "originalBytes":  0,
+                        "originalSHA256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "publishedBytes":  0,
+                        "publishedSHA256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "repository-gates/census.json",
+                        "originalBytes":  25385,
+                        "originalSHA256":  "83530e7c800638300a2a87455fda967c69104e5ecd1fddb7332ff38a10041e38",
+                        "publishedBytes":  25159,
+                        "publishedSHA256":  "d0f14e5719b066b1daf60e1674e6e77bf18c44b1d60256871f0d32b465787823",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "repository-gates/owned-process-snapshot.json",
+                        "originalBytes":  288,
+                        "originalSHA256":  "2bda8c1413e8feb1521acd995b940a15a18f0e29a53bc7375f84267a1657ca83",
+                        "publishedBytes":  278,
+                        "publishedSHA256":  "7a9c2f278087271b6b3e3d152a6bafd46a14740594c7344050caa09f4123609a",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "repository-gates/source-identity.json",
+                        "originalBytes":  491,
+                        "originalSHA256":  "681b59d519b479b6c6179802b0c9795fe8a64a9c3cd09e8bfe995710c64229f4",
+                        "publishedBytes":  483,
+                        "publishedSHA256":  "bc392dc076f4c530716c730d0fd5622c3fe35dbb31cb7f3fb8fe83ed67913831",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "repository-gates/state-tag.log",
+                        "originalBytes":  7254149,
+                        "originalSHA256":  "4c75811b42dd6fa72b252b7a261db5ffb5d6c4469c41c5966b0ec47aaf598426",
+                        "publishedBytes":  7222824,
+                        "publishedSHA256":  "39fd799b8f257416b39d7a5711659696939a48cddea62768533cc589577ed3e5",
+                        "sidRedactions":  5,
+                        "profileRedactions":  6
+                    },
+                    {
+                        "entry":  "repository-gates/steps.json",
+                        "originalBytes":  1781,
+                        "originalSHA256":  "be3bd8c82a46e429da0f36cf05a846d5da7486142b837a3dd36ec3a47768642b",
+                        "publishedBytes":  1781,
+                        "publishedSHA256":  "be3bd8c82a46e429da0f36cf05a846d5da7486142b837a3dd36ec3a47768642b",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "repository-gates/test.log",
+                        "originalBytes":  14538010,
+                        "originalSHA256":  "1325ceacb79be52ec0fb8bc6c52238e0738b2ec521aa77d35ca5355e64764b4d",
+                        "publishedBytes":  14474992,
+                        "publishedSHA256":  "811bdad6af37cafb860422bdcb37c5ba28edbda5e08f95e1cd46f1ed959febc6",
+                        "sidRedactions":  6,
+                        "profileRedactions":  23
+                    },
+                    {
+                        "entry":  "repository-gates/vet.log",
+                        "originalBytes":  0,
+                        "originalSHA256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "publishedBytes":  0,
+                        "publishedSHA256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "root-controls/good-consumer.log",
+                        "originalBytes":  1185,
+                        "originalSHA256":  "eb37b97b80a0c71b95d514619f1fbbfce51e4d236b9eceb348c0e28c96411315",
+                        "publishedBytes":  1175,
+                        "publishedSHA256":  "49e87b0496fffc9a3aac477b2cf28e66ecc1ce6f74231b871368fe3faf9aaa59",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "root-controls/results.json",
+                        "originalBytes":  2304,
+                        "originalSHA256":  "12932f711a75b482ed1b5db15f0b16b8a16b03ed59e0713d1bbc7b799d1b0e5b",
+                        "publishedBytes":  2253,
+                        "publishedSHA256":  "85c3a6e0b9ffc58ead28dfe39e58d23e16f12f7beee1dc7f8e8dff8acae0f922",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "root-controls/reviewed-results.json",
+                        "originalBytes":  1608,
+                        "originalSHA256":  "965c8012ba49469f5ad7f779062620c0ab2b650d29c9c295b3e5387bb92920ae",
+                        "publishedBytes":  1608,
+                        "publishedSHA256":  "965c8012ba49469f5ad7f779062620c0ab2b650d29c9c295b3e5387bb92920ae",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "root-controls/weakened-consumer.log",
+                        "originalBytes":  1458,
+                        "originalSHA256":  "69c55f7fbaed1e64a021975a4bd7b19a6fa9998588414943c4eabf1a3119a536",
+                        "publishedBytes":  1447,
+                        "publishedSHA256":  "0794c185bcf59b3149fc2027aeb8920781bf2492ee7380d2327a3c959ede485c",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "runners/qualify-query.ps1",
+                        "originalBytes":  9302,
+                        "originalSHA256":  "03924046cc7a4b8a2e86c1c91dcc107315497b435e28493623b78b5a624dc250",
+                        "publishedBytes":  9302,
+                        "publishedSHA256":  "03924046cc7a4b8a2e86c1c91dcc107315497b435e28493623b78b5a624dc250",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "runners/repository-gates.ps1",
+                        "originalBytes":  3056,
+                        "originalSHA256":  "8223df9048da7553896ca02f825b8b1c879e8cca278941718c2803153b0fff7f",
+                        "publishedBytes":  3066,
+                        "publishedSHA256":  "48247911342f8e432956832e757a94f4728f129e07ef324f75ad6ca365ccb93e",
+                        "sidRedactions":  0,
+                        "profileRedactions":  1
+                    },
+                    {
+                        "entry":  "runners/summarize-gates.ps1",
+                        "originalBytes":  3354,
+                        "originalSHA256":  "b88ca838c74c8cd2fdf3b885f84d442b42c9e401422b9029529630192b82c103",
+                        "publishedBytes":  3354,
+                        "publishedSHA256":  "b88ca838c74c8cd2fdf3b885f84d442b42c9e401422b9029529630192b82c103",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "runners/root-controls.ps1",
+                        "originalBytes":  3540,
+                        "originalSHA256":  "819dc387114ba1d07a9e892df591fff305d588ac743f08c7cda753f3d9daa557",
+                        "publishedBytes":  3540,
+                        "publishedSHA256":  "819dc387114ba1d07a9e892df591fff305d588ac743f08c7cda753f3d9daa557",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "runners/review-root-controls.ps1",
+                        "originalBytes":  2022,
+                        "originalSHA256":  "dc20833cd472b5cbf068e652be82eda5793a13e4711e0958cba9f4f781b8ab60",
+                        "publishedBytes":  2022,
+                        "publishedSHA256":  "dc20833cd472b5cbf068e652be82eda5793a13e4711e0958cba9f4f781b8ab60",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "runners/telemetry-readback.json",
+                        "originalBytes":  541,
+                        "originalSHA256":  "2e8ac0ca6fdb869889c18735a9405c92e157b39186e2936e6bff677c5cf77171",
+                        "publishedBytes":  541,
+                        "publishedSHA256":  "2e8ac0ca6fdb869889c18735a9405c92e157b39186e2936e6bff677c5cf77171",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/run-query-controls.ps1",
+                        "originalBytes":  19265,
+                        "originalSHA256":  "ffbab6449ea0764804830569880f0153a28dc4219fe1d9e55078fd03381055ef",
+                        "publishedBytes":  19265,
+                        "publishedSHA256":  "ffbab6449ea0764804830569880f0153a28dc4219fe1d9e55078fd03381055ef",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/commands.json",
+                        "originalBytes":  22709,
+                        "originalSHA256":  "abb638d2b774f84a1ace15a5d4fbab154dff9b0012b5221ac4e35129cc5509b1",
+                        "publishedBytes":  22217,
+                        "publishedSHA256":  "89b90b1b9ca51c3674e4b8815f157a269d0816504f5f3050d45f4c91890fb39d",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/test-runs.json",
+                        "originalBytes":  15268,
+                        "originalSHA256":  "57f4c6cd389068564675a82973879612207c00039ebc84501939b953701aa0d1",
+                        "publishedBytes":  14964,
+                        "publishedSHA256":  "bd398ff7beca6a419d27860095f692134ddb1db63c7d6f477a837f765dd66e81",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/environment.json",
+                        "originalBytes":  1479,
+                        "originalSHA256":  "76646b978d40b1ee31c605e47be1bade06232f396a541226952a9c59a00d6d31",
+                        "publishedBytes":  1459,
+                        "publishedSHA256":  "5c2b56a3fdf23bed7a26be8a3a6f3e570f1ab2ac8f76fc41ae9a67986f0b7b0c",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/input-source-manifest.json",
+                        "originalBytes":  7863,
+                        "originalSHA256":  "08e9a97c526a20eab354366e050cb59b9b8a581aba30f8e5206f40f528ef050f",
+                        "publishedBytes":  7637,
+                        "publishedSHA256":  "f89795c3541b898d64e2f894ba9a6c2701ae7c5ed897d002cb94df2d3944e8d4",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/SUMMARY.json",
+                        "originalBytes":  1096,
+                        "originalSHA256":  "dfbc4f6f1a7f94e784c2af25728c2ee07afe113cacd86df91f592ea7e4be7c9d",
+                        "publishedBytes":  1078,
+                        "publishedSHA256":  "a7eef69da155cb5d8bad6a61e350e3658e84458debb23c5cf27b18937f9e0b64",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/build-active-observation.log",
+                        "originalBytes":  203,
+                        "originalSHA256":  "bb674119d9d3483616b3e52d22216e5d60b2dbcc3bda891fdbb134982e8b2301",
+                        "publishedBytes":  203,
+                        "publishedSHA256":  "bb674119d9d3483616b3e52d22216e5d60b2dbcc3bda891fdbb134982e8b2301",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/build-baseline.log",
+                        "originalBytes":  400,
+                        "originalSHA256":  "698e41036ba3386191decebbb3e80a2f8fe7944f975312502b5ed544a970a1a7",
+                        "publishedBytes":  400,
+                        "publishedSHA256":  "698e41036ba3386191decebbb3e80a2f8fe7944f975312502b5ed544a970a1a7",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/build-close-only.log",
+                        "originalBytes":  203,
+                        "originalSHA256":  "bb674119d9d3483616b3e52d22216e5d60b2dbcc3bda891fdbb134982e8b2301",
+                        "publishedBytes":  203,
+                        "publishedSHA256":  "bb674119d9d3483616b3e52d22216e5d60b2dbcc3bda891fdbb134982e8b2301",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/build-consumer-faults.log",
+                        "originalBytes":  1,
+                        "originalSHA256":  "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+                        "publishedBytes":  1,
+                        "publishedSHA256":  "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/build-consumer-normal.log",
+                        "originalBytes":  1,
+                        "originalSHA256":  "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+                        "publishedBytes":  1,
+                        "publishedSHA256":  "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/build-consumer-weakened.log",
+                        "originalBytes":  1,
+                        "originalSHA256":  "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+                        "publishedBytes":  1,
+                        "publishedSHA256":  "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/build-invalid-observation.log",
+                        "originalBytes":  203,
+                        "originalSHA256":  "4f774ffc161d71e53ba91ae07cd76c638a5ac722ef2912c3bfbe13d3468711e4",
+                        "publishedBytes":  203,
+                        "publishedSHA256":  "4f774ffc161d71e53ba91ae07cd76c638a5ac722ef2912c3bfbe13d3468711e4",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/build-known-root-not-signaled.log",
+                        "originalBytes":  203,
+                        "originalSHA256":  "bb674119d9d3483616b3e52d22216e5d60b2dbcc3bda891fdbb134982e8b2301",
+                        "publishedBytes":  203,
+                        "publishedSHA256":  "bb674119d9d3483616b3e52d22216e5d60b2dbcc3bda891fdbb134982e8b2301",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/build-late-report.log",
+                        "originalBytes":  203,
+                        "originalSHA256":  "bb674119d9d3483616b3e52d22216e5d60b2dbcc3bda891fdbb134982e8b2301",
+                        "publishedBytes":  203,
+                        "publishedSHA256":  "bb674119d9d3483616b3e52d22216e5d60b2dbcc3bda891fdbb134982e8b2301",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/build-missing-receiver.log",
+                        "originalBytes":  203,
+                        "originalSHA256":  "bb674119d9d3483616b3e52d22216e5d60b2dbcc3bda891fdbb134982e8b2301",
+                        "publishedBytes":  203,
+                        "publishedSHA256":  "bb674119d9d3483616b3e52d22216e5d60b2dbcc3bda891fdbb134982e8b2301",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/build-pid-mismatch.log",
+                        "originalBytes":  203,
+                        "originalSHA256":  "e743c94bb5099009305617962708ab7eca11629a4549b71bb21f83c24dc0af25",
+                        "publishedBytes":  203,
+                        "publishedSHA256":  "e743c94bb5099009305617962708ab7eca11629a4549b71bb21f83c24dc0af25",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/build-query-close.log",
+                        "originalBytes":  203,
+                        "originalSHA256":  "4f774ffc161d71e53ba91ae07cd76c638a5ac722ef2912c3bfbe13d3468711e4",
+                        "publishedBytes":  203,
+                        "publishedSHA256":  "4f774ffc161d71e53ba91ae07cd76c638a5ac722ef2912c3bfbe13d3468711e4",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/build-repeated-receiver.log",
+                        "originalBytes":  203,
+                        "originalSHA256":  "e743c94bb5099009305617962708ab7eca11629a4549b71bb21f83c24dc0af25",
+                        "publishedBytes":  203,
+                        "publishedSHA256":  "e743c94bb5099009305617962708ab7eca11629a4549b71bb21f83c24dc0af25",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/build-routing-admission.log",
+                        "originalBytes":  203,
+                        "originalSHA256":  "469a345f250b94fd195f7ebb3d018ebc02e57e0cb0e784353d05f1cddf09a0dc",
+                        "publishedBytes":  203,
+                        "publishedSHA256":  "469a345f250b94fd195f7ebb3d018ebc02e57e0cb0e784353d05f1cddf09a0dc",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/build-settlement.log",
+                        "originalBytes":  203,
+                        "originalSHA256":  "469a345f250b94fd195f7ebb3d018ebc02e57e0cb0e784353d05f1cddf09a0dc",
+                        "publishedBytes":  203,
+                        "publishedSHA256":  "469a345f250b94fd195f7ebb3d018ebc02e57e0cb0e784353d05f1cddf09a0dc",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/test-active-observation.log",
+                        "originalBytes":  1175,
+                        "originalSHA256":  "f5f654fdd4bea461abd881b5c00dc4e7da3a181e3b2a2079b3776ca23f21ffd1",
+                        "publishedBytes":  1175,
+                        "publishedSHA256":  "f5f654fdd4bea461abd881b5c00dc4e7da3a181e3b2a2079b3776ca23f21ffd1",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/test-baseline.log",
+                        "originalBytes":  2959,
+                        "originalSHA256":  "024ca37796816c6565a4e8bc9be8d86367caeea67a29566ba53da6520d2e6e20",
+                        "publishedBytes":  2959,
+                        "publishedSHA256":  "024ca37796816c6565a4e8bc9be8d86367caeea67a29566ba53da6520d2e6e20",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/test-close-only.log",
+                        "originalBytes":  1174,
+                        "originalSHA256":  "7527c60c7514ac1742edff2d2a3285cb0aa815d3c75a61770e26885b9b8ec956",
+                        "publishedBytes":  1174,
+                        "publishedSHA256":  "7527c60c7514ac1742edff2d2a3285cb0aa815d3c75a61770e26885b9b8ec956",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/test-invalid-observation.log",
+                        "originalBytes":  1175,
+                        "originalSHA256":  "825a11b6a6cfd396a69ee9b56601cdf6810293012d9341e2b9f1a0937f4b6d5e",
+                        "publishedBytes":  1175,
+                        "publishedSHA256":  "825a11b6a6cfd396a69ee9b56601cdf6810293012d9341e2b9f1a0937f4b6d5e",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/test-known-root-not-signaled.log",
+                        "originalBytes":  1175,
+                        "originalSHA256":  "aa631c831f573c562d190d70c8d24e5e823d97b04343c3564fdf39509bc7eccf",
+                        "publishedBytes":  1175,
+                        "publishedSHA256":  "aa631c831f573c562d190d70c8d24e5e823d97b04343c3564fdf39509bc7eccf",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/test-late-report.log",
+                        "originalBytes":  1174,
+                        "originalSHA256":  "90fc53c3e2ccff54c6fd950a23d376cd9f7b377c5cc5361a47a53d55120e2b72",
+                        "publishedBytes":  1174,
+                        "publishedSHA256":  "90fc53c3e2ccff54c6fd950a23d376cd9f7b377c5cc5361a47a53d55120e2b72",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/test-missing-receiver.log",
+                        "originalBytes":  1175,
+                        "originalSHA256":  "4de26042402367ac6e39e5af08c0086551d2d6bc0a99cf25dae012570510d56b",
+                        "publishedBytes":  1175,
+                        "publishedSHA256":  "4de26042402367ac6e39e5af08c0086551d2d6bc0a99cf25dae012570510d56b",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/test-pid-mismatch.log",
+                        "originalBytes":  1175,
+                        "originalSHA256":  "ab4f2a65e8e6890d6fb22650c1c58e6f3fd29f85eb37b2afcbfd300f76660713",
+                        "publishedBytes":  1175,
+                        "publishedSHA256":  "ab4f2a65e8e6890d6fb22650c1c58e6f3fd29f85eb37b2afcbfd300f76660713",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/test-query-close.log",
+                        "originalBytes":  1174,
+                        "originalSHA256":  "a7ee9305b29a08883be0dbfe5cfc53b51fb44b1f0ebcebf8958c21772cdfbad2",
+                        "publishedBytes":  1174,
+                        "publishedSHA256":  "a7ee9305b29a08883be0dbfe5cfc53b51fb44b1f0ebcebf8958c21772cdfbad2",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/test-repeated-receiver.log",
+                        "originalBytes":  1173,
+                        "originalSHA256":  "2006f34dd1bffa5a1184af13d8493d89cf4d473fc5b229de467f0e391715dc36",
+                        "publishedBytes":  1173,
+                        "publishedSHA256":  "2006f34dd1bffa5a1184af13d8493d89cf4d473fc5b229de467f0e391715dc36",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/test-routing-admission.log",
+                        "originalBytes":  3574,
+                        "originalSHA256":  "f970f2abc890934a6a8be203ccc6d58413d3914e5cf270546688d51dfa9ffd21",
+                        "publishedBytes":  3574,
+                        "publishedSHA256":  "f970f2abc890934a6a8be203ccc6d58413d3914e5cf270546688d51dfa9ffd21",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/test-settlement.log",
+                        "originalBytes":  1174,
+                        "originalSHA256":  "09b90c377a07257772747a6ac280bd6552a36e518a6d36f33404de078ce1a830",
+                        "publishedBytes":  1174,
+                        "publishedSHA256":  "09b90c377a07257772747a6ac280bd6552a36e518a6d36f33404de078ce1a830",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/test-weakened-consumer.log",
+                        "originalBytes":  1447,
+                        "originalSHA256":  "7d9dfe6433c3732b34ce8e8be7fdf86ea1389c7e0b965f40fed9bbe1c76b256b",
+                        "publishedBytes":  1447,
+                        "publishedSHA256":  "7d9dfe6433c3732b34ce8e8be7fdf86ea1389c7e0b965f40fed9bbe1c76b256b",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/baseline/mutation.json",
+                        "originalBytes":  413,
+                        "originalSHA256":  "61281591f7a62d9f9c8509b1799cf86cf40988df6b0881b770bf381deac2fb4e",
+                        "publishedBytes":  405,
+                        "publishedSHA256":  "dcb19c9248c17a648ae1fc0c2340142508d4b130c9f23306fd4f56c45dd362dc",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/baseline/identity.rs",
+                        "originalBytes":  25005,
+                        "originalSHA256":  "f4a091e54e31975482fcca4943c69085701caf30fbcc133faeaca452f7ba5ec5",
+                        "publishedBytes":  25005,
+                        "publishedSHA256":  "f4a091e54e31975482fcca4943c69085701caf30fbcc133faeaca452f7ba5ec5",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/baseline/dll.sha256",
+                        "originalBytes":  65,
+                        "originalSHA256":  "9629be5d1d86a32b4428760d7e3ea34e8ac5de12932076a4ac219c8a6ebc3fd7",
+                        "publishedBytes":  65,
+                        "publishedSHA256":  "9629be5d1d86a32b4428760d7e3ea34e8ac5de12932076a4ac219c8a6ebc3fd7",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/baseline/test-result.json",
+                        "originalBytes":  1184,
+                        "originalSHA256":  "43a1496cc9b922728e50bdbc703388e854200fc7dc3c6d2f0c850a15bcd63ab8",
+                        "publishedBytes":  1160,
+                        "publishedSHA256":  "81cd4549a4dd5f9e1859aa402fc77f7a867407a50632d8019a741c9c2680ea1d",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/late-report/mutation.json",
+                        "originalBytes":  416,
+                        "originalSHA256":  "ed8e219a5e89dacda8116522d5c24b2032eea846b57931ae6b9d7ae874731879",
+                        "publishedBytes":  408,
+                        "publishedSHA256":  "c50834c4cc62b3962eb10cba6e257f073a629a2911581f9d0aaa4be6739a05c0",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/late-report/identity.rs",
+                        "originalBytes":  25047,
+                        "originalSHA256":  "bd217dfe7a4d9174e03f8f891794a5c560aa5b708565cf52cc488c8144c073cc",
+                        "publishedBytes":  25047,
+                        "publishedSHA256":  "bd217dfe7a4d9174e03f8f891794a5c560aa5b708565cf52cc488c8144c073cc",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/late-report/dll.sha256",
+                        "originalBytes":  65,
+                        "originalSHA256":  "612e6074dc11e97cc4e31eebf03685fea12a284c7e16eadd3e523daf9f9c2b29",
+                        "publishedBytes":  65,
+                        "publishedSHA256":  "612e6074dc11e97cc4e31eebf03685fea12a284c7e16eadd3e523daf9f9c2b29",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/late-report/test-result.json",
+                        "originalBytes":  1029,
+                        "originalSHA256":  "b8efb38e2958c91efa6bfa2f6691899e3f2882e9c156bea43806eda8d75f9e04",
+                        "publishedBytes":  1007,
+                        "publishedSHA256":  "b16a5f5a43622fcafe0fb01624f6361b824e080a91730703ef7348e26c7e8366",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/missing-receiver/mutation.json",
+                        "originalBytes":  421,
+                        "originalSHA256":  "6d861651709025c985860e352c7ea9ae272ccc5947379c1c6b9c558dd0f24fd9",
+                        "publishedBytes":  413,
+                        "publishedSHA256":  "edbb969415f0609defd0b62d925491c98b870412a3ee26df75a0ffc78fc0f9ff",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/missing-receiver/identity.rs",
+                        "originalBytes":  24979,
+                        "originalSHA256":  "4759c82d43ac0adcda3a1874994ba6052e11260ce6564aaaf74cee9ce7142c7f",
+                        "publishedBytes":  24979,
+                        "publishedSHA256":  "4759c82d43ac0adcda3a1874994ba6052e11260ce6564aaaf74cee9ce7142c7f",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/missing-receiver/dll.sha256",
+                        "originalBytes":  65,
+                        "originalSHA256":  "fd2174fc2d319fc3a7fdc2550545209fa6c0cc06d685687ba0584d84fd2ed55f",
+                        "publishedBytes":  65,
+                        "publishedSHA256":  "fd2174fc2d319fc3a7fdc2550545209fa6c0cc06d685687ba0584d84fd2ed55f",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/missing-receiver/test-result.json",
+                        "originalBytes":  1044,
+                        "originalSHA256":  "55a282fa3c962f5a6fd75a17f45d852b5b820293d8e05644d8210c4a3403b831",
+                        "publishedBytes":  1022,
+                        "publishedSHA256":  "39305a1d5543b31bdf6aa3bc1d2e57dad4158cad10c08c5882d0574079199e5e",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/repeated-receiver/mutation.json",
+                        "originalBytes":  422,
+                        "originalSHA256":  "8796649a0746c118dbbbaef3d2e65e2e80fb30a0625c2fcbed2ce464273dd5fb",
+                        "publishedBytes":  414,
+                        "publishedSHA256":  "a5c56702c5ffeb328087407ab424e85df512dd58c844036519c9dd304c38eb85",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/repeated-receiver/identity.rs",
+                        "originalBytes":  25083,
+                        "originalSHA256":  "42a3d647cd78420f55f2af98df5961855a827e4f3d2bbbec09c85addb65dddc0",
+                        "publishedBytes":  25083,
+                        "publishedSHA256":  "42a3d647cd78420f55f2af98df5961855a827e4f3d2bbbec09c85addb65dddc0",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/repeated-receiver/dll.sha256",
+                        "originalBytes":  65,
+                        "originalSHA256":  "c7465ad8ae2ca0ccd69ac09b9a93e4c6c4acd0aff19b1051f123c5fbe3fa0721",
+                        "publishedBytes":  65,
+                        "publishedSHA256":  "c7465ad8ae2ca0ccd69ac09b9a93e4c6c4acd0aff19b1051f123c5fbe3fa0721",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/repeated-receiver/test-result.json",
+                        "originalBytes":  1047,
+                        "originalSHA256":  "c24117ee8692970a45df1279b63a5691aab5f34cd78dbd2ba5e9a0f59cfb268e",
+                        "publishedBytes":  1025,
+                        "publishedSHA256":  "45f84ec6682e48fb41a782a55a3000a40ba1d52426a736dda2d3eba4e3550a5d",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/invalid-observation/mutation.json",
+                        "originalBytes":  424,
+                        "originalSHA256":  "ff2dee58ef360a15ea5946dd746ae3418f3f03712b680e76a42daa522ee74fd4",
+                        "publishedBytes":  416,
+                        "publishedSHA256":  "3a851e3c546ca7631e27e856206bb5bf2ccafef46a9bdd791ff27288803cce1e",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/invalid-observation/identity.rs",
+                        "originalBytes":  25062,
+                        "originalSHA256":  "6e39caa794894322f1c43256bc30f2470387990daea1a9ee69b34d3013244184",
+                        "publishedBytes":  25062,
+                        "publishedSHA256":  "6e39caa794894322f1c43256bc30f2470387990daea1a9ee69b34d3013244184",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/invalid-observation/dll.sha256",
+                        "originalBytes":  65,
+                        "originalSHA256":  "bbefd5f8bd2f5843f48efed96d6df38359e30cfa560cd9636006d64e0511703b",
+                        "publishedBytes":  65,
+                        "publishedSHA256":  "bbefd5f8bd2f5843f48efed96d6df38359e30cfa560cd9636006d64e0511703b",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/invalid-observation/test-result.json",
+                        "originalBytes":  1053,
+                        "originalSHA256":  "cbaab91a27f65207cac1cb875c739ec66596d8709e921b1b0b5b544c5a6fc442",
+                        "publishedBytes":  1031,
+                        "publishedSHA256":  "6476f75998bb537531c900192e4248aaaaff850ea553bacb48174fb773b6a718",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/query-close/mutation.json",
+                        "originalBytes":  415,
+                        "originalSHA256":  "eb27c228fea0bb7606e00a1f929f47ecf010478912ce4ca4249dc7d5e9fae8db",
+                        "publishedBytes":  407,
+                        "publishedSHA256":  "c286154e7d595814f21b063deb7c09d4b53280b978633b04d3cd494b6384c7be",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/query-close/identity.rs",
+                        "originalBytes":  25159,
+                        "originalSHA256":  "9293f6ad82957efd5a416767100c09046e25c3e648b5f9a458353a776201a049",
+                        "publishedBytes":  25159,
+                        "publishedSHA256":  "9293f6ad82957efd5a416767100c09046e25c3e648b5f9a458353a776201a049",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/query-close/dll.sha256",
+                        "originalBytes":  65,
+                        "originalSHA256":  "340766f31b94680704e65a8670e6458be00d9070f7e4e8fcbf5647c59f01d9ef",
+                        "publishedBytes":  65,
+                        "publishedSHA256":  "340766f31b94680704e65a8670e6458be00d9070f7e4e8fcbf5647c59f01d9ef",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/query-close/test-result.json",
+                        "originalBytes":  1029,
+                        "originalSHA256":  "c43069856a796766a5c4808ea17adc3e473dd761bdf8413da314f92225eb953f",
+                        "publishedBytes":  1007,
+                        "publishedSHA256":  "985deb24f180d2c80844185334ce6ac74b8c7e441b7ad48599d8ade04bc9c009",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/close-only/mutation.json",
+                        "originalBytes":  414,
+                        "originalSHA256":  "93e2038fa307e65603508fb967b93114a7aa699b5d9ee303904b6766afcc9950",
+                        "publishedBytes":  406,
+                        "publishedSHA256":  "b61fc0c9d7e739eb0f86af8ff61db4ab29762f3462c681f16b39662ff3bb4576",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/close-only/identity.rs",
+                        "originalBytes":  25157,
+                        "originalSHA256":  "2b68a026cf018366ecd973d2bfbdbfc773ec3f7ff646f7ba3c9e80a90874e2fe",
+                        "publishedBytes":  25157,
+                        "publishedSHA256":  "2b68a026cf018366ecd973d2bfbdbfc773ec3f7ff646f7ba3c9e80a90874e2fe",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/close-only/dll.sha256",
+                        "originalBytes":  65,
+                        "originalSHA256":  "46dc99751bf081e62ee3cc7731dd3774c2a2794f210932af0fa6f520e41858f3",
+                        "publishedBytes":  65,
+                        "publishedSHA256":  "46dc99751bf081e62ee3cc7731dd3774c2a2794f210932af0fa6f520e41858f3",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/close-only/test-result.json",
+                        "originalBytes":  1026,
+                        "originalSHA256":  "a1733552a9766db446c6a60c11eb4d44f2bc76d3e35bc1ac0dd5f764f7ce88e6",
+                        "publishedBytes":  1004,
+                        "publishedSHA256":  "e827692c12af352aaa0f49a584b76de2f33f7e431c54cfd6252d7c09a6755c6e",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/known-root-not-signaled/mutation.json",
+                        "originalBytes":  428,
+                        "originalSHA256":  "b80f279ce7e0c34b54df9c4431fd57c62b65862477091af47eb3b3d18af218a8",
+                        "publishedBytes":  420,
+                        "publishedSHA256":  "4f64cd8c7f520592c75c3cf9ad9bc4ecad13e3ef8154791a3f21c1ab19034926",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/known-root-not-signaled/identity.rs",
+                        "originalBytes":  25080,
+                        "originalSHA256":  "824b8c308786540644c515975d7a566d41b3b5773330fdc856eef07b18f29a91",
+                        "publishedBytes":  25080,
+                        "publishedSHA256":  "824b8c308786540644c515975d7a566d41b3b5773330fdc856eef07b18f29a91",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/known-root-not-signaled/dll.sha256",
+                        "originalBytes":  65,
+                        "originalSHA256":  "e2eda14032085f1f3652d15389cc7d7343419d0401aebf52be618d1c550ebe19",
+                        "publishedBytes":  65,
+                        "publishedSHA256":  "e2eda14032085f1f3652d15389cc7d7343419d0401aebf52be618d1c550ebe19",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/known-root-not-signaled/test-result.json",
+                        "originalBytes":  1065,
+                        "originalSHA256":  "100cda749ebbe3641b1afd5ff05d1bebe218a9518fa94ac84c3c8096d82c0c7d",
+                        "publishedBytes":  1043,
+                        "publishedSHA256":  "b361449734d2b7ff880d0125f2c78996f82a93f15a4155582f5d20507dc49ce8",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/pid-mismatch/mutation.json",
+                        "originalBytes":  417,
+                        "originalSHA256":  "82ef5aa9d788a1c38291cc1861258ef003538e7d64adf16f4f51b3fd1d777685",
+                        "publishedBytes":  409,
+                        "publishedSHA256":  "6bafca25b8c397e80aa15c578d50bbe6b38d4b2cc95da06f26b99936f950babb",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/pid-mismatch/identity.rs",
+                        "originalBytes":  25091,
+                        "originalSHA256":  "4446ae906c38067d7795ec6b48e0f0a1e7198c1df7995fa8c84831246ace5091",
+                        "publishedBytes":  25091,
+                        "publishedSHA256":  "4446ae906c38067d7795ec6b48e0f0a1e7198c1df7995fa8c84831246ace5091",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/pid-mismatch/dll.sha256",
+                        "originalBytes":  65,
+                        "originalSHA256":  "a74ceed8f58061f8841973a5267f7097e3ba3294b3d3ade543d0cb968ca128b2",
+                        "publishedBytes":  65,
+                        "publishedSHA256":  "a74ceed8f58061f8841973a5267f7097e3ba3294b3d3ade543d0cb968ca128b2",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/pid-mismatch/test-result.json",
+                        "originalBytes":  1032,
+                        "originalSHA256":  "0857befe820436ad6736d22206e898022f669987512d0d79a5abbe356bd1dfbc",
+                        "publishedBytes":  1010,
+                        "publishedSHA256":  "cc3bac257e4710296ffe946411dc7d803fd1390eb7bda0cd055a73712f30e388",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/settlement/mutation.json",
+                        "originalBytes":  415,
+                        "originalSHA256":  "9765b161a2d9337d2d5e7603d42a4eeca767edbd5cdb02a96703a776b843561d",
+                        "publishedBytes":  407,
+                        "publishedSHA256":  "1979204fbdfd4c4190547c4716ea415389b07fd9b5ff592b1a5a7fcdb6fca12a",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/settlement/identity.rs",
+                        "originalBytes":  25045,
+                        "originalSHA256":  "7461d7ccc208da546b42936b25d1841c79e2873678adf3b8883fe33b3ee52c27",
+                        "publishedBytes":  25045,
+                        "publishedSHA256":  "7461d7ccc208da546b42936b25d1841c79e2873678adf3b8883fe33b3ee52c27",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/settlement/dll.sha256",
+                        "originalBytes":  65,
+                        "originalSHA256":  "0948b7fb4b74643638f196f3a9659019a0d4397e1e6b3303458505b20e3412ec",
+                        "publishedBytes":  65,
+                        "publishedSHA256":  "0948b7fb4b74643638f196f3a9659019a0d4397e1e6b3303458505b20e3412ec",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/settlement/test-result.json",
+                        "originalBytes":  1026,
+                        "originalSHA256":  "10d6e70d32264b6146a6d79babf879b1bd72909b21669b9bc7869287ac6942ee",
+                        "publishedBytes":  1004,
+                        "publishedSHA256":  "7b9550315b7d22b9cc31ad95bbec6411f22f929df2f502d49a5c297048cec1d8",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/active-observation/mutation.json",
+                        "originalBytes":  423,
+                        "originalSHA256":  "ffbbf83505c9e3d635ec3f229f088a719e03250d44bc1054f407b690a2bbcad0",
+                        "publishedBytes":  415,
+                        "publishedSHA256":  "8590c160239f2d53db701968200644709b6282f4dc2659d1bfbda7aa6dc651b2",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/active-observation/identity.rs",
+                        "originalBytes":  25051,
+                        "originalSHA256":  "006f462a1841e9f90d620ab0d220baf14eff51e499794226e62598751377c87c",
+                        "publishedBytes":  25051,
+                        "publishedSHA256":  "006f462a1841e9f90d620ab0d220baf14eff51e499794226e62598751377c87c",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/active-observation/dll.sha256",
+                        "originalBytes":  65,
+                        "originalSHA256":  "d7a4f0ab333df270e8e4a2b309160f1a04e9174d729b8212457efe66c6d65a4b",
+                        "publishedBytes":  65,
+                        "publishedSHA256":  "d7a4f0ab333df270e8e4a2b309160f1a04e9174d729b8212457efe66c6d65a4b",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/active-observation/test-result.json",
+                        "originalBytes":  1050,
+                        "originalSHA256":  "c70cc279e0cd5185bf47e5840136a9cbe306a94c04dbf014b83b710dd6c1ed2f",
+                        "publishedBytes":  1028,
+                        "publishedSHA256":  "56147d1b218994bd14c002aabfbfe9552d2658e6e76c917d0fa0059b85ca3850",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/routing-admission/mutation.json",
+                        "originalBytes":  422,
+                        "originalSHA256":  "fbb5ee3216d663d96afc8d7db78b4b9ba01301a8ffa00e6985990607751297c1",
+                        "publishedBytes":  414,
+                        "publishedSHA256":  "26785ff73eccd2bf40596cb840b57adb14f80ff4a10bb95bffa8c4491c052514",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/routing-admission/identity.rs",
+                        "originalBytes":  25138,
+                        "originalSHA256":  "89d862c0360745915b82fef2d50d441a2b9c1670296927df0de5fb9a9b8e8839",
+                        "publishedBytes":  25138,
+                        "publishedSHA256":  "89d862c0360745915b82fef2d50d441a2b9c1670296927df0de5fb9a9b8e8839",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/routing-admission/dll.sha256",
+                        "originalBytes":  65,
+                        "originalSHA256":  "ac58340e8038f097647bbfa0d0a0f564c603b97e172700ecbabddfe9025a3fbd",
+                        "publishedBytes":  65,
+                        "publishedSHA256":  "ac58340e8038f097647bbfa0d0a0f564c603b97e172700ecbabddfe9025a3fbd",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/routing-admission/test-result.json",
+                        "originalBytes":  1380,
+                        "originalSHA256":  "1d63afd77b05fb00640fab3456b48fa8f874828ca02f700b017bfe72444619b9",
+                        "publishedBytes":  1356,
+                        "publishedSHA256":  "74fe687461876ad6db83c3687f90da1bb84727258dbe72f6cdca3136f4c3801b",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/weakened-consumer/mutation.json",
+                        "originalBytes":  739,
+                        "originalSHA256":  "34df2afad2f8c80676fb7f4529d8f926dbf3bdbd179708b0c9447f5b4e5deadc",
+                        "publishedBytes":  732,
+                        "publishedSHA256":  "37f6f2fb6c983079ce52b79944cd12d4f784eed3c11b02bc7d4fb55fc8ab1e46",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/weakened-consumer/bridge_windows.go",
+                        "originalBytes":  19668,
+                        "originalSHA256":  "2d9540feb69cb530af460f5228d23283a7d2d6a230bfabad51efa3c19f0f23ae",
+                        "publishedBytes":  19668,
+                        "publishedSHA256":  "2d9540feb69cb530af460f5228d23283a7d2d6a230bfabad51efa3c19f0f23ae",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "controls/weakened-consumer/test-result.json",
+                        "originalBytes":  1113,
+                        "originalSHA256":  "06f7ea3b906c9688dfc141831bbafce9c801399116354dc75d50eefe37c4c91d",
+                        "publishedBytes":  1091,
+                        "publishedSHA256":  "f74e4d8c7fc46f2c2c6a0e1acfb36ca078119e7c970e40662f83dc5678a3608d",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    }
+                ],
+    "zip":  {
+                "verifiedEntries":  123,
+                "sha256":  "9f9370562ded4048fa3332f92846a4ba1bc20431d7f83de9eaeab50537bd97ee",
+                "file":  "logs.zip",
+                "bytes":  1472686
+            },
+    "normalization":  "UTF-8 without BOM and LF; original execution files unchanged.",
+    "redaction":  "Textual numeric SID and Windows user-profile name redacted. Embedded captured hashes refer to original execution bytes; entry hashes map original to published copies.",
+    "exclusions":  "Private fixture directories, binary SID markers, test executables, DLLs, targets/caches, complete baseline source copies, duplicate per-command JSON and duplicate case event logs.",
+    "rootControlInterpretation":  "Original two executions had expected exits 0 and 1. Initial interpreter mishandled scalar Count; separate reviewed-results.json preserves original evidence and corrects interpretation without rerunning tests.",
+    "repositoryGates":  "build/vet 0; full/state-tag 1; not cleared by isolated qualification"
+}

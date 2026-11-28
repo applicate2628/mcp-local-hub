@@ -1,0 +1,74 @@
+{
+  "schema": "static-review-publication-manifest-v1",
+  "source_commit": "a217c7799a0214967bf86211542e508162c680b5",
+  "source_tree": "ca118ff1ec513cc830bb8b96b4d6782d23915a26",
+  "native_build_commit": "efa73c0e23f7af16b8aa2ccb047b745a58ba4f71",
+  "file_count_excluding_manifest": 13,
+  "files": [
+    {
+      "path": "NATIVE-DELTA-REVIEW.md",
+      "bytes": 9527,
+      "sha256": "54f0430207f36fdf732c2cce45ef0c2fae57ef6da74a7b267ed9313677313aba"
+    },
+    {
+      "path": "README.md",
+      "bytes": 16072,
+      "sha256": "934b9e805b843496076de6063dfaa3205e125773933daf0cc0634a86b7bde189"
+    },
+    {
+      "path": "RUST-ABI-REVIEW.md",
+      "bytes": 18896,
+      "sha256": "c787466a8e465905212047fcbcc0522b15f8a44249f131deaa075ab0ef0aaba1"
+    },
+    {
+      "path": "coverage-rust.json",
+      "bytes": 24119,
+      "sha256": "23485bb383355c55356f53913494107599461d0d991e0e0012ffa90488cf43bb"
+    },
+    {
+      "path": "coverage.json",
+      "bytes": 94291,
+      "sha256": "73812c70991bf3e16f97ceb82c2015577cfe7fd253fbbd05b8b3b171c8c220d8"
+    },
+    {
+      "path": "go-production-review.json",
+      "bytes": 6745,
+      "sha256": "084b1e8176a96e041ee500bd36cd0bfb40e1f671cfdf2800883bb5abc5a7f056"
+    },
+    {
+      "path": "go-production-review.md",
+      "bytes": 6520,
+      "sha256": "000b5f025c84f53fb8e3ee982f29b8d5ae8e0d5c397439233cca7148c6dc58b3"
+    },
+    {
+      "path": "go-tests-review.json",
+      "bytes": 26432,
+      "sha256": "7f7bd322157321f8974faaefe0059d989da60fd8de3e4a0f68bfa14d5079efa2"
+    },
+    {
+      "path": "go-tests-review.md",
+      "bytes": 15610,
+      "sha256": "245b6eebfa907ba8e4a8b76f678972c5160ee1fcd5557756089308c16da73153"
+    },
+    {
+      "path": "native-dll-source-map.json",
+      "bytes": 27093,
+      "sha256": "dfe4c0b1edb22bcfdec0d70a7d299e247ffc53de154a3330175968dc36264db4"
+    },
+    {
+      "path": "native-vs-a217-windows.patch",
+      "bytes": 1375,
+      "sha256": "9f195f71103e3ced3185186ca6dfd0b7a190be497b6f909a18260036225f06e6"
+    },
+    {
+      "path": "provenance.json",
+      "bytes": 2436,
+      "sha256": "e1adf781f96ae64d15bbb9562d796a4f145a78d1c8018f7859e58e70cf89d11e"
+    },
+    {
+      "path": "source-inventory.json",
+      "bytes": 16225,
+      "sha256": "04a9ea3e6b283ccafec86572ef6c6c6f8b87df4584efa92a707992293bf175a1"
+    }
+  ]
+}

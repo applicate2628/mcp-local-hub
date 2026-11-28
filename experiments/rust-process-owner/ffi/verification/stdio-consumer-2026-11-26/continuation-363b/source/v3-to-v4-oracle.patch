@@ -1,0 +1,25 @@
+--- consumer-v3/zz_rust_adoption_stdio_consumer_windows_test.go
++++ consumer-v4/zz_rust_adoption_stdio_consumer_windows_test.go
+@@ -10,6 +10,7 @@
+ 	"fmt"
+ 	"os"
+ 	"path/filepath"
++	"syscall"
+ 	"testing"
+ 	"time"
+ 
+@@ -227,8 +228,12 @@
+ 		if file == nil || file.file == nil || file.closeError != nil {
+ 			t.Fatalf("original file %d missing or close failed", index)
+ 		}
+-		if _, err := file.file.Stat(); !errors.Is(err, os.ErrClosed) {
+-			t.Fatalf("original file %d remains usable after close: %v", index, err)
++		if fd := file.file.Fd(); fd != uintptr(syscall.InvalidHandle) {
++			t.Fatalf("original file %d retains a live Go descriptor after close", index)
++		}
++		// Windows Stat probes the invalidated native handle after os.File.Close.
++		if _, err := file.file.Stat(); !errors.Is(err, os.ErrClosed) && !errors.Is(err, syscall.ERROR_INVALID_HANDLE) {
++			t.Fatalf("original file %d did not report a closed state: %v", index, err)
+ 		}
+ 	}
+ 	again, againErr := h.StopObserved(observer)

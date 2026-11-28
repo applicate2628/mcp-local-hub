@@ -145,6 +145,8 @@ The token is opened with only query access from the retained process handle [18]
 
 The accepted Go contract still requires SID formatting/resource evidence, the original Go capability and real consumer integration. Binary SID bytes provide an observation, not that capability or formatting receipt. A copied timestamp, PID or digest cannot grant process ownership.
 
+This branch contains the additive version-1 [identity protocol](ffi/README.md#additive-identity-protocol), including native image observations alongside the original-process facts above. Product decision rules and complete caller preparation remain separate gates.
+
 ## Evidence and negative controls
 
 Native Windows x86_64, Rust 1.99.1, pinned cached `windows-sys = 0.61.2` and `windows-link = 0.2.1`. FileSystem/Pipes/Globalization features use the same dependency; `Cargo.lock` and dependency versions are unchanged.

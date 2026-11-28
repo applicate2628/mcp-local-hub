@@ -1,0 +1,3394 @@
+[
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "8ed260ad5036af6cdea455fb042580fdf7555e7a",
+    "newBlob": "d84a2f77a5ef099bb7f47f25bb3ed878aff968fb",
+    "status": "M",
+    "path": ".github/workflows/npm-publish.yml"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "6b6b7eefdd4f2a2e78521a38cb120482ba8dab41",
+    "newBlob": "af75420fad6094b470ba97ab4fbfb4d61c0d6da6",
+    "status": "M",
+    "path": "build.ps1"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "e0edb695971105c9920f04ae43cbcc696cd7781b",
+    "newBlob": "f65ec90172c991c969c482fccf1770f008a0eaf6",
+    "status": "M",
+    "path": "cmd/mcphub-launcher/main_windows.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "bfbbbb4bb94cfc5858a62dbc4fbd25c7c22e1a28",
+    "newBlob": "a0f48ccd0153f76491519a98afa65195534d4929",
+    "status": "M",
+    "path": "cmd/mcphub-launcher/outcome_windows.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "76c9f26d76ab6225513a68fe00ecde3949f8b355",
+    "newBlob": "95e0e56b778692febf9030976704b723dc036ecc",
+    "status": "M",
+    "path": "cmd/mcphub-launcher/outcome_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "10e7aaf4c614bc9f3bad5c1df404ac7471181f1a",
+    "newBlob": "22c133acf5209c6dd8b2458daae37ca80e3da0da",
+    "status": "M",
+    "path": "cmd/mcphub/main.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "685ac99e43cff39808048bebf366e8a66febc5af",
+    "status": "A",
+    "path": "docs/modernization/adr/0007-rust-owner-sidecar.md"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "a32d4054aa7bfaa4a8578149155ece678f08bf41",
+    "newBlob": "7671741c57a63a47d10ca7477085042565f026a3",
+    "status": "M",
+    "path": "docs/modernization/decisions.md"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "2cd7a7db36d636c1c69594467ebbeedb69f59cf2",
+    "status": "A",
+    "path": "docs/modernization/verification/member-ffi-2026-11-19.md"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "47f755c8e756ada8bdeccf9cdef33cb8e5c5d549",
+    "status": "A",
+    "path": "docs/modernization/verification/rust-owner-custody-retry-audit-2026-11-19.md"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "c28bd3c586710750c2f4b5e2bde470c0aa60be55",
+    "status": "A",
+    "path": "docs/modernization/verification/rust-owner-foreground-console-audit-2026-11-20.md"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "91cf030ff3eabcebe9121ccf2b51396ea5e3642e",
+    "status": "A",
+    "path": "docs/modernization/verification/rust-owner-product-audit-2026-11-17.md"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "5b9c8d23ddcc85e915489135b2a3182afa96103e",
+    "status": "A",
+    "path": "docs/modernization/verification/rust-owner-product-facade-audit-2026-11-19.md"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "5c1b3063e968a366aee65162ce3561fe83393ea6",
+    "status": "A",
+    "path": "docs/modernization/verification/rust-owner-product-host-audit-2026-11-19.md"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "97f8308c2e674c993a0eeafbd338be73214840de",
+    "status": "A",
+    "path": "docs/modernization/verification/rust-owner-product-io-audit-2026-11-19.md"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "93ec969337c85b71f961da8da2d895a511277aa5",
+    "status": "A",
+    "path": "docs/modernization/verification/rust-owner-product-io-plan-2026-11-19.md"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "33d988b989961e213e076a86b5616954c609cc02",
+    "status": "A",
+    "path": "docs/modernization/verification/rust-owner-product-members-audit-2026-11-19.md"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "76b3dfdfe172486a9784791caeb2d3a3546644f6",
+    "status": "A",
+    "path": "docs/modernization/verification/rust-owner-product-supervisor-audit-2026-11-19.md"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "83b0a41afba632fbdad45bcd04137979cb15e39d",
+    "status": "A",
+    "path": "docs/modernization/verification/rust-owner-rust100-audit-2026-11-19.md"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "fb663d6a48cb5817135b863dbef93fb59c5176f2",
+    "newBlob": "a6e8d41637e2b3d755f81b52565b999255f79c3f",
+    "status": "M",
+    "path": "experiments/rust-process-owner/Cargo.toml"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "408bcf8d4e033abeb9dd675cb8af28151bb680a8",
+    "newBlob": "d46f0cee2cffe87a9a64057558ee0709b0b79481",
+    "status": "M",
+    "path": "experiments/rust-process-owner/README.md"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "cb452856cec0251dcb08f77940cfe841b7bc4159",
+    "newBlob": "35df5080fe63636219021cbc7840b25167374af1",
+    "status": "M",
+    "path": "experiments/rust-process-owner/ffi/Cargo.toml"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "ea7a32101f1c8977f6404bb57df611fd2fa2b3b0",
+    "newBlob": "516865ccd9202fdedaf9333093c32196acacea06",
+    "status": "M",
+    "path": "experiments/rust-process-owner/ffi/README.md"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "e3010d7dbc602054d43a4fda4ade0c7719b94863",
+    "newBlob": "0f7ff1b6675a6acc5dc172e5e432b36fb93d094f",
+    "status": "M",
+    "path": "experiments/rust-process-owner/ffi/go/bridge_windows.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "71f9c924aba43f8e32aaaa42c3d67ff694cd0b26",
+    "newBlob": "3d358e24c12655f49bbab6e509713a15f955010b",
+    "status": "M",
+    "path": "experiments/rust-process-owner/ffi/go/environment_windows.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "2a2048728394db63133f0a557b33cea334af8559",
+    "newBlob": "ffc0db2c1ea507fcf657e3c59e776f7d7b62a4d5",
+    "status": "M",
+    "path": "experiments/rust-process-owner/ffi/go/environment_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "0f46b1796532613eebfd8e74842eb44217c1dd7a",
+    "status": "A",
+    "path": "experiments/rust-process-owner/ffi/go/members_faults_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "026b4b45b37cedefcd3014a6a75bdabd43e1c7c5",
+    "status": "A",
+    "path": "experiments/rust-process-owner/ffi/go/members_legacy_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "b1da3dc082f14ffc07a1ea04cff68a47e6588296",
+    "status": "A",
+    "path": "experiments/rust-process-owner/ffi/go/members_report_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "b9b5488128888d7eca4e14b0642d57b723f3299f",
+    "status": "A",
+    "path": "experiments/rust-process-owner/ffi/go/members_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "9c97e52a029da819a5032c40715735546eb844b8",
+    "status": "A",
+    "path": "experiments/rust-process-owner/ffi/go/members_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "c432420e74b6a25d2f7d292aed06c4814db08b9c",
+    "newBlob": "e17b0086ef9c417d53716eafc2c714d9f46a55ee",
+    "status": "M",
+    "path": "experiments/rust-process-owner/ffi/go/native_cleanup_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "01311adcc77cfb1a443bdc41498fa2b2274aa19f",
+    "status": "A",
+    "path": "experiments/rust-process-owner/ffi/go/wait_legacy_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "064a3777627712b04f29eef73704ca4897a150f6",
+    "status": "A",
+    "path": "experiments/rust-process-owner/ffi/go/wait_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "c6c6fb5c7e109b1f3d8c96b0112d49eae08c4543",
+    "status": "A",
+    "path": "experiments/rust-process-owner/ffi/go/wait_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "4ced211c17c8c5977f4e9c394c2ba07083cf5924",
+    "status": "A",
+    "path": "experiments/rust-process-owner/ffi/include/members_v1.h"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "346ee95df8162995fc42d400e85bae2e17794db0",
+    "newBlob": "3bda9dce0dd1f316da99985eec3300bc78f67a68",
+    "status": "M",
+    "path": "experiments/rust-process-owner/ffi/include/owner_v1.h"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "6661864cf1fa863d89c96c8e62d35a26c3173f71",
+    "status": "A",
+    "path": "experiments/rust-process-owner/ffi/src/argv0_tests.rs"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "18f506a290491731695c6db297efe9eb7046d4ba",
+    "newBlob": "2a89392d5cf7d18fa9139170b7fea4a2ce31cac2",
+    "status": "M",
+    "path": "experiments/rust-process-owner/ffi/src/lib.rs"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "69dddfc5016f66a936ece97e5769d650a3e1136e",
+    "status": "A",
+    "path": "experiments/rust-process-owner/ffi/src/members.rs"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "d362d8339ec67147691f5678640bef7247010745",
+    "status": "A",
+    "path": "experiments/rust-process-owner/ffi/src/members_tests.rs"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "8af6740dfd0ef4538e1b90b9a248b7b691fda01a",
+    "status": "A",
+    "path": "experiments/rust-process-owner/ffi/src/process_borrow.rs"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "b2fa752d807c325cd17721bd7d1c3cbeeeef6a88",
+    "status": "A",
+    "path": "experiments/rust-process-owner/ffi/src/process_borrow_tests.rs"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "ad6b71ad84fe28442606c86539c6a729a7476cb6",
+    "newBlob": "6799d78d143d20daabdf5ee0751ca304b00a4018",
+    "status": "M",
+    "path": "experiments/rust-process-owner/ffi/src/tests.rs"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "000000",
+    "oldBlob": "b18a60ed46666bae1b6a386f41927edbe7c4d8ba",
+    "newBlob": "0000000000000000000000000000000000000000",
+    "status": "D",
+    "path": "experiments/rust-process-owner/ffi/verification/stdio-consumer-2026-11-26/README.md"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "000000",
+    "oldBlob": "a15243fd46e1cc28f6484a3a3ab6bebe2440fd49",
+    "newBlob": "0000000000000000000000000000000000000000",
+    "status": "D",
+    "path": "experiments/rust-process-owner/ffi/verification/stdio-consumer-2026-11-26/a217-wait-close-release-source-review.md"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "000000",
+    "oldBlob": "be3775baf3b37d03e3c0af729c3cbb568358ace6",
+    "newBlob": "0000000000000000000000000000000000000000",
+    "status": "D",
+    "path": "experiments/rust-process-owner/ffi/verification/stdio-consumer-2026-11-26/draft-plan.json"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "000000",
+    "oldBlob": "71208ab8429055b765e8054821006289eb8758cb",
+    "newBlob": "0000000000000000000000000000000000000000",
+    "status": "D",
+    "path": "experiments/rust-process-owner/ffi/verification/stdio-consumer-2026-11-26/evidence.json"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "000000",
+    "oldBlob": "085b9a11cd090c069295eab71be1f7a3b4c1f3d8",
+    "newBlob": "0000000000000000000000000000000000000000",
+    "status": "D",
+    "path": "experiments/rust-process-owner/ffi/verification/stdio-consumer-2026-11-26/previous-pr-description.md"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "000000",
+    "oldBlob": "7f7ea44c76862ebbc4b59c4c0f7274d2b80a59db",
+    "newBlob": "0000000000000000000000000000000000000000",
+    "status": "D",
+    "path": "experiments/rust-process-owner/ffi/verification/stdio-consumer-2026-11-26/testdata/zz_rust_adoption_stdio_consumer_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "b81b42423ff66b5e049ac5dd5e32a8d8336f814d",
+    "status": "A",
+    "path": "experiments/rust-process-owner/src/argv0_tests.rs"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "49bd944ebf52bfd36103d385aba4e89c49d392d6",
+    "newBlob": "a084e8e1b4a4740b7f9064434d9240266c96892f",
+    "status": "M",
+    "path": "experiments/rust-process-owner/src/bin/owner_child.rs"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "11316ffbc6400e44ea3dd0a6a02c9020ca47f903",
+    "status": "A",
+    "path": "experiments/rust-process-owner/src/foreground_console_tests.rs"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "22e8d9ae5671a58b7081d3f7519656155167ef23",
+    "status": "A",
+    "path": "experiments/rust-process-owner/src/job_member_tests.rs"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "2291e3d523b9dc33c5dcc929550df37e59ac0637",
+    "status": "A",
+    "path": "experiments/rust-process-owner/src/job_members.rs"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "00f8b3c852cd3a472479384cb7e8e7b940605f9a",
+    "newBlob": "13cd1fbac2881a2535fd74c92cba3e74cd0cd96d",
+    "status": "M",
+    "path": "experiments/rust-process-owner/src/launch_context.rs"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "4a9dc490256cde54a2eba198bd7e714948672f40",
+    "newBlob": "91f684a82616de706b87b351e3f92ef78459827d",
+    "status": "M",
+    "path": "experiments/rust-process-owner/src/lib.rs"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "0e42430166af66b34c7d42ee8710da14037e6bce",
+    "newBlob": "46f37a23a0104bf5e7a6f85bf3197ffb6fcfea63",
+    "status": "M",
+    "path": "experiments/rust-process-owner/src/native_failure_tests.rs"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "7819cd248c4cb66c9f16aeecdbec0216a568913c",
+    "status": "A",
+    "path": "experiments/rust-process-owner/src/process_borrow_tests.rs"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "fdd23cd6870e37b1355e22c94a1be4b8d85a289f",
+    "newBlob": "c279bfba630d1748c8894a41de69401a10a66165",
+    "status": "M",
+    "path": "experiments/rust-process-owner/src/windows.rs"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "aa406a170f3e86284e4f8de7c592c40f49f4170f",
+    "newBlob": "a60704b07ec9b71388d129e1ba47bb04ec647ecd",
+    "status": "M",
+    "path": "experiments/rust-process-owner/tests/launch_context.rs"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "73c184a8dd0dca1564dba47a379f2c446a1e2569",
+    "newBlob": "0aa1350c7e2ac6288122a7c38d11dd5f02052e1d",
+    "status": "M",
+    "path": "experiments/rust-process-owner/tests/lifecycle.rs"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "91a9da042aa348ad4306e9f783e5c38794327a4a",
+    "newBlob": "956033ecd1246eceed9738fa3b7aef103ed1bffd",
+    "status": "M",
+    "path": "experiments/rust-process-owner/tests/stdio.rs"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "bc49ccc7810e27dc97731d8a107ea072e889ac63",
+    "newBlob": "4dc6ac2671bceecf12cfbb6a24055c045787074d",
+    "status": "M",
+    "path": "internal/api/adopt_lease_namespace_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "28f76fd00521c291d2d0a6fc0dee10133da549d3",
+    "newBlob": "8f19522959dc3cb497046cdaef46d70937918537",
+    "status": "M",
+    "path": "internal/api/adopt_lease_owner_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "61fa3fe0aae2735f8ef2988cbb19501d0c6e447d",
+    "newBlob": "4ff265d838646e1338eacce5c67106fe8c1b204a",
+    "status": "M",
+    "path": "internal/api/adopt_provider_working_directory_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "938adb8bce844805a0c431ef88e0195c9e454b38",
+    "newBlob": "0c5ce23648afe6d6d5d2d812e49bd16ba05610b8",
+    "status": "M",
+    "path": "internal/api/api.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "9f1ff4104a81b0b2bd295729daf8232f08df3a05",
+    "newBlob": "94c4428d9c6fbac88a121530d549977c7cbf5685",
+    "status": "M",
+    "path": "internal/api/attach_client_public_cli_receiving_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "892e7ee2760bf5fc81563b85024420a41494b773",
+    "newBlob": "c4e62ea351eea5584edd756ad7aeb2f1deef8efc",
+    "status": "M",
+    "path": "internal/api/client_install_prefs_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "ae25a6d52b5427d242606438f6c745a269d34b7e",
+    "newBlob": "4d4f25b47ad9e8d11a1aa4a2c2ecacb40c9b50d0",
+    "status": "M",
+    "path": "internal/api/daemon_intent_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "bb45b6e98e4f040934fb68d366c5e1ba7001169a",
+    "newBlob": "57a661fa0ddd2632974cda1823befc593fe8cd11",
+    "status": "M",
+    "path": "internal/api/install.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "15b017ab36cd502bd74e0e496d7045a859e13d9e",
+    "status": "A",
+    "path": "internal/api/install_codex_repeat_receiving_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "1351850f1d8198e79ac134b6e52f18d84f541bc0",
+    "newBlob": "3c13cc7efb9542733d6c56ac1d9c4467ec9567a2",
+    "status": "M",
+    "path": "internal/api/install_parsed_manifest.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "f4756e97580d61110636f3fc7a7da46f2621d39b",
+    "newBlob": "0dd3495a12748266ca0efc86bf3f740a58061b4b",
+    "status": "M",
+    "path": "internal/api/install_parsed_manifest_lane_b_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "f1ff936968edacd37e1e3e1e766848c8c238847f",
+    "newBlob": "7f2f70f1b11b5343126bbc29b1cfb9ac0374d1e5",
+    "status": "M",
+    "path": "internal/api/install_parsed_manifest_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "51bc0486322f19c1ea9aac3c972c0bfc85df520a",
+    "newBlob": "c013912c413d7a40b134e3b41a24575c10a40846",
+    "status": "M",
+    "path": "internal/api/install_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "267856a46c7ad7553b1d0bdf3d9a824c06ec02cd",
+    "newBlob": "dc16f03b830eb8b884c90b1427005e72877e7d58",
+    "status": "M",
+    "path": "internal/api/intent_audit_caller_oracle_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "05c3c8d831013ebd4114dcb372d55137132ce606",
+    "status": "A",
+    "path": "internal/api/main_helper_dispatch_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "86b8a81a3bd8cb0219bd99f8a4aba5899f792bb0",
+    "status": "A",
+    "path": "internal/api/main_helper_dispatch_validation_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "0aebe605b377efd27cbcf8b57d4c417b151ce298",
+    "newBlob": "665f48f9d658fed3708700a30c3d60df3a979bcd",
+    "status": "M",
+    "path": "internal/api/main_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "1f5130993cddd5f2e1fd7c1697e5f51c1048cc6c",
+    "newBlob": "d5e752083eb2053c64619c1955a88561a8edf322",
+    "status": "M",
+    "path": "internal/api/managed_backend_install.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "b1e96f5be2eecdadb4f7744afbe6dc13b48dcdd7",
+    "newBlob": "91a50251204a4c044595f641e337e271dbe2367a",
+    "status": "M",
+    "path": "internal/api/managed_registration_install_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "83d5dc6ee91000e973b244a0c1696e7aad9aa057",
+    "newBlob": "bc1fee97f3ac520fe56d6009e4728ec1353204c8",
+    "status": "M",
+    "path": "internal/api/managed_registration_runtime.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "8c5fef963fd26cc9d2672e63dac9da320776378e",
+    "newBlob": "e4dcbc1297079c76413a43d57993a266bf8e2877",
+    "status": "M",
+    "path": "internal/api/managed_registration_synthetic_receiving_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "1f8905d50d0460b107c0db59d1c1f0a749e82659",
+    "newBlob": "fc85a9e8952478d758f38b987ff9dbdb3c13e737",
+    "status": "M",
+    "path": "internal/api/manifest_canonical_root_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "f95462ebd0846ff161e53ab5b3d3b821239e8d7c",
+    "newBlob": "32bf7a049bccad727cf1135d0ac2b9e574f52958",
+    "status": "M",
+    "path": "internal/api/manifest_test_remote_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "0e1c7550201a3b8d9b5d2ae8dd5e080fc0d59450",
+    "newBlob": "64af91d71921eb82b9d4b657cbcd488badff9a89",
+    "status": "M",
+    "path": "internal/api/project_client_attachment_install.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "79d80031a708238ae26e41c91cbc557265ffe6d5",
+    "newBlob": "a886f9a288eb25a0a4328013c0104d20191b09c9",
+    "status": "M",
+    "path": "internal/api/project_codex_adapter_composition_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "30737f11000a3bca8c709378320c091a1be0199a",
+    "newBlob": "612a03783e76a8963e513ee4db9434a9158bcc4f",
+    "status": "M",
+    "path": "internal/api/register_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "39caf9cc5d2a0162ac6b0ca5df73e0af3bb6e56d",
+    "newBlob": "343fc877f60d5c33015e64ed2f42975fc11e8dc1",
+    "status": "M",
+    "path": "internal/api/secrets_init_recovery.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "1aa9972c810ab92a34c7356caf722598e25270ef",
+    "status": "A",
+    "path": "internal/api/secrets_init_recovery_directory_probe_nonwindows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "ad4ccac3b9053a9937d5f68a0b7f718df416299f",
+    "status": "A",
+    "path": "internal/api/secrets_init_recovery_directory_probe_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "90b596965456187271d6092596fa3dd037397bae",
+    "newBlob": "2f730943cc7c0393a5464383c2cba36f3fab8636",
+    "status": "M",
+    "path": "internal/api/secrets_init_recovery_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "2454c53a777b727d386c7a28ccd886e9d2b0d9d9",
+    "newBlob": "ce45e86c6df0cda46e38240dadb03b64b9830b05",
+    "status": "M",
+    "path": "internal/api/secrets_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "83ab63a6a38f7f3bbe3a35c114779b515e553ec5",
+    "newBlob": "94c9d49af93999f8dbad472506297e7baab40106",
+    "status": "M",
+    "path": "internal/api/secure_create_client_config_parent_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "99487b5ad246d404ac2eef4dcd7fc28959299a10",
+    "newBlob": "c503c4ea9c30e83d044c13a3daf971b9f3525ef4",
+    "status": "M",
+    "path": "internal/api/serena_auto_register.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "2749e71f89b64d41a19ec224a1032358b5165f07",
+    "status": "A",
+    "path": "internal/api/serena_auto_register_preparation_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "433d56c0ca2907c5db1df1f4bcfc432ee8fe4144",
+    "newBlob": "9b449468312516f8ffa857192d96f64cbbc7c43b",
+    "status": "M",
+    "path": "internal/api/serena_auto_register_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "4c25fa37f43e97feedc9d02eaa475d39f29e5bae",
+    "status": "A",
+    "path": "internal/api/serena_build_constraint_policy_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "35af40886d457d10e7de63edec99b11262a0006c",
+    "newBlob": "de80d106a1abe94e56e98b010ef424bb06d48a9c",
+    "status": "M",
+    "path": "internal/api/serena_build_environment.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "dac996afbb422ec9d97eff7cc9710853c314a39f",
+    "newBlob": "8b51938117adefb0b0f6b4906a1ae3d7cc3bfd0f",
+    "status": "M",
+    "path": "internal/api/serena_build_environment_source.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "f01c668d6bc25aef7ae47329eef3accf746c6869",
+    "status": "A",
+    "path": "internal/api/serena_build_environment_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "15de08da8226793979d4179fdb879c6ab5547c3e",
+    "status": "A",
+    "path": "internal/api/serena_build_environment_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "e6b76597618866a01e05331b2c72d47512d53c36",
+    "newBlob": "9fbb9f44a0942d0fbf3f027adf34b9c2c9bdba7a",
+    "status": "M",
+    "path": "internal/api/serena_client_reconcile_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "b39982a3e993bf518f9a442113d1ff8bf08e2178",
+    "newBlob": "72166de959efc195da64006c39a7afae4d73bd2c",
+    "status": "M",
+    "path": "internal/api/serena_consumer_coordinator.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "31468a609d5fa8d7f71eb2679501f8cde91ca899",
+    "newBlob": "44002f84bf5aed95d0d29871d12299cf14b5f853",
+    "status": "M",
+    "path": "internal/api/serena_consumer_invocation.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "7f1e5aa41c0b346afd8dc7b059e3b4992a0634e5",
+    "status": "A",
+    "path": "internal/api/serena_finalization_context_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "da1deebec53810322af7a385656c2abfbb244ab6",
+    "newBlob": "5bd9e58805d8c5e322a425b691b4342a749ffd22",
+    "status": "M",
+    "path": "internal/api/serena_intent_repair.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "260019a6d1e7cf45bb5e7780f087147a3216946c",
+    "status": "A",
+    "path": "internal/api/serena_owned_attempt_layout_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "c69b1943fd64c2459038e43cca0d36db1b6e79ed",
+    "newBlob": "01c4e7eadc8e821e400ab1f35a1784e8f919db29",
+    "status": "M",
+    "path": "internal/api/serena_owned_tree.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "caf03e0efcd99f82c28abd482828b1edb029cc24",
+    "status": "A",
+    "path": "internal/api/serena_owned_tree_delete_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "2162ae7d6488bf44299f742c8a03f1c1d32305a0",
+    "status": "A",
+    "path": "internal/api/serena_owned_tree_streams_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "6d4a2e8982654c10132cb3e0c863e5acc73cb358",
+    "newBlob": "964279951600bee86057a4794c89c05adfde84b6",
+    "status": "M",
+    "path": "internal/api/serena_owned_tree_windows.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "7b6d33b2ed30ffbe1b4736a9d0947fb8f02d7f0b",
+    "newBlob": "24ab4075dd1e28cfb87a297c4725017eba153bd0",
+    "status": "M",
+    "path": "internal/api/serena_parsed_preparation.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "a7910e133ebf218ce73a6274f1d06785d221c7a3",
+    "newBlob": "4f4864cfe597c327f938cedc71bc2b84ba0f8669",
+    "status": "M",
+    "path": "internal/api/serena_parsed_preparation_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "740539f6d7c5912751c03ee82f48c44ec6d8efa4",
+    "newBlob": "76b86ac369534be55610452239998ef142309bf1",
+    "status": "M",
+    "path": "internal/api/serena_preparation_assembly.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "3cb72448d854ebd76f79647d54d35a8c70fe7733",
+    "newBlob": "4ca4111e8b3d92933eab9cdd179bab878df70e48",
+    "status": "M",
+    "path": "internal/api/serena_prepared_acquisition.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "f54aa58e857b9e703b96de5ad287a008e41e0cd3",
+    "status": "A",
+    "path": "internal/api/serena_prepared_acquisition_context_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "ee0b946864b0385b4fdb17f1e1d2ac19ac24695d",
+    "status": "A",
+    "path": "internal/api/serena_prepared_acquisition_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "4a1682d2d9820cde34422b482d3052d53976f790",
+    "status": "A",
+    "path": "internal/api/serena_prepared_build_constraint.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "8eec0326c838a824ef93f63eb645f86b14db9515",
+    "status": "A",
+    "path": "internal/api/serena_prepared_build_constraint_integration_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "0798bba831c055965be0b4326a44b3c4bf97346b",
+    "status": "A",
+    "path": "internal/api/serena_prepared_build_constraint_pin_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "38c82a218355a4245cd60b93ca33c3904c59ed68",
+    "status": "A",
+    "path": "internal/api/serena_prepared_build_constraint_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "635b65c9f92fd8799e485b7122b04d11a71bc614",
+    "status": "A",
+    "path": "internal/api/serena_prepared_build_constraint_unsupported.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "67bb5184be847fd6b0986f753863bd2daecc64c7",
+    "status": "A",
+    "path": "internal/api/serena_prepared_build_constraint_windows.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "1a806b399dc9a6be1ad50a756ef1f2e65a05f3ee",
+    "newBlob": "193dbc60556b8f4c63930df172854a78ed4f75d1",
+    "status": "M",
+    "path": "internal/api/serena_prepared_consumer.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "c8984d40a2591e84489d0939dcca2cb16232701c",
+    "newBlob": "acb206cdda2ca9b221acb2d80872835aea219a48",
+    "status": "M",
+    "path": "internal/api/serena_prepared_consumer_ticket.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "602f3177d357f0687e3ccaf7e49c5e270d9de1fa",
+    "status": "A",
+    "path": "internal/api/serena_prepared_diagnostics.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "04c813bf745b1384d0c34c9d0f7baa3e129bfa50",
+    "status": "A",
+    "path": "internal/api/serena_prepared_diagnostics_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "54345920399ea5aabdab9f7499d281023256d74a",
+    "status": "A",
+    "path": "internal/api/serena_prepared_diagnostics_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "05eff3480bbf929f7b9eace482cb3cd52f5acfa9",
+    "newBlob": "488dda9e8f117ebdbf0d38134e1e2e03767cbaf7",
+    "status": "M",
+    "path": "internal/api/serena_prepared_effects.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "c471c34f910195bc1ceec5e6fa0db5a6299f7a39",
+    "newBlob": "57d92ddf892a07cfe008b2af671df99fbcbacfc8",
+    "status": "M",
+    "path": "internal/api/serena_prepared_execution.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "58fffea91b00a37c9e881446fef1c083d7322227",
+    "newBlob": "431a9889abd931a6900fc2156f05db8e6ba75eeb",
+    "status": "M",
+    "path": "internal/api/serena_prepared_file_unsupported.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "9b7fbd1270420a05ad1e2e825ff0291192d722d1",
+    "newBlob": "0e36d5b6adc2950a2f49d477ae56e390628d3c0a",
+    "status": "M",
+    "path": "internal/api/serena_prepared_file_windows.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "8c5e13ae17037761d42be026dc0991a62be17ca1",
+    "newBlob": "7f09479fce10d43512d8f7f09ec0ff3a98b7ec0d",
+    "status": "M",
+    "path": "internal/api/serena_prepared_inputs.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "1cb841f32af85f0367fd7ae5f6b6c3e3500baec0",
+    "newBlob": "564f5d8e1a47e07dc6d54e5aafc56976cf4e5ef2",
+    "status": "M",
+    "path": "internal/api/serena_prepared_install_effects.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "ecd852e318ab512338a3a93ed9eaa12ae767a420",
+    "status": "A",
+    "path": "internal/api/serena_prepared_interpreter_unsupported.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "54594e5def9e2d522b2078d42e269525792cf085",
+    "status": "A",
+    "path": "internal/api/serena_prepared_interpreter_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "1483a6b987e892746358d12375a080fb6a0c1b06",
+    "status": "A",
+    "path": "internal/api/serena_prepared_interpreter_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "c16a6c4d9d4f0bbf5dd5ad39b6143531c2bfc06f",
+    "newBlob": "ae107d8d1c8dab659ffc7dc99f4a28e41f25bb0e",
+    "status": "M",
+    "path": "internal/api/serena_prepared_launch.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "3d7bf5594f2dfdb3c963d43b1fc4a056ec5dd725",
+    "newBlob": "f7c1c100c694b10fccb961a79d080a409ec156d6",
+    "status": "M",
+    "path": "internal/api/serena_prepared_metadata.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "ebbcdc12878fbc12ab79eb5fe25a578686d439c1",
+    "status": "A",
+    "path": "internal/api/serena_prepared_owned_file_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "8da2ce58a7c3669e8a6d41c7f327165387a3a295",
+    "status": "A",
+    "path": "internal/api/serena_prepared_owned_file_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "8e6df68f0bfae7ff89a151f95e5978449fbf4188",
+    "status": "A",
+    "path": "internal/api/serena_prepared_owned_generation_integration_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "04c07d971df9a5d945d8852b3b86ae9b60f22709",
+    "status": "A",
+    "path": "internal/api/serena_prepared_prior_lifetime_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "865c7b948d4f2c3fc38c562c52ce69e5ed6324ed",
+    "newBlob": "c94012d8fa6a086ea3bf71df1c409425e369480d",
+    "status": "M",
+    "path": "internal/api/serena_prepared_publication.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "56263ea20d159dd637ce3dde267621b3707c0dc0",
+    "status": "A",
+    "path": "internal/api/serena_prepared_publication_native_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "ff7cd293a7e64707b1c48f84ae8a87b03254e224",
+    "newBlob": "1a4deb4edaf61e8eb8d17d42db1195e08c7374c9",
+    "status": "M",
+    "path": "internal/api/serena_prepared_qualification.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "da74b9d3a183204d64a420ef4c57a8bbbe625702",
+    "newBlob": "68b0b8c50350961c183e109e176db6e02819cef6",
+    "status": "M",
+    "path": "internal/api/serena_prepared_runtime.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "b2ab3c9fef386b92c0e9dc59f3e14ed2d0fd9345",
+    "status": "A",
+    "path": "internal/api/serena_private_cache_seed.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "8f237b625e552b8c81d1a61e5af5acee48d1faa8",
+    "status": "A",
+    "path": "internal/api/serena_private_cache_seed_tar.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "1cb02f47d88a71e1e221dec82cdce4a58ca6f41c",
+    "status": "A",
+    "path": "internal/api/serena_private_cache_seed_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "aa8f1ce849a9030d1dd7884a9bd24d4878823ec0",
+    "status": "A",
+    "path": "internal/api/serena_private_cache_seed_unsupported.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "13afc079291cf202dacfd27ea03b49d7d37048d6",
+    "status": "A",
+    "path": "internal/api/serena_private_cache_seed_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "6c5d24226cc9ffbf634b876ded7360034cc5fb3e",
+    "status": "A",
+    "path": "internal/api/serena_private_cache_seed_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "74a9717086b319e637f248c72902e2738f50fda6",
+    "status": "A",
+    "path": "internal/api/serena_private_integration_publisher.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "9fb3dc7d31e9ec5abdc0a546365f5f6de2a35cbc",
+    "status": "A",
+    "path": "internal/api/serena_private_integration_publisher_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "f324e211c23fba1bbc9c3ca29c1efad264a95d88",
+    "status": "A",
+    "path": "internal/api/serena_private_publisher_namespace.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "e60579eb4dc17c6a4c9bfdc6ea0413dd10e07e1e",
+    "status": "A",
+    "path": "internal/api/serena_private_publisher_namespace_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "b25944a782c32d724f5090b6a9902d3f77d10053",
+    "newBlob": "c7b670de9446808da31b95db5e3f5f7774da1a8a",
+    "status": "M",
+    "path": "internal/api/serena_publisher_image.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "aba060e163d116170b969df70df9f7795a0c9263",
+    "status": "A",
+    "path": "internal/api/serena_publisher_image_policy.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "258f9a4c955c6389ce03384da1894ab1b719c31a",
+    "status": "A",
+    "path": "internal/api/serena_publisher_image_policy_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "fb195efd4a277155437d0a91f7beb81c1dda8cbb",
+    "newBlob": "3b5642c1fc6dfddaf2504db3409671b124599aeb",
+    "status": "M",
+    "path": "internal/api/serena_qualification_resources.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "35f00b3dcf11ff3f3808e20621e2eac2708c5000",
+    "newBlob": "32851306a8bd27e4a562dae7c75b821289bd2cc5",
+    "status": "M",
+    "path": "internal/api/serena_routing/resolver_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "d142fd7cd5636c6f307c7776963c0a8904dc09d9",
+    "newBlob": "1b8d16a0fc02495545153ea1d69230dced683f9c",
+    "status": "M",
+    "path": "internal/api/serena_tcp_rows_observed.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "e7f9786d7ea696a311bb7f1adcb934ec36b8986b",
+    "status": "A",
+    "path": "internal/api/serena_tcp_rows_observed_native_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "a96e799794b5347f9bf251df80e6051be2cf0f29",
+    "newBlob": "6dc44790481a0f52ae7735da06a3b5c71b26eb2d",
+    "status": "M",
+    "path": "internal/api/serena_tcp_rows_observed_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "39c2e453fd8ca7d9c1bdaea567b19ab26286021e",
+    "newBlob": "cd566b8c0de75cf31901046b37e503b633b24f8e",
+    "status": "M",
+    "path": "internal/api/serena_tcp_rows_observed_windows.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "503f14b9eca30193e061a2ec624bd9d263776664",
+    "newBlob": "cea765939d8b679387dcd8ca5d7005fcf784f951",
+    "status": "M",
+    "path": "internal/api/state_dacl_repair_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "4d17e680e55d2b8aa9652206909df9b0a44f0b18",
+    "newBlob": "34940211dbddb0ea37a3ed3a75317856c4960f97",
+    "status": "M",
+    "path": "internal/api/state_dir_resolution_observed.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "045902a8e93af9c4395e876275bd53d28cce587f",
+    "newBlob": "943a440a210af118f06c799b4be16a897f4ed427",
+    "status": "M",
+    "path": "internal/api/state_dir_resolution_observed_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "bcea0c3bfc3461767548a9378905f5ac6c3f4522",
+    "status": "A",
+    "path": "internal/api/state_dir_resolution_observed_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "9ed96aa0309498f0aa923f450b47e6b51dcceb3c",
+    "newBlob": "cb76761c5439b2eeb956c94909fa1ef4870fe82f",
+    "status": "M",
+    "path": "internal/api/stdio_bridge_admission_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "d0bd26179ea3cf7c4e5f8fec3b14ecc873d5c206",
+    "newBlob": "823a43e39d481afaaf09ee4a56d5f86403d7a310",
+    "status": "M",
+    "path": "internal/api/supervisor_intent_build_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "c924bbbf57c8350c7ee6fde4b92c24f2bcc518ba",
+    "newBlob": "a066f788c4aabd7de6eb72efecf501264d86637b",
+    "status": "M",
+    "path": "internal/api/supervisor_intent_lock_ownership_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "9d649f1a09023512c8078413807f24c06daef5aa",
+    "newBlob": "fd6c6cf05e39039aa4883165daf69d3f61eb794b",
+    "status": "M",
+    "path": "internal/api/supervisor_ipc_peer_transport_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "5430c88dad6222fcf23ae7be5a067987aa353592",
+    "newBlob": "5202badcfe8e94fc5a7fa92e66d2d648633b4406",
+    "status": "M",
+    "path": "internal/api/supervisor_ipc_status_client_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "6608e8343dd2375c778d306f0bcd43f2e1e47557",
+    "newBlob": "950ea51eb5f8692ca4be173dae433bf3cf2ba50e",
+    "status": "M",
+    "path": "internal/api/supervisor_status_server_identity_windows.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "7c038dd326adafb10f3b3d9423adc01b4c698f65",
+    "newBlob": "960a48ccac549883f7d5bd0af3a241100fe8f1c5",
+    "status": "M",
+    "path": "internal/api/tool_catalog_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "25b49eae7c38e154e72973102f0282ca57e70dd6",
+    "newBlob": "581ef9193b85b6e35aaec30eaab7aacc386a73fb",
+    "status": "M",
+    "path": "internal/api/upgrade_fence_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "c5f3ea22dd616cf12dddba7638925262bd07f7ed",
+    "newBlob": "863f09e837e7516e2ae1dad2dc6ab89687eeab7a",
+    "status": "M",
+    "path": "internal/api/weekly_refresh_atomic_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "8c2238448ccace764dbc813afec13ab4baf763ab",
+    "newBlob": "212750b52a9eeab958e11a6a15a53f25f1c12a05",
+    "status": "M",
+    "path": "internal/api/workspace_prune_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "3754b1f5434c425b6d7dfe927fe9f8ef3a38c8a1",
+    "newBlob": "eb868e4d228a1613c2ac5a187318bde058bb67c0",
+    "status": "M",
+    "path": "internal/binaryadmission/windows_pe.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "3a54220e5cd0a028b3292a47fa25822d4fe9ff75",
+    "status": "A",
+    "path": "internal/binaryadmission/windows_publisher_test_identity_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "84bfb38dbcf4310c2b812c4480534bbd0e930365",
+    "status": "A",
+    "path": "internal/binaryadmission/windows_runtime_library.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "000f6e8c99abef7e94d04c12b3f7aeb9f9e8c996",
+    "status": "A",
+    "path": "internal/binaryadmission/windows_runtime_library_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "5c629908fbd54db913d5e6e0ba0a70952bfcbcfc",
+    "newBlob": "baeab828ccbd1674a90415ae9da1051351390fa4",
+    "status": "M",
+    "path": "internal/binaryadmission/windows_versioninfo.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "40a2b4ee14d43952fb6a53bcf49174c754cde832",
+    "newBlob": "e6963157d4bf69cc7c83424dc1e4884c3cde07fa",
+    "status": "M",
+    "path": "internal/buildinfo/buildinfo.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "71926f568285090b00a07a9e20a4c565c6b19d3d",
+    "status": "A",
+    "path": "internal/buildinfo/rust_owner_product_policy_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "f030a692b897f5f9a51467a67eb5f637a34b22dd",
+    "status": "A",
+    "path": "internal/buildinfo/rust_owner_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "7fa930da709db7eb780dfefeb4103d6e3bc6e5a1",
+    "status": "A",
+    "path": "internal/canonicalnativefixture/protocol_windows.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "167d5a19b879075bb5d68e846dea64ad84eb5dad",
+    "newBlob": "c514b3113feb22d9286853f2bc5d4d49974a91ec",
+    "status": "M",
+    "path": "internal/cbuild/exec_windows.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "445e1bf48ffdd09fa52307fb316db274702c4b38",
+    "newBlob": "1ae992b21f00bf56b5abef18e45a21c1e207265c",
+    "status": "M",
+    "path": "internal/cli/daemon_mcpcompat_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "30ffeb812c880d3f026025e3e733a5790d051086",
+    "newBlob": "c7bd862103fe21fac7650cb9f6113783451f95cf",
+    "status": "M",
+    "path": "internal/cli/daemon_reliability_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "6af406fca90e2ec2d3e6e8667160ec5b76278cf7",
+    "newBlob": "3628be5222f83c59e23af39c9e227dcce197ca22",
+    "status": "M",
+    "path": "internal/cli/daemon_stdio_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "51fa16cfbd8659a358992d6c0a2a97e2b4c89e91",
+    "newBlob": "acd1b33339623568eda917e811543d1156e5494f",
+    "status": "M",
+    "path": "internal/cli/daemon_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "eb520e0d26ceffcd3986523f957793c13dbd9ec8",
+    "newBlob": "3434d159391629281faf8e6a42ae88fac498888d",
+    "status": "M",
+    "path": "internal/cli/gui_force_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "0d0562b4816cb3fa27fbecbbeaeba41548edfb12",
+    "newBlob": "5327b592589e9af42a69a1c3e9b5a64f00d6278c",
+    "status": "M",
+    "path": "internal/cli/gui_integration_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "f645a5b11644c474ed78736ee593abf0bceac210",
+    "newBlob": "9c8696676e1848ee24b6ffdc8dcfdff28636740e",
+    "status": "M",
+    "path": "internal/cli/gui_tray_state_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "f2422f6b2a745a495f9cba0d7db44fe4c1e96a0b",
+    "newBlob": "ac67f447736767a4815713f17b20ab365b28546c",
+    "status": "M",
+    "path": "internal/cli/install_reconcile_mcp_front_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "cdc126cf94d2d44ac9455c55c4375ccfa7eb6d98",
+    "newBlob": "92b398f7ba4d21db30b93a69b21cb4b631906aec",
+    "status": "M",
+    "path": "internal/cli/migrate_serena.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "d4f46b748bdd3c6cb2a865e2c4327dd9c60ba463",
+    "newBlob": "829d969a4464f640daa71ec57dd78d13936f608b",
+    "status": "M",
+    "path": "internal/cli/migrate_serena_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "a0c343813d1f0f4d23d101d2f5aeed39f267e78a",
+    "status": "A",
+    "path": "internal/cli/private_publisher_observation_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "a2aad2e1a23997f8efffc643464a71e253630e8a",
+    "status": "A",
+    "path": "internal/cli/private_serena_migration_case_contract_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "2a7e5ff5f4fa50d0bf8728fea52ebd2b86100f51",
+    "status": "A",
+    "path": "internal/cli/private_serena_migration_case_other_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "1ecb01b3cd4ca9987dee5aa2df6afb86f93f394b",
+    "status": "A",
+    "path": "internal/cli/private_serena_migration_case_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "2b3d64d7c6d09ec3a00fb1a19eccb96f66ab065b",
+    "status": "A",
+    "path": "internal/cli/private_serena_migration_consumer_receipt_validation_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "482386d96faefd3fe9914675780d8b5f3d10fd9b",
+    "status": "A",
+    "path": "internal/cli/private_serena_migration_consumer_receipt_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "aeb903b5aa20f3156100166865187ebdae1945e3",
+    "status": "A",
+    "path": "internal/cli/private_serena_migration_consumer_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "f45e8462bfe3221a11a7bca0ab3f3af564189271",
+    "status": "A",
+    "path": "internal/cli/private_serena_migration_data_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "7868d91c46884eb59afcd88558bd74e5ac600c63",
+    "status": "A",
+    "path": "internal/cli/private_serena_migration_seed_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "b23b373e5a71800cd2e2c3ab3cec19d00526488e",
+    "status": "A",
+    "path": "internal/cli/private_serena_publisher_namespace_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "ef548032ca548c323546eb8d495ae6a49b120f1a",
+    "newBlob": "37f22c85350aab49185355c0485338fb16bc46cc",
+    "status": "M",
+    "path": "internal/cli/process_identity_match_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "2d0413ebd15fedb2878915c53ab5af419396dd27",
+    "newBlob": "2a9df838092e54b422043e7053bf44b3d8030749",
+    "status": "M",
+    "path": "internal/cli/relay_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "8a8d4071ff302e5e4ec175986be487e6dbc46c3a",
+    "newBlob": "7a5ed33e35b440a6f999d8f3c3a3e8c1dfe428cd",
+    "status": "M",
+    "path": "internal/cli/secrets_audit_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "de5d5db25e4250cf6124907c7d417f24ad032d91",
+    "status": "A",
+    "path": "internal/cli/secrets_helper_dispatch_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "c0c46e7a1c272cdfa973c84bd7c301b1cf8e0fa7",
+    "newBlob": "49786bebcdbebe5a65e97e64dcf62bd056212b32",
+    "status": "M",
+    "path": "internal/cli/serena_original_endpoint.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "72488713751bde915d1a931a0f45bce367239357",
+    "status": "A",
+    "path": "internal/cli/serena_original_endpoint_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "3f3e760c961b6b597d0879b14d7e52260cb89583",
+    "status": "A",
+    "path": "internal/cli/serena_preparation_environment_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "cd96d388de722f0a326816001f90daaef02fd754",
+    "newBlob": "f49f4ca62ff0b8fcd90429c80e7916508d06242b",
+    "status": "M",
+    "path": "internal/cli/serena_prepared_run.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "f9ad6ea44bfb6a2f2d3d674beba1215208a00261",
+    "newBlob": "b7ac3ac94b837e46f6a754377d8af92c17ae38bc",
+    "status": "M",
+    "path": "internal/cli/settings_registry_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "465b6b0a61026f399a5ac67768a847cb54ff5793",
+    "newBlob": "3d6006c899450857bfb90bceebabf2d789df14fc",
+    "status": "M",
+    "path": "internal/cli/strict_mode_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "2889568657f714240da0c9dd22a7c3356c046c16",
+    "newBlob": "f61d5696f10cb2bae2485378eb326d1546b44a57",
+    "status": "M",
+    "path": "internal/cli/supervise.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "9143061dc1db2a4f6687484b6cd73b412159f2ab",
+    "newBlob": "a23246baaab0f004d4a487d554380837f573e6a5",
+    "status": "M",
+    "path": "internal/cli/supervise_cst_identity_windows.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "802b6744c1cd61ad1baada19b3366d1df3b0814c",
+    "newBlob": "3765beeb6fc37a7c7d1254ac2d5c82fcc2a96fc8",
+    "status": "M",
+    "path": "internal/cli/supervise_ipc_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "607e3dd5ce78970f5af027200718d20c350b37a8",
+    "newBlob": "36f9d05137a0c4e979e4a2bff213d7335f9cc3cc",
+    "status": "M",
+    "path": "internal/cli/supervise_lostchild_f6_f2_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "6a233238b83bcf5c61c66f8b87b2a08753dd9ed6",
+    "newBlob": "bb25fcb35d69f7d8983c44173c5edd4dc7bc73e2",
+    "status": "M",
+    "path": "internal/cli/supervise_overlay_marker_spawn_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "331c8ecf7f9b88f4fe9e8085d6e91aaf539c3d69",
+    "newBlob": "03870c2e7addef18b9aae7acdcdbac16b54a5277",
+    "status": "M",
+    "path": "internal/cli/supervise_quiesce_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "65af6c787bbab9c2c48195eb98225ce7c0b8558b",
+    "newBlob": "e9d47ea4a232127800c360bede2b6535b0338d3d",
+    "status": "M",
+    "path": "internal/cli/supervise_reconcile_ipc.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "623e9b74fd5b23c0ce53d2982e6621b0f4c3c0e7",
+    "newBlob": "5a6b2c5f5641b34844d9a2ffbce522a9a8e97b68",
+    "status": "M",
+    "path": "internal/cli/supervise_reconcile_ipc_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "6bae3b350d596246462d211e15073378a00b91db",
+    "newBlob": "4081007f8985eb05659a6c092595993d8202a14f",
+    "status": "M",
+    "path": "internal/cli/supervise_reconcile_serena_repair_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "5e84a353a733eedf51fcf12790b922b30b7e57ab",
+    "newBlob": "767c0be7897fbbded2616cc8bf5adb84b9c18958",
+    "status": "M",
+    "path": "internal/cli/supervise_reconcile_wiring_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "88cfb21ec768e5c20bccb6ad567a41756b1fb1e4",
+    "status": "A",
+    "path": "internal/cli/supervise_root_exit_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "9a623acfc2de006802086afc7bae05370cffb50a",
+    "status": "A",
+    "path": "internal/cli/supervise_rust_owner_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "58be5ed0e55f36dc017869732ee088670b2fdbd6",
+    "newBlob": "b3b076e77a1d4e027f86b0673faad7b5140b894e",
+    "status": "M",
+    "path": "internal/cli/supervise_stale_exit_spawn_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "253bb00a7272139124d2ee8f61236f0498cc99c3",
+    "newBlob": "df7588f354e842a571bfc5433019c089d5446c53",
+    "status": "M",
+    "path": "internal/cli/supervise_stall_dump_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "a127781048624324139185ffa592e185010a6ed9",
+    "newBlob": "d4d7f492379b7f543f074982260148ad8bfff207",
+    "status": "M",
+    "path": "internal/cli/supervise_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "6ad9b53b09c917025542444e80b7d8a7114c6019",
+    "newBlob": "13093ea87f73a498846d1672020011fddd912cb0",
+    "status": "M",
+    "path": "internal/cli/supervisor_death_forensics_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "b7ce0d1a11ad06fc7c7b2c004ff7e5fc6777beac",
+    "newBlob": "2d69fc58f2c46dafb6cbc8d6a017b51509e197f3",
+    "status": "M",
+    "path": "internal/cli/supervisor_launch_status_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "debdeae8c731c993f554336e0fb0a235b70f72bb",
+    "newBlob": "2ea2b1f5d07a2dccefb6da7efc7ab6b6736a7028",
+    "status": "M",
+    "path": "internal/cli/supervisor_launch_successor_runtime_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "fb2427b00558e7180248b4ef96c52f63d42267a7",
+    "newBlob": "d1573ede111088e43d966ada8a358ef4e93581b7",
+    "status": "M",
+    "path": "internal/cli/supervisor_launch_windows.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "367cc534b73f43ecaed1c3d634754016e56ad2c7",
+    "newBlob": "caf37e2dc11644cef2b5c0b03ab62c5adbc00881",
+    "status": "M",
+    "path": "internal/cli/supervisor_launch_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "5478ec02f99aef81dd95e15fa4664599861314b8",
+    "status": "A",
+    "path": "internal/cli/testmain_dispatch_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "53bfb7008fb30fe0dbe5fe4c90e6ebe2f255b6d9",
+    "newBlob": "ae7885f0f72d6c0d24a5d25dfbf61052161190e8",
+    "status": "M",
+    "path": "internal/cli/testmain_helpers_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "9bd5cf27131490c9c96b9a74f1bbfb95a7803f5a",
+    "status": "A",
+    "path": "internal/cli/testmain_paths_other_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "e248ed590868ac4a9b08f3763de9e06028de4761",
+    "status": "A",
+    "path": "internal/cli/testmain_paths_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "af307faf72059d9072a881bd4cf43eb76e0191e5",
+    "newBlob": "bb92fdc0c936c94e7489a87d681b90fc5fdcf257",
+    "status": "M",
+    "path": "internal/cli/upgrade_gui_qualified_fixture_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "b76bf5bb84d7f13ee818405faedf24f457e5814c",
+    "newBlob": "90019d744bbc04946a39d17474a026053f0f20b8",
+    "status": "M",
+    "path": "internal/cli/windows_canonical_entry_gui_native_replay_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "249459e11a23841611ad1af8dfa3a8d1adebba86",
+    "status": "A",
+    "path": "internal/cli/windows_canonical_native_actor_case_external_data_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "7980006ac5344136cb5b849b2cc93861139f3396",
+    "status": "A",
+    "path": "internal/cli/windows_canonical_native_actor_case_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "bcce27d9902c8370b3cb44f3b33c5cd93e528d2d",
+    "status": "A",
+    "path": "internal/cli/windows_canonical_native_actor_fixture_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "d1eeeccea235af1137799bf89e2d6f8ece8d4286",
+    "newBlob": "535082e3e12c71a257f1c15a2e9c826c5635a89d",
+    "status": "M",
+    "path": "internal/cli/windows_pe_admission_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "84ae204e3d422f84f29749ff4c80fd6eb1952829",
+    "newBlob": "67d3d2e719b11f00da0b30cc3ae664a4f863d14c",
+    "status": "M",
+    "path": "internal/cli/workspace_cmd_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "d32f4e52abbb87b7eac2f1e356be4b37da617507",
+    "newBlob": "6c0848b0f01c90135ad4c231fd1540c43ea49d5d",
+    "status": "M",
+    "path": "internal/clients/codex_cli.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "a910cec687b709234aea3b02716cbe72ccc5c1d6",
+    "status": "A",
+    "path": "internal/clients/codex_cli_install_observation_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "387fb118b6d455597f69f38aec26742338a03aa4",
+    "newBlob": "383dfdc39d041e7de037265328c7ef7c9e94c7ac",
+    "status": "M",
+    "path": "internal/clients/codex_cli_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "872ee8b1943fc2f6bade77ea5bd61c0f74c19e77",
+    "newBlob": "df27978d4be9ecacc6efb92b633849c13b54a350",
+    "status": "M",
+    "path": "internal/clients/config_lock.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "5e889b6a5a04eaec5f8d990c4834ce6d4eb83c8f",
+    "newBlob": "e16100139993bf62ea4ac143aac521b18af0176a",
+    "status": "M",
+    "path": "internal/cmakegraph/cmakegraph_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "8d9ae60384fd4859dc5df94637125cda20ccbd33",
+    "newBlob": "0a1cb5e55ed9d26e1a109bb7991a4d91b142dbc7",
+    "status": "M",
+    "path": "internal/daemon/host.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "827dc83b7cca0f4e68ffe05a80e44652c403d87a",
+    "newBlob": "17228c53ff070135bc87ef45f9b0196ae340b542",
+    "status": "M",
+    "path": "internal/daemon/host_original.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "1be95885ce28c3ede1eb24547993257129196676",
+    "status": "A",
+    "path": "internal/daemon/host_original_timing_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "71c772ee8df4036f166b47af400ed5393ef94bec",
+    "newBlob": "921eaf013dd071b1d3c55acd574dc2a3e6e7302e",
+    "status": "M",
+    "path": "internal/daemon/host_original_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "7ed8a0716dd2192174eec9e9fd080750f7ca0c67",
+    "status": "A",
+    "path": "internal/daemon/host_rust_original_boundaries_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "fef2bde035c3e69f08f8d4dff9fc7f73ec1a0db0",
+    "status": "A",
+    "path": "internal/daemon/host_rust_original_environment_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "ec831fff40c40e46f3f2c5df21eaddb5eac65036",
+    "status": "A",
+    "path": "internal/daemon/host_rust_original_preparation_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "32837e9a94b987f83281ea9e7004e5b63bf04cdc",
+    "status": "A",
+    "path": "internal/daemon/host_rust_original_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "f5a28aa02cd15d81b1adc8815f7fb761c60d1423",
+    "newBlob": "11eceded8539c26c30765877b021a529bbce2802",
+    "status": "M",
+    "path": "internal/daemon/host_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "229f1fb246499b4d37bd357a93d7d7501d3db0bf",
+    "newBlob": "c717242e09a9a7897914fa9e0746d0605273fec4",
+    "status": "M",
+    "path": "internal/daemon/http_host_endpoint_release.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "45e872d21b48dd4e389c5d7101530c78c7391a1f",
+    "status": "A",
+    "path": "internal/daemon/http_host_endpoint_release_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "c6f68df8a14d2ab22db5015ee048d29723409a36",
+    "newBlob": "981834bfd95345fc66eda41b83634448ac1e8c95",
+    "status": "M",
+    "path": "internal/daemon/http_host_prepared.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "6cdf53546921796c437f3e3f2306c0a042f2b4ed",
+    "newBlob": "f58f0689794488d7f1dc5d98c771ea0e72c69c26",
+    "status": "M",
+    "path": "internal/daemon/relay_qualification.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "687f22f38b3acefe67ebe14a7f0b8cdb2fbd5202",
+    "status": "A",
+    "path": "internal/daemon/relay_qualification_connection_close_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "783d38b5244e241fd8e91c4444311b6cf1463190",
+    "newBlob": "790952d1484fbb81d5546d1bc1aadb0cdfc09712",
+    "status": "M",
+    "path": "internal/daemon/relay_qualification_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "dc825b9f62deb047c3655bf00738bba81b18d671",
+    "status": "A",
+    "path": "internal/daemon/relay_qualification_transport_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "1a0847102301f0b7f4f4c4d115f3fc7358bfe352",
+    "newBlob": "169bc817692a16f60887afaa1a617be6019c2960",
+    "status": "M",
+    "path": "internal/daemonrecovery/recovery_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "acd0001c3b9ee8ce0e92aa7661a56e96331116fd",
+    "newBlob": "3fe6488349a4af192fb547ae79028e922e09a1e8",
+    "status": "M",
+    "path": "internal/e2e/cst_observer_custody_fake_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "276c1c47a5e55a9ef1eba2c4b250b4bf6c5a77ee",
+    "newBlob": "fb9913b162b5c9ddc36840721a9c32bcb6762e00",
+    "status": "M",
+    "path": "internal/e2e/cst_saved_field_result_tree_probe_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "0017ef479320833ca8bfd555c3990769da5ba520",
+    "newBlob": "1256595a84ff77fbe07de1def6a0ad86f56bba18",
+    "status": "M",
+    "path": "internal/gui/audit_lock_state_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "efb178d9974bc6fb2577357a8e003ccd9b774d78",
+    "newBlob": "584229b06e35af2440698f7785de1d4cf4bce768",
+    "status": "M",
+    "path": "internal/gui/audit_lock_terminal_worker_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "e3c007ba06618d6860845eeb43b7bb0fded4f666",
+    "newBlob": "4e52459db70d54d679f90f3f0f519bba23e975be",
+    "status": "M",
+    "path": "internal/gui/supervisor_restart_spawn_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "8d20328042dc1607ce40810453c7cace49a90d4d",
+    "newBlob": "84edbe40248cd576cd1f44a6d6d338958fced8fe",
+    "status": "M",
+    "path": "internal/gui/testmain_dispatch_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "b1cd7ed86e7200a93e9ce5e5d9c8670fcdd253ce",
+    "newBlob": "becadccf71e0b45eebf9de24b0466cb04ce862ab",
+    "status": "M",
+    "path": "internal/oneapi/setvars_windows.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "758ff2e64f24bc1afb7ffe90778a13193fc387bc",
+    "newBlob": "f1ff9f6020581a9c0a6d2e0a49dbfe66a89d84c3",
+    "status": "M",
+    "path": "internal/oneapirun/async.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "a2e97f8dc9bd6b759ac0de8cbf27977f03165be1",
+    "status": "A",
+    "path": "internal/oneapirun/async_cleanup_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "04333e9da8a658e7a6b4642f1c155abdca08e9c7",
+    "newBlob": "51e5785d981d6b443657bfd942416098f34c7ebb",
+    "status": "M",
+    "path": "internal/oneapirun/handlers.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "773aef160423b5f33582067abbbd129e9705d66c",
+    "newBlob": "340b5c6b7cbe46fff31d89c96fc0de6805d4a0ef",
+    "status": "M",
+    "path": "internal/perftools/exec.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "c4a2c43afee3718ad3083316f805685adeb5542a",
+    "newBlob": "d34e2c688a8b4c1e6c627bc5ec9f3fa6441285d9",
+    "status": "M",
+    "path": "internal/perftools/handlers_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "6ba763f1eee449a6f5db5fc429b0064cf7dc0619",
+    "newBlob": "eba48760596da187784da23cbd2fccbf6ac51457",
+    "status": "M",
+    "path": "internal/perftools/hyperfine.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "80e4ce3f64bd6d45933ba3e2df273df29ee6440f",
+    "newBlob": "19f05ec2ed33905c44dd222b19855481690ab360",
+    "status": "M",
+    "path": "internal/perftools/llvmnm_size_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "e0618753360b3cd7fee9d9190bd0862113d3f9a1",
+    "status": "A",
+    "path": "internal/process/background_console_native_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "6f8594dfd4cc0ab0a2750246800fcf6f19aa49c7",
+    "newBlob": "8631516b2a33b1216efe64a28701579a86bfe8b5",
+    "status": "M",
+    "path": "internal/process/contained_stream.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "e6f6bed1a92f460ddc1b9d62def5fead5824e382",
+    "newBlob": "179928b32b53273decaee7639f9902845184de3b",
+    "status": "M",
+    "path": "internal/process/contained_stream_linux_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "3a416c8abf2dc235bbfc11dd0488806333f23c2f",
+    "newBlob": "b72ea16bcdaed9407fc7e81f34650d168b8458c0",
+    "status": "M",
+    "path": "internal/process/contained_stream_observed.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "8b6ff87814bff5fa8356691914d720db4622dd32",
+    "status": "A",
+    "path": "internal/process/contained_stream_product.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "d6cf7136dd7f6a6d59d7893d674f88ac892e10d1",
+    "status": "A",
+    "path": "internal/process/contained_stream_start_failure_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "66173e5fae0ce530a50454c89b5ea79442beda74",
+    "newBlob": "7614e1f36a5280e2aa269fc906a1e29eeca55221",
+    "status": "M",
+    "path": "internal/process/contained_stream_windows.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "c8e1262e05d96e6eba8ec1c11f57f698f32f4ee5",
+    "newBlob": "1053530302ed282889f5900b2181fcda6faf66fa",
+    "status": "M",
+    "path": "internal/process/contained_stream_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "b7b414ecc515ee283e28179528f9e43e665f0c13",
+    "newBlob": "7f32d596c8a8f44139430e2dacaccc567e92f01a",
+    "status": "M",
+    "path": "internal/process/creator_identity.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "444b40002661c6557eb8ab6f5ec63f8553d378b1",
+    "status": "A",
+    "path": "internal/process/creator_identity_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "cadf114ca7f4b2ec9e3059ee638d790fce22f106",
+    "status": "A",
+    "path": "internal/process/facade_custody_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "6477c0c804931a30e32b2851cece881a28151109",
+    "status": "A",
+    "path": "internal/process/foreground_conpty_actor_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "6feb41dd44c16ebd59097c64006ac0e4bafa1c01",
+    "status": "A",
+    "path": "internal/process/foreground_conpty_native_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "aaf66015b4873ddd6a028311d3014fad5115cf4f",
+    "status": "A",
+    "path": "internal/process/foreground_console_native_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "e9266536737135e8e2434ab45a7519fe9fa930c5",
+    "status": "A",
+    "path": "internal/process/foreground_console_policy_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "b6633768d29da1933c582d284361e2b3dd91d89c",
+    "newBlob": "44fa9ce6621d28ab71c8b972a7e2a4999119dd3e",
+    "status": "M",
+    "path": "internal/process/foreground_outcome_windows.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "1de1d4116b8b0069eb2f58dff50ab7e76ce6b76d",
+    "newBlob": "5727dd0773d2f4a5a318db83b3a8c205ece7274b",
+    "status": "M",
+    "path": "internal/process/foreground_outcome_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "c6087cc4c65b52060358b9c9290bc9eb8d2a27a5",
+    "newBlob": "c9771d2adaad1af63a32dfddd7edc145a1d1ffb3",
+    "status": "M",
+    "path": "internal/process/foreground_windows.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "82755d675a7f13a2c6781367cbd7474bc18bfd8c",
+    "newBlob": "52504da53b66b78d1375bad0336104ad1be4338b",
+    "status": "M",
+    "path": "internal/process/foreground_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "f65315092579d8f1acceede11d0efda2a0c4ee08",
+    "status": "A",
+    "path": "internal/process/jobobject_capture_race_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "6ba482701b3aebf65aa58946d9ae3754d15b77cb",
+    "newBlob": "7676016dc3854626c91f2c8077ccb9af8dbe4e73",
+    "status": "M",
+    "path": "internal/process/jobobject_windows.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "5180a5b8b56cb8768b9e1d6ab212d6abba46f435",
+    "newBlob": "b079fc962fae048d8e6e72234f3247bcfc019550",
+    "status": "M",
+    "path": "internal/process/jobobject_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "0de1f556a3dd933f13e0e058821d1a454e4f0a8b",
+    "status": "A",
+    "path": "internal/process/original_job_member_batch_close_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "15a352191d6141103aeb70df4ba1d4e6a106165b",
+    "status": "A",
+    "path": "internal/process/original_job_member_close_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "3df77b63bc1cf19b17f4a122900e83dd925360fd",
+    "newBlob": "44e67ca72783c10663775ad3371aa3f3bb08a08f",
+    "status": "M",
+    "path": "internal/process/original_job_members.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "6857bd21487f5ec21e2426aac14da40c8499ae67",
+    "newBlob": "67d8f294a0139a9571c3572dcf884ef7688130f9",
+    "status": "M",
+    "path": "internal/process/original_member_custody.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "d920f9033711bb559da46467aaf0b4d2053fed32",
+    "status": "A",
+    "path": "internal/process/original_member_custody_batch_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "cddd44afee76f231e9adb8baafdb3a975a9d9d8b",
+    "newBlob": "93aea7fb5db3e1c100c38d7d84e11fc23872c7bd",
+    "status": "M",
+    "path": "internal/process/original_member_provisional.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "f01ae7e62956401e5466267ddc0db1f04163f10e",
+    "newBlob": "c4bf8007e19fd328e02e4972dfbe2b212e98bd72",
+    "status": "M",
+    "path": "internal/process/pid_alive_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "b0d358dba9175dc6e6546121a04da3332d881d26",
+    "newBlob": "19115335c10368990c0f3fda892ecd37023fb451",
+    "status": "M",
+    "path": "internal/process/pid_identity_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "ddbf3bd129c67a8c7ff1e9a1282b61a3cb3154a3",
+    "newBlob": "1f3fb0acf16655d26d9ef568356606d0b8c8c7e4",
+    "status": "M",
+    "path": "internal/process/provisional.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "98e4f4f31d0a19a4b8e353aa3e46ef33aeb25270",
+    "newBlob": "ebd04e77d2facacb7a605bb519e67207f9db357e",
+    "status": "M",
+    "path": "internal/process/provisional_no_spawn_review_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "b3c8e3f346214dcad27f5d52424e0642e32fb378",
+    "status": "A",
+    "path": "internal/process/rust_owner_abi_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "b8ada87de7608fa7276431c076dc8866aeea5767",
+    "status": "A",
+    "path": "internal/process/rust_owner_abi_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "9c7ec56aaaea399e2cab1e8dc05477dc51fc7e26",
+    "status": "A",
+    "path": "internal/process/rust_owner_argv0_native_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "c2144230dbd34263fe93f1363164e341c2ca64e0",
+    "status": "A",
+    "path": "internal/process/rust_owner_argv0_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "b99171980f1fd52a2c53914fa467ab40283f40f6",
+    "status": "A",
+    "path": "internal/process/rust_owner_command_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "0b090285564440e3f74882f45448dd171dbb1eea",
+    "status": "A",
+    "path": "internal/process/rust_owner_command_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "a67d5d1c6842fcb5cae1455f50590568e126bec6",
+    "status": "A",
+    "path": "internal/process/rust_owner_contained_native_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "c5e6235bded16796c48e272a50a000a7b757466e",
+    "status": "A",
+    "path": "internal/process/rust_owner_contained_other.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "de197cae37c9fc643ea6c5de95ca7a4e043d211b",
+    "status": "A",
+    "path": "internal/process/rust_owner_contained_paths_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "71b0716dc0a5c38552291c4fb20a771debb87ea7",
+    "status": "A",
+    "path": "internal/process/rust_owner_contained_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "6fcbf1497eae44a0f30ab8c9540846b9d3b3752e",
+    "status": "A",
+    "path": "internal/process/rust_owner_contained_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "d031f366ca7593301b5f8c383ba89e89072911e8",
+    "status": "A",
+    "path": "internal/process/rust_owner_creator_identity_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "2c14c24c3507fc03c16f2132f5c872037bb8c540",
+    "status": "A",
+    "path": "internal/process/rust_owner_creator_identity_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "a9c3aeedbeaf6626e14002654d6f3e4a270ed043",
+    "status": "A",
+    "path": "internal/process/rust_owner_environment_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "1331ef609fe0c0fd76edb6dce88999dd465a08b7",
+    "status": "A",
+    "path": "internal/process/rust_owner_environment_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "12f9f7c101330059a70980ec32e9f604de76c6bb",
+    "status": "A",
+    "path": "internal/process/rust_owner_facade_native_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "13e551d307e177ef8083c9bd3a6aa4ec45c71a39",
+    "status": "A",
+    "path": "internal/process/rust_owner_facade_start_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "bd1c14cf60aa5f548037726603ae5b939b490cff",
+    "status": "A",
+    "path": "internal/process/rust_owner_facade_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "f2fc97bfd98b9b9da17f4a507ec78bf8dd8af4b9",
+    "status": "A",
+    "path": "internal/process/rust_owner_facade_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "dae28dc48130b620ee9808991a1b72d3b4a9daeb",
+    "status": "A",
+    "path": "internal/process/rust_owner_foreground_cache_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "40fb044e0e51f749efaa4761a6c3c30b18f2bf17",
+    "status": "A",
+    "path": "internal/process/rust_owner_foreground_console_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "04a4ee08d0f85651b673ece87a4962badfcb6df1",
+    "status": "A",
+    "path": "internal/process/rust_owner_foreground_native_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "2795c4b8f0a01caa934ed322821cb7277638e39d",
+    "status": "A",
+    "path": "internal/process/rust_owner_foreground_policy_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "4af0bd69994ddc9d9b3c1a6d08acbb8b96d5ebc2",
+    "status": "A",
+    "path": "internal/process/rust_owner_foreground_unsupported_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "cd0120e8b1dda116dba05311244d608ed1fcf883",
+    "status": "A",
+    "path": "internal/process/rust_owner_foreground_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "58cc84ca14fd26b277a63b47017aa100a2d99e48",
+    "status": "A",
+    "path": "internal/process/rust_owner_foreground_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "ceffd4bfbd079c095eb44da2bf2f24ccb2d375c9",
+    "status": "A",
+    "path": "internal/process/rust_owner_identity_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "fb3bc5186d3bb420d62bcdc68310a3742fa3d0d9",
+    "status": "A",
+    "path": "internal/process/rust_owner_identity_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "86c2ceb3ee591456140c2a62e10658cb52baa662",
+    "status": "A",
+    "path": "internal/process/rust_owner_io_abi_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "5b77a0c278c0651c6dde48217242fe7138745e0b",
+    "status": "A",
+    "path": "internal/process/rust_owner_io_fault_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "98a508bef6ff77aae9d5ee7b93bb9ff5d25406a1",
+    "status": "A",
+    "path": "internal/process/rust_owner_io_native_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "9f79e2d5f89274612d4c6152df2cb64485b3d5e2",
+    "status": "A",
+    "path": "internal/process/rust_owner_library_borrow_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "618f5b93dd28e4e7ab0185bc909db34560cbd5ab",
+    "status": "A",
+    "path": "internal/process/rust_owner_library_integration_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "d2e3558a87b121bace72e1b9004c68a01c90399a",
+    "status": "A",
+    "path": "internal/process/rust_owner_library_members_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "025c59c2eb1d032b2c1014f42de2c3241a612259",
+    "status": "A",
+    "path": "internal/process/rust_owner_library_product_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "476291c89c47f3384c894210d3f1ca13f8faf9bd",
+    "status": "A",
+    "path": "internal/process/rust_owner_library_trust_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "66b5866eeaf7b5ef92763eef2a13e3aeba8dced1",
+    "status": "A",
+    "path": "internal/process/rust_owner_library_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "edc008357999132e383c350adcdcb2bac913923d",
+    "status": "A",
+    "path": "internal/process/rust_owner_library_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "e02a26cef53a98ebf219974fbcebe56462f650aa",
+    "status": "A",
+    "path": "internal/process/rust_owner_members_abi_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "aef89e2b1285048b49c96dc81637963253f9b616",
+    "status": "A",
+    "path": "internal/process/rust_owner_members_native_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "56794711c710a7265fac1e3d1bc89ee3b35a4cc5",
+    "status": "A",
+    "path": "internal/process/rust_owner_members_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "f01f94ff79252c18712fad548583cd7be518efa5",
+    "status": "A",
+    "path": "internal/process/rust_owner_members_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "a9c1d75d964a560abffdd531e4597ee0375d1a90",
+    "status": "A",
+    "path": "internal/process/rust_owner_native_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "b9455e3ea54769162d47221df2c4f5e697dad879",
+    "status": "A",
+    "path": "internal/process/rust_owner_native_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "d74d96b17144510451fdca4b825b664f27bb1e19",
+    "status": "A",
+    "path": "internal/process/rust_owner_process_borrow_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "314cf463804d625e339c8fd61e3ccf4aca0ebda6",
+    "status": "A",
+    "path": "internal/process/rust_owner_process_borrow_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "83d32eef1de4ebe8edc5b900bda03d44bc7fcc67",
+    "status": "A",
+    "path": "internal/process/rust_owner_product_module_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "a0b7210dd5b7c4f69a03f0e332ea840b6751e666",
+    "status": "A",
+    "path": "internal/process/rust_owner_product_native_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "ae2ed44f2e73d570483cccc2228df632f82a2b49",
+    "status": "A",
+    "path": "internal/process/rust_owner_product_other.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "6b12384f74d31e32d5d4b7b74ca04fd3fc7d2d05",
+    "status": "A",
+    "path": "internal/process/rust_owner_product_policy_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "c5f5b8dd65a95fb2d7da25a07047614bc140feaa",
+    "status": "A",
+    "path": "internal/process/rust_owner_product_policy_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "ec4e93e2a37115e64b9f091e95f8dda0faf42511",
+    "status": "A",
+    "path": "internal/process/rust_owner_product_provisional_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "d9f4c3af65f5caf27a151c5049d09bcdd3841b95",
+    "status": "A",
+    "path": "internal/process/rust_owner_product_unsupported_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "9bb34d9d3926dc7227b90a2ecb751740256edd09",
+    "status": "A",
+    "path": "internal/process/rust_owner_product_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "60f39bee053bfea86746a85ab8a4230930dfc40c",
+    "status": "A",
+    "path": "internal/process/rust_owner_product_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "9bd0ca0b00769a1b8a98e9a1bf867f653a8d7b97",
+    "status": "A",
+    "path": "internal/process/rust_owner_retention_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "82aff70f2cc364d50651acf0f815bb26fe3a8de4",
+    "status": "A",
+    "path": "internal/process/rust_owner_retention_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "e22296cb2dc8b32d8262f6304653ae028b5f2142",
+    "status": "A",
+    "path": "internal/process/rust_owner_root_wait_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "04c5d1f6f63df41330981daad9e95422eba80f7e",
+    "status": "A",
+    "path": "internal/process/rust_owner_root_wait_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "6f87e02c93632ddfbd42d26c18a15b7ed3cf6b42",
+    "status": "A",
+    "path": "internal/process/rust_owner_sid_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "303d0ca0795283ffd2d680597c4c0e11ad8f6e1e",
+    "status": "A",
+    "path": "internal/process/rust_owner_split_order_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "151531b16b3872e6f4db70dfa16ad7ecd26b0ff9",
+    "status": "A",
+    "path": "internal/process/rust_owner_start_admission_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "f56042b37d9210f9958902a7d6bdde6660ab6c21",
+    "status": "A",
+    "path": "internal/process/rust_owner_start_return_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "87316686cbfe50c7b3e758973f907fc4caaea973",
+    "status": "A",
+    "path": "internal/process/rust_owner_stdio_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "f19953f34fe18696bb563a2da9d2d5125a41cb18",
+    "status": "A",
+    "path": "internal/process/rust_owner_stdio_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "ca797f348d8a6523e117b2015520160e468ed6de",
+    "status": "A",
+    "path": "internal/process/rust_owner_synthetic_callback_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "6eff50e88c5bf8ca73041d074dd5a29c3247c37a",
+    "status": "A",
+    "path": "internal/process/rust_owner_wait_windows.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "35421ceb28637a2a39d76ef70d67e4a242f4965e",
+    "newBlob": "25d8032068154d0e3e2f167a858436980363efec",
+    "status": "M",
+    "path": "internal/process/start_with_job_original.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "8cbe3f0e0302e6a269b19609794073af9d142095",
+    "newBlob": "8a8083ea43163936a7f7ad29692916ff2f2cd984",
+    "status": "M",
+    "path": "internal/process/start_with_job_original_windows.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "c4b07b9e9bbe976b370c3780eafa86e48c96b77d",
+    "newBlob": "f13509a0aa374a009b9909de3012d68d09b332aa",
+    "status": "M",
+    "path": "internal/process/start_with_job_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "fc1821024a9580f057803632ceafc224a605cb3a",
+    "status": "A",
+    "path": "internal/process/testdata/foreground_console_child/main_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "1f9e98d7ccc19deec497140d58a52d8dbe4be4ff",
+    "status": "A",
+    "path": "internal/process/token_integrity_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "e795fc76b5e596bd9e6dc3061581d4c22b3a51c5",
+    "status": "A",
+    "path": "internal/process/token_integrity_windows_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "f669f616853d062801cec7070f569952db8246fd",
+    "status": "A",
+    "path": "internal/process/tool_console_other.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "76c26002ace3c623f15cff279470397cc0879ea0",
+    "status": "A",
+    "path": "internal/process/tool_console_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "e86285df4dee1babfb645334218db2af88d251c6",
+    "status": "A",
+    "path": "internal/runtimeidentity/library.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "280addc081dac67df8463cd42d8723076a119700",
+    "status": "A",
+    "path": "internal/runtimeidentity/library_borrow_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "fcf668b03153e0e67179fb8e8e0ffdaa24bbb38e",
+    "status": "A",
+    "path": "internal/runtimeidentity/library_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "8d99a6a7238a863833b9ad1a77b90091da2d9b07",
+    "newBlob": "de82d97edff05d656bc42b5fb5c7cd29b84a0322",
+    "status": "M",
+    "path": "internal/sonnet/strict_driver_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "0b2bc32a51a126d53031ed82b292facf43a0e29c",
+    "newBlob": "a718c43d9dd58c8175412b3c1c175cc2b23e6193",
+    "status": "M",
+    "path": "internal/testkit/golden_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "2d18d7a3e5f3b819dacced270fcee3631a333f21",
+    "newBlob": "f0c1a60fd5ecd02f39d7b71fcd8d26abf3be0127",
+    "status": "M",
+    "path": "internal/tray/tray_lifecycle_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "40d03796621fca9af78d97e063380bfcd13e12de",
+    "newBlob": "249eaec14f22fb4ca552cf1f9cbc0ea2e30a217e",
+    "status": "M",
+    "path": "internal/vcpkgmcp/pinstatus/remote_process_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "9c16db74fa8f85aebb61ef5f7ae70c0963394691",
+    "newBlob": "3d6b279f7033deec5ea070d1237b495ec086c16e",
+    "status": "M",
+    "path": "internal/vcpkgmcp/reversedepgraph/process_tree_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "9c019717a09ea21fcca5dc8c82e8364eb6b124b4",
+    "newBlob": "0fc38872551c578dfd0345c51652aae7632818b9",
+    "status": "M",
+    "path": "internal/vcpkgmcp/reversedepgraph/process_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "01219b17f9d2dcede6f649aa6b5d408ccdc05a9f",
+    "status": "A",
+    "path": "internal/vcpkgmcp/reversedepgraph/process_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "1e249ebe5f743805f0e1aeaaeb8c041e75b24d1d",
+    "newBlob": "939eb174cf92c8c0aa7d05026775797be82a8c1a",
+    "status": "M",
+    "path": "internal/vcpkgmcp/vcpkgserver/public_contract_decision_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "079ab997a66449ebbc7d96b38e7fc37ebc0389b9",
+    "newBlob": "d1ef655ab6f2e58d695e6f7099997751f6777a96",
+    "status": "M",
+    "path": "internal/vcpkgmcp/vcpkgserver/reverse_dependencies_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "fdbdc7c41dc4977d919622016762739cfa0de1a4",
+    "newBlob": "41f49046ffe333ec1f46576a72f3809145d380a9",
+    "status": "M",
+    "path": "npm/generate-platform-packages.js"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "1ed2dca32579c8496ce77460019306fb1ee1bc97",
+    "newBlob": "230463dff28a3ba39066f4bb6035eef3f2e1c40d",
+    "status": "M",
+    "path": "npm/packages/win32-x64/README.md"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "8f2280e85eff28b33dd079a5459c73ff530d9557",
+    "newBlob": "f92fb27a5d419fd011ab5b752848ccfc047b6a5f",
+    "status": "M",
+    "path": "npm/packages/win32-x64/package.json"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "d7c2697b0d63775b07e92427afb10b607d015caf",
+    "newBlob": "68f72b5be2b0ee07bd14cbd00187d8b179fa761e",
+    "status": "M",
+    "path": "npm/platform-packages.test.js"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "019d5f25726ffc2ac161c2eeec55db473d8dfa51",
+    "newBlob": "8d785c43f9acc95e5b1bf8f26bdfc01076401b2f",
+    "status": "M",
+    "path": "npm/postinstall.test.js"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "72a86d959bf2740f38a4053b36e3a98adf5b1ead",
+    "newBlob": "a8d79d8b0fafeb32995ecaae87006c52cec03645",
+    "status": "M",
+    "path": "scripts/test-recovery-namespace/helper.ps1"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "78d3d63e04b8821ac4f9cef3ef9259370f22bb11",
+    "newBlob": "ef82e1646336179c11e5bb3712b01318b4fd56df",
+    "status": "M",
+    "path": "scripts/test-windows-product-build.ps1"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "06e339266dda0efba44f953e8c8878ab49b15f15",
+    "newBlob": "34cfe4a3477745f05fcdc8060d5b37a576d9f544",
+    "status": "M",
+    "path": "tools/test-job-entry/main_windows.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "4b61d794bd0e029601c0a8e629339cafc7e84b1e",
+    "newBlob": "3a7b16d1ae81739800ae76a450eb485ed5b9e8f2",
+    "status": "M",
+    "path": "tools/test-job-entry/main_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "a4087c475d16226e30d37bbff2c0482f2ea75e9b",
+    "newBlob": "7300d3468dec41f56686c43a1064b76c4cf42e4f",
+    "status": "M",
+    "path": "tools/test-recovery-namespace/main_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "bccf22363c9ec2090e8ec380cc533322cba5b413",
+    "status": "A",
+    "path": "tools/test-recovery-namespace/prebuilt_windows.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "d093c8d2611d095a2f11a35206b8841d76bf05a3",
+    "status": "A",
+    "path": "tools/test-recovery-namespace/prebuilt_windows_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "cd4ae79a167328881648d466100f1fed51ac4636",
+    "newBlob": "819d117c780115e884979356b331c41fe92603a6",
+    "status": "M",
+    "path": "tools/windows-product-validate/main.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "b4f445265234addd28e30962ebce0b3b4f5d8089",
+    "status": "A",
+    "path": "tools/windows-product-validate/runtime_library_borrow_test.go"
+  },
+  {
+    "oldMode": "000000",
+    "newMode": "100644",
+    "oldBlob": "0000000000000000000000000000000000000000",
+    "newBlob": "2d23b55c374d55e99b9302dc3fcb72129f322405",
+    "status": "A",
+    "path": "tools/windows-product-validate/runtime_library_test.go"
+  },
+  {
+    "oldMode": "100644",
+    "newMode": "100644",
+    "oldBlob": "354c765c8a1ed862e61ef0c005dabd7a32523184",
+    "newBlob": "9ba392d333e203d1709c2d9dfc0a0cb96fd31984",
+    "status": "M",
+    "path": "windows-product-artifacts.json"
+  }
+]

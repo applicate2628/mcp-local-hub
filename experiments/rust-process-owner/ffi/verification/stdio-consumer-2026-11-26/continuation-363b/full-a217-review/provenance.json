@@ -1,0 +1,62 @@
+{
+  "schema": "static-review-publication-provenance-v1",
+  "source_commit": "a217c7799a0214967bf86211542e508162c680b5",
+  "source_tree": "ca118ff1ec513cc830bb8b96b4d6782d23915a26",
+  "original_records_preserved": true,
+  "editorial_transformation": "Public copies remove local environment locations, normalize spacing, repair package-relative links and distinguish source-defined fixture mechanisms from executed evidence. Finding IDs, exact source pins, conditions and reviewer attribution are retained.",
+  "consolidator": "functional_review",
+  "reviewers": [
+    {
+      "id": "functional_review",
+      "scope": "31 Rust, ABI header, Cargo and Rust test files; exact native delta supplement"
+    },
+    {
+      "id": "root",
+      "scope": "9 Go implementation files and go.mod"
+    },
+    {
+      "id": "measurements_inventory",
+      "original_task_identity": "Go test review allocation",
+      "scope": "23 Go test files; GT1/GT2/GT3"
+    }
+  ],
+  "original_input_digests": [
+    {
+      "record_name": "inventory.json",
+      "sha256": "2b24cb1dbc68de38a4a41b5fdadf1a9fe8ad12ede3d7506ae1ff8c8b6a4fb745"
+    },
+    {
+      "record_name": "coverage-rust.json",
+      "sha256": "3d7a7ca4cb3c394764b926cb549488938892d99be7e75cd4b7a3fbefeddcc183"
+    },
+    {
+      "record_name": "RUST-ABI-REVIEW.md",
+      "sha256": "67b8bc06337e769871bd7b34dfe95fdaf447892de85afbc3b88b4bb7b2654fa5"
+    },
+    {
+      "record_name": "go-production-review.json",
+      "sha256": "734582d567a45ba6806f04b42b0d08219bcee565f570ab35fee6accdcd5e454e"
+    },
+    {
+      "record_name": "go-tests-review.json",
+      "sha256": "16bd246a976f23147ea3d6494d39646f580b3086877fe9acfa84ce9b11dee3ed"
+    },
+    {
+      "record_name": "go-tests-review.md",
+      "sha256": "9dd02ea86243b6e2ca56cc2fce7da72afeb27a6bf1bb2fcdc53698ab54d206bf"
+    },
+    {
+      "record_name": "native-dll-source-map.json",
+      "sha256": "af5067f6121e8b3ccdd66af1b503a85288a720b61565f1fc4d32720915f0e6cf"
+    },
+    {
+      "record_name": "NATIVE-DELTA-REVIEW.md",
+      "sha256": "9f4f1b4c8b37193c22a3fb66331ef5d00958854c6560e8d96d907d8068be4bf6"
+    },
+    {
+      "record_name": "native-vs-a217-windows.patch",
+      "sha256": "9f195f71103e3ced3185186ca6dfd0b7a190be497b6f909a18260036225f06e6"
+    }
+  ],
+  "publication_evidence_boundary": "Source and review receipts only; no local process IDs, account names, runtime markers or execution-environment paths are included."
+}

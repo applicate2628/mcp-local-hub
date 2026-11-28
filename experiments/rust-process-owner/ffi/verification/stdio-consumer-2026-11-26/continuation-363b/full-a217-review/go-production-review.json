@@ -1,0 +1,123 @@
+{
+  "source_commit": "a217c7799a0214967bf86211542e508162c680b5",
+  "source_tree": "ca118ff1ec513cc830bb8b96b4d6782d23915a26",
+  "scope": "9 Go implementation files and go.mod; tests reviewed separately",
+  "native_tests_run_by_this_review": false,
+  "files": [
+    {
+      "path": "experiments/rust-process-owner/ffi/go/admission_windows.go",
+      "blob": "f5203d071b4a8913a44d36285a794b77c6144180",
+      "size": 2439,
+      "sha256": "4a3185d4edd221e943ffae73192c7a4b75501c9a80624426612ce88078e939c2",
+      "reviewer": "root",
+      "coverage": "full_file_static_review",
+      "lines": 77,
+      "notes": "Read complete callback: call-scoped cgo.Handle, single call, native UTF-16 extent/alignment/NUL validation, Go-owned copy before policy, panic containment; policy Goexit/fatal abort expressly unsupported."
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/bridge_windows.go",
+      "blob": "0f7ff1b6675a6acc5dc172e5e432b36fb93d094f",
+      "size": 33852,
+      "sha256": "c2e6055dbe2874dcc9544fc455b8a190cc2f75c9b02ea01b62a4ea12fab91811",
+      "reviewer": "root",
+      "coverage": "full_file_static_review",
+      "lines": 835,
+      "notes": "Read all 835 lines including C shim: loader symbol/version negotiation, library/owner mutex and live count, bounded C-owned request buffers, transferred-owner preservation, split wait/close/release, admission/query metadata validation and member generation/cached-close rules. Conditional unload-error loss at C fail label recorded separately."
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/environment_windows.go",
+      "blob": "3d358e24c12655f49bbab6e509713a15f955010b",
+      "size": 778,
+      "sha256": "2131922df4d2686606c9a759c90c8eaf504b8e3d4060861e610c25a899d89ef0",
+      "reviewer": "root",
+      "coverage": "full_file_static_review",
+      "lines": 14,
+      "notes": "Read full explicit sorted/unique environment contract; no inherited environment overlay or logging claimed."
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/finish_context_windows.go",
+      "blob": "d11fc4b252f9e533263dbc4a738a6b14591d775d",
+      "size": 2581,
+      "sha256": "64046068cab96d7a0e587091a3e0b2a7909a8870ddc7ccbfa28d1bdbe43a271d",
+      "reviewer": "root",
+      "coverage": "full_file_static_review",
+      "lines": 78,
+      "notes": "Read full synchronous Finish(0) polling with TryLock, cancellation cause preservation and reusable timer; no cancellation/termination/reader ownership claimed."
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/go.mod",
+      "blob": "199b42593568e3b007d0f3f413c3d27f4d501d2f",
+      "size": 42,
+      "sha256": "99502c9ced07df2ba8052a397081e34f6254cd91c7f0d3d47388a060538bef93",
+      "reviewer": "root",
+      "coverage": "full_file_static_review",
+      "lines": 3,
+      "notes": "Read complete isolated module declaration and Go 1.27.3 language/toolchain requirement; not a Hub backend import."
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/identity_windows.go",
+      "blob": "7f963020fa5f8fe2e5db64bab1776ed66d380827",
+      "size": 8623,
+      "sha256": "9408ed59ccc01e0333d53e7347766ea49ba148138142fee67857ed3ca84f6b97",
+      "reviewer": "root",
+      "coverage": "full_file_static_review",
+      "lines": 245,
+      "notes": "Read full fixed report and identity-copy validation, native token-close error preservation, Go-owned UTF-16/SID copies, admission and query callbacks, repeated callback and panic rejection."
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/members_windows.go",
+      "blob": "b9b5488128888d7eca4e14b0642d57b723f3299f",
+      "size": 18885,
+      "sha256": "0cfc5364d54b4177adbd8926bda478acd24acf9f207e43e3645c34df88837940",
+      "reviewer": "root",
+      "coverage": "full_file_static_review",
+      "lines": 497,
+      "notes": "Read all 497 lines: bounded/aligned array validation, census ordering, retained resource prefix, original generation, partial acquisition and close-state validation, cached resource binding, Go-owned callback copies."
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/outcome_windows.go",
+      "blob": "39cb54ab8fd2c0589f6aecd85e1d9ac18bdcba38",
+      "size": 2115,
+      "sha256": "6ce7b2f82c52f163b6a17e93fef66cf65e76f2ee41cfdaa619e045cca0cb0448",
+      "reviewer": "root",
+      "coverage": "full_file_static_review",
+      "lines": 51,
+      "notes": "Read complete shared ABI status/state/flags/native-error/cleanup-mask validation. Validation is a trusted DLL protocol boundary, not arbitrary pointer safety."
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/stdio_windows.go",
+      "blob": "98beaedf13824b08e5d49624c9c6a8767620db8f",
+      "size": 3148,
+      "sha256": "d1fada91384230ff84d68dd3359ce5f066637cf0ca6448976d078f37bd11a2d9",
+      "reviewer": "root",
+      "coverage": "full_file_static_review",
+      "lines": 89,
+      "notes": "Read complete caller-owned File duplication via RawConn.Control, one-shot temporary close, no original inheritance mutation, aliasing contract and owner-preserving late close error."
+    },
+    {
+      "path": "experiments/rust-process-owner/ffi/go/wait_windows.go",
+      "blob": "064a3777627712b04f29eef73704ca4897a150f6",
+      "size": 2431,
+      "sha256": "e68d3c473974ca6d22964f1d211b50edb020663c3c1a669152499f6421ba6925",
+      "reviewer": "root",
+      "coverage": "full_file_static_review",
+      "lines": 71,
+      "notes": "Read complete exit-only observation decoder, split-export availability requirement, pending/exited coherence; no native cleanup authority conferred."
+    }
+  ],
+  "findings": [
+    {
+      "id": "A217-GO-01",
+      "classification": "conditional_static_error_preservation_defect",
+      "priority": "P2",
+      "path": "experiments/rust-process-owner/ffi/go/bridge_windows.go",
+      "lines": "89-90",
+      "condition": "LoadLibraryExW succeeded; required symbol resolution or ABI version rejects the DLL; subsequent FreeLibrary returns false.",
+      "observation": "bridge_open ignores FreeLibrary return and frees its bridge storage, returning only the original load/admission error.",
+      "consequence": "Secondary unload failure is lost; no Library/retained module capability is returned to account for unresolved module reference.",
+      "native_reproduction": "NOT_RUN; no real FreeLibrary failure induced. Do not report an observed leak.",
+      "scope_limit": "Foreign-caller experimental loader, not proof of defect in Hub product cleanup or Reader627 CloseHandle paths."
+    }
+  ],
+  "publication_note": "Reviewer attribution and findings are retained from the original record. This is static source review; no test execution is claimed."
+}
