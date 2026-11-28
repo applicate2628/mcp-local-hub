@@ -99,7 +99,7 @@ func (h *StdioHost) startOriginal(ctx context.Context, cmd *exec.Cmd) (selected 
 		p.identity, identityErr = p.original.Identity()
 		err = errors.Join(err, identityErr)
 	}
-	stderrSink := h.openStderrSink()
+	stderrReader := h.stderrReader(p.files[4].file)
 	h.stdoutScan = bufio.NewScanner(p.files[2].file)
 	h.stdoutScan.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	h.wg.Add(1)
@@ -113,14 +113,7 @@ func (h *StdioHost) startOriginal(ctx context.Context, cmd *exec.Cmd) (selected 
 	}()
 	go func() {
 		defer close(p.stderrDone)
-		scanner := bufio.NewScanner(p.files[4].file)
-		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-		for scanner.Scan() {
-			if _, writeErr := fmt.Fprintf(stderrSink, "[subproc stderr] %s\n", scanner.Bytes()); writeErr != nil {
-				p.stderrError = errors.Join(p.stderrError, writeErr)
-			}
-		}
-		p.stderrError = errors.Join(p.stderrError, scanner.Err())
+		p.stderr = stderrReader()
 	}()
 	readersStarted = true
 	if !p.original.Created() {
@@ -133,8 +126,15 @@ func (h *StdioHost) startOriginal(ctx context.Context, cmd *exec.Cmd) (selected 
 		close(h.procExited)
 		// Original native cleanup and final response drain share the one
 		// post-exit deadline. The finalizer publishes childExited after receipt.
-		h.beginOriginalStop(context.Background(), p.root.Error)
+		if h.private == nil {
+			h.beginOriginalStop(context.Background(), p.root.Error)
+		}
 	}()
+	if h.private != nil {
+		close(p.lifetimeDone)
+		waiterStarted = true
+		return true, err
+	}
 	go func() {
 		defer close(p.lifetimeDone)
 		select {

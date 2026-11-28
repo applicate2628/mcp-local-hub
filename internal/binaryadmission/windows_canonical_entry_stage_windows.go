@@ -303,17 +303,21 @@ func (s *StagedWindowsCanonicalEntrySetV1) removeOriginalStage(member *canonical
 // A creation object must share WRITE for its transient writer. A separate read
 // FileObject denies WRITE after that writer closes, without releasing DELETE.
 func (s *StagedWindowsCanonicalEntrySetV1) sealOriginalStage(member *canonicalEntryNativeFile) error {
-	if member == nil || member.file == nil || s.root == nil || s.root.closed {
+	return canonicalEntrySealOriginalStage(s.root, s.parent, member)
+}
+
+func canonicalEntrySealOriginalStage(root *WindowsCanonicalEntrySetV1, parentRoot, member *canonicalEntryNativeFile) error {
+	if member == nil || member.file == nil || root == nil || root.closed {
 		return errors.New("original stage disposition unavailable for read-only guard")
 	}
 	if member.readOnlyGuard != nil {
 		return nil
 	}
-	relative, err := canonicalEntryMemberRelative(s.parent, member)
+	relative, err := canonicalEntryMemberRelative(parentRoot, member)
 	if err != nil {
 		return err
 	}
-	parent, leaf, err := canonicalEntryRelativeParent(s.root, s.parent, relative)
+	parent, leaf, err := canonicalEntryRelativeParent(root, parentRoot, relative)
 	if err != nil {
 		return err
 	}
@@ -330,7 +334,7 @@ func (s *StagedWindowsCanonicalEntrySetV1) sealOriginalStage(member *canonicalEn
 		return errors.Join(errors.New("stage read-only guard wrapper unavailable"), windows.CloseHandle(h))
 	}
 	member.readOnlyGuard = guard
-	s.root.files = append(s.root.files, guard)
+	root.files = append(root.files, guard)
 	return nil
 }
 
@@ -393,13 +397,21 @@ func canonicalEntryVerifyOriginalMember(member *canonicalEntryNativeFile, expect
 }
 
 func canonicalEntryRelativeParent(root *WindowsCanonicalEntrySetV1, parent *canonicalEntryNativeFile, relative string) (*canonicalEntryNativeFile, string, error) {
+	return canonicalEntryRelativeParentRead(context.Background(), root, parent, relative, nil)
+}
+
+func canonicalEntryOpenRelativeDirectory(parent *canonicalEntryNativeFile, component string) (windows.Handle, error) {
+	return canonicalEntryOpenNative(windows.Handle(parent.file.Fd()), component, true, windows.FILE_TRAVERSE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, windows.FILE_OPEN)
+}
+
+func canonicalEntryRelativeParentRead(ctx context.Context, root *WindowsCanonicalEntrySetV1, parent *canonicalEntryNativeFile, relative string, scope *canonicalEntryRecoveryReadScopeV2) (*canonicalEntryNativeFile, string, error) {
 	if root == nil || root.closed || parent == nil || !publisherSourcePathValid(relative) {
 		return nil, "", errors.New("invalid confined original canonical entry relative path")
 	}
 	parts := strings.Split(relative, "/")
 	current := parent
 	for _, part := range parts[:len(parts)-1] {
-		borrowed, matched, borrowErr := canonicalEntryBorrowPayloadDirectory(root, current, part)
+		borrowed, matched, borrowErr := canonicalEntryBorrowPayloadDirectoryRead(ctx, root, current, part, scope)
 		if borrowErr != nil {
 			return nil, "", borrowErr
 		}
@@ -407,7 +419,7 @@ func canonicalEntryRelativeParent(root *WindowsCanonicalEntrySetV1, parent *cano
 			current = borrowed
 			continue
 		}
-		h, err := canonicalEntryOpenNative(windows.Handle(current.file.Fd()), part, true, windows.FILE_TRAVERSE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, windows.FILE_OPEN)
+		h, err := canonicalEntryOpenRelativeDirectory(current, part)
 		if err != nil {
 			return nil, "", err
 		}
@@ -441,11 +453,15 @@ func canonicalEntryMemberRelative(parent, member *canonicalEntryNativeFile) (str
 // A name probe checks currentness only. Promotion authority remains the original
 // retained DELETE handle; a successful probe never replaces that handle.
 func canonicalEntryCurrentMember(root *WindowsCanonicalEntrySetV1, parent, member *canonicalEntryNativeFile) (*canonicalEntryNativeFile, string, error, error) {
+	return canonicalEntryCurrentMemberRead(context.Background(), root, parent, member, nil)
+}
+
+func canonicalEntryCurrentMemberRead(ctx context.Context, root *WindowsCanonicalEntrySetV1, parent, member *canonicalEntryNativeFile, scope *canonicalEntryRecoveryReadScopeV2) (*canonicalEntryNativeFile, string, error, error) {
 	rel, err := canonicalEntryMemberRelative(parent, member)
 	if err != nil {
 		return nil, "", nil, err
 	}
-	dir, leaf, err := canonicalEntryRelativeParent(root, parent, rel)
+	dir, leaf, err := canonicalEntryRelativeParentRead(ctx, root, parent, rel, scope)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -842,9 +858,25 @@ func canonicalEntryIsFinalRelative(relative string) bool {
 // discard must additionally refuse the original native object selected by ANY
 // final canonical target, with original parent/file guards held continuously.
 func canonicalEntryRefuseFinalObject(root *WindowsCanonicalEntrySetV1, parent, member *canonicalEntryNativeFile) (error, error) {
+	finals := []string{WindowsCanonicalEntryRelativePathV1, WindowsCanonicalProductRelativePathV1, WindowsCanonicalIdentityRelativePathV1}
+	if root.memberFinalPaths != nil {
+		finals = root.memberFinalPaths
+	}
+	return canonicalEntryRefuseFinalPaths(root, parent, member, finals, nil)
+}
+
+func canonicalEntryRefuseFinalPaths(root *WindowsCanonicalEntrySetV1, parent, member *canonicalEntryNativeFile, finals []string, prior *canonicalEntryClosePriorParentsV2) (error, error) {
 	var closeErrors error
-	for _, relative := range []string{WindowsCanonicalEntryRelativePathV1, WindowsCanonicalProductRelativePathV1, WindowsCanonicalIdentityRelativePathV1} {
-		directory, leaf, err := canonicalEntryRelativeParent(root, parent, relative)
+	for _, relative := range finals {
+		var directory *canonicalEntryNativeFile
+		var leaf string
+		var err error
+		if prior != nil {
+			directory, leaf, err = prior.finalParent(relative)
+		}
+		if directory == nil && err == nil {
+			directory, leaf, err = canonicalEntryRelativeParent(root, parent, relative)
+		}
 		if errors.Is(err, windows.STATUS_OBJECT_NAME_NOT_FOUND) {
 			continue
 		}
@@ -876,7 +908,11 @@ func canonicalEntryRefuseFinalObject(root *WindowsCanonicalEntrySetV1, parent, m
 
 // The caller owns committed transaction intent. This native port merely
 // disposes its exact original non-final object and receives actual absence.
-func canonicalEntryDiscardOriginal(ctx context.Context, root *WindowsCanonicalEntrySetV1, parent, member *canonicalEntryNativeFile, memberName, expectedRelative, expectedHash string) (result WindowsCanonicalEntryMoveResultV1, retErr error) {
+func canonicalEntryDiscardOriginal(ctx context.Context, root *WindowsCanonicalEntrySetV1, parent, member *canonicalEntryNativeFile, memberName, expectedRelative, expectedHash string) (WindowsCanonicalEntryMoveResultV1, error) {
+	return canonicalEntryDiscardOriginalWithClosePrefix(ctx, root, parent, member, memberName, expectedRelative, expectedHash, nil)
+}
+
+func canonicalEntryDiscardOriginalWithClosePrefix(ctx context.Context, root *WindowsCanonicalEntrySetV1, parent, member *canonicalEntryNativeFile, memberName, expectedRelative, expectedHash string, prefix *canonicalEntryStageClosePrefixV2) (result WindowsCanonicalEntryMoveResultV1, retErr error) {
 	result.Member = memberName
 	result.SourceRelative = expectedRelative
 	result.OriginalOwnerPending = root != nil && !root.closed
@@ -900,12 +936,28 @@ func canonicalEntryDiscardOriginal(ctx context.Context, root *WindowsCanonicalEn
 	if err = canonicalEntryVerifyOriginalMember(member, expectedHash); err != nil {
 		return result, err
 	}
-	finalCloseErr, finalErr := canonicalEntryRefuseFinalObject(root, parent, member)
+	var finalCloseErr, finalErr error
+	deferred := false
+	if prefix == nil {
+		finalCloseErr, finalErr = canonicalEntryRefuseFinalObject(root, parent, member)
+	} else {
+		if prefix.root != root || prefix.parent != parent {
+			return result, errors.New("original stage close prefix belongs to a different owner")
+		}
+		deferred, finalCloseErr, finalErr = prefix.refuseFinals(ctx, member)
+	}
 	result.CloseError = errors.Join(result.CloseError, finalCloseErr)
 	if finalErr != nil || finalCloseErr != nil {
 		return result, finalErr
 	}
-	directory, leaf, closeErr, err := canonicalEntryCurrentMember(root, parent, member)
+	var directory *canonicalEntryNativeFile
+	var leaf string
+	var closeErr error
+	if deferred {
+		directory, leaf, closeErr, err = prefix.confirmCurrentMember(ctx, member)
+	} else {
+		directory, leaf, closeErr, err = canonicalEntryCurrentMember(root, parent, member)
+	}
 	result.CloseError = errors.Join(result.CloseError, closeErr)
 	if err != nil || closeErr != nil {
 		return result, err

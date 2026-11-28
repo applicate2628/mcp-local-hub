@@ -11,6 +11,7 @@ package api
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"maps"
 	"strconv"
 	"strings"
 
@@ -349,14 +350,7 @@ func buildSerenaChildArgs(m *config.ServerManifest, workspacePath string) []stri
 // Used by BuildSupervisorDaemonsForSerena so each per-workspace
 // descriptor owns an independent env map.
 func cloneStringMap(m map[string]string) map[string]string {
-	if m == nil {
-		return nil
-	}
-	out := make(map[string]string, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
-	return out
+	return maps.Clone(m)
 }
 
 // hashWorkspacePathForTest exposes the suffix-only hash helper for the

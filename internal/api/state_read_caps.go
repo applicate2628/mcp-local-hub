@@ -1,9 +1,23 @@
 package api
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 )
+
+const stateFileReadPathCapacityError = "positive non-overflowing observed read path/cap required"
+
+// ValidateStateFileReadCapacity checks the existing observed reader's capacity
+// domain. The allocation headroom is arithmetic safety, not a read allowance:
+// callers still own their permitted byte count, path, policy and authority.
+func ValidateStateFileReadCapacity(maxBytes int64) error {
+	maximum := int64(int(^uint(0) >> 1))
+	if maxBytes <= 0 || maxBytes > maximum-4096 {
+		return errors.New(stateFileReadPathCapacityError)
+	}
+	return nil
+}
 
 const (
 	// maxStateFileBytes caps ordinary hub/state control files. These files

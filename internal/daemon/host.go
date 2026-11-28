@@ -19,6 +19,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"mcp-local-hub/internal/mcpcompat"
 	"mcp-local-hub/internal/mcpcompat/readinesswire"
@@ -145,12 +146,15 @@ type StdioHost struct {
 	// daemon process is force-killed without a chance to run cleanup.
 	// Set after cmd.Start(); released in Stop after killProcessTree.
 	// See internal/process/jobobject_windows.go.
-	job                *process.Job
-	original           *stdioOriginalLifecycle
-	originalLaunch     *stdioOriginalLaunchOps
-	prepared           *StdioLaunchPreparation
-	preparedGeneration *stdioLaunchGeneration
-	launchContext      *StdioLaunchContext
+	job                  *process.Job
+	original             *stdioOriginalLifecycle
+	originalLaunch       *stdioOriginalLaunchOps
+	prepared             *StdioLaunchPreparation
+	preparedGeneration   *stdioLaunchGeneration
+	launchContext        *StdioLaunchContext
+	private              *isolatedStdioSession
+	stderrMode           stdioStderrMode
+	privateStdoutInvalid atomic.Bool
 }
 
 const maxMCPPostBodyBytes int64 = 1 << 20 // 1 MiB
@@ -290,12 +294,12 @@ func (h *StdioHost) start(ctx context.Context, prepared bool) (retErr error) {
 	defer func() {
 		original := h.original
 		h.mu.Unlock()
-		if retErr != nil && originalAcquired && original != nil {
+		if retErr != nil && originalAcquired && original != nil && h.private == nil {
 			_, cleanupErr := h.StopObserved(context.Background())
 			retErr = errors.Join(retErr, cleanupErr)
 		}
 	}()
-	if h.started {
+	if h.started || (h.private != nil && h.stopped) {
 		return errors.New("already started")
 	}
 
@@ -325,6 +329,9 @@ func (h *StdioHost) start(ctx context.Context, prepared bool) (retErr error) {
 	if selected, err := h.startOriginal(ctx, cmd); selected {
 		originalAcquired = true
 		return err
+	}
+	if h.private != nil {
+		return ErrIsolatedStdioUnavailable
 	}
 
 	// Partial-init pipe cleanup: each successful *Pipe() call opens a pipe
@@ -422,7 +429,7 @@ func (h *StdioHost) start(ctx context.Context, prepared bool) (retErr error) {
 	// real terminal. Mirrors HTTPHost behavior so
 	// `mcphub logs <server>` shows actual subprocess output instead of
 	// "(no output yet)" for stdio-bridge daemons.
-	stderrSink := h.openStderrSink()
+	stderrReader := h.stderrReader(stderr)
 	var pipesDrained sync.WaitGroup
 	pipesDrained.Add(2)
 
@@ -430,10 +437,9 @@ func (h *StdioHost) start(ctx context.Context, prepared bool) (retErr error) {
 	go func() {
 		defer h.wg.Done()
 		defer pipesDrained.Done()
-		s := bufio.NewScanner(stderr)
-		s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-		for s.Scan() {
-			fmt.Fprintf(stderrSink, "[subproc stderr] %s\n", s.Bytes())
+		result := stderrReader()
+		if h.stderrMode == stdioStderrPrivate {
+			result.logPrivate()
 		}
 	}()
 
@@ -908,77 +914,84 @@ func (r *rotatingFileWriter) disableLocked(cause error) {
 func (h *StdioHost) writeStdin(line []byte) error {
 	h.stdinMu.Lock()
 	defer h.stdinMu.Unlock()
-	buf := line
-	if len(line) == 0 || line[len(line)-1] != '\n' {
-		b := make([]byte, 0, len(line)+1)
-		b = append(b, line...)
-		b = append(b, '\n')
-		buf = b
-	}
-	_, err := h.stdin.Write(buf)
+	_, err := h.stdin.Write(stdioLine(line))
 	return err
 }
 
-// readStdoutLoop is the subprocess stdout reader. It peeks at each line's
-// JSON-RPC id and dispatches it to the corresponding waiting HTTP handler
-// via the `pending` map. Lines without a matching pending entry (e.g.
-// notifications, server-initiated messages, or unrouted ids) fall through
-// to testStdout so unit tests can still observe raw subprocess output.
+func stdioLine(line []byte) []byte {
+	if len(line) == 0 || line[len(line)-1] != '\n' {
+		b := make([]byte, 0, len(line)+1)
+		b = append(b, line...)
+		return append(b, '\n')
+	}
+	return line
+}
+
+// stdioOutputMember records field presence without copying the payload.
+type stdioOutputMember bool
+
+func (present *stdioOutputMember) UnmarshalJSON([]byte) error {
+	*present = true
+	return nil
+}
+
+type stdioOutputMethod bool
+
+func (present *stdioOutputMethod) UnmarshalJSON(raw []byte) error {
+	*present = true
+	// Preserve the stdout decoder's method type check for private hosts.
+	var method string
+	return json.Unmarshal(raw, &method)
+}
+
+// stdioResponseID identifies response envelopes with a Hub-style integer ID.
+func stdioResponseID(line []byte) (int64, bool, error) {
+	var envelope struct {
+		JSONRPC json.RawMessage   `json:"jsonrpc"`
+		ID      json.RawMessage   `json:"id"`
+		Method  stdioOutputMethod `json:"method"`
+		Result  stdioOutputMember `json:"result"`
+		Error   stdioOutputMember `json:"error"`
+	}
+	if err := json.Unmarshal(line, &envelope); err != nil {
+		return 0, false, err
+	}
+	if envelope.Method || envelope.Result == envelope.Error {
+		return 0, false, nil
+	}
+	var version string
+	if err := json.Unmarshal(envelope.JSONRPC, &version); err != nil || version != "2.0" {
+		return 0, false, nil
+	}
+	id, err := strconv.ParseInt(string(envelope.ID), 10, 64)
+	if err != nil {
+		return 0, false, nil
+	}
+	return id, true, nil
+}
+
+// readStdoutLoop dispatches JSON-RPC responses to waiting callers.
+// All other lines and unmatched responses go only to the raw test observer.
 func (h *StdioHost) readStdoutLoop() {
 	defer h.wg.Done()
 	for h.stdoutScan.Scan() {
 		line := append([]byte(nil), h.stdoutScan.Bytes()...)
-		// Peek both id and method. The id alone is not enough to
-		// classify a message as a stale response: JSON-RPC requests
-		// (responses' opposite) carry an id AND a method, and MCP
-		// servers can legitimately send server-initiated requests
-		// (e.g. `sampling/createMessage`) with numeric ids. Codex
-		// finding 6290ce6e: a method-blind id filter would suppress
-		// those server-initiated requests as if they were stale
-		// responses. Only the (id, no method) shape is unambiguously
-		// a response and safe to drop.
-		var peek struct {
-			ID     json.RawMessage `json:"id"`
-			Method string          `json:"method"`
+		id, isResponse, decodeErr := stdioResponseID(line)
+		if decodeErr != nil && h.private != nil {
+			h.privateStdoutInvalid.Store(true)
 		}
-		if err := json.Unmarshal(line, &peek); err == nil && len(peek.ID) > 0 {
-			var id int64
-			if err := json.Unmarshal(peek.ID, &id); err == nil {
-				h.pendingMu.Lock()
-				ch, ok := h.pending[id]
-				h.pendingMu.Unlock()
-				if ok {
-					select {
-					case ch <- line:
-					default:
-					}
-					continue
+		if isResponse {
+			h.pendingMu.Lock()
+			ch, ok := h.pending[id]
+			h.pendingMu.Unlock()
+			if ok {
+				select {
+				case ch <- line:
+				default:
 				}
-				if peek.Method == "" {
-					// Untracked response id (e.g. a late reply
-					// after caller timeout). Do not propagate
-					// further; it may belong to a different
-					// canceled client and could leak response
-					// contents. testStdout-only retains
-					// observability for unit tests.
-					select {
-					case h.testStdout <- line:
-					default:
-					}
-					continue
-				}
-				// id + method = server-initiated request. Fall
-				// through to the testStdout fallback so future
-				// SSE work can pick it up uniformly with
-				// notifications. SSE fan-out from this loop was
-				// removed in PR #64 because unrouted output
-				// cannot be attributed to a specific HTTP caller
-				// safely; if/when SSE broadcast is reintroduced
-				// (separately threat-modeled), it should
-				// branch from here rather than from this filter.
+				continue
 			}
 		}
-		// Also keep the testStdout path for tests that watch raw output.
 		select {
 		case h.testStdout <- line:
 		default:
@@ -1017,6 +1030,19 @@ func (h *StdioHost) HTTPHandler() http.Handler {
 }
 
 func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
+	post, ok := parseStdioPOST(w, r, false)
+	if ok {
+		h.handleParsedPOST(w, r, post)
+	}
+}
+
+type stdioPOST struct {
+	body   []byte
+	msg    map[string]json.RawMessage
+	method string
+}
+
+func parseStdioPOST(w http.ResponseWriter, r *http.Request, private bool) (stdioPOST, bool) {
 	// Content-Type gate runs FIRST — before body read, JSON parse, or
 	// pending-slot reservation. A `text/plain` CSRF probe must not
 	// consume the body parser, the unmarshal path, or a pending slot.
@@ -1025,7 +1051,7 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 	// match that admits `application/jsonx`.
 	if !requireJSONContentType(r.Header.Get("Content-Type")) {
 		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
-		return
+		return stdioPOST{}, false
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxMCPPostBodyBytes)
 	defer r.Body.Close()
@@ -1034,18 +1060,28 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
 			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
-			return
+			return stdioPOST{}, false
 		}
-		http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
-		return
+		message := "unable to read request"
+		if !private {
+			message = "read body: " + err.Error()
+		}
+		http.Error(w, message, http.StatusBadRequest)
+		return stdioPOST{}, false
+	}
+	if private && !utf8.Valid(body) {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return stdioPOST{}, false
 	}
 	var msg map[string]json.RawMessage
 	if err := json.Unmarshal(body, &msg); err != nil {
-		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
-		return
+		message := "invalid JSON"
+		if !private {
+			message += ": " + err.Error()
+		}
+		http.Error(w, message, http.StatusBadRequest)
+		return stdioPOST{}, false
 	}
-
-	origIDRaw, hasID := msg["id"]
 
 	// Snapshot the original method once. Used by the initialize cache,
 	// the __read_resource__ rewrite, and the post-response injection hook.
@@ -1053,8 +1089,24 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 	if m, ok := msg["method"]; ok {
 		_ = json.Unmarshal(m, &origMethod)
 	}
+	return stdioPOST{body: body, msg: msg, method: origMethod}, true
+}
+
+func (h *StdioHost) handleParsedPOST(w http.ResponseWriter, r *http.Request, post stdioPOST) {
+	body, msg, origMethod := post.body, post.msg, post.method
+	origIDRaw, hasID := msg["id"]
 	requestedProtocolVersion := initializeRequestProtocolVersion(msg)
-	if origMethod == "initialize" {
+	var privateOperation *isolatedStdioOperation
+	if h.private != nil {
+		var admitted bool
+		privateOperation, admitted = h.private.beginPOST(w, r, post)
+		if !admitted {
+			return
+		}
+		if privateOperation != nil {
+			defer h.private.finishOperation(privateOperation)
+		}
+	} else if origMethod == "initialize" {
 		if _, ok := h.validateRequestProtocolVersion(w, r); !ok {
 			return
 		}
@@ -1069,13 +1121,13 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 	// Initialize-cache short-circuit. Stdio MCP servers expect `initialize`
 	// once per process lifetime; on a cache hit we replay the prior response
 	// with the caller's id substituted, without touching the subprocess.
-	if hasID && origMethod == "initialize" {
+	if h.private == nil && hasID && origMethod == "initialize" {
 		if cached := h.bridge.InitCached(); cached != nil {
 			var respMsg map[string]json.RawMessage
 			_ = json.Unmarshal(cached, &respMsg)
 			respMsg["id"] = origIDRaw
 			out, _ := json.Marshal(respMsg)
-			h.writeStdioJSONResponse(w, origMethod, requestedProtocolVersion, out)
+			h.writeStdioJSONResponse(w, r, origMethod, requestedProtocolVersion, out)
 			return
 		}
 	}
@@ -1096,8 +1148,10 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 
 	// Notifications have no id; we forward-and-forget.
 	if !hasID {
-		if err := h.writeStdin(body); err != nil {
-			http.Error(w, "write stdin: "+err.Error(), http.StatusInternalServerError)
+		if h.private != nil {
+			body, _ = json.Marshal(msg)
+		}
+		if !h.writePOST(w, r, body, privateOperation, 0) {
 			return
 		}
 		w.WriteHeader(http.StatusAccepted)
@@ -1124,8 +1178,7 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 		h.pendingMu.Unlock()
 	}()
 
-	if err := h.writeStdin(rewritten); err != nil {
-		http.Error(w, "write stdin: "+err.Error(), http.StatusInternalServerError)
+	if !h.writePOST(w, r, rewritten, privateOperation, internalID) {
 		return
 	}
 
@@ -1142,7 +1195,7 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 		}
 		respMsg["id"] = origIDRaw
 		out, _ := json.Marshal(respMsg)
-		h.writeStdioJSONResponse(w, origMethod, requestedProtocolVersion, out)
+		h.writeStdioJSONResponse(w, r, origMethod, requestedProtocolVersion, out)
 		return
 	default:
 	}
@@ -1168,7 +1221,7 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 		}
 		respMsg["id"] = origIDRaw
 		out, _ := json.Marshal(respMsg)
-		h.writeStdioJSONResponse(w, origMethod, requestedProtocolVersion, out)
+		h.writeStdioJSONResponse(w, r, origMethod, requestedProtocolVersion, out)
 	case <-h.done:
 		// Codex CLI xhigh re-review on 479cbc3 (P2): a race-filled response
 		// must beat the failure verdict — re-check respCh non-blockingly
@@ -1184,9 +1237,13 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 			}
 			respMsg["id"] = origIDRaw
 			out, _ := json.Marshal(respMsg)
-			h.writeStdioJSONResponse(w, origMethod, requestedProtocolVersion, out)
+			h.writeStdioJSONResponse(w, r, origMethod, requestedProtocolVersion, out)
 			return
 		default:
+		}
+		if h.private != nil && origMethod != "initialize" {
+			http.Error(w, "unknown session id", http.StatusNotFound)
+			return
 		}
 		http.Error(w, "host shutting down", http.StatusServiceUnavailable)
 	case <-h.childExited:
@@ -1206,7 +1263,7 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 			}
 			respMsg["id"] = origIDRaw
 			out, _ := json.Marshal(respMsg)
-			h.writeStdioJSONResponse(w, origMethod, requestedProtocolVersion, out)
+			h.writeStdioJSONResponse(w, r, origMethod, requestedProtocolVersion, out)
 			return
 		default:
 		}
@@ -1220,12 +1277,27 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if h.private != nil {
+			http.Error(w, "unknown session id", http.StatusNotFound)
+			return
+		}
 		http.Error(w, "subprocess died unexpectedly", http.StatusBadGateway)
 	case <-r.Context().Done():
 		http.Error(w, "client canceled", http.StatusRequestTimeout)
 	case <-time.After(stdioToolResponseTimeout):
 		http.Error(w, "subprocess response timeout", http.StatusGatewayTimeout)
 	}
+}
+
+func (h *StdioHost) writePOST(w http.ResponseWriter, r *http.Request, body []byte, op *isolatedStdioOperation, id int64) bool {
+	if h.private != nil {
+		return h.private.writePOST(w, r, body, op, id)
+	}
+	if err := h.writeStdin(body); err != nil {
+		http.Error(w, "write stdin: "+err.Error(), http.StatusInternalServerError)
+		return false
+	}
+	return true
 }
 
 func (h *StdioHost) cacheValidInitializeResponse(method, requestedVersion string, body json.RawMessage) {
@@ -1293,41 +1365,62 @@ func (e *unsupportedStdioProtocolError) Error() string {
 
 func (h *StdioHost) writeStdioJSONResponse(
 	w http.ResponseWriter,
+	r *http.Request,
 	origMethod string,
 	requestedProtocolVersion string,
 	body []byte,
 ) {
 	if origMethod == "initialize" {
 		version, success, err := h.initializeResponseProtocolVersion(body, requestedProtocolVersion)
-		if err != nil {
-			var unsupported *unsupportedStdioProtocolError
-			if errors.As(err, &unsupported) {
-				if wireErr := readinesswire.WriteFailure(w, readinesswire.Failure{
-					FailureID:          readinesswire.FailureBackingProtocolUnsupported,
-					Stage:              readinesswire.StageInitialize,
-					HTTPStatus:         http.StatusBadGateway,
-					RequestedProtocol:  requestedProtocolVersion,
-					NegotiatedProtocol: unsupported.negotiated,
-					SupportedFloor:     "2025-03-26",
-				}); wireErr == nil {
-					return
-				}
-			}
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		if success {
-			sid, err := h.createSession(version)
-			if err != nil {
-				http.Error(w, "create MCP session: "+err.Error(), http.StatusInternalServerError)
+		if h.private != nil {
+			if err != nil || !success {
+				http.Error(w, "invalid protected provider initialize response", http.StatusBadGateway)
 				return
 			}
-			w.Header().Set("Mcp-Session-Id", sid)
+			if !h.private.publish(w, r, version) {
+				http.Error(w, "protected provider unavailable", http.StatusServiceUnavailable)
+				return
+			}
+		} else {
+			if err != nil {
+				var unsupported *unsupportedStdioProtocolError
+				if errors.As(err, &unsupported) {
+					if wireErr := readinesswire.WriteFailure(w, readinesswire.Failure{
+						FailureID:          readinesswire.FailureBackingProtocolUnsupported,
+						Stage:              readinesswire.StageInitialize,
+						HTTPStatus:         http.StatusBadGateway,
+						RequestedProtocol:  requestedProtocolVersion,
+						NegotiatedProtocol: unsupported.negotiated,
+						SupportedFloor:     "2025-03-26",
+					}); wireErr == nil {
+						return
+					}
+				}
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			if success {
+				sid, err := h.createSession(version)
+				if err != nil {
+					http.Error(w, "create MCP session: "+err.Error(), http.StatusInternalServerError)
+					return
+				}
+				w.Header().Set("Mcp-Session-Id", sid)
+			}
 		}
+	} else if h.private != nil {
+		if !h.private.resultAllowed(r) {
+			http.Error(w, "unknown session id", http.StatusNotFound)
+			return
+		}
+		body = sanitizeStdioPrivateResponse(origMethod, body)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(body)
+	n, err := w.Write(body)
+	if h.private != nil && origMethod == "initialize" && (err != nil || n != len(body) || r.Context().Err() != nil) {
+		h.private.retire()
+	}
 }
 
 func (h *StdioHost) createSession(protocolVersion string) (string, error) {
@@ -1424,6 +1517,14 @@ func (h *StdioHost) handleSSE(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.validateRequestSession(w, r); !ok {
 		return
 	}
+	h.serveStdioSSE(w, r)
+}
+
+func (h *StdioHost) serveStdioSSE(w http.ResponseWriter, r *http.Request) {
+	var retired <-chan struct{}
+	if h.private != nil {
+		retired = h.private.revoked
+	}
 	if h.sseActive.Add(1) > maxSSESubscribers {
 		h.sseActive.Add(-1)
 		http.Error(w, "too many SSE subscribers", http.StatusTooManyRequests)
@@ -1460,6 +1561,8 @@ func (h *StdioHost) handleSSE(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-r.Context().Done():
+			return
+		case <-retired:
 			return
 		case <-h.done:
 			return

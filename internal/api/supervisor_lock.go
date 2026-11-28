@@ -1,11 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sync"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -43,7 +46,10 @@ type SupervisorLock struct {
 	// overwriting it with the interlock-holder's own CLI PID would make the reap
 	// kill the caller instead of the old supervisor. Release() therefore skips the
 	// sidecar removal for a quiet lock — it never owned that file.
-	quiet bool
+	quiet            bool
+	quietObserved    bool
+	quietMu          sync.Mutex
+	quietAcquisition flock.AcquisitionObservation
 }
 
 var (
@@ -150,6 +156,64 @@ func AcquireSupervisorLockQuiet(path string) (*SupervisorLock, error) {
 	return &SupervisorLock{path: path, fl: lk, quiet: true}, nil
 }
 
+// AcquireSupervisorLockQuietObserved borrows the original singleton without
+// touching its owner sidecar. A partial owner is returned before any error.
+func AcquireSupervisorLockQuietObserved(ctx context.Context, path string) (*SupervisorLock, flock.AcquisitionObservation, error) {
+	if ctx == nil {
+		return nil, flock.AcquisitionObservation{}, errors.New("quiet lock context required")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, flock.AcquisitionObservation{}, err
+	}
+	if _, err := observedStateFileLeasePath(path); err != nil {
+		return nil, flock.AcquisitionObservation{}, err
+	}
+	owner := &SupervisorLock{path: path, fl: flock.New(path + ".lock"), quiet: true, quietObserved: true}
+	observation, err := owner.fl.TryLockObserved(ctx)
+	if !observation.Attempted {
+		return nil, observation, errors.Join(err, errors.New("supervisor quiet reservation not entered"))
+	}
+	owner.quietAcquisition = observation
+	if err != nil || !observation.Attempted || !observation.Returned || !observation.Held || observation.Generation == 0 {
+		return owner, observation, errors.Join(err, errors.New("supervisor quiet reservation unavailable"))
+	}
+	return owner, observation, nil
+}
+
+func (l *SupervisorLock) ValidateQuietObservedHeld(ctx context.Context, path string) error {
+	if l == nil || ctx == nil {
+		return errors.New("original quiet observed reservation required")
+	}
+	l.quietMu.Lock()
+	defer l.quietMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	a := l.quietAcquisition
+	if !l.quietObserved || !l.quiet || l.fl == nil || l.path != path || !l.fl.Locked() ||
+		!a.Attempted || !a.Returned || !a.Held || a.Error != nil || a.Generation == 0 {
+		return errors.New("original quiet reservation is not held")
+	}
+	return nil
+}
+
+func (l *SupervisorLock) ReleaseQuietObserved() (flock.ReleaseObservation, error) {
+	if l == nil {
+		return flock.ReleaseObservation{}, errors.New("original observed quiet lock required")
+	}
+	l.quietMu.Lock()
+	defer l.quietMu.Unlock()
+	if !l.quiet || !l.quietObserved || l.fl == nil {
+		return flock.ReleaseObservation{}, errors.New("original observed quiet acquisition required")
+	}
+	view, err := l.fl.ReleaseObserved()
+	a := l.quietAcquisition
+	if view.Generation != a.Generation || !view.AcquisitionReturned || !view.AllocatedFilesClosed || view.Pending || (a.Held && !view.Complete) {
+		err = errors.Join(err, errors.New("original observed quiet release incomplete"))
+	}
+	return view, err
+}
+
 // Owner returns the exact sidecar identity written when the lock was acquired.
 // IPC listeners use this as the single source of truth for hello frames.
 func (l *SupervisorLock) Owner() SupervisorLockOwner {
@@ -163,8 +227,22 @@ func (l *SupervisorLock) Owner() SupervisorLockOwner {
 // parsed sidecar. Returns the zero owner + error on missing/corrupt
 // file.
 func ReadSupervisorLockOwner(path string) (SupervisorLockOwner, error) {
+	return readSupervisorLockOwnerWith(path, readStateFileInodeAnchored)
+}
+
+func readSupervisorLockOwnerNoAudit(path string) (SupervisorLockOwner, error) {
+	owner, err := readSupervisorLockOwnerWith(path, func(sidecarPath string) ([]byte, error) {
+		return readStateFileInodeAnchoredWithStrictPolicyNoAudit(sidecarPath, operatorRequiresSingleUserHome)
+	})
+	if err != nil {
+		return SupervisorLockOwner{}, err
+	}
+	return owner, nil
+}
+
+func readSupervisorLockOwnerWith(path string, read func(string) ([]byte, error)) (SupervisorLockOwner, error) {
 	var o SupervisorLockOwner
-	raw, err := readStateFileInodeAnchored(path + ".owner.json")
+	raw, err := read(path + ".owner.json")
 	if err != nil {
 		return o, err
 	}
@@ -183,6 +261,10 @@ func ReadSupervisorLockOwner(path string) (SupervisorLockOwner, error) {
 // successor will overwrite it on its next acquire anyway, and removing
 // it on graceful release keeps the state directory tidy.
 func (l *SupervisorLock) Release() {
+	if l != nil && l.quietObserved {
+		_, _ = l.ReleaseQuietObserved()
+		return
+	}
 	if l == nil || l.fl == nil {
 		return
 	}
@@ -280,6 +362,40 @@ func SupervisorRunningUnderStateDir(stateDir string) (running bool, pid int, err
 	})
 }
 
+// ReadOccupiedSupervisorLockOwner observes the existing Windows singleton without
+// creating a lock leaf. PID/birth are a hint until the actual peer proves them.
+func ReadOccupiedSupervisorLockOwner(stateDir string) (SupervisorLockOwner, error) {
+	var zero SupervisorLockOwner
+	if runtime.GOOS != "windows" {
+		return zero, ErrSupervisorControlPeerUnsupported
+	}
+	if !filepath.IsAbs(stateDir) || filepath.Clean(stateDir) != stateDir {
+		return zero, errors.New("absolute supervisor state directory required")
+	}
+	running, firstOwner, err := supervisorRunningUnderStateDirWithOwnerReader(stateDir, func(path string) supervisorLockProbeLease {
+		return flock.New(path, flock.SetFlag(os.O_RDONLY))
+	}, readSupervisorLockOwnerNoAudit)
+	if err != nil {
+		return zero, err
+	}
+	if !running || firstOwner.PID <= 0 {
+		return zero, ErrSupervisorIPCUnavailable
+	}
+	firstBirth, parseErr := time.Parse(time.RFC3339Nano, firstOwner.StartedAt)
+	if parseErr != nil || firstBirth.IsZero() {
+		return zero, ErrSupervisorIPCUnavailable
+	}
+	owner, err := readSupervisorLockOwnerNoAudit(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		return zero, err
+	}
+	birth, parseErr := time.Parse(time.RFC3339Nano, owner.StartedAt)
+	if owner.PID != firstOwner.PID || parseErr != nil || birth.IsZero() || !birth.Equal(firstBirth) {
+		return zero, ErrSupervisorIPCUnavailable
+	}
+	return owner, nil
+}
+
 // supervisorLockProbeLease is the minimal flock surface the probe needs from its
 // TENTATIVE lease. *flock.Flock satisfies it.
 type supervisorLockProbeLease interface {
@@ -298,13 +414,22 @@ func supervisorRunningUnderStateDir(
 	stateDir string,
 	newProbeLease func(lockFilePath string) supervisorLockProbeLease,
 ) (running bool, pid int, err error) {
+	running, owner, err := supervisorRunningUnderStateDirWithOwnerReader(stateDir, newProbeLease, ReadSupervisorLockOwner)
+	return running, owner.PID, err
+}
+
+func supervisorRunningUnderStateDirWithOwnerReader(
+	stateDir string,
+	newProbeLease func(lockFilePath string) supervisorLockProbeLease,
+	readOwner func(string) (SupervisorLockOwner, error),
+) (bool, SupervisorLockOwner, error) {
 	lockPath := filepath.Join(stateDir, "supervisor.lock")
 	// Mirror AcquireSupervisorLock's flock leaf: it locks `path + ".lock"`.
 	lk := newProbeLease(lockPath + ".lock")
 	got, lerr := lk.TryLock()
 	if lerr != nil {
 		// Probe error → UNDETERMINABLE. Surface it so the gate fails closed.
-		return false, 0, fmt.Errorf("probe supervisor lock %s: %w", lockPath+".lock", lerr)
+		return false, SupervisorLockOwner{}, fmt.Errorf("probe supervisor lock %s: %w", lockPath+".lock", lerr)
 	}
 	if got {
 		// We acquired it → no supervisor held it at that instant. Release at
@@ -312,14 +437,14 @@ func supervisorRunningUnderStateDir(
 		// swallowing it, because an unreleased probe lease makes "not running"
 		// a claim this process itself falsifies (see the doc comment).
 		if uerr := lk.Unlock(); uerr != nil {
-			return false, 0, fmt.Errorf("release supervisor lock probe lease %s: %w", lockPath+".lock", uerr)
+			return false, SupervisorLockOwner{}, fmt.Errorf("release supervisor lock probe lease %s: %w", lockPath+".lock", uerr)
 		}
-		return false, 0, nil
+		return false, SupervisorLockOwner{}, nil
 	}
 	// Held by another process → a supervisor is running. The PID is best-effort
 	// diagnostic from the sidecar (absent/corrupt → 0).
-	owner, _ := ReadSupervisorLockOwner(lockPath)
-	return true, owner.PID, nil
+	owner, _ := readOwner(lockPath)
+	return true, owner, nil
 }
 
 // InstallParsedManifestBypass is an opaque, constructor-enforced capability
@@ -352,5 +477,8 @@ type InstallParsedManifestBypass struct{ lk *SupervisorLock }
 // at use time), so a stale token can never re-open the split-brain the gate
 // prevents.
 func (l *SupervisorLock) AllowSpecBearingWriteBypass() InstallParsedManifestBypass {
+	if l != nil && l.quietObserved {
+		return InstallParsedManifestBypass{}
+	}
 	return InstallParsedManifestBypass{lk: l}
 }
