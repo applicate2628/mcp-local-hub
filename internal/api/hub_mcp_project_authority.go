@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 )
 
 // This key is owned by the backend routing state and stays outside SettingsRegistry.
@@ -32,6 +34,10 @@ type hubProjectEnrollment struct {
 	AttachmentPlan    string `json:"attachment_plan"`
 	AttachmentReceipt string `json:"attachment_receipt,omitempty"`
 	Credential        string `json:"credential_verifier,omitempty"`
+	ProjectRoot       string `json:"project_root,omitempty"`
+	CapsuleLeaf       string `json:"capsule_leaf,omitempty"`
+	GroupSHA256       string `json:"group_sha256,omitempty"`
+	Revoked           bool   `json:"revoked,omitempty"`
 }
 
 func hubProjectAuthorityFromSettings(raw map[string]string) (hubProjectAuthorityRecord, error) {
@@ -96,6 +102,11 @@ func (record hubProjectAuthorityRecord) guards(scope string) bool {
 }
 
 func (e hubProjectEnrollment) valid() bool {
+	if e.ProjectRoot != "" || e.CapsuleLeaf != "" || e.GroupSHA256 != "" {
+		if !filepath.IsAbs(e.ProjectRoot) || filepath.Base(e.CapsuleLeaf) != e.CapsuleLeaf || !strings.HasSuffix(e.CapsuleLeaf, ".project-client-private-v3.json") || !isLowerHex64(e.GroupSHA256) {
+			return false
+		}
+	}
 	return validateGroupName(e.Group) == nil && isLowerHex64(e.Project) && isLowerHex64(e.Revision) &&
 		(e.PriorRevision == "" || isLowerHex64(e.PriorRevision) && e.PriorRevision != e.Revision) &&
 		e.Generation > 0 && e.Port > 0 && e.Port <= 65535 && isLowerHex64(e.AttachmentPlan) &&
@@ -130,21 +141,35 @@ type hubProjectRebind struct {
 // stageHubProjectRebind quarantines the exact group before rotating its token.
 // The returned credential is for the selected backend attachment owner only.
 // No scope becomes eligible here, including after an interrupted write.
-func stageHubProjectRebind(ctx context.Context, input hubProjectRebind) (hubProjectEnrollment, string, error) {
+type hubProjectIssuance struct{ Revision, Token, ProjectRoot, CapsuleLeaf, GroupSHA256 string }
+
+func stageHubProjectRebind(ctx context.Context, input hubProjectRebind, issued ...hubProjectIssuance) (enrollment hubProjectEnrollment, credential string, resultErr error) {
 	revision, err := generateHexToken()
 	if err != nil {
 		return hubProjectEnrollment{}, "", err
 	}
+	if len(issued) > 1 {
+		return hubProjectEnrollment{}, "", errHubProjectAuthority
+	}
+	if len(issued) == 1 {
+		if !isLowerHex64(issued[0].Revision) || !isLowerHex64(issued[0].Token) {
+			return hubProjectEnrollment{}, "", errHubProjectAuthority
+		}
+		revision = issued[0].Revision
+	}
 	next := hubProjectEnrollment{Group: input.Group, Project: input.Project, Revision: revision,
 		PriorRevision: input.PriorRevision, Generation: input.Epoch.Generation, Port: input.Epoch.Port, AttachmentPlan: input.AttachmentPlan}
+	if len(issued) == 1 {
+		next.ProjectRoot, next.CapsuleLeaf, next.GroupSHA256 = issued[0].ProjectRoot, issued[0].CapsuleLeaf, issued[0].GroupSHA256
+	}
 	if !next.valid() || !next.matchesEpoch(input.Epoch) {
 		return hubProjectEnrollment{}, "", errHubProjectAuthority
 	}
-	lock, err := acquireHubMcpLockContext(ctx)
+	release, err := AcquireHubMcpMutationContext(ctx)
 	if err != nil {
 		return hubProjectEnrollment{}, "", err
 	}
-	defer func() { _ = lock.Unlock() }()
+	defer ReleaseAndJoin(&resultErr, release, "release project enrollment Hub lease")
 	groups, err := loadGroupsLocked()
 	if err != nil {
 		return hubProjectEnrollment{}, "", err
@@ -152,6 +177,12 @@ func stageHubProjectRebind(ctx context.Context, input hubProjectRebind) (hubProj
 	declared := false
 	for _, group := range groups.Groups {
 		if group.Name == input.Group {
+			if next.GroupSHA256 != "" {
+				digest, err := projectClientValueHash(group)
+				if err != nil || digest != next.GroupSHA256 {
+					return hubProjectEnrollment{}, "", errHubProjectAuthority
+				}
+			}
 			declared = true
 			break
 		}
@@ -170,7 +201,7 @@ func stageHubProjectRebind(ctx context.Context, input hubProjectRebind) (hubProj
 	}
 	if err := mutateHubProjectAuthority(ctx, input.Epoch, next.Group, func(prior hubProjectEnrollment) (hubProjectEnrollment, error) {
 		if prior.Revision != input.PriorRevision || prior.Revision != "" &&
-			(prior.Group != input.Group || prior.AttachmentReceipt == "" || !prior.matchesCredential(priorToken)) {
+			(prior.Group != input.Group || !prior.Revoked && (prior.AttachmentReceipt == "" || !prior.matchesCredential(priorToken))) {
 			return hubProjectEnrollment{}, errHubProjectAuthority
 		}
 		return next, nil
@@ -183,6 +214,9 @@ func stageHubProjectRebind(ctx context.Context, input hubProjectRebind) (hubProj
 	fresh, err := generateHexToken()
 	if err != nil {
 		return hubProjectEnrollment{}, "", err
+	}
+	if len(issued) == 1 {
+		fresh = issued[0].Token
 	}
 	if subtle.ConstantTimeCompare([]byte(fresh), []byte(priorToken)) == 1 {
 		return hubProjectEnrollment{}, "", errHubProjectAuthority
@@ -216,18 +250,18 @@ type hubProjectRebindReceiving struct {
 	Epoch             MCPFrontRoutingTargetSnapshot
 }
 
-func commitHubProjectRebind(ctx context.Context, staged hubProjectEnrollment, receiving hubProjectRebindReceiving) error {
+func commitHubProjectRebind(ctx context.Context, staged hubProjectEnrollment, receiving hubProjectRebindReceiving) (resultErr error) {
 	if staged.AttachmentReceipt != "" || staged.Credential == "" || !staged.valid() ||
 		staged.Project != receiving.Project || staged.Revision != receiving.Revision ||
 		staged.AttachmentPlan != receiving.AttachmentPlan || !isLowerHex64(receiving.AttachmentReceipt) ||
 		!staged.matchesEpoch(receiving.Epoch) {
 		return errHubProjectAuthority
 	}
-	lock, err := acquireHubMcpLockContext(ctx)
+	release, err := AcquireHubMcpMutationContext(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = lock.Unlock() }()
+	defer ReleaseAndJoin(&resultErr, release, "release project commit Hub lease")
 	table, err := loadHubTokensLocked()
 	if err != nil {
 		return err
@@ -241,6 +275,58 @@ func commitHubProjectRebind(ctx context.Context, staged hubProjectEnrollment, re
 		}
 		prior.AttachmentReceipt = receiving.AttachmentReceipt
 		return prior, nil
+	}); err != nil {
+		return err
+	}
+	publishTokenTable(table)
+	return nil
+}
+
+// All newly connected project mutations share the existing release ledger.
+// An unconfirmed release poisons this leaf for subsequent mutation attempts.
+func AcquireHubMcpMutationContext(ctx context.Context) (func() error, error) {
+	root, err := DaemonStateDir()
+	if err != nil {
+		return nil, err
+	}
+	path := filepath.Join(root, hubMcpLockFileLeaf)
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		release, acquired, err := tryLockLeafLedgered(path)
+		if err != nil || acquired {
+			return release, err
+		}
+		timer := time.NewTimer(hubMcpLockRetryDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+// Revoke only the issuance recorded by this attachment owner. A successor
+// revision is neither restored nor rotated by an old rollback.
+func revokeHubProjectEnrollment(ctx context.Context, original hubProjectEnrollment, epoch MCPFrontRoutingTargetSnapshot) (resultErr error) {
+	release, err := AcquireHubMcpMutationContext(ctx)
+	if err != nil {
+		return err
+	}
+	defer ReleaseAndJoin(&resultErr, release, "release project revoke Hub lease")
+	table, err := loadHubTokensLocked()
+	if err != nil {
+		return err
+	}
+	if err := mutateHubProjectAuthority(ctx, epoch, original.Group, func(current hubProjectEnrollment) (hubProjectEnrollment, error) {
+		if current.Revision != original.Revision || current.Project != original.Project || current.AttachmentPlan != original.AttachmentPlan {
+			return hubProjectEnrollment{}, errHubProjectAuthority
+		}
+		current.Revoked = true
+		current.AttachmentReceipt = ""
+		return current, nil
 	}); err != nil {
 		return err
 	}

@@ -40,6 +40,7 @@
 package autostart
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -47,6 +48,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"mcp-local-hub/internal/scheduler"
 	"mcp-local-hub/internal/supervisorowner"
 )
 
@@ -64,6 +66,44 @@ const (
 // unavailable. It is an observation outcome, not a lifecycle State: callers
 // must not mistake it for an absent or disabled autostart shim.
 var ErrStatusObservationUnavailable = errors.New("autostart status observation unavailable")
+
+// ObservedTaskReplacementRefusal carries the exact observed definition to the
+// caller that owns protected snapshot storage. The definition stays out of
+// diagnostics. Cause preserves a failed create or observation, or the reason
+// an existing task cannot be accepted as enabled.
+type ObservedTaskReplacementRefusal struct {
+	TaskName string
+	Cause    error
+	xml      []byte
+}
+
+// NewObservedTaskReplacementRefusal copies the observed bytes into the refusal.
+func NewObservedTaskReplacementRefusal(taskName string, observedXML []byte, cause error) *ObservedTaskReplacementRefusal {
+	return &ObservedTaskReplacementRefusal{TaskName: taskName, Cause: cause, xml: bytes.Clone(observedXML)}
+}
+
+// ObservedXML returns a copy for the caller's protected snapshot store.
+func (e *ObservedTaskReplacementRefusal) ObservedXML() []byte {
+	return bytes.Clone(e.xml)
+}
+
+func (e *ObservedTaskReplacementRefusal) Error() string {
+	if e.Cause != nil {
+		return fmt.Sprintf("refuse replacement of task %s: %v (%v)", e.TaskName, scheduler.ErrTaskReplacementUnowned, e.Cause)
+	}
+	return fmt.Sprintf("refuse replacement of task %s: %v", e.TaskName, scheduler.ErrTaskReplacementUnowned)
+}
+
+func (e *ObservedTaskReplacementRefusal) GoString() string {
+	return e.Error()
+}
+
+func (e *ObservedTaskReplacementRefusal) Unwrap() []error {
+	if e.Cause != nil {
+		return []error{scheduler.ErrTaskReplacementUnowned, e.Cause}
+	}
+	return []error{scheduler.ErrTaskReplacementUnowned}
+}
 
 // WindowsTaskName is the Task Scheduler entry the Windows autostart
 // shim installs (`\mcp-local-hub-supervisor`). Exported (capital) so
@@ -108,8 +148,7 @@ const (
 	// StateDrifted — shim installed but the recorded command-line
 	// args (presence/absence of --strict-mode) or the recorded binary
 	// path does not match what `mcphub autostart enable` would write
-	// today. Operators should re-run `mcphub autostart enable` to
-	// reconcile.
+	// today.
 	StateDrifted
 
 	// StateStaleResidue — remnants of a prior install (e.g. an old
@@ -176,27 +215,20 @@ type StatusSnapshot struct {
 // files (windows.go, linux.go, darwin.go). The same caller code in
 // `internal/cli/autostart.go` drives all three.
 type Backend interface {
-	// Enable installs (or replaces) the autostart shim. Idempotent:
-	// re-enabling with the same Options is a no-op apart from a
-	// re-write of the on-disk artifact. Re-enabling with different
-	// Options (strict-mode toggled, binary moved) MUST overwrite the
-	// prior shim so a stale entry never lingers.
+	// Enable installs an autostart shim. POSIX can rewrite the installed
+	// artifact. Windows creates only an absent registration or accepts a fully
+	// matching enabled task without mutation. Other existing tasks return a
+	// typed refusal with the observed definition.
 	Enable(opts Options) error
 
 	// Disable removes the autostart shim. Idempotent: returns nil
-	// when there is nothing installed. The shim's stop side-effects
-	// (Task Scheduler /End, systemctl --user stop, launchctl bootout)
-	// are best-effort — Disable does NOT fail when the supervisor
-	// process is already dead.
+	// when there is nothing installed. On POSIX, it also requests
+	// a best-effort stop of the supervisor.
 	Disable() error
 
-	// Status reports the current State. opts.StrictMode + opts.MCPHubPath
-	// are inputs to drift detection: when the on-disk shim's recorded
-	// command-line or binary path does not match what `Enable(opts)`
-	// would write, Status returns StateDrifted. When opts.StrictMode
-	// is false, drift detection ignores the strict-mode flag — i.e.
-	// a shim that has --strict-mode but the caller didn't pass it
-	// is still drift.
+	// Status reports the current State. Its drift observation compares the
+	// command-line and binary path to opts. Windows Enable independently
+	// checks the complete definition and runtime enabled state for a no-op.
 	Status(opts Options) (State, error)
 
 	// StatusSnapshot reports State plus a comparable liveness-free shim spec.

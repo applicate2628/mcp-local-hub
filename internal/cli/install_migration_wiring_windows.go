@@ -168,7 +168,7 @@ func captureUpgradeGUITaskActions(ctx context.Context, target string) ([]upgrade
 	if len(refs) == 0 {
 		return nil, errors.New("no exact-owned Product task actions were found")
 	}
-	sch, err := scheduler.New()
+	sch, err := scheduler.NewContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -646,7 +646,7 @@ func recheckUpgradeGUIBeforeExitWithBoundedJournal(ctx context.Context, held *up
 	}
 	in := held.inputs
 	if pending == nil {
-		if present, err := inspectWindowsProductRecoveryLeaves(held.StateDir); err != nil || present {
+		if present, err := inspectMutatingWindowsProductRecoveryLeaves(held.StateDir); err != nil || present {
 			return fmt.Errorf("UPGRADE_GUI_PENDING_RECOVERY: exact journal state changed: present=%v error=%v", present, err)
 		}
 	} else {
@@ -1494,7 +1494,7 @@ func runUpgradeGUIFencedPrelude(ctx context.Context, fence *api.UpgradeFenceLeas
 		return nil, "", errors.New("UPGRADE_GUI_PRIOR_STATE_UNVERIFIABLE: incomplete fenced upgrade window")
 	}
 	checkJournals := func(afterExit bool) error {
-		present, err := inspectWindowsProductRecoveryLeaves(stateDir)
+		present, err := inspectMutatingWindowsProductRecoveryLeaves(stateDir)
 		if err != nil {
 			if afterExit {
 				return fmt.Errorf("UPGRADE_GUI_JOURNAL_DRIFT_AFTER_EXIT: journal identity unknown after GUI exit: %w", err)
@@ -1617,6 +1617,7 @@ func runV5UpgradeWindowsWithPathsAndDeps(cmd *cobra.Command, exe, target string,
 }
 
 type upgradeProductContinuation struct {
+	restore   func() error
 	namespace *api.WindowsProductStateNamespace
 	apply     func() error
 }
@@ -1651,6 +1652,12 @@ func finishV5UpgradeWindowsCommand(cmd *cobra.Command, optIn bool, completionTex
 		retErr = fmt.Errorf("v0.5 upgrade: release upgrade transaction fence: %w", releaseErr)
 	}
 	api.ReleaseAndJoin(&retErr, continuation.namespace.Close, "close original Product state namespace")
+	if continuation.restore != nil {
+		if retErr != nil && !soleMaterialRollbackError(retErr) {
+			return errors.Join(retErr, ErrWindowsProductRecoveryPending)
+		}
+		return errors.Join(retErr, continuation.restore())
+	}
 	if continuation.apply != nil {
 		if retErr != nil {
 			return fmt.Errorf("Product upgrade settled. Aggregate apply withheld: %w", retErr)
@@ -1692,6 +1699,9 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 	}
 	optIn := upgradeGUIRequested(cmd)
 	pairOptIn := upgradeGUIOwnedFleetStopRequested(cmd)
+	if input.cleanInstall && (!current || optIn || pairOptIn) {
+		return errors.New("clean install requires the current Windows Product and an absent original fleet")
+	}
 	if pairOptIn && !optIn {
 		return errors.New("--stop-gui-owned-fleet-for-upgrade requires --terminate-gui-for-upgrade")
 	}
@@ -1725,7 +1735,18 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 		}
 	}
 	var fence *api.UpgradeFenceLease
-	if namespace != nil {
+	if input.cleanInstall {
+		if stateDir == "" {
+			stateDir, err = api.DaemonStateDirReadOnly()
+		}
+		if err == nil {
+			var acquired bool
+			fence, acquired, err = api.TryAcquireUpgradeFence(fenceCtx, stateDir)
+			if err == nil && (!acquired || fence == nil) {
+				err = errors.New("another Windows Product transaction is active")
+			}
+		}
+	} else if namespace != nil {
 		fence, err = api.AcquireUpgradeFenceBound(fenceCtx, stateDir, namespace)
 	} else {
 		stateDir, err = api.DaemonStateDir()
@@ -1796,6 +1817,38 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 			return fmt.Errorf("read saved aggregate gate before Product transfer: %w", err)
 		}
 	}
+	restore := func(leaf *api.WindowsProductRollbackContinuation) {
+		continuation.restore = func() error {
+			return restoreProductPriorAggregate(context.WithoutCancel(ctx), stateDir, target, allowance, leaf)
+		}
+	}
+	transferRollback := func(ctx context.Context, raw []byte) error {
+		if namespace == nil || !aggregateEnabled || optIn || input.cleanInstall {
+			return ErrWindowsProductRecoveryPending
+		}
+		leaf, err := namespace.TransferAggregateRollback(ctx, fence, raw)
+		if err != nil {
+			return err
+		}
+		restore(leaf)
+		return nil
+	}
+	if pending, err := inspectProductLeaves(stateDir, windowsProductAggregateRollbackLeaf); err != nil || pending {
+		if err != nil || !aggregateEnabled || namespace == nil || optIn || input.cleanInstall {
+			return errors.Join(ErrWindowsProductRecoveryPending, err)
+		}
+		leaf, err := namespace.ReceiveAggregateRollback(ctx, allowance.maxEncodedBytes)
+		if err != nil {
+			return errors.Join(ErrWindowsProductRecoveryPending, err)
+		}
+		rollback, err := receiveAggregateRollbackJournal(leaf, stateDir, target)
+		if err != nil {
+			return err
+		}
+		recovered = &WindowsProductPairRecoverySettled{TransactionID: rollback.TransactionID, Outcome: WindowsProductPairRecoverySettledRollback}
+		restore(leaf)
+		return nil
+	}
 	// Recover or refuse pending publication before staging a new candidate.
 	if !optIn {
 		recoveryRequest, err := windowsCanonicalEntryRecoveryRequestForDomain(ctx, stateDir, target, legacyWindowlessTarget, current, allowance, evidence)
@@ -1805,16 +1858,25 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 		if current {
 			bindWindowsProductSuccessorQuiescence(&recoveryRequest, original)
 		}
-		recoveryRequest.RequireCurrentHeadlessUpgrade = aggregateEnabled
-		settled, err := reconcileWiredWindowsProductRecovery(recoveryRequest)
-		if err != nil {
-			return ordinaryWindowsProductRecoveryError(err)
+		if input.cleanInstall {
+			if err := retireRolledBackForCleanInstall(recoveryRequest, namespace); err != nil {
+				return err
+			}
+		} else {
+			recoveryRequest.RequireCurrentHeadlessUpgrade = aggregateEnabled
+			if aggregateEnabled && namespace != nil {
+				recoveryRequest.transferAggregateRollback = transferRollback
+			}
+			settled, err := reconcileWiredWindowsProductRecovery(recoveryRequest)
+			if err != nil {
+				return ordinaryWindowsProductRecoveryError(err)
+			}
+			if aggregateEnabled && settled != nil {
+				recovered = settled
+				return nil
+			}
 		}
-		if aggregateEnabled && settled != nil {
-			recovered = settled
-			return nil
-		}
-	} else if present, err := inspectWindowsProductRecoveryLeaves(stateDir); err != nil || present {
+	} else if present, err := inspectMutatingWindowsProductRecoveryLeaves(stateDir); err != nil || present {
 		return fmt.Errorf("UPGRADE_GUI_PENDING_RECOVERY: pending=%v error=%v", present, err)
 	}
 	request := windowsProductTxnRequest{
@@ -1824,14 +1886,16 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 	var successorSource windowsCanonicalSuccessorRuntimeSource
 	var priorRuntime *binaryadmission.WindowsCanonicalEntryPriorRuntimeV1
 	if current {
-		stage, err := original.Stage(ctx, target)
-		if stage != nil {
-			request.EntryBundle = &stagedWindowsCanonicalEntrySetV2{original: stage}
-			defer api.ReleaseAndJoin(&retErr, request.EntryBundle.Close, "close upgrade original entry-set carrier")
+		carrier, err := stageCurrentEntryBundleForUpgrade(ctx, original, target)
+		if carrier != nil {
+			request.EntryBundle = carrier
+			defer api.ReleaseAndJoin(&retErr, carrier.Close, "close upgrade original entry-set carrier")
 		}
-		if err != nil || stage == nil {
-			return errors.Join(err, errors.New("upgrade original entry-set stage unavailable"))
+		if err != nil {
+			return err
 		}
+
+		stage := carrier.original
 		request.StagedProduct, err = currentStageProductPath(stage)
 		if err != nil {
 			return err
@@ -1937,15 +2001,29 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 		return errors.New("upgrade complete-set transaction unavailable")
 	}
 	var same bool
-	if current {
-		same, err = reconcileWindowsCurrentEntryNoop(ctx, stateDir, WindowsProductPairModeUpgrade, request.EntryBundle, productTxn.Opts.Tasks)
-	} else {
+	if !current {
 		same, err = reconcileWindowsCanonicalEntryNoop(ctx, stateDir, WindowsProductPairModeUpgrade, request.EntrySet, productTxn.Opts.Tasks)
+	} else {
+		same, err = reconcileWindowsCurrentEntryNoop(ctx, stateDir, WindowsProductPairModeUpgrade, request.EntryBundle, productTxn.Opts.Tasks)
 	}
 	if err != nil {
 		return err
 	}
 	if same {
+		if input.cleanInstall {
+			intent, err := api.ObserveSupervisorRuntimeIntent(ctx, filepath.Join(stateDir, "supervisor-intent.json"), time.Now().UTC())
+			if err != nil || intent == nil || intent.Ports == nil {
+				return errors.Join(ErrWindowsProductRecoveryPending, err)
+			}
+			frozen := expandWindowsProductFrozenPorts(intent.Ports)
+			observation, err := observeWindowsProductPairQuiescence(ctx, stateDir, priorPath, frozen)
+			if err != nil {
+				return err
+			}
+			if err := validateCleanProductRuntimeAbsence(ctx, frozen, observation, request.ProductPath, request.CanonicalEntryPath, request.LegacyWindowlessPath); err != nil {
+				return err
+			}
+		}
 		if !current {
 			projectOnFinish = projectCurrentAutorunOff
 		}
@@ -1965,13 +2043,16 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 			return errors.New("prior aggregate GUI reservation unavailable")
 		}
 		productTxn.aroundCommitDecision = aggregateQualification.beforeDecision
+		productTxn.beforePromotion = aggregateQualification.beforePromotion
+		productTxn.Opts.PriorServingAggregate = aggregateQualification.serving
+		defer api.ReleaseAndJoin(&retErr, aggregateQualification.live.close, "close original aggregate process observations")
 	}
 	if optIn && priorRuntime == nil {
 		return errors.New("UPGRADE_GUI_PRIOR_STATE_UNVERIFIABLE: no original prior runtime exists for GUI-owned stop")
 	}
 	var pairHeld *upgradeGUIHeldTopology
 	if pairOptIn {
-		present, journalErr := inspectWindowsProductRecoveryLeaves(stateDir)
+		present, journalErr := inspectMutatingWindowsProductRecoveryLeaves(stateDir)
 		if journalErr != nil || present {
 			return fmt.Errorf("UPGRADE_GUI_PENDING_RECOVERY: pair-stop admission journal present=%v error=%v", present, journalErr)
 		}
@@ -2041,6 +2122,9 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 			expectedPorts = append(expectedPorts, port)
 			frozenPorts = append(frozenPorts, windowsProductIntentPortV1{TaskName: d.TaskName, Port: port, ArgvSHA256: windowsProductArgvSHA256(append([]string{d.Command}, d.Args...))})
 		}
+	}
+	if aggregateQualification != nil {
+		productTxn.transferAggregateRollback = transferRollback
 	}
 	txnEntered := false
 	if optIn {
@@ -2116,7 +2200,7 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 			}
 		}()
 	} else if optIn {
-		present, journalErr := inspectWindowsProductRecoveryLeaves(stateDir)
+		present, journalErr := inspectMutatingWindowsProductRecoveryLeaves(stateDir)
 		if journalErr != nil || present {
 			return fmt.Errorf("UPGRADE_GUI_JOURNAL_DRIFT_AFTER_EXIT: pre-transaction journal present=%v error=%v", present, journalErr)
 		}
@@ -2152,6 +2236,9 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 		if err == nil && priorRuntime == nil && observation.Supervisor.State != windowsProductSupervisorKnownAbsent {
 			return observation, errors.New("prior files absent without native runtime absence")
 		}
+		if err == nil && input.cleanInstall {
+			err = validateCleanProductRuntimeAbsence(ctx, ports, observation, request.ProductPath, request.CanonicalEntryPath, request.LegacyWindowlessPath)
+		}
 		return observation, err
 	}
 	var admitPrior func(string) (string, error) = admitV5UpgradePrior
@@ -2160,12 +2247,17 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 		admitPrior = nil
 		verifyPrior = nil
 	}
+	var upgradeOps UpgradeDeps = deps
+	if aggregateQualification != nil && aggregateQualification.live != nil {
+		upgradeOps = &servingAggregateReap{v5UpgradeDeps: deps, live: aggregateQualification.live, beforeStop: aggregateQualification.checkBeforeStop, stateDir: stateDir}
+	}
 	txnErr := runInstallUpgradeWindowsFn(ctx, UpgradeOpts{
-		WindowsProduct:    productTxn,
-		priorRuntime:      priorRuntime,
-		StateDir:          stateDir,
-		GUIOwnedPending:   pairOptIn,
-		OnProductPrepared: onProductPrepared,
+		WindowsProduct:     productTxn,
+		priorRuntime:       priorRuntime,
+		requirePriorAbsent: input.cleanInstall,
+		StateDir:           stateDir,
+		GUIOwnedPending:    pairOptIn,
+		OnProductPrepared:  onProductPrepared,
 		WindowsProductPairLifecycle: &windowsProductPairLifecycleHooks{
 			FrozenPorts: frozenPorts,
 			Observe: func(ctx context.Context, target string, ports []windowsProductIntentPortV1) (windowsProductQuiescenceObservationV1, error) {
@@ -2189,7 +2281,7 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 		},
 		BinaryPath:                 priorPath,
 		PipePath:                   deps.pipePath,
-		Deps:                       deps,
+		Deps:                       upgradeOps,
 		ExpectedPorts:              expectedPorts,
 		VerifyPortsUnbound:         verifyPortsUnboundForUpgrade,
 		WaitSupervisorLockReleased: deps.WaitSupervisorLockReleased,
@@ -2438,24 +2530,64 @@ func windowsProductArgvSHA256(argv []string) string {
 }
 
 func retainedGenerationParentPID(pid int) (int, error) {
-	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	parent := 0
+	found := false
+	err := walkProductProcessSnapshot(context.Background(), nativeProductProcessSnapshotOps(), func(entry *windows.ProcessEntry32) (bool, error) {
+		if int(entry.ProcessID) != pid {
+			return true, nil
+		}
+		parent, found = int(entry.ParentProcessID), true
+		return false, nil
+	})
 	if err != nil {
 		return 0, err
 	}
-	defer windows.CloseHandle(snapshot)
+	if !found {
+		return 0, process.ErrProcessNotFound
+	}
+	return parent, nil
+}
+
+type productProcessSnapshotOps struct {
+	open  func(uint32, uint32) (windows.Handle, error)
+	first func(windows.Handle, *windows.ProcessEntry32) error
+	next  func(windows.Handle, *windows.ProcessEntry32) error
+	close func(windows.Handle) error
+}
+
+func nativeProductProcessSnapshotOps() productProcessSnapshotOps {
+	return productProcessSnapshotOps{windows.CreateToolhelp32Snapshot, windows.Process32First, windows.Process32Next, windows.CloseHandle}
+}
+
+func walkProductProcessSnapshot(ctx context.Context, ops productProcessSnapshotOps, visit func(*windows.ProcessEntry32) (bool, error)) (retErr error) {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	snapshot, err := ops.open(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return err
+	}
+	if snapshot == 0 || snapshot == windows.InvalidHandle {
+		return errors.New("process snapshot has no native handle")
+	}
+	defer func() { retErr = errors.Join(retErr, ops.close(snapshot), ctx.Err()) }()
 	entry := windows.ProcessEntry32{Size: uint32(unsafe.Sizeof(windows.ProcessEntry32{}))}
-	if err := windows.Process32First(snapshot, &entry); err != nil {
-		return 0, err
+	if err := ops.first(snapshot, &entry); err != nil {
+		return err
 	}
 	for {
-		if int(entry.ProcessID) == pid {
-			return int(entry.ParentProcessID), nil
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		if err := windows.Process32Next(snapshot, &entry); err != nil {
+		more, err := visit(&entry)
+		if err != nil || !more {
+			return err
+		}
+		if err := ops.next(snapshot, &entry); err != nil {
 			if errors.Is(err, windows.ERROR_NO_MORE_FILES) {
-				return 0, process.ErrProcessNotFound
+				return nil
 			}
-			return 0, err
+			return err
 		}
 	}
 }
@@ -2714,7 +2846,7 @@ func stageV5UpgradeBinary(exe, target string) (string, error) {
 }
 
 func cleanupUpgradeStagedProduct(stateDir, staged, expectedSHA256 string) error {
-	present, err := inspectWindowsProductRecoveryLeaves(stateDir)
+	present, err := inspectMutatingWindowsProductRecoveryLeaves(stateDir)
 	if err != nil {
 		return fmt.Errorf("UPGRADE_GUI_STAGE_CLEANUP_UNCONFIRMED: journal state unknown; preserve staged Product: %w", err)
 	}
@@ -3313,6 +3445,15 @@ func waitCanonicalRecoveredSupervisorReady(ctx context.Context, stateDir, path s
 	}
 }
 
+func validateCleanProductRuntimeAbsence(ctx context.Context, frozen []windowsProductIntentPortV1, observation windowsProductQuiescenceObservationV1, productPath, launcherPath, legacyPath string) error {
+	if observation.Supervisor.State != windowsProductSupervisorKnownAbsent || observation.GUIOwner != windowsProductGUIOwnerConfirmedAbsent || !observation.SupervisorLockReleased {
+		return fmt.Errorf("%w: original clean install runtime absence unproved", ErrWindowsProductRecoveryPending)
+	}
+	if err := validateWindowsProductQuiescenceObservation(observation, frozen); err != nil {
+		return err
+	}
+	return validateCleanInstallProcessAbsence(ctx, productPath, launcherPath, legacyPath)
+}
 func validateCanonicalEntryRuntimeAbsence(ctx context.Context, path string, frozen []windowsProductIntentPortV1, observation windowsProductQuiescenceObservationV1) error {
 	if observation.Supervisor.State != windowsProductSupervisorKnownAbsent || observation.GUIOwner != windowsProductGUIOwnerConfirmedAbsent || !observation.SupervisorLockReleased {
 		return fmt.Errorf("%w: original runtime absence unproved", ErrWindowsProductRecoveryPending)

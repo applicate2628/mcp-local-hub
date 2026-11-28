@@ -31,6 +31,7 @@
 package lldb
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -59,8 +60,10 @@ const (
 // StdinPipe, so without this wrapper the handle could be finalized and
 // closed before we actively close it during teardown.
 type spawnedLldb struct {
-	cmd   *exec.Cmd
-	stdin io.WriteCloser
+	cmd     *exec.Cmd
+	stdin   io.WriteCloser
+	done    chan struct{}
+	waitErr error // published by closing done
 }
 
 // ParseHostPort validates a host:port address EXACTLY as the lldb-bridge
@@ -122,7 +125,7 @@ func runLldbBridge(host string, port int, lldbPath string) error {
 		spawned = s
 		defer terminateSpawned(spawned)
 
-		sock, err = waitForPort(addr, spawned.cmd)
+		sock, err = waitForPort(addr, spawned)
 		if err != nil {
 			return fmt.Errorf("lldb did not open %s within %s: %w", addr, lldbSpawnTimeout, err)
 		}
@@ -152,41 +155,58 @@ func spawnLldb(lldbPath, host string, port int) (*spawnedLldb, error) {
 	if err != nil {
 		return nil, err
 	}
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	// Nil stdout and stderr use the null device without copy goroutines.
 	if err := cmd.Start(); err != nil {
 		_ = stdin.Close()
 		return nil, err
 	}
+	s := &spawnedLldb{cmd: cmd, stdin: stdin, done: make(chan struct{})}
+	go func() {
+		s.waitErr = cmd.Wait()
+		close(s.done)
+	}()
+
 	// The MCP listen command must end with a newline — LLDB's REPL is
 	// line-buffered and will otherwise sit on the fragment forever.
 	if _, writeErr := fmt.Fprintf(stdin, "protocol-server start MCP listen://%s:%d\n", host, port); writeErr != nil {
 		_ = stdin.Close()
 		_ = cmd.Process.Kill()
-		return nil, fmt.Errorf("write protocol-server command: %w", writeErr)
+		<-s.done
+		return nil, fmt.Errorf("write protocol-server command: %w", errors.Join(writeErr, s.waitErr))
 	}
-	return &spawnedLldb{cmd: cmd, stdin: stdin}, nil
+	return s, nil
 }
 
 // waitForPort polls the target address until either the port accepts a
 // connection (returns the live socket) or the deadline elapses. The
 // spawned subprocess is watched in parallel — if LLDB dies before opening
 // its port, we fail fast instead of blocking the full timeout.
-func waitForPort(addr string, cmd *exec.Cmd) (net.Conn, error) {
+func waitForPort(addr string, s *spawnedLldb) (net.Conn, error) {
 	deadline := time.Now().Add(lldbSpawnTimeout)
 	for time.Now().Before(deadline) {
-		// Early exit: subprocess crashed before it could bind. ProcessState
-		// is only populated after Wait, so a live subprocess shows nil here.
-		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
-			return nil, fmt.Errorf("lldb exited with %s", cmd.ProcessState)
+		select {
+		case <-s.done:
+			return nil, s.startupExit()
+		default:
 		}
 		sock, err := net.DialTimeout("tcp", addr, lldbConnectTimeout)
 		if err == nil {
 			return sock, nil
 		}
-		time.Sleep(lldbPollInterval)
+		select {
+		case <-s.done:
+			return nil, s.startupExit()
+		case <-time.After(lldbPollInterval):
+		}
 	}
 	return nil, fmt.Errorf("timeout")
+}
+
+func (s *spawnedLldb) startupExit() error {
+	if s.waitErr != nil {
+		return fmt.Errorf("lldb exited before listening: %w", s.waitErr)
+	}
+	return errors.New("lldb exited before listening")
 }
 
 // bridge runs two concurrent io.Copy loops between the TCP socket and the
@@ -272,15 +292,10 @@ func terminateSpawned(s *spawnedLldb) {
 	// Closing stdin lets LLDB exit on its own when it notices no more input.
 	_ = s.stdin.Close()
 
-	done := make(chan struct{})
-	go func() {
-		_, _ = s.cmd.Process.Wait()
-		close(done)
-	}()
 	select {
-	case <-done:
+	case <-s.done:
 	case <-time.After(2 * time.Second):
 		_ = s.cmd.Process.Kill()
-		<-done
+		<-s.done
 	}
 }

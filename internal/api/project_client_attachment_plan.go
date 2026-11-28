@@ -15,6 +15,7 @@ import (
 // InstallProjectClientCreate is an explicit prospective project attachment.
 // A nil pointer leaves every legacy installation route unchanged.
 type InstallProjectClientCreate struct {
+	Group              string
 	ProjectRoot        string
 	LogicalEntryName   string
 	PolicySource       string
@@ -22,10 +23,16 @@ type InstallProjectClientCreate struct {
 	ExpectedPlanSHA256 string
 }
 
+// V3 previews bind an issuance action, never a guessed or reusable secret.
+const projectCredentialPlanMarker = "<issued-by-this-project-transaction>"
+
 func validateInstallProjectClientCreate(opts InstallOpts) error {
 	c := opts.ProjectClientCreate
 	if c == nil {
 		return nil
+	}
+	if c.Group != "" && validateGroupName(c.Group) != nil {
+		return clients.ErrProjectClientInvalid
 	}
 	if opts.Server == "" || opts.DaemonFilter == "" || len(opts.ClientsInclude) != 1 || opts.ClientsInclude[0] != "codex-cli" || opts.IncludeAllClients || opts.SkipClientConfigWrites || opts.CodexProjectRoot != "" || opts.CodexWorkingDir != "" || !filepath.IsAbs(c.ProjectRoot) || !managedRegistrationSafeIdentifier(c.LogicalEntryName) || (c.PolicySource != "inherited-global" && c.PolicySource != "native-defaults") {
 		return clients.ErrProjectClientInvalid
@@ -70,6 +77,7 @@ type ProjectClientCreatePlanV1 struct {
 }
 
 type projectClientAttachmentPlan struct {
+	private     *projectPrivateAttachment
 	public      ProjectClientCreatePlanV1
 	preparation *clients.ProjectHTTPAttachmentPreparation
 	project     clients.Client
@@ -88,6 +96,7 @@ func projectClientValueHash(v any) (string, error) {
 
 func (p ProjectClientCreatePlanV1) validate() error {
 	validPair := p.Schema == "project-client-create-plan-v1" && p.Operation == "create-absent" || p.Schema == "project-client-attachment-plan-v2" && p.Operation == "replace-enable-override"
+	validPair = validPair || p.Schema == projectPrivatePlanSchema && (p.Operation == "create-absent" || p.Operation == "replace-enable-override")
 	if !validPair || p.Client != "codex-cli" || (p.PolicySource != "inherited-global" && p.PolicySource != "native-defaults") {
 		return clients.ErrProjectClientInvalid
 	}
@@ -133,7 +142,7 @@ func prepareProjectClientAttachmentPlan(opts InstallOpts, manifestSHA string, pl
 	if err := validateInstallProjectClientCreate(opts); err != nil {
 		return nil, err
 	}
-	if opts.ProjectClientCreate == nil || plan == nil || project == nil || len(plan.ClientUpdates) != 1 || len(plan.SupervisorIntent) != 1 || !managedRegistrationBackupDigestValid(manifestSHA) || release.Version == "" || release.Commit == "" {
+	if opts.ProjectClientCreate == nil || plan == nil || project == nil || len(plan.ClientUpdates) != 1 || (plan.sessionLocal == nil && len(plan.SupervisorIntent) != 1) || (plan.sessionLocal != nil && len(plan.SupervisorIntent) != 0) || !managedRegistrationBackupDigestValid(manifestSHA) || release.Version == "" || release.Commit == "" {
 		return nil, clients.ErrProjectClientInvalid
 	}
 	c := opts.ProjectClientCreate
@@ -152,6 +161,13 @@ func prepareProjectClientAttachmentPlan(opts InstallOpts, manifestSHA string, pl
 		return nil, err
 	}
 	schema, operation := p.SchemaOperation()
+	private, targetSHA, err := prepareProjectPrivateBinding(opts, plan, identity)
+	if err != nil {
+		return nil, err
+	}
+	if private != nil {
+		schema = projectPrivatePlanSchema
+	}
 	desired = p.DesiredEntry()
 	policy := make(map[string]any)
 	for k, v := range desired.Raw {
@@ -166,10 +182,9 @@ func prepareProjectClientAttachmentPlan(opts InstallOpts, manifestSHA string, pl
 		return nil, err
 	}
 	desiredSHA, err := projectClientValueHash(desired.Raw)
-	if err != nil {
-		return nil, err
+	if private != nil {
+		desiredSHA, err = privateDesiredPlanHash(desired.Raw)
 	}
-	targetSHA, err := projectClientValueHash(plan.SupervisorIntent)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +200,7 @@ func prepareProjectClientAttachmentPlan(opts InstallOpts, manifestSHA string, pl
 	if !opts.DryRun && public.PlanSHA256 != c.ExpectedPlanSHA256 {
 		return nil, clients.ErrProjectClientPlanStale
 	}
-	return &projectClientAttachmentPlan{public: public, preparation: p, project: project, identity: identity, global: append([]byte(nil), global...)}, nil
+	return &projectClientAttachmentPlan{private: private, public: public, preparation: p, project: project, identity: identity, global: append([]byte(nil), global...)}, nil
 }
 
 // Strict token walk rejects duplicate fields, null authority and trailing

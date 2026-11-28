@@ -605,10 +605,11 @@ func TestAttachedV3CatalogProjectsSerenaWithoutChangingSiblingRows(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	row, entry, err := catalogRow(v2, "serena")
+	projection, err := catalogRow(v2, "serena")
 	if err != nil {
 		t.Fatal(err)
 	}
+	row, entry := projection.bytes(v2), projection.entry
 	staleCommit := strings.Repeat("a", 40)
 	staleRow := strings.ReplaceAll(string(row), entry.Args[1], "git+"+repositoryURL+"@"+staleCommit)
 	staleRow = strings.ReplaceAll(staleRow, entry.ReadmeURL, "https://raw.githubusercontent.com/oraios/serena/"+staleCommit+"/README.md")
@@ -665,11 +666,11 @@ readme_path: README.md
 	if err != nil {
 		t.Fatalf("read generated v2 catalog: %v", err)
 	}
-	row, _, err := catalogRow(got, "serena")
+	projection, err := catalogRow(got, "serena")
 	if err != nil {
 		t.Fatalf("read generated Serena row: %v", err)
 	}
-	if bytes.Contains(row, []byte("\r")) {
+	if bytes.Contains(projection.bytes(got), []byte("\r")) {
 		t.Fatalf("generated Serena row retained CRLF bytes")
 	}
 	if !bytes.Contains(got, []byte("\"id\": \"other\"\r\n")) {
@@ -680,6 +681,89 @@ readme_path: README.md
 	}
 	if err := Check(root); err != nil {
 		t.Fatalf("generated repository must pass Check: %v", err)
+	}
+}
+
+func TestPackageCatalogChangesOnlyOwnedValues(t *testing.T) {
+	const prefix = "{\r\n  \"entries\": [\r\n    null,\r\n    {\"id\":\"other\",\"args\":[\"left]right\"]},\r\n    "
+	const suffix = ",\r\n    {\"id\":\"last\"}\r\n  ],\r\n  \"unrelated\":{\"readme_url\":\"old\"}\r\n}\r\n"
+	const staleRow = `{
+      "id": "fetch",
+      "command": "uvx",
+      "transport": "stdio",
+      "metadata": {"args":["nested"],"readme_url":"old"},
+      "\u0061rgs": ["left]right", "\"quoted\""],
+      "readme_url": "\u006fld"
+    }`
+	const wantRow = `{
+      "id": "fetch",
+      "command": "uvx",
+      "transport": "stdio",
+      "metadata": {"args":["nested"],"readme_url":"old"},
+      "\u0061rgs": [
+        "new]value",
+        "tab\tand\u0001"
+      ],
+      "readme_url": "new"
+    }`
+	data := []byte(prefix + strings.ReplaceAll(staleRow, "\n", "\r\n") + suffix)
+	args := []string{"new]value", "tab\tand\u0001"}
+	got, err := generatePackageCatalog(data, "fetch", "uvx", args, "new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != prefix+wantRow+suffix {
+		t.Fatalf("generated catalog changed bytes outside the owned values and row line endings:\n%s", got)
+	}
+	if err := checkPackageCatalog(got, "fetch", "uvx", args, "new"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSerenaCatalogPreservesNestedReadmeLookalike(t *testing.T) {
+	const oldREADME = "https://example.test/old"
+	descriptor := Descriptor{UpstreamRepository: repositoryURL, Commit: strings.Repeat("b", 40), ReadmePath: "README.md"}
+	withNestedReadme := func(catalog string) string {
+		return strings.Replace(catalog, `"readme_url": "`,
+			`"metadata": {"readme_url":"`+oldREADME+`"}, "readme_url": "`, 1)
+	}
+	data := []byte(withNestedReadme(testCatalog("git+"+repositoryURL+"@old", oldREADME)))
+	want := withNestedReadme(testCatalog(descriptor.SourceArgument(), descriptor.readmeURL()))
+	got, err := generateCatalog(data, descriptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Fatalf("generated Serena catalog changed bytes outside its owned values:\n%s", got)
+	}
+	if err := checkCatalog(got, descriptor); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPackageCatalogRejectsAmbiguousOrInvalidInput(t *testing.T) {
+	const row = `{"id":"fetch","command":"uvx","transport":"stdio","args":["old"],"readme_url":"old"}`
+	tests := []struct {
+		name string
+		data string
+		want string
+	}{
+		{"duplicate entries", `{"entries":[` + row + `],"Entr\u0069es":[]}`, "duplicate entries"},
+		{"duplicate target row", `{"entries":[` + row + `,` + row + `]}`, "duplicate fetch catalog rows"},
+		{"shadowed id", `{"entries":[{"id":"fetch","ID":"other"},` + row + `]}`, "duplicate id"},
+		{"duplicate args", `{"entries":[{` + `"ARG\u0053":[] ,` + row[1:] + `]}`, "duplicate args"},
+		{"duplicate readme", `{"entries":[{` + `"README_URL":"other",` + row[1:] + `]}`, "duplicate readme_url"},
+		{"wrong sibling type", `{"entries":[{"id":"other","args":[true]},` + row + `]}`, "cannot unmarshal"},
+		{"comment", `{"entries":[` + row + `],"other": /* comment */ null}`, "invalid character"},
+		{"trailing comma", `{"entries":[` + row + `,]}`, "invalid character"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := generatePackageCatalog([]byte(tt.data), "fetch", "uvx", []string{"new"}, "new")
+			if got != nil || err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("generatePackageCatalog() = %q, %v, want failure containing %q", got, err, tt.want)
+			}
+		})
 	}
 }
 

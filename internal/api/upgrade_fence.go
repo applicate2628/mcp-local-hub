@@ -19,7 +19,9 @@ const upgradeFenceRetryInterval = 10 * time.Millisecond
 // one-shot: repeated calls return the first release outcome, including an
 // unconfirmed-release poison from the shared lock ledger.
 type UpgradeFenceLease struct {
-	release func() error
+	release   func() error
+	bound     *StateFileObservedLease
+	namespace *WindowsProductStateNamespace
 }
 
 // Release releases the fence once and returns the same outcome on every call.
@@ -88,7 +90,7 @@ func AcquireUpgradeFenceBound(ctx context.Context, stateDir string, namespace *W
 	if err := ctx.Err(); err != nil {
 		return nil, errors.Join(err, release())
 	}
-	return &UpgradeFenceLease{release: release}, nil
+	return &UpgradeFenceLease{release: release, bound: owner, namespace: namespace}, nil
 }
 
 // TryAcquireUpgradeFence attempts the fence once without waiting. A busy fence

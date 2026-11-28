@@ -176,6 +176,29 @@ func VerifySupervisorControlGenerationForPeerFromStateDir(ctx context.Context, s
 	return verifySupervisorControlGenerationFromStateDir(ctx, stateDir, owner, &expected)
 }
 
+// ReadSupervisorRouteForPeer receives the unique built-in Route row from the
+// same authenticated Supervisor used for its aggregate status exchange.
+func ReadSupervisorRouteForPeer(ctx context.Context, stateDir string, owner SupervisorLockOwner, peer SupervisorProcessIdentityV1) (DaemonStatus, error) {
+	result, err := readValidatedSupervisorControlStatus(ctx, stateDir, owner, &peer)
+	if err != nil {
+		return DaemonStatus{}, err
+	}
+	var route *DaemonStatus
+	for i := range result.Rows {
+		row := &result.Rows[i]
+		if row.TaskName == BuiltinRouteTaskName {
+			if route != nil {
+				return DaemonStatus{}, errors.New("duplicate original Route status")
+			}
+			route = row
+		}
+	}
+	if route == nil {
+		return DaemonStatus{}, errors.New("original Route status unavailable")
+	}
+	return *route, nil
+}
+
 func verifySupervisorControlGenerationFromStateDir(ctx context.Context, stateDir string, expected SupervisorLockOwner, peer *SupervisorProcessIdentityV1) error {
 	_, err := readValidatedSupervisorControlStatus(ctx, stateDir, expected, peer)
 	return err
@@ -349,6 +372,7 @@ type supervisorIPCStatusDaemon struct {
 	State         string   `json:"state"`
 	CurrentPID    int      `json:"current_pid"`
 	StartedAt     string   `json:"started_at"`
+	PIDGeneration int      `json:"pid_generation"`
 	IsMaintenance bool     `json:"is_maintenance"`
 	// CrashesInWindow is the supervisor's current in-memory crash count for the
 	// canonical respawn failure window. Zero is a valid observation and remains

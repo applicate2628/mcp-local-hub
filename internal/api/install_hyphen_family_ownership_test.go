@@ -20,6 +20,7 @@ package api
 // kill/port seams — NO real schtasks, NO real kills, NO real ports bound.
 
 import (
+	"bytes"
 	"net"
 	"os"
 	"path/filepath"
@@ -179,16 +180,19 @@ func TestUninstallSchedulerTasksForServer_ReclaimsWhenNoSibling(t *testing.T) {
 // Pre-fix: `planned` holds only demo's OWN tasks, so demo-alpha's task
 // (absent from planned) was sch.Delete-d on every full reinstall of demo.
 // Post-fix: the longest-installed-prefix guard skips it — demo-alpha owns it.
-// demo's own obsolete task (not in planned, owned by demo) IS still pruned.
-func TestPruneObsoleteServerTasks_KeepsSiblingPrunesOwnObsolete(t *testing.T) {
+// The server's own obsolete task receives a named ownership refusal.
+func TestPruneObsoleteServerTasks_KeepsSiblingReportsOwnObsolete(t *testing.T) {
 	daemonIntentTestHelper(t)
 	seedInstalledServerManifests(t, "demo", "demo-alpha")
 
 	f := newInstallFakeScheduler()
 	f.listSeed = []scheduler.TaskStatus{
 		{Name: `\mcp-local-hub-demo-alpha`},      // demo's PLANNED task (kept by planned set)
-		{Name: `\mcp-local-hub-demo-obsolete`},   // demo's OWN obsolete task → must be pruned
+		{Name: `\mcp-local-hub-demo-obsolete`},   // demo's OWN obsolete task → named refusal
 		{Name: `\mcp-local-hub-demo-alpha-beta`}, // sibling demo-alpha / beta → must survive
+	}
+	for _, task := range f.listSeed {
+		f.xml[strings.TrimPrefix(task.Name, "\\")] = []byte("<Task/>")
 	}
 
 	// planned = demo's own current task set (only demo-alpha).
@@ -196,19 +200,20 @@ func TestPruneObsoleteServerTasks_KeepsSiblingPrunesOwnObsolete(t *testing.T) {
 		"mcp-local-hub-demo-alpha": {},
 	}
 
-	rollbacks, err := pruneObsoleteServerTasks(f, "demo", planned, os.Stderr)
+	var output bytes.Buffer
+	err := pruneObsoleteServerTasks(f, "demo", planned, &output)
 	if err != nil {
 		t.Fatalf("pruneObsoleteServerTasks(demo): %v", err)
 	}
-	_ = rollbacks
 
 	// CORE: sibling task survives.
 	if sliceContainsBare(f.deleteNames, "mcp-local-hub-demo-alpha-beta") {
 		t.Fatalf("full reinstall of demo pruned sibling task; deleted=%v (FIX 2 falsified)", f.deleteNames)
 	}
-	// demo's own obsolete task was pruned.
-	if !sliceContainsBare(f.deleteNames, "mcp-local-hub-demo-obsolete") {
-		t.Fatalf("demo's own obsolete task was not pruned; deleted=%v", f.deleteNames)
+	// Classification identifies only demo's obsolete task; it still has no
+	// authority to delete its current generation.
+	if len(f.deleteNames) != 0 || strings.Count(output.String(), "Skipped pruning obsolete scheduler task ") != 1 || !strings.Contains(output.String(), "mcp-local-hub-demo-obsolete") || strings.Contains(output.String(), "mcp-local-hub-demo-alpha-beta") {
+		t.Fatalf("obsolete-task classification/refusal differs: deletes=%v output=%s", f.deleteNames, output.String())
 	}
 	// The planned task is never pruned.
 	if sliceContainsBare(f.deleteNames, "mcp-local-hub-demo-alpha") {
@@ -311,7 +316,7 @@ func TestStop_ServerDaemon_DoesNotKillSiblingPort(t *testing.T) {
 // beta, never sibling demo-alpha-beta.
 //
 // The Restart legacy loop calls killDaemonByPort directly (not killByPortFn);
-// killDaemonByPort calls lookupProcess(port). We record every port lookupProcess
+// killDaemonByPort calls lookupPortPID(port). We record every port lookupPortPID
 // is asked about and assert 9402 is never queried, and that sch.Run/sch.Stop
 // never touch the sibling task name.
 func TestRestart_ServerDaemon_DoesNotKillSiblingPort(t *testing.T) {
@@ -334,12 +339,12 @@ func TestRestart_ServerDaemon_DoesNotKillSiblingPort(t *testing.T) {
 	t.Cleanup(func() { restartSchedulerFactory = origRestart })
 
 	var queriedPorts []int
-	origLookup := lookupProcess
-	lookupProcess = func(port int) (int, uint64, int64, bool) {
+	origLookup := lookupPortPID
+	lookupPortPID = func(port int) (int, bool, error) {
 		queriedPorts = append(queriedPorts, port)
-		return 0, 0, 0, false // no listener → killDaemonByPort is a no-op
+		return 0, false, nil // no listener → killDaemonByPort is a no-op
 	}
-	t.Cleanup(func() { lookupProcess = origLookup })
+	t.Cleanup(func() { lookupPortPID = origLookup })
 
 	if _, err := NewAPI().Restart("demo", "beta"); err != nil {
 		t.Fatalf("Restart(demo, beta): %v", err)
@@ -386,12 +391,12 @@ func TestRestart_Server_DoesNotKillSiblingDaemon(t *testing.T) {
 	t.Cleanup(func() { restartSchedulerFactory = origRestart })
 
 	var queriedPorts []int
-	origLookup := lookupProcess
-	lookupProcess = func(port int) (int, uint64, int64, bool) {
+	origLookup := lookupPortPID
+	lookupPortPID = func(port int) (int, bool, error) {
 		queriedPorts = append(queriedPorts, port)
-		return 0, 0, 0, false
+		return 0, false, nil
 	}
-	t.Cleanup(func() { lookupProcess = origLookup })
+	t.Cleanup(func() { lookupPortPID = origLookup })
 
 	if _, err := NewAPI().Restart("demo", ""); err != nil {
 		t.Fatalf("Restart(demo): %v", err)

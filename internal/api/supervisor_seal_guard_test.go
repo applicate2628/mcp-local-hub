@@ -24,12 +24,15 @@ import (
 // localhost HTTP poll against the developer's real supervisor/processes BEFORE the
 // assertion could fail (Codex #503 r2). Pointer comparison touches nothing.
 //
-// lookupProcess / lookupProcessBatch are checked == nil. The dial + readiness +
-// snapshot seams have func-literal defaults (not comparable to a named production
-// function); they are covered by the AST guard below instead.
+// lookupPortPID / lookupProcess / lookupProcessBatch are checked == nil. The
+// dial + readiness + snapshot seams have func-literal defaults (not comparable
+// to a named production function); they are covered by the AST guard below.
 func TestTestMainSealsLiveFleetAndSlowSeams(t *testing.T) {
+	if lookupPortPID != nil {
+		t.Error("lookupPortPID is not nil-sealed by TestMain — port-kill paths can inspect and taskkill a live daemon")
+	}
 	if lookupProcess != nil {
-		t.Error("lookupProcess is not nil-sealed by TestMain — port-kill paths shell out to netstat/wmic and can taskkill a live daemon")
+		t.Error("lookupProcess is not nil-sealed by TestMain — status paths shell out to netstat/wmic against the live process table")
 	}
 	if lookupProcessBatch != nil {
 		t.Error("lookupProcessBatch is not nil-sealed by TestMain")
@@ -47,6 +50,8 @@ func TestTestMainSealsLiveFleetAndSlowSeams(t *testing.T) {
 	sealed("loopbackPortOwnerFn", loopbackPortOwnerFn, loopbackPortOwnerPID)
 	sealed("taskkillProcessTreeByPIDFn", taskkillProcessTreeByPIDFn, taskkillProcessTreeByPID)
 	sealed("stopForceKillPIDFn", stopForceKillPIDFn, stopForceKillSupervisorPIDTree)
+	sealed("supervisorForceStopFn", supervisorForceStopFn, DialSupervisorIPCForceStop)
+	sealed("prepareSupervisorRemovedStopFn", prepareSupervisorRemovedStopFn, prepareSupervisorRemovedStop)
 }
 
 // liveSeamSinkNames are the production functions whose presence in a package-var
@@ -61,6 +66,7 @@ var liveSeamSinkNames = map[string]bool{
 	"loopbackPortOwnerPID":           true, // netstat loopback owner lookup
 	"taskkillProcessTreeByPID":       true, // taskkill /T
 	"stopForceKillSupervisorPIDTree": true, // POSIX process-group SIGKILL
+	"prepareSupervisorRemovedStop":   true, // authenticated original-creator capture
 	"StartOwner":                     true, // autostart.StartOwner → schtasks /Run
 }
 

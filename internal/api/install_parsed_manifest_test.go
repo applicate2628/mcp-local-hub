@@ -30,16 +30,30 @@ func TestRuntimeImageErrorsReachTimerFanoutAndDryRunWithoutMutation(t *testing.T
 	t.Cleanup(SetTestCanonicalMcphubPath(""))
 	root := hardenedTempDir(t)
 	t.Cleanup(SetDaemonStateRootForTest(root))
+	// Even an admitted Product must reject an occupied singleton whose owner
+	// sidecar cannot be decoded. Keep the original quiet lease for all calls.
+	lockPath := filepath.Join(root, "supervisor.lock")
+	lock, err := AcquireSupervisorLockQuiet(lockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(lock.Release)
+	ownerPath := lockPath + ".owner.json"
+	ownerBefore := []byte(`{"pid":`)
+	if err := os.WriteFile(ownerPath, ownerBefore, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	m := globalTwoDaemonManifest()
 	m.WeeklyRefresh = true
 	assertImageError := func(err error) {
 		t.Helper()
 		var imageErr *RuntimeProductImageError
-		if !errors.As(err, &imageErr) || imageErr.Cause == nil {
-			t.Fatalf("IMAGE-ERROR lost admission cause: %v", err)
+		var syntaxErr *json.SyntaxError
+		if !errors.As(err, &imageErr) || !errors.As(imageErr.Cause, &syntaxErr) || !strings.Contains(imageErr.Cause.Error(), "read runtime product owner") {
+			t.Fatalf("IMAGE-ERROR lost the invalid owner-sidecar cause: %v", err)
 		}
 	}
-	_, err := mergeServerWeeklyRefreshTimer(m, "", nil)
+	_, err = mergeServerWeeklyRefreshTimer(m, "", nil)
 	assertImageError(err)
 	workspace := &config.ServerManifest{Name: "image-error-workspace", Kind: config.KindWorkspaceScoped, DaemonTemplate: &config.DaemonTemplate{}}
 	_, err = serenaOrPlanDaemons(workspace, nil, "", []WorkspaceEntry{{WorkspacePath: root, Language: SerenaLanguageSentinel}}, "", io.Discard)
@@ -53,6 +67,9 @@ func TestRuntimeImageErrorsReachTimerFanoutAndDryRunWithoutMutation(t *testing.T
 	}
 	if _, err := os.Stat(filepath.Join(root, supervisorIntentFileLeaf)); !os.IsNotExist(err) {
 		t.Fatalf("failed image admission mutated intent: %v", err)
+	}
+	if ownerAfter, err := os.ReadFile(ownerPath); err != nil || !bytes.Equal(ownerAfter, ownerBefore) {
+		t.Fatalf("failed image admission changed the occupied owner's sidecar: %v", err)
 	}
 }
 
@@ -1865,11 +1882,8 @@ func TestInstallParsedManifest_SpecBearingWrite_StillRefusesWithoutToken(t *test
 }
 
 // TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockPathMismatches
-// is the in-gate Crux-3 guard: a token minted from a lock whose leaf does NOT
-// match the gate's own stateDir/supervisor.lock is REJECTED — the gate treats it
-// as no-bypass, the probe runs, and the spec-bearing write REFUSES. This folds
-// the path-mismatch check INTO the gate so a misconfigured Phase-2 call site
-// (wrong resolver) cannot silently re-open the split-brain.
+// requires runtime-image preflight to reject a token from another state root
+// before a spec-bearing write can reach the install gate.
 func TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockPathMismatches(t *testing.T) {
 	stateDir := daemonIntentTestHelper(t)
 	preparePreflightBinaryChecks(t)
@@ -1887,7 +1901,7 @@ func TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockPathMismatc
 	// Mint a token from a lock on a DIFFERENT leaf (a sibling temp dir). Its
 	// .path does not equal the gate's stateDir/supervisor.lock, so the identity
 	// check must reject it.
-	otherDir := t.TempDir()
+	otherDir := hardenedTempDir(t)
 	otherLk, err := AcquireSupervisorLock(filepath.Join(otherDir, "supervisor.lock"))
 	if err != nil {
 		t.Fatalf("acquire mismatched supervisor lock: %v", err)
@@ -1905,25 +1919,35 @@ func TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockPathMismatc
 	m := serenaTemplateManifest()
 	a := NewAPI()
 	var buf bytes.Buffer
-	_, err = a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+	for _, leaf := range []string{supervisorIntentFileLeaf, supervisorIntentFileLeaf + supervisorIntentLockSuffix, SupervisorEventLogFileLeaf} {
+		if _, statErr := os.Stat(filepath.Join(stateDir, leaf)); !os.IsNotExist(statErr) {
+			t.Fatalf("mismatched bypass setup touched %s before install: %v", leaf, statErr)
+		}
+	}
+	intentPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
 		ManifestHash:         testExactManifestHash,
 		Writer:               &buf,
 		Workspaces:           workspaces,
 		SupervisorLockBypass: otherLk.AllowSpecBearingWriteBypass(),
 	})
-	if err == nil {
-		t.Fatal("expected §7.1 refuse when the bypass token's lock leaf mismatches the gate path, got nil")
+	var admissionErr *AdmissionError
+	if intentPath != "" || !errors.As(err, &admissionErr) || admissionErr.ID != "canonical-mcphub" ||
+		admissionErr.Reason != "E_RUNTIME_PRODUCT_IMAGE: runtime product supervisor exclusion is absent, released, or belongs to another state directory" {
+		t.Fatalf("invalid bypass preflight classification: path=%q error=%v", intentPath, err)
 	}
-	if !strings.Contains(err.Error(), "refusing to write spec-bearing") {
-		t.Errorf("refuse error %q missing the gate signature (path-mismatch token must NOT bypass)", err.Error())
+	for _, leaf := range []string{supervisorIntentFileLeaf, supervisorIntentFileLeaf + supervisorIntentLockSuffix, SupervisorEventLogFileLeaf} {
+		if _, statErr := os.Stat(filepath.Join(stateDir, leaf)); !os.IsNotExist(statErr) {
+			t.Fatalf("refused bypass touched %s: %v", leaf, statErr)
+		}
+	}
+	if f.createCount != 0 || f.runCount != 0 || len(f.deleteNames) != 0 || len(f.importNames) != 0 {
+		t.Fatalf("refused bypass mutated scheduler: create=%d run=%d delete=%v import=%v", f.createCount, f.runCount, f.deleteNames, f.importNames)
 	}
 }
 
 // TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockAlreadyReleased
-// proves the identity check verifies the lock is STILL HELD, not merely that the
-// handle once existed. A token minted from a matching lock that is then released
-// (Release() nils .fl) is stale and must be REJECTED — the gate falls through to
-// the probe and refuses.
+// requires runtime-image preflight to reject a previously held token. Reacquiring
+// the same path must not restore authority to the released original token.
 func TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockAlreadyReleased(t *testing.T) {
 	stateDir := daemonIntentTestHelper(t)
 	preparePreflightBinaryChecks(t)
@@ -1959,17 +1983,24 @@ func TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockAlreadyRele
 	m := serenaTemplateManifest()
 	a := NewAPI()
 	var buf bytes.Buffer
-	_, err = a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+	intentPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
 		ManifestHash:         testExactManifestHash,
 		Writer:               &buf,
 		Workspaces:           workspaces,
 		SupervisorLockBypass: token, // stale: minted then released
 	})
-	if err == nil {
-		t.Fatal("expected §7.1 refuse when the bypass token's lock was already released, got nil")
+	var admissionErr *AdmissionError
+	if intentPath != "" || !errors.As(err, &admissionErr) || admissionErr.ID != "canonical-mcphub" ||
+		admissionErr.Reason != "E_RUNTIME_PRODUCT_IMAGE: runtime product supervisor exclusion is absent, released, or belongs to another state directory" {
+		t.Fatalf("invalid bypass preflight classification: path=%q error=%v", intentPath, err)
 	}
-	if !strings.Contains(err.Error(), "refusing to write spec-bearing") {
-		t.Errorf("refuse error %q missing the gate signature (released token must NOT bypass)", err.Error())
+	for _, leaf := range []string{supervisorIntentFileLeaf, supervisorIntentFileLeaf + supervisorIntentLockSuffix, SupervisorEventLogFileLeaf} {
+		if _, statErr := os.Stat(filepath.Join(stateDir, leaf)); !os.IsNotExist(statErr) {
+			t.Fatalf("refused bypass touched %s: %v", leaf, statErr)
+		}
+	}
+	if f.createCount != 0 || f.runCount != 0 || len(f.deleteNames) != 0 || len(f.importNames) != 0 {
+		t.Fatalf("refused bypass mutated scheduler: create=%d run=%d delete=%v import=%v", f.createCount, f.runCount, f.deleteNames, f.importNames)
 	}
 }
 
@@ -2040,12 +2071,19 @@ func TestInstallPlanCore_GlobalFreshInstall_WritesSupervisorIntent_NoSchedulerTa
 }
 
 func TestInstallPlanCore_GlobalDryRunPrintsSupervisorMutationPlan(t *testing.T) {
-	daemonIntentTestHelper(t)
+	stateDir := daemonIntentTestHelper(t)
 	preparePreflightBinaryChecks(t)
 	f := newInstallFakeScheduler()
 	installFakeScheduler(t, f)
 
 	m := globalTwoDaemonManifest()
+	const removedTask = `\mcp-local-hub-demo-gamma`
+	if err := WriteSupervisorIntent(filepath.Join(stateDir, supervisorIntentFileLeaf), &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{{TaskName: removedTask, Server: m.Name, Daemon: "gamma", Command: "old", Port: 9213}},
+	}); err != nil {
+		t.Fatalf("seed supervisor intent: %v", err)
+	}
 	plan, err := BuildPlan(m, "")
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
@@ -2056,6 +2094,13 @@ func TestInstallPlanCore_GlobalDryRunPrintsSupervisorMutationPlan(t *testing.T) 
 		t.Fatalf("installPlanCore(global dry-run): %v", err)
 	}
 	out := buf.String()
+	removedHeading := "Removed supervisor targets to kill (1)"
+	if runtime.GOOS == "windows" {
+		removedHeading = "Removed supervisor intent targets (1; automatic force-stop refused on Windows)"
+		if strings.Contains(out, "Removed supervisor targets to kill") {
+			t.Errorf("Windows dry-run claimed a force-stop:\n%s", out)
+		}
+	}
 	for _, want := range []string{
 		"Supervisor intent rows to write",
 		"mcp-local-hub-demo-alpha",
@@ -2063,8 +2108,9 @@ func TestInstallPlanCore_GlobalDryRunPrintsSupervisorMutationPlan(t *testing.T) 
 		"Maintenance timers to ensure",
 		"mcp-local-hub-demo-weekly-refresh",
 		"Autostart owner to ensure",
-		"Legacy scheduler tasks to clean",
-		"Removed supervisor targets to kill",
+		"Legacy scheduler tasks retained",
+		removedHeading,
+		"mcp-local-hub-demo-gamma  [port 9213]",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("global dry-run output missing %q:\n%s", want, out)
@@ -2342,18 +2388,16 @@ func TestInstallPlanCore_GlobalInstall_AutostartEnableUsesCanonicalMcphubPath(t 
 	}
 }
 
-// TestInstallPlanCore_GlobalInstall_AutostartAlreadyEnabledNoops proves install
-// does not rewrite an existing logon owner merely because daemon scheduler tasks
-// are suppressed.
-//
-// Negative-control: unconditionally call Enable after the supervisor-path
-// install and the fake Enable count becomes 1, so this test fails.
-func TestInstallPlanCore_GlobalInstall_AutostartAlreadyEnabledNoops(t *testing.T) {
-	daemonIntentTestHelper(t)
+func TestInstallPlanCore_GlobalInstall_AutostartExistingTask(t *testing.T) {
+	root := daemonIntentTestHelper(t)
 	preparePreflightBinaryChecks(t)
 	f := newInstallFakeScheduler()
 	installFakeScheduler(t, f)
-	fb := &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped}
+	prior := scheduler.EncodeXMLUTF16LEBOM("<Task>existing autostart</Task>")
+	fb := &fakeInstallAutostartBackend{
+		statusReturn: autostart.StateEnabledStopped,
+		enableErr:    autostart.NewObservedTaskReplacementRefusal(autostart.WindowsTaskName, prior, nil),
+	}
 	installFakeAutostartBackend(t, fb)
 	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
 		return ReconcileResponse{}, nil
@@ -2364,24 +2408,25 @@ func TestInstallPlanCore_GlobalInstall_AutostartAlreadyEnabledNoops(t *testing.T
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
-	if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", false, io.Discard); err != nil {
+	var out bytes.Buffer
+	if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", false, &out); err != nil {
 		t.Fatalf("installPlanCore(global install): %v", err)
 	}
 
-	if fb.enableCalls != 0 {
+	if runtime.GOOS == "windows" {
+		if fb.enableCalls != 1 || len(fb.statusOpts) != 0 || fb.disableCalls != 0 {
+			t.Fatalf("Windows existing-task projection: enable=%d status=%d disable=%d", fb.enableCalls, len(fb.statusOpts), fb.disableCalls)
+		}
+		readInstallRecoverySnapshot(t, root, autostart.WindowsTaskName, prior)
+		if !strings.Contains(out.String(), ErrSchedulerReplacementUnowned.Error()) || !strings.Contains(out.String(), "snapshot retained at") {
+			t.Fatalf("install did not report preserved task: %q", out.String())
+		}
+	} else if fb.enableCalls != 0 {
 		t.Fatalf("autostart Enable calls = %d, want 0 when owner is already enabled", fb.enableCalls)
 	}
 }
 
-// TestEnsureGlobalInstallAutostartOwner_RecreatesDriftedShimWithCanonicalPath
-// pins the install-time owner handoff for a drifted existing shim. StateDrifted
-// means the stored command line or binary path disagrees with the canonical
-// Enable(opts) body, so install must rewrite it before relying on that owner.
-//
-// Negative-control: pre-fix ensureGlobalInstallAutostartOwner only warned for
-// StateDrifted, so the fake Enable count stayed 0 and the canonical path was
-// never applied.
-func TestEnsureGlobalInstallAutostartOwner_RecreatesDriftedShimWithCanonicalPath(t *testing.T) {
+func TestEnsureGlobalInstallAutostartOwner_UsesCanonicalPath(t *testing.T) {
 	canonical := filepath.Join(t.TempDir(), MCPHubBinaryName())
 	if err := os.WriteFile(canonical, []byte("fixture"), 0o600); err != nil {
 		t.Fatal(err)
@@ -2405,6 +2450,14 @@ func TestEnsureGlobalInstallAutostartOwner_RecreatesDriftedShimWithCanonicalPath
 }
 
 func TestEnsureGlobalInstallAutostartOwner_EnabledStatesDoNotRewriteShim(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows Enable performs its own create-only admission")
+	}
+	canonical := filepath.Join(t.TempDir(), MCPHubBinaryName())
+	if err := os.WriteFile(canonical, []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(SetTestCanonicalMcphubPath(canonical))
 	for _, state := range []autostart.State{autostart.StateEnabledRunning, autostart.StateEnabledStopped} {
 		t.Run(state.String(), func(t *testing.T) {
 			fb := &fakeInstallAutostartBackend{statusReturn: state}
@@ -2412,71 +2465,10 @@ func TestEnsureGlobalInstallAutostartOwner_EnabledStatesDoNotRewriteShim(t *test
 
 			ensureGlobalInstallAutostartOwner(io.Discard, false, OwnerModeGUI)
 
-			if fb.enableCalls != 0 {
-				t.Fatalf("autostart Enable calls = %d, want 0 for %s", fb.enableCalls, state)
+			if fb.enableCalls != 0 || len(fb.statusOpts) != 1 {
+				t.Fatalf("projection for %s: enable=%d status=%d", state, fb.enableCalls, len(fb.statusOpts))
 			}
 		})
-	}
-}
-
-func TestKillLegacySchedulerTaskDaemonByPortBestEffort_ForeignOwnerNotKilled(t *testing.T) {
-	origKill := killByPortFn
-	origForceKill := forceKillByPortFn
-	origLookup := lookupProcess
-	t.Cleanup(func() {
-		killByPortFn = origKill
-		forceKillByPortFn = origForceKill
-		lookupProcess = origLookup
-	})
-	lookupProcess = nil
-
-	legacyKillCalled := false
-	killByPortFn = func(port int, timeout time.Duration) error {
-		legacyKillCalled = true
-		return nil
-	}
-	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
-		if port != 33031 {
-			t.Fatalf("forceKillByPortFn port = %d, want 33031", port)
-		}
-		return portKillIdentityMismatch, errors.New("port owned by foreign process")
-	}
-
-	var buf bytes.Buffer
-	killLegacySchedulerTaskDaemonByPortBestEffort("mcp-local-hub-demo-alpha", 33031, &buf)
-	if legacyKillCalled {
-		t.Fatal("legacy handoff used killByPortFn on a foreign owner; want identity-mismatch warning without kill")
-	}
-	out := buf.String()
-	if !strings.Contains(out, "port owned by foreign process") || !strings.Contains(out, "not killing") {
-		t.Fatalf("warning = %q, want foreign-owner not-killing warning", out)
-	}
-}
-
-func TestKillLegacySchedulerTaskDaemonByPortBestEffort_McphubOwnerKilled(t *testing.T) {
-	origKill := killByPortFn
-	origForceKill := forceKillByPortFn
-	origLookup := lookupProcess
-	t.Cleanup(func() {
-		killByPortFn = origKill
-		forceKillByPortFn = origForceKill
-		lookupProcess = origLookup
-	})
-	lookupProcess = nil
-
-	killByPortFn = func(port int, timeout time.Duration) error {
-		t.Fatalf("legacy handoff must use outcome-aware kill path, got killByPortFn(%d)", port)
-		return nil
-	}
-	var killedPorts []int
-	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
-		killedPorts = append(killedPorts, port)
-		return portKillKilled, nil
-	}
-
-	killLegacySchedulerTaskDaemonByPortBestEffort("mcp-local-hub-demo-alpha", 33032, io.Discard)
-	if !reflect.DeepEqual(killedPorts, []int{33032}) {
-		t.Fatalf("killed ports = %v, want [33032]", killedPorts)
 	}
 }
 
@@ -2553,7 +2545,7 @@ func TestInstallPlanCore_GlobalFilteredInstall_ReplacesOnlySelectedDaemon(t *tes
 	}
 }
 
-func TestInstallPlanCore_GlobalFullReinstall_KillsRemovedSupervisorDaemon(t *testing.T) {
+func TestInstallPlanCore_GlobalFullReinstall_RemovesSupervisorDaemon(t *testing.T) {
 	fakeMcphubIdentityForTest(t)
 	stateDir := daemonIntentTestHelper(t)
 	preparePreflightBinaryChecks(t)
@@ -2591,46 +2583,44 @@ func TestInstallPlanCore_GlobalFullReinstall_KillsRemovedSupervisorDaemon(t *tes
 	}
 
 	var order []string
-	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+	var completedPIDs []int
+	captures := make(map[string]*removedStopFixture, 2)
+	installRemovedPrepareFixture(t, func(_ context.Context, task string, port int) (supervisorRemovedStop, error) {
+		order = append(order, "capture")
+		assertSupervisorIntentFlockAvailableDuringIPCStatus(t, stateDir)
+		current, err := ReadSupervisorIntent(intentPath)
+		if err != nil || current.FindSupervisorDaemonByTaskName(task) == nil {
+			t.Fatalf("capture followed descriptor removal: task=%s error=%v", task, err)
+		}
+		pid := map[string]int{alphaTask: 4243, betaTask: 4244}[task]
+		wantPort := map[string]int{alphaTask: 9321, betaTask: 9322}[task]
+		if pid == 0 || port != wantPort || captures[task] != nil {
+			t.Fatalf("unexpected original capture: task=%s port=%d", task, port)
+		}
+		capture := &removedStopFixture{complete: func(context.Context) (ForceStopResultV1, error) {
+			order = append(order, "complete")
+			assertSupervisorIntentFlockAvailableDuringIPCStatus(t, stateDir)
+			current, err := ReadSupervisorIntent(intentPath)
+			if task != betaTask || err != nil || current.FindSupervisorDaemonByTaskName(task) != nil {
+				t.Fatalf("cleanup did not receive only the committed removal: task=%s error=%v", task, err)
+			}
+			completedPIDs = append(completedPIDs, pid)
+			result := forceStopClosedFixture(task, port)
+			result.Target.PID = pid
+			return result, nil
+		}}
+		captures[task] = capture
+		return capture, nil
+	})
+	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(context.Context, bool) (ReconcileResponse, error) {
 		order = append(order, "nudge")
+		assertSupervisorIntentFlockAvailableDuringIPCStatus(t, stateDir)
+		current, err := ReadSupervisorIntent(intentPath)
+		if err != nil || current.FindSupervisorDaemonByTaskName(betaTask) != nil || current.FindSupervisorDaemonByTaskName(alphaTask) == nil || current.FindSupervisorDaemonByTaskName(otherTask) == nil {
+			t.Fatalf("nudge preceded committed removal or lost a retained row: %v", err)
+		}
 		return ReconcileResponse{}, nil
 	}))
-
-	var killPorts []int
-	origForceKill := forceKillByPortFn
-	origLookup := lookupProcess
-	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
-		order = append(order, "kill-port")
-		killPorts = append(killPorts, port)
-		t.Fatalf("forceKillByPortFn called for port %d after successful PID kill", port)
-		return portKillNoListener, nil
-	}
-	lookupProcess = func(port int) (int, uint64, int64, bool) {
-		if port != 9322 {
-			t.Fatalf("lookupProcess port = %d, want 9322", port)
-		}
-		return 0, 0, 0, false
-	}
-	t.Cleanup(func() {
-		forceKillByPortFn = origForceKill
-		lookupProcess = origLookup
-	})
-
-	var killedPIDs []int
-	origPID := stopForceKillPIDFn
-	stopForceKillPIDFn = func(pid int) error {
-		order = append(order, "kill-pid")
-		killedPIDs = append(killedPIDs, pid)
-		return nil
-	}
-	t.Cleanup(func() { stopForceKillPIDFn = origPID })
-
-	origStatus := supervisorIPCStatusFn
-	supervisorIPCStatusFn = func(ctx context.Context) ([]DaemonStatus, error) {
-		order = append(order, "ipc-status")
-		return []DaemonStatus{{TaskName: betaTask, PID: 4244, State: "Running"}}, nil
-	}
-	t.Cleanup(func() { supervisorIPCStatusFn = origStatus })
 
 	m := &config.ServerManifest{
 		Name:          "demo",
@@ -2661,17 +2651,22 @@ func TestInstallPlanCore_GlobalFullReinstall_KillsRemovedSupervisorDaemon(t *tes
 			t.Fatalf("removed daemon %s survived merged intent: %+v", betaTask, written.Daemons)
 		}
 	}
-	// The captured supervisor-reported PID (4244) is killed first. The
-	// descriptor port is only polled for release; it must not fall through to a
-	// blind port kill because the removed row's port may already be reused.
-	if len(killPorts) != 0 {
-		t.Fatalf("forceKillByPortFn ports = %v, want none after the PID kill", killPorts)
+	// This mapping fixture completes the captured original beta descriptor.
+	// installRemovedPrepareFixture seals numerical PID/port fallbacks; native
+	// closure is covered by the separate original-owner Windows fixture.
+	if len(completedPIDs) != 1 || completedPIDs[0] != 4244 {
+		t.Fatalf("completed original fixture PIDs = %v, want exactly [4244]", completedPIDs)
 	}
-	if len(killedPIDs) != 1 || killedPIDs[0] != 4244 {
-		t.Fatalf("PID kills = %v, want exactly [4244]", killedPIDs)
+	if !reflect.DeepEqual(order, []string{"capture", "capture", "nudge", "complete"}) {
+		t.Fatalf("capture/nudge/complete order = %v", order)
 	}
-	if len(order) != 3 || order[0] != "ipc-status" || order[1] != "nudge" || order[2] != "kill-pid" {
-		t.Fatalf("ipc/reconcile/kill order = %v, want [ipc-status nudge kill-pid]", order)
+	if len(captures) != 2 {
+		t.Fatalf("captured %d original rows, want 2", len(captures))
+	}
+	for _, capture := range captures {
+		if capture.closed != 1 {
+			t.Fatalf("capture close count = %d, want 1", capture.closed)
+		}
 	}
 	if _, ok := written.Stops[betaTask]; ok {
 		t.Fatalf("removed daemon %s retained a dangling stop entry: %+v", betaTask, written.Stops)
@@ -2684,6 +2679,103 @@ func TestInstallPlanCore_GlobalFullReinstall_KillsRemovedSupervisorDaemon(t *tes
 	}
 	if _, ok := written.LegacyStopWatermarks[otherTask]; ok {
 		t.Fatalf("sibling stop %s retained redundant legacy-stop watermark: %+v", otherTask, written.LegacyStopWatermarks)
+	}
+}
+
+func TestInstallPlanCore_WindowsFullReinstallRetainsLegacyGeneration(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows install force-stop refusal")
+	}
+	const legacyName = "mcp-local-hub-demo-beta"
+	const removedTask = `\` + legacyName
+	priorXML := []byte("<Task>original legacy registration</Task>")
+	for _, tc := range []struct {
+		name   string
+		listed bool
+		pid    int
+	}{
+		{name: "listed with port fallback", listed: true},
+		{name: "listed with captured PID", listed: true, pid: 4244},
+		{name: "unlisted with port fallback"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fakeMcphubIdentityForTest(t)
+			stateDir := daemonIntentTestHelper(t)
+			preparePreflightBinaryChecks(t)
+			f := newInstallFakeScheduler()
+			f.tasks[legacyName], f.xml[legacyName] = true, bytes.Clone(priorXML)
+			if tc.listed {
+				f.listSeed = []scheduler.TaskStatus{{Name: removedTask}}
+			}
+			installFakeScheduler(t, f)
+			installFakeAutostartBackend(t, &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped})
+
+			m := globalTwoDaemonManifest()
+			removed := m.Daemons[1]
+			m.Daemons = m.Daemons[:1]
+			m.WeeklyRefresh = false
+			intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+			if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{
+				Version: 1,
+				Daemons: []SupervisorDaemon{{TaskName: removedTask, Server: m.Name, Daemon: removed.Name, Command: "old", Port: removed.Port}},
+			}); err != nil {
+				t.Fatalf("seed supervisor intent: %v", err)
+			}
+
+			origStatus, origPIDKill := supervisorIPCStatusFn, stopForceKillPIDFn
+			origPortKill, origLookup := forceKillByPortFn, lookupProcess
+			t.Cleanup(func() {
+				supervisorIPCStatusFn, stopForceKillPIDFn = origStatus, origPIDKill
+				forceKillByPortFn, lookupProcess = origPortKill, origLookup
+			})
+			supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
+				if tc.pid == 0 {
+					return nil, nil
+				}
+				return []DaemonStatus{{TaskName: removedTask, PID: tc.pid, State: "Running"}}, nil
+			}
+			stopForceKillPIDFn = func(pid int) error {
+				t.Errorf("automatic install attempted to kill PID %d", pid)
+				return nil
+			}
+			forceKillByPortFn = func(port int, _ time.Duration) (portKillOutcome, error) {
+				t.Errorf("automatic install attempted to kill the listener on port %d", port)
+				return portKillKilled, nil
+			}
+			lookupProcess = func(int) (int, uint64, int64, bool) { return 0, 0, 0, false }
+			var nudges int
+			t.Cleanup(setSupervisorReconcileApplyHookForTest(func(_ context.Context, apply bool) (ReconcileResponse, error) {
+				if !apply {
+					t.Error("install did not request reconcile apply")
+				}
+				nudges++
+				return ReconcileResponse{}, nil
+			}))
+
+			plan, err := BuildPlan(m, "")
+			if err != nil {
+				t.Fatalf("BuildPlan: %v", err)
+			}
+			var out bytes.Buffer
+			if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", false, &out); err != nil {
+				t.Fatalf("installPlanCore: %v", err)
+			}
+			written, err := ReadSupervisorIntent(intentPath)
+			if err != nil || len(written.Daemons) != 1 || written.Daemons[0].Daemon != "alpha" {
+				t.Fatalf("install did not replace the old supervisor intent: %+v, err=%v", written, err)
+			}
+			if !f.tasks[legacyName] || !bytes.Equal(f.xml[legacyName], priorXML) || len(f.deleteNames) != 0 || len(f.importNames) != 0 || f.createCount != 0 || f.runCount != 0 {
+				t.Fatalf("install mutated the legacy scheduler: exists=%v XML=%q deletes=%v imports=%v creates=%d runs=%d", f.tasks[legacyName], f.xml[legacyName], f.deleteNames, f.importNames, f.createCount, f.runCount)
+			}
+			if tc.listed {
+				readInstallRecoverySnapshot(t, stateDir, legacyName, priorXML)
+			} else if snapshots, err := filepath.Glob(filepath.Join(stateDir, "scheduler-recovery-*.json")); err != nil || len(snapshots) != 0 {
+				t.Fatalf("install recorded an unobserved task: snapshots=%v err=%v", snapshots, err)
+			}
+			if nudges != 1 || !strings.Contains(out.String(), "force kill removed supervisor targets skipped on Windows ("+legacyName+")") {
+				t.Fatalf("nudges=%d, output:\n%s", nudges, out.String())
+			}
+		})
 	}
 }
 
@@ -2846,207 +2938,6 @@ func TestInstallPlanCore_GlobalFreshInstall_NoPerDaemonSchedulerTaskCreated(t *t
 	if got.Enabled != nil {
 		t.Errorf("materialized weekly-refresh timer Enabled = %v, want nil (default-on on a fresh install)", *got.Enabled)
 	}
-}
-
-func TestCleanupLegacySchedulerTasksForSupervisorInstall_DeletesTaskAndKillsPort(t *testing.T) {
-	t.Run("legacy daemon task is deleted before its manifest port is killed", func(t *testing.T) {
-		daemonIntentTestHelper(t)
-		f := newInstallFakeScheduler()
-		f.listSeed = []scheduler.TaskStatus{{Name: `\mcp-local-hub-demo-alpha`}}
-		installFakeScheduler(t, f)
-
-		origLookup := lookupProcess
-		lookupProcess = nil
-		t.Cleanup(func() { lookupProcess = origLookup })
-
-		var killed []int
-		origKill := forceKillByPortFn
-		forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
-			if len(f.deleteNames) == 0 {
-				t.Errorf("forceKillByPortFn called before deleting the legacy scheduler task")
-			}
-			if timeout != 5*time.Second {
-				t.Errorf("kill timeout = %s, want 5s", timeout)
-			}
-			killed = append(killed, port)
-			return portKillKilled, nil
-		}
-		t.Cleanup(func() { forceKillByPortFn = origKill })
-
-		m := &config.ServerManifest{
-			Name:      "demo",
-			Kind:      config.KindGlobal,
-			Transport: config.TransportStdioBridge,
-			Command:   "go",
-			Daemons: []config.DaemonSpec{
-				{Name: "alpha", Port: 9313},
-				{Name: "beta", Port: 33013},
-			},
-		}
-		var buf bytes.Buffer
-		cleanupLegacySchedulerTasksForSupervisorInstall(m, "", &buf)
-
-		if len(f.deleteNames) != 1 || f.deleteNames[0] != "mcp-local-hub-demo-alpha" {
-			t.Fatalf("deleted legacy tasks = %v, want [mcp-local-hub-demo-alpha]", f.deleteNames)
-		}
-		if len(killed) != 1 || killed[0] != 9313 {
-			t.Fatalf("forceKillByPortFn ports = %v, want only the listed legacy task port [9313]", killed)
-		}
-	})
-
-	t.Run("hyphenated daemon name uses exact manifest match for port kill", func(t *testing.T) {
-		daemonIntentTestHelper(t)
-		f := newInstallFakeScheduler()
-		f.listSeed = []scheduler.TaskStatus{{Name: `\mcp-local-hub-demo-vscode-css`}}
-		installFakeScheduler(t, f)
-
-		origLookup := lookupProcess
-		lookupProcess = nil
-		t.Cleanup(func() { lookupProcess = origLookup })
-
-		var killed []int
-		origKill := forceKillByPortFn
-		forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
-			if len(f.deleteNames) == 0 {
-				t.Errorf("forceKillByPortFn called before deleting the legacy scheduler task")
-			}
-			killed = append(killed, port)
-			return portKillKilled, nil
-		}
-		t.Cleanup(func() { forceKillByPortFn = origKill })
-
-		m := &config.ServerManifest{
-			Name:      "demo",
-			Kind:      config.KindGlobal,
-			Transport: config.TransportStdioBridge,
-			Command:   "go",
-			Daemons: []config.DaemonSpec{
-				{Name: "vscode-css", Port: 33017},
-			},
-		}
-		var buf bytes.Buffer
-		cleanupLegacySchedulerTasksForSupervisorInstall(m, "", &buf)
-
-		if len(f.deleteNames) != 1 || f.deleteNames[0] != "mcp-local-hub-demo-vscode-css" {
-			t.Fatalf("deleted legacy tasks = %v, want [mcp-local-hub-demo-vscode-css]", f.deleteNames)
-		}
-		if len(killed) != 1 || killed[0] != 33017 {
-			t.Fatalf("forceKillByPortFn ports = %v, want hyphenated daemon port [33017]", killed)
-		}
-	})
-
-	t.Run("zero port deletes task but skips kill with warning", func(t *testing.T) {
-		daemonIntentTestHelper(t)
-		f := newInstallFakeScheduler()
-		f.listSeed = []scheduler.TaskStatus{{Name: `\mcp-local-hub-demo-alpha`}}
-		installFakeScheduler(t, f)
-
-		origLookup := lookupProcess
-		lookupProcess = nil
-		t.Cleanup(func() { lookupProcess = origLookup })
-
-		var killed []int
-		origKill := forceKillByPortFn
-		forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
-			killed = append(killed, port)
-			return portKillKilled, nil
-		}
-		t.Cleanup(func() { forceKillByPortFn = origKill })
-
-		m := &config.ServerManifest{
-			Name:      "demo",
-			Kind:      config.KindGlobal,
-			Transport: config.TransportStdioBridge,
-			Command:   "go",
-			Daemons:   []config.DaemonSpec{{Name: "alpha", Port: 0}},
-		}
-		var buf bytes.Buffer
-		cleanupLegacySchedulerTasksForSupervisorInstall(m, "", &buf)
-
-		if len(f.deleteNames) != 1 || f.deleteNames[0] != "mcp-local-hub-demo-alpha" {
-			t.Fatalf("deleted legacy tasks = %v, want [mcp-local-hub-demo-alpha]", f.deleteNames)
-		}
-		if len(killed) != 0 {
-			t.Fatalf("forceKillByPortFn ports = %v, want none for port 0", killed)
-		}
-		if !strings.Contains(buf.String(), "daemon port unknown") {
-			t.Fatalf("cleanup warning = %q, want daemon port unknown warning", buf.String())
-		}
-	})
-
-	t.Run("filtered install skips absent legacy task without delete or kill", func(t *testing.T) {
-		daemonIntentTestHelper(t)
-		f := newInstallFakeScheduler()
-		installFakeScheduler(t, f)
-
-		origLookup := lookupProcess
-		lookupProcess = nil
-		t.Cleanup(func() { lookupProcess = origLookup })
-
-		var killed []int
-		origKill := forceKillByPortFn
-		forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
-			killed = append(killed, port)
-			return portKillKilled, nil
-		}
-		t.Cleanup(func() { forceKillByPortFn = origKill })
-
-		m := &config.ServerManifest{
-			Name:      "demo",
-			Kind:      config.KindGlobal,
-			Transport: config.TransportStdioBridge,
-			Command:   "go",
-			Daemons:   []config.DaemonSpec{{Name: "alpha", Port: 33031}},
-		}
-		var buf bytes.Buffer
-		cleanupLegacySchedulerTasksForSupervisorInstall(m, "alpha", &buf)
-
-		if len(f.deleteNames) != 0 {
-			t.Fatalf("deleted legacy tasks = %v, want none when filtered task is absent", f.deleteNames)
-		}
-		if len(killed) != 0 {
-			t.Fatalf("forceKillByPortFn ports = %v, want none when filtered task is absent", killed)
-		}
-	})
-
-	t.Run("filtered install deletes and kills when legacy task exists", func(t *testing.T) {
-		daemonIntentTestHelper(t)
-		f := newInstallFakeScheduler()
-		f.listSeed = []scheduler.TaskStatus{{Name: `\mcp-local-hub-demo-alpha`}}
-		installFakeScheduler(t, f)
-
-		origLookup := lookupProcess
-		lookupProcess = nil
-		t.Cleanup(func() { lookupProcess = origLookup })
-
-		var killed []int
-		origKill := forceKillByPortFn
-		forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
-			if len(f.deleteNames) == 0 {
-				t.Errorf("forceKillByPortFn called before deleting the filtered legacy scheduler task")
-			}
-			killed = append(killed, port)
-			return portKillKilled, nil
-		}
-		t.Cleanup(func() { forceKillByPortFn = origKill })
-
-		m := &config.ServerManifest{
-			Name:      "demo",
-			Kind:      config.KindGlobal,
-			Transport: config.TransportStdioBridge,
-			Command:   "go",
-			Daemons:   []config.DaemonSpec{{Name: "alpha", Port: 33032}},
-		}
-		var buf bytes.Buffer
-		cleanupLegacySchedulerTasksForSupervisorInstall(m, "alpha", &buf)
-
-		if len(f.deleteNames) != 1 || f.deleteNames[0] != "mcp-local-hub-demo-alpha" {
-			t.Fatalf("deleted legacy tasks = %v, want [mcp-local-hub-demo-alpha]", f.deleteNames)
-		}
-		if len(killed) != 1 || killed[0] != 33032 {
-			t.Fatalf("forceKillByPortFn ports = %v, want [33032]", killed)
-		}
-	})
 }
 
 // TestBuildMergedSupervisorIntent_PreservesStopsSubBlock locks in the

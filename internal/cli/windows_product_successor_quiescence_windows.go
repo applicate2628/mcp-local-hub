@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -184,7 +186,7 @@ func acquireWindowsProductSuccessorQuiescence(ctx context.Context, stateDir, gui
 		return q, err
 	}
 	stage = windowsProductQuiescenceAtHeldRecheck
-	if err = q.verifyHeld(limit); err != nil {
+	if err = q.verifyHeld(limit, nil); err != nil {
 		return q, err
 	}
 	q.phase = windowsProductQuiescenceInverseReady
@@ -269,43 +271,15 @@ func (q *windowsProductSuccessorQuiescence) absent(ctx context.Context) error {
 	if err != nil {
 		return &windowsProductAbsenceError{check: windowsProductAbsenceIssuedImages, cause: err}
 	}
+	// The installed Product remains protected even if it was not returned
+	// among the successor's issued images.
+	images = append(images, q.journal.Product.Target)
 	frozen := expandWindowsProductFrozenPorts(q.intent.Ports)
 	if _, err := observeWindowsProductIntentPorts(ctx, q.journal.Product.Target, frozen, true); err != nil {
 		return &windowsProductAbsenceError{check: windowsProductAbsenceFrozenPorts, cause: err}
 	}
-	names := []string{"mcphub.exe", "mcphub-windowless.exe"}
-	for _, image := range images {
-		names = append(names, filepath.Base(image))
-	}
-	rows, err := api.NewAPI().ListMatchingProcessesContext(ctx, names)
-	if err != nil {
-		return &windowsProductAbsenceError{check: windowsProductAbsenceProcessInventory, cause: err}
-	}
-	for _, row := range rows {
-		if err := ctx.Err(); err != nil {
-			return &windowsProductAbsenceError{check: windowsProductAbsenceContext, cause: err}
-		}
-		observation, err := process.ObservePIDHandleIdentity(ctx, row.PID)
-		if err != nil {
-			return &windowsProductAbsenceError{check: windowsProductAbsenceProcessIdentity, cause: err}
-		}
-		if observation.ConfirmedAbsent {
-			continue
-		}
-		identity := observation.Identity
-		for _, image := range images {
-			if samePath(identity.ExecutablePath, image) {
-				return &windowsProductAbsenceError{check: windowsProductAbsenceProcessPresent, cause: fmt.Errorf("%w: current selected image still has a process user", ErrWindowsProductRecoveryPending)}
-			}
-		}
-		role := supervisorCommandLineSubcommand(row.Cmdline)
-		if role == "gui" || role == "tray" || role == "supervise" {
-			// Other namespaces remain untouched; their GUI listener/singleton may
-			// nevertheless conflict with this required per-user slot below.
-			if samePath(identity.ExecutablePath, q.journal.Product.Target) {
-				return &windowsProductAbsenceError{check: windowsProductAbsenceProcessPresent, cause: errors.New("current runtime actor remains")}
-			}
-		}
+	if err := observeWindowsProductImageAbsence(ctx, images, []string{"mcphub.exe", "mcphub-windowless.exe"}, nativeProductProcessSnapshotOps(), process.ObservePIDHandleIdentity); err != nil {
+		return err
 	}
 	record, err := gui.ReadGUIOwnerRecord(q.guiOwnerPath)
 	if err != nil {
@@ -317,28 +291,183 @@ func (q *windowsProductSuccessorQuiescence) absent(ctx context.Context) error {
 	return nil
 }
 
-func (q *windowsProductSuccessorQuiescence) verifyHeld(ctx context.Context) error {
-	if err := q.verifyNative(ctx, nil); err != nil {
+// The clean-install owner supplies all three installed image paths. This
+// observation alone does not reserve GUI startup, the Supervisor or ports.
+func validateCleanInstallProcessAbsence(ctx context.Context, productPath, launcherPath, legacyWindowlessPath string) error {
+	images := []string{productPath, launcherPath, legacyWindowlessPath}
+	for _, image := range images {
+		if !cleanAbsolutePath(image) {
+			return &windowsProductAbsenceError{check: windowsProductAbsenceIssuedImages, cause: errors.New("clean installation requires exact installed image paths")}
+		}
+	}
+	return observeWindowsProductImageAbsence(ctx, images, nil, nativeProductProcessSnapshotOps(), process.ObservePIDHandleIdentity)
+}
+
+func observeWindowsProductImageAbsence(ctx context.Context, images, names []string, ops productProcessSnapshotOps, observe func(context.Context, int) (process.PIDHandleObservation, error)) error {
+	if ctx == nil {
+		return &windowsProductAbsenceError{check: windowsProductAbsenceContext, cause: errors.New("process absence context required")}
+	}
+	if err := ctx.Err(); err != nil {
+		return &windowsProductAbsenceError{check: windowsProductAbsenceContext, cause: err}
+	}
+	for _, image := range images {
+		names = append(names, filepath.Base(image))
+	}
+	pids, err := productImageSnapshotPIDs(ctx, names, ops)
+	if err != nil {
+		return &windowsProductAbsenceError{check: windowsProductAbsenceProcessInventory, cause: err}
+	}
+	for _, pid := range pids {
+		if err := ctx.Err(); err != nil {
+			return &windowsProductAbsenceError{check: windowsProductAbsenceContext, cause: err}
+		}
+		observation, err := observe(ctx, pid)
+		if err != nil {
+			return &windowsProductAbsenceError{check: windowsProductAbsenceProcessIdentity, cause: err}
+		}
+		if observation.ConfirmedAbsent {
+			continue
+		}
+		identity := observation.Identity
+		if identity.PID != pid || !filepath.IsAbs(identity.ExecutablePath) || identity.StartedAt.IsZero() {
+			return &windowsProductAbsenceError{check: windowsProductAbsenceProcessIdentity, cause: errors.New("incomplete selected process identity")}
+		}
+		for _, image := range images {
+			if samePath(identity.ExecutablePath, image) {
+				return &windowsProductAbsenceError{check: windowsProductAbsenceProcessPresent, cause: fmt.Errorf("%w: current selected image still has a process user", ErrWindowsProductRecoveryPending)}
+			}
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return &windowsProductAbsenceError{check: windowsProductAbsenceContext, cause: err}
+	}
+	return nil
+}
+
+// Toolhelp supplies executable basenames only. It preselects candidates for
+// the held native process identity check and contributes no path authority.
+func productImageSnapshotPIDs(ctx context.Context, names []string, ops productProcessSnapshotOps) ([]int, error) {
+	var pids []int
+	haveProcess := false
+	err := walkProductProcessSnapshot(ctx, ops, func(entry *windows.ProcessEntry32) (bool, error) {
+		if entry.ProcessID == 0 {
+			return true, nil // The system idle pseudo-process has no image owner.
+		}
+		if !slices.Contains(entry.ExeFile[:], 0) {
+			return false, errors.New("process snapshot contains an incomplete image name")
+		}
+		name := windows.UTF16ToString(entry.ExeFile[:])
+		if name == "" {
+			return false, errors.New("process snapshot contains a row without an image name")
+		}
+		haveProcess = true
+		for _, image := range names {
+			if strings.EqualFold(name, image) {
+				pids = append(pids, int(entry.ProcessID))
+				break
+			}
+		}
+		return true, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !haveProcess {
+		return nil, errors.New("process snapshot contains no complete process rows")
+	}
+	return pids, nil
+}
+
+type currentInverseCheck string
+
+const (
+	currentInverseCheckPhase          currentInverseCheck = "PHASE"
+	currentInverseCheckNativeIdentity currentInverseCheck = "NATIVE_IDENTITY"
+	currentInverseCheckNativeJournal  currentInverseCheck = "NATIVE_JOURNAL"
+	currentInverseCheckSuccessorBank  currentInverseCheck = "SUCCESSOR_BANK"
+	currentInverseCheckReservations   currentInverseCheck = "RESERVATIONS"
+	currentInverseCheckSupervisor     currentInverseCheck = "SUPERVISOR_RESERVATION"
+	currentInverseCheckIntentLease    currentInverseCheck = "INTENT_RESERVATION"
+	currentInverseCheckIntentBorrow   currentInverseCheck = "INTENT_BORROW"
+	currentInverseCheckIntentObserve  currentInverseCheck = "INTENT_OBSERVATION"
+	currentInverseCheckIntentCompare  currentInverseCheck = "INTENT_COMPARE"
+	currentInverseCheckAbsence        currentInverseCheck = "ABSENCE"
+)
+
+func isCurrentInverseCheck(check currentInverseCheck) bool {
+	switch check {
+	case currentInverseCheckPhase, currentInverseCheckNativeIdentity, currentInverseCheckNativeJournal,
+		currentInverseCheckSuccessorBank, currentInverseCheckReservations, currentInverseCheckSupervisor,
+		currentInverseCheckIntentLease, currentInverseCheckIntentBorrow, currentInverseCheckIntentObserve,
+		currentInverseCheckIntentCompare, currentInverseCheckAbsence:
+		return true
+	default:
+		return false
+	}
+}
+
+func (check *currentInverseCheck) record(next currentInverseCheck) {
+	if check != nil {
+		*check = next
+	}
+}
+
+type currentInverseCheckError struct {
+	check currentInverseCheck
+	cause error
+}
+
+func (e *currentInverseCheckError) Error() string { return e.cause.Error() }
+func (e *currentInverseCheckError) Unwrap() error { return e.cause }
+
+func (q *windowsProductSuccessorQuiescence) verifyHeld(ctx context.Context, check *currentInverseCheck) error {
+	var nativeStage *windowsProductQuiescenceAcquisitionStage
+	if check != nil {
+		stage := windowsProductQuiescenceAtNativeIdentity
+		nativeStage = &stage
+	}
+	if err := q.verifyNative(ctx, nativeStage); err != nil {
+		if nativeStage != nil {
+			switch *nativeStage {
+			case windowsProductQuiescenceAtNativeJournal:
+				check.record(currentInverseCheckNativeJournal)
+			case windowsProductQuiescenceAtSuccessorBank:
+				check.record(currentInverseCheckSuccessorBank)
+			default:
+				check.record(currentInverseCheckNativeIdentity)
+			}
+		}
 		return err
 	}
+	check.record(currentInverseCheckReservations)
 	if q.guiLease == nil || q.supervisor == nil || q.intentLease == nil {
 		return errors.New("original quiescence reservations incomplete")
 	}
+	check.record(currentInverseCheckSupervisor)
 	if err := q.supervisor.ValidateQuietObservedHeld(ctx, filepath.Join(q.stateDir, "supervisor.lock")); err != nil {
 		return err
 	}
+	check.record(currentInverseCheckIntentLease)
 	if err := q.intentLease.ValidateHeld(ctx, q.intentPath); err != nil {
 		return err
 	}
+	check.record(currentInverseCheckIntentBorrow)
 	return q.intentLease.Borrow(ctx, q.intentPath, func() error {
+		check.record(currentInverseCheckIntentObserve)
 		observed, err := api.ObserveSupervisorRuntimeIntent(ctx, q.intentPath, q.now())
 		if err != nil {
 			return err
 		}
+		check.record(currentInverseCheckIntentCompare)
 		if observed == nil || observed.SHA256 != q.intent.SHA256 || observed.StopSHA256 != q.intent.StopSHA256 || observed.Generation != q.intent.Generation || !reflect.DeepEqual(observed.Ports, q.intent.Ports) || !reflect.DeepEqual(observed.Stopped, q.intent.Stopped) {
 			return errors.New("current runtime intent/cohort/stops changed")
 		}
-		return q.absent(ctx)
+		check.record(currentInverseCheckAbsence)
+		if err := q.absent(ctx); err != nil {
+			return err
+		}
+		check.record(currentInverseCheckIntentBorrow)
+		return nil
 	})
 }
 
@@ -364,10 +493,14 @@ func (q *windowsProductSuccessorQuiescence) leave(err error) {
 }
 func (q *windowsProductSuccessorQuiescence) VerifyForInverse(ctx context.Context) (retErr error) {
 	if err := q.enter(windowsProductQuiescenceInverseReady); err != nil {
-		return err
+		return &currentInverseCheckError{check: currentInverseCheckPhase, cause: err}
 	}
 	defer func() { q.leave(retErr) }()
-	return q.verifyHeld(ctx)
+	var check currentInverseCheck
+	if err := q.verifyHeld(ctx, &check); err != nil {
+		return &currentInverseCheckError{check: check, cause: err}
+	}
+	return nil
 }
 func (q *windowsProductSuccessorQuiescence) WithIntentInverse(ctx context.Context, body func(*api.StateFileObservedLease) error) (retErr error) {
 	if body == nil {
@@ -381,7 +514,7 @@ func (q *windowsProductSuccessorQuiescence) WithIntentInverse(ctx context.Contex
 	q.phase = windowsProductQuiescenceIntentInverse
 	q.mu.Unlock()
 	// No q mutex is held across original owner operations or the callback.
-	retErr = q.verifyHeld(ctx)
+	retErr = q.verifyHeld(ctx, nil)
 	if retErr == nil {
 		retErr = q.intentLease.Borrow(ctx, q.intentPath, func() error { return body(q.intentLease) })
 	}

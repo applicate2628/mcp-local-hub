@@ -3,8 +3,10 @@
 package binaryadmission
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -13,6 +15,7 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -149,12 +152,20 @@ type canonicalEntryRecoveryCleanupReadSourceV2 interface {
 	WithCanonicalRecoveryCleanupReadScope(context.Context, WindowsCanonicalRecoverySideV1, WindowsCanonicalEntryRecoveryPurposeV2, func(func(context.Context) error, WindowsCanonicalEntryMembersRecoveryInputV2) error) error
 }
 
+// The exact same source may additionally qualify a clean-only effect scope.
+// Its callback is synchronous and bounded by the source's held archive proof
+// and immutable, persisted discard intents. A read scope never grants effects.
+type canonicalEntryRecoveryCleanEffectSourceV2 interface {
+	WithCanonicalRecoveryCleanEffectScope(context.Context, string, func(func(context.Context) error, WindowsCanonicalEntryMembersRecoveryInputV2) error) error
+}
+
 type canonicalEntryRecoveryReadAcceptanceV2 func(func(context.Context) error, *WindowsCanonicalEntryMembersRecoveryInputV2) error
 
 type canonicalEntryRecoveryReadScopeV2 struct {
-	bank   *canonicalEntryMembersV2
-	source WindowsCanonicalRecoverySourceV2
-	check  func(context.Context) error
+	bank                 *canonicalEntryMembersV2
+	source               WindowsCanonicalRecoverySourceV2
+	check                func(context.Context) error
+	requireIssuedParents bool
 }
 
 func sameCanonicalRecoverySourceV2(a, b WindowsCanonicalRecoverySourceV2) bool {
@@ -363,7 +374,10 @@ func (c *canonicalEntryMembersV2) observeOriginalMember(ctx context.Context, key
 
 func (c *canonicalEntryMembersV2) disposition() WindowsCanonicalEntryMemberDispositionV2 {
 	pending := false
-	for _, m := range c.members {
+	for key, m := range c.members {
+		if _, retained := c.recoveryRetained[key]; retained {
+			continue
+		}
 		if m.cleanup == nil || !m.cleanup.Applied || !m.cleanup.Readback {
 			pending = true
 		}
@@ -416,8 +430,40 @@ func (c *canonicalEntryMembersV2) close() error {
 	return c.closeError
 }
 
+type canonicalEntryStageSelectionV2 uint8
+
+const (
+	canonicalEntryStageFull canonicalEntryStageSelectionV2 = iota
+	canonicalEntryStageRetained
+	canonicalEntryStageUpgrade
+)
+
 func (o *WindowsCanonicalEntrySetV2) Stage(ctx context.Context, canonicalEntryPath string) (*StagedWindowsCanonicalEntrySetV2, error) {
-	s := &StagedWindowsCanonicalEntrySetV2{original: newCanonicalEntryMembersV2()}
+	return o.stage(ctx, canonicalEntryPath, canonicalEntryStageFull)
+}
+
+// StageRetainingEqualRuntime qualifies the original installed current bundle
+// before creating any staged file. The prior owner is read-only for this
+// preparation. Close the stage on every exit, including a partially received
+// pair. It closes its prior first and its shared directory lenders last.
+func (o *WindowsCanonicalEntrySetV2) StageRetainingEqualRuntime(ctx context.Context, canonicalEntryPath string) (*StagedWindowsCanonicalEntrySetV2, *WindowsCanonicalEntryPriorSetV2, error) {
+	stage, err := o.stage(ctx, canonicalEntryPath, canonicalEntryStageRetained)
+	return stage, stage.prior, err
+}
+
+// StageForUpgrade selects the staging mode from the admitted original target.
+// Close the stage on every exit. It owns its returned prior and directory
+// lenders in both modes, including a partially received pair.
+func (o *WindowsCanonicalEntrySetV2) StageForUpgrade(ctx context.Context, canonicalEntryPath string) (*StagedWindowsCanonicalEntrySetV2, *WindowsCanonicalEntryPriorSetV2, error) {
+	stage, err := o.stage(ctx, canonicalEntryPath, canonicalEntryStageUpgrade)
+	return stage, stage.prior, err
+}
+
+func (o *WindowsCanonicalEntrySetV2) stage(ctx context.Context, canonicalEntryPath string, selection canonicalEntryStageSelectionV2) (*StagedWindowsCanonicalEntrySetV2, error) {
+	s := &StagedWindowsCanonicalEntrySetV2{
+		original: newCanonicalEntryMembersV2(), ownsPrior: selection != canonicalEntryStageFull,
+		retainsRuntime: selection == canonicalEntryStageRetained,
+	}
 	c := &s.original
 	if o == nil || ctx == nil {
 		return s, errors.New("source owner and stage context required")
@@ -446,8 +492,34 @@ func (o *WindowsCanonicalEntrySetV2) Stage(ctx context.Context, canonicalEntryPa
 	if err != nil {
 		return s, err
 	}
-	c.keys = keys
 	c.root.memberFinalPaths = append([]string(nil), keys...)
+	if s.ownsPrior {
+		prior, err := s.acquireOriginalPriorSet(ctx, keys, nil)
+		if err != nil {
+			return s, err
+		}
+		if selection == canonicalEntryStageUpgrade {
+			switch prior.observation.BeforeKind {
+			case WindowsCanonicalEntryBeforeBundleV2:
+				s.retainsRuntime = true
+			case WindowsCanonicalEntryBeforeAbsentV2, WindowsCanonicalEntryBeforeRootProductV2, WindowsCanonicalEntryBeforeLegacyV2:
+				// The full loop consumes the same admitted prior.
+			default:
+				return s, errors.New("upgrade original prior kind is unavailable")
+			}
+		}
+	}
+	if s.retainsRuntime {
+		if err := verifyRetainedCanonicalRuntime(ctx, s.prior, c.snapshot); err != nil {
+			return s, err
+		}
+		keys, err = o.changedCanonicalStageKeys(s.prior, keys, plan)
+		if err != nil {
+			return s, err
+		}
+	} else {
+		c.keys = keys
+	}
 	var token [16]byte
 	if _, err = rand.Read(token[:]); err != nil {
 		return s, err
@@ -479,12 +551,18 @@ func (o *WindowsCanonicalEntrySetV2) Stage(ctx context.Context, canonicalEntryPa
 		}
 		h, e := canonicalEntryOpenNativeAttributes(windows.Handle(c.parent.file.Fd()), leaf, false, windows.FILE_READ_DATA|windows.DELETE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, windows.FILE_CREATE, attributes)
 		if e != nil {
+			if s.retainsRuntime {
+				return s, fmt.Errorf("create selective stage member: %w", e)
+			}
 			return s, e
 		}
 		// FILE_CREATE already selected this object. Retain its physical duty
 		// even if wrapping or receiving native identity fails before evidence.
 		m := &canonicalEntryOwnedMemberV2{original: &canonicalEntryNativeFile{path: name}, evidence: WindowsCanonicalEntryMemberEvidenceV2{Member: key, File: WindowsCanonicalEntryFileV1{Path: leaf}}}
 		c.members[key] = m
+		if s.retainsRuntime {
+			c.keys = append(c.keys, key)
+		}
 		guard, e := c.root.retain(h, name, false)
 		if guard != nil {
 			m.original = guard
@@ -538,7 +616,9 @@ func (o *WindowsCanonicalEntrySetV2) Stage(ctx context.Context, canonicalEntryPa
 			return s, errors.New("actual member stage differs from authenticated source")
 		}
 		// Preserve the portable attributes described by the authenticated plan.
-		if key != o.snapshot.CanonicalEntryRelativePath && actual.Attributes != object.Attributes {
+		if key == o.snapshot.CanonicalEntryRelativePath {
+			s.launcherStageRelative = leaf
+		} else if actual.Attributes != object.Attributes {
 			return s, errors.New("created member attributes differ from authenticated source")
 		}
 	}
@@ -546,7 +626,102 @@ func (o *WindowsCanonicalEntrySetV2) Stage(ctx context.Context, canonicalEntryPa
 		return s, err
 	}
 	c.ready = true
+	if s.ownsPrior && !s.retainsRuntime {
+		s.prior.readOnly = false
+	}
 	return s, nil
+}
+
+// Component content-ID directories own their descriptor, inventory and
+// runtime root. Other files in the bundle are independently staged if changed.
+func canonicalRuntimeObjects(snapshot WindowsCanonicalEntrySetSnapshotV2, payload RuntimePayloadV1) map[string]RuntimeObjectV1 {
+	objects := make(map[string]RuntimeObjectV1)
+	for _, object := range snapshot.BundleInventory {
+		for _, component := range payload.Components {
+			parent := path.Dir(component.Root)
+			if object.Path == parent || strings.HasPrefix(object.Path, parent+"/") {
+				objects[object.Path] = object
+				break
+			}
+		}
+	}
+	return objects
+}
+
+func verifyRetainedCanonicalRuntime(ctx context.Context, prior *WindowsCanonicalEntryPriorSetV2, expected WindowsCanonicalEntrySetSnapshotV2) error {
+	if prior.observation.BeforeKind != WindowsCanonicalEntryBeforeBundleV2 {
+		return errors.New("retained runtime requires an original current installed bundle")
+	}
+	pc := &prior.original
+	if !bytes.Equal(pc.snapshot.RuntimePayloadBytes, expected.RuntimePayloadBytes) {
+		return errors.New("installed runtime components differ from the candidate")
+	}
+	payload, err := ParseRuntimePayload(expected.RuntimePayloadBytes)
+	if err != nil {
+		return err
+	}
+	want := canonicalRuntimeObjects(expected, payload)
+	installed := canonicalRuntimeObjects(pc.snapshot, payload)
+	if !reflect.DeepEqual(installed, want) {
+		return errors.New("original installed runtime inventory differs from the candidate")
+	}
+
+	return verifyCanonicalRuntimeObjects(ctx, pc, expected.BundleRelativePath, payload, want, nil)
+}
+
+func verifyCanonicalRuntimeObjects(ctx context.Context, pc *canonicalEntryMembersV2, bundle string, payload RuntimePayloadV1, want map[string]RuntimeObjectV1, scope *canonicalEntryRecoveryReadScopeV2) error {
+	objects := make(map[string]*canonicalEntryNativeFile, len(want))
+	for name, object := range want {
+		key := path.Join(bundle, name)
+		if object.Kind == "directory" {
+			directory, attrs, err := receiveCanonicalSuccessorDirectoryReadV2(ctx, pc, key, scope)
+			if err != nil {
+				return err
+			}
+			if attrs != object.Attributes {
+				return errors.New("original retained runtime directory attributes changed")
+			}
+			objects[name] = directory
+			continue
+		}
+		member := pc.members[key]
+		object.Path = key
+		if member == nil || !canonicalMemberMatchesPlanV2(member.evidence, object) {
+			return errors.New("original retained runtime file differs from the candidate")
+		}
+		objects[name] = member.original
+	}
+	for _, component := range payload.Components {
+		root := path.Dir(component.Root)
+		original := objects[root]
+		if original == nil {
+			return errors.New("original retained runtime component directory unavailable")
+		}
+		if err := canonicalEntryVerifyDirectoryMembers(ctx, pc.root, objects, original, root); err != nil {
+			return err
+		}
+	}
+	return ctx.Err()
+}
+
+func (o *WindowsCanonicalEntrySetV2) changedCanonicalStageKeys(prior *WindowsCanonicalEntryPriorSetV2, keys []string, plan map[string]RuntimeObjectV1) ([]string, error) {
+	// The launcher has no extent/attributes in the bundle inventory because
+	// it sits outside the bundle. Receive those from the held candidate.
+	_, size, attrs, err := canonicalMemberFileIdentityV2(o.guard.entry)
+	if err != nil {
+		return nil, err
+	}
+	var changed []string
+	for _, key := range keys {
+		object := plan[key]
+		if key == o.snapshot.CanonicalEntryRelativePath {
+			object.Size, object.Attributes = &size, attrs
+		}
+		if member := prior.original.members[key]; member == nil || !canonicalMemberMatchesPlanV2(member.evidence, object) {
+			changed = append(changed, key)
+		}
+	}
+	return changed, nil
 }
 
 func (s *StagedWindowsCanonicalEntrySetV2) Snapshot() (WindowsCanonicalEntrySetSnapshotV2, error) {
@@ -599,6 +774,91 @@ func (s *StagedWindowsCanonicalEntrySetV2) VerifyUnchanged(ctx context.Context) 
 	return c.verify(ctx)
 }
 
+// RetainedMembersWitness rechecks the exact native originals omitted from
+// a selective stage. The digest covers the canonical JSON array of existing
+// member evidence records, ordered by their exact relative member key.
+func (s *StagedWindowsCanonicalEntrySetV2) RetainedMembersWitness(ctx context.Context) (WindowsCanonicalEntryRetainedMembersV2, error) {
+	var witness WindowsCanonicalEntryRetainedMembersV2
+	if s == nil {
+		return witness, errors.New("selective runtime stage required")
+	}
+	c := &s.original
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !s.retainsRuntime || s.prior == nil || s.priorError != nil {
+		return witness, errors.Join(s.priorError, errors.New("original retained runtime prior required"))
+	}
+	pc := &s.prior.original
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	return s.retainedMembersWitnessLocked(ctx)
+}
+
+// The caller holds the selective stage and original prior mutexes in that order.
+func (s *StagedWindowsCanonicalEntrySetV2) retainedMembersWitnessLocked(ctx context.Context) (WindowsCanonicalEntryRetainedMembersV2, error) {
+	var witness WindowsCanonicalEntryRetainedMembersV2
+	c, pc := &s.original, &s.prior.original
+	if err := c.verify(ctx); err != nil {
+		return witness, err
+	}
+	if !pc.ready || pc.closed || pc.root == nil || pc.root.closed ||
+		c.targets != pc.targets || c.parent == nil || pc.parent == nil ||
+		c.parent.identity != pc.parent.identity || c.directories == nil || c.directories != pc.directories {
+		return witness, errors.New("original retained runtime prior custody changed")
+	}
+	if err := verifyRetainedCanonicalRuntime(ctx, s.prior, c.snapshot); err != nil {
+		return witness, err
+	}
+	payload, err := ParseRuntimePayload(c.snapshot.RuntimePayloadBytes)
+	if err != nil {
+		return witness, err
+	}
+	components := canonicalRuntimeObjects(c.snapshot, payload)
+	keys, plan, err := canonicalMemberPlanV2(c.snapshot)
+	if err != nil {
+		return witness, err
+	}
+	var omitted []WindowsCanonicalEntryMemberEvidenceV2
+	singletons := []string{}
+	for _, key := range keys {
+		if c.members[key] != nil {
+			continue
+		}
+		member, err := pc.observeOriginalMember(ctx, key)
+		if err != nil {
+			return witness, err
+		}
+		if !canonicalMemberMatchesPlanV2(member, plan[key]) {
+			return witness, errors.New("retained original differs from the candidate plan")
+		}
+		omitted = append(omitted, member)
+		relative, inBundle := strings.CutPrefix(key, c.snapshot.BundleRelativePath+"/")
+		if _, inComponent := components[relative]; !inBundle || !inComponent {
+			singletons = append(singletons, key)
+		}
+	}
+	digest, err := retainedCanonicalMembersSHA256(ctx, omitted)
+	if err != nil {
+		return witness, err
+	}
+	return WindowsCanonicalEntryRetainedMembersV2{MembersSHA256: digest, Singletons: singletons}, nil
+}
+
+// Both callers supply original evidence in exact member-key order.
+func retainedCanonicalMembersSHA256(ctx context.Context, omitted []WindowsCanonicalEntryMemberEvidenceV2) (string, error) {
+	if len(omitted) == 0 {
+		return "", errors.New("selective transaction has no retained originals")
+	}
+	raw, err := CanonicalRuntimeJSON(omitted)
+	if err != nil {
+		return "", err
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return RuntimeDigest(raw), nil
+}
+
 // ObserveOriginalMember freshly verifies only the selected issued original.
 // MoveOriginal independently revalidates it after the caller persists intent.
 func (s *StagedWindowsCanonicalEntrySetV2) ObserveOriginalMember(ctx context.Context, key string) (WindowsCanonicalEntryMemberEvidenceV2, error) {
@@ -618,6 +878,9 @@ func (s *StagedWindowsCanonicalEntrySetV2) TakeForTransaction(ctx context.Contex
 	c := &s.original
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if s.retainsRuntime {
+		return WindowsCanonicalEntrySetSnapshotV2{}, errors.New("retained runtime stage cannot transfer to the full-member transaction")
+	}
 	if c.transferred {
 		return WindowsCanonicalEntrySetSnapshotV2{}, errors.New("member custody already transferred")
 	}
@@ -631,8 +894,52 @@ func (s *StagedWindowsCanonicalEntrySetV2) TakeForTransaction(ctx context.Contex
 	return cloneCanonicalEntrySnapshotV2(c.snapshot), nil
 }
 
+// TakeRetainingForTransaction transfers the selective stage to the existing
+// Product transaction. Its caller receives the first V3 write/readback and
+// each exact move or discard intent before entering the corresponding effect.
+func (s *StagedWindowsCanonicalEntrySetV2) TakeRetainingForTransaction(ctx context.Context, entry string, expected WindowsCanonicalEntryRetainedMembersV2) (WindowsCanonicalEntrySetSnapshotV2, error) {
+	if s == nil {
+		return WindowsCanonicalEntrySetSnapshotV2{}, errors.New("selective stage required")
+	}
+	c := &s.original
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !s.retainsRuntime || s.prior == nil || s.priorError != nil || c.transferred || entry != c.targets.CanonicalEntryPath {
+		return WindowsCanonicalEntrySetSnapshotV2{}, errors.Join(s.priorError, errors.New("selective original custody or target is unavailable"))
+	}
+	pc := &s.prior.original
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	witness, err := s.retainedMembersWitnessLocked(ctx)
+	if err != nil {
+		return WindowsCanonicalEntrySetSnapshotV2{}, err
+	}
+	if !reflect.DeepEqual(witness, expected) {
+		return WindowsCanonicalEntrySetSnapshotV2{}, errors.New("current selective original witness differs")
+	}
+	if len(c.keys) == 0 {
+		return WindowsCanonicalEntrySetSnapshotV2{}, errors.New("selective transfer has no changed originals")
+	}
+	changed := make(map[string]bool, len(c.keys))
+	for _, key := range c.keys {
+		if _, err := pc.observeOriginalMember(ctx, key); err != nil {
+			return WindowsCanonicalEntrySetSnapshotV2{}, err
+		}
+		changed[key] = true
+	}
+	if err := ctx.Err(); err != nil {
+		return WindowsCanonicalEntrySetSnapshotV2{}, err
+	}
+	pc.warmChanged = changed
+	c.transferred = true
+	return cloneCanonicalEntrySnapshotV2(c.snapshot), nil
+}
+
 func (c *canonicalEntryMembersV2) move(ctx context.Context, key, destination string) (result WindowsCanonicalEntryMoveResultV1, retErr error) {
 	defer func() { result.Error = errors.Join(retErr, result.CloseError); retErr = result.Error }()
+	if _, retained := c.recoveryRetained[key]; retained {
+		return WindowsCanonicalEntryMoveResultV1{Member: key, DestinationRelative: destination}, errors.New("retained runtime member is read-only")
+	}
 	m := c.members[key]
 	if m == nil {
 		return WindowsCanonicalEntryMoveResultV1{Member: key, DestinationRelative: destination}, errors.New("unissued member key")
@@ -667,6 +974,9 @@ func (c *canonicalEntryMembersV2) move(ctx context.Context, key, destination str
 }
 func (c *canonicalEntryMembersV2) discard(ctx context.Context, key, relative string) (result WindowsCanonicalEntryMoveResultV1, retErr error) {
 	defer func() { result.Error = errors.Join(retErr, result.CloseError); retErr = result.Error }()
+	if _, retained := c.recoveryRetained[key]; retained {
+		return WindowsCanonicalEntryMoveResultV1{Member: key, SourceRelative: relative}, errors.New("retained runtime member is read-only")
+	}
 	m := c.members[key]
 	if m == nil {
 		return WindowsCanonicalEntryMoveResultV1{Member: key}, errors.New("unissued member key")
@@ -680,7 +990,11 @@ func (c *canonicalEntryMembersV2) discard(ctx context.Context, key, relative str
 	if err := c.authorizeRecoveryEffect(ctx, key, relative, true); err != nil {
 		return WindowsCanonicalEntryMoveResultV1{Member: key, SourceRelative: relative, Error: err, OriginalOwnerPending: !c.closed}, err
 	}
-	r, err := canonicalEntryDiscardOriginal(ctx, c.root, c.parent, m.original, key, relative, m.evidence.File.SHA256)
+	return c.discardIssuedOriginal(ctx, key, relative, m, nil)
+}
+
+func (c *canonicalEntryMembersV2) discardIssuedOriginal(ctx context.Context, key, relative string, m *canonicalEntryOwnedMemberV2, scope *canonicalEntryRecoveryReadScopeV2) (WindowsCanonicalEntryMoveResultV1, error) {
+	r, err := canonicalEntryDiscardOriginalWithChecks(ctx, c.root, c.parent, m.original, key, relative, m.evidence.File.SHA256, nil, scope)
 	c.cleanup = append(c.cleanup, r)
 	if r.Applied {
 		copy := r
@@ -741,8 +1055,36 @@ func (s *StagedWindowsCanonicalEntrySetV2) Close() error {
 	c := &s.original
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	s.closeMembersLocked()
+	if s.ownsPrior && !s.directoryCloseEntered {
+		s.directoryCloseEntered = true
+		for _, directory := range c.directoryOwners() {
+			c.closeError = errors.Join(c.closeError, directory.Close())
+		}
+	}
+	return c.closeError
+}
+
+// CloseMembers settles the file banks without closing the directory lenders.
+// The existing transaction may then dispose its eligible original directories
+// before the final Close. Untransferred stage files keep their normal cleanup.
+func (s *StagedWindowsCanonicalEntrySetV2) CloseMembers() error {
+	if s == nil {
+		return nil
+	}
+	c := &s.original
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return s.closeMembersLocked()
+}
+
+func (s *StagedWindowsCanonicalEntrySetV2) closeMembersLocked() error {
+	c := &s.original
 	if c.closed {
 		return c.closeError
+	}
+	if s.ownsPrior && s.prior != nil {
+		c.closeError = errors.Join(c.closeError, s.prior.Close())
 	}
 	if !c.transferred {
 		prefix := planCanonicalEntryStageClosePrefixV2(c.root, c.parent)
@@ -1038,6 +1380,10 @@ func (c *canonicalEntryMembersV2) openMember(ctx context.Context, key, relative 
 }
 
 func (c *canonicalEntryMembersV2) openMemberRead(ctx context.Context, key, relative string, scope *canonicalEntryRecoveryReadScopeV2) (*canonicalEntryOwnedMemberV2, *WindowsCanonicalEntryMemberAbsenceV2, error) {
+	return c.openMemberWithAccess(ctx, key, relative, windows.FILE_READ_DATA|windows.DELETE, scope)
+}
+
+func (c *canonicalEntryMembersV2) openMemberWithAccess(ctx context.Context, key, relative string, access uint32, scope *canonicalEntryRecoveryReadScopeV2) (*canonicalEntryOwnedMemberV2, *WindowsCanonicalEntryMemberAbsenceV2, error) {
 	if scope != nil {
 		if err := scope.validateBank(ctx, c); err != nil {
 			return nil, nil, err
@@ -1070,7 +1416,7 @@ func (c *canonicalEntryMembersV2) openMemberRead(ctx context.Context, key, relat
 		parentRelative = dirRelative
 		_ = d
 	}
-	h, err := canonicalEntryOpenNative(windows.Handle(parent.file.Fd()), parts[len(parts)-1], false, windows.FILE_READ_DATA|windows.DELETE, windows.FILE_SHARE_READ, windows.FILE_OPEN)
+	h, err := canonicalEntryOpenNative(windows.Handle(parent.file.Fd()), parts[len(parts)-1], false, access, windows.FILE_SHARE_READ, windows.FILE_OPEN)
 	if errors.Is(err, windows.STATUS_OBJECT_NAME_NOT_FOUND) {
 		id, e := canonicalPayloadDirectoryIdentity(parent)
 		return nil, &WindowsCanonicalEntryMemberAbsenceV2{parentRelative, id, relative}, e
@@ -1273,11 +1619,21 @@ func (s *StagedWindowsCanonicalEntrySetV2) AcquireOriginalPriorSet(ctx context.C
 	c := &s.original
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if s.retainsRuntime {
+		return nil, errors.New("selective stage requires its original prior handoff")
+	}
 	if s.priorAttempted {
 		return s.prior, s.priorError
 	}
+	return s.acquireOriginalPriorSet(ctx, c.keys, c.verify(ctx))
+}
+
+// The caller owns c.mu, or the unexposed Stage while composing its native
+// destination. incoming is the complete candidate namespace in both modes.
+func (s *StagedWindowsCanonicalEntrySetV2) acquireOriginalPriorSet(ctx context.Context, incoming []string, stageErr error) (*WindowsCanonicalEntryPriorSetV2, error) {
+	c := &s.original
 	s.priorAttempted = true
-	p := &WindowsCanonicalEntryPriorSetV2{original: newCanonicalEntryMembersV2()}
+	p := &WindowsCanonicalEntryPriorSetV2{original: newCanonicalEntryMembersV2(), readOnly: s.ownsPrior}
 	s.prior = p
 	pc := &p.original
 	pc.targets = c.targets
@@ -1285,8 +1641,8 @@ func (s *StagedWindowsCanonicalEntrySetV2) AcquireOriginalPriorSet(ctx context.C
 	pc.directories = c.directories
 	pc.root.memberDirectories = c.directories
 	s.priorError = func() error {
-		if err := c.verify(ctx); err != nil {
-			return err
+		if stageErr != nil {
+			return stageErr
 		}
 		var err error
 		pc.parent, err = pc.root.openAbsolute(c.parent.path, true)
@@ -1435,7 +1791,7 @@ func (s *StagedWindowsCanonicalEntrySetV2) AcquireOriginalPriorSet(ctx context.C
 				return errors.New("prior entry has no admitted Product/launcher role")
 			}
 		}
-		keys, err := canonicalEntryPriorProbeKeysV2(c.keys, pc.members, p.observation.BeforeKind)
+		keys, err := canonicalEntryPriorProbeKeysV2(incoming, pc.members, p.observation.BeforeKind)
 		if err != nil {
 			return err
 		}
@@ -1592,6 +1948,9 @@ func (p *WindowsCanonicalEntryPriorSetV2) MoveOriginal(ctx context.Context, key,
 	c := &p.original
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if p.readOnly && !c.warmChanged[key] {
+		return WindowsCanonicalEntryMoveResultV1{Member: key}, errors.New("retained runtime prior is read-only")
+	}
 	return c.move(ctx, key, dst)
 }
 func (p *WindowsCanonicalEntryPriorSetV2) DiscardOriginal(ctx context.Context, key, relative string) (WindowsCanonicalEntryMoveResultV1, error) {
@@ -1601,6 +1960,9 @@ func (p *WindowsCanonicalEntryPriorSetV2) DiscardOriginal(ctx context.Context, k
 	c := &p.original
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if p.readOnly && !c.warmChanged[key] {
+		return WindowsCanonicalEntryMoveResultV1{Member: key}, errors.New("retained runtime prior is read-only")
+	}
 	return c.discard(ctx, key, relative)
 }
 func (p *WindowsCanonicalEntryPriorSetV2) Disposition() WindowsCanonicalEntryMemberDispositionV2 {
@@ -1662,6 +2024,9 @@ func (p *WindowsCanonicalEntryPriorSetV2) verifyOriginalRuntimeProcess(_ int, _ 
 	if m == nil {
 		return errors.New("prior original Product unavailable")
 	}
+	if _, retained := c.recoveryRetained[p.runtimeMember]; retained {
+		return verifyCanonicalEntryProductProcessImageInNamespace(m.original, handle, windows.FILE_SHARE_READ, nil, c.directories)
+	}
 	// The existing image verifier borrows the actual retained DELETE object;
 	// this local view acquires, duplicates and closes no original resource.
 	borrow := &WindowsCanonicalEntryPriorSetV1{root: c.root, ready: true, members: [3]*canonicalEntryNativeFile{m.original}}
@@ -1681,6 +2046,7 @@ type canonicalEntryRecoveryLineageV2 struct {
 	directories map[string]WindowsCanonicalEntryMemberDirectoryRecordV2
 	originals   []*canonicalEntryRecoveryOriginalV2
 	plans       map[string]WindowsCanonicalEntryMemberRecoveryPlanV2
+	retained    map[string]RuntimeObjectV1
 	purpose     WindowsCanonicalEntryRecoveryPurposeV2
 }
 
@@ -1712,19 +2078,23 @@ func canonicalRecoveryIssuedLocationsV2(plan WindowsCanonicalEntryMemberRecovery
 func (l *canonicalEntryRecoveryLineageV2) issuedImagePaths(targets WindowsCanonicalEntrySetTargetsV2) []string {
 	root := filepath.Dir(targets.CanonicalEntryPath)
 	out := []string{}
+	add := func(relative string) {
+		name := filepath.Join(root, filepath.FromSlash(relative))
+		for _, prior := range out {
+			if strings.EqualFold(prior, name) {
+				return
+			}
+		}
+		out = append(out, name)
+	}
 	for _, original := range l.originals {
 		for _, relative := range canonicalRecoveryIssuedLocationsV2(l.plans[original.member], original.prior, original.original) {
-			name := filepath.Join(root, filepath.FromSlash(relative))
-			known := false
-			for _, prior := range out {
-				if strings.EqualFold(prior, name) {
-					known = true
-					break
-				}
-			}
-			if !known {
-				out = append(out, name)
-			}
+			add(relative)
+		}
+	}
+	for relative := range l.retained {
+		if strings.EqualFold(filepath.Ext(relative), ".exe") {
+			add(relative)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -1741,6 +2111,71 @@ func canonicalRecoveryEvidenceValidV2(member string, e *WindowsCanonicalEntryMem
 	return e != nil && e.Member == member && publisherSourcePathValid(e.File.Path) && validLowerHex(e.File.SHA256, 64, 64) && e.Size >= 0 && e.Attributes & ^uint32(7) == 0
 }
 
+func canonicalRecoveryRetainedPlanV2(input WindowsCanonicalEntryMembersRecoveryInputV2) (map[string]RuntimeObjectV1, error) {
+	if input.Retained == nil {
+		return nil, nil
+	}
+	if input.BeforeKind != WindowsCanonicalEntryBeforeBundleV2 || !validLowerHex(input.Retained.MembersSHA256, 64, 64) || input.Retained.Singletons == nil {
+		return nil, errors.New("native retained recovery witness is invalid")
+	}
+	payload, err := ParseRuntimePayload(input.Expected.RuntimePayloadBytes)
+	if err != nil {
+		return nil, err
+	}
+	retained := make(map[string]RuntimeObjectV1)
+	for _, object := range canonicalRuntimeObjects(input.Expected, payload) {
+		if object.Kind == "file" {
+			object.Path = path.Join(input.Expected.BundleRelativePath, object.Path)
+			retained[object.Path] = object
+		}
+	}
+	_, plan, err := canonicalMemberPlanV2(input.Expected)
+	if err != nil {
+		return nil, err
+	}
+	last := ""
+	for _, key := range input.Retained.Singletons {
+		if key <= last || key != input.Expected.RuntimePayload.Path && key != input.Expected.IdentityRelativePath &&
+			key != input.Expected.CanonicalEntryRelativePath && key != input.Expected.ProductRelativePath {
+			return nil, errors.New("native retained singleton selection is not exact")
+		}
+		last = key
+		object, ok := plan[key]
+		if !ok || object.Kind != "file" {
+			return nil, errors.New("native retained singleton is not a candidate file")
+		}
+		retained[key] = object
+	}
+	if len(retained) == 0 {
+		return nil, errors.New("native retained recovery plan is empty")
+	}
+	return retained, nil
+}
+
+func canonicalRecoveryRetainedDirectoryV2(input WindowsCanonicalEntryMembersRecoveryInputV2, relative string) bool {
+	if input.Retained == nil {
+		return false
+	}
+	bundle := input.Expected.BundleRelativePath
+	payload, err := ParseRuntimePayload(input.Expected.RuntimePayloadBytes)
+	if err != nil {
+		return true
+	}
+	relative = strings.ToLower(relative)
+	for _, component := range payload.Components {
+		root := strings.ToLower(path.Join(bundle, path.Dir(component.Root)))
+		if relative == root || strings.HasPrefix(relative, root+"/") || strings.HasPrefix(root, relative+"/") {
+			return true
+		}
+	}
+	for _, key := range input.Retained.Singletons {
+		if strings.HasPrefix(strings.ToLower(key), relative+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // This is lineage validation, not snapshot/build admission. The public receiver
 // separately authenticates/crosschecks the complete current cohort before it
 // calls this native-original classifier.
@@ -1749,6 +2184,14 @@ func buildCanonicalRecoveryLineageV2(input WindowsCanonicalEntryMembersRecoveryI
 	transaction, err := hex.DecodeString(input.TransactionID)
 	if err != nil || len(transaction) != 16 || !canonicalRecoveryPurposeV2(input.Purpose) || len(input.Members) == 0 {
 		return l, errors.New("current recovery transaction/purpose/original plan invalid")
+	}
+	l.retained, err = canonicalRecoveryRetainedPlanV2(input)
+	if err != nil {
+		return l, err
+	}
+	retainedNames := make(map[string]bool, len(l.retained))
+	for key := range l.retained {
+		retainedNames[strings.ToLower(key)] = true
 	}
 	rootSet := false
 	setRoot := func(id WindowsCanonicalEntryDirectoryIdentityV1) error {
@@ -1766,6 +2209,19 @@ func buildCanonicalRecoveryLineageV2(input WindowsCanonicalEntryMembersRecoveryI
 	for _, plan := range input.Members {
 		if !publisherSourcePathValid(plan.Member) || plan.Member <= previous || seenKeys[strings.ToLower(plan.Member)] || plan.Prior == nil && plan.Staged == nil {
 			return l, errors.New("current original member plan ordering/shape invalid")
+		}
+		if retainedNames[strings.ToLower(plan.Member)] {
+			return l, errors.New("retained member entered effect lineage")
+		}
+		for _, original := range []*WindowsCanonicalEntryMemberEvidenceV2{plan.Prior, plan.Staged} {
+			if original != nil && retainedNames[strings.ToLower(original.File.Path)] {
+				return l, errors.New("effect original aliases a retained member")
+			}
+		}
+		for _, aside := range []*string{plan.PriorAsideRelative, plan.SuccessorAsideRelative} {
+			if aside != nil && retainedNames[strings.ToLower(*aside)] {
+				return l, errors.New("effect aside aliases a retained member")
+			}
 		}
 		previous = plan.Member
 		seenKeys[strings.ToLower(plan.Member)] = true
@@ -1844,7 +2300,7 @@ func buildCanonicalRecoveryLineageV2(input WindowsCanonicalEntryMembersRecoveryI
 				return l, errors.New("directory creation record has no original creation")
 			}
 		case "dispose_intent", "absence_received":
-			if !d.Created || !canonicalRecoveryCleanupPurposeV2(input.Purpose) {
+			if !d.Created || !canonicalRecoveryCleanupPurposeV2(input.Purpose) || canonicalRecoveryRetainedDirectoryV2(input, d.RelativePath) {
 				return l, errors.New("directory disposal lacks creation/cleanup purpose")
 			}
 		default:
@@ -2284,6 +2740,13 @@ func validateCanonicalRecoveryCurrentCohortV2(input WindowsCanonicalEntryMembers
 	}
 	staged := map[string]bool{}
 	prior := map[string]bool{}
+	retained, err := canonicalRecoveryRetainedPlanV2(input)
+	if err != nil {
+		return err
+	}
+	for key := range retained {
+		prior[key], staged[key] = true, true
+	}
 	for _, row := range input.Members {
 		if row.Staged != nil {
 			object, ok := plan[row.Member]
@@ -2325,6 +2788,9 @@ func validateCanonicalRecoveryCurrentCohortV2(input WindowsCanonicalEntryMembers
 }
 
 func canonicalRecoveryDirectoryRequiredV2(input WindowsCanonicalEntryMembersRecoveryInputV2, relative string) bool {
+	if canonicalRecoveryRetainedDirectoryV2(input, relative) {
+		return true
+	}
 	if input.Purpose == WindowsCanonicalRecoveryCommittedForwardV2 {
 		for _, object := range input.Expected.BundleInventory {
 			if object.Kind == "directory" && path.Join(input.Expected.BundleRelativePath, object.Path) == relative {
@@ -2658,8 +3124,25 @@ func (c *canonicalEntryMembersV2) verifyCleanupAbsence(input WindowsCanonicalEnt
 // A successful absence requires that original's acquired witness or applied
 // native readback and its current durable cleanup row.
 func (r *WindowsCanonicalEntryRecoverySetV2) ObserveCleanupMember(ctx context.Context, side WindowsCanonicalRecoverySideV1, purpose WindowsCanonicalEntryRecoveryPurposeV2, expected WindowsCanonicalEntryMemberEvidenceV2) (WindowsCanonicalEntryMemberEvidenceV2, bool, error) {
+	return r.receiveCleanupMember(ctx, side, purpose, expected, nil)
+}
+
+// CopyRollbackCleanupOriginal streams one issued, non-final successor original
+// from the held bank. Proven absences do not write. The destination may contain
+// partial bytes on error and may be accepted only after successful readback.
+func (r *WindowsCanonicalEntryRecoverySetV2) CopyRollbackCleanupOriginal(ctx context.Context, expected WindowsCanonicalEntryMemberEvidenceV2, destination io.Writer) (WindowsCanonicalEntryMemberEvidenceV2, bool, error) {
+	if destination == nil {
+		return WindowsCanonicalEntryMemberEvidenceV2{}, false, errors.New("rollback cleanup archive destination required")
+	}
+	return r.receiveCleanupMember(ctx, WindowsCanonicalRecoverySuccessorV1, WindowsCanonicalRecoveryRollbackCleanupV2, expected, destination)
+}
+
+func (r *WindowsCanonicalEntryRecoverySetV2) receiveCleanupMember(ctx context.Context, side WindowsCanonicalRecoverySideV1, purpose WindowsCanonicalEntryRecoveryPurposeV2, expected WindowsCanonicalEntryMemberEvidenceV2, destination io.Writer) (WindowsCanonicalEntryMemberEvidenceV2, bool, error) {
 	var observation WindowsCanonicalEntryMemberEvidenceV2
 	err := r.withCleanupRead(ctx, side, purpose, func(c *canonicalEntryMembersV2, input WindowsCanonicalEntryMembersRecoveryInputV2, scope *canonicalEntryRecoveryReadScopeV2) error {
+		if destination != nil && c.recoveryInput.Purpose != WindowsCanonicalRecoveryRollbackCleanupV2 {
+			return errors.New("rollback cleanup archive requires a bank acquired for cleanup")
+		}
 		i := sort.Search(len(input.Members), func(i int) bool { return input.Members[i].Member >= expected.Member })
 		if i == len(input.Members) || input.Members[i].Member != expected.Member {
 			return errors.New("unissued cleanup member key")
@@ -2696,6 +3179,29 @@ func (r *WindowsCanonicalEntryRecoverySetV2) ObserveCleanupMember(ctx context.Co
 		}
 		if actual != m.evidence || actual.NativeIdentity != expected.NativeIdentity || actual.Size != expected.Size || actual.Attributes != expected.Attributes {
 			return errors.New("original cleanup member identity, parent, extent, attributes or bytes changed")
+		}
+		if destination != nil {
+			if canonicalEntryIsFinalRelative(actual.File.Path) || slices.ContainsFunc(c.root.memberFinalPaths, func(final string) bool {
+				return strings.EqualFold(final, actual.File.Path)
+			}) {
+				return errors.New("rollback cleanup archive cannot read a protected final")
+			}
+			hash := sha256.New()
+			reader := &canonicalEntryContextReader{ctx: ctx, reader: io.NewSectionReader(m.original.file, 0, actual.Size)}
+			n, err := io.Copy(io.MultiWriter(destination, hash), reader)
+			if err != nil {
+				return err
+			}
+			if n != actual.Size || hex.EncodeToString(hash.Sum(nil)) != expected.File.SHA256 {
+				return errors.New("rollback cleanup original bytes changed during archive copy")
+			}
+			after, err := c.receiveMemberRead(ctx, expected.Member, m.original, expected.File.SHA256, scope)
+			if err != nil {
+				return err
+			}
+			if after != actual {
+				return errors.New("rollback cleanup original changed after archive copy")
+			}
 		}
 		observation = actual
 		return nil
@@ -2801,6 +3307,9 @@ func (c *canonicalEntryMembersV2) partialRecoveryCaptures() []WindowsCanonicalEn
 }
 
 func canonicalRecoveryOriginalBindingStableV2(original, current WindowsCanonicalEntryMembersRecoveryInputV2) bool {
+	if !reflect.DeepEqual(original.Retained, current.Retained) {
+		return false
+	}
 	if original.Targets != current.Targets || original.TransactionID != current.TransactionID || original.BeforeKind != current.BeforeKind || !reflect.DeepEqual(original.Expected, current.Expected) || !reflect.DeepEqual(original.Members, current.Members) || len(original.Directories) != len(current.Directories) || len(current.Moves) < len(original.Moves) {
 		return false
 	}
@@ -2970,6 +3479,9 @@ func (r *WindowsCanonicalEntryRecoverySetV2) acquireRecoveryRead(ctx context.Con
 	for _, plan := range input.Members {
 		c.root.memberFinalPaths = append(c.root.memberFinalPaths, plan.Member)
 	}
+	for key := range lineage.retained {
+		c.root.memberFinalPaths = append(c.root.memberFinalPaths, key)
+	}
 	if err = r.receiveRecoveryDirectoriesRead(ctx, input, lineage, scope); err != nil {
 		return err
 	}
@@ -2986,6 +3498,11 @@ func (r *WindowsCanonicalEntryRecoverySetV2) acquireRecoveryRead(ctx context.Con
 	}
 	if err = c.acquireRecoveryMatchesRead(ctx, matches, scope); err != nil {
 		return err
+	}
+	if len(lineage.retained) != 0 {
+		if err := c.receiveRecoveryRetainedMembers(ctx, input, lineage.retained, scope); err != nil {
+			return err
+		}
 	}
 	finalMatches, err := c.discoverRecoveryMembersRead(ctx, lineage, scope)
 	if err != nil {
@@ -3014,6 +3531,45 @@ func (r *WindowsCanonicalEntryRecoverySetV2) acquireRecoveryRead(ctx context.Con
 			c.recoveryAbsences[match.original.member] = *match.original.cleanup
 		}
 	}
+	return nil
+}
+
+// The original journal still owns changed effects. This bank only borrows
+// the omitted originals at their witnessed canonical names, without DELETE.
+func (c *canonicalEntryMembersV2) receiveRecoveryRetainedMembers(ctx context.Context, input WindowsCanonicalEntryMembersRecoveryInputV2, retained map[string]RuntimeObjectV1, scope *canonicalEntryRecoveryReadScopeV2) error {
+	keys := make([]string, 0, len(retained))
+	for key := range retained {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	members := make([]WindowsCanonicalEntryMemberEvidenceV2, 0, len(keys))
+	for _, key := range keys {
+		member, missing, err := c.openMemberWithAccess(ctx, key, key, windows.FILE_READ_DATA, scope)
+		if err != nil {
+			return err
+		}
+		if missing != nil || member == nil || !canonicalMemberMatchesPlanV2(member.evidence, retained[key]) {
+			return errors.New("canonical retained original missing or differs from the authenticated plan")
+		}
+		c.keys = append(c.keys, key)
+		members = append(members, member.evidence)
+	}
+	digest, err := retainedCanonicalMembersSHA256(ctx, members)
+	if err != nil {
+		return err
+	}
+	if digest != input.Retained.MembersSHA256 {
+		return errors.New("canonical retained original identity witness changed")
+	}
+	payload, err := ParseRuntimePayload(c.snapshot.RuntimePayloadBytes)
+	if err != nil {
+		return err
+	}
+	if err := verifyCanonicalRuntimeObjects(ctx, c, c.snapshot.BundleRelativePath, payload, canonicalRuntimeObjects(c.snapshot, payload), scope); err != nil {
+		return err
+	}
+	sort.Strings(c.keys)
+	c.recoveryRetained = retained
 	return nil
 }
 
@@ -3072,6 +3628,83 @@ func (r *WindowsCanonicalEntryRecoverySetV2) DiscardOriginal(ctx context.Context
 		return WindowsCanonicalEntryMoveResultV1{}, errors.New("current recovery owner required")
 	}
 	return r.original.DiscardOriginal(ctx, key, relative)
+}
+
+// DiscardArchivedRollbackCleanup receives a clean-only archive-bound intent
+// batch from the exact original source and applies it using the same native
+// discard owner. It returns the actual result prefix even on closing failure.
+func (r *WindowsCanonicalEntryRecoverySetV2) DiscardArchivedRollbackCleanup(ctx context.Context, archiveSHA256 string, members []WindowsCanonicalEntryMemberEvidenceV2) ([]WindowsCanonicalEntryMoveResultV1, error) {
+	if r == nil || r.original == nil || ctx == nil || !validLowerHex(archiveSHA256, 64, 64) {
+		return nil, errors.New("clean rollback cleanup requires the original owner, context and archive digest")
+	}
+	c := &r.original.original
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	const purpose = WindowsCanonicalRecoveryRollbackCleanupV2
+	if !c.ready || c.closed || c.root == nil || c.root.closed || c.parent == nil || c.parent.file == nil ||
+		c.recoverySide != WindowsCanonicalRecoverySuccessorV1 || c.recoveryInput == nil || c.recoveryInput.Purpose != purpose {
+		return nil, errors.Join(c.acquisitionError, errors.New("clean batch requires an opened successor rollback-cleanup bank"))
+	}
+	provider, ok := c.source.(canonicalEntryRecoveryCleanEffectSourceV2)
+	if !ok {
+		return nil, errors.New("original clean rollback cleanup effect scope unavailable")
+	}
+	members = slices.Clone(members)
+	var results []WindowsCanonicalEntryMoveResultV1
+	err := c.receiveRecoveryReadScope(ctx, func(accept canonicalEntryRecoveryReadAcceptanceV2) error {
+		return provider.WithCanonicalRecoveryCleanEffectScope(ctx, archiveSHA256, func(check func(context.Context) error, input WindowsCanonicalEntryMembersRecoveryInputV2) error {
+			return accept(check, &input)
+		})
+	}, func(scope *canonicalEntryRecoveryReadScopeV2, input *WindowsCanonicalEntryMembersRecoveryInputV2) error {
+		if err := scope.validateBank(ctx, c); err != nil {
+			return err
+		}
+		fresh := cloneCanonicalEntryMembersRecoveryInputV2(*input)
+		if fresh.Purpose != purpose || !canonicalRecoveryOriginalBindingStableV2(*c.recoveryInput, fresh) {
+			return errors.New("clean batch no longer binds its original recovery lineage")
+		}
+		if _, err := buildCanonicalRecoveryLineageV2(fresh); err != nil {
+			return err
+		}
+		intents := make(map[string]WindowsCanonicalEntryMemberCleanupRecordV2, len(fresh.Cleanup))
+		for _, row := range fresh.Cleanup {
+			if row.Side == "unused-successor" && row.State == "discard_intent" {
+				intents[row.Member] = row
+			}
+		}
+		for _, evidence := range members {
+			held := c.members[evidence.Member]
+			row, found := intents[evidence.Member]
+			if held == nil || held.original == nil || held.cleanup != nil || held.evidence != evidence || !found ||
+				row.SourceRelative != evidence.File.Path || row.ExpectedSHA256 != evidence.File.SHA256 {
+				return errors.New("clean archive member lacks an exact held original and unique discard intent")
+			}
+			delete(intents, evidence.Member)
+		}
+
+		scope.requireIssuedParents = true
+		results = make([]WindowsCanonicalEntryMoveResultV1, 0, len(members))
+		for _, evidence := range members {
+			held := c.members[evidence.Member]
+			actual, err := c.receiveMemberRead(ctx, evidence.Member, held.original, evidence.File.SHA256, scope)
+			if err == nil && actual != evidence {
+				err = errors.New("clean archive original identity, path, parent, extent, attributes or bytes changed")
+			}
+			if err != nil {
+				results = append(results, WindowsCanonicalEntryMoveResultV1{
+					Member: evidence.Member, SourceRelative: evidence.File.Path, Error: err, OriginalOwnerPending: !c.closed,
+				})
+				return err
+			}
+			result, err := c.discardIssuedOriginal(ctx, evidence.Member, evidence.File.Path, held, scope)
+			results = append(results, result)
+			if err != nil {
+				return err
+			}
+		}
+		return scope.validateBank(ctx, c)
+	})
+	return results, err
 }
 func (r *WindowsCanonicalEntryRecoverySetV2) Disposition() WindowsCanonicalEntryMemberDispositionV2 {
 	if r == nil || r.original == nil {

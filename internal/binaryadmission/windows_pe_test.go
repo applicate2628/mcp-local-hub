@@ -181,6 +181,30 @@ func TestWindowsProductRoleAdmissionBindsExactIdentityAndHash(t *testing.T) {
 	}
 }
 
+func TestWindowsRoleHashRejectsGrowthAfterStat(t *testing.T) {
+	path := writeWindowsPEVersionFixture(t, WindowsArtifactRoleProduct, "0.4.66", "abc1234", "2026-11-23T16:36:05Z", false)
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := f.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	stat, err := f.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteAt([]byte{0}, stat.Size()); err != nil {
+		t.Fatal(err)
+	}
+	if digest, err := hashWindowsRoleFile(f, stat.Size()); digest != "" || err == nil ||
+		!strings.Contains(err.Error(), "file size changed during admission") {
+		t.Fatalf("hash accepted a stale extent: %v", err)
+	}
+}
+
 func writeWindowsPEFixture(t *testing.T, magic, subsystem uint16, mutate func([]byte)) string {
 	t.Helper()
 	data := make([]byte, 0x200)

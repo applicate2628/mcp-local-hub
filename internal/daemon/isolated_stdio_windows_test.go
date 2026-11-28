@@ -170,14 +170,14 @@ func nativeIsolatedStdio(t *testing.T, mode string, slots int) (*IsolatedStdioSe
 		MaxRequestIDs: 16, MaxIDBytes: 32, Startup: 4 * time.Second,
 		Operation: 2 * time.Second, Idle: 10 * time.Second,
 		Teardown: 4 * time.Second, EOFGrace: 500 * time.Millisecond,
-	}, func(r *http.Request) IsolatedStdioRole {
+	}, func(r *http.Request) IsolatedStdioAuthorization {
 		switch r.Header.Get("X-Owned-Fixture-Grant") {
 		case "hub":
-			return IsolatedStdioHub
+			return IsolatedStdioAuthorization{Role: IsolatedStdioHub, Session: ctx}
 		case "discovery":
-			return IsolatedStdioDiscovery
+			return IsolatedStdioAuthorization{Role: IsolatedStdioDiscovery, Session: ctx}
 		default:
-			return IsolatedStdioDenied
+			return IsolatedStdioAuthorization{}
 		}
 	})
 	if err != nil {
@@ -294,6 +294,47 @@ func TestOwnedIsolatedStdioSessionStateAndStderr(t *testing.T) {
 	if strings.Contains(logged, "synth") || !strings.Contains(logged, "stderr_bytes=2097152 stderr_eof=true") {
 		t.Fatalf("wrong private diagnostics: %q", logged)
 	}
+}
+
+func TestOwnedIsolatedStdioBindsSameRoleToOriginalFrontLifetime(t *testing.T) {
+	p, _ := nativeIsolatedStdio(t, "cooperative", 2)
+	a, cancelA := context.WithCancel(context.Background())
+	b, cancelB := context.WithCancel(context.Background())
+	defer cancelA()
+	defer cancelB()
+	p.authorize = func(r *http.Request) IsolatedStdioAuthorization {
+		switch r.Header.Get("X-Owned-Fixture-Grant") {
+		case "client-a":
+			return IsolatedStdioAuthorization{Role: IsolatedStdioHub, Session: a}
+		case "client-b":
+			return IsolatedStdioAuthorization{Role: IsolatedStdioHub, Session: b}
+		default:
+			return IsolatedStdioAuthorization{}
+		}
+	}
+	aSID := ownedIsolatedInit(t, p, "client-a")
+	bSID := ownedIsolatedInit(t, p, "client-b")
+	if got := ownedIsolatedRequest(p, http.MethodPost, "client-b", aSID, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`); got.Code != http.StatusNotFound {
+		t.Fatalf("same-role cross-front SID was accepted: %d", got.Code)
+	}
+	retirement := p.Retirement(aSID)
+	if retirement == nil {
+		t.Fatal("lost A original retirement")
+	}
+	cancelA()
+	ctx, release := context.WithTimeout(context.Background(), 5*time.Second)
+	defer release()
+	settled, err := retirement.Await(ctx)
+	if err != nil || !settled.Complete() || !settled.RootWait.Known {
+		t.Fatalf("A original lifetime did not settle: %+v / %v", settled, err)
+	}
+	if got := ownedIsolatedRequest(p, http.MethodPost, "client-a", "", privateInitFixture); got.Code != http.StatusForbidden {
+		t.Fatalf("revoked original front admitted a late initialize: %d", got.Code)
+	}
+	if got := ownedIsolatedRequest(p, http.MethodPost, "client-b", bSID, `{"jsonrpc":"2.0","id":2,"method":"tools/call"}`); got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"count":1`) {
+		t.Fatalf("A cancellation affected B: %d %s", got.Code, got.Body.String())
+	}
+	ownedIsolatedRetire(t, p, "client-b", bSID)
 }
 
 func TestOwnedIsolatedStdioInitializeIDIsSessionScoped(t *testing.T) {

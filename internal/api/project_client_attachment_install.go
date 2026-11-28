@@ -19,7 +19,7 @@ func (a *API) installProjectClientAttachment(ctx context.Context, m *config.Serv
 	if err := validateInstallProjectClientCreate(opts); err != nil {
 		return err
 	}
-	if ctx == nil || ctx.Err() != nil || m == nil || plan == nil || !plan.supervisorIntentHashesBound || len(plan.SupervisorIntent) != 1 {
+	if ctx == nil || ctx.Err() != nil || m == nil || plan == nil || !plan.supervisorIntentHashesBound || (plan.sessionLocal == nil && len(plan.SupervisorIntent) != 1) || (plan.sessionLocal != nil && len(plan.SupervisorIntent) != 0) {
 		return clients.ErrProjectClientInvalid
 	}
 	c := opts.ProjectClientCreate
@@ -40,7 +40,11 @@ func (a *API) installProjectClientAttachment(ctx context.Context, m *config.Serv
 		return err
 	}
 	version, commit, _ := buildinfo.Get()
-	p, err := prepareProjectClientAttachmentPlan(opts, plan.SupervisorIntent[0].manifestHash, plan, project, identity, global, managedRegistrationReleaseIdentity{Version: version, Commit: commit})
+	manifestHash := plan.manifestHash
+	if manifestHash == "" && len(plan.SupervisorIntent) == 1 {
+		manifestHash = plan.SupervisorIntent[0].manifestHash
+	}
+	p, err := prepareProjectClientAttachmentPlan(opts, manifestHash, plan, project, identity, global, managedRegistrationReleaseIdentity{Version: version, Commit: commit})
 	if err != nil {
 		return err
 	}
@@ -91,6 +95,16 @@ func projectAttachmentReceiver(project clients.Client, p *clients.ProjectHTTPAtt
 }
 
 func (a *API) applyProjectClientAttachment(ctx context.Context, m *config.ServerManifest, plan *Plan, opts InstallOpts, p *projectClientAttachmentPlan, globalReader interface{ ReadProjectAttachmentPolicySnapshot() ([]byte, error) }, w io.Writer, emit func(InstallMutationReceiptV1)) (resultErr error) {
+	if p.private == nil {
+		return a.applyProjectClientAttachmentHeld(ctx, m, plan, opts, p, globalReader, w, emit)
+	}
+	epoch := p.private.target.Epoch
+	return a.WithClientRoutingAuthorityLease(ctx, ExactTarget(ClientRoutingTarget{Mode: epoch.State, Generation: epoch.Generation, Port: epoch.Port}), func(ClientRoutingTarget) error {
+		return a.applyProjectClientAttachmentHeld(ctx, m, plan, opts, p, globalReader, w, emit)
+	})
+}
+
+func (a *API) applyProjectClientAttachmentHeld(ctx context.Context, m *config.ServerManifest, plan *Plan, opts InstallOpts, p *projectClientAttachmentPlan, globalReader interface{ ReadProjectAttachmentPolicySnapshot() ([]byte, error) }, w io.Writer, emit func(InstallMutationReceiptV1)) (resultErr error) {
 	policyOwner, ok := globalReader.(clients.ProjectHTTPAttachmentPolicyTransactionOwner)
 	if !ok {
 		return clients.ErrProjectClientInvalid
@@ -100,6 +114,9 @@ func (a *API) applyProjectClientAttachment(ctx context.Context, m *config.Server
 		return err
 	} else if !exists {
 		return clients.ErrProjectClientInvalid
+	}
+	if err := bindProjectPrivateIssuance(p, plan, opts); err != nil {
+		return err
 	}
 	op := &managedBackendInstallOperation{owner: managedRegistrationBackupIO{}, public: p.public, attachment: p}
 	backendPlan := *plan
@@ -153,15 +170,24 @@ func (a *API) applyProjectClientAttachment(ctx context.Context, m *config.Server
 	mutation := frozenInstallMutationReceipt(&backendPlan, backendOpts)
 	defer func() {
 		mutation.BackendInstall = op.receipt
+		if backendPlan.sessionLocal != nil && backendPlan.sessionLocal.legacyRemovalCommitted {
+			mutation.Committed = true
+		}
 		if emit != nil {
 			emit(mutation)
 		}
 	}()
-	if err := a.admitFrozenStdioBridgeBeforeMutation(ctx, m, &backendPlan, backendOpts); err != nil {
-		return err
-	}
-	if err := a.installPlanCoreWithRoutingTargetLease(ctx, m, &backendPlan, backendOpts, CanonicalAtAdmission(), w); err != nil {
-		return err
+	if p.private != nil {
+		if err := a.receiveProjectPrivateBackend(ctx, m, &backendPlan, backendOpts, op); err != nil {
+			return err
+		}
+	} else {
+		if err := a.admitFrozenStdioBridgeBeforeMutation(ctx, m, &backendPlan, backendOpts); err != nil {
+			return err
+		}
+		if err := a.installPlanCoreWithRoutingTargetLease(ctx, m, &backendPlan, backendOpts, CanonicalAtAdmission(), w); err != nil {
+			return err
+		}
 	}
 	mutation.Committed = true
 	if op.receipt == nil {
@@ -177,6 +203,9 @@ func (a *API) applyProjectClientAttachment(ctx context.Context, m *config.Server
 	}
 	if err := op.sealReady(ctx, ready.Snapshot); err != nil {
 		return err
+	}
+	if p.private != nil && op.capsule.Activation.PIDGeneration != uint64(p.private.target.Aggregate.Generation) {
+		return ErrSessionLocalInstallUnavailable
 	}
 	if err := a.freezeProjectBackendReceiptBindings(p, op); err != nil {
 		return err
@@ -223,6 +252,9 @@ func (a *API) applyProjectClientAttachment(ctx context.Context, m *config.Server
 	if err := lease.RunMutation(func() error { return op.owner.transitionProjectClientCapsule(ctx, parent, capsule, next) }); err != nil {
 		return errors.Join(err, &InstallCommittedUnverifiedError{cause: err})
 	}
+	if err := commitProjectPrivateAttachment(ctx, p, next); err != nil {
+		return errors.Join(err, &InstallCommittedUnverifiedError{cause: err})
+	}
 	mutation.projectSettlement = &settled
 	return nil
 }
@@ -249,6 +281,9 @@ func commitProjectAttachmentWithPolicy(ctx context.Context, policyOwner clients.
 			return err
 		}
 		prepared = true
+		if err := stageProjectPrivateAttachment(heldCtx, p, capsule); err != nil {
+			return err
+		}
 		if _, err := txn.Create(heldCtx); err != nil {
 			return err
 		}
@@ -274,6 +309,9 @@ func (a *API) freezeProjectBackendReceiptBindings(p *projectClientAttachmentPlan
 }
 
 func (a *API) compensateProjectClientAttachment(ctx context.Context, p *projectClientAttachmentPlan, c *projectClientAttachmentCapsule, op *managedBackendInstallOperation, cause error) error {
+	if err := revokeProjectPrivateAttachment(ctx, *c); err != nil {
+		return errors.Join(cause, err, clients.ErrProjectClientRollbackIncomplete)
+	}
 	parent := filepath.Dir(p.project.ConfigPath())
 	lease, err := NewCodexProjectConfigMutationOwner(p.identity)
 	if err != nil {

@@ -77,7 +77,8 @@ type ResolverSnapshot struct {
 
 	// ordinaryEndpoints includes unbound registrations. Scope removal alone
 	// must not prevent retirement of a session on its captured ordinary owner.
-	ordinaryEndpoints map[int]canonicalDaemonRef
+	ordinaryEndpoints     map[int]canonicalDaemonRef
+	sessionLocalEndpoints map[canonicalDaemonRef]HubStdioEndpoint
 
 	// ToolsHidden is the FINE-GRAINED per-tool visibility filter for
 	// group scope keys (groups/namespaces Phase 5a, operator decision 3).
@@ -230,9 +231,10 @@ func BuildResolverSnapshotFromManifests(manifests []config.ServerManifest) *Reso
 func BuildResolverSnapshotFromManifestsAndGroups(manifests []config.ServerManifest, groups []Group) *ResolverSnapshot {
 	gen := resolverGen.Add(1)
 	snap := &ResolverSnapshot{
-		Gen:               gen,
-		Bindings:          make(map[string][]canonicalDaemonRef),
-		ordinaryEndpoints: ordinaryHubEndpointOwners(manifests),
+		Gen:                   gen,
+		Bindings:              make(map[string][]canonicalDaemonRef),
+		ordinaryEndpoints:     ordinaryHubEndpointOwners(manifests),
+		sessionLocalEndpoints: sessionLocalHubEndpoints(manifests),
 	}
 	// codex bot r10 P2 closure on PR #157: dedupe (scopeKey, ref) pairs
 	// so a manifest that accidentally repeats a ClientBinding row (no

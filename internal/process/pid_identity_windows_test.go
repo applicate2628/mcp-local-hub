@@ -402,30 +402,47 @@ func TestLookupPIDHandleIdentityClosesOnSuccessAndIdentityError(t *testing.T) {
 func TestObservePIDHandleIdentityUsesExactHeldObject(t *testing.T) {
 	const pid = 4321
 	const handle windows.Handle = 0x1234
-	imageErr := &pidImagePathQueryError{pid: pid, err: windows.ERROR_ACCESS_DENIED}
-	waitErr := errors.New("fixture wait failed")
-	closeErr := errors.New("fixture close failed")
+	imageErr := pidObservationFailure(pidObservationImage, windows.ERROR_ACCESS_DENIED, nil)
+	generalFailure := pidObservationFailure(pidObservationImage, windows.ERROR_GEN_FAILURE, nil)
+	timesErr := pidObservationFailure(pidObservationTimes, windows.ERROR_GEN_FAILURE, nil)
+	waitErr := windows.ERROR_INVALID_HANDLE
+	closeErr := windows.ERROR_INVALID_HANDLE
 	otherErr := errors.New("fixture independent identity failure")
 	for _, tc := range []struct {
-		name        string
-		identityErr error
-		waitResult  uint32
-		waitErr     error
-		closeErr    error
-		cancel      bool
-		wantWait    bool
-		wantAbsent  bool
-		wantErrs    []error
+		name               string
+		identityErr        error
+		waitResult         uint32
+		waitErr            error
+		windowResult       uint32
+		windowErr          error
+		cancelDuringWindow bool
+		closeErr           error
+		cancel             bool
+		wantWait           bool
+		wantWindow         bool
+		wantAbsent         bool
+		wantErrs           []error
+		wantStage          string
+		wantCode           uint32
 	}{
 		{name: "identity"},
 		{name: "image denied and signaled", identityErr: imageErr, waitResult: windows.WAIT_OBJECT_0, wantWait: true, wantAbsent: true},
-		{name: "image denied and live", identityErr: imageErr, waitResult: uint32(windows.WAIT_TIMEOUT), wantWait: true, wantErrs: []error{imageErr}},
+		{name: "image denied and exits within window", identityErr: imageErr, waitResult: uint32(windows.WAIT_TIMEOUT), windowResult: windows.WAIT_OBJECT_0, wantWait: true, wantWindow: true, wantAbsent: true},
+		{name: "image denied and live", identityErr: imageErr, waitResult: uint32(windows.WAIT_TIMEOUT), windowResult: uint32(windows.WAIT_TIMEOUT), wantWait: true, wantWindow: true, wantErrs: []error{imageErr}, wantStage: "IMAGE", wantCode: 5},
+		{name: "image denied and timed wait fails", identityErr: imageErr, waitResult: uint32(windows.WAIT_TIMEOUT), windowResult: windows.WAIT_FAILED, windowErr: waitErr, wantWait: true, wantWindow: true, wantErrs: []error{imageErr, waitErr}, wantStage: "IMAGE", wantCode: 5},
+		{name: "image denied and canceled during window", identityErr: imageErr, waitResult: uint32(windows.WAIT_TIMEOUT), windowResult: windows.WAIT_OBJECT_0, cancelDuringWindow: true, wantWait: true, wantWindow: true, wantErrs: []error{imageErr, context.Canceled}, wantStage: "CONTEXT"},
+		{name: "image denied and failed close after window", identityErr: imageErr, waitResult: uint32(windows.WAIT_TIMEOUT), windowResult: windows.WAIT_OBJECT_0, closeErr: closeErr, wantWait: true, wantWindow: true, wantErrs: []error{imageErr, closeErr}, wantStage: "CLOSE", wantCode: 6},
+		{name: "image general failure and signaled", identityErr: generalFailure, waitResult: windows.WAIT_OBJECT_0, wantWait: true, wantAbsent: true},
+		{name: "image general failure and live", identityErr: generalFailure, waitResult: uint32(windows.WAIT_TIMEOUT), wantWait: true, wantErrs: []error{generalFailure}, wantStage: "IMAGE", wantCode: 31},
+		{name: "times failure and signaled", identityErr: timesErr, waitResult: windows.WAIT_OBJECT_0, wantWait: true, wantAbsent: true},
+		{name: "times failure and live", identityErr: timesErr, waitResult: uint32(windows.WAIT_TIMEOUT), wantWait: true, wantErrs: []error{timesErr}, wantStage: "TIMES", wantCode: 31},
 		{name: "unsupported wait", identityErr: imageErr, waitResult: windows.WAIT_ABANDONED, wantWait: true, wantErrs: []error{imageErr}},
-		{name: "failed wait", identityErr: imageErr, waitResult: windows.WAIT_FAILED, waitErr: waitErr, wantWait: true, wantErrs: []error{imageErr, waitErr}},
-		{name: "failed close", identityErr: imageErr, waitResult: windows.WAIT_OBJECT_0, closeErr: closeErr, wantWait: true, wantErrs: []error{imageErr, closeErr}},
-		{name: "canceled during close", identityErr: imageErr, waitResult: windows.WAIT_OBJECT_0, cancel: true, wantWait: true, wantErrs: []error{imageErr, context.Canceled}},
-		{name: "denied at another stage", identityErr: windows.ERROR_ACCESS_DENIED, wantErrs: []error{windows.ERROR_ACCESS_DENIED}},
-		{name: "aggregate identity failure", identityErr: errors.Join(imageErr, otherErr), wantErrs: []error{imageErr, otherErr}},
+		{name: "failed wait", identityErr: generalFailure, waitResult: windows.WAIT_FAILED, waitErr: waitErr, wantWait: true, wantErrs: []error{generalFailure, waitErr}, wantStage: "WAIT", wantCode: 6},
+		{name: "failed close", identityErr: generalFailure, waitResult: windows.WAIT_OBJECT_0, closeErr: closeErr, wantWait: true, wantErrs: []error{generalFailure, closeErr}, wantStage: "CLOSE", wantCode: 6},
+		{name: "canceled during close", identityErr: generalFailure, waitResult: windows.WAIT_OBJECT_0, cancel: true, wantWait: true, wantErrs: []error{generalFailure, context.Canceled}, wantStage: "CONTEXT"},
+		{name: "failed and canceled close", identityErr: generalFailure, waitResult: windows.WAIT_OBJECT_0, closeErr: closeErr, cancel: true, wantWait: true, wantErrs: []error{generalFailure, closeErr, context.Canceled}, wantStage: "CONTEXT"},
+		{name: "denied at another stage", identityErr: windows.ERROR_ACCESS_DENIED, waitResult: uint32(windows.WAIT_TIMEOUT), wantWait: true, wantErrs: []error{windows.ERROR_ACCESS_DENIED}},
+		{name: "aggregate identity failure", identityErr: errors.Join(imageErr, otherErr), waitResult: uint32(windows.WAIT_TIMEOUT), wantWait: true, wantErrs: []error{imageErr, otherErr}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
@@ -447,11 +464,21 @@ func TestObservePIDHandleIdentityUsesExactHeldObject(t *testing.T) {
 					return processHandleIdentity{ExecutablePath: "fixture.exe", CreationTime: time.Unix(1700000000, 0)}, tc.identityErr
 				},
 				wait: func(gotHandle windows.Handle, timeout uint32) (uint32, error) {
-					calls = append(calls, "wait")
-					if gotHandle != handle || timeout != 0 {
+					if gotHandle != handle {
 						t.Fatalf("wait=(%#x,%d)", gotHandle, timeout)
 					}
-					return tc.waitResult, tc.waitErr
+					if timeout == 0 {
+						calls = append(calls, "wait")
+						return tc.waitResult, tc.waitErr
+					}
+					if !tc.wantWindow || timeout != 10 {
+						t.Fatalf("unexpected timed wait=(%#x,%d)", gotHandle, timeout)
+					}
+					calls = append(calls, "timed wait")
+					if tc.cancelDuringWindow {
+						cancel()
+					}
+					return tc.windowResult, tc.windowErr
 				},
 				close: func(gotHandle windows.Handle) error {
 					calls = append(calls, "close")
@@ -468,6 +495,9 @@ func TestObservePIDHandleIdentityUsesExactHeldObject(t *testing.T) {
 			if tc.wantWait {
 				wantCalls = "open,identity,wait,close"
 			}
+			if tc.wantWindow {
+				wantCalls = "open,identity,wait,timed wait,close"
+			}
 			if strings.Join(calls, ",") != wantCalls {
 				t.Fatalf("calls=%v, want %s", calls, wantCalls)
 			}
@@ -477,6 +507,12 @@ func TestObservePIDHandleIdentityUsesExactHeldObject(t *testing.T) {
 			for _, cause := range tc.wantErrs {
 				if !errors.Is(err, cause) {
 					t.Fatalf("error=%v, missing %v", err, cause)
+				}
+			}
+			if tc.wantStage != "" {
+				stage, code, known := PIDHandleObservationFailure(err)
+				if stage != tc.wantStage || code != tc.wantCode || known != (tc.wantCode != 0) {
+					t.Fatalf("failure observation = %s, %d, %v; want %s, %d", stage, code, known, tc.wantStage, tc.wantCode)
 				}
 			}
 			wantIdentity := PIDHandleIdentity{}
@@ -503,13 +539,14 @@ func TestObservePIDHandleIdentityRechecksOnlyMissingOpen(t *testing.T) {
 		wantCalls  string
 		wantAbsent bool
 		wantErrs   []error
+		wantOpen   uint32
 	}{
 		{name: "missing again", openErr: windows.ERROR_INVALID_PARAMETER, reopenErr: windows.ERROR_INVALID_PARAMETER, wantCalls: "open,reopen", wantAbsent: true},
 		{name: "reopened signaled", openErr: windows.ERROR_INVALID_PARAMETER, waitResult: windows.WAIT_OBJECT_0, wantCalls: "open,reopen,wait,close", wantAbsent: true},
 		{name: "reopened live", openErr: windows.ERROR_INVALID_PARAMETER, waitResult: uint32(windows.WAIT_TIMEOUT), wantCalls: "open,reopen,wait,close", wantErrs: []error{windows.ERROR_INVALID_PARAMETER}},
 		{name: "reopened close failed", openErr: windows.ERROR_INVALID_PARAMETER, waitResult: windows.WAIT_OBJECT_0, closeErr: closeErr, wantCalls: "open,reopen,wait,close", wantErrs: []error{windows.ERROR_INVALID_PARAMETER, closeErr}},
-		{name: "reopen denied", openErr: windows.ERROR_INVALID_PARAMETER, reopenErr: windows.ERROR_ACCESS_DENIED, wantCalls: "open,reopen", wantErrs: []error{windows.ERROR_INVALID_PARAMETER, windows.ERROR_ACCESS_DENIED}},
-		{name: "initial open denied", openErr: windows.ERROR_ACCESS_DENIED, wantCalls: "open", wantErrs: []error{windows.ERROR_ACCESS_DENIED}},
+		{name: "reopen denied", openErr: windows.ERROR_INVALID_PARAMETER, reopenErr: windows.ERROR_ACCESS_DENIED, wantCalls: "open,reopen", wantErrs: []error{windows.ERROR_INVALID_PARAMETER, windows.ERROR_ACCESS_DENIED}, wantOpen: 5},
+		{name: "initial open denied", openErr: windows.ERROR_ACCESS_DENIED, wantCalls: "open", wantErrs: []error{windows.ERROR_ACCESS_DENIED}, wantOpen: 5},
 		{name: "aggregate open error", openErr: errors.Join(windows.ERROR_INVALID_PARAMETER, closeErr), wantCalls: "open", wantErrs: []error{windows.ERROR_INVALID_PARAMETER, closeErr}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -556,6 +593,12 @@ func TestObservePIDHandleIdentityRechecksOnlyMissingOpen(t *testing.T) {
 			})
 			if strings.Join(calls, ",") != tc.wantCalls {
 				t.Fatalf("calls=%v, want %s", calls, tc.wantCalls)
+			}
+			if tc.wantOpen != 0 {
+				stage, code, known := PIDHandleObservationFailure(err)
+				if stage != "OPEN" || !known || code != tc.wantOpen {
+					t.Fatalf("open failure = %s, %d, %v; want OPEN, %d", stage, code, known, tc.wantOpen)
+				}
 			}
 			if (err != nil) != (len(tc.wantErrs) != 0) || got != (PIDHandleObservation{ConfirmedAbsent: tc.wantAbsent}) {
 				t.Fatalf("observation=%+v error=%v", got, err)

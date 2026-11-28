@@ -52,13 +52,17 @@ func newWindowsProductTxnWith(
 	if req.Context == nil {
 		req.Context = context.Background()
 	}
-	if req.StateDir == "" || req.ProductPath == "" || req.LegacyWindowlessPath == "" || req.StagedProduct == "" {
+	missingStage := req.StagedProduct == "" && (req.EntryBundle == nil || !req.EntryBundle.selective)
+	if req.StateDir == "" || req.ProductPath == "" || req.LegacyWindowlessPath == "" || missingStage {
 		return nil, errors.New("Windows product wiring: state and artifact paths are required")
 	}
 	if req.EntrySet != nil && req.EntryBundle != nil {
 		return nil, errors.New("legacy and current entry stages coexist")
 	}
 	if err := validateWindowsProductJournalOperation(req.Context, req.JournalAllowance); err != nil {
+		return nil, err
+	}
+	if err := refuseAggregateRollback(req.StateDir); err != nil {
 		return nil, err
 	}
 	if req.journalReadEvidence == nil {
@@ -540,6 +544,7 @@ func (o *windowsProductPairTaskOwner) VerifyRuntimeSHA256() (string, error) {
 	return o.txn.VerifyRuntimeSHA256()
 }
 func (o *windowsProductPairTaskOwner) RestoreImport() error        { return o.txn.RestoreImport() }
+func (o *windowsProductPairTaskOwner) VerifyRestored() error       { return o.txn.VerifyRestored() }
 func (o *windowsProductPairTaskOwner) DiscardRecoveryStore() error { return o.store.Close() }
 func (o *windowsProductPairTaskOwner) Close() error                { return o.txn.Close() }
 

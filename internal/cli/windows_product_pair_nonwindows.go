@@ -17,3 +17,5 @@ func withWindowsProductNativeDefaults(d WindowsProductTxnDeps) WindowsProductTxn
 	}
 	return d
 }
+
+func (*WindowsProductTxn) recordWarmSelectiveCommitClose(error) error { return errors.ErrUnsupported }

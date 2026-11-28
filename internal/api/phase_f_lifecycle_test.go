@@ -21,6 +21,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -599,21 +600,40 @@ func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_StartFailurePrintsHint(
 	}
 }
 
-// TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_StartsAutostartOwnerNow
-// locks the first-install contract: when the descriptor write succeeds but the
-// post-install reconcile sees no running supervisor, install should start the
-// already-enabled autostart owner immediately instead of leaving the daemon
-// pending until a manual supervise or next logon.
-//
-// Negative-control: pre-fix nudgeSupervisorReconcileAfterGlobalInstall only
-// prints the old next-supervise/logon note, so the positive started-owner line
-// is absent and the stale pending-daemon note remains.
-func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_StartsAutostartOwnerNow(t *testing.T) {
+func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_AutostartDispatch(t *testing.T) {
+	t.Run("enabled", func(t *testing.T) {
+		testInstallColdAutostartDispatch(t, false, nil)
+	})
+	if runtime.GOOS == "windows" {
+		t.Run("refused", func(t *testing.T) {
+			prior := []byte("<Task>available observation</Task>")
+			refusal := autostart.NewObservedTaskReplacementRefusal(autostart.WindowsTaskName, prior, nil)
+			testInstallColdAutostartDispatch(t, false, refusal)
+		})
+		t.Run("saved_off_projection_failed", func(t *testing.T) {
+			testInstallColdAutostartDispatch(t, true, nil)
+		})
+	}
+}
+
+func testInstallColdAutostartDispatch(t *testing.T, autorunOff bool, enableErr error) {
+	t.Helper()
 	phaseFStateDir(t)
 	preparePreflightBinaryChecks(t)
 	f := newInstallFakeScheduler()
 	installFakeScheduler(t, f)
-	installFakeAutostartBackend(t, &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped})
+	fb := &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped, enableErr: enableErr}
+	installFakeAutostartBackend(t, fb)
+	if autorunOff {
+		path := SettingsPath()
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("gui.autorun_enabled: \"false\"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		fb.disableErr = scheduler.ErrPermissionDenied
+	}
 
 	probeCalls := 0
 	origProbe := installSupervisorRunningProbeFn
@@ -651,10 +671,29 @@ func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_StartsAutostartOwnerNow
 	if probeCalls != 1 {
 		t.Fatalf("supervisor running probe calls = %d, want 1", probeCalls)
 	}
+	out := buf.String()
+	if runtime.GOOS == "windows" {
+		if startCalls != 0 || !strings.Contains(out, "skips starting the Windows autostart task by name") ||
+			strings.Contains(out, "supervisor autostart owner started") {
+			t.Fatalf("Windows install dispatched a task by name: starts=%d output=%q", startCalls, out)
+		}
+		if autorunOff && (fb.disableCalls != 1 || fb.enableCalls != 0 || !strings.Contains(out, fb.disableErr.Error())) {
+			t.Fatalf("OFF projection not exercised: enable=%d disable=%d output=%q", fb.enableCalls, fb.disableCalls, out)
+		}
+		if autorunOff && (strings.Contains(out, "mcphub autostart enable") || !strings.Contains(out, "mcphub autostart status --details")) {
+			t.Fatalf("failed OFF projection must recommend inspecting the saved policy without enabling autorun; output=%q", out)
+		}
+		if !autorunOff && (fb.enableCalls != 1 || fb.disableCalls != 0) {
+			t.Fatalf("ON projection not exercised: enable=%d disable=%d output=%q", fb.enableCalls, fb.disableCalls, out)
+		}
+		if enableErr != nil && !strings.Contains(out, ErrSchedulerReplacementUnowned.Error()) {
+			t.Fatalf("refusal not exercised: enable=%d output=%q", fb.enableCalls, out)
+		}
+		return
+	}
 	if startCalls != 1 {
 		t.Fatalf("autostart owner start calls = %d, want 1", startCalls)
 	}
-	out := buf.String()
 	if !strings.Contains(out, "supervisor autostart owner started") {
 		t.Fatalf("install output missing started-owner confirmation; got:\n%s", out)
 	}
@@ -713,28 +752,48 @@ func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_RunningProbeSkipsStart(
 	}
 }
 
-// TestInstallPlanCore_GlobalInstallDeletesThisServersLegacyTasks
-// asserts the Phase-F handoff cleanup: supervisor-path installs must remove
-// stale pre-v0.6 per-daemon scheduler tasks for this server so those legacy
-// tasks cannot spawn daemons outside the supervisor after logon.
-//
-// Negative-control: remove the legacy scheduler cleanup from the supervise
-// global branch and deleteNames stays empty, so this test fails.
-func TestInstallPlanCore_GlobalInstallDeletesThisServersLegacyTasks(t *testing.T) {
-	phaseFStateDir(t)
+func TestInstallPlanCore_GlobalInstallRetainsObservedLegacyTasks(t *testing.T) {
+	stateDir := phaseFStateDir(t)
 	preparePreflightBinaryChecks(t)
+	seedInstalledServerManifests(t, "demo", "demo-alpha")
+	ownNames := []string{"mcp-local-hub-demo-alpha", "mcp-local-hub-demo-beta", "mcp-local-hub-demo-weekly-refresh"}
+	listedNames := append(append([]string{}, ownNames...), "mcp-local-hub-demo-alpha-beta", "mcp-local-hub-other-alpha", "mcp-local-hub-supervisor")
+	definitions := make(map[string][]byte, len(listedNames))
 	f := newInstallFakeScheduler()
-	f.listSeed = []scheduler.TaskStatus{
-		{Name: `\mcp-local-hub-demo-alpha`},
-		{Name: `\mcp-local-hub-demo-beta`},
-		{Name: `\mcp-local-hub-demo-weekly-refresh`},
-		{Name: `\mcp-local-hub-other-alpha`},
-		{Name: `\mcp-local-hub-supervisor`},
+	for _, name := range listedNames {
+		definitions[name] = []byte(`<Task name="` + name + `"/>`)
+		f.listSeed = append(f.listSeed, scheduler.TaskStatus{Name: `\` + name})
+		f.tasks[name], f.xml[name] = true, bytes.Clone(definitions[name])
 	}
 	installFakeScheduler(t, f)
 	installFakeAutostartBackend(t, &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped})
 
-	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+	origStatus, origLookup := supervisorIPCStatusFn, lookupProcess
+	origPIDKill, origStart := stopForceKillPIDFn, installAutostartOwnerStartFn
+	t.Cleanup(func() {
+		supervisorIPCStatusFn, lookupProcess = origStatus, origLookup
+		stopForceKillPIDFn, installAutostartOwnerStartFn = origPIDKill, origStart
+	})
+	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) { return nil, nil }
+	lookupProcess = nil
+	stopForceKillPIDFn = func(pid int) error {
+		t.Errorf("automatic install attempted to kill PID %d", pid)
+		return nil
+	}
+	t.Cleanup(swapKillByPort(func(port int, _ time.Duration) error {
+		t.Errorf("automatic install attempted to kill the listener on port %d", port)
+		return nil
+	}))
+	installAutostartOwnerStartFn = func() error {
+		t.Error("automatic install attempted to start the autostart owner after reconcile")
+		return nil
+	}
+	var nudges int
+	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(_ context.Context, apply bool) (ReconcileResponse, error) {
+		if !apply {
+			t.Error("install did not request reconcile apply")
+		}
+		nudges++
 		return ReconcileResponse{}, nil
 	}))
 
@@ -745,22 +804,33 @@ func TestInstallPlanCore_GlobalInstallDeletesThisServersLegacyTasks(t *testing.T
 		t.Fatalf("BuildPlan: %v", err)
 	}
 
-	if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", false, io.Discard); err != nil {
+	var out bytes.Buffer
+	if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", false, &out); err != nil {
 		t.Fatalf("installPlanCore(global install): %v", err)
 	}
-
-	deleted := map[string]bool{}
-	for _, name := range f.deleteNames {
-		deleted[strings.TrimPrefix(name, `\`)] = true
+	if len(f.deleteNames) != 0 || len(f.importNames) != 0 || f.createCount != 0 || f.runCount != 0 {
+		t.Fatalf("install mutated legacy scheduler: deletes=%v imports=%v creates=%d runs=%d", f.deleteNames, f.importNames, f.createCount, f.runCount)
 	}
-	for _, want := range []string{"mcp-local-hub-demo-alpha", "mcp-local-hub-demo-beta", "mcp-local-hub-demo-weekly-refresh"} {
-		if !deleted[want] {
-			t.Fatalf("legacy scheduler task %q was not deleted; deleteNames=%v", want, f.deleteNames)
+	for _, name := range listedNames {
+		if !f.tasks[name] || !bytes.Equal(f.xml[name], definitions[name]) {
+			t.Errorf("legacy scheduler task %q changed: exists=%v XML=%q", name, f.tasks[name], f.xml[name])
 		}
 	}
-	for _, forbidden := range []string{"mcp-local-hub-other-alpha", "mcp-local-hub-supervisor"} {
-		if deleted[forbidden] {
-			t.Fatalf("deleted non-owned/control-plane task %q; deleteNames=%v", forbidden, f.deleteNames)
+	if nudges != 1 {
+		t.Errorf("reconcile nudge calls = %d, want 1", nudges)
+	}
+	snapshots, err := filepath.Glob(filepath.Join(stateDir, "scheduler-recovery-*.json"))
+	if err != nil || len(snapshots) != len(ownNames) {
+		t.Fatalf("recovery snapshots = %v, want %d, err=%v", snapshots, len(ownNames), err)
+	}
+	const warningPrefix = "Legacy scheduler task "
+	if count := strings.Count(out.String(), warningPrefix); count != len(ownNames) {
+		t.Fatalf("retention warnings = %d, want %d; output:\n%s", count, len(ownNames), out.String())
+	}
+	for _, name := range ownNames {
+		assertUpgradeRecoverySnapshot(t, name, definitions[name])
+		if !strings.Contains(out.String(), warningPrefix+name+" retained; daemon stop skipped") {
+			t.Errorf("missing retention warning for %q; output:\n%s", name, out.String())
 		}
 	}
 }
@@ -855,181 +925,62 @@ func TestInstallPlanCore_GlobalDaemonlessFullInstallDropsStaleSupervisorRows(t *
 // no scheduler task) instead of recording the audit and killing nothing.
 // ---------------------------------------------------------------------------
 
-// TestStopForce_TerminatesSupervisorOwnedDaemon asserts the F3 fix: a forced
-// stop of a v0.6 GLOBAL server (descriptor in supervisor-intent.json, NO
-// scheduler task) kills the daemon by its descriptor port. Pre-fix the force
-// branch only called stopKillCore (scheduler-task targets) and killed NOTHING.
-//
-// Negative-control: revert StopWithOpts' Force branch to
-// `return a.stopKillCore(opts.Server, opts.DaemonFilter, nil)` and the kill
-// counter stays 0 → this test fails.
+// Force-stop uses one original-owner receipt and preserves running intent.
+// Reverting to the old descriptor/PID kill path trips the sealed fallbacks.
 func TestStopForce_TerminatesSupervisorOwnedDaemon(t *testing.T) {
-	stateDir := phaseFStateDir(t)
+	stateDir, task := seedForceStopDescriptor(t, "time", 9128)
 	installRecordingAudit(t, &recordingAuditWriter{})
-	// Seed a supervisor-intent with a single GLOBAL descriptor for "time"
-	// (the same shape the stop_supervisor tests use) and NO scheduler task.
-	intent := &SupervisorIntentFile{
-		Version: 1,
-		Daemons: []SupervisorDaemon{
-			{TaskName: `\mcp-local-hub-time-default`, Server: "time", Daemon: "default", Port: 9128},
-		},
-	}
-	if err := WriteSupervisorIntent(filepath.Join(stateDir, supervisorIntentFileLeaf), intent); err != nil {
-		t.Fatalf("seed supervisor-intent: %v", err)
-	}
-
-	// No scheduler tasks exist (Phase F global). stopKillCore must find nothing.
-	fake := &restartAllFakeScheduler{tasks: nil}
-	t.Cleanup(swapStopSchedulerFactory(fake))
-
-	// Count force kills by port via the killByPortFn seam.
-	var killedPorts []int
-	t.Cleanup(swapKillByPort(func(port int, _ time.Duration) error {
-		killedPorts = append(killedPorts, port)
-		return nil
-	}))
-	// The reconcile seam must NOT be dialed by the force path (force records no
-	// stop intent, so a reconcile would no-op). Fail loud if it is.
-	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
-		t.Error("stop --force dialed the supervisor reconcile; force must kill directly, not reconcile")
-		return ReconcileResponse{}, nil
-	}))
-
-	results, err := NewAPI().StopWithOpts(StopOpts{Server: "time", Force: true})
-	if err != nil {
-		t.Fatalf("StopWithOpts(force): %v", err)
-	}
-
-	// The supervisor-owned daemon was killed by its descriptor port.
-	if len(killedPorts) != 1 || killedPorts[0] != 9128 {
-		t.Fatalf("force stop killed ports %v, want exactly [9128] (the supervisor-owned descriptor port)", killedPorts)
-	}
-	// A result row exists for the supervisor-owned task.
-	var sawTask bool
-	for _, r := range results {
-		if r.TaskName == `\mcp-local-hub-time-default` {
-			sawTask = true
-			if r.Err != "" {
-				t.Errorf("force stop of supervisor-owned daemon returned error row: %q", r.Err)
-			}
+	t.Cleanup(swapStopSchedulerFactory(&restartAllFakeScheduler{tasks: nil}))
+	sealForceStopNumericalFallbacks(t)
+	var calls int
+	installForceStopReceipt(t, func(ctx context.Context, got string, port int) (ForceStopResultV1, error) {
+		calls++
+		if got != task || port != 9128 {
+			t.Fatalf("force_stop selected %q/%d, want %q/9128", got, port, task)
 		}
-	}
-	if !sawTask {
-		t.Fatalf("no result row for the supervisor-owned task; results=%+v", results)
-	}
-}
-
-// TestStopForceKillSupervisorOwned_PortlessFallsBackToPID asserts the
-// descriptor-port-less fallback: when a supervisor-owned descriptor has no
-// port, the force path resolves a live PID from the IPC status and kills it.
-func TestStopForceKillSupervisorOwned_PortlessFallsBackToPID(t *testing.T) {
-	pinOwnerSIDMatch(t) // SEC-F3: same-user owner; this test asserts the portless PID fallback.
-	stateDir := phaseFStateDir(t)
-	intent := &SupervisorIntentFile{
-		Version: 1,
-		Daemons: []SupervisorDaemon{
-			// Port 0 → no port-kill target; the IPC status supplies the PID.
-			{TaskName: `\mcp-local-hub-time-default`, Server: "time", Daemon: "default", Port: 0},
-		},
-	}
-	if err := WriteSupervisorIntent(filepath.Join(stateDir, supervisorIntentFileLeaf), intent); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-
-	// killByPortFn must NOT fire (no port); stopForceKillPIDFn must.
-	t.Cleanup(swapKillByPort(func(port int, _ time.Duration) error {
-		t.Errorf("killByPortFn fired for a portless descriptor (port=%d); want PID fallback", port)
-		return nil
-	}))
-	var killedPIDs []int
-	origPID := stopForceKillPIDFn
-	stopForceKillPIDFn = func(pid int) error { killedPIDs = append(killedPIDs, pid); return nil }
-	t.Cleanup(func() { stopForceKillPIDFn = origPID })
-
-	origIdentity := processIdentityByPID
-	processIdentityByPID = func(pid int) (string, string, bool) {
-		if pid == 4242 {
-			return "mcphub.exe", "svchost.exe", true
-		}
-		return "", "", false
-	}
-	t.Cleanup(func() { processIdentityByPID = origIdentity })
-
-	// IPC status reports the live PID for the task.
-	origStatus := supervisorIPCStatusFn
-	supervisorIPCStatusFn = func(ctx context.Context) ([]DaemonStatus, error) {
-		return []DaemonStatus{{TaskName: `\mcp-local-hub-time-default`, PID: 4242, State: "Running"}}, nil
-	}
-	t.Cleanup(func() { supervisorIPCStatusFn = origStatus })
-
-	results, handled, err := stopForceKillSupervisorOwned(context.Background(), "time", "")
-	if err != nil {
-		t.Fatalf("stopForceKillSupervisorOwned: %v", err)
-	}
-	if !handled {
-		t.Fatal("handled=false, want true (a supervisor-owned target was in scope)")
-	}
-	if len(killedPIDs) != 1 || killedPIDs[0] != 4242 {
-		t.Fatalf("PID-fallback kills = %v, want exactly [4242]", killedPIDs)
-	}
-	if len(results) != 1 || results[0].Err != "" {
-		t.Fatalf("unexpected results: %+v", results)
-	}
-}
-
-func TestStopForceKillSupervisorOwned_PortlessNoPIDReturnsError(t *testing.T) {
-	stateDir := phaseFStateDir(t)
-	// A GENUINELY portless supervisor-owned daemon: a server with NO manifest, so
-	// the owner (EffectiveDaemonPort) resolves nothing and d.Port stays 0. NOTE a
-	// `time` Port=0 row is no longer portless — the owner resolves its manifest
-	// port 9128 (bot PR #505) — so it can no longer exercise the no-kill-surface
-	// path; use an unknown server to keep testing the genuinely-portless case.
-	intent := &SupervisorIntentFile{
-		Version: 1,
-		Daemons: []SupervisorDaemon{
-			{TaskName: `\mcp-local-hub-phantomsrv-default`, Server: "phantomsrv", Daemon: "default", Port: 0,
-				Args: []string{"daemon", "--server", "phantomsrv", "--daemon", "default"}},
-		},
-	}
-	if err := WriteSupervisorIntent(filepath.Join(stateDir, supervisorIntentFileLeaf), intent); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-
-	origStatus := supervisorIPCStatusFn
-	origPID := stopForceKillPIDFn
-	origForceKill := forceKillByPortFn
-	t.Cleanup(func() {
-		supervisorIPCStatusFn = origStatus
-		stopForceKillPIDFn = origPID
-		forceKillByPortFn = origForceKill
+		return forceStopClosedFixture(got, port), nil
 	})
-	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
-		return []DaemonStatus{{TaskName: `\mcp-local-hub-phantomsrv-default`, PID: 0, State: "Running"}}, nil
+	results, err := NewAPI().StopWithOpts(StopOpts{Server: "time", Force: true})
+	if err != nil || calls != 1 || len(results) != 1 || results[0].Err != "" {
+		t.Fatalf("force stop: calls=%d rows=%+v err=%v", calls, results, err)
 	}
-	stopForceKillPIDFn = func(pid int) error {
-		t.Fatalf("stopForceKillPIDFn called with pid %d; no live PID was available", pid)
-		return nil
-	}
-	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
-		t.Fatalf("forceKillByPortFn called for portless descriptor port=%d", port)
-		return portKillNoListener, nil
-	}
-
-	results, handled, err := stopForceKillSupervisorOwned(context.Background(), "phantomsrv", "")
+	intent, err := ReadSupervisorIntent(filepath.Join(stateDir, supervisorIntentFileLeaf))
 	if err != nil {
-		t.Fatalf("stopForceKillSupervisorOwned: %v", err)
+		t.Fatal(err)
 	}
-	if !handled {
-		t.Fatal("handled=false, want true (a supervisor-owned target was in scope)")
+	if stop, present := intent.Stops[task]; present && stop.Desired == IntentDesiredStopped {
+		t.Fatal("force-stop changed the desired state to stopped")
 	}
-	if len(results) != 1 {
-		t.Fatalf("results len = %d, want 1; results=%+v", len(results), results)
+}
+
+// A portless descriptor needs the same retained creator; a PID is not authority.
+func TestStopForceKillSupervisorOwned_PortlessUsesOriginalOwner(t *testing.T) {
+	_, task := seedForceStopDescriptor(t, "phantomsrv", 0)
+	sealForceStopNumericalFallbacks(t)
+	var calls int
+	installForceStopReceipt(t, func(ctx context.Context, got string, port int) (ForceStopResultV1, error) {
+		calls++
+		if got != task || port != 0 {
+			t.Fatalf("portless request=%q/%d", got, port)
+		}
+		return forceStopClosedFixture(got, port), nil
+	})
+	rows, handled, err := stopForceKillSupervisorOwned(context.Background(), "phantomsrv", "")
+	if err != nil || !handled || calls != 1 || len(rows) != 1 || rows[0].Err != "" {
+		t.Fatalf("portless receipt: calls=%d handled=%t rows=%+v err=%v", calls, handled, rows, err)
 	}
-	if results[0].Err == "" {
-		t.Fatalf("portless descriptor with no live PID returned success; want no-kill-surface error row: %+v", results[0])
-	}
-	if !strings.Contains(results[0].Err, "no kill surface") || !strings.Contains(results[0].Err, "portless descriptor") {
-		t.Fatalf("result error = %q, want no kill surface / portless descriptor wording", results[0].Err)
+}
+
+// No PID or listener does not prove original tree closure.
+func TestStopForceKillSupervisorOwned_PortlessMissingOwnerReturnsError(t *testing.T) {
+	seedForceStopDescriptor(t, "phantomsrv", 0)
+	sealForceStopNumericalFallbacks(t)
+	installForceStopReceipt(t, func(context.Context, string, int) (ForceStopResultV1, error) {
+		return ForceStopResultV1{}, &IPCErr{Code: ForceStopOwnerUnavailable, Message: "original owner absent"}
+	})
+	rows, handled, err := stopForceKillSupervisorOwned(context.Background(), "phantomsrv", "")
+	if err != nil || !handled || len(rows) != 1 || rows[0].Code != ForceStopOwnerUnavailable || rows[0].Err == "" {
+		t.Fatalf("missing owner: handled=%t rows=%+v err=%v", handled, rows, err)
 	}
 }
 
@@ -1058,93 +1009,18 @@ func TestForceKillOneSupervisorTarget_LegacyPortZeroEngagesResolvedPortKill(t *t
 	}
 }
 
-func TestStopForceKillSupervisorOwned_PIDSuccessWithPortWaitsForRelease(t *testing.T) {
-	pinOwnerSIDMatch(t) // SEC-F3: same-user owner; this test asserts PID-kill-then-port-release.
-	stateDir := phaseFStateDir(t)
-	intent := &SupervisorIntentFile{
-		Version: 1,
-		Daemons: []SupervisorDaemon{
-			{TaskName: `\mcp-local-hub-time-default`, Server: "time", Daemon: "default", Port: 33105},
-		},
-	}
-	if err := WriteSupervisorIntent(filepath.Join(stateDir, supervisorIntentFileLeaf), intent); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-
-	const (
-		supervisorPID = 43105
-	)
-	origIdentity := processIdentityByPID
-	origStatus := supervisorIPCStatusFn
-	origPID := stopForceKillPIDFn
-	origForceKill := forceKillByPortFn
-	origLookup := lookupProcess
-	origTaskkill := taskkillProcessTreeByPIDFn
-	t.Cleanup(func() {
-		processIdentityByPID = origIdentity
-		supervisorIPCStatusFn = origStatus
-		stopForceKillPIDFn = origPID
-		forceKillByPortFn = origForceKill
-		lookupProcess = origLookup
-		taskkillProcessTreeByPIDFn = origTaskkill
+// A successor or unrelated listener never becomes a second termination target.
+func TestStopForceKillSupervisorOwned_ClosedTreePreservesOccupiedPortObservation(t *testing.T) {
+	seedForceStopDescriptor(t, "time", 33105)
+	sealForceStopNumericalFallbacks(t)
+	installForceStopReceipt(t, func(ctx context.Context, task string, port int) (ForceStopResultV1, error) {
+		receipt := forceStopClosedFixture(task, port)
+		receipt.PortState, receipt.PortOwnerPID = "occupied", 53106
+		return receipt, nil
 	})
-
-	processIdentityByPID = func(pid int) (string, string, bool) {
-		switch pid {
-		case supervisorPID:
-			return mcphubProcessImageName, mcphubProcessImageName, true
-		default:
-			t.Fatalf("processIdentityByPID pid = %d, want %d", pid, supervisorPID)
-			return "", "", false
-		}
-	}
-	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
-		return []DaemonStatus{{TaskName: `\mcp-local-hub-time-default`, PID: supervisorPID, State: "Running"}}, nil
-	}
-	var killedPIDs []int
-	stopForceKillPIDFn = func(pid int) error {
-		killedPIDs = append(killedPIDs, pid)
-		return nil
-	}
-	var portLookups int
-	lookupProcess = func(port int) (int, uint64, int64, bool) {
-		portLookups++
-		if port != 33105 {
-			t.Fatalf("lookupProcess port = %d, want 33105", port)
-		}
-		if portLookups <= 2 {
-			return supervisorPID, 0, 0, true
-		}
-		return 0, 0, 0, false
-	}
-	var taskkillPIDs []int
-	taskkillProcessTreeByPIDFn = func(pid int) error {
-		taskkillPIDs = append(taskkillPIDs, pid)
-		return nil
-	}
-	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
-		t.Fatalf("forceKillByPortFn called for port %d after successful PID kill", port)
-		return portKillNoListener, nil
-	}
-
-	results, handled, err := stopForceKillSupervisorOwned(context.Background(), "time", "")
-	if err != nil {
-		t.Fatalf("stopForceKillSupervisorOwned: %v", err)
-	}
-	if !handled {
-		t.Fatal("handled=false, want true")
-	}
-	if len(results) != 1 || results[0].Err != "" {
-		t.Fatalf("unexpected results: %+v", results)
-	}
-	if len(killedPIDs) != 1 || killedPIDs[0] != supervisorPID {
-		t.Fatalf("PID kills = %v, want [%d]", killedPIDs, supervisorPID)
-	}
-	if portLookups < 3 {
-		t.Fatalf("port release wait consulted lookupProcess %d times, want initial lookup plus release polling", portLookups)
-	}
-	if len(taskkillPIDs) != 0 {
-		t.Fatalf("taskkill PIDs = %v, want none for wait-only release", taskkillPIDs)
+	rows, handled, err := stopForceKillSupervisorOwned(context.Background(), "time", "")
+	if err != nil || !handled || len(rows) != 1 || rows[0].Err != "" || !strings.Contains(rows[0].Warning, "occupied") || !strings.Contains(rows[0].Warning, "53106") {
+		t.Fatalf("separate closure/port facts: handled=%t rows=%+v err=%v", handled, rows, err)
 	}
 }
 
@@ -1157,12 +1033,12 @@ func TestWaitPortReleasedAfterPIDKill_ForeignPortReuseSucceedsWithoutKill(t *tes
 
 	origIdentity := processIdentityByPID
 	origForceKill := forceKillByPortFn
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	origTaskkill := taskkillProcessTreeByPIDFn
 	t.Cleanup(func() {
 		processIdentityByPID = origIdentity
 		forceKillByPortFn = origForceKill
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 		taskkillProcessTreeByPIDFn = origTaskkill
 	})
 
@@ -1177,11 +1053,11 @@ func TestWaitPortReleasedAfterPIDKill_ForeignPortReuseSucceedsWithoutKill(t *tes
 			return "", "", false
 		}
 	}
-	lookupProcess = func(gotPort int) (int, uint64, int64, bool) {
+	lookupPortPID = func(gotPort int) (int, bool, error) {
 		if gotPort != port {
-			t.Fatalf("lookupProcess port = %d, want %d", gotPort, port)
+			t.Fatalf("lookupPortPID port = %d, want %d", gotPort, port)
 		}
-		return foreignPID, 0, 0, true
+		return foreignPID, true, nil
 	}
 	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
 		t.Fatalf("forceKillByPortFn called for reused foreign port %d", port)
@@ -1201,92 +1077,24 @@ func TestWaitPortReleasedAfterPIDKill_ForeignPortReuseSucceedsWithoutKill(t *tes
 	}
 }
 
-// TestStopForceKillSupervisorOwned_UnsupportedPortKillReportsSuccessWithUnverifiedPortWarning
-// covers the POSIX supervisor-owned force path: descriptor ports exist, but the
-// Windows-only port lookup hook is structurally absent (lookupProcess == nil on
-// non-Windows). A SUCCESSFUL trusted PID/tree kill IS the proof the daemon is
-// gone, so the force-stop goal is achieved: the per-target row must be SUCCESS
-// (empty Err) carrying a warning that notes the port-release proof was
-// unavailable on this platform but the trusted kill succeeded (bot PR #288
-// r35-1, site 1). The pre-fix code demanded a port-release proof it could not
-// supply and turned the success into a FAILED stop — this test inverts that
-// entrenching assertion.
-//
-// Negative-control (now matched by the assertions): keep returning success after
-// the PID kill and this test observes an empty per-target Err despite no
-// port-release proof.
-func TestStopForceKillSupervisorOwned_UnsupportedPortKillReportsSuccessWithUnverifiedPortWarning(t *testing.T) {
-	pinOwnerSIDMatch(t) // SEC-F3: same-user owner; this test asserts the unsupported-port-kill warning path.
-	stateDir := phaseFStateDir(t)
-	intent := &SupervisorIntentFile{
-		Version: 1,
-		Daemons: []SupervisorDaemon{
-			{TaskName: `\mcp-local-hub-time-default`, Server: "time", Daemon: "default", Port: 9315},
-		},
-	}
-	if err := WriteSupervisorIntent(filepath.Join(stateDir, supervisorIntentFileLeaf), intent); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-
-	origKill := killByPortFn
-	origForceKill := forceKillByPortFn
-	origLookup := lookupProcess
-	killByPortFn = killDaemonByPort
-	forceKillByPortFn = killDaemonByPortOutcome
-	lookupProcess = nil
-	t.Cleanup(func() {
-		killByPortFn = origKill
-		forceKillByPortFn = origForceKill
-		lookupProcess = origLookup
+// Native closure and failed port observation remain separate facts.
+func TestStopForceKillSupervisorOwned_ClosedTreeRetainsPortProbeFailure(t *testing.T) {
+	seedForceStopDescriptor(t, "time", 9128)
+	sealForceStopNumericalFallbacks(t)
+	installForceStopReceipt(t, func(ctx context.Context, task string, port int) (ForceStopResultV1, error) {
+		receipt := forceStopClosedFixture(task, port)
+		receipt.PortState, receipt.PortError = "unknown", "port observation failed"
+		return receipt, nil
 	})
-
-	var killedPIDs []int
-	origPID := stopForceKillPIDFn
-	stopForceKillPIDFn = func(pid int) error { killedPIDs = append(killedPIDs, pid); return nil }
-	t.Cleanup(func() { stopForceKillPIDFn = origPID })
-
-	origIdentity := processIdentityByPID
-	processIdentityByPID = func(pid int) (string, string, bool) {
-		if pid == 4243 {
-			return "mcphub.exe", "svchost.exe", true
-		}
-		return "", "", false
-	}
-	t.Cleanup(func() { processIdentityByPID = origIdentity })
-
-	origStatus := supervisorIPCStatusFn
-	supervisorIPCStatusFn = func(ctx context.Context) ([]DaemonStatus, error) {
-		return []DaemonStatus{{TaskName: `\mcp-local-hub-time-default`, PID: 4243, State: "Running"}}, nil
-	}
-	t.Cleanup(func() { supervisorIPCStatusFn = origStatus })
-
-	results, handled, err := stopForceKillSupervisorOwned(context.Background(), "time", "")
-	if err != nil {
-		t.Fatalf("stopForceKillSupervisorOwned: %v", err)
-	}
-	if !handled {
-		t.Fatal("handled=false, want true (a supervisor-owned target was in scope)")
-	}
-	if len(killedPIDs) != 1 || killedPIDs[0] != 4243 {
-		t.Fatalf("PID-fallback kills = %v, want exactly [4243]", killedPIDs)
-	}
-	if len(results) != 1 {
-		t.Fatalf("unexpected results: %+v", results)
-	}
-	if results[0].Err != "" {
-		t.Fatalf("results[0].Err = %q, want empty — a successful trusted PID kill IS the proof on a host with no port-owner lookup", results[0].Err)
-	}
-	if results[0].Warning == "" {
-		t.Fatalf("results[0].Warning = %q, want a non-empty warning noting the trusted kill succeeded without a port-release proof", results[0].Warning)
-	}
-	if !strings.Contains(results[0].Warning, "trusted PID/tree kill succeeded") {
-		t.Fatalf("results[0].Warning = %q, want it to note the trusted PID/tree kill succeeded", results[0].Warning)
+	rows, handled, err := stopForceKillSupervisorOwned(context.Background(), "time", "")
+	if err != nil || !handled || len(rows) != 1 || rows[0].Err != "" || !strings.Contains(rows[0].Warning, "port observation failed") {
+		t.Fatalf("port error was lost: handled=%t rows=%+v err=%v", handled, rows, err)
 	}
 }
 
 // TestStopForceKillSupervisorOwned_NoTargets_NoOp asserts the no-op path: a
 // server with no supervisor-owned descriptor returns (nil,false,nil) so the
-// caller falls through to the legacy stopKillCore.
+// caller reports any manifest-only task as lacking original custody.
 func TestStopForceKillSupervisorOwned_NoTargets_NoOp(t *testing.T) {
 	phaseFStateDir(t) // no intent file seeded
 	results, handled, err := stopForceKillSupervisorOwned(context.Background(), "time", "")

@@ -57,10 +57,14 @@ type ownedSupervisorLaunch struct {
 }
 
 func validateSupervisorImageIdentity(binaryPath, expectedSHA256 string, owner api.SupervisorLockOwner) error {
+	return validateSupervisorImageIdentityWithLookup(binaryPath, expectedSHA256, owner, processLookupIdentityFn)
+}
+
+func validateSupervisorImageIdentityWithLookup(binaryPath, expectedSHA256 string, owner api.SupervisorLockOwner, lookup func(int) (process.ProcessIdentity, error)) error {
 	if owner.PID <= 0 {
 		return fmt.Errorf("successor supervisor lock owner has invalid PID %d", owner.PID)
 	}
-	identity, err := processLookupIdentityFn(owner.PID)
+	identity, err := lookup(owner.PID)
 	if err != nil {
 		return fmt.Errorf("probe successor process identity: %w", err)
 	}
@@ -130,7 +134,7 @@ func (l *ownedSupervisorLaunch) observeControl(ctx context.Context, expected Sup
 			_, err := observeOriginalSupervisorRuntime(ctx, expected.ProductPath, expected.ProductSHA256, owner, l.deps.originalRuntime)
 			return err
 		}
-		return validateCreatedSupervisorNativeControl(expected, owner)
+		return validateCreatedSupervisorNativeControl(ctx, expected, owner)
 	}, l.deps.readOwner)
 }
 
@@ -278,13 +282,17 @@ func (l *ownedSupervisorLaunch) Abort(ctx context.Context) error {
 		if !graceful && l.proof != nil && l.deps.sendIPCPeer == nil {
 			errs = append(errs, errSupervisorPeerIPCSenderRequired)
 		} else if !graceful && l.proof != nil {
-			limit, cancel := context.WithTimeout(ctx, time.Duration(defaultExitTimeoutMs)*time.Millisecond)
-			owner, err := l.observeControl(limit, l.proof.expected)
+			// Check the original before starting its graceful-exit timeout.
+			// Both deadlines stay within the existing caller cleanup context.
+			check, stopCheck := context.WithTimeout(ctx, time.Duration(defaultExitTimeoutMs)*time.Millisecond)
+			owner, err := l.observeControl(check, l.proof.expected)
+			stopCheck()
 			if err == nil && owner == l.proof.owner {
 				select {
 				case <-l.waitDone:
 					graceful = true // Retained original outcome: do not contact a replacement.
 				default:
+					limit, cancel := context.WithTimeout(ctx, time.Duration(defaultExitTimeoutMs)*time.Millisecond)
 					resp, exitErr := l.deps.sendIPCPeer(limit, l.deps.pipePath, owner, l.proof.peer, "exit", map[string]any{"graceful": true, "timeout_ms": defaultExitTimeoutMs}, time.Duration(defaultExitTimeoutMs)*time.Millisecond)
 					if exitErr == nil && resp.OK && resp.Final && resp.Error == nil {
 						select {
@@ -294,6 +302,7 @@ func (l *ownedSupervisorLaunch) Abort(ctx context.Context) error {
 							exitErr = limit.Err()
 						}
 					}
+					cancel()
 					if exitErr != nil {
 						errs = append(errs, fmt.Errorf("created supervisor graceful exit: %w", exitErr))
 					}
@@ -301,7 +310,6 @@ func (l *ownedSupervisorLaunch) Abort(ctx context.Context) error {
 			} else if err != nil {
 				errs = append(errs, err)
 			}
-			cancel()
 		}
 		if !graceful {
 			if err := l.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
@@ -344,8 +352,16 @@ func (l *ownedSupervisorLaunch) Abort(ctx context.Context) error {
 	return l.settleErr
 }
 
-func validateCreatedSupervisorNativeControl(expected SupervisorControlExpectation, owner api.SupervisorLockOwner) error {
-	if err := validateSupervisorImageIdentity(expected.ProductPath, expected.ProductSHA256, owner); err != nil {
+func validateCreatedSupervisorNativeControl(ctx context.Context, expected SupervisorControlExpectation, owner api.SupervisorLockOwner) error {
+	if ctx == nil {
+		return errors.New("supervisor native control requires context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := validateSupervisorImageIdentityWithLookup(expected.ProductPath, expected.ProductSHA256, owner, func(pid int) (process.ProcessIdentity, error) {
+		return process.LookupProcessIdentityContext(ctx, pid)
+	}); err != nil {
 		return err
 	}
 	sameUser, err := process.ProcessOwnerSIDMatchesCurrent(owner.PID)
@@ -355,7 +371,7 @@ func validateCreatedSupervisorNativeControl(expected SupervisorControlExpectatio
 	if !sameUser {
 		return errors.New("created supervisor current user mismatch")
 	}
-	return nil
+	return ctx.Err()
 }
 
 // observeOriginalSupervisorRuntime proves the image through the retained original

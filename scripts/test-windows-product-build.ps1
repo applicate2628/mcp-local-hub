@@ -8,6 +8,8 @@ $fixtureRoot = Join-Path $scratchRoot "windows-build-plan-$PID-$([Guid]::NewGuid
 $fakeTools = Join-Path $fixtureRoot "fake-tools"
 $fakeBuildTools = Join-Path $fixtureRoot "fake-build-tools"
 $fakeBuildLog = Join-Path $fixtureRoot "fake-build-go.jsonl"
+$commandTestBuildLog = Join-Path $fixtureRoot "fake-command-test-go.jsonl"
+$privateOutputsRoot = Join-Path $scratchRoot ((Split-Path -Leaf $fixtureRoot) + "-private-inputs")
 $pwsh = (Get-Command pwsh -ErrorAction Stop).Source
 $windowsPowerShell = (Get-Command powershell -ErrorAction Stop).Source
 $realGo = (Get-Command go -ErrorAction Stop).Source
@@ -19,11 +21,47 @@ $fixtureCommit = "abcdef0123456789abcdef0123456789abcdef01"
 
 New-Item -ItemType Directory -Force -Path $fakeTools,$fakeBuildTools | Out-Null
 Copy-Item -LiteralPath $buildScript -Destination (Join-Path $fixtureRoot "build.ps1")
+# The DATA fixture also replaces destructive filesystem cleanup: the real
+# builder still selects and checks its original targets, but its test-local
+# Remove-Item receives those files by move. Keep this evidence outside trash
+# until every assertion in this script has passed. Release cleanup is unchanged.
+$cleanupBoundary = @'
+function Remove-Item {
+    [CmdletBinding()]
+    param([Parameter(Position=0)][string[]]$Path, [string[]]$LiteralPath, [switch]$Force, [switch]$Recurse)
+    $targets = if ($null -ne $LiteralPath) { $LiteralPath } else { $Path }
+    foreach ($target in $targets) {
+        if ($target -match '^Env:') {
+            Microsoft.PowerShell.Management\Remove-Item -LiteralPath $target -Force:$Force -ErrorAction Stop
+            continue
+        }
+        $absolute = [IO.Path]::GetFullPath($target)
+        $fixturePrefix = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+        if (-not $absolute.StartsWith($fixturePrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "DATA cleanup refused an operand outside its own fixture"
+        }
+        $preserved = Join-Path $PSScriptRoot "preserved-legacy-cleanup"
+        if (-not (Test-Path -LiteralPath $preserved)) { New-Item -ItemType Directory -Path $preserved -ErrorAction Stop | Out-Null }
+        $destination = Join-Path $preserved ([Guid]::NewGuid().ToString("N") + "-" + [IO.Path]::GetFileName($absolute))
+        if (Test-Path -LiteralPath $destination) { throw "DATA cleanup destination already exists" }
+        Move-Item -LiteralPath $absolute -Destination $destination -ErrorAction Stop
+    }
+}
+'@
+$fixtureBuildPath = Join-Path $fixtureRoot "build.ps1"
+$fixtureBuildText = [IO.File]::ReadAllText($fixtureBuildPath)
+$cleanupInsertion = '$ErrorActionPreference = "Stop"'
+if ([regex]::Matches($fixtureBuildText, [regex]::Escape($cleanupInsertion)).Count -ne 1) {
+    throw "DATA cleanup boundary requires the exact builder initialization point"
+}
+[IO.File]::WriteAllText($fixtureBuildPath, $fixtureBuildText.Replace($cleanupInsertion, $cleanupInsertion + [char]10 + $cleanupBoundary),
+    (New-Object Text.UTF8Encoding($false)))
 $contract = Join-Path $repoRoot "windows-product-artifacts.json"
 if (Test-Path -LiteralPath $contract) {
     Copy-Item -LiteralPath $contract -Destination (Join-Path $fixtureRoot "windows-product-artifacts.json")
 }
 [void](New-Item -ItemType Directory -Force -Path (Join-Path $fixtureRoot "cmd/mcphub"))
+[void](New-Item -ItemType Directory -Force -Path (Join-Path $fixtureRoot "internal/cli"))
 Copy-Item -LiteralPath (Join-Path $repoRoot "cmd/mcphub/versioninfo.json") -Destination (Join-Path $fixtureRoot "cmd/mcphub/versioninfo.json")
 Copy-Item -LiteralPath (Join-Path $repoRoot "cmd/mcphub/mcphub.ico") -Destination (Join-Path $fixtureRoot "cmd/mcphub/mcphub.ico")
 $fakeGit = @"
@@ -39,7 +77,25 @@ $fakeGit = @"
 [IO.File]::WriteAllText((Join-Path $fakeTools "go.cmd"), '@if "%1"=="env" (@echo %MCPHUB_FAKE_GOARCH% & @exit /b 0) else (@echo partial-resource^>cmd\mcphub\zz_product_versioninfo.syso & @exit /b 93)' + "`r`n")
 Copy-Item -LiteralPath (Join-Path $fakeTools "git.cmd") -Destination (Join-Path $fakeBuildTools "git.cmd")
 $fakeGoScript = @'
-$CommandArgs = [string[]]$args
+# PowerShell -File rebinds a leading-dash argument containing a colon (the
+# single -ldflags value contains an ISO build date). Receive the original
+# process argv before that script binder; the real go.exe receives this tuple.
+$processArgs = [Environment]::GetCommandLineArgs()
+$scriptAt = [Array]::IndexOf($processArgs, $PSCommandPath)
+if ($scriptAt -ge 0) {
+    if ($scriptAt -lt 1 -or $processArgs[$scriptAt - 1] -cne "-File" -or
+        @($processArgs | Where-Object { $_ -ceq $PSCommandPath }).Count -ne 1) { exit 80 }
+    $CommandArgs = [string[]]@($processArgs | Select-Object -Skip ($scriptAt + 1))
+} else {
+    # The three existing dot-source probes call the explicit go alias inside
+    # their PowerShell process. '& go' reports InvocationName='&'; receive
+    # its original builder ScriptName and actual alias definition instead.
+    $expectedBuilder = Join-Path (Split-Path -Parent $PSScriptRoot) "build.ps1"
+    $goAlias = Get-Alias -Name go -ErrorAction Stop
+    if ($MyInvocation.InvocationName -cne "&" -or $MyInvocation.ScriptName -cne $expectedBuilder -or
+        $MyInvocation.MyCommand.Path -cne $PSCommandPath -or $goAlias.Definition -cne $PSCommandPath) { exit 80 }
+    $CommandArgs = [string[]]$args
+}
 $record = [ordered]@{
     argv = @($CommandArgs)
     goflags = if (Test-Path Env:GOFLAGS) { [string]$env:GOFLAGS } else { $null }
@@ -66,12 +122,46 @@ if ($CommandArgs.Count -ge 1 -and $CommandArgs[0] -eq "build") {
     [IO.File]::WriteAllText($CommandArgs[$outputIndex + 1], $(if ($CommandArgs[-1] -eq "./cmd/mcphub-launcher") { "fake-launcher" } else { "fake-product" }))
     exit 0
 }
+if ($CommandArgs.Count -ge 2 -and $CommandArgs[0] -eq "test" -and $CommandArgs -contains "-c") {
+    $outputIndex = [Array]::IndexOf($CommandArgs, "-o")
+    if ($outputIndex -lt 0 -or $outputIndex + 1 -ge $CommandArgs.Count) { exit 85 }
+    [IO.File]::WriteAllText($CommandArgs[$outputIndex + 1], "fake-command-test-product")
+    if ($env:MCPHUB_FAKE_EXTRA_EXE -eq "1") {
+        $productDir = Split-Path -Parent $CommandArgs[$outputIndex + 1]
+        $outputRoot = Split-Path -Parent $productDir
+        [IO.File]::WriteAllText((Join-Path $outputRoot "mcphub-extra.exe"), "unexpected-extra-executable")
+    }
+    exit 0
+}
 if ($CommandArgs.Count -ge 2 -and $CommandArgs[0] -eq "run" -and
     $CommandArgs[1] -eq "./tools/windows-product-validate") {
     function Value-After([string]$Name) {
         $index = [Array]::IndexOf($CommandArgs, $Name)
         if ($index -lt 0 -or $index + 1 -ge $CommandArgs.Count) { exit 83 }
         return $CommandArgs[$index + 1]
+    }
+    if ($CommandArgs -contains "--source-snapshot" -and
+        $CommandArgs -notcontains "--candidate" -and
+        $CommandArgs -notcontains "--validate-entry-set-build" -and
+        $CommandArgs -notcontains "--stage-runtime") {
+        $sourceReads = @(Get-Content -LiteralPath $env:MCPHUB_FAKE_GO_LOG | ForEach-Object { $_ | ConvertFrom-Json } |
+            Where-Object { $_.argv -contains "--source-snapshot" -and $_.argv -notcontains "--candidate" -and
+                $_.argv -notcontains "--validate-entry-set-build" -and $_.argv -notcontains "--stage-runtime" })
+        $epoch = if ($env:MCPHUB_FAKE_SOURCE_CHANGE -eq "1" -and $sourceReads.Count -gt 1) { "c" * 64 } else { "a" * 64 }
+        Write-Output ([ordered]@{ schema = "windows-publisher-source-input-v1"; source_epoch = $epoch;
+            source_snapshot_sha256 = (Get-FileHash -LiteralPath (Value-After "--source-snapshot") -Algorithm SHA256).Hash.ToLowerInvariant();
+            file_count = 1 } | ConvertTo-Json -Compress)
+        exit 0
+    }
+    if ($CommandArgs -contains "--stage-runtime") {
+        $runtimeOutput = Value-After "--runtime-output"
+        New-Item -ItemType Directory -Path $runtimeOutput -ErrorAction Stop | Out-Null
+        $runtimeIndex = Join-Path $runtimeOutput "runtime-payload.json"
+        [IO.File]::WriteAllText($runtimeIndex, '{"fixture":"control-data-only"}')
+        Write-Output ([ordered]@{ schema = "hub-runtime-staging-v1";
+            runtime_payload_sha256 = (Get-FileHash -LiteralPath $runtimeIndex -Algorithm SHA256).Hash.ToLowerInvariant();
+            file_count = 1 } | ConvertTo-Json -Compress)
+        exit 0
     }
     if ($CommandArgs -contains "--encode-entry-comments") {
         $request = Get-Content -Raw -LiteralPath (Value-After "--encode-entry-comments") | ConvertFrom-Json
@@ -81,16 +171,19 @@ if ($CommandArgs.Count -ge 2 -and $CommandArgs[0] -eq "run" -and
     }
     if ($CommandArgs -contains "--validate-entry-set-build") {
         $entry = Value-After "--validate-entry-set-build"
-        $identityPath = Join-Path (Split-Path $entry) "windows-product-identity.json"
+        $identityRelative = if ($CommandArgs -contains "--runtime-payload") { "mcphub-product/windows-product-identity.json" } else { "windows-product-identity.json" }
+        $identityPath = Join-Path (Split-Path $entry) $identityRelative
         $identity = Get-Content -Raw -LiteralPath $identityPath | ConvertFrom-Json
-        Write-Output ([ordered]@{
+        $observation = [ordered]@{
             schema = "windows-canonical-entry-build-observation-v1"
             build_id = Value-After "--expected-entry-set-build-id"
             registry_projection_sha256 = ("b" * 64)
             canonical_entry_sha256 = (Get-FileHash $entry -Algorithm SHA256).Hash.ToLowerInvariant()
             product_sha256 = $identity.sha256
             identity_sha256 = (Get-FileHash $identityPath -Algorithm SHA256).Hash.ToLowerInvariant()
-        } | ConvertTo-Json -Compress)
+        }
+        if ($CommandArgs -contains "--expected-source-epoch") { $observation.source_epoch = Value-After "--expected-source-epoch" }
+        Write-Output ($observation | ConvertTo-Json -Compress)
         exit 0
     }
     $candidate = Value-After "--candidate"
@@ -105,6 +198,14 @@ if ($CommandArgs.Count -ge 2 -and $CommandArgs[0] -eq "run" -and
         build_date = Value-After "--expected-build-date"
         sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $candidate).Hash.ToLowerInvariant()
     }
+    if ($CommandArgs -contains "--runtime-payload") {
+        $identity.schema = "windows-product-identity-v2"
+        $identity.source_epoch = Value-After "--expected-source-epoch"
+        $identity.launcher_sha256 = (Get-FileHash -LiteralPath (Value-After "--helper") -Algorithm SHA256).Hash.ToLowerInvariant()
+        $identity.runtime_payload_path = Value-After "--runtime-payload"
+        $identity.runtime_payload_sha256 = (Get-FileHash -LiteralPath (Join-Path (Split-Path -Parent $candidate) $identity.runtime_payload_path) -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($env:MCPHUB_FAKE_RUNTIME_MISMATCH -eq "1") { $identity.runtime_payload_sha256 = "f" * 64 }
+    }
     Write-Output ($identity | ConvertTo-Json -Compress)
     exit 0
 }
@@ -114,7 +215,7 @@ $fakeGoScriptPath = Join-Path $fakeBuildTools "fake-go.ps1"
 [IO.File]::WriteAllText($fakeGoScriptPath, $fakeGoScript, (New-Object Text.UTF8Encoding($false)))
 $fakeGoCommand = @"
 @echo off
-"$pwsh" -NoProfile -ExecutionPolicy Bypass -File "$fakeGoScriptPath" %*
+"$pwsh" -NoProfile -File "$fakeGoScriptPath" %*
 @exit /b %ERRORLEVEL%
 "@
 [IO.File]::WriteAllText((Join-Path $fakeBuildTools "go.cmd"), $fakeGoCommand)
@@ -172,9 +273,32 @@ try {
         if (-not $testPlan.testOnly -or ($testPlan.buildTags -join "|") -ne "test_state_path_env") {
             throw "test-state-isolated plan mode drift: testOnly=$($testPlan.testOnly) tags=$($testPlan.buildTags -join '|')"
         }
+        $commandTestOutput = Join-Path $fixtureRoot ".scratch/o7-command-test-product"
+        $commandTestJson = & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") `
+            -PrintPlanJson `
+            -TestStateIsolatedProduct `
+            -CanonicalEntryCommandTestProduct `
+            -OutputDirectory $commandTestOutput
+        if ($LASTEXITCODE -ne 0) {
+            throw "canonical command test Product plan failed with exit $LASTEXITCODE"
+        }
+        $commandTestPlan = $commandTestJson | ConvertFrom-Json
+        if (-not $commandTestPlan.testOnly -or -not $commandTestPlan.canonicalEntryCommandTestProduct -or
+            $commandTestPlan.testProductPackage -cne "./internal/cli" -or
+            $commandTestPlan.artifacts[0].source -cne "./internal/cli" -or
+            $commandTestPlan.canonicalCommandFixture -cne (Join-Path $commandTestOutput "windows-canonical-command-test-fixture.json")) {
+            throw "canonical command test Product plan did not expose its exact test package and fixture output"
+        }
         $ordinaryPlan = $json | ConvertFrom-Json
         if ($ordinaryPlan.testOnly -or @($ordinaryPlan.buildTags).Count -ne 0) {
             throw "ordinary plan acquired test-only state"
+        }
+        foreach ($otherPlan in @($ordinaryPlan, $testPlan, $releasePlans["amd64"], $releasePlans["arm64"])) {
+            foreach ($field in @("canonicalEntryCommandTestProduct", "testProductPackage", "canonicalCommandFixture")) {
+                if (@($otherPlan.PSObject.Properties.Name) -contains $field) {
+                    throw "non-command-test plan acquired $field"
+                }
+            }
         }
         foreach ($arch in @("amd64", "arm64")) {
             if ($releasePlans[$arch].testOnly -or @($releasePlans[$arch].buildTags).Count -ne 0) {
@@ -182,6 +306,8 @@ try {
             }
         }
         $invalidTestModeArguments = @(
+            @("-PrintPlanJson", "-CanonicalEntryCommandTestProduct"),
+            @("-PrintPlanJson", "-CanonicalEntryCommandTestProduct", "-OutputDirectory", $commandTestOutput),
             @("-PrintPlanJson", "-TestStateIsolatedProduct"),
             @("-PrintPlanJson", "-TestStateIsolatedProduct", "-OutputDirectory", "relative-o7"),
             @("-PrintPlanJson", "-TestStateIsolatedProduct", "-OutputDirectory", (Join-Path $fixtureRoot "outside-scratch")),
@@ -276,6 +402,251 @@ Write-Output ('__GOFLAGS_AFTER__=' + `$env:GOFLAGS)
         if ($encoderCalls.Count -ne 1 -or $cuiFlags.Contains("expectedCanonicalEntrySHA256") -or $buildCalls[0].argv -contains "-tags") {
             throw "Build topology contains a launcher hash cycle, extra launcher build, or tagged CUI"
         }
+
+        $priorModePath = $env:PATH
+        $priorFakeLog = $env:MCPHUB_FAKE_GO_LOG
+        try {
+            $env:PATH = $fakeBuildTools + [IO.Path]::PathSeparator + $system32
+            $env:MCPHUB_FAKE_GO_LOG = $commandTestBuildLog
+            $escapedBuildScript = (Join-Path $fixtureRoot "build.ps1").Replace("'", "''")
+            $escapedCommandTestOutput = $commandTestOutput.Replace("'", "''")
+            $escapedFakeGoScript = $fakeGoScriptPath.Replace("'", "''")
+            $commandProbe = @"
+Set-Alias -Name go -Value '$escapedFakeGoScript' -Scope Local
+`$env:GOFLAGS = '-tags=ambient_should_not_apply'
+. '$escapedBuildScript' -TestStateIsolatedProduct -CanonicalEntryCommandTestProduct -OutputDirectory '$escapedCommandTestOutput'
+Write-Output ('__GOFLAGS_AFTER__=' + `$env:GOFLAGS)
+"@
+            $commandProbeOutput = @(& $pwsh -NoProfile -Command $commandProbe)
+            if ($LASTEXITCODE -ne 0) {
+                throw "canonical command test Product build probe failed with exit $LASTEXITCODE"
+            }
+        } finally {
+            $env:PATH = $priorModePath
+            $env:MCPHUB_FAKE_GO_LOG = $priorFakeLog
+        }
+        if ($commandProbeOutput[-1] -ne "__GOFLAGS_AFTER__=-tags=ambient_should_not_apply") {
+            throw "canonical command test Product build did not restore caller GOFLAGS"
+        }
+        $commandCalls = @(Get-Content -LiteralPath $commandTestBuildLog | ForEach-Object { $_ | ConvertFrom-Json })
+        $commandBuildCalls = @($commandCalls | Where-Object { $_.argv[0] -eq "build" })
+        $commandTestCalls = @($commandCalls | Where-Object { $_.argv[0] -eq "test" -and $_.argv -contains "-c" })
+        if ($commandBuildCalls.Count -ne 1 -or $commandBuildCalls[0].argv[-1] -ne "./cmd/mcphub-launcher" -or
+            $commandTestCalls.Count -ne 1 -or $commandTestCalls[0].argv[-1] -ne "./internal/cli") {
+            throw "canonical command fixture must build one launcher and compile internal/cli once with go test -c"
+        }
+        $commandTestArgv = @($commandTestCalls[0].argv)
+        $commandTagIndex = [Array]::IndexOf([string[]]$commandTestArgv, "-tags")
+        if ($commandTagIndex -lt 0 -or $commandTestArgv[$commandTagIndex + 1] -ne "test_state_path_env" -or
+            [string]$commandTestCalls[0].goflags -ne "") {
+            throw "canonical command test Product did not isolate its test_state_path_env tag"
+        }
+        $fixtureInputPath = Join-Path $commandTestOutput "windows-canonical-command-test-fixture.json"
+        if (-not (Test-Path -LiteralPath $fixtureInputPath -PathType Leaf)) {
+            throw "canonical command test Product did not issue fixture input"
+        }
+        $fixtureInput = Get-Content -Raw -LiteralPath $fixtureInputPath | ConvertFrom-Json
+        $commandCommentsRequest = Get-Content -Raw -LiteralPath ($commandTestBuildLog + ".comments-request.json") | ConvertFrom-Json
+        $commandEntry = Join-Path $commandTestOutput "mcphub.exe"
+        $commandProduct = Join-Path $commandTestOutput "mcphub-product/mcphub.exe"
+        $commandIdentity = Join-Path $commandTestOutput "windows-product-identity.json"
+        if ($fixtureInput.product_root -cne [IO.Path]::GetFullPath($commandTestOutput) -or
+            $fixtureInput.source_epoch -cne "" -or $fixtureInput.product_version -cne $commandTestPlan.version -or
+            $fixtureInput.build_id -cne $commandCommentsRequest.build_id -or
+            $fixtureInput.reverse_projection -cne "../mcphub.exe" -or
+            $fixtureInput.canonical_entry_sha256 -cne (Get-FileHash $commandEntry -Algorithm SHA256).Hash.ToLowerInvariant() -or
+            $fixtureInput.product_sha256 -cne (Get-FileHash $commandProduct -Algorithm SHA256).Hash.ToLowerInvariant() -or
+            $fixtureInput.identity_sha256 -cne (Get-FileHash $commandIdentity -Algorithm SHA256).Hash.ToLowerInvariant()) {
+            throw "canonical command fixture input disagrees with the emitted original files"
+        }
+
+        $refusalOutput = Join-Path $fixtureRoot ".scratch/o7-command-test-extra-exe"
+        $priorModePath = $env:PATH
+        $priorFakeLog = $env:MCPHUB_FAKE_GO_LOG
+        $priorExtraExe = $env:MCPHUB_FAKE_EXTRA_EXE
+        try {
+            $env:PATH = $fakeBuildTools + [IO.Path]::PathSeparator + $system32
+            $env:MCPHUB_FAKE_GO_LOG = Join-Path $fixtureRoot "fake-command-test-refusal-go.jsonl"
+            $env:MCPHUB_FAKE_EXTRA_EXE = "1"
+            $escapedRefusalOutput = $refusalOutput.Replace("'", "''")
+            $refusalProbe = @"
+Set-Alias -Name go -Value '$escapedFakeGoScript' -Scope Local
+. '$escapedBuildScript' -TestStateIsolatedProduct -CanonicalEntryCommandTestProduct -OutputDirectory '$escapedRefusalOutput'
+"@
+            & $pwsh -NoProfile -Command $refusalProbe *> $null
+            if ($LASTEXITCODE -eq 0) {
+                throw "canonical command test Product admitted an undeclared executable"
+            }
+        } finally {
+            $env:PATH = $priorModePath
+            $env:MCPHUB_FAKE_GO_LOG = $priorFakeLog
+            $env:MCPHUB_FAKE_EXTRA_EXE = $priorExtraExe
+        }
+        if (Test-Path -LiteralPath (Join-Path $refusalOutput "windows-canonical-command-test-fixture.json")) {
+            throw "failed canonical command build issued a usable fixture"
+        }
+        if (Test-Path -LiteralPath (Join-Path $fixtureRoot "internal/cli/zz_product_versioninfo.syso")) {
+            throw "failed canonical command build retained its generated VERSIONINFO resource"
+        }
+        if ((Test-Path -LiteralPath (Join-Path $refusalOutput "trash")) -or
+            -not (Test-Path -LiteralPath (Join-Path $refusalOutput "retained-build-inputs/zz_product_versioninfo.syso"))) {
+            throw "failed private command admission did not preserve its original inputs outside trash"
+        }
+        & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") -PrintPlanJson `
+            -TestStateIsolatedProduct -OutputDirectory $testOutput *> $null
+        if ($LASTEXITCODE -eq 0 -or (Get-FileHash -LiteralPath (Join-Path $testOutput "mcphub.exe") -Algorithm SHA256).Hash.ToLowerInvariant() -cne $fakeEntryHash) {
+            throw "test-only builder reused or changed an existing Product output"
+        }
+
+        # These compiler/validator stubs test the producer's dataflow only.
+        # Synthetic bytes below are never executed or accepted as qualification.
+        New-Item -ItemType Directory -Path $privateOutputsRoot -ErrorAction Stop | Out-Null
+        $sourceSnapshot = Join-Path $privateOutputsRoot "source-control.json"
+        [IO.File]::WriteAllText($sourceSnapshot, '{"fixture":"not-a-qualified-source-snapshot"}')
+        $runtimeArchives = Join-Path $privateOutputsRoot "runtime-archives"
+        New-Item -ItemType Directory -Path $runtimeArchives -ErrorAction Stop | Out-Null
+        $privateCommon = @("-WindowsTargetArch", "amd64", "-ReleaseVersion", $releaseVersion,
+            "-ReleaseCommit", $releaseCommit, "-ReleaseBuildDate", $releaseBuildDate, "-SourceSnapshotPath", $sourceSnapshot)
+        $registryBase64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $fixtureRoot "windows-product-artifacts.json")))
+        $privateEnvironment = @{}
+        foreach ($name in @("PATH", "GOFLAGS", "MCPHUB_FAKE_GO_LOG", "MCPHUB_FAKE_RESOURCE_EXIT", "MCPHUB_FAKE_SOURCE_CHANGE", "MCPHUB_FAKE_RUNTIME_MISMATCH")) {
+            $privateEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+        }
+        try {
+            $env:PATH = $fakeBuildTools + [IO.Path]::PathSeparator + $system32
+            $env:GOFLAGS = "-mod=readonly"
+            $env:MCPHUB_FAKE_RESOURCE_EXIT = ""
+            $env:MCPHUB_FAKE_SOURCE_CHANGE = ""
+            $env:MCPHUB_FAKE_RUNTIME_MISMATCH = ""
+            foreach ($lane in @("default", "test_state_path_env")) {
+                $laneOutput = Join-Path $privateOutputsRoot $lane
+                $env:MCPHUB_FAKE_GO_LOG = Join-Path $privateOutputsRoot "$lane-plan.jsonl"
+                $privatePlanRows = & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") @privateCommon `
+                    -PrepareCLIPrivatePreparationInputs -PrivateCLIPreparationLane $lane -OutputDirectory $laneOutput -PrintPlanJson
+                if ($LASTEXITCODE -ne 0) { throw "$lane private compiler input plan failed" }
+                $privatePlan = $privatePlanRows | ConvertFrom-Json
+                $expectedTags = if ($lane -ceq "default") { "" } else { "test_state_path_env" }
+                if ($privatePlan.schema -cne "windows-cli-publisher-test-inputs-v1" -or $privatePlan.prepared -or
+                    $privatePlan.purpose -cne "private-serena-migration-integration" -or $privatePlan.role -cne "publisher-test" -or
+                    $privatePlan.goEntrypoint -cne "mcp-local-hub/internal/cli.test" -or $privatePlan.package -cne "./internal/cli" -or
+                    $privatePlan.subsystem -ne 2 -or $privatePlan.machine -ne 34404 -or ($privatePlan.buildTags -join ",") -cne $expectedTags -or
+                    $privatePlan.publisherSource.source_epoch -cne ("a" * 64) -or $null -ne $privatePlan.resourceSHA256 -or
+                    -not $privatePlan.ldflags.Contains("-X mcp-local-hub/internal/binaryadmission.compiledWindowsProductRegistryBase64=$registryBase64") -or
+                    $privatePlan.versionInfo.SpecialBuild -cne "mcphub-role-v1;role=publisher-test" -or (Test-Path -LiteralPath $laneOutput)) {
+                    throw "$lane private compiler plan lost its role, Source, registry or exact lane"
+                }
+                $env:MCPHUB_FAKE_GO_LOG = Join-Path $privateOutputsRoot "$lane-build.jsonl"
+                & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") @privateCommon `
+                    -PrepareCLIPrivatePreparationInputs -PrivateCLIPreparationLane $lane -OutputDirectory $laneOutput | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw "$lane private compiler input generation failed" }
+                $issued = Get-Content -Raw -LiteralPath (Join-Path $laneOutput "cli-publisher-test-inputs.json") | ConvertFrom-Json
+                $resourceConfiguration = Get-Content -Raw -LiteralPath $issued.resourceConfigurationPath | ConvertFrom-Json
+                $calls = @(Get-Content -LiteralPath $env:MCPHUB_FAKE_GO_LOG | ForEach-Object { $_ | ConvertFrom-Json })
+                if (-not $issued.prepared -or $issued.ldflags -cne $privatePlan.ldflags -or
+                    ($issued.buildTags -join ",") -cne $expectedTags -or
+                    $issued.resourceSHA256 -cne (Get-FileHash -LiteralPath $issued.resourcePath -Algorithm SHA256).Hash.ToLowerInvariant() -or
+                    $resourceConfiguration.StringFileInfo.SpecialBuild -cne "mcphub-role-v1;role=publisher-test" -or
+                    -not $resourceConfiguration.StringFileInfo.Comments.Contains("mcphub-source-v1;sha256=" + ("a" * 64)) -or
+                    @($calls | Where-Object { $_.argv[0] -in @("build", "test") }).Count -ne 0 -or
+                    @($calls | Where-Object { $_.argv -contains "--source-snapshot" }).Count -ne 2) {
+                    throw "$lane compiler input issuance did not recheck Source or preserved a wrong resource"
+                }
+            }
+            foreach ($failure in @("source-change", "resource-failure")) {
+                $failedOutput = Join-Path $privateOutputsRoot $failure
+                $env:MCPHUB_FAKE_GO_LOG = Join-Path $privateOutputsRoot "$failure.jsonl"
+                $env:MCPHUB_FAKE_SOURCE_CHANGE = if ($failure -ceq "source-change") { "1" } else { "" }
+                $env:MCPHUB_FAKE_RESOURCE_EXIT = if ($failure -ceq "resource-failure") { "93" } else { "" }
+                & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") @privateCommon `
+                    -PrepareCLIPrivatePreparationInputs -OutputDirectory $failedOutput *> $null
+                if ($LASTEXITCODE -eq 0 -or (Test-Path -LiteralPath (Join-Path $failedOutput "cli-publisher-test-inputs.json"))) {
+                    throw "$failure issued usable private compiler inputs"
+                }
+                if (-not (Test-Path -LiteralPath (Join-Path $failedOutput "cli-publisher-test.syso"))) {
+                    throw "$failure removed original compiler failure residue before receiving"
+                }
+            }
+            $env:MCPHUB_FAKE_RESOURCE_EXIT = ""
+            $env:MCPHUB_FAKE_SOURCE_CHANGE = ""
+            $currentOutput = Join-Path $privateOutputsRoot "current-runtime-actor"
+            $env:MCPHUB_FAKE_GO_LOG = Join-Path $privateOutputsRoot "current-plan.jsonl"
+            $currentPlanRows = & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") @privateCommon `
+                -CurrentWindowsPackage -CurrentStateIsolatedTestProduct -RuntimeArchiveDirectory $runtimeArchives -OutputDirectory $currentOutput -PrintPlanJson
+            if ($LASTEXITCODE -ne 0) { throw "current state-isolated actor plan failed" }
+            $currentPlan = $currentPlanRows | ConvertFrom-Json
+            if (-not $currentPlan.testOnly -or -not $currentPlan.currentStateIsolatedTestProduct -or
+                ($currentPlan.buildTags -join ",") -cne "test_state_path_env" -or
+                $currentPlan.identityManifest.schema -cne "windows-product-identity-v2" -or
+                $currentPlan.canonicalEntry.identityRelativePath -cne "mcphub-product/windows-product-identity.json" -or
+                -not $currentPlan.runtimePayload.precompileStagingRequired -or
+                $currentPlan.canonicalRuntimeActorFixture -cne (Join-Path $currentOutput "private-serena-runtime-product.json") -or
+                (Test-Path -LiteralPath $currentOutput)) { throw "current actor plan did not preserve its V4 test-only contract" }
+            $env:MCPHUB_FAKE_GO_LOG = Join-Path $privateOutputsRoot "current-build.jsonl"
+            & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") @privateCommon `
+                -CurrentWindowsPackage -CurrentStateIsolatedTestProduct -RuntimeArchiveDirectory $runtimeArchives -OutputDirectory $currentOutput | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "controlled current actor build failed" }
+            $actor = Get-Content -Raw -LiteralPath $currentPlan.canonicalRuntimeActorFixture | ConvertFrom-Json
+            $currentCalls = @(Get-Content -LiteralPath $env:MCPHUB_FAKE_GO_LOG | ForEach-Object { $_ | ConvertFrom-Json })
+            $currentBuilds = @($currentCalls | Where-Object { $_.argv[0] -eq "build" })
+            if ($currentBuilds.Count -ne 2 -or $currentBuilds[0].argv[-1] -cne "./cmd/mcphub-launcher" -or
+                $currentBuilds[1].argv[-1] -cne "./cmd/mcphub") { throw "current actor changed executable roles" }
+            foreach ($build in $currentBuilds) {
+                $tagAt = [Array]::IndexOf([string[]]$build.argv, "-tags")
+                $flagsAt = [Array]::IndexOf([string[]]$build.argv, "-ldflags")
+                if ($build.argv.Count -ne 9 -or $tagAt -lt 0 -or $build.argv[$tagAt + 1] -cne "test_state_path_env" -or $build.goflags -cne "-mod=readonly" -or
+                    $flagsAt -lt 0 -or -not ([string]$build.argv[$flagsAt + 1]).Contains("compiledWindowsProductRegistryBase64=$registryBase64")) {
+                    throw "both current actor images require the exact test tag and original V4 registry"
+                }
+            }
+            $currentProductFlags = [string]$currentBuilds[1].argv[[Array]::IndexOf([string[]]$currentBuilds[1].argv, "-ldflags") + 1]
+            if (-not $currentProductFlags.Contains("main.buildDate=$releaseBuildDate")) {
+                throw "current actor compiler argv split the original ISO build date"
+            }
+            $actorFiles = @{ canonical_entry_sha256 = "mcphub.exe"; product_sha256 = "mcphub-product/mcphub.exe";
+                identity_sha256 = "mcphub-product/windows-product-identity.json" }
+            foreach ($field in $actorFiles.Keys) {
+                if ($actor.entry_set.$field -cne (Get-FileHash -LiteralPath (Join-Path $currentOutput $actorFiles[$field]) -Algorithm SHA256).Hash.ToLowerInvariant()) {
+                    throw "current actor fixture does not bind the actual $field"
+                }
+            }
+            if ($actor.entry_set.source_epoch -cne ("a" * 64) -or $actor.entry_set.product_root -cne $currentOutput -or
+                $actor.runtime_payload_sha256 -cne (Get-FileHash -LiteralPath (Join-Path $currentOutput "mcphub-product/runtime-payload.json") -Algorithm SHA256).Hash.ToLowerInvariant() -or
+                -not (Test-Path -LiteralPath (Join-Path $currentOutput "trash/zz_product_versioninfo.syso")) -or
+                (Test-Path -LiteralPath (Join-Path $fixtureRoot "cmd/mcphub/zz_product_versioninfo.syso"))) {
+                throw "current actor lost its actual Source/runtime binding or original resource disposition"
+            }
+            $env:MCPHUB_FAKE_RUNTIME_MISMATCH = "1"
+            $badRuntimeOutput = Join-Path $privateOutputsRoot "foreign-runtime"
+            $env:MCPHUB_FAKE_GO_LOG = Join-Path $privateOutputsRoot "foreign-runtime.jsonl"
+            & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") @privateCommon `
+                -CurrentWindowsPackage -CurrentStateIsolatedTestProduct -RuntimeArchiveDirectory $runtimeArchives -OutputDirectory $badRuntimeOutput *> $null
+            if ($LASTEXITCODE -eq 0 -or (Test-Path -LiteralPath (Join-Path $badRuntimeOutput "private-serena-runtime-product.json"))) {
+                throw "foreign runtime identity issued a current actor fixture"
+            }
+            if ((Test-Path -LiteralPath (Join-Path $badRuntimeOutput "trash")) -or
+                -not (Test-Path -LiteralPath (Join-Path $badRuntimeOutput "retained-build-inputs/zz_product_versioninfo.syso"))) {
+                throw "failed current runtime admission moved its original inputs to trash"
+            }
+            $env:MCPHUB_FAKE_RUNTIME_MISMATCH = ""
+            foreach ($invalid in @(
+                @("-PrivateCLIPreparationLane", "default"),
+                @("-CurrentStateIsolatedTestProduct"),
+                @("-PrepareCLIPrivatePreparationInputs", "-CurrentWindowsPackage"),
+                @("-PrepareCLIPrivatePreparationInputs", "-TestStateIsolatedProduct"),
+                @("-PrepareCLIPrivatePreparationInputs", "-PrivateCLIPreparationLane", "DEFAULT"),
+                @("-PrepareCLIPrivatePreparationInputs", "-OutputDirectory", "relative-private-output"),
+                @("-PrepareCLIPrivatePreparationInputs", "-OutputDirectory", $privateOutputsRoot)
+            )) {
+                & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") @privateCommon -PrintPlanJson @invalid *> $null
+                if ($LASTEXITCODE -eq 0) { throw "private/current mode accepted invalid operands: $($invalid -join ' ')" }
+            }
+            $env:GOFLAGS = "-tags=ambient_should_not_apply"
+            & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") @privateCommon -PrintPlanJson `
+                -PrepareCLIPrivatePreparationInputs -OutputDirectory (Join-Path $privateOutputsRoot "ambient-flags") *> $null
+            if ($LASTEXITCODE -eq 0) { throw "private publisher producer accepted ambient compiler overrides" }
+        } finally {
+            foreach ($name in $privateEnvironment.Keys) { [Environment]::SetEnvironmentVariable($name, $privateEnvironment[$name], "Process") }
+        }
         $env:MCPHUB_FAKE_GOARCH = "arm64"
         $nativeArmJson = & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") -PrintPlanJson
         if ($LASTEXITCODE -ne 0) { throw "native arm64 plan failed" }
@@ -299,6 +670,10 @@ Write-Output ('__GOFLAGS_AFTER__=' + `$env:GOFLAGS)
             -ReleaseCommit $releaseCommit `
             -ReleaseBuildDate $releaseBuildDate *> $null
         if ($LASTEXITCODE -eq 0) { throw "release plan accepted a tuple without WindowsTargetArch" }
+        $legacyPreserved = Join-Path $fixtureRoot "preserved-legacy-cleanup"
+        $partialResourcesBefore = if (Test-Path -LiteralPath $legacyPreserved) {
+            @(Get-ChildItem -LiteralPath $legacyPreserved -File -Filter "*-zz_product_versioninfo.syso").Count
+        } else { 0 }
         & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") `
             -WindowsTargetArch amd64 `
             -OutputDirectory "out" `
@@ -309,6 +684,9 @@ Write-Output ('__GOFLAGS_AFTER__=' + `$env:GOFLAGS)
         if (Test-Path -LiteralPath (Join-Path $fixtureRoot "cmd/mcphub/zz_product_versioninfo.syso")) {
             throw "failing resource generation left a partial syso"
         }
+        if (@(Get-ChildItem -LiteralPath $legacyPreserved -File -Filter "*-zz_product_versioninfo.syso").Count -ne $partialResourcesBefore + 1) {
+            throw "DATA cleanup did not preserve the failed legacy generator's original resource"
+        }
         if (@(Get-ChildItem -LiteralPath (Join-Path $fixtureRoot ".scratch") -Directory -Filter "windows-versioninfo-*" -ErrorAction SilentlyContinue).Count -ne 0) {
             throw "failing resource generation left its scratch directory"
         }
@@ -318,7 +696,6 @@ Write-Output ('__GOFLAGS_AFTER__=' + `$env:GOFLAGS)
 } finally {
     $env:PATH = $priorPath
     $env:MCPHUB_FAKE_GOARCH = $priorFakeArch
-    Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 $plan = $json | ConvertFrom-Json
@@ -562,21 +939,18 @@ if ($metaPackStep -notmatch $metaValidationPattern -or $metaEncoding -lt 0 -or $
 
 
 $encodingProbe = Join-Path $scratchRoot "windows-build-json-encoding-$PID-$([Guid]::NewGuid().ToString('N'))"
-try {
-    New-Item -ItemType Directory -Force -Path $encodingProbe | Out-Null
-    $decoder = Join-Path $encodingProbe "decode.go"
-    [IO.File]::WriteAllText($decoder, 'package main; import ("encoding/json"; "os"); func main(){ var v interface{}; b,_:=os.ReadFile(os.Args[1]); if json.Unmarshal(b,&v)!=nil { os.Exit(1) } }', (New-Object Text.UTF8Encoding($false)))
-    $noBOM = Join-Path $encodingProbe "resource.json"
-    & $windowsPowerShell -NoProfile -Command "[IO.File]::WriteAllText('$noBOM', '{""probe"":true}', (New-Object Text.UTF8Encoding(`$false)))"
-    & $realGo run $decoder $noBOM
-    if ($LASTEXITCODE -ne 0) { throw "Windows PowerShell no-BOM JSON failed Go decoder" }
-    $bom = Join-Path $encodingProbe "old-bom.json"
-    [IO.File]::WriteAllText($bom, '{"probe":true}', (New-Object Text.UTF8Encoding($true)))
-    & $realGo run $decoder $bom *> $null
-    if ($LASTEXITCODE -eq 0) { throw "Go JSON decoder accepted old UTF8 BOM fixture" }
-} finally {
-    Remove-Item -LiteralPath $encodingProbe -Recurse -Force -ErrorAction SilentlyContinue
-}
+New-Item -ItemType Directory -Force -Path $encodingProbe | Out-Null
+$decoder = Join-Path $encodingProbe "decode.go"
+[IO.File]::WriteAllText($decoder, 'package main; import ("encoding/json"; "os"); func main(){ var v interface{}; b,_:=os.ReadFile(os.Args[1]); if json.Unmarshal(b,&v)!=nil { os.Exit(1) } }', (New-Object Text.UTF8Encoding($false)))
+$noBOM = Join-Path $encodingProbe "resource.json"
+& $windowsPowerShell -NoProfile -Command "[IO.File]::WriteAllText('$noBOM', '{""probe"":true}', (New-Object Text.UTF8Encoding(`$false)))"
+& $realGo run $decoder $noBOM
+if ($LASTEXITCODE -ne 0) { throw "Windows PowerShell no-BOM JSON failed Go decoder" }
+$bom = Join-Path $encodingProbe "old-bom.json"
+[IO.File]::WriteAllText($bom, '{"probe":true}', (New-Object Text.UTF8Encoding($true)))
+& $realGo run $decoder $bom *> $null
+if ($LASTEXITCODE -eq 0) { throw "Go JSON decoder accepted old UTF8 BOM fixture" }
+
 
 function Get-PESubsystem([string]$Path) {
     $bytes = [IO.File]::ReadAllBytes($Path)
@@ -585,33 +959,42 @@ function Get-PESubsystem([string]$Path) {
 }
 
 $compileRoot = Join-Path $scratchRoot "windows-linker-probe-$PID-$([Guid]::NewGuid().ToString('N'))"
-try {
-    $source = "package main`nfunc main() {}`n"
-    foreach ($name in @("a", "b")) {
-        $dir = Join-Path $compileRoot $name
-        New-Item -ItemType Directory -Force -Path $dir | Out-Null
-        [IO.File]::WriteAllText((Join-Path $dir "main.go"), $source)
-        & go build -trimpath -buildvcs=false -o (Join-Path $dir "cui.exe") (Join-Path $dir "main.go")
-        if ($LASTEXITCODE -ne 0) { throw "CUI fixture build $name failed with exit $LASTEXITCODE" }
-        & go build -trimpath -buildvcs=false -ldflags "-H windowsgui" -o (Join-Path $dir "gui.exe") (Join-Path $dir "main.go")
-        if ($LASTEXITCODE -ne 0) { throw "GUI fixture build $name failed with exit $LASTEXITCODE" }
-    }
+$source = "package main`nfunc main() {}`n"
+foreach ($name in @("a", "b")) {
+    $dir = Join-Path $compileRoot $name
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    [IO.File]::WriteAllText((Join-Path $dir "main.go"), $source)
+    & go build -trimpath -buildvcs=false -o (Join-Path $dir "cui.exe") (Join-Path $dir "main.go")
+    if ($LASTEXITCODE -ne 0) { throw "CUI fixture build $name failed with exit $LASTEXITCODE" }
+    & go build -trimpath -buildvcs=false -ldflags "-H windowsgui" -o (Join-Path $dir "gui.exe") (Join-Path $dir "main.go")
+    if ($LASTEXITCODE -ne 0) { throw "GUI fixture build $name failed with exit $LASTEXITCODE" }
+}
 
-    $cuiA = Join-Path $compileRoot "a\cui.exe"
-    $cuiB = Join-Path $compileRoot "b\cui.exe"
-    $guiA = Join-Path $compileRoot "a\gui.exe"
-    $guiB = Join-Path $compileRoot "b\gui.exe"
-    if ((Get-PESubsystem $cuiA) -ne 3) { throw "default Go linker output is not PE subsystem 3" }
-    if ((Get-PESubsystem $guiA) -ne 2) { throw "-H windowsgui output is not PE subsystem 2" }
-    $cuiHashA = (Get-FileHash -Algorithm SHA256 -LiteralPath $cuiA).Hash
-    $cuiHashB = (Get-FileHash -Algorithm SHA256 -LiteralPath $cuiB).Hash
-    $guiHashA = (Get-FileHash -Algorithm SHA256 -LiteralPath $guiA).Hash
-    $guiHashB = (Get-FileHash -Algorithm SHA256 -LiteralPath $guiB).Hash
-    if ($cuiHashA -ne $cuiHashB) { throw "CUI fixture hashes differ across workspace paths" }
-    if ($guiHashA -ne $guiHashB) { throw "GUI fixture hashes differ across workspace paths" }
-    Write-Output "PASS: linker flag delta observed (default subsystem=3; -H windowsgui subsystem=2); two-path hashes CUI=$cuiHashA GUI=$guiHashA."
-} finally {
-    Remove-Item -LiteralPath $compileRoot -Recurse -Force -ErrorAction SilentlyContinue
+$cuiA = Join-Path $compileRoot "a\cui.exe"
+$cuiB = Join-Path $compileRoot "b\cui.exe"
+$guiA = Join-Path $compileRoot "a\gui.exe"
+$guiB = Join-Path $compileRoot "b\gui.exe"
+if ((Get-PESubsystem $cuiA) -ne 3) { throw "default Go linker output is not PE subsystem 3" }
+if ((Get-PESubsystem $guiA) -ne 2) { throw "-H windowsgui output is not PE subsystem 2" }
+$cuiHashA = (Get-FileHash -Algorithm SHA256 -LiteralPath $cuiA).Hash
+$cuiHashB = (Get-FileHash -Algorithm SHA256 -LiteralPath $cuiB).Hash
+$guiHashA = (Get-FileHash -Algorithm SHA256 -LiteralPath $guiA).Hash
+$guiHashB = (Get-FileHash -Algorithm SHA256 -LiteralPath $guiB).Hash
+if ($cuiHashA -ne $cuiHashB) { throw "CUI fixture hashes differ across workspace paths" }
+if ($guiHashA -ne $guiHashB) { throw "GUI fixture hashes differ across workspace paths" }
+Write-Output "PASS: linker flag delta observed (default subsystem=3; -H windowsgui subsystem=2); two-path hashes CUI=$cuiHashA GUI=$guiHashA."
+
+
+# Success-only disposition is deliberately after the final assertion. Every
+# unexpected failure preserves all four original fixture roots for receiving.
+$fixtureTrash = Join-Path $scratchRoot "trash"
+if (-not (Test-Path -LiteralPath $fixtureTrash)) { New-Item -ItemType Directory -Path $fixtureTrash -ErrorAction Stop | Out-Null }
+foreach ($ownedFixture in @($fixtureRoot, $privateOutputsRoot, $encodingProbe, $compileRoot)) {
+    if (Test-Path -LiteralPath $ownedFixture) {
+        $destination = Join-Path $fixtureTrash (Split-Path -Leaf $ownedFixture)
+        if (Test-Path -LiteralPath $destination) { throw "fixture trash destination already exists" }
+        Move-Item -LiteralPath $ownedFixture -Destination $destination -ErrorAction Stop
+    }
 }
 
 Write-Output "PASS: Windows build plan has one GUI-subsystem product, repository-only admission, and a non-executable identity manifest."

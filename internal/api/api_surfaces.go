@@ -9,14 +9,10 @@
 // task surface). What remains here is the general ctx-aware wrappers and the
 // audit/intent/scheduler seams the supervisor + CLI still consume.
 //
-// Best-effort cancellation contract (§32):
-//
-//	StatusContext / RestartContext run the underlying op in a goroutine.
-//	When ctx is cancelled, the wrapper returns ctx.Err() to the caller
-//	within ~10ms. The underlying op continues to completion in the
-//	background — its result is dropped. This is best-effort because
-//	Status() and Restart() delegate to schtasks, which we cannot interrupt
-//	mid-call.
+// Production RestartContext passes the caller lifetime into the shared mutation
+// core and waits for the contained scheduler worker to settle. StatusContext and
+// the legacy non-contextual test seams keep their documented best-effort wrapper;
+// their early return is not proof that an underlying operation was cancelled.
 //
 // Surfaces owned elsewhere:
 //   - IntentAuditEntry / AppendIntentAudit                 → intent_audit.go
@@ -141,12 +137,16 @@ func (a *API) StatusContext(ctx context.Context) ([]DaemonStatus, error) {
 // RestartContext (§32).
 // ---------------------------------------------------------------------------
 
-// RestartContext wraps (*API).Restart with a goroutine + ctx-select
-// pattern. Best-effort cancellation: ctx.Done() returns ctx.Err() to
-// the caller within ~10ms; the underlying Restart continues until
-// schtasks completes or fails. General-purpose: reads the manifest
-// fresh on each invocation, suitable for `mcphub restart` CLI.
+// RestartContext passes the caller context through restart dispatch. The Windows
+// scheduler observes that lifetime and joins its owned worker before returning.
+// This does not claim cancellation of unrelated legacy process-control paths.
 func (a *API) RestartContext(ctx context.Context, server, daemonFilter string) ([]RestartResult, error) {
+	// Production passes the original context through the mutation core and
+	// waits for its owned resources. Only the legacy test seam below retains
+	// the old best-effort wrapper; it supplies no cancellable executor.
+	if restartContextSrcFn == nil {
+		return a.restartWithFrozenDispatch(ctx, server, daemonFilter)
+	}
 	type result struct {
 		results []RestartResult
 		err     error
@@ -299,4 +299,18 @@ func newScheduler() (scheduler.Scheduler, error) {
 		return schedulerFactoryFn()
 	}
 	return scheduler.New()
+}
+
+// newSchedulerContext preserves the factory seam while binding the production
+// Windows backend to the actual operation. Legacy injected backends receive
+// admission checking only; tests must not mistake that for native preemption.
+func newSchedulerContext(ctx context.Context) (scheduler.Scheduler, error) {
+	if schedulerFactoryFn == nil {
+		return scheduler.NewContext(ctx)
+	}
+	backend, err := schedulerFactoryFn()
+	if err != nil {
+		return nil, err
+	}
+	return scheduler.BindContext(ctx, backend)
 }

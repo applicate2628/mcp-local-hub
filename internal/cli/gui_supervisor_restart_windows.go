@@ -333,7 +333,7 @@ func (m *supervisorManager) receiveRestartNamespace(ctx context.Context, operati
 		peer, err = api.ObserveSupervisorProcessIdentityV1(winner.PID)
 		if err == nil {
 			_, err = observeCreatedSupervisorControl(ctx, operation.expected, winner, peer, func(owner api.SupervisorLockOwner) error {
-				return validateCreatedSupervisorNativeControl(operation.expected, owner)
+				return validateCreatedSupervisorNativeControl(ctx, operation.expected, owner)
 			}, api.ReadSupervisorLockOwner)
 		}
 		if err == nil {
@@ -446,7 +446,7 @@ func (m *supervisorManager) stopHeldRestartOriginal(ctx context.Context, operati
 		return false, false, errors.Join(errors.New("original live generation does not have a qualified held namespace"), namespaceErr)
 	}
 	if _, err = observeCreatedSupervisorControl(ctx, operation.expected, operation.target, peer, func(owner api.SupervisorLockOwner) error {
-		return validateCreatedSupervisorNativeControl(operation.expected, owner)
+		return validateCreatedSupervisorNativeControl(ctx, operation.expected, owner)
 	}, api.ReadSupervisorLockOwner); err != nil {
 		return false, false, err
 	}

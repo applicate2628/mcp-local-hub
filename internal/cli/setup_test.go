@@ -3,8 +3,10 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"github.com/spf13/cobra"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -16,24 +18,12 @@ import (
 // command to decide whether ~/.local/bin is already on PATH. The real
 // targetDirOnPath wraps this over os.Getenv; exercising the splitter
 // directly keeps the test independent of the running process's PATH.
-//
-// Test inputs are built at runtime to match the host's PATH conventions
-// (drive-letter colons collide with the POSIX `:` separator on Linux,
-// so a literal `C:\...` entry would split inside the colon and break
-// the assertion).
 func TestDirOnPath(t *testing.T) {
 	sep := string(os.PathListSeparator)
-	target := `C:\Users\alice\.local\bin`
-	other1, other2 := `C:\Go\bin`, `C:\Windows`
-	mixedCaseEntry := `C:\Users\alice/.local/bin`
-	if runtime.GOOS != "windows" {
-		// POSIX-style entries: `:` is the separator, so absolute POSIX
-		// paths split cleanly. The function still needs to see a
-		// non-trivial path for the "absent" / "single entry" cases.
-		target = "/home/u/.local/bin"
-		other1, other2 = "/usr/local/go/bin", "/usr/bin"
-		mixedCaseEntry = "/home/u/.local/bin" // POSIX is case-sensitive; same string still matches
-	}
+	root := t.TempDir()
+	target := filepath.Join(root, ".local", "bin")
+	other1 := filepath.Join(root, "tools", "bin")
+	other2 := filepath.Join(root, "system")
 
 	cases := []struct {
 		name    string
@@ -84,7 +74,7 @@ func TestDirOnPath(t *testing.T) {
 		}{
 			name:    "mixed slashes and case (Windows semantics)",
 			dir:     target,
-			pathEnv: mixedCaseEntry,
+			pathEnv: strings.ToUpper(filepath.ToSlash(target)),
 			want:    true,
 		})
 	}
@@ -201,8 +191,16 @@ func setupTrustedRootTestEnv(t *testing.T) string {
 	return path
 }
 
+func stubUnelevatedSetup(t *testing.T) {
+	t.Helper()
+	prev := setupIsElevatedFn
+	setupIsElevatedFn = func() (bool, error) { return false, nil }
+	t.Cleanup(func() { setupIsElevatedFn = prev })
+}
+
 func runSetupCmd(t *testing.T, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
+	stubUnelevatedSetup(t)
 	cmd := newSetupCmdReal()
 	var out, errBuf bytes.Buffer
 	cmd.SetOut(&out)
@@ -237,6 +235,39 @@ func TestSetupCommand_TrustedRootBlessesAbsolutePath(t *testing.T) {
 	}
 }
 
+func TestSetupCleanUsesExistingProductUpgradeOnly(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows Product setup only")
+	}
+	previousUpgrade, previousBootstrap := upgradeDispatcher, setupBootstrapFn
+	t.Cleanup(func() { upgradeDispatcher, setupBootstrapFn = previousUpgrade, previousBootstrap })
+	cut := errors.New("owned clean setup handoff")
+	calls := 0
+	upgradeDispatcher = func(cmd *cobra.Command) error {
+		calls++
+		if cmd.Name() != "setup" {
+			t.Error("clean setup changed caller")
+		}
+		return cut
+	}
+	setupBootstrapFn = func(io.Writer) error {
+		t.Error("clean Product setup reached ordinary client-changing bootstrap")
+		return nil
+	}
+	cmd := newSetupCmdReal()
+	cmd.SetArgs([]string{"--clean"})
+	if err := cmd.Execute(); !errors.Is(err, cut) || calls != 1 {
+		t.Fatal("clean setup did not select the existing Product upgrade owner", err)
+	}
+	cmd = newSetupCmdReal()
+	cmd.SetArgs([]string{"--clean", "--rollback-lsp-router"})
+	if err := cmd.Execute(); err == nil || calls != 1 {
+		t.Fatal("clean option allowed a client-changing setup operation", err)
+	}
+	if err := recoverUnpromotedUpgrade(t.Context(), UpgradeOpts{requirePriorAbsent: true}, 0, "", cut); !errors.Is(err, cut) {
+		t.Fatal("failed clean preflight did not preserve absent predecessor state", err)
+	}
+}
 func TestSetupCommand_TrustedRootRejectsRelativePath(t *testing.T) {
 	storePath := setupTrustedRootTestEnv(t)
 
@@ -286,6 +317,7 @@ func TestSetupCommand_TrustedRootIdempotentRebless(t *testing.T) {
 }
 
 func TestSetupCommand_ContinuesToWatchdogWhenLSPRouterWiringFails(t *testing.T) {
+	stubUnelevatedSetup(t)
 	origBootstrap := setupBootstrapFn
 	origRouter := setupLSPClientRouterFn
 	origWatchdog := setupWatchdogFn

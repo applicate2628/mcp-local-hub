@@ -1,0 +1,1116 @@
+{
+  "schema": 1,
+  "status": "OBSERVED_SCOPED_WINDOWS_QUALIFICATION_WITH_EXPECTED_NEGATIVE_CONTROLS",
+  "reviewer": "scheduler_residual: candidate author own evidence review, not external published-head review",
+  "collection": "Read-only export of exactly three authorized Windows evidence directories. Every byte was hashed and reread remotely before in-memory export; local decoded files match. No Go/Rust/native Scheduler operation during collection.",
+  "raw_export": {
+    "path": "qualification/results/scheduler/raw-export-manifest.json",
+    "bytes": 7733,
+    "sha256": "c9be50816c1d9441dd56604f41765ceade0caeb96984bb1749d64fe36487d12c"
+  },
+  "raw_payload": {
+    "path": "qualification/results/scheduler/raw-export.json.zlib",
+    "bytes": 45952,
+    "sha256": "111584035810f0dab70e4fa408f15c527144d90b77911cbd7177b5f2565584d2"
+  },
+  "raw_tool_result": {
+    "path": "qualification/results/scheduler/raw-export-tool-result.json",
+    "bytes": 67680,
+    "sha256": "1d2325a274535729732d2c61b601ff5ca3504dc15d000890ad948212d46479df"
+  },
+  "composition": {
+    "source_head": "858812988833a84368c60fba1540ae601155fa71",
+    "source_tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+    "source_inventory": {
+      "files": 3281,
+      "bytes": 50583217,
+      "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+    },
+    "base_pr660": "0bdb725ed261c532eba07d645c2a14880d12b9fd",
+    "master": "75dbc6406123e22468f168b861d5e0622c9d5769",
+    "go_overlay_count": 39,
+    "overlay_map": {
+      "path": "qualification/inputs/scheduler-predelete/overlay.json",
+      "bytes": 8805,
+      "sha256": "c2c99a136e3acee7d6b7ab15103cac38170dbb27fe393357fffce1ef0967c610"
+    },
+    "overlay_files": [
+      {
+        "path": "scheduler/internal/api/adopt.go",
+        "bytes": 88753,
+        "sha256": "cb1e1711e848ec718b868b51e8194ea13a7f9adbee21c6584a2fa005fab692a9",
+        "source_path": "internal/api/adopt.go",
+        "source_baseline_sha256": "b430d70d502543371cc0fac3ec35816270a7bdc8c3cc5db94ddc7736dffcc4ea"
+      },
+      {
+        "path": "scheduler/internal/api/adopt_provenance_events.go",
+        "bytes": 10948,
+        "sha256": "7ac2132fdf4211c0884d9f877d01c9afcdda8c5757edf5746592943959abb6f3",
+        "source_path": "internal/api/adopt_provenance_events.go",
+        "source_baseline_sha256": "bb5ab40b3d1fd60c5557c9b444371edd1adb8e84667122cb54d8dab78dfd8cda"
+      },
+      {
+        "path": "scheduler/internal/api/adopt_scheduler_recovery_test.go",
+        "bytes": 10083,
+        "sha256": "5200d67c4c92da2d224320feff39e41a67e467aafd955f62727e7ce12b365b71",
+        "source_path": "internal/api/adopt_scheduler_recovery_test.go",
+        "source_baseline_sha256": null
+      },
+      {
+        "path": "scheduler-predelete/internal/api/install.go",
+        "bytes": 218267,
+        "sha256": "9e6a81aa7a8936789698c3ddc4bd6304f719bbce20a62ec7b7ad47338abbccd7",
+        "source_path": "internal/api/install.go",
+        "source_baseline_sha256": "be0f52f06c24a93a30d008b18a6c44b5eee76a73da09d8731902b48874ebe46c"
+      },
+      {
+        "path": "scheduler/internal/api/install_backend_hold_composition_windows_test.go",
+        "bytes": 3170,
+        "sha256": "d558384b41b8840f021aeba7d71eb643ad766e17bc3a6c94ecbdd1a199c9b553",
+        "source_path": "internal/api/install_backend_hold_composition_windows_test.go",
+        "source_baseline_sha256": null
+      },
+      {
+        "path": "scheduler/internal/api/install_hyphen_family_ownership_test.go",
+        "bytes": 22696,
+        "sha256": "4edc4ccded09b44639a5e74d379462df4733e570a004e5188cb042df902a7b26",
+        "source_path": "internal/api/install_hyphen_family_ownership_test.go",
+        "source_baseline_sha256": "490bc4b5b6dea92b93d1180835d057b18cc8b91ba8d3f878a9636ea94dd8e1b1"
+      },
+      {
+        "path": "scheduler/internal/api/install_own_port_test.go",
+        "bytes": 30491,
+        "sha256": "edbffbc3f81db30589e9ccb625ef9245afa6faa48971e57d409269a3d46e1630",
+        "source_path": "internal/api/install_own_port_test.go",
+        "source_baseline_sha256": "6a471135e158843b623c5f3014353bc1e8bfc2809e6a88bc214e6e39ae201ce2"
+      },
+      {
+        "path": "scheduler/internal/api/install_parsed_manifest.go",
+        "bytes": 143465,
+        "sha256": "e3b66f71a690d2be7006f5cd65e6ef38365fee01aa297ee332cdfe93de05b561",
+        "source_path": "internal/api/install_parsed_manifest.go",
+        "source_baseline_sha256": "1cca59a45b0d4eb7ddb37c5e9e98598790e29fc2e927e0d6aa3317bb0a5e605a"
+      },
+      {
+        "path": "scheduler/internal/api/install_prune_recovery_test.go",
+        "bytes": 18576,
+        "sha256": "79292de007701d7e1cb9a271e6458e0f16d83e5cd54271317374bbb40a611fc5",
+        "source_path": "internal/api/install_prune_recovery_test.go",
+        "source_baseline_sha256": null
+      },
+      {
+        "path": "scheduler/internal/api/install_scheduler_snapshot_test.go",
+        "bytes": 7703,
+        "sha256": "554b66722410d4d7c837d374a471b0384d1fff08290c4b18cd70d8017b05fab1",
+        "source_path": "internal/api/install_scheduler_snapshot_test.go",
+        "source_baseline_sha256": null
+      },
+      {
+        "path": "scheduler/internal/api/install_task_mutation_failure_test.go",
+        "bytes": 11556,
+        "sha256": "7496583080e79d2f531ab85c5c4b4a9b50884f82bd729493df59edfc873a2ed5",
+        "source_path": "internal/api/install_task_mutation_failure_test.go",
+        "source_baseline_sha256": null
+      },
+      {
+        "path": "scheduler/internal/api/install_task_recovery.go",
+        "bytes": 3539,
+        "sha256": "edfd3bf0428534f931019a0b75b101b60ccce2ac257c8ab11e0947ebba444510",
+        "source_path": "internal/api/install_task_recovery.go",
+        "source_baseline_sha256": null
+      },
+      {
+        "path": "scheduler/internal/api/install_task_recovery_storage_test.go",
+        "bytes": 1862,
+        "sha256": "8899bf5ccb5eacef5c66bebdeeaf091aa26b91fffe0ab9b49aa3edb8cfecd78f",
+        "source_path": "internal/api/install_task_recovery_storage_test.go",
+        "source_baseline_sha256": null
+      },
+      {
+        "path": "scheduler/internal/api/install_task_recovery_test.go",
+        "bytes": 11323,
+        "sha256": "7f7afc5ff0f497d2384a9378f287e9930f65468650cb6d91f933664d41ad3b37",
+        "source_path": "internal/api/install_task_recovery_test.go",
+        "source_baseline_sha256": null
+      },
+      {
+        "path": "scheduler-predelete/internal/api/install_task_rollback.go",
+        "bytes": 7521,
+        "sha256": "4986cf2770250ae34dd6458ee97f113e7ba8c46ca4e1d1c22535ba7cd70b1a06",
+        "source_path": "internal/api/install_task_rollback.go",
+        "source_baseline_sha256": null
+      },
+      {
+        "path": "scheduler-predelete/internal/api/install_task_rollback_test.go",
+        "bytes": 27426,
+        "sha256": "8a59365cba82ce7996e01f9c30108a7a49ec2f53d3b754c7807b253e42f5b3c8",
+        "source_path": "internal/api/install_task_rollback_test.go",
+        "source_baseline_sha256": null
+      },
+      {
+        "path": "scheduler/internal/api/intent_audit_caller_oracle_test.go",
+        "bytes": 5807,
+        "sha256": "266da232a605029cb2eb65cf57dcf80ca0d629a4259d6a021b48958d786fe365",
+        "source_path": "internal/api/intent_audit_caller_oracle_test.go",
+        "source_baseline_sha256": "af54e4ba30d9fcff4093d2820e9a8b630189cd976fcee83ed9391d663e20882b"
+      },
+      {
+        "path": "scheduler/internal/api/main_helper_dispatch_test.go",
+        "bytes": 4137,
+        "sha256": "3f9e37d635d2942fd0f967a11d107fe7657c35fab976d524176d15006299fd95",
+        "source_path": "internal/api/main_helper_dispatch_test.go",
+        "source_baseline_sha256": null
+      },
+      {
+        "path": "scheduler/internal/api/main_helper_dispatch_validation_test.go",
+        "bytes": 6651,
+        "sha256": "bcc4636ea0a3c260015e155ed1d8ad2dc287dea93dc2d29b33c3d45bc56d09fd",
+        "source_path": "internal/api/main_helper_dispatch_validation_test.go",
+        "source_baseline_sha256": null
+      },
+      {
+        "path": "scheduler/internal/api/main_test.go",
+        "bytes": 16576,
+        "sha256": "2c93ff894595a54b13f4409492a807aae3dba3dda5145af22b191b2bbd8b4cd1",
+        "source_path": "internal/api/main_test.go",
+        "source_baseline_sha256": "a34d3b8e14f610945662a7aeee122068641b931af19ffd9535ba6e24b186d869"
+      },
+      {
+        "path": "scheduler/internal/api/prune_tasks_test.go",
+        "bytes": 13981,
+        "sha256": "e22ef041f80ece55f3dd5e2b29dab684e8d274be6b96ff19cd389d993534deca",
+        "source_path": "internal/api/prune_tasks_test.go",
+        "source_baseline_sha256": "17cda6c55481885434e9f599ca03a0c3082940d78d61b4e30df9d7f0ebb3c5f9"
+      },
+      {
+        "path": "scheduler/internal/api/scheduler_owner_sid_windows_test.go",
+        "bytes": 2203,
+        "sha256": "463ad2f82026260e28702e1a481f15a635bc3c7a6aa7f2c850e83188c7f5ec1e",
+        "source_path": "internal/api/scheduler_owner_sid_windows_test.go",
+        "source_baseline_sha256": null
+      },
+      {
+        "path": "scheduler/internal/api/secrets_test.go",
+        "bytes": 48066,
+        "sha256": "ad1f93d38e8c4ff3d369779223a7bf4f7686947135a76706bf45494bbc771e79",
+        "source_path": "internal/api/secrets_test.go",
+        "source_baseline_sha256": "3f07678c5875a81d84037cc00a21b0aab27532cfa0387afce0d2f98e6d23c8ff"
+      },
+      {
+        "path": "scheduler/internal/autostart/linux.go",
+        "bytes": 14296,
+        "sha256": "d0f04d5baf045674b7264090e90cc0274312426c3291847956a77397a8e35e9c",
+        "source_path": "internal/autostart/linux.go",
+        "source_baseline_sha256": "ebd8c716576656f9458b64d37762fa9cae77e5adc1e7b9657ca08ec89f6701f1"
+      },
+      {
+        "path": "scheduler/internal/autostart/linux_exec_percent_test.go",
+        "bytes": 2809,
+        "sha256": "34db04e7f452df8df0f5ed41683c4aa67da6386196702237ec46e753c4cc5e60",
+        "source_path": "internal/autostart/linux_exec_percent_test.go",
+        "source_baseline_sha256": null
+      },
+      {
+        "path": "scheduler/internal/scheduler/entrypoint_migration_windows.go",
+        "bytes": 45496,
+        "sha256": "6f8f8bc0d73d40279a927fe8cae25ebeebb4e769e01f67566b0dcfe254ce49c2",
+        "source_path": "internal/scheduler/entrypoint_migration_windows.go",
+        "source_baseline_sha256": "63b1c4f52706231405717997cdce11b930954d797d300ffa67e290780c8b8aee"
+      },
+      {
+        "path": "scheduler/internal/scheduler/entrypoint_migration_windows_test.go",
+        "bytes": 43046,
+        "sha256": "9184ed38764ac3d9823fe10399e883b48519eddc485a7da0bf34c92876ced174",
+        "source_path": "internal/scheduler/entrypoint_migration_windows_test.go",
+        "source_baseline_sha256": "324f4c3ee02e743a86a862d8f0ceb08caf8db571e70b87867399781d7da33de3"
+      },
+      {
+        "path": "scheduler/internal/scheduler/scheduler.go",
+        "bytes": 7371,
+        "sha256": "907449ab2be563539dd29179a00a7b68fa5cead9f89376169e521bd9df9123c5",
+        "source_path": "internal/scheduler/scheduler.go",
+        "source_baseline_sha256": "f13244c94d13ab424e55a8fee74669c17790a83ef93e7f10e0b954813001a825"
+      },
+      {
+        "path": "scheduler/internal/scheduler/scheduler_com_windows.go",
+        "bytes": 12974,
+        "sha256": "5ca8d9cae441d54c1d403732d07e65a6526119339b619febf564e3c9350d6aa4",
+        "source_path": "internal/scheduler/scheduler_com_windows.go",
+        "source_baseline_sha256": "e59ad7303248918880d871dbdf256ff73dadc0ac917aca3863c04cadf6e25a34"
+      },
+      {
+        "path": "scheduler/internal/scheduler/scheduler_com_windows_test.go",
+        "bytes": 6957,
+        "sha256": "5352797d1adb396ff006683b64ec63fe8490883e52c3967b30c243fa4accc2d6",
+        "source_path": "internal/scheduler/scheduler_com_windows_test.go",
+        "source_baseline_sha256": "0d4abb1eb300b75e5be411df355c948f1adb0d00e82f15f4fb73bdc21c1e6372"
+      },
+      {
+        "path": "scheduler/internal/scheduler/scheduler_create_conflict_windows_test.go",
+        "bytes": 3783,
+        "sha256": "3e5d9d1d77ffcf36ba1b4335854b16d2120a2c73f26c67a5400bf768e0af2621",
+        "source_path": "internal/scheduler/scheduler_create_conflict_windows_test.go",
+        "source_baseline_sha256": null
+      },
+      {
+        "path": "scheduler/internal/scheduler/scheduler_hidden_task_windows_test.go",
+        "bytes": 6146,
+        "sha256": "33a50b53f006374dd8aa79f00f099d17696164e70487b1d75b737ea8125fe689",
+        "source_path": "internal/scheduler/scheduler_hidden_task_windows_test.go",
+        "source_baseline_sha256": null
+      },
+      {
+        "path": "scheduler/internal/scheduler/scheduler_last_result_windows_test.go",
+        "bytes": 12482,
+        "sha256": "690595eb86c182c92ebc592d8fd85ecd3d30ebe4401a8241cd3e1bad4f85a0e6",
+        "source_path": "internal/scheduler/scheduler_last_result_windows_test.go",
+        "source_baseline_sha256": null
+      },
+      {
+        "path": "scheduler/internal/scheduler/scheduler_owned_run_windows_test.go",
+        "bytes": 9293,
+        "sha256": "a30c2944ea1b7bcf95fecb1a33b165cec76e3a832300cb422660c951b00e0f8e",
+        "source_path": "internal/scheduler/scheduler_owned_run_windows_test.go",
+        "source_baseline_sha256": "eca095b629a0fa6b4836d069d1489ca92bb3e91e49cde17e66b1e5028aeffc03"
+      },
+      {
+        "path": "scheduler/internal/scheduler/scheduler_owner_sid_windows_test.go",
+        "bytes": 11255,
+        "sha256": "06717dab4bab825649cc7be9b98eaa9f7c64a9ad3de13746a84d7d1d17a8c715",
+        "source_path": "internal/scheduler/scheduler_owner_sid_windows_test.go",
+        "source_baseline_sha256": null
+      },
+      {
+        "path": "scheduler/internal/scheduler/scheduler_windows.go",
+        "bytes": 14487,
+        "sha256": "fe9290acff37e50f841bdbf3db713402ea93ed96dd442b09b28dddbb79377db0",
+        "source_path": "internal/scheduler/scheduler_windows.go",
+        "source_baseline_sha256": "d2d286ea3c43ea1337dbf1ec7125557d58539f7868410ad1edf38fdcde35588c"
+      },
+      {
+        "path": "scheduler/internal/scheduler/scheduler_windows_test.go",
+        "bytes": 9130,
+        "sha256": "37ae4c5c0ef6bc79b1a5c8b75b0c7f96921836555475d106fa88d9fe5c36978d",
+        "source_path": "internal/scheduler/scheduler_windows_test.go",
+        "source_baseline_sha256": "1498f646acbb7e65977b5511cb9ab79829300b603f2fedf1973c58a2c3db9947"
+      },
+      {
+        "path": "scheduler/internal/scheduler/scheduler_xml_create_windows.go",
+        "bytes": 2023,
+        "sha256": "eafbae884b9516385206004c2255fd63b23a0a7e07f0179c93a66218817f1ba1",
+        "source_path": "internal/scheduler/scheduler_xml_create_windows.go",
+        "source_baseline_sha256": null
+      },
+      {
+        "path": "scheduler/internal/scheduler/scheduler_xml_create_windows_test.go",
+        "bytes": 8883,
+        "sha256": "062b4671cd846bc4d06ec684f6d6b7bc3f4b05a8265840f4950dba20f14704ed",
+        "source_path": "internal/scheduler/scheduler_xml_create_windows_test.go",
+        "source_baseline_sha256": null
+      }
+    ],
+    "api_testmain_donor": "b5cd530969b7089e7d7cbaf5308543be8c443f8c",
+    "standalone_pr_head_tested": false,
+    "explanation": "Preserved source858/master75 plus 39 Go overlays. The 45 pinned phase inputs also include maps and alternative control files; 45 is not the active Go overlay count."
+  },
+  "phases": [
+    {
+      "phase": "scheduler-sid-control",
+      "plan": {
+        "path": "qualification/plans/scheduler-sid-control.json",
+        "bytes": 596789,
+        "sha256": "eab0c5480b01f608a5d1ac3479506a2447b7a04997de8dd16df2da7c3f8ed9d2"
+      },
+      "receipt": {
+        "path": "qualification/results/scheduler/scheduler-sid-control/receipt.json",
+        "bytes": 5484,
+        "sha256": "106f86fa783473e1b284ba31c5390b31fe77532fd4da2d1a4855f14b3ee44017"
+      },
+      "started_utc": "2026-11-22T13:05:18.975931+00:00",
+      "finished_utc": "2026-11-22T13:05:34.246980+00:00",
+      "completed": true,
+      "source_before_after": {
+        "files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+      },
+      "inputs_before_after": {
+        "files": 45,
+        "bytes": 1223005,
+        "inventory_sha256": "456d9abe260fb1a2c1ab187d33f6b3ba529d5bf5810e5f7452c9df030c5bddb6"
+      },
+      "local_plan_inputs_all_match": true,
+      "native_scheduler_operations": false,
+      "tools_sha256": {
+        "C:\\msys64\\ucrt64\\bin\\go.exe": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113",
+        "C:\\msys64\\ucrt64\\bin\\gofmt.exe": "95368e4aafefa20f962a345ab02f53ffc035ed69349612abbf385b52f4fb25c5",
+        "C:\\msys64\\ucrt64\\bin\\gcc.exe": "f6ff9378c1edb591131304518eac6456708d28720284105930d0d687136bcdd3"
+      },
+      "commands": [
+        {
+          "label": "owner-control",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-buildvcs=false",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-final-20261122-e21a1792\\inputs\\scheduler-control\\overlay.json",
+            "-p=2",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-race",
+            "-run",
+            "^(TestWindowsSchedulerCurrentOwnerUsesSID|TestSchedulerCOMOwnerSIDProjection)$",
+            "./internal/scheduler"
+          ],
+          "exit_code": 1,
+          "seconds": 6.849253899999894,
+          "settled": true,
+          "timed_out": false,
+          "oracle_pass": true,
+          "stdout": {
+            "bytes": 13355,
+            "sha256": "f065d6d61138c2b6982f24ca2d2feb833c1e81d2b211dc11e186976497c69b8a"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "command_receipt": {
+            "path": "qualification/results/scheduler/scheduler-sid-control/owner-control.receipt.json",
+            "bytes": 1884,
+            "sha256": "c968b3486bac74878e380c7d297564069086b4a55d36c56694598ebb203e086a"
+          },
+          "race_detector_enabled": true,
+          "selected_roots": [
+            "TestSchedulerCOMOwnerSIDProjection",
+            "TestWindowsSchedulerCurrentOwnerUsesSID"
+          ],
+          "terminal_events": {
+            "pass": [
+              "TestSchedulerCOMOwnerSIDProjection/list-SID-literal",
+              "TestSchedulerCOMOwnerSIDProjection/status-SID-literal",
+              "TestSchedulerCOMOwnerSIDProjection/export-retains-raw-owner-without-lookup"
+            ],
+            "fail": [
+              "TestWindowsSchedulerCurrentOwnerUsesSID",
+              "TestSchedulerCOMOwnerSIDProjection/list-same-short-name-different-SID",
+              "TestSchedulerCOMOwnerSIDProjection/list-unknown-after-good",
+              "TestSchedulerCOMOwnerSIDProjection/list-empty-after-good",
+              "TestSchedulerCOMOwnerSIDProjection/status-qualified-owner",
+              "TestSchedulerCOMOwnerSIDProjection/status-unknown-owner",
+              "TestSchedulerCOMOwnerSIDProjection/status-empty-owner",
+              "TestSchedulerCOMOwnerSIDProjection",
+              "PACKAGE:mcp-local-hub/internal/scheduler"
+            ],
+            "skip": []
+          },
+          "events_json_lines": 55,
+          "test_counts": {
+            "pass": 3,
+            "fail": 8,
+            "skip": 0
+          },
+          "package_counts": {
+            "pass": 0,
+            "fail": 1,
+            "skip": 0
+          }
+        }
+      ]
+    },
+    {
+      "phase": "scheduler-predelete-control",
+      "plan": {
+        "path": "qualification/plans/scheduler-predelete-control.json",
+        "bytes": 597936,
+        "sha256": "65e26f2b4fb04d3e11d0afd4dea6f1362397ccb699986d438072c8edd72ad3d4"
+      },
+      "receipt": {
+        "path": "qualification/results/scheduler/scheduler-predelete-control/receipt.json",
+        "bytes": 6037,
+        "sha256": "73517ba9f8dfe095eebce038285a14bfd4051db280c0aa6a30430b486386ca16"
+      },
+      "started_utc": "2026-11-22T13:05:54.701532+00:00",
+      "finished_utc": "2026-11-22T13:06:47.778204+00:00",
+      "completed": true,
+      "source_before_after": {
+        "files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+      },
+      "inputs_before_after": {
+        "files": 45,
+        "bytes": 1194599,
+        "inventory_sha256": "fa80cd04953c86b19130d6bf6a07c98a4057deaa1b18ab52d332182290615011"
+      },
+      "local_plan_inputs_all_match": true,
+      "native_scheduler_operations": false,
+      "tools_sha256": {
+        "C:\\msys64\\ucrt64\\bin\\go.exe": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113",
+        "C:\\msys64\\ucrt64\\bin\\gofmt.exe": "95368e4aafefa20f962a345ab02f53ffc035ed69349612abbf385b52f4fb25c5",
+        "C:\\msys64\\ucrt64\\bin\\gcc.exe": "f6ff9378c1edb591131304518eac6456708d28720284105930d0d687136bcdd3"
+      },
+      "commands": [
+        {
+          "label": "predelete-control",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-buildvcs=false",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-final-20261122-e21a1792\\inputs\\scheduler-predelete\\control-overlay.json",
+            "-p=2",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-run",
+            "^(TestExecuteInstallToPreDeleteRevalidation|TestExecuteInstallToPreDeleteRefusalRollsBackEarlierTask)$",
+            "./internal/api"
+          ],
+          "exit_code": 1,
+          "seconds": 45.4290821000468,
+          "settled": true,
+          "timed_out": false,
+          "oracle_pass": true,
+          "stdout": {
+            "bytes": 43291,
+            "sha256": "1874866157111f4f10a0d804d220ba56726eac01d35100c251fedaef868756b1"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "command_receipt": {
+            "path": "qualification/results/scheduler/scheduler-predelete-control/predelete-control.receipt.json",
+            "bytes": 2345,
+            "sha256": "edbd9edfad192ebdee1cea15601e69f3579f5157b53ad91fe539c15565ec84d5"
+          },
+          "race_detector_enabled": true,
+          "selected_roots": [
+            "TestExecuteInstallToPreDeleteRefusalRollsBackEarlierTask",
+            "TestExecuteInstallToPreDeleteRevalidation"
+          ],
+          "terminal_events": {
+            "pass": [
+              "TestExecuteInstallToPreDeleteRevalidation/replace_same_xml",
+              "TestExecuteInstallToPreDeleteRevalidation/prune_same_xml"
+            ],
+            "fail": [
+              "TestExecuteInstallToPreDeleteRevalidation/replace_changed_xml",
+              "TestExecuteInstallToPreDeleteRevalidation/replace_missing",
+              "TestExecuteInstallToPreDeleteRevalidation/replace_empty",
+              "TestExecuteInstallToPreDeleteRevalidation/replace_read_error",
+              "TestExecuteInstallToPreDeleteRevalidation/replace_matching_xml_with_error",
+              "TestExecuteInstallToPreDeleteRevalidation/prune_changed_xml",
+              "TestExecuteInstallToPreDeleteRevalidation/prune_missing",
+              "TestExecuteInstallToPreDeleteRevalidation/prune_empty",
+              "TestExecuteInstallToPreDeleteRevalidation/prune_read_error",
+              "TestExecuteInstallToPreDeleteRevalidation/prune_matching_xml_with_error",
+              "TestExecuteInstallToPreDeleteRevalidation",
+              "TestExecuteInstallToPreDeleteRefusalRollsBackEarlierTask/earlier_creation_removed",
+              "TestExecuteInstallToPreDeleteRefusalRollsBackEarlierTask/earlier_rollback_failure_retained",
+              "TestExecuteInstallToPreDeleteRefusalRollsBackEarlierTask",
+              "PACKAGE:mcp-local-hub/internal/api"
+            ],
+            "skip": []
+          },
+          "events_json_lines": 143,
+          "test_counts": {
+            "pass": 2,
+            "fail": 14,
+            "skip": 0
+          },
+          "package_counts": {
+            "pass": 0,
+            "fail": 1,
+            "skip": 0
+          }
+        }
+      ]
+    },
+    {
+      "phase": "scheduler-sid-predelete-candidate",
+      "plan": {
+        "path": "qualification/plans/scheduler-sid-predelete-candidate.json",
+        "bytes": 601461,
+        "sha256": "1bd3d0feb078f28e3552c694ddc392a44c57b2b5d01ac5b1c1ff14a8cf719366"
+      },
+      "receipt": {
+        "path": "qualification/results/scheduler/scheduler-sid-predelete-candidate/receipt.json",
+        "bytes": 22913,
+        "sha256": "bbc04e2ea9b7b09536855b145cb46b299f9e67ab36125a7f7c4d62ec1abdb9c2"
+      },
+      "started_utc": "2026-11-22T13:07:07.771538+00:00",
+      "finished_utc": "2026-11-22T13:09:10.670556+00:00",
+      "completed": true,
+      "source_before_after": {
+        "files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+      },
+      "inputs_before_after": {
+        "files": 45,
+        "bytes": 1194599,
+        "inventory_sha256": "fa80cd04953c86b19130d6bf6a07c98a4057deaa1b18ab52d332182290615011"
+      },
+      "local_plan_inputs_all_match": true,
+      "native_scheduler_operations": false,
+      "tools_sha256": {
+        "C:\\msys64\\ucrt64\\bin\\go.exe": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113",
+        "C:\\msys64\\ucrt64\\bin\\gofmt.exe": "95368e4aafefa20f962a345ab02f53ffc035ed69349612abbf385b52f4fb25c5",
+        "C:\\msys64\\ucrt64\\bin\\gcc.exe": "f6ff9378c1edb591131304518eac6456708d28720284105930d0d687136bcdd3"
+      },
+      "commands": [
+        {
+          "label": "scheduler-owners",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-buildvcs=false",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-final-20261122-e21a1792\\inputs\\scheduler-predelete\\overlay.json",
+            "-p=2",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-race",
+            "-run",
+            "^(TestWindowsSchedulerCurrentOwnerUsesSID|TestSchedulerCOMOwnerSIDProjection|TestSchedulerCOMOwnedRunUsesSameSIDResolver|TestSameWindowsUser|TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation|TestSchedulerCOMLastResultPublicQueries|TestSchedulerCOMLastResultScript)$",
+            "./internal/scheduler"
+          ],
+          "exit_code": 0,
+          "seconds": 15.65908270003274,
+          "settled": true,
+          "timed_out": false,
+          "oracle_pass": true,
+          "stdout": {
+            "bytes": 41863,
+            "sha256": "ec93206da0cad535d05342fba7d57a88aee8c1e524bb9db566bcbd942d0d05a9"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "command_receipt": {
+            "path": "qualification/results/scheduler/scheduler-sid-predelete-candidate/scheduler-owners.receipt.json",
+            "bytes": 4219,
+            "sha256": "1ca21fe6ac37211fdbc0c34245b97e1e4ca8e60e2d4460ed3bb44b1bf4db72ef"
+          },
+          "race_detector_enabled": true,
+          "selected_roots": [
+            "TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation",
+            "TestSameWindowsUser",
+            "TestSchedulerCOMLastResultPublicQueries",
+            "TestSchedulerCOMLastResultScript",
+            "TestSchedulerCOMOwnedRunUsesSameSIDResolver",
+            "TestSchedulerCOMOwnerSIDProjection",
+            "TestWindowsSchedulerCurrentOwnerUsesSID"
+          ],
+          "terminal_events": {
+            "pass": [
+              "TestSchedulerCOMLastResultPublicQueries/status-preserves-signed-result",
+              "TestSchedulerCOMLastResultPublicQueries/list-preserves-each-result",
+              "TestSchedulerCOMLastResultPublicQueries/status-rejects-missing-result",
+              "TestSchedulerCOMLastResultPublicQueries/list-rejects-null-without-partial-results",
+              "TestSchedulerCOMLastResultPublicQueries",
+              "TestSchedulerCOMLastResultScript/status-zero",
+              "TestSchedulerCOMLastResultScript/status-signed-result",
+              "TestSchedulerCOMLastResultScript/list-results",
+              "TestSchedulerCOMLastResultScript/status-null",
+              "TestSchedulerCOMLastResultScript/status-missing",
+              "TestSchedulerCOMLastResultScript/status-getter-error",
+              "TestSchedulerCOMLastResultScript/list-null-after-result",
+              "TestSchedulerCOMLastResultScript/list-missing-after-result",
+              "TestSchedulerCOMLastResultScript/list-getter-error-after-result",
+              "TestSchedulerCOMLastResultScript/export-does-not-read-result",
+              "TestSchedulerCOMLastResultScript",
+              "TestWindowsSchedulerCurrentOwnerUsesSID",
+              "TestSchedulerCOMOwnerSIDProjection/list-same-short-name-different-SID",
+              "TestSchedulerCOMOwnerSIDProjection/list-SID-literal",
+              "TestSchedulerCOMOwnerSIDProjection/list-unknown-after-good",
+              "TestSchedulerCOMOwnerSIDProjection/list-empty-after-good",
+              "TestSchedulerCOMOwnerSIDProjection/status-qualified-owner",
+              "TestSchedulerCOMOwnerSIDProjection/status-SID-literal",
+              "TestSchedulerCOMOwnerSIDProjection/status-unknown-owner",
+              "TestSchedulerCOMOwnerSIDProjection/status-empty-owner",
+              "TestSchedulerCOMOwnerSIDProjection/export-retains-raw-owner-without-lookup",
+              "TestSchedulerCOMOwnerSIDProjection",
+              "TestSchedulerCOMOwnedRunUsesSameSIDResolver/matching-account",
+              "TestSchedulerCOMOwnedRunUsesSameSIDResolver/same-short-name-foreign-domain",
+              "TestSchedulerCOMOwnedRunUsesSameSIDResolver/unresolved-owner",
+              "TestSchedulerCOMOwnedRunUsesSameSIDResolver/empty-owner",
+              "TestSchedulerCOMOwnedRunUsesSameSIDResolver",
+              "TestSameWindowsUser/exact",
+              "TestSameWindowsUser/qualified_is_not_short",
+              "TestSameWindowsUser/case-insensitive_exact_account",
+              "TestSameWindowsUser/different_domains",
+              "TestSameWindowsUser/matching_SID",
+              "TestSameWindowsUser/different_SID",
+              "TestSameWindowsUser/different_user",
+              "TestSameWindowsUser/empty_owner",
+              "TestSameWindowsUser",
+              "TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation/foreign_owner",
+              "TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation/same_short_name_foreign_domain",
+              "TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation/multiple_actions",
+              "TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation",
+              "PACKAGE:mcp-local-hub/internal/scheduler"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "events_json_lines": 188,
+          "test_counts": {
+            "pass": 45,
+            "fail": 0,
+            "skip": 0
+          },
+          "package_counts": {
+            "pass": 1,
+            "fail": 0,
+            "skip": 0
+          }
+        },
+        {
+          "label": "api-owners-hold-recovery",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-buildvcs=false",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-final-20261122-e21a1792\\inputs\\scheduler-predelete\\overlay.json",
+            "-p=2",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-run",
+            "^(TestSchedulerPortOwnerRequiresCurrentSID|TestPortHeldByOurDaemon|TestInstallMergePreservesBackendRunHold|TestInstallPreflightPreservesBackendRunHold|TestExecuteInstallToEarlierTaskRollback|TestExecuteInstallToRollbackCaptureFailureRetainsCreatedTask|TestExecuteInstallToRollbackOwnsCapturedBytes|TestExecuteInstallToRollbackContinuesAndPreservesEveryCause|TestExecuteInstallToRollbackPreservesClientErrorDomains|TestInstallSchedulerRecoveryTasksClassifiesCurrentAndLater|TestExecuteInstallToRollbackBackendCompatibility|TestExecuteInstallToPreDeleteRevalidation|TestExecuteInstallToPreDeleteRefusalRollsBackEarlierTask|TestExecuteInstallToCurrentTaskRecovery|TestExecuteInstallToRecoveryCapabilityRequired|TestExecuteInstallToRecoverySnapshotBeforeDelete|TestExecuteInstallToRecoverySnapshotFailureStopsReplacement|TestExecuteInstallToAbsentFailureHasNoRecovery|TestExecuteInstallToRejectsAliasedRecoveryNames|TestExecuteInstallToCurrentMutationFailureObservation|TestExecuteInstallToCurrentAndEarlierRecoveryNames|TestExecuteAdoptCurrentMutationFailurePreservesRecovery|TestExecuteInstallToPruneSnapshotBeforeDelete|TestExecuteInstallToPruneRequiresRecoveryBeforeDelete|TestExecuteInstallToPruneDeleteUnconfirmedStopsAndRollsBack|TestExecuteInstallToPruneRollbackObservation|TestExecuteInstallToPruneRollbackPreservesExternalOccupant|TestExecuteAdoptPruneRecoveryPreservesProvenance)$",
+            "./internal/api"
+          ],
+          "exit_code": 0,
+          "seconds": 56.175278400070965,
+          "settled": true,
+          "timed_out": false,
+          "oracle_pass": true,
+          "stdout": {
+            "bytes": 123291,
+            "sha256": "53b99a7a36d2c87206876e0fbbc43fd46e93bd14f3bbc6f60b384c402ea412be"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "command_receipt": {
+            "path": "qualification/results/scheduler/scheduler-sid-predelete-candidate/api-owners-hold-recovery.receipt.json",
+            "bytes": 12134,
+            "sha256": "d911ab6a2f3492439f921b9c0c584b173528bfedfceac9b159c0d8625e0dc567"
+          },
+          "race_detector_enabled": true,
+          "selected_roots": [
+            "TestExecuteAdoptCurrentMutationFailurePreservesRecovery",
+            "TestExecuteAdoptPruneRecoveryPreservesProvenance",
+            "TestExecuteInstallToAbsentFailureHasNoRecovery",
+            "TestExecuteInstallToCurrentAndEarlierRecoveryNames",
+            "TestExecuteInstallToCurrentMutationFailureObservation",
+            "TestExecuteInstallToCurrentTaskRecovery",
+            "TestExecuteInstallToEarlierTaskRollback",
+            "TestExecuteInstallToPreDeleteRefusalRollsBackEarlierTask",
+            "TestExecuteInstallToPreDeleteRevalidation",
+            "TestExecuteInstallToPruneDeleteUnconfirmedStopsAndRollsBack",
+            "TestExecuteInstallToPruneRequiresRecoveryBeforeDelete",
+            "TestExecuteInstallToPruneRollbackObservation",
+            "TestExecuteInstallToPruneRollbackPreservesExternalOccupant",
+            "TestExecuteInstallToPruneSnapshotBeforeDelete",
+            "TestExecuteInstallToRecoveryCapabilityRequired",
+            "TestExecuteInstallToRecoverySnapshotBeforeDelete",
+            "TestExecuteInstallToRecoverySnapshotFailureStopsReplacement",
+            "TestExecuteInstallToRejectsAliasedRecoveryNames",
+            "TestExecuteInstallToRollbackBackendCompatibility",
+            "TestExecuteInstallToRollbackCaptureFailureRetainsCreatedTask",
+            "TestExecuteInstallToRollbackContinuesAndPreservesEveryCause",
+            "TestExecuteInstallToRollbackOwnsCapturedBytes",
+            "TestExecuteInstallToRollbackPreservesClientErrorDomains",
+            "TestInstallMergePreservesBackendRunHold",
+            "TestInstallPreflightPreservesBackendRunHold",
+            "TestInstallSchedulerRecoveryTasksClassifiesCurrentAndLater",
+            "TestPortHeldByOurDaemon",
+            "TestSchedulerPortOwnerRequiresCurrentSID"
+          ],
+          "terminal_events": {
+            "pass": [
+              "TestInstallMergePreservesBackendRunHold",
+              "TestInstallPreflightPreservesBackendRunHold",
+              "TestPortHeldByOurDaemon/mcphub.exe_+_task_Running_→_ours_(stdio-bridge_/_native-http_external)",
+              "TestPortHeldByOurDaemon/MCPHUB.EXE_(uppercase)_+_task_Running_→_ours",
+              "TestPortHeldByOurDaemon/MCPHub.exe_(mixed)_+_task_Running_→_ours",
+              "TestPortHeldByOurDaemon/python.exe_child_of_mcphub.exe_+_task_Running_→_ours_(native-http_internal)",
+              "TestPortHeldByOurDaemon/node.exe_child_of_MCPHUB.EXE_(case_insensitive_parent)_→_ours",
+              "TestPortHeldByOurDaemon/empty_image_+_parent_mcphub.exe_→_ours_(parent_saves_it)",
+              "TestPortHeldByOurDaemon/foreign_python.exe_(no_mcphub_parent)_+_task_Running_→_NOT_ours",
+              "TestPortHeldByOurDaemon/foreign_notepad.exe_(no_mcphub_parent)_+_task_Running_→_NOT_ours",
+              "TestPortHeldByOurDaemon/foreign_python.exe_+_empty_parent_→_NOT_ours",
+              "TestPortHeldByOurDaemon/identity_lookup_fails_→_fail-closed_(not_ours)",
+              "TestPortHeldByOurDaemon/empty_image_AND_empty_parent_→_fail-closed_(not_ours)",
+              "TestPortHeldByOurDaemon/mcphub.exe_+_task_Ready_(not_Running)_→_not_ours",
+              "TestPortHeldByOurDaemon/mcphub.exe_+_task_Disabled_→_not_ours",
+              "TestPortHeldByOurDaemon/mcphub.exe_+_task-not-found_→_not_ours_(foreign_owner)",
+              "TestPortHeldByOurDaemon/mcphub.exe_+_task_Running_owned_by_other_user_→_not_ours",
+              "TestPortHeldByOurDaemon/port-to-PID_lookup_fails_→_not_ours",
+              "TestPortHeldByOurDaemon/port-to-PID_returns_0_→_not_ours",
+              "TestPortHeldByOurDaemon",
+              "TestExecuteInstallToPruneSnapshotBeforeDelete/successful_prune",
+              "TestExecuteInstallToPruneSnapshotBeforeDelete/later_failure_restores_owned_bytes",
+              "TestExecuteInstallToPruneSnapshotBeforeDelete",
+              "TestExecuteInstallToPruneRequiresRecoveryBeforeDelete/snapshot_storage_unavailable",
+              "TestExecuteInstallToPruneRequiresRecoveryBeforeDelete/no_create_only_capability",
+              "TestExecuteInstallToPruneRequiresRecoveryBeforeDelete",
+              "TestExecuteInstallToPruneDeleteUnconfirmedStopsAndRollsBack/delete_applied_reply_lost",
+              "TestExecuteInstallToPruneDeleteUnconfirmedStopsAndRollsBack/partial_observation_error",
+              "TestExecuteInstallToPruneDeleteUnconfirmedStopsAndRollsBack/earlier_restore_failed",
+              "TestExecuteInstallToPruneDeleteUnconfirmedStopsAndRollsBack",
+              "TestExecuteInstallToPruneRollbackObservation/prior_already_present",
+              "TestExecuteInstallToPruneRollbackObservation/external_already_present",
+              "TestExecuteInstallToPruneRollbackObservation/observation_unavailable",
+              "TestExecuteInstallToPruneRollbackObservation",
+              "TestExecuteInstallToPruneRollbackPreservesExternalOccupant",
+              "TestExecuteAdoptPruneRecoveryPreservesProvenance/delete_unconfirmed",
+              "TestExecuteAdoptPruneRecoveryPreservesProvenance/restore_conflict",
+              "TestExecuteAdoptPruneRecoveryPreservesProvenance",
+              "TestExecuteInstallToCurrentMutationFailureObservation/delete_rejected_prior_confirmed",
+              "TestExecuteInstallToCurrentMutationFailureObservation/delete_applied_reply_lost",
+              "TestExecuteInstallToCurrentMutationFailureObservation/delete_external_definition",
+              "TestExecuteInstallToCurrentMutationFailureObservation/delete_partial_observation_error",
+              "TestExecuteInstallToCurrentMutationFailureObservation/delete_empty_success",
+              "TestExecuteInstallToCurrentMutationFailureObservation/create_rejected_absence_confirmed",
+              "TestExecuteInstallToCurrentMutationFailureObservation/create_wrapped_absence",
+              "TestExecuteInstallToCurrentMutationFailureObservation/create_applied_reply_lost",
+              "TestExecuteInstallToCurrentMutationFailureObservation/create_observation_error",
+              "TestExecuteInstallToCurrentMutationFailureObservation/create_partial_absence",
+              "TestExecuteInstallToCurrentMutationFailureObservation/create_empty_success",
+              "TestExecuteInstallToCurrentMutationFailureObservation",
+              "TestExecuteInstallToCurrentAndEarlierRecoveryNames",
+              "TestExecuteAdoptCurrentMutationFailurePreservesRecovery/delete",
+              "TestExecuteAdoptCurrentMutationFailurePreservesRecovery/create",
+              "TestExecuteAdoptCurrentMutationFailurePreservesRecovery",
+              "TestExecuteInstallToCurrentTaskRecovery/restored",
+              "TestExecuteInstallToCurrentTaskRecovery/external_occupant",
+              "TestExecuteInstallToCurrentTaskRecovery/create_applied_reply_lost",
+              "TestExecuteInstallToCurrentTaskRecovery/restore_rejected",
+              "TestExecuteInstallToCurrentTaskRecovery/restore_applied_reply_lost",
+              "TestExecuteInstallToCurrentTaskRecovery",
+              "TestExecuteInstallToRecoveryCapabilityRequired",
+              "TestExecuteInstallToRecoverySnapshotBeforeDelete/replacement_succeeds",
+              "TestExecuteInstallToRecoverySnapshotBeforeDelete/delete_fails",
+              "TestExecuteInstallToRecoverySnapshotBeforeDelete",
+              "TestExecuteInstallToRecoverySnapshotFailureStopsReplacement",
+              "TestExecuteInstallToAbsentFailureHasNoRecovery",
+              "TestExecuteInstallToRejectsAliasedRecoveryNames/exact",
+              "TestExecuteInstallToRejectsAliasedRecoveryNames/case",
+              "TestExecuteInstallToRejectsAliasedRecoveryNames/root_prefix",
+              "TestExecuteInstallToRejectsAliasedRecoveryNames",
+              "TestExecuteInstallToEarlierTaskRollback/restore_prior",
+              "TestExecuteInstallToEarlierTaskRollback/remove_new",
+              "TestExecuteInstallToEarlierTaskRollback/already_absent",
+              "TestExecuteInstallToEarlierTaskRollback/already_prior",
+              "TestExecuteInstallToEarlierTaskRollback/external_replacement",
+              "TestExecuteInstallToEarlierTaskRollback/read_error",
+              "TestExecuteInstallToEarlierTaskRollback/partial_read_error",
+              "TestExecuteInstallToEarlierTaskRollback/empty_read",
+              "TestExecuteInstallToEarlierTaskRollback/delete_rejected",
+              "TestExecuteInstallToEarlierTaskRollback/delete_applied_reply_lost",
+              "TestExecuteInstallToEarlierTaskRollback/delete_ack_without_effect",
+              "TestExecuteInstallToEarlierTaskRollback/absence_read_error",
+              "TestExecuteInstallToEarlierTaskRollback/restore_conflict",
+              "TestExecuteInstallToEarlierTaskRollback/restore_rejected",
+              "TestExecuteInstallToEarlierTaskRollback/restore_applied_reply_lost",
+              "TestExecuteInstallToEarlierTaskRollback/restore_ack_wrong_definition",
+              "TestExecuteInstallToEarlierTaskRollback/restored_read_error",
+              "TestExecuteInstallToEarlierTaskRollback",
+              "TestExecuteInstallToRollbackCaptureFailureRetainsCreatedTask/unavailable",
+              "TestExecuteInstallToRollbackCaptureFailureRetainsCreatedTask/partial_error",
+              "TestExecuteInstallToRollbackCaptureFailureRetainsCreatedTask/empty_success",
+              "TestExecuteInstallToRollbackCaptureFailureRetainsCreatedTask/not_found",
+              "TestExecuteInstallToRollbackCaptureFailureRetainsCreatedTask",
+              "TestExecuteInstallToRollbackOwnsCapturedBytes",
+              "TestExecuteInstallToRollbackContinuesAndPreservesEveryCause",
+              "TestExecuteInstallToRollbackPreservesClientErrorDomains/client_incomplete",
+              "TestExecuteInstallToRollbackPreservesClientErrorDomains/client_release_unconfirmed",
+              "TestExecuteInstallToRollbackPreservesClientErrorDomains",
+              "TestInstallSchedulerRecoveryTasksClassifiesCurrentAndLater/plain",
+              "TestInstallSchedulerRecoveryTasksClassifiesCurrentAndLater/current_acknowledged",
+              "TestInstallSchedulerRecoveryTasksClassifiesCurrentAndLater/current_uncertain",
+              "TestInstallSchedulerRecoveryTasksClassifiesCurrentAndLater/later_and_current",
+              "TestInstallSchedulerRecoveryTasksClassifiesCurrentAndLater",
+              "TestExecuteInstallToRollbackBackendCompatibility/fresh_task_without_xml_creator",
+              "TestExecuteInstallToRollbackBackendCompatibility/skipped_scheduler",
+              "TestExecuteInstallToRollbackBackendCompatibility/noop_rejects_before_capture",
+              "TestExecuteInstallToRollbackBackendCompatibility",
+              "TestExecuteInstallToPreDeleteRevalidation/replace_same_xml",
+              "TestExecuteInstallToPreDeleteRevalidation/replace_changed_xml",
+              "TestExecuteInstallToPreDeleteRevalidation/replace_missing",
+              "TestExecuteInstallToPreDeleteRevalidation/replace_empty",
+              "TestExecuteInstallToPreDeleteRevalidation/replace_read_error",
+              "TestExecuteInstallToPreDeleteRevalidation/replace_matching_xml_with_error",
+              "TestExecuteInstallToPreDeleteRevalidation/prune_same_xml",
+              "TestExecuteInstallToPreDeleteRevalidation/prune_changed_xml",
+              "TestExecuteInstallToPreDeleteRevalidation/prune_missing",
+              "TestExecuteInstallToPreDeleteRevalidation/prune_empty",
+              "TestExecuteInstallToPreDeleteRevalidation/prune_read_error",
+              "TestExecuteInstallToPreDeleteRevalidation/prune_matching_xml_with_error",
+              "TestExecuteInstallToPreDeleteRevalidation",
+              "TestExecuteInstallToPreDeleteRefusalRollsBackEarlierTask/earlier_creation_removed",
+              "TestExecuteInstallToPreDeleteRefusalRollsBackEarlierTask/earlier_rollback_failure_retained",
+              "TestExecuteInstallToPreDeleteRefusalRollsBackEarlierTask",
+              "TestSchedulerPortOwnerRequiresCurrentSID/current-SID",
+              "TestSchedulerPortOwnerRequiresCurrentSID/unresolved-short-name",
+              "TestSchedulerPortOwnerRequiresCurrentSID/same-short-name-other-domain",
+              "TestSchedulerPortOwnerRequiresCurrentSID/unresolved-qualified-name",
+              "TestSchedulerPortOwnerRequiresCurrentSID/missing-owner",
+              "TestSchedulerPortOwnerRequiresCurrentSID",
+              "PACKAGE:mcp-local-hub/internal/api"
+            ],
+            "fail": [],
+            "skip": [
+              "TestExecuteInstallToRollbackBackendCompatibility/unsupported_platform"
+            ]
+          },
+          "events_json_lines": 526,
+          "test_counts": {
+            "pass": 129,
+            "fail": 0,
+            "skip": 1
+          },
+          "package_counts": {
+            "pass": 1,
+            "fail": 0,
+            "skip": 0
+          }
+        },
+        {
+          "label": "build",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "build",
+            "-buildvcs=false",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-final-20261122-e21a1792\\inputs\\scheduler-predelete\\overlay.json",
+            "-p=2",
+            "./..."
+          ],
+          "exit_code": 0,
+          "seconds": 19.47214199998416,
+          "settled": true,
+          "timed_out": false,
+          "oracle_pass": true,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "command_receipt": {
+            "path": "qualification/results/scheduler/scheduler-sid-predelete-candidate/build.receipt.json",
+            "bytes": 868,
+            "sha256": "7547496b5e252fdf1a43c821bd74b9717fa04062fb42fcf1edf8869a527c6918"
+          },
+          "race_detector_enabled": false,
+          "selected_roots": [],
+          "terminal_events": {
+            "pass": [],
+            "fail": [],
+            "skip": []
+          },
+          "events_json_lines": 0,
+          "test_counts": {
+            "pass": 0,
+            "fail": 0,
+            "skip": 0
+          },
+          "package_counts": {
+            "pass": 0,
+            "fail": 0,
+            "skip": 0
+          }
+        },
+        {
+          "label": "vet",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "vet",
+            "-buildvcs=false",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-final-20261122-e21a1792\\inputs\\scheduler-predelete\\overlay.json",
+            "-p=2",
+            "./..."
+          ],
+          "exit_code": 0,
+          "seconds": 23.800557199981995,
+          "settled": true,
+          "timed_out": false,
+          "oracle_pass": true,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "command_receipt": {
+            "path": "qualification/results/scheduler/scheduler-sid-predelete-candidate/vet.receipt.json",
+            "bytes": 865,
+            "sha256": "a2f11105f04d231f01cb3383dc07598ec6f1a28deb1293cf2d0103de77016b1d"
+          },
+          "race_detector_enabled": false,
+          "selected_roots": [],
+          "terminal_events": {
+            "pass": [],
+            "fail": [],
+            "skip": []
+          },
+          "events_json_lines": 0,
+          "test_counts": {
+            "pass": 0,
+            "fail": 0,
+            "skip": 0
+          },
+          "package_counts": {
+            "pass": 0,
+            "fail": 0,
+            "skip": 0
+          }
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "candidate_test_pass": 174,
+    "candidate_test_fail": 0,
+    "candidate_test_skip": 1,
+    "candidate_package_pass": 2,
+    "candidate_package_fail": 0,
+    "candidate_selected_roots": 35,
+    "candidate_build_exit": 0,
+    "candidate_vet_exit": 0,
+    "control_test_pass": 5,
+    "control_test_fail": 22,
+    "control_package_fail": 2,
+    "control_test_skip": 0
+  },
+  "strict_oracles": {
+    "terminal_names_once_each": true,
+    "selected_root_multisets_exact": true,
+    "receipt_terminal_multisets_equal_raw": true,
+    "sid_control_exact_pass": [
+      "TestSchedulerCOMOwnerSIDProjection/list-SID-literal",
+      "TestSchedulerCOMOwnerSIDProjection/status-SID-literal",
+      "TestSchedulerCOMOwnerSIDProjection/export-retains-raw-owner-without-lookup"
+    ],
+    "sid_control_exact_fail": [
+      "TestWindowsSchedulerCurrentOwnerUsesSID",
+      "TestSchedulerCOMOwnerSIDProjection",
+      "TestSchedulerCOMOwnerSIDProjection/list-same-short-name-different-SID",
+      "TestSchedulerCOMOwnerSIDProjection/list-unknown-after-good",
+      "TestSchedulerCOMOwnerSIDProjection/list-empty-after-good",
+      "TestSchedulerCOMOwnerSIDProjection/status-qualified-owner",
+      "TestSchedulerCOMOwnerSIDProjection/status-unknown-owner",
+      "TestSchedulerCOMOwnerSIDProjection/status-empty-owner"
+    ],
+    "predelete_control_expected_multisets_exact": true,
+    "predelete_candidate_exact_39_pass_names": [
+      "TestExecuteInstallToEarlierTaskRollback",
+      "TestExecuteInstallToEarlierTaskRollback/absence_read_error",
+      "TestExecuteInstallToEarlierTaskRollback/already_absent",
+      "TestExecuteInstallToEarlierTaskRollback/already_prior",
+      "TestExecuteInstallToEarlierTaskRollback/delete_ack_without_effect",
+      "TestExecuteInstallToEarlierTaskRollback/delete_applied_reply_lost",
+      "TestExecuteInstallToEarlierTaskRollback/delete_rejected",
+      "TestExecuteInstallToEarlierTaskRollback/empty_read",
+      "TestExecuteInstallToEarlierTaskRollback/external_replacement",
+      "TestExecuteInstallToEarlierTaskRollback/partial_read_error",
+      "TestExecuteInstallToEarlierTaskRollback/read_error",
+      "TestExecuteInstallToEarlierTaskRollback/remove_new",
+      "TestExecuteInstallToEarlierTaskRollback/restore_ack_wrong_definition",
+      "TestExecuteInstallToEarlierTaskRollback/restore_applied_reply_lost",
+      "TestExecuteInstallToEarlierTaskRollback/restore_conflict",
+      "TestExecuteInstallToEarlierTaskRollback/restore_prior",
+      "TestExecuteInstallToEarlierTaskRollback/restore_rejected",
+      "TestExecuteInstallToEarlierTaskRollback/restored_read_error",
+      "TestExecuteInstallToPreDeleteRefusalRollsBackEarlierTask",
+      "TestExecuteInstallToPreDeleteRefusalRollsBackEarlierTask/earlier_creation_removed",
+      "TestExecuteInstallToPreDeleteRefusalRollsBackEarlierTask/earlier_rollback_failure_retained",
+      "TestExecuteInstallToPreDeleteRevalidation",
+      "TestExecuteInstallToPreDeleteRevalidation/prune_changed_xml",
+      "TestExecuteInstallToPreDeleteRevalidation/prune_empty",
+      "TestExecuteInstallToPreDeleteRevalidation/prune_matching_xml_with_error",
+      "TestExecuteInstallToPreDeleteRevalidation/prune_missing",
+      "TestExecuteInstallToPreDeleteRevalidation/prune_read_error",
+      "TestExecuteInstallToPreDeleteRevalidation/prune_same_xml",
+      "TestExecuteInstallToPreDeleteRevalidation/replace_changed_xml",
+      "TestExecuteInstallToPreDeleteRevalidation/replace_empty",
+      "TestExecuteInstallToPreDeleteRevalidation/replace_matching_xml_with_error",
+      "TestExecuteInstallToPreDeleteRevalidation/replace_missing",
+      "TestExecuteInstallToPreDeleteRevalidation/replace_read_error",
+      "TestExecuteInstallToPreDeleteRevalidation/replace_same_xml",
+      "TestExecuteInstallToRollbackCaptureFailureRetainsCreatedTask",
+      "TestExecuteInstallToRollbackCaptureFailureRetainsCreatedTask/empty_success",
+      "TestExecuteInstallToRollbackCaptureFailureRetainsCreatedTask/not_found",
+      "TestExecuteInstallToRollbackCaptureFailureRetainsCreatedTask/partial_error",
+      "TestExecuteInstallToRollbackCaptureFailureRetainsCreatedTask/unavailable"
+    ],
+    "command_argv_and_stream_hashes_match": true,
+    "all_six_direct_children_settled": true,
+    "timeouts": 0
+  },
+  "skip": {
+    "test": "TestExecuteInstallToRollbackBackendCompatibility/unsupported_platform",
+    "raw_output": [
+      "=== RUN   TestExecuteInstallToRollbackBackendCompatibility/unsupported_platform\n",
+      "    install_task_rollback_test.go:403: native backend is supported on this platform\n",
+      "--- SKIP: TestExecuteInstallToRollbackBackendCompatibility/unsupported_platform (0.00s)\n"
+    ],
+    "source": "qualification/inputs/scheduler-predelete/internal/api/install_task_rollback_test.go",
+    "condition": "On Windows the unsupported-platform branch skips before clearing MCPHUB_E2E_SCHEDULER or creating a native backend.",
+    "interpretation": "Expected platform-specific exclusion, not a native Scheduler PASS."
+  },
+  "source_fixture_review": [
+    "SID fixture replaces the single Schedule.Service connection and NTAccount translation with in-memory PowerShell objects; leftover native boundaries are rejected. Its Run writes only a marker; Stop/Delete throw. Public queries use withCOMRunner; user.Current is a read-only identity observation.",
+    "LastTaskResult script fixture replaces the unique Schedule.Service connection with memory GetTasks/GetFolder/property getters. Public Status/List/Export use withCOMRunner. Real PowerShell children execute substituted production scripts; this is not native Scheduler execution.",
+    "Entrypoint tests inject newEntrypointTaskBackendFake and use a lock in t.TempDir. Account-equality cases use pure string predicates.",
+    "API ownership mocks PID/image/task observations. installRecoveryPlan replaces schedulerFactoryFn with a memory fake and restores it via t.Cleanup. Snapshots, manifests and protected state directories are newly test-owned. The noop branch uses MCPHUB_E2E_SCHEDULER=none.",
+    "Adopt's nextBindableAdoptPortForTest creates a finite loopback listener and closes it before returning; its install callback returns to the memory Scheduler. No external service is used.",
+    "The canonical API TestMain redirects client profiles and state, audits configuration paths and seals live IPC, autostart, process lookup and kill paths. The chosen roots do not enter helper-test modes."
+  ],
+  "source_review_references": [
+    {
+      "path": "evidence/scheduler-predelete-source-review.json",
+      "bytes": 8647,
+      "sha256": "d5fec70ddf0892c5a05d80a498191899b5071e302209dc9273bda7ff513c604c"
+    },
+    {
+      "path": "evidence/scheduler-composition-independent-review.json",
+      "bytes": 20056,
+      "sha256": "9c7d2260d34a10c4c4cf677e731f651dbe758e4b9cf5a2997d347d922604d93f"
+    }
+  ],
+  "backend_hold_proposal": {
+    "path": "evidence/scheduler-backend-hold-proposal.json",
+    "bytes": 3287,
+    "sha256": "59a300d8cd5eb757a9c78875beab46dde8cdeb4ce7141bf867b97de8279cce8f"
+  },
+  "limits": [
+    "This is source858 plus 39 overlays, not execution of a standalone #660 head or readiness to merge.",
+    "Native Run/RunOwned/Stop/Delete, real domain resolution, permissions/credentials, native external replacement and process-tree cancellation/lifetime remain unqualified here.",
+    "The final XML read-to-Delete window remains. Equal XML does not prove generation, security-descriptor or credential identity.",
+    "Retained direct-child receipts do not prove whole-process-tree settlement.",
+    "Selected tests used -race; full Go test suites were not run. Full build/vet succeeded for this composition only.",
+    "The provider recovery guard is source-bound and unchanged; its dedicated provider-adopt test was not selected in these phases.",
+    "External published-head review, publication/readback and cleanup are outside this report.",
+    "The first evidence-export command failed at cmd quoting before Python ran. Its raw diagnostic is preserved as transport history, not counted as a Go outcome."
+  ]
+}

@@ -4,18 +4,16 @@
 // source registration), §61 (--allow-elevated audit fail-closed).
 //
 // v0.6 Phase C/D (spec §5): the legacy `\mcp-local-hub-watchdog` task is
-// no longer INSTALLED here — the supervisor owns daemon revival and the
-// supervisor-liveness task owns owner-death recovery. These tests INVERT
-// the prior watchdog-install assertions: setup must NOT ImportXML the
-// watchdog, MUST ImportXML the liveness task, and MUST best-effort delete
-// any leftover legacy watchdog task on existing hosts.
+// no longer installed here. The supervisor owns daemon revival and the
+// supervisor-liveness task owns owner-death recovery. Setup retains an
+// observed legacy watchdog task. Explicit last-server uninstall removes it.
 //
 // Test seam strategy:
 //   - api.SetDaemonStateRootForTest routes every state file (intent,
 //     state, audit log, --once.lock) into a temp dir.
 //   - api.SetTestSchedulerFactoryFn injects a recording fake scheduler so
-//     the liveness install (ImportXML) + legacy-watchdog removal (Delete)
-//     land in-memory rather than calling schtasks.
+//     liveness install, legacy watchdog observation, and uninstall land in
+//     memory rather than calling schtasks.
 //   - api.SetTestCanonicalMcphubPathFn / SetTestCurrentWindowsUserFn stub
 //     the canonical-mcphub resolver + per-user principal so the liveness
 //     install's BuildLivenessXML succeeds without real filesystem state.
@@ -33,12 +31,14 @@ import (
 	"io"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/scheduler"
 )
 
@@ -49,21 +49,22 @@ import (
 
 var errNotImplementedForSetupTest = errors.New("setupFakeScheduler: not implemented")
 
-type setupImportXMLCall struct {
+type setupXMLCall struct {
 	name string
 	xml  []byte
 }
 
 type setupFakeScheduler struct {
-	mu              sync.Mutex
-	tasks           map[string][]byte
-	deleteCalls     []string
-	importXMLCalls  []setupImportXMLCall
-	order           []string
-	importXMLErr    error
-	normalizeImport func([]byte) []byte
-	listResult      []scheduler.TaskStatus
-	listErr         error
+	mu                      sync.Mutex
+	tasks                   map[string][]byte
+	deleteCalls             []string
+	createXMLCalls          []setupXMLCall
+	importXMLCalls          []setupXMLCall
+	order                   []string
+	createXMLErr            error
+	legacyWatchdogExportErr error
+	listResult              []scheduler.TaskStatus
+	listErr                 error
 }
 
 func (f *setupFakeScheduler) Create(scheduler.TaskSpec) error { return errNotImplementedForSetupTest }
@@ -93,27 +94,38 @@ func (f *setupFakeScheduler) List(prefix string) ([]scheduler.TaskStatus, error)
 func (f *setupFakeScheduler) ExportXML(name string) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.order = append(f.order, "export:"+name)
+	if name == api.LegacyWatchdogTaskName && f.legacyWatchdogExportErr != nil {
+		return nil, f.legacyWatchdogExportErr
+	}
 	xml, ok := f.tasks[name]
 	if !ok {
 		return nil, scheduler.ErrTaskNotFound
 	}
 	return append([]byte(nil), xml...), nil
 }
-func (f *setupFakeScheduler) ImportXML(name string, xml []byte) error {
+func (f *setupFakeScheduler) CreateXMLIfAbsent(name string, xml []byte) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	cp := make([]byte, len(xml))
 	copy(cp, xml)
-	f.importXMLCalls = append(f.importXMLCalls, setupImportXMLCall{name: name, xml: cp})
-	f.order = append(f.order, "import:"+name)
-	if f.importXMLErr != nil {
-		return f.importXMLErr
+	f.createXMLCalls = append(f.createXMLCalls, setupXMLCall{name: name, xml: cp})
+	f.order = append(f.order, "create:"+name)
+	if _, exists := f.tasks[name]; exists {
+		return scheduler.ErrTaskAlreadyExists
 	}
-	if f.normalizeImport != nil {
-		cp = f.normalizeImport(cp)
+	if f.createXMLErr != nil {
+		return f.createXMLErr
 	}
 	f.tasks[name] = cp
 	return nil
+}
+func (f *setupFakeScheduler) ImportXML(name string, xml []byte) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.importXMLCalls = append(f.importXMLCalls, setupXMLCall{name: name, xml: bytes.Clone(xml)})
+	f.order = append(f.order, "import:"+name)
+	return errNotImplementedForSetupTest
 }
 func (f *setupFakeScheduler) deletes() []string {
 	f.mu.Lock()
@@ -131,12 +143,12 @@ func (f *setupFakeScheduler) operationOrder() []string {
 	return out
 }
 
-// importXMLByName returns how many ImportXML calls targeted the given name.
-func (f *setupFakeScheduler) importXMLByName(name string) int {
+// createXMLByName returns how many CreateXMLIfAbsent calls targeted the given name.
+func (f *setupFakeScheduler) createXMLByName(name string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	n := 0
-	for _, c := range f.importXMLCalls {
+	for _, c := range f.createXMLCalls {
 		if c.name == name {
 			n++
 		}
@@ -205,13 +217,9 @@ func setupWatchdogTestHelper(t *testing.T) (string, *setupFakeScheduler) {
 }
 
 // ---------------------------------------------------------------------------
-// runSetupWatchdog — Phase C: NO watchdog install, liveness install + legacy
-// watchdog cleanup.
+// runSetupWatchdog — liveness install and legacy watchdog observation.
 // ---------------------------------------------------------------------------
 
-// TestSetup_DoesNotInstallWatchdog_InstallsLiveness asserts the C inversion:
-// the watchdog is NEVER ImportXML'd, the liveness task IS, and a best-effort
-// Delete of the legacy watchdog task fires.
 func TestSetup_DoesNotInstallWatchdog_InstallsLiveness(t *testing.T) {
 	_, fakeSch := setupWatchdogTestHelper(t)
 
@@ -220,16 +228,15 @@ func TestSetup_DoesNotInstallWatchdog_InstallsLiveness(t *testing.T) {
 		t.Fatalf("runSetupWatchdog: %v", err)
 	}
 	// The legacy watchdog must NEVER be installed.
-	if got := fakeSch.importXMLByName(api.LegacyWatchdogTaskName); got != 0 {
-		t.Errorf("watchdog ImportXML calls = %d, want 0 (Phase C dropped the install)", got)
+	if got := fakeSch.createXMLByName(api.LegacyWatchdogTaskName); got != 0 {
+		t.Errorf("watchdog CreateXMLIfAbsent calls = %d, want 0 (Phase C dropped the install)", got)
 	}
 	// The liveness task IS installed (the sole maintenance-task install).
-	if got := fakeSch.importXMLByName(api.LivenessTaskName); got != 1 {
-		t.Errorf("liveness ImportXML calls = %d, want 1", got)
+	if got := fakeSch.createXMLByName(api.LivenessTaskName); got != 1 {
+		t.Errorf("liveness CreateXMLIfAbsent calls = %d, want 1", got)
 	}
-	// A best-effort legacy-watchdog removal fires for existing-host cleanup.
-	if !containsTask(fakeSch.deletes(), api.LegacyWatchdogTaskName) {
-		t.Errorf("expected Delete(%q) for existing-host cleanup; got %v", api.LegacyWatchdogTaskName, fakeSch.deletes())
+	if deletes := fakeSch.deletes(); len(deletes) != 0 || strings.Contains(out.String(), api.LegacyWatchdogTaskName) {
+		t.Errorf("absent watchdog was not a silent no-op: deletes=%v output=%q", deletes, out.String())
 	}
 	if !strings.Contains(out.String(), api.LivenessTaskName) {
 		t.Errorf("stdout missing liveness task name; got %q", out.String())
@@ -238,7 +245,9 @@ func TestSetup_DoesNotInstallWatchdog_InstallsLiveness(t *testing.T) {
 
 func TestSetup_LivenessInstallFailureFailsClosedAndKeepsLegacyWatchdog(t *testing.T) {
 	_, fakeSch := setupWatchdogTestHelper(t)
-	fakeSch.importXMLErr = errors.New("schtasks /Create /XML rejected liveness")
+	fakeSch.createXMLErr = errors.New("schtasks /Create /XML rejected liveness")
+	prior := []byte("<Task>legacy watchdog</Task>")
+	fakeSch.tasks[api.LegacyWatchdogTaskName] = prior
 
 	out := &bytes.Buffer{}
 	err := runSetupWatchdog(out, false)
@@ -255,8 +264,9 @@ func TestSetup_LivenessInstallFailureFailsClosedAndKeepsLegacyWatchdog(t *testin
 	if fe.ExitCode() != 12 {
 		t.Errorf("exit code = %d, want 12", fe.ExitCode())
 	}
-	if containsTask(fakeSch.deletes(), api.LegacyWatchdogTaskName) {
-		t.Errorf("legacy watchdog must NOT be deleted when liveness install fails; deletes=%v", fakeSch.deletes())
+	if calls := fakeSch.operationOrder(); slices.Contains(calls, "export:"+api.LegacyWatchdogTaskName) ||
+		containsTask(fakeSch.deletes(), api.LegacyWatchdogTaskName) || !bytes.Equal(fakeSch.tasks[api.LegacyWatchdogTaskName], prior) {
+		t.Errorf("legacy watchdog was touched before liveness settled: operations=%v", calls)
 	}
 	got := out.String()
 	for _, want := range []string{"supervisor-liveness task install failed", "mcphub setup", "schtasks /Create /XML"} {
@@ -266,36 +276,28 @@ func TestSetup_LivenessInstallFailureFailsClosedAndKeepsLegacyWatchdog(t *testin
 	}
 }
 
-func TestSetup_LivenessReadbackDriftRestoresPriorTaskAndFailsClosed(t *testing.T) {
+func TestSetup_ObservedLivenessDriftIsRetainedAndFailsClosed(t *testing.T) {
 	_, fakeSch := setupWatchdogTestHelper(t)
+	t.Cleanup(api.SetDaemonStateRootForTest(apitest.HardenedTempDir(t)))
 	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
 		`C:\previous\mcphub.exe`, `C:\previous`, "S-1-5-21-test", "test-user"))
 	fakeSch.tasks[api.LivenessTaskName] = prior
-	firstImport := true
-	fakeSch.normalizeImport = func(raw []byte) []byte {
-		if !firstImport {
-			return raw
-		}
-		firstImport = false
-		return scheduler.EncodeXMLUTF16LEBOM(strings.Replace(
-			scheduler.BuildLivenessXML(`C:\fake\mcphub.exe`, `C:\fake`, "S-1-5-21-test", "test-user"),
-			"<Interval>PT1M</Interval>", "<Interval>PT5M</Interval>", 1))
-	}
-
+	registerCalls := 0
+	setupRegisterEventLogFn = func() error { registerCalls++; return nil }
 	out := &bytes.Buffer{}
 	err := runSetupWatchdog(out, false)
-	if err == nil {
-		t.Fatal("runSetupWatchdog: want liveness readback failure")
-	}
 	var fe interface{ ExitCode() int }
 	if !errors.As(err, &fe) || fe.ExitCode() != 12 {
 		t.Fatalf("setup exit=%v, want force exit 12", err)
 	}
-	if got := fakeSch.tasks[api.LivenessTaskName]; !bytes.Equal(got, prior) {
-		t.Fatalf("setup left drifted liveness task: got %q, want exact prior XML %q", got, prior)
+	if !bytes.Equal(fakeSch.tasks[api.LivenessTaskName], prior) || len(fakeSch.createXMLCalls) != 0 || len(fakeSch.importXMLCalls) != 0 || len(fakeSch.deletes()) != 0 {
+		t.Fatalf("setup mutated observed liveness task: operations=%v", fakeSch.operationOrder())
 	}
-	if got := fakeSch.importXMLByName(api.LivenessTaskName); got != 2 {
-		t.Fatalf("liveness ImportXML calls=%d, want replacement plus restoration", got)
+	if registerCalls != 0 || slices.Contains(fakeSch.operationOrder(), "export:"+api.LegacyWatchdogTaskName) {
+		t.Fatalf("setup continued past required liveness refusal: EventLog=%d operations=%v", registerCalls, fakeSch.operationOrder())
+	}
+	if !strings.Contains(out.String(), "observed definition snapshot retained at") {
+		t.Fatalf("setup lost liveness retention diagnostic: %q", out.String())
 	}
 }
 
@@ -304,17 +306,17 @@ func TestSetup_NonWindowsLivenessNotImplementedContinues(t *testing.T) {
 		t.Skip("ErrNotImplemented liveness installs must fail closed on Windows")
 	}
 	_, fakeSch := setupWatchdogTestHelper(t)
-	fakeSch.importXMLErr = fmt.Errorf("linux scheduler backend: %w", scheduler.ErrNotImplemented)
+	fakeSch.createXMLErr = fmt.Errorf("linux scheduler backend: %w", scheduler.ErrNotImplemented)
 
 	out := &bytes.Buffer{}
 	if err := runSetupWatchdog(out, false); err != nil {
 		t.Fatalf("runSetupWatchdog: %v", err)
 	}
-	if got := fakeSch.importXMLByName(api.LivenessTaskName); got != 1 {
-		t.Errorf("liveness ImportXML calls = %d, want 1", got)
+	if got := fakeSch.createXMLByName(api.LivenessTaskName); got != 1 {
+		t.Errorf("liveness CreateXMLIfAbsent calls = %d, want 1", got)
 	}
-	if !containsTask(fakeSch.deletes(), api.LegacyWatchdogTaskName) {
-		t.Errorf("expected legacy watchdog cleanup after POSIX liveness skip; got %v", fakeSch.deletes())
+	if calls := fakeSch.operationOrder(); !slices.Contains(calls, "export:"+api.LegacyWatchdogTaskName) || len(fakeSch.deletes()) != 0 {
+		t.Errorf("expected read-only legacy watchdog observation after POSIX liveness skip; got %v", calls)
 	}
 	got := out.String()
 	for _, want := range []string{"supervisor-liveness task skipped", "Windows-only capability"} {
@@ -324,7 +326,7 @@ func TestSetup_NonWindowsLivenessNotImplementedContinues(t *testing.T) {
 	}
 }
 
-func TestSetup_InstallsLivenessBeforeRemovingLegacyWatchdog(t *testing.T) {
+func TestSetup_InstallsLivenessBeforeObservingLegacyWatchdog(t *testing.T) {
 	_, fakeSch := setupWatchdogTestHelper(t)
 
 	out := &bytes.Buffer{}
@@ -332,24 +334,25 @@ func TestSetup_InstallsLivenessBeforeRemovingLegacyWatchdog(t *testing.T) {
 		t.Fatalf("runSetupWatchdog: %v", err)
 	}
 	want := []string{
-		"import:" + api.LivenessTaskName,
-		"delete:" + api.LegacyWatchdogTaskName,
+		"export:" + api.LivenessTaskName,
+		"create:" + api.LivenessTaskName,
+		"export:" + api.LivenessTaskName,
+		"export:" + api.LegacyWatchdogTaskName,
 	}
-	got := fakeSch.operationOrder()
-	if len(got) < len(want) {
-		t.Fatalf("operation order = %v, want prefix %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("operation order = %v, want prefix %v", got, want)
-		}
+	if got := fakeSch.operationOrder(); !slices.Equal(got, want) {
+		t.Fatalf("operation order = %v, want %v", got, want)
 	}
 }
 
 // TestSetup_RunsTwice_Idempotent asserts re-running setup does not error and
-// the settled liveness task is verified without a second ImportXML call.
+// the settled liveness task is verified without a second CreateXMLIfAbsent call.
 func TestSetup_RunsTwice_Idempotent(t *testing.T) {
 	_, fakeSch := setupWatchdogTestHelper(t)
+	t.Cleanup(api.SetDaemonStateRootForTest(apitest.HardenedTempDir(t)))
+	prior := scheduler.EncodeXMLUTF16LEBOM("<Task>legacy watchdog</Task>")
+	fakeSch.tasks[api.LegacyWatchdogTaskName] = prior
+	registerCalls := 0
+	setupRegisterEventLogFn = func() error { registerCalls++; return nil }
 
 	out := &bytes.Buffer{}
 	if err := runSetupWatchdog(out, false); err != nil {
@@ -358,11 +361,34 @@ func TestSetup_RunsTwice_Idempotent(t *testing.T) {
 	if err := runSetupWatchdog(out, false); err != nil {
 		t.Fatalf("second runSetupWatchdog: %v", err)
 	}
-	if got := fakeSch.importXMLByName(api.LivenessTaskName); got != 1 {
-		t.Errorf("liveness ImportXML calls = %d after two runs, want 1", got)
+	if got := fakeSch.createXMLByName(api.LivenessTaskName); got != 1 {
+		t.Errorf("liveness CreateXMLIfAbsent calls = %d after two runs, want 1", got)
 	}
-	if got := fakeSch.importXMLByName(api.LegacyWatchdogTaskName); got != 0 {
-		t.Errorf("watchdog ImportXML calls = %d, want 0 across both runs", got)
+	if got := fakeSch.createXMLByName(api.LegacyWatchdogTaskName); got != 0 {
+		t.Errorf("watchdog CreateXMLIfAbsent calls = %d, want 0 across both runs", got)
+	}
+	if deletes := fakeSch.deletes(); len(deletes) != 0 || !bytes.Equal(fakeSch.tasks[api.LegacyWatchdogTaskName], prior) {
+		t.Errorf("repeating setup mutated the watchdog: deletes=%v", deletes)
+	}
+	if registerCalls != 2 || strings.Count(out.String(), "left untouched (non-fatal)") != 2 ||
+		strings.Count(out.String(), "observed definition snapshot retained at") != 2 || strings.Contains(out.String(), "Removed scheduled task") {
+		t.Errorf("repeating setup did not report retention and continue: EventLog calls=%d output=%q", registerCalls, out.String())
+	}
+}
+
+func TestSetup_LegacyWatchdogObservationErrorIsNonFatal(t *testing.T) {
+	_, fakeSch := setupWatchdogTestHelper(t)
+	fakeSch.legacyWatchdogExportErr = fmt.Errorf("observation fixture: %w", scheduler.ErrPermissionDenied)
+	registerCalls := 0
+	setupRegisterEventLogFn = func() error { registerCalls++; return nil }
+
+	var out bytes.Buffer
+	if err := runSetupWatchdog(&out, false); err != nil {
+		t.Fatalf("runSetupWatchdog: %v", err)
+	}
+	if registerCalls != 1 || len(fakeSch.deletes()) != 0 || !strings.Contains(out.String(), api.LegacyWatchdogTaskName) ||
+		!strings.Contains(out.String(), fakeSch.legacyWatchdogExportErr.Error()) || strings.Contains(out.String(), "snapshot retained") {
+		t.Errorf("legacy watchdog observation outcome lost: EventLog calls=%d deletes=%v output=%q", registerCalls, fakeSch.deletes(), out.String())
 	}
 }
 
@@ -391,8 +417,8 @@ func TestSetup_StateDirSanityFails_AbortsExit8(t *testing.T) {
 	if fe.ExitCode() != 8 {
 		t.Errorf("exit code = %d, want 8", fe.ExitCode())
 	}
-	if len(fakeSch.importXMLCalls) != 0 {
-		t.Errorf("ImportXML should NOT be called on state-dir failure; got %d calls", len(fakeSch.importXMLCalls))
+	if len(fakeSch.createXMLCalls)+len(fakeSch.importXMLCalls) != 0 {
+		t.Errorf("Scheduler registration should NOT be called on state-dir failure; got %d calls", len(fakeSch.createXMLCalls)+len(fakeSch.importXMLCalls))
 	}
 	if !strings.Contains(out.String(), "synthetic state-dir sanity failure") {
 		t.Errorf("stderr missing state-dir error context; got %q", out.String())
@@ -415,8 +441,8 @@ func TestSetup_Elevated_NoFlag_Refuses(t *testing.T) {
 	if !strings.Contains(err.Error(), "--allow-elevated") {
 		t.Errorf("error must mention --allow-elevated; got %q", err.Error())
 	}
-	if len(fakeSch.importXMLCalls) != 0 {
-		t.Errorf("ImportXML should NOT be called when refusing elevation; got %d calls", len(fakeSch.importXMLCalls))
+	if len(fakeSch.createXMLCalls)+len(fakeSch.importXMLCalls) != 0 {
+		t.Errorf("Scheduler registration should NOT be called when refusing elevation; got %d calls", len(fakeSch.createXMLCalls)+len(fakeSch.importXMLCalls))
 	}
 }
 
@@ -437,8 +463,8 @@ func TestSetup_Elevated_WithAllowElevated_HappyPath_AuditWritten(t *testing.T) {
 	if err := runSetupWatchdog(out, true); err != nil {
 		t.Fatalf("runSetupWatchdog with allowElevated=true: %v", err)
 	}
-	if got := fakeSch.importXMLByName(api.LivenessTaskName); got != 1 {
-		t.Errorf("liveness ImportXML calls = %d, want 1", got)
+	if got := fakeSch.createXMLByName(api.LivenessTaskName); got != 1 {
+		t.Errorf("liveness CreateXMLIfAbsent calls = %d, want 1", got)
 	}
 
 	found := false
@@ -486,8 +512,8 @@ func TestSetup_Elevated_WithAllowElevated_AuditFails_Exit11(t *testing.T) {
 	if fe.ExitCode() != 11 {
 		t.Errorf("exit code = %d, want 11", fe.ExitCode())
 	}
-	if len(fakeSch.importXMLCalls) != 0 {
-		t.Errorf("ImportXML should NOT be called when audit fails; got %d calls", len(fakeSch.importXMLCalls))
+	if len(fakeSch.createXMLCalls)+len(fakeSch.importXMLCalls) != 0 {
+		t.Errorf("Scheduler registration should NOT be called when audit fails; got %d calls", len(fakeSch.createXMLCalls)+len(fakeSch.importXMLCalls))
 	}
 }
 
@@ -514,8 +540,8 @@ func TestSetup_EventLogRegistrationFails_NonFatal(t *testing.T) {
 	if atomic.LoadInt32(&regCalls) != 1 {
 		t.Errorf("RegisterEventLog calls = %d, want 1", atomic.LoadInt32(&regCalls))
 	}
-	if got := fakeSch.importXMLByName(api.LivenessTaskName); got != 1 {
-		t.Errorf("liveness should still install when EventLog reg fails; got %d liveness ImportXML calls", got)
+	if got := fakeSch.createXMLByName(api.LivenessTaskName); got != 1 {
+		t.Errorf("liveness should still install when EventLog reg fails; got %d liveness CreateXMLIfAbsent calls", got)
 	}
 	if !strings.Contains(out.String(), "EventLog source registration failed") {
 		t.Errorf("stdout missing non-fatal EventLog warning; got %q", out.String())

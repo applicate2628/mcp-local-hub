@@ -406,6 +406,7 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 	c.Flags().StringVar(&daemonFilter, "daemon", "", "install only this daemon (+ its client bindings); omit to install all")
 	c.Flags().StringVar(&clientsFlag, "clients", "", "comma-separated subset of clients (default: claude-code,codex-cli)")
 	c.Flags().StringVar(&projectClientRoot, "project-client-root", "", "existing project root for a prospective Codex attachment")
+	c.Flags().String("project-client-group", "", "existing declared group for a session-local project attachment; membership is not changed")
 	c.Flags().StringVar(&projectClientEntry, "project-client-entry", "", "logical project MCP entry")
 	c.Flags().StringVar(&projectClientPolicy, "project-client-policy-source", "", "inherited-global or native-defaults")
 	c.Flags().BoolVar(&createProjectClient, "create-project-client", false, "positively apply the exact previewed project attachment")
@@ -522,7 +523,20 @@ func renderReadinessReport(w io.Writer, rep *api.ReadinessReport) (blocked bool)
 // must invoke the reconciler explicitly; without this entry point
 // the Phase 5 Settings toggle would be a no-op.
 func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
+	// Direct callers may bypass Cobra's Execute context initialization.
+	if cmd.Context() == nil {
+		cmd.SetContext(context.Background())
+	}
 	a := api.NewAPIWithSerenaPreparation(newSerenaPreparationAssembly())
+	if dryRun {
+		return runReconcileHubModeHeld(cmd, dryRun, a)
+	}
+	return a.WithClientRoutingAuthorityLease(cmd.Context(), api.CanonicalAtAdmission(), func(api.ClientRoutingTarget) error {
+		return runReconcileHubModeHeld(cmd, dryRun, a)
+	})
+}
+
+func runReconcileHubModeHeld(cmd *cobra.Command, dryRun bool, a *api.API) (resultErr error) {
 	// 1. Read current gate state. False = OFF (default) → restore
 	//    per-daemon entries + remove the aggregate. codex bot phase5
 	//    r7 P2 closure on PR #160: a corrupt settings.yaml must NOT
@@ -563,11 +577,11 @@ func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
 	//   - gate-OFF dry-run: NO lock — reads nothing, applies nothing,
 	//     so a state-dir creation here would be a behavior regression.
 	if gateOn || !dryRun {
-		lk, lockErr := api.AcquireHubMcpLock()
+		release, lockErr := api.AcquireHubMcpMutationContext(cmd.Context())
 		if lockErr != nil {
 			return fmt.Errorf("reconcile: acquire hub-mcp.lock: %w", lockErr)
 		}
-		defer func() { _ = lk.Unlock() }()
+		defer api.ReleaseAndJoin(&resultErr, release, "release Hub reconciliation lease")
 	}
 
 	// 2. Load endpoint + tokens for plan header inputs (URL +
@@ -652,6 +666,10 @@ func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
 	if siErr != nil {
 		return fmt.Errorf("read supervisor-intent installed servers: %w", siErr)
 	}
+	privateInstalled, err := api.SessionLocalInstalledServers(cmd.Context(), gateOn)
+	if err != nil {
+		return fmt.Errorf("read settled private registrations: %w", err)
+	}
 	tasks, tErr := a.ListManagedTasks()
 	if tErr != nil && !api.SchedulerUnavailableError(tErr) {
 		return fmt.Errorf("list managed tasks: %w", tErr)
@@ -712,13 +730,19 @@ func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
 		if pErr != nil {
 			return fmt.Errorf("parse manifest %q: %w", name, pErr)
 		}
-		if !manifestHasInstallSignal(m, scheduledTasks, supervisorInstalledServers) {
+		privateSignal := false
+		if privateInstalled[m.Name] && m.Transport == config.TransportStdioBridge {
+			for _, daemon := range m.Daemons {
+				privateSignal = privateSignal || daemon.MCPStdioState == config.MCPStdioStateSessionLocal
+			}
+		}
+		if !manifestHasInstallSignal(m, scheduledTasks, supervisorInstalledServers) && !privateSignal {
 			continue // not installed on this machine
 		}
 		manifests = append(manifests, *m)
 	}
 
-	plan, pErr := api.BuildHubReconcilePlan(manifests, endpoint, tokens, api.HubReconcileOpts{GateOn: gateOn})
+	plan, pErr := a.BuildAdmittedHubReconcilePlan(cmd.Context(), manifests, endpoint, tokens, api.HubReconcileOpts{GateOn: gateOn}, dryRun)
 	if pErr != nil {
 		return fmt.Errorf("build reconcile plan: %w", pErr)
 	}

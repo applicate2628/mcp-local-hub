@@ -20,6 +20,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/binaryadmission"
+	"mcp-local-hub/internal/scheduler"
 )
 
 const (
@@ -337,7 +338,23 @@ type windowsProductPreSettlementV3 struct {
 	SupervisorLockReleased bool                                 `json:"supervisor_lock_released"`
 }
 
+// This pre-stop observation selects rollback service restoration. Native owners
+// and protected control state must be acquired afresh before each operation.
+type windowsProductPriorServingAggregateV1 struct {
+	Supervisor                    api.SupervisorLockOwner             `json:"supervisor"`
+	Route                         api.SupervisorLockOwner             `json:"route"`
+	RouteGeneration               int                                 `json:"route_generation"`
+	PriorTransactionID            string                              `json:"prior_transaction_id"`
+	PriorReceiptSHA256            string                              `json:"prior_receipt_sha256"`
+	EndpointAuthoritySHA256       string                              `json:"endpoint_authority_sha256"`
+	EndpointProvenanceSHA256      string                              `json:"endpoint_provenance_sha256"`
+	QualificationProvenanceSHA256 string                              `json:"qualification_provenance_sha256"`
+	EndpointRawSHA256             string                              `json:"endpoint_raw_sha256"`
+	EndpointIdentity              api.ConfigParentDirectoryIdentityV1 `json:"endpoint_identity"`
+}
+
 type windowsProductRecoveryJournalV3 struct {
+	PriorServingAggregate   *windowsProductPriorServingAggregateV1   `json:"prior_serving_aggregate,omitempty"`
 	EntryBundle             *windowsCanonicalEntrySetJournalV2       `json:"-"`
 	EntrySet                *windowsCanonicalEntrySetJournalV1       `json:"entry_set,omitempty"`
 	Schema                  string                                   `json:"schema"`
@@ -571,26 +588,27 @@ type WindowsProductTxnDeps struct {
 }
 
 type WindowsProductTxnOpts struct {
-	JournalAllowance     WindowsProductJournalAllowance
-	journalReadEvidence  *windowsProductJournalReadEvidence
-	EntryBundle          *stagedWindowsCanonicalEntrySetV2
-	Context              context.Context
-	EntrySet             *stagedWindowsCanonicalEntrySetV1
-	CanonicalEntryPath   string
-	IdentityPath         string
-	StateDir             string
-	ProductPath          string
-	LegacyWindowlessPath string
-	StagedProduct        string
-	ReceiptV3Path        string
-	ReceiptV2Path        string
-	Mode                 WindowsProductPairMode
-	FrozenPorts          []windowsProductIntentPortV1
-	PreSettlement        *windowsProductQuiescenceObservationV1
-	PriorFleetReaped     bool
-	ReplacementAuthority windowsProductReplacementAuthority
-	Tasks                WindowsProductTaskTxn
-	Deps                 WindowsProductTxnDeps
+	PriorServingAggregate *windowsProductPriorServingAggregateV1
+	JournalAllowance      WindowsProductJournalAllowance
+	journalReadEvidence   *windowsProductJournalReadEvidence
+	EntryBundle           *stagedWindowsCanonicalEntrySetV2
+	Context               context.Context
+	EntrySet              *stagedWindowsCanonicalEntrySetV1
+	CanonicalEntryPath    string
+	IdentityPath          string
+	StateDir              string
+	ProductPath           string
+	LegacyWindowlessPath  string
+	StagedProduct         string
+	ReceiptV3Path         string
+	ReceiptV2Path         string
+	Mode                  WindowsProductPairMode
+	FrozenPorts           []windowsProductIntentPortV1
+	PreSettlement         *windowsProductQuiescenceObservationV1
+	PriorFleetReaped      bool
+	ReplacementAuthority  windowsProductReplacementAuthority
+	Tasks                 WindowsProductTaskTxn
+	Deps                  WindowsProductTxnDeps
 }
 
 type windowsProductPreparedTxn struct {
@@ -625,18 +643,38 @@ type WindowsProductTxn struct {
 	prepareError        error
 	constructorStore    interface{ Close() error }
 	// The guard may call the original decision writer synchronously once.
-	aroundCommitDecision func(context.Context, func() error) error
+	aroundCommitDecision      func(context.Context, func() error) error
+	beforePromotion           func(context.Context) error
+	transferAggregateRollback func(context.Context, []byte) error
 }
 
-// inspectWindowsProductRecoveryLeaves observes both exact Product recovery
-// owners without opening, parsing, creating, or settling either journal.
-func inspectWindowsProductRecoveryLeaves(stateDir string) (present bool, err error) {
+const windowsProductAggregateRollbackLeaf = "windows-product-aggregate-rollback-pending-v1.json"
+
+// The restored Route must see ordinary material settlement while the Product
+// command still has an aggregate rollback obligation.
+func inspectWindowsProductRecoveryLeaves(stateDir string) (bool, error) {
+	return inspectProductLeaves(stateDir, WindowsProductRecoveryFileLeafV3, WindowsProductPairRecoveryFileLeaf)
+}
+
+func inspectMutatingWindowsProductRecoveryLeaves(stateDir string) (bool, error) {
+	return inspectProductLeaves(stateDir, WindowsProductRecoveryFileLeafV3, WindowsProductPairRecoveryFileLeaf, windowsProductAggregateRollbackLeaf)
+}
+
+func refuseAggregateRollback(stateDir string) error {
+	_, err := os.Lstat(filepath.Join(stateDir, windowsProductAggregateRollbackLeaf))
+	if !errors.Is(err, os.ErrNotExist) {
+		return errors.Join(ErrWindowsProductRecoveryPending, err, errors.New("aggregate rollback requires ordinary upgrade recovery"))
+	}
+	return nil
+}
+
+func inspectProductLeaves(stateDir string, names ...string) (present bool, err error) {
 	root, err := os.Lstat(stateDir)
 	if err != nil || !root.IsDir() || root.Mode()&os.ModeSymlink != 0 {
 		return false, fmt.Errorf("Windows Product state root is unverifiable: %v", err)
 	}
 	var uncertain []error
-	for _, leaf := range []string{WindowsProductRecoveryFileLeafV3, WindowsProductPairRecoveryFileLeaf} {
+	for _, leaf := range names {
 		info, statErr := os.Lstat(filepath.Join(stateDir, leaf))
 		switch {
 		case statErr == nil && info.Mode().IsRegular():
@@ -656,7 +694,15 @@ func inspectWindowsProductRecoveryLeaves(stateDir string) (present bool, err err
 
 func (t *WindowsProductTxn) Close() (retErr error) {
 	if t != nil && t.Opts.EntryBundle != nil {
-		defer func() { retErr = errors.Join(retErr, closeCurrentEntryOwners(t.Opts.EntryBundle)) }()
+		if t.prepared != nil && servingAggregateRollbackJournal(t.prepared.journal) {
+			closed := closeCurrentEntryOwners(t.Opts.EntryBundle)
+			if closed != nil && len(t.prepared.lastJournalBytes) != 0 {
+				closed = errors.Join(closed, t.recordWarmSelectiveCommitClose(closed))
+			}
+			defer func() { retErr = errors.Join(retErr, closed) }()
+		} else {
+			defer func() { retErr = errors.Join(retErr, closeCurrentEntryOwners(t.Opts.EntryBundle)) }()
+		}
 	}
 	if t != nil && t.Opts.EntrySet != nil && t.Opts.EntrySet.original != nil {
 		defer func() {
@@ -701,6 +747,7 @@ func (t *WindowsProductTxn) Prepare() (retErr error) {
 	if t.prepareError != nil {
 		return t.prepareError
 	}
+
 	if t.prepared != nil {
 		return requireWindowsProductWithoutBackendHold(t.prepared.journalContext, t.Opts.StateDir)
 	}
@@ -715,14 +762,18 @@ func (t *WindowsProductTxn) Prepare() (retErr error) {
 	if o.StateDir == "" && o.ReceiptV3Path != "" {
 		o.StateDir = filepath.Dir(o.ReceiptV3Path)
 	}
+	if err := refuseAggregateRollback(o.StateDir); err != nil {
+		return err
+	}
 	if o.ReceiptV3Path == "" {
 		o.ReceiptV3Path = filepath.Join(o.StateDir, UpgradeReceiptSchemaV3+".json")
 	}
 	if o.ReceiptV2Path == "" {
 		o.ReceiptV2Path = filepath.Join(o.StateDir, UpgradeReceiptSchemaV2+".json")
 	}
+	productStageValid := cleanAbsolutePath(o.StagedProduct) || o.StagedProduct == "" && o.EntryBundle != nil && o.EntryBundle.selective
 	if o.Tasks == nil || !cleanAbsolutePath(o.StateDir) || !cleanAbsolutePath(o.ProductPath) ||
-		!cleanAbsolutePath(o.LegacyWindowlessPath) || !cleanAbsolutePath(o.StagedProduct) ||
+		!cleanAbsolutePath(o.LegacyWindowlessPath) || !productStageValid ||
 		!cleanAbsolutePath(o.ReceiptV3Path) || !cleanAbsolutePath(o.ReceiptV2Path) {
 		return errors.New("Windows product transaction: state, task, and artifact paths are required")
 	}
@@ -869,9 +920,15 @@ func (t *WindowsProductTxn) Prepare() (retErr error) {
 			V2: recoveryReceiptFromSnapshot(v2Prior),
 		},
 		Tasks:         tasks,
-		Staged:        windowsProductRecoveryStagedV3{Path: o.StagedProduct, SHA256: staged.SHA256},
 		FrozenPorts:   projectWindowsProductFrozenPorts(o.FrozenPorts),
 		PreSettlement: projectWindowsProductPreSettlement(o.PreSettlement),
+	}
+	if o.PriorServingAggregate != nil {
+		original := *o.PriorServingAggregate
+		journal.PriorServingAggregate = &original
+	}
+	if o.StagedProduct != "" {
+		journal.Staged = windowsProductRecoveryStagedV3{Path: o.StagedProduct, SHA256: staged.SHA256}
 	}
 	if o.Mode == WindowsProductPairModeUpgrade && o.PreSettlement != nil &&
 		o.PreSettlement.GUIOwner == windowsProductGUIOwnerConfirmedPresent {
@@ -921,7 +978,7 @@ func (t *WindowsProductTxn) Prepare() (retErr error) {
 		arm.Bundle.Disposition.State = "transferred"
 		arm.Bundle.Disposition.Transferred = true
 		attempt.EntryBundle = &arm
-		frozen, err := encodeWindowsProductRecoveryJournalV3(attempt)
+		frozen, err := encodeReceivedWindowsProductRecoveryJournalV3(attempt)
 		if err != nil {
 			return err
 		}
@@ -929,7 +986,15 @@ func (t *WindowsProductTxn) Prepare() (retErr error) {
 			return err
 		}
 		bundleState.firstJournalBytes = append([]byte(nil), frozen...)
-		snapshot, err := o.EntryBundle.original.TakeForTransaction(o.Context, o.CanonicalEntryPath)
+		var snapshot binaryadmission.WindowsCanonicalEntrySetSnapshotV2
+		if witness := arm.Bundle.Retained; witness != nil {
+			snapshot, err = o.EntryBundle.original.TakeRetainingForTransaction(o.Context, o.CanonicalEntryPath, binaryadmission.WindowsCanonicalEntryRetainedMembersV2{
+				MembersSHA256: witness.MembersSHA256,
+				Singletons:    witness.Singletons,
+			})
+		} else {
+			snapshot, err = o.EntryBundle.original.TakeForTransaction(o.Context, o.CanonicalEntryPath)
+		}
 		if err != nil {
 			return err
 		}
@@ -1023,6 +1088,11 @@ func (t *WindowsProductTxn) Run(ctx context.Context) (result WindowsProductCommi
 	}
 	if err := validateWindowsProductTxnReplacementAuthority(o, p); err != nil {
 		return WindowsProductCommitted{}, t.rollback(err)
+	}
+	if t.beforePromotion != nil {
+		if err := t.beforePromotion(ctx); err != nil {
+			return WindowsProductCommitted{}, t.rollback(err)
+		}
 	}
 	fault := func(stage WindowsProductStage) error {
 		if p.deps.Fault == nil {
@@ -1164,7 +1234,7 @@ func (t *WindowsProductTxn) Run(ctx context.Context) (result WindowsProductCommi
 	if err := fault(WindowsProductStageCommitDecided); err != nil {
 		return WindowsProductCommitted{}, fmt.Errorf("%w: %v", ErrWindowsProductCleanupPending, err)
 	}
-	committed, err := t.finishProductCommit(ctx, readBack, false)
+	committed, err := t.finishProductCommit(ctx, readBack, false, nil)
 	if err != nil {
 		return committed, err
 	}
@@ -1345,7 +1415,14 @@ func sameWindowsProductIdentity(a, b binaryadmission.WindowsArtifact) bool {
 
 func (t *WindowsProductTxn) persistProductJournal() error {
 	p := t.prepared
-	raw, err := encodeWindowsProductRecoveryJournalV3(p.journal)
+	if e := p.journal.EntryBundle; e != nil && e.Bundle.Retained != nil {
+		if p.entryBundle == nil || p.entryBundle.source == nil || !p.entryBundle.source.selective ||
+			!p.entryBundle.source.original.Disposition().Transferred {
+			p.attemptedJournalBytes = nil
+			return errors.Join(ErrWindowsProductRecoveryPending, errCurrentEntryRuntimeRetentionUnavailable)
+		}
+	}
+	raw, err := encodeReceivedWindowsProductRecoveryJournalV3(p.journal)
 	p.attemptedJournalBytes = append([]byte(nil), raw...)
 	if err != nil {
 		return err
@@ -1477,6 +1554,12 @@ func (t *WindowsProductTxn) SettleGUIOwnedStop(receipt windowsProductQuiescenceR
 }
 
 func (t *WindowsProductTxn) rollback(trigger error) error {
+	if errors.Is(trigger, scheduler.ErrMutationOutcomeUnknown) {
+		// Task XML may already name the promoted Product. An unconfirmed task
+		// mutation grants no authority to undo any member of that same bundle.
+		// Retain the prepared journal and exact recovery store for its owner.
+		return errors.Join(trigger, fmt.Errorf("%w: task mutation outcome is unconfirmed; retain Windows product recovery", ErrWindowsProductRecoveryPending))
+	}
 	o, p := t.Opts, t.prepared
 	var restoreErrs []error
 	if p.successorForwardOwned {
@@ -1609,8 +1692,11 @@ func verifyBoundWindowsProductFile(path string, prior productPairFileSnapshot, t
 	return nil
 }
 
-func (t *WindowsProductTxn) finishProductCommit(_ context.Context, artifact binaryadmission.WindowsArtifact, forwardReplay bool) (WindowsProductCommitted, error) {
+func (t *WindowsProductTxn) finishProductCommit(_ context.Context, artifact binaryadmission.WindowsArtifact, forwardReplay bool, persistSettled func(windowsProductRecoveryJournalV3) error) (WindowsProductCommitted, error) {
 	o, p := t.Opts, t.prepared
+	if persistSettled != nil && !forwardReplay {
+		return WindowsProductCommitted{}, errors.New("warm Product commit cannot borrow cold journal authority")
+	}
 	if p.entryBundle != nil {
 		p.journal.EntryBundle.Bundle.Disposition.State = "committed"
 		if err := t.cleanupCurrentEntryFiles(true, true); err != nil {
@@ -1735,9 +1821,15 @@ func (t *WindowsProductTxn) finishProductCommit(_ context.Context, artifact bina
 		p.journal.EntryBundle.Bundle.Disposition.DispositionPending = false
 	}
 	p.journal.Phase = WindowsProductRecoverySettledCommit
-	if err := t.persistProductJournal(); err != nil {
+	var journalErr error
+	if persistSettled != nil {
+		journalErr = persistSettled(p.journal)
+	} else {
+		journalErr = t.persistProductJournal()
+	}
+	if journalErr != nil {
 		committed.Outcome = WindowsProductPairCommittedCleanupFailed
-		return committed, fmt.Errorf("%w: persist settled commit: %v", ErrWindowsProductCleanupPending, err)
+		return committed, fmt.Errorf("%w: persist settled commit: %v", ErrWindowsProductCleanupPending, journalErr)
 	}
 	if err := o.Tasks.DiscardRecoveryStore(); err != nil {
 		committed.Outcome = WindowsProductPairCommittedCleanupFailed
@@ -2371,6 +2463,9 @@ func decodeWindowsProductRecoveryJournalV3(raw []byte) (windowsProductRecoveryJo
 }
 
 func validateWindowsProductRecoveryJournalV3(j windowsProductRecoveryJournalV3) error {
+	if err := validatePriorServingAggregate(j); err != nil {
+		return err
+	}
 	if err := validateCanonicalEntrySetJournal(j); err != nil {
 		return err
 	}
@@ -2412,10 +2507,13 @@ func validateWindowsProductRecoveryJournalV3(j windowsProductRecoveryJournalV3) 
 		!validRecoveryReceiptSnapshot(j.Receipts.V2) {
 		return errors.New("invalid V3 recovery receipt snapshots")
 	}
-	if !cleanAbsolutePath(j.Staged.Path) ||
-		sameWindowsProductPath(j.Staged.Path, j.Product.Target) ||
-		j.Staged.SHA256 != j.Product.NewSHA256 {
-		return errors.New("invalid V3 staged product identity")
+	e := j.EntryBundle
+	if e == nil || !e.retainsSingleton(e.Expected.ProductRelativePath) {
+		if !cleanAbsolutePath(j.Staged.Path) ||
+			sameWindowsProductPath(j.Staged.Path, j.Product.Target) ||
+			j.Staged.SHA256 != j.Product.NewSHA256 {
+			return errors.New("invalid V3 staged product identity")
+		}
 	}
 	if !cleanAbsolutePath(j.Tasks.StoreRoot) {
 		return errors.New("invalid V3 retained task store")
@@ -2473,7 +2571,7 @@ func validateWindowsProductRecoveryJournalV3(j windowsProductRecoveryJournalV3) 
 		}
 		if j.Quiescence == nil {
 			if (j.Phase != WindowsProductRecoveryPrepared && j.Phase != WindowsProductRecoveryGUIOwnedStopPending &&
-				!(guiOwned && j.Phase == WindowsProductRecoverySettledRollback)) || j.PriorFleetReaped || j.QuiescenceReceiptSHA256 != "" {
+				!((guiOwned || j.PriorServingAggregate != nil) && j.Phase == WindowsProductRecoverySettledRollback)) || j.PriorFleetReaped || j.QuiescenceReceiptSHA256 != "" {
 				return errors.New("invalid initial prepared V3 recovery form")
 			}
 			return nil
@@ -2499,6 +2597,64 @@ func validateWindowsProductRecoveryJournalV3(j windowsProductRecoveryJournalV3) 
 	} else if len(j.FrozenPorts) != 0 || j.PreSettlement != nil ||
 		j.PriorFleetReaped || j.Quiescence != nil || j.QuiescenceReceiptSHA256 != "" {
 		return errors.New("non-upgrade V3 recovery contains quiescence state")
+	}
+	return nil
+}
+
+func servingAggregateRollbackJournal(j windowsProductRecoveryJournalV3) bool {
+	return j.PriorServingAggregate != nil && j.EntryBundle != nil &&
+		(j.Phase == WindowsProductRecoveryPrepared || j.Phase == WindowsProductRecoverySuccessorStarting || j.Phase == WindowsProductRecoverySettledRollback)
+}
+
+func validatePriorServingAggregate(j windowsProductRecoveryJournalV3) error {
+	a := j.PriorServingAggregate
+	if a == nil {
+		return nil
+	}
+	invalid := errors.New("invalid original serving aggregate in Product recovery journal")
+	if j.Mode != WindowsProductPairModeUpgrade || j.EntryBundle == nil || j.EntrySet != nil ||
+		j.PreSettlement == nil || j.PreSettlement.GUIOwner != windowsProductGUIOwnerConfirmedAbsent ||
+		j.PreSettlement.Supervisor.State != windowsProductSupervisorGracefullySettled ||
+		j.PreSettlement.Supervisor.Generation == nil || j.EntryBundle.PriorRuntime == nil || !j.EntryBundle.PriorRuntime.Present ||
+		!j.Receipts.V3.PriorPresent || !validLowerHexSHA256(a.PriorReceiptSHA256) || !validLowerHexSHA256(a.EndpointAuthoritySHA256) ||
+		!validLowerHexSHA256(a.EndpointRawSHA256) || !validLowerHexSHA256(a.QualificationProvenanceSHA256) ||
+		!validLowerHexSHA256(a.EndpointProvenanceSHA256) || a.EndpointIdentity.FileID == ([16]byte{}) ||
+		a.RouteGeneration <= 0 || a.Route.PID <= 0 || a.Route.PID == a.Supervisor.PID || a.Supervisor.PID <= 0 {
+		return invalid
+	}
+	supervisor := j.PreSettlement.Supervisor.Generation
+	if a.Supervisor.PID != supervisor.PID || a.Supervisor.StartedAt != supervisor.StartedAt ||
+		!validRecoveryHex(a.PriorTransactionID, 16) || a.PriorTransactionID == j.TransactionID ||
+		fmt.Sprintf("%x", sha256.Sum256(j.Receipts.V3.PriorBytes)) != a.PriorReceiptSHA256 {
+		return invalid
+	}
+	if _, err := time.Parse(time.RFC3339Nano, a.Supervisor.StartedAt); err != nil {
+		return invalid
+	}
+	if _, err := time.Parse(time.RFC3339Nano, a.Route.StartedAt); err != nil {
+		return invalid
+	}
+	r, err := DecodeUpgradeReceipt(j.Receipts.V3.PriorBytes)
+	if err != nil || r.V3 == nil || r.V3.Mode != WindowsProductPairModeUpgrade ||
+		r.V3.Admission != UpgradeAdmissionCanonicalEntryProductV2 || r.V3.EntryBundle == nil ||
+		r.V3.TransactionID != a.PriorTransactionID || r.V3.Artifact.SHA256 != j.EntryBundle.PriorRuntime.SHA256 ||
+		!sameWindowsProductPath(r.V3.EntryBundle.ProductPath, j.EntryBundle.PriorRuntime.Path) ||
+		!sameWindowsProductPath(r.V3.EntryBundle.CanonicalEntryPath, j.EntryBundle.CanonicalEntry.Target) ||
+		!sameWindowsProductPath(r.V3.EntryBundle.IdentityPath, j.EntryBundle.Expected.Identity.Path) {
+		return errors.Join(invalid, err)
+	}
+	e := j.EntryBundle
+	identityDigest := e.Expected.Identity.SHA256
+	if row := currentEntryMember(e, e.Expected.IdentityRelativePath); row != nil {
+		if row.Prior == nil {
+			return invalid
+		}
+		identityDigest = row.Prior.File.SHA256
+	} else if !e.retainsSingleton(e.Expected.IdentityRelativePath) {
+		return invalid
+	}
+	if r.V3.EntryBundle.IdentitySHA256 != identityDigest || r.V3.EntryBundle.CanonicalEntrySHA256 != e.CanonicalEntry.PriorSHA256 {
+		return invalid
 	}
 	return nil
 }
@@ -2648,6 +2804,20 @@ func sameWindowsProductPath(left, right string) bool {
 }
 
 func encodeWindowsProductRecoveryJournalV3(journal windowsProductRecoveryJournalV3) ([]byte, error) {
+	raw, err := encodeReceivedWindowsProductRecoveryJournalV3(journal)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireCurrentEntryNativeRetention(journal.EntryBundle); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+// The current transaction freezes these bytes before Take and checks the
+// transfer before writing. The cold source uses the same codec for its sealed
+// original and validated updates.
+func encodeReceivedWindowsProductRecoveryJournalV3(journal windowsProductRecoveryJournalV3) ([]byte, error) {
 	if err := validateWindowsProductRecoveryJournalV3(journal); err != nil {
 		return nil, err
 	}

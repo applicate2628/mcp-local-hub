@@ -83,18 +83,28 @@ type deadlineHandler struct {
 // makeWin32File makes a new win32File from an existing file handle.
 func makeWin32File(h windows.Handle) (*win32File, error) {
 	f := &win32File{handle: h}
+	if err := f.initIOCompletion(); err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+// Initialize this same original owner. Dial creates it before metadata can
+// fail; other constructors retain their existing caller-owned error cleanup.
+func (f *win32File) initIOCompletion() error {
+	h := f.handle
 	ioInitOnce.Do(initIO)
 	_, err := createIoCompletionPort(h, ioCompletionPort, 0, 0xffffffff)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	err = setFileCompletionNotificationModes(h, windows.FILE_SKIP_COMPLETION_PORT_ON_SUCCESS|windows.FILE_SKIP_SET_EVENT_ON_HANDLE)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	f.readDeadline.channel = make(timeoutChan)
 	f.writeDeadline.channel = make(timeoutChan)
-	return f, nil
+	return nil
 }
 
 // Deprecated: use NewOpenFile instead.
@@ -115,8 +125,9 @@ func NewOpenFile(h windows.Handle) (io.ReadWriteCloser, error) {
 // CloseReceipt carries the result of the one native close attempt owned by a
 // win32File. Its zero value does not report a native result.
 type CloseReceipt struct {
-	done      chan struct{}
-	nativeErr error
+	done         chan struct{}
+	nativeErr    error
+	failedHandle windows.Handle // private original custody, never reissued/retried
 }
 
 // NativeResult reports the original native close result. The boolean is false
@@ -151,7 +162,11 @@ func (f *win32File) closeHandle(closeNative func(windows.Handle) error) *CloseRe
 	// Cancel all I/O and wait for it to complete before closing the handle.
 	_ = cancelIoEx(f.handle, nil)
 	f.wg.Wait()
-	receipt.nativeErr = closeNative(f.handle)
+	original := f.handle
+	receipt.nativeErr = closeNative(original)
+	if receipt.nativeErr != nil {
+		receipt.failedHandle = original
+	}
 	f.handle = 0
 	close(receipt.done)
 	return receipt
@@ -325,6 +340,11 @@ func (f *win32File) Flush() error {
 }
 
 func (f *win32File) Fd() uintptr {
+	f.wgLock.RLock()
+	defer f.wgLock.RUnlock()
+	if f.closing.Load() {
+		return 0
+	}
 	return uintptr(f.handle)
 }
 

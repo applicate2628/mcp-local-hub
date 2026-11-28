@@ -130,6 +130,89 @@ func TestSupervisorControlReadinessStrictOneExchange(t *testing.T) {
 	}
 }
 
+// This is the public projection over one actual authenticated status exchange.
+// The returned Route fields are fixture DATA, not a retained live Route proof.
+func TestReadSupervisorRouteForPeer_AuthenticatedSelection(t *testing.T) {
+	peer, err := ObserveSupervisorProcessIdentityV1(os.Getpid())
+	if errors.Is(err, ErrSupervisorControlPeerUnsupported) {
+		t.Skip("native strict peer projection unsupported")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := SupervisorLockOwner{PID: peer.PID, StartedAt: peer.CreationTime}
+	route := map[string]any{
+		"task_name":   BuiltinRouteTaskName,
+		"server":      BuiltinRouteServer,
+		"daemon":      BuiltinRouteDaemonName,
+		"state":       "Running",
+		"current_pid": 4242,
+		"port":        9137,
+		"command":     "route-fixture",
+		"args":        []string{"route", "--fixture"},
+		"started_at":  "2026-05-18T10:00:00Z",
+	}
+	other := map[string]any{"task_name": "unrelated-task", "server": "other", "state": "Running"}
+	for _, test := range []struct {
+		name          string
+		rows          []any
+		wantError     string
+		cancelOnReply bool
+	}{
+		{"unique", []any{other, route}, "", false},
+		{"absent", []any{other}, "original Route status unavailable", false},
+		{"duplicate", []any{route, other, route}, "duplicate original Route status", false},
+		{"cancelled_exchange", []any{route}, "", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			stateDir := hardenedTempDir(t)
+			writeSupervisorOwnerForTest(t, stateDir, owner)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			var requests atomic.Int32
+			stop := startFakeSupervisorIPCStatusServer(t, stateDir, owner, func(request IPCRequest) IPCResponse {
+				requests.Add(1)
+				if request.Cmd != "status" {
+					t.Error("Route projection used a different command")
+				}
+				if test.cancelOnReply {
+					cancel()
+				}
+				return IPCResponse{ID: request.ID, OK: true, Result: map[string]any{"state": "running", "daemons": test.rows}}
+			})
+			defer stop()
+
+			// Missing original peer facts must refuse before using this listener.
+			unknown, unknownErr := ReadSupervisorRouteForPeer(ctx, stateDir, owner, SupervisorProcessIdentityV1{})
+			if !errors.Is(unknownErr, ErrSupervisorControlPeerIdentity) || unknown.TaskName != "" || requests.Load() != 0 {
+				t.Fatalf("unproven peer admitted Route: %+v / %v; requests=%d", unknown, unknownErr, requests.Load())
+			}
+			got, err := ReadSupervisorRouteForPeer(ctx, stateDir, owner, peer)
+			if requests.Load() != 1 {
+				t.Fatalf("Route projection used %d status exchanges, want one", requests.Load())
+			}
+			if test.cancelOnReply {
+				if !errors.Is(err, context.Canceled) || got.TaskName != "" {
+					t.Fatalf("cancelled exchange admitted Route: %+v / %v", got, err)
+				}
+				return
+			}
+			if test.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantError) || got.TaskName != "" {
+					t.Fatalf("Route selection=%+v / %v, want %q and no row", got, err, test.wantError)
+				}
+				return
+			}
+			if err != nil || got.TaskName != BuiltinRouteTaskName || got.Server != BuiltinRouteServer ||
+				got.Daemon != BuiltinRouteDaemonName || got.State != "Running" || got.PID != 4242 || got.Port != 9137 ||
+				got.CommandInternal != "route-fixture" || got.StartedAtInternal != "2026-05-18T10:00:00Z" ||
+				len(got.ArgsInternal) != 2 || got.ArgsInternal[0] != "route" || got.ArgsInternal[1] != "--fixture" {
+				t.Fatalf("unique actual status row changed: %+v / %v", got, err)
+			}
+		})
+	}
+}
+
 type readinessCloseResultConn struct {
 	net.Conn
 	fd       uintptr

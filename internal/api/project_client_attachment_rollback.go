@@ -48,7 +48,7 @@ func (a *API) rollbackProjectClientAttachment(ctx context.Context, opts InstallO
 	var capsule projectClientAttachmentCapsule
 	found := false
 	for _, entry := range entries {
-		if !strings.HasPrefix(entry.Name(), filepath.Base(project.ConfigPath())+".bak-mcp-local-hub-") || !(strings.HasSuffix(entry.Name(), ".project-client-create-v1.json") || strings.HasSuffix(entry.Name(), ".project-client-attachment-v2.json")) {
+		if !strings.HasPrefix(entry.Name(), filepath.Base(project.ConfigPath())+".bak-mcp-local-hub-") || !(strings.HasSuffix(entry.Name(), ".project-client-create-v1.json") || strings.HasSuffix(entry.Name(), ".project-client-attachment-v2.json") || strings.HasSuffix(entry.Name(), ".project-client-private-v3.json")) {
 			continue
 		}
 		b, err := ReadClientConfigBackupBeneathRootNoFollow(ctx, parent, []string{entry.Name()}, "")
@@ -93,6 +93,9 @@ func (a *API) rollbackProjectClientAttachment(ctx context.Context, opts InstallO
 	clientOwner := project.(clients.ProjectHTTPAttachmentClient)
 	if capsule.Phase == "rolled-back" {
 		return clientOwner.VerifyRestoredProjectHTTPAttachment(preparation)
+	}
+	if err := revokeProjectPrivateAttachment(ctx, capsule); err != nil {
+		return errors.Join(clients.ErrProjectClientRollbackIncomplete, err)
 	}
 	root, err := DaemonStateDir()
 	if err != nil {

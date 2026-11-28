@@ -87,7 +87,8 @@ func (o *routeAggregateOwner) apply(operation, attached context.Context, challen
 	}
 
 	listener, err := mcproute.StartHubListener(operation, api.NewAPI(), mcproute.HubListenerOptions{
-		Lifetime: attached,
+		Lifetime:     attached,
+		PrepareStdio: prepareRouteStdio,
 		BindExisting: func(ctx context.Context, validate func() error) (*api.HubMcpBindResult, error) {
 			var result *api.HubMcpBindResult
 			err := o.withCurrentBindAuthority(ctx, challenge, validate,

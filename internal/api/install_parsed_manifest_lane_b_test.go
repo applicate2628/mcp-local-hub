@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -81,26 +82,30 @@ func TestRemoveServerFromSupervisorIntentBestEffort_KillsRemovedDaemonsAfterNudg
 	}
 
 	var order []string
-	origStatus := supervisorIPCStatusFn
-	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
-		order = append(order, "ipc-status")
+	var completedPIDs []int
+	var captures []*removedStopFixture
+	installRemovedPrepareFixture(t, func(_ context.Context, task string, port int) (supervisorRemovedStop, error) {
+		order = append(order, "capture")
 		assertSupervisorIntentFlockAvailableDuringIPCStatus(t, stateDir)
-		return []DaemonStatus{
-			{TaskName: `\mcp-local-hub-demo-alpha`, PID: 4101, State: "Running"},
-			{TaskName: `\mcp-local-hub-demo-beta`, PID: 4102, State: "Running"},
-			{TaskName: `\mcp-local-hub-other-default`, PID: 4999, State: "Running"},
-		}, nil
-	}
-	t.Cleanup(func() { supervisorIPCStatusFn = origStatus })
-
-	var killedPIDs []int
-	origPID := stopForceKillPIDFn
-	stopForceKillPIDFn = func(pid int) error {
-		order = append(order, "kill-pid")
-		killedPIDs = append(killedPIDs, pid)
-		return nil
-	}
-	t.Cleanup(func() { stopForceKillPIDFn = origPID })
+		pid := map[string]int{seed.Daemons[0].TaskName: 4101, seed.Daemons[1].TaskName: 4102}[task]
+		if pid == 0 {
+			t.Fatalf("captured unrelated task %s", task)
+		}
+		stop := &removedStopFixture{complete: func(context.Context) (ForceStopResultV1, error) {
+			order = append(order, "complete")
+			assertSupervisorIntentFlockAvailableDuringIPCStatus(t, stateDir)
+			current, err := ReadSupervisorIntent(intentPath)
+			if err != nil || current.FindSupervisorDaemonByTaskName(task) != nil {
+				t.Fatalf("cleanup preceded descriptor removal: %v", err)
+			}
+			completedPIDs = append(completedPIDs, pid)
+			result := forceStopClosedFixture(task, port)
+			result.Target.PID = pid
+			return result, nil
+		}}
+		captures = append(captures, stop)
+		return stop, nil
+	})
 
 	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(context.Context, bool) (ReconcileResponse, error) {
 		order = append(order, "nudge")
@@ -110,113 +115,98 @@ func TestRemoveServerFromSupervisorIntentBestEffort_KillsRemovedDaemonsAfterNudg
 	report := &UninstallReport{}
 	NewAPI().removeServerFromSupervisorIntentBestEffort("demo", report)
 
-	if !reflect.DeepEqual(killedPIDs, []int{4101, 4102}) {
-		t.Fatalf("killed PIDs = %v, want [4101 4102] for the removed demo rows only", killedPIDs)
+	if !reflect.DeepEqual(completedPIDs, []int{4101, 4102}) {
+		t.Fatalf("completed original fixture PIDs = %v, want [4101 4102] for the removed demo rows only", completedPIDs)
 	}
-	if !reflect.DeepEqual(order, []string{"ipc-status", "nudge", "kill-pid", "kill-pid"}) {
-		t.Fatalf("ipc/nudge/kill order = %v, want [ipc-status nudge kill-pid kill-pid]", order)
+	if !reflect.DeepEqual(order, []string{"capture", "capture", "nudge", "complete", "complete"}) {
+		t.Fatalf("capture/nudge/complete order = %v, want [capture capture nudge complete complete]", order)
+	}
+	for _, capture := range captures {
+		if capture.closed != 1 {
+			t.Fatalf("capture close count=%d", capture.closed)
+		}
 	}
 	if len(report.TaskDeleteWarns) != 0 {
 		t.Fatalf("unexpected uninstall warnings: %v", report.TaskDeleteWarns)
 	}
 }
 
-func TestInstallParsedManifest_KillsDroppedWorkspaceRowAfterNudgeOnly(t *testing.T) {
-	fakeMcphubIdentityForTest(t)
+// Positive prepared add/drop coverage lives in CLI
+// TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut. An ordinary API
+// without an assembly must refuse before changing intent or capturing removals.
+func TestInstallParsedManifest_MissingSerenaAssemblyPreservesWorkspaceRowsBeforeCleanup(t *testing.T) {
 	stateDir := daemonIntentTestHelper(t)
 	preparePreflightBinaryChecks(t)
 	installFakeScheduler(t, newInstallFakeScheduler())
 
+	// Exercise the shared parsed workspace install with a generic template.
+	m := &config.ServerManifest{
+		Name:      "workspace-fixture",
+		Kind:      config.KindWorkspaceScoped,
+		Transport: config.TransportNativeHTTP,
+		Command:   "go",
+		DaemonTemplate: &config.DaemonTemplate{
+			Context:           "ide-assistant",
+			PortPool:          &config.PortPool{Start: 9400, End: 9499},
+			ExtraArgsTemplate: []string{"--project", "${workspace.path}"},
+		},
+	}
 	wsDrop := t.TempDir()
 	wsKeep := t.TempDir()
-	dropEntry := WorkspaceEntry{WorkspaceKey: WorkspaceKey(wsDrop), WorkspacePath: wsDrop, Language: SerenaLanguageSentinel, Backend: "serena", Port: 9401}
-	keepEntry := WorkspaceEntry{WorkspaceKey: WorkspaceKey(wsKeep), WorkspacePath: wsKeep, Language: SerenaLanguageSentinel, Backend: "serena", Port: 9402}
-	m := serenaTemplateManifest()
+	dropEntry := WorkspaceEntry{WorkspaceKey: WorkspaceKey(wsDrop), WorkspacePath: wsDrop, Language: SerenaLanguageSentinel, Backend: m.Name, Port: 9401}
+	keepEntry := WorkspaceEntry{WorkspaceKey: WorkspaceKey(wsKeep), WorkspacePath: wsKeep, Language: SerenaLanguageSentinel, Backend: m.Name, Port: 9402}
 
-	priorRows := BuildSupervisorDaemonsForSerena(m, []WorkspaceEntry{dropEntry, keepEntry}, "seed", "mcphub")
+	priorRows := BuildSupervisorDaemonsForSerena(m, []WorkspaceEntry{dropEntry, keepEntry}, testExactManifestHash, "mcphub")
 	if len(priorRows) != 2 {
-		t.Fatalf("prior serena rows = %d, want 2", len(priorRows))
+		t.Fatalf("prior workspace rows = %d, want 2", len(priorRows))
 	}
 	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
 	if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{Version: 1, Daemons: priorRows}); err != nil {
 		t.Fatalf("seed supervisor-intent: %v", err)
 	}
 
-	var order []string
-	origStatus := supervisorIPCStatusFn
-	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
-		order = append(order, "ipc-status")
-		assertSupervisorIntentFlockAvailableDuringIPCStatus(t, stateDir)
-		return []DaemonStatus{
-			{TaskName: priorRows[0].TaskName, PID: 5101, State: "Running"},
-			{TaskName: priorRows[1].TaskName, PID: 5102, State: "Running"},
-		}, nil
+	before, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read prior supervisor intent: %v", err)
 	}
-	t.Cleanup(func() { supervisorIPCStatusFn = origStatus })
 
-	var killedPorts []int
-	origForceKill := forceKillByPortFn
-	origLookup := lookupProcess
-	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
-		order = append(order, "kill-port")
-		killedPorts = append(killedPorts, port)
-		t.Fatalf("forceKillByPortFn called for port %d after successful PID kill", port)
-		return portKillKilled, nil
-	}
-	lookupProcess = func(port int) (int, uint64, int64, bool) {
-		return 0, 0, 0, false
-	}
-	t.Cleanup(func() {
-		forceKillByPortFn = origForceKill
-		lookupProcess = origLookup
+	captureCalls, nudgeCalls := 0, 0
+	installRemovedPrepareFixture(t, func(context.Context, string, int) (supervisorRemovedStop, error) {
+		captureCalls++
+		return nil, errors.New("unexpected removal capture before Serena preparation")
 	})
-
-	// Lane A inverted the kill preference: a captured supervisor-reported PID
-	// is killed FIRST (identity-gated, best-effort), and the port kill is only
-	// the no-PID-snapshot fallback. The IPC fake above reports PID 5101 for
-	// the dropped row, so the kill must arrive via stopForceKillPIDFn.
-	var killedPIDs []int
-	origPIDKill := stopForceKillPIDFn
-	stopForceKillPIDFn = func(pid int) error {
-		order = append(order, "kill-pid")
-		killedPIDs = append(killedPIDs, pid)
-		return nil
-	}
-	t.Cleanup(func() { stopForceKillPIDFn = origPIDKill })
-
 	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(context.Context, bool) (ReconcileResponse, error) {
-		order = append(order, "nudge")
-		return ReconcileResponse{}, nil
+		nudgeCalls++
+		return ReconcileResponse{}, errors.New("unexpected reconcile before Serena preparation")
 	}))
 
-	if _, err := NewAPI().InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+	path, err := NewAPI().InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
 		ManifestHash: testExactManifestHash,
 		Writer:       io.Discard,
 		Workspaces:   []WorkspaceEntry{keepEntry},
-	}); err != nil {
-		t.Fatalf("InstallParsedManifest: %v", err)
+	})
+	if path != "" || err == nil || !strings.Contains(err.Error(), "SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE") {
+		t.Fatalf("unprepared Serena install returned path=%q error=%v", path, err)
 	}
-
-	if !reflect.DeepEqual(killedPIDs, []int{5101}) {
-		t.Fatalf("killed PIDs = %v, want [5101] for the dropped workspace row only", killedPIDs)
+	after, err := os.ReadFile(intentPath)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("unprepared Serena install changed workspace intent: %v", err)
 	}
-	if len(killedPorts) != 0 {
-		t.Fatalf("killed ports = %v, want none (PID-first kill must not fall through to the port path)", killedPorts)
-	}
-	if !reflect.DeepEqual(order, []string{"ipc-status", "nudge", "kill-pid"}) {
-		t.Fatalf("ipc/nudge/kill order = %v, want [ipc-status nudge kill-pid]", order)
+	if captureCalls != 0 || nudgeCalls != 0 {
+		t.Fatalf("unprepared Serena install reached cleanup: captures=%d nudges=%d", captureCalls, nudgeCalls)
 	}
 }
 
-func TestInstallPlanCore_RemovedTargetKillDependsOnNudgeOutcome(t *testing.T) {
+func TestInstallPlanCore_RemovedTargetForceStopAfterNudge(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		nudgeErr error
-		wantKill []int
-		wantWarn bool
+		name      string
+		nudgeErr  error
+		wantKill  []int
+		wantOrder []string
+		wantWarn  bool
 	}{
-		{name: "success kills removed target", wantKill: []int{6201}},
-		{name: "hard nudge failure skips kill", nudgeErr: errors.New("synthetic reconcile scheduler-list timeout"), wantWarn: true},
+		{name: "success kills removed target", wantKill: []int{6201}, wantOrder: []string{"capture", "capture", "nudge", "complete"}},
+		{name: "hard nudge failure skips kill", nudgeErr: errors.New("synthetic reconcile scheduler-list timeout"), wantOrder: []string{"capture", "capture", "nudge"}, wantWarn: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fakeMcphubIdentityForTest(t)
@@ -225,41 +215,68 @@ func TestInstallPlanCore_RemovedTargetKillDependsOnNudgeOutcome(t *testing.T) {
 			installFakeScheduler(t, newInstallFakeScheduler())
 			installFakeAutostartBackend(t, &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped})
 
-			const removedTask = `\mcp-local-hub-demo-beta`
+			const (
+				removedTask  = "\\mcp-local-hub-demo-beta"
+				retainedTask = "\\mcp-local-hub-demo-alpha"
+			)
 			seed := &SupervisorIntentFile{
 				Version: 1,
 				Daemons: []SupervisorDaemon{
 					{TaskName: removedTask, Server: "demo", Daemon: "beta", Command: "old", Port: 0},
+					{TaskName: retainedTask, Server: "demo", Daemon: "alpha", Command: "old-alpha", Port: 9321},
 				},
 			}
-			if err := WriteSupervisorIntent(filepath.Join(stateDir, supervisorIntentFileLeaf), seed); err != nil {
+			intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+			if err := WriteSupervisorIntent(intentPath, seed); err != nil {
 				t.Fatalf("seed supervisor-intent: %v", err)
 			}
 
-			origStatus := supervisorIPCStatusFn
-			supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
+			var order []string
+			var completedPIDs []int
+			var captures []*removedStopFixture
+			installRemovedPrepareFixture(t, func(_ context.Context, task string, port int) (supervisorRemovedStop, error) {
+				order = append(order, "capture")
 				assertSupervisorIntentFlockAvailableDuringIPCStatus(t, stateDir)
-				return []DaemonStatus{{TaskName: removedTask, PID: 6201, State: "Running"}}, nil
-			}
-			t.Cleanup(func() { supervisorIPCStatusFn = origStatus })
-
-			var killedPIDs []int
-			origPID := stopForceKillPIDFn
-			stopForceKillPIDFn = func(pid int) error {
-				killedPIDs = append(killedPIDs, pid)
-				return nil
-			}
-			t.Cleanup(func() { stopForceKillPIDFn = origPID })
+				current, err := ReadSupervisorIntent(intentPath)
+				if err != nil || current.FindSupervisorDaemonByTaskName(task) == nil {
+					t.Fatalf("capture followed descriptor removal: %v", err)
+				}
+				pid := map[string]int{removedTask: 6201, retainedTask: 6202}[task]
+				if pid == 0 {
+					t.Fatalf("unexpected capture %s", task)
+				}
+				capture := &removedStopFixture{complete: func(context.Context) (ForceStopResultV1, error) {
+					order = append(order, "complete")
+					assertSupervisorIntentFlockAvailableDuringIPCStatus(t, stateDir)
+					current, err := ReadSupervisorIntent(intentPath)
+					if err != nil || current.FindSupervisorDaemonByTaskName(task) != nil {
+						t.Fatalf("cleanup preceded descriptor removal: %v", err)
+					}
+					completedPIDs = append(completedPIDs, pid)
+					result := forceStopClosedFixture(task, port)
+					result.Target.PID = pid
+					return result, nil
+				}}
+				captures = append(captures, capture)
+				return capture, nil
+			})
 
 			t.Cleanup(setSupervisorReconcileApplyHookForTest(func(context.Context, bool) (ReconcileResponse, error) {
+				order = append(order, "nudge")
+				assertSupervisorIntentFlockAvailableDuringIPCStatus(t, stateDir)
+				current, err := ReadSupervisorIntent(intentPath)
+				if err != nil || current.FindSupervisorDaemonByTaskName(removedTask) != nil || current.FindSupervisorDaemonByTaskName(retainedTask) == nil {
+					t.Fatalf("nudge preceded committed removal or lost retained row: %v", err)
+				}
 				return ReconcileResponse{}, tc.nudgeErr
 			}))
 
 			m := &config.ServerManifest{
 				Name:      "demo",
 				Kind:      config.KindGlobal,
-				Transport: config.TransportRemoteHTTP,
-				URL:       "https://example.invalid/mcp",
+				Transport: config.TransportNativeHTTP,
+				Command:   "go",
+				Daemons:   []config.DaemonSpec{{Name: "alpha", Port: 9321}},
 			}
 			plan, err := BuildPlan(m, "")
 			if err != nil {
@@ -267,18 +284,32 @@ func TestInstallPlanCore_RemovedTargetKillDependsOnNudgeOutcome(t *testing.T) {
 			}
 
 			var buf bytes.Buffer
-			if err := NewAPI().installPlanCore(context.Background(), m, plan, "", false, &buf); err != nil {
+			if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", false, &buf); err != nil {
 				t.Fatalf("installPlanCore: %v", err)
 			}
 
-			if !reflect.DeepEqual(killedPIDs, tc.wantKill) {
-				t.Fatalf("killed PIDs = %v, want %v", killedPIDs, tc.wantKill)
+			if !reflect.DeepEqual(completedPIDs, tc.wantKill) {
+				t.Fatalf("completed original fixture PIDs = %v, want %v", completedPIDs, tc.wantKill)
+			}
+			if !reflect.DeepEqual(order, tc.wantOrder) {
+				t.Fatalf("capture/nudge/complete order = %v, want %v", order, tc.wantOrder)
+			}
+			if len(captures) != 2 {
+				t.Fatalf("captured %d original rows, want 2", len(captures))
+			}
+			for _, capture := range captures {
+				if capture.closed != 1 {
+					t.Fatalf("capture close count=%d, want 1", capture.closed)
+				}
 			}
 			out := buf.String()
 			hasWarn := strings.Contains(out, "warning:") &&
 				strings.Contains(out, "reconcile") &&
-				strings.Contains(out, "re-run install") &&
-				strings.Contains(out, "mcphub stop --force demo")
+				strings.Contains(out, "original creator custody required") &&
+				strings.Contains(out, "cleanup incomplete")
+			if strings.Contains(out, "mcphub stop --force") {
+				t.Fatalf("cleanup warning recommends an unavailable CLI fallback: %s", out)
+			}
 			if hasWarn != tc.wantWarn {
 				t.Fatalf("warning presence = %v, want %v; output:\n%s", hasWarn, tc.wantWarn, out)
 			}
@@ -359,7 +390,7 @@ func TestInstallPlanCore_GlobalInstall_HeldSupervisorLockAfterIPCFailureSkipsRem
 	}
 }
 
-func TestInstallParsedManifest_PrunesStopsForDroppedWorkspaceRows(t *testing.T) {
+func TestInstallParsedManifest_MissingSerenaAssemblyPreservesStopsBeforeCleanup(t *testing.T) {
 	stateDir := daemonIntentTestHelper(t)
 	preparePreflightBinaryChecks(t)
 	installFakeScheduler(t, newInstallFakeScheduler())
@@ -397,48 +428,39 @@ func TestInstallParsedManifest_PrunesStopsForDroppedWorkspaceRows(t *testing.T) 
 		},
 	}
 	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
-	if err := WriteSupervisorIntent(intentPath, seed); err != nil {
+	// Keep redundant legacy watermarks in the prior data until an admitted write.
+	if err := WriteStateFileAtomic(intentPath, seed); err != nil {
 		t.Fatalf("seed supervisor-intent: %v", err)
 	}
 
-	origStatus := supervisorIPCStatusFn
-	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) { return nil, nil }
-	t.Cleanup(func() { supervisorIPCStatusFn = origStatus })
-	origForceKill := forceKillByPortFn
-	forceKillByPortFn = func(int, time.Duration) (portKillOutcome, error) { return portKillKilled, nil }
-	t.Cleanup(func() { forceKillByPortFn = origForceKill })
+	before, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read prior supervisor intent: %v", err)
+	}
+
+	captureCalls, nudgeCalls := 0, 0
+	installRemovedPrepareFixture(t, func(context.Context, string, int) (supervisorRemovedStop, error) {
+		captureCalls++
+		return nil, errors.New("unexpected removal capture before Serena preparation")
+	})
 	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(context.Context, bool) (ReconcileResponse, error) {
-		return ReconcileResponse{}, nil
+		nudgeCalls++
+		return ReconcileResponse{}, errors.New("unexpected reconcile before Serena preparation")
 	}))
 
-	if _, err := NewAPI().InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+	path, err := NewAPI().InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
 		ManifestHash: testExactManifestHash,
 		Writer:       io.Discard,
 		Workspaces:   []WorkspaceEntry{keepEntry},
-	}); err != nil {
-		t.Fatalf("InstallParsedManifest: %v", err)
+	})
+	if path != "" || err == nil || !strings.Contains(err.Error(), "SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE") {
+		t.Fatalf("unprepared Serena install returned path=%q error=%v", path, err)
 	}
-
-	written, err := ReadSupervisorIntent(intentPath)
-	if err != nil {
-		t.Fatalf("ReadSupervisorIntent: %v", err)
+	after, err := os.ReadFile(intentPath)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("unprepared Serena install changed stop or watermark data: %v", err)
 	}
-	if _, ok := written.Stops[priorRows[0].TaskName]; ok {
-		t.Fatalf("dropped workspace stop %q survived: %+v", priorRows[0].TaskName, written.Stops)
-	}
-	if _, ok := written.Stops[priorRows[1].TaskName]; !ok {
-		t.Fatalf("surviving workspace stop %q was pruned: %+v", priorRows[1].TaskName, written.Stops)
-	}
-	if _, ok := written.Stops[otherTask]; !ok {
-		t.Fatalf("sibling server stop %q was pruned: %+v", otherTask, written.Stops)
-	}
-	if _, ok := written.LegacyStopWatermarks[priorRows[0].TaskName]; ok {
-		t.Fatalf("dropped workspace watermark %q survived: %+v", priorRows[0].TaskName, written.LegacyStopWatermarks)
-	}
-	if _, ok := written.LegacyStopWatermarks[priorRows[1].TaskName]; ok {
-		t.Fatalf("surviving workspace stop %q retained redundant watermark: %+v", priorRows[1].TaskName, written.LegacyStopWatermarks)
-	}
-	if _, ok := written.LegacyStopWatermarks[otherTask]; ok {
-		t.Fatalf("sibling server stop %q retained redundant watermark: %+v", otherTask, written.LegacyStopWatermarks)
+	if captureCalls != 0 || nudgeCalls != 0 {
+		t.Fatalf("unprepared Serena install reached cleanup: captures=%d nudges=%d", captureCalls, nudgeCalls)
 	}
 }

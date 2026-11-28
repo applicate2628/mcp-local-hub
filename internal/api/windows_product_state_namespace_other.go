@@ -4,6 +4,7 @@ package api
 
 import (
 	"context"
+	"io"
 	"os"
 )
 
@@ -25,6 +26,9 @@ func (*productStateNamespaceNative) openLock(context.Context, string, string, in
 }
 func (*productStateNamespaceNative) read(context.Context, string) ([]byte, error) {
 	return nil, errHubRouteStateUnavailable
+}
+func (*productStateNamespaceNative) withBoundFileReader(context.Context, string, func(io.Reader) error) error {
+	return errHubRouteStateUnavailable
 }
 func (*productStateNamespaceNative) withHub(context.Context, func(*HubRouteState) error) error {
 	return errHubRouteStateUnavailable

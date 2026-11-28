@@ -19,6 +19,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"sync"
@@ -133,6 +134,50 @@ func TestIdleSweeperRespectsInFlightCount(t *testing.T) {
 	store.sweepOnce()
 	if _, ok := store.Get(s.ClientSessionID); ok {
 		t.Errorf("sweep should have removed idle, inFlight=0 session")
+	}
+}
+
+// A session-local provider's admission context belongs to the front session.
+// Idle removal must cancel that context, not dispatch a transport operation.
+func TestIdleSweeperCancelsOnlyExpiredSessionLocalFront(t *testing.T) {
+	// The non-nil interface enables stock front lifetimes. A method call on
+	// its nil embedded interface fails the test; no provider is present.
+	noDispatch := struct{ HubStdioSessions }{}
+	store := NewHubSessionStore(SessionStoreOpts{
+		StdioSessions: noDispatch,
+		IdleTimeout:   30 * time.Minute,
+		SweepInterval: time.Hour,
+	})
+	t.Cleanup(store.Close)
+
+	now := time.Unix(0, 0)
+	store.now = func() time.Time { return now }
+	a, err := store.Create("claude-code", "2025-11-25", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(31 * time.Minute)
+	b, err := store.Create("cursor", "2025-11-25", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.stdioLifetime == nil || b.stdioLifetime == nil || a.stdioLifetime == b.stdioLifetime {
+		t.Fatal("missing separate front lifetimes")
+	}
+
+	a.incInFlightForTest()
+	store.sweepOnce()
+	if got, ok := store.Get(a.ClientSessionID); !ok || got != a || a.stdioLifetime.Err() != nil {
+		t.Fatal("expiry retired in-flight A")
+	}
+	a.decInFlightForTest()
+	store.sweepOnce()
+	store.sweepOnce()
+	if _, ok := store.Get(a.ClientSessionID); ok || a.stdioLifetime.Err() != context.Canceled {
+		t.Fatal("expiry did not remove A and cancel its original context")
+	}
+	if got, ok := store.Get(b.ClientSessionID); !ok || got != b || b.stdioLifetime.Err() != nil {
+		t.Fatal("expiry touched the live B session or its context")
 	}
 }
 

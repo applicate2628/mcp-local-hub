@@ -35,6 +35,7 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -226,8 +227,10 @@ func (h *HubMcpHandler) checkTokenAndInstanceID(w http.ResponseWriter, r *http.R
 	// both kinds (clients via EnsureHubTokens, groups via
 	// EnsureGroupTokens), so the compare is kind-agnostic.
 	if ConstantTimeCompareToken(scopeKey, tok) != 1 {
-		w.WriteHeader(http.StatusUnauthorized)
-		return false
+		if _, ok := h.projectTokenReceiving(r.Context(), scopeKey, tok); !ok {
+			w.WriteHeader(http.StatusUnauthorized)
+			return false
+		}
 	}
 	// Gate 5: instance id match. Constant-time compare against the
 	// published endpoint's InstanceID. An empty currentInstanceID
@@ -612,8 +615,11 @@ func (h *HubMcpHandler) handleInitialize(w http.ResponseWriter, r *http.Request,
 	if snap != nil {
 		bindings := snap.Bindings[scopeKey]
 		for _, ref := range bindings {
-			if snap.allowsOrdinaryEndpoint(ref) {
+			if h.sessions.allowsEndpoint(snap, ref) {
 				participants = append(participants, ref)
+			} else if _, private := snap.sessionLocalEndpoints[ref]; private {
+				writeJSONRPCErrorStatus(w, reqID, http.StatusServiceUnavailable, -32000, errHubDaemonAdmission.Error(), nil)
+				return
 			}
 		}
 		if len(bindings) != 0 && len(participants) == 0 {
@@ -622,6 +628,15 @@ func (h *HubMcpHandler) handleInitialize(w http.ResponseWriter, r *http.Request,
 		}
 	}
 
+	var project *hubProjectRebindReceiving
+	if table := liveTokenTable.Load(); table != nil && table.guarded(scopeKey) {
+		received, ok := h.projectTokenReceiving(r.Context(), scopeKey, r.Header.Get("X-Mcphub-Hub-Token"))
+		if !ok {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		project = &received
+	}
 	sess, err := h.sessions.Create(scopeKey, negotiatedVersion, snap)
 	if err != nil {
 		if errors.Is(err, ErrSessionCapExceeded) {
@@ -634,6 +649,9 @@ func (h *HubMcpHandler) handleInitialize(w http.ResponseWriter, r *http.Request,
 	}
 	sess.mu.Lock()
 	sess.InstanceID = r.Header.Get("X-Mcphub-Instance-Id")
+	if sess.stdioSessions != nil {
+		sess.stdioCredential = &hubStdioCredential{digest: sha256.Sum256([]byte(r.Header.Get("X-Mcphub-Hub-Token"))), project: project}
+	}
 	sess.mu.Unlock()
 
 	// Populate IntendedParticipants from the snapshot's bindings for
@@ -774,7 +792,7 @@ func (h *HubMcpHandler) handleDelete(w http.ResponseWriter, r *http.Request, sco
 				defer func() { done <- struct{}{} }()
 				fanCtx, fanCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer fanCancel()
-				_ = bestEffortDeleteDaemonSession(fanCtx, ref, state.SessionID, state.ProtocolVersion)
+				_ = deleteHubDaemonSession(fanCtx, sess.daemonRequest(ref, true), state.SessionID, state.ProtocolVersion)
 			}(ref, state)
 		}
 		// Bound the total wait at 5 s + small slack. Workers
@@ -800,7 +818,11 @@ func (h *HubMcpHandler) handleDelete(w http.ResponseWriter, r *http.Request, sco
 // but swallowed at the call site (the spec contract is "best-effort
 // fan-out; 204 regardless").
 func bestEffortDeleteDaemonSession(ctx context.Context, ref canonicalDaemonRef, daemonSID, protoVer string) error {
-	u := clients.HubLoopbackURL(ref.Port, "/mcp")
+	return deleteHubDaemonSession(ctx, hubDaemonRequest{ref: ref, captured: true}, daemonSID, protoVer)
+}
+
+func deleteHubDaemonSession(ctx context.Context, target hubDaemonRequest, daemonSID, protoVer string) error {
+	u := clients.HubLoopbackURL(target.ref.Port, "/mcp")
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)
 	if err != nil {
 		return err
@@ -811,7 +833,7 @@ func bestEffortDeleteDaemonSession(ctx context.Context, ref canonicalDaemonRef, 
 	if protoVer != "" {
 		req.Header.Set("MCP-Protocol-Version", protoVer)
 	}
-	resp, err := doHubDaemonRequest(req, hubDaemonRequest{ref: ref, captured: true}, 5*time.Second)
+	resp, err := doHubDaemonRequest(req, target, 5*time.Second)
 	if err != nil {
 		return err
 	}

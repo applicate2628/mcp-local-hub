@@ -69,7 +69,8 @@ func TestHubOrdinaryAdmissionBeforeSession(t *testing.T) {
 	}{
 		{"/clients/claude-code/mcp", http.StatusServiceUnavailable, false},
 		{"/g/Alias/mcp", http.StatusServiceUnavailable, false},
-		{"/g/Mixed/mcp", http.StatusOK, true},
+		// A protected session-local member needs its received owner before any group session exists.
+		{"/g/Mixed/mcp", http.StatusServiceUnavailable, false},
 		{"/g/Ordinary/mcp", http.StatusOK, true},
 		{"/g/Empty/mcp", http.StatusOK, false},
 		{"/g/Unresolved/mcp", http.StatusOK, false},

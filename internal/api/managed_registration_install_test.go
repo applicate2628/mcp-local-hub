@@ -102,10 +102,10 @@ func TestW10_InstallCompositionFreezesPhysicalAliasAndTimeout(t *testing.T) {
 		t.Fatalf("managed inputs = %#v", core.inputs)
 	}
 	input, target := core.inputs[0], core.inputs[0].Targets[0]
-	if input.Server != "serena" || input.StateRoot != fixture.stateDir || input.JournalRoot != fixture.stateDir || input.ReleaseIdentity.Version != "0.4.37-test" || input.ReleaseIdentity.Commit != "install-test-commit" || !input.CapturedAtUTC.Equal(fixture.now) {
+	if input.Server != "demo" || input.StateRoot != fixture.stateDir || input.JournalRoot != fixture.stateDir || input.ReleaseIdentity.Version != "0.4.37-test" || input.ReleaseIdentity.Commit != "install-test-commit" || !input.CapturedAtUTC.Equal(fixture.now) {
 		t.Fatalf("frozen input = %#v", input)
 	}
-	if target.ClientID != "codex-cli" || target.LogicalEntryName != "serena" || target.PhysicalEntryName != "serena-mcphub" || target.Desired.Name != "serena-mcphub" || target.Desired.ToolTimeoutSec != 45 || target.Codex == nil || target.Codex.ExpectedSource != clients.CodexTransportStdio || target.Codex.AlreadyConfigured {
+	if target.ClientID != "codex-cli" || target.LogicalEntryName != "demo" || target.PhysicalEntryName != "demo-mcphub" || target.Desired.Name != "demo-mcphub" || target.Desired.ToolTimeoutSec != 45 || target.Codex == nil || target.Codex.ExpectedSource != clients.CodexTransportStdio || target.Codex.AlreadyConfigured {
 		t.Fatalf("frozen target = %#v", target)
 	}
 	if len(input.ClientPopulation) != 1 || input.ClientPopulation["codex-cli"] == nil || len(input.ClientConstructionFailures) != 0 {
@@ -270,6 +270,8 @@ type w10InstallCompositionFixture struct {
 	now      time.Time
 }
 
+// This generic fixture exercises alias and settlement composition without a
+// Serena runtime preparation contract.
 func newW10InstallCompositionFixture(t *testing.T) w10InstallCompositionFixture {
 	t.Helper()
 	root := t.TempDir()
@@ -282,26 +284,26 @@ func newW10InstallCompositionFixture(t *testing.T) w10InstallCompositionFixture 
 		t.Fatal(err)
 	}
 	t.Setenv("CODEX_HOME", codexHome)
-	if err := os.WriteFile(filepath.Join(codexHome, "config.toml"), []byte("[mcp_servers.serena]\ncommand = \"uvx\"\nargs = [\"serena\"]\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(codexHome, "config.toml"), []byte("[mcp_servers.demo]\ncommand = \"go\"\nargs = [\"version\"]\ntool_timeout_sec = 45\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	client, err := clients.NewCodexCLI()
 	if err != nil {
 		t.Fatal(err)
 	}
-	update := ClientUpdatePlan{Client: "codex-cli", Action: ClientUpdateAddReplace, EntryName: "serena-mcphub", URL: "http://127.0.0.1:9121/mcp", ToolTimeoutSec: 45, DaemonName: "default"}
+	update := ClientUpdatePlan{Client: "codex-cli", Action: ClientUpdateAddReplace, EntryName: "demo-mcphub", URL: "http://127.0.0.1:9121/mcp", ToolTimeoutSec: 45, DaemonName: "default"}
 	return w10InstallCompositionFixture{
 		api: NewAPI(), client: client, stateDir: stateDir, now: time.Date(2026, 9, 10, 2, 30, 0, 0, time.UTC),
 		manifest: &config.ServerManifest{
-			Name: "serena", Kind: config.KindGlobal, Transport: config.TransportNativeHTTP,
+			Name: "demo", Kind: config.KindGlobal, Transport: config.TransportNativeHTTP,
 			Daemons:        []config.DaemonSpec{{Name: "default", Port: 9121}},
 			ClientBindings: []config.ClientBinding{{Client: "codex-cli", Daemon: "default", URLPath: "/mcp", ToolTimeoutSec: 45}},
 		},
 		plan: &Plan{
-			Server: "serena", SupervisorIntent: []SupervisorIntentEntry{{Name: "mcp-local-hub-serena-default", Args: []string{"daemon", "--server", "serena", "--daemon", "default"}}},
+			Server: "demo", SupervisorIntent: []SupervisorIntentEntry{{Name: "mcp-local-hub-demo-default", Args: []string{"daemon", "--server", "demo", "--daemon", "default"}}},
 			ClientUpdates: []ClientUpdatePlan{update}, installRelayExePath: filepath.Join(root, "mcphub.exe"),
 		},
-		opts: InstallOpts{Server: "serena", Writer: io.Discard},
+		opts: InstallOpts{Server: "demo", Writer: io.Discard},
 	}
 }
 

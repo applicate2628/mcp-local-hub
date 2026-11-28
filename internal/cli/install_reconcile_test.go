@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -53,6 +54,30 @@ func TestReconcileHubModeSuccessfulApplyClearsDurableReconcilePending(t *testing
 	}
 	if pending, _ := onDisk["reconcile_pending"].(bool); pending {
 		t.Fatalf("reconcile_pending remained true after successful reconcile: %s", raw)
+	}
+}
+
+func TestReconcileHubModePreservesCanceledCommandContext(t *testing.T) {
+	restoreState := api.SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	t.Cleanup(restoreState)
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+
+	restoreScheduler := api.SetTestSchedulerFactoryFn(func() (scheduler.Scheduler, error) {
+		t.Fatal("canceled reconcile reached scheduler discovery")
+		return nil, nil
+	})
+	t.Cleanup(restoreScheduler)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	cmd := &cobra.Command{}
+	cmd.SetContext(ctx)
+
+	if err := runReconcileHubMode(cmd, false); !errors.Is(err, context.Canceled) {
+		t.Fatalf("runReconcileHubMode error = %v, want context.Canceled", err)
+	}
+	if cmd.Context() != ctx {
+		t.Fatal("reconcile replaced the caller's command context")
 	}
 }
 

@@ -173,7 +173,9 @@ func freezeManagedRegistrationInstallInput(manifest *config.ServerManifest, plan
 				taskMatches++
 			}
 		}
-		if taskMatches != 1 {
+		if plan.sessionLocal != nil && daemon.MCPStdioState == config.MCPStdioStateSessionLocal && taskMatches == 0 {
+			taskName = plan.sessionLocal.Route.TaskName
+		} else if taskMatches != 1 {
 			return managedRegistrationFrozenInstallInput{}, newManagedRegistrationFailure(ManagedRegistrationFailureRuntimeTargetConflict, nil)
 		}
 		urlPath := ""
@@ -190,6 +192,14 @@ func freezeManagedRegistrationInstallInput(manifest *config.ServerManifest, plan
 		if bindingMatches != 1 {
 			return managedRegistrationFrozenInstallInput{}, newManagedRegistrationFailure(ManagedRegistrationFailureRuntimeTargetConflict, nil)
 		}
+		port := daemon.Port
+		if plan.sessionLocal != nil {
+			port = plan.sessionLocal.Endpoint.Port
+			urlPath = HubClientPrefix + update.Client + "/mcp"
+			if plan.projectAttachment != nil && plan.projectAttachment.private != nil {
+				urlPath = HubGroupPrefix + plan.projectAttachment.private.enrollment.Group + "/mcp"
+			}
+		}
 		desired := installClientEntryV1(plan.Server, update, plan.installRelayExePath)
 		logical := plan.Server
 		if plan.projectAttachment != nil {
@@ -199,7 +209,7 @@ func freezeManagedRegistrationInstallInput(manifest *config.ServerManifest, plan
 		}
 		frozen := managedRegistrationFrozenInstallTarget{
 			ClientID: update.Client, LogicalEntryName: logical, PhysicalEntryName: desired.Name, Action: update.Action,
-			DaemonName: update.DaemonName, TaskName: taskName, Port: daemon.Port, URLPath: urlPath, Desired: desired,
+			DaemonName: update.DaemonName, TaskName: taskName, Port: port, URLPath: urlPath, Desired: desired,
 		}
 		frozen.ProjectAttachment = plan.projectAttachment != nil
 		if plan.projectAttachment == nil && isCodexAliasInstallUpdate(plan.Server, update) {

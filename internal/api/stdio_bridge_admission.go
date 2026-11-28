@@ -263,6 +263,11 @@ func (a *API) admitFrozenStdioBridgeBeforeMutation(ctx context.Context, m *confi
 	if opts.DryRun || m == nil || m.Kind != config.KindGlobal || m.Transport != config.TransportStdioBridge {
 		return nil
 	}
+	if len(selectedSessionLocalDaemons(m, opts.DaemonFilter)) != 0 {
+		// Apply receives the private probe only after any original shared
+		// creator has settled, while the routing selection remains leased.
+		return a.verifySessionLocalInstallTarget(ctx, m, plan, opts, false)
+	}
 	requests, err := frozenStdioBridgeAdmissionRequests(m, plan, opts.DaemonFilter)
 	if err != nil {
 		return err

@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"errors"
+	"sort"
 	"strings"
 	"testing"
 
@@ -10,23 +11,25 @@ import (
 )
 
 // fakeListScheduler is the narrow schedulerLister used by the
-// pruneObsoleteServerTasks tests. It keeps per-task XML (so
-// ExportXML/Delete/ImportXML round-trips behave like the real
-// Task Scheduler) and records every Delete/ImportXML call so tests
-// can assert rollback semantics without relying on log output.
+// pruneObsoleteServerTasks tests. It keeps per-task XML and records attempted
+// Delete/CreateXMLIfAbsent calls to distinguish refusal from compensation.
 type fakeListScheduler struct {
 	tasks        map[string][]byte
 	listErr      error
 	exportErrFor map[string]error
+	exportXMLFor map[string][]byte
 	deleteErrFor map[string]error
 	deletes      []string
-	imports      []string
+	restores     []string
 }
 
-func newFakeListScheduler(tasks map[string][]byte) *fakeListScheduler {
+func newFakeListScheduler(t *testing.T, tasks map[string][]byte) *fakeListScheduler {
+	t.Helper()
+	t.Cleanup(SetDaemonStateRootForTest(hardenedTempDir(t)))
 	return &fakeListScheduler{
 		tasks:        tasks,
 		exportErrFor: map[string]error{},
+		exportXMLFor: map[string][]byte{},
 		deleteErrFor: map[string]error{},
 	}
 }
@@ -45,6 +48,7 @@ func (f *fakeListScheduler) List(prefix string) ([]scheduler.TaskStatus, error) 
 			out = append(out, scheduler.TaskStatus{Name: name})
 		}
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
 }
 
@@ -74,6 +78,9 @@ func (f *fakeListScheduler) Delete(name string) error {
 }
 
 func (f *fakeListScheduler) ExportXML(name string) ([]byte, error) {
+	if xml, ok := f.exportXMLFor[name]; ok {
+		return xml, f.exportErrFor[name]
+	}
 	if err := f.exportErrFor[name]; err != nil {
 		return nil, err
 	}
@@ -83,239 +90,106 @@ func (f *fakeListScheduler) ExportXML(name string) ([]byte, error) {
 	return nil, scheduler.ErrTaskNotFound
 }
 
-func (f *fakeListScheduler) ImportXML(name string, xml []byte) error {
+func (f *fakeListScheduler) CreateXMLIfAbsent(name string, xml []byte) error {
+	f.restores = append(f.restores, name)
+	if _, occupied := f.resolveTaskKey(name); occupied {
+		return scheduler.ErrTaskAlreadyExists
+	}
 	if f.tasks == nil {
 		f.tasks = map[string][]byte{}
 	}
-	f.tasks[name] = xml
-	f.imports = append(f.imports, name)
+	f.tasks[name] = bytes.Clone(xml)
 	return nil
 }
 
-// TestPruneObsoleteServerTasks_RemovesOnlyUnplanned is the core semantic:
-// tasks that match the server prefix AND are in the plan must stay;
-// tasks that match the prefix but are NOT in the plan must be deleted.
-// Tasks outside the server prefix are ignored entirely (List only
-// returns prefix matches anyway, but we defensively check in the helper).
-func TestPruneObsoleteServerTasks_RemovesOnlyUnplanned(t *testing.T) {
-	sch := newFakeListScheduler(map[string][]byte{
-		"mcp-local-hub-serena-claude":         []byte("<xml>claude</xml>"),
-		"mcp-local-hub-serena-codex":          []byte("<xml>codex</xml>"),
-		"mcp-local-hub-serena-weekly-refresh": []byte("<xml>weekly</xml>"), // obsolete
-		"mcp-local-hub-other-daemon":          []byte("<xml>other</xml>"),  // different server
-		"unrelated-task":                      []byte("<xml>unrelated</xml>"),
+// Obsolete-task classification is still exact even though deletion is refused.
+// Planned, unrelated and sibling tasks must not acquire warnings or snapshots.
+func TestPruneObsoleteServerTasks_ReportsOnlyUnplanned(t *testing.T) {
+	const obsolete = "mcp-local-hub-serena-weekly-refresh"
+	sch := newFakeListScheduler(t, map[string][]byte{
+		"mcp-local-hub-serena-claude": []byte("<xml>claude</xml>"),
+		"mcp-local-hub-serena-codex":  []byte("<xml>codex</xml>"),
+		obsolete:                      []byte("<xml>weekly</xml>"),
+		"mcp-local-hub-other-daemon":  []byte("<xml>other</xml>"),
+		"unrelated-task":              []byte("<xml>unrelated</xml>"),
 	})
-	planned := map[string]struct{}{
-		"mcp-local-hub-serena-claude": {},
-		"mcp-local-hub-serena-codex":  {},
+	planned := map[string]struct{}{"mcp-local-hub-serena-claude": {}, "mcp-local-hub-serena-codex": {}}
+	var output bytes.Buffer
+	if err := pruneObsoleteServerTasks(sch, "serena", planned, &output); err != nil {
+		t.Fatal(err)
 	}
-
-	var buf bytes.Buffer
-	rollbacks, err := pruneObsoleteServerTasks(sch, "serena", planned, &buf)
-	if err != nil {
-		t.Fatalf("prune: unexpected error: %v", err)
+	if len(sch.tasks) != 5 || len(sch.deletes) != 0 || len(sch.restores) != 0 {
+		t.Fatalf("prune changed registrations: %v deletes=%v", sch.tasks, sch.deletes)
 	}
-	if len(rollbacks) != 1 {
-		t.Fatalf("rollbacks = %d, want 1", len(rollbacks))
-	}
-
-	// serena-claude and serena-codex must be untouched.
-	if _, ok := sch.tasks["mcp-local-hub-serena-claude"]; !ok {
-		t.Error("serena-claude was unexpectedly deleted (in plan)")
-	}
-	if _, ok := sch.tasks["mcp-local-hub-serena-codex"]; !ok {
-		t.Error("serena-codex was unexpectedly deleted (in plan)")
-	}
-	// weekly-refresh must be gone.
-	if _, ok := sch.tasks["mcp-local-hub-serena-weekly-refresh"]; ok {
-		t.Error("serena-weekly-refresh was not pruned (obsolete, not in plan)")
-	}
-	// Different server prefix: untouched (prune scoped to server).
-	if _, ok := sch.tasks["mcp-local-hub-other-daemon"]; !ok {
-		t.Error("mcp-local-hub-other-daemon was pruned, but it belongs to a different server")
-	}
-	// User-created unrelated task: untouched (outside prefix entirely).
-	if _, ok := sch.tasks["unrelated-task"]; !ok {
-		t.Error("unrelated-task was pruned despite not matching our prefix")
-	}
-
-	if want := "Scheduler task removed (obsolete): mcp-local-hub-serena-weekly-refresh"; !strings.Contains(buf.String(), want) {
-		t.Errorf("output missing prune log line; got: %q", buf.String())
+	if strings.Count(output.String(), "Skipped pruning obsolete scheduler task ") != 1 || !strings.Contains(output.String(), obsolete) || !strings.Contains(output.String(), ErrSchedulerReplacementUnowned.Error()) {
+		t.Fatalf("classification warning: %s", output.String())
 	}
 }
 
-// TestPruneObsoleteServerTasks_RollbackRestoresXML exercises the
-// rollback path: after prune succeeds, invoking the returned closure
-// must recreate the pruned task from its pre-delete XML snapshot. This
-// is the piece that makes the helper install-rollback-safe — if a later
-// install step fails and the runRollback stack unwinds, obsolete-task
-// pruning gets undone together with the rest.
-func TestPruneObsoleteServerTasks_RollbackRestoresXML(t *testing.T) {
-	sch := newFakeListScheduler(map[string][]byte{
-		"mcp-local-hub-s-weekly-refresh": []byte("<xml>weekly-snapshot</xml>"),
-	})
-	planned := map[string]struct{}{} // nothing planned -> weekly gets pruned
-
-	rollbacks, err := pruneObsoleteServerTasks(sch, "s", planned, &bytes.Buffer{})
-	if err != nil {
-		t.Fatalf("prune: %v", err)
-	}
-	if _, ok := sch.tasks["mcp-local-hub-s-weekly-refresh"]; ok {
-		t.Fatal("task should have been pruned before rollback runs")
-	}
-
-	// Run rollbacks in LIFO order like executeInstallTo would.
-	for i := len(rollbacks) - 1; i >= 0; i-- {
-		rollbacks[i]()
-	}
-
-	got, ok := sch.tasks["mcp-local-hub-s-weekly-refresh"]
-	if !ok {
-		t.Fatal("rollback did not restore the pruned task")
-	}
-	if string(got) != "<xml>weekly-snapshot</xml>" {
-		t.Errorf("rollback restored wrong XML: %q", got)
-	}
-	if len(sch.imports) != 1 || sch.imports[0] != "mcp-local-hub-s-weekly-refresh" {
-		t.Errorf("ImportXML record = %v, want [mcp-local-hub-s-weekly-refresh]", sch.imports)
+func TestPruneObsoleteServerTasks_SkipsUnavailableSnapshot(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		xml  []byte
+		err  error
+	}{
+		{"export error", nil, errors.New("export unavailable")},
+		{"bytes with error", []byte("<partial/>"), errors.New("partial export")},
+		{"not found after list", nil, scheduler.ErrTaskNotFound},
+		{"nil snapshot", nil, nil}, {"empty snapshot", []byte{}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const unavailable, later = "mcp-local-hub-s-unavailable", "mcp-local-hub-s-zobsolete"
+			prior := []byte("<xml>preserve</xml>")
+			sch := newFakeListScheduler(t, map[string][]byte{unavailable: bytes.Clone(prior), later: bytes.Clone(prior)})
+			sch.exportXMLFor[unavailable], sch.exportErrFor[unavailable] = tc.xml, tc.err
+			var output bytes.Buffer
+			if err := pruneObsoleteServerTasks(sch, "s", nil, &output); err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(sch.tasks[unavailable], prior) || !bytes.Equal(sch.tasks[later], prior) || len(sch.deletes) != 0 || len(sch.restores) != 0 {
+				t.Fatalf("snapshot error allowed mutation: deletes=%v", sch.deletes)
+			}
+			cause := "empty XML snapshot"
+			if tc.err != nil {
+				cause = tc.err.Error()
+			}
+			if !strings.Contains(output.String(), cause) || !strings.Contains(output.String(), "Skipped pruning obsolete scheduler task "+unavailable) || !strings.Contains(output.String(), "Skipped pruning obsolete scheduler task "+later) {
+				t.Fatalf("warning lost cause or later task: %s", output.String())
+			}
+		})
 	}
 }
 
-// TestPruneObsoleteServerTasks_RollbackNoopWhenExportFailed covers the
-// degraded-but-safe path: if ExportXML failed before the Delete (e.g.
-// platform doesn't support export), Delete still runs so the stale task
-// does not keep executing, but rollback has no XML to restore from. The
-// rollback closure must tolerate that and log rather than panic or
-// silently succeed.
-func TestPruneObsoleteServerTasks_RollbackNoopWhenExportFailed(t *testing.T) {
-	sch := newFakeListScheduler(map[string][]byte{
-		"mcp-local-hub-s-weekly-refresh": []byte("<xml>w</xml>"),
-	})
-	sch.exportErrFor["mcp-local-hub-s-weekly-refresh"] = errors.New("export not supported on this platform")
-
-	var buf bytes.Buffer
-	rollbacks, err := pruneObsoleteServerTasks(sch, "s", map[string]struct{}{}, &buf)
-	if err != nil {
-		t.Fatalf("prune: %v", err)
-	}
-	if _, ok := sch.tasks["mcp-local-hub-s-weekly-refresh"]; ok {
-		t.Fatal("task should have been pruned even when ExportXML failed")
-	}
-
-	buf.Reset()
-	for _, rb := range rollbacks {
-		rb()
-	}
-	// Rollback must not restore a task without a snapshot.
-	if _, ok := sch.tasks["mcp-local-hub-s-weekly-refresh"]; ok {
-		t.Error("rollback recreated task despite no XML snapshot available")
-	}
-	if !strings.Contains(buf.String(), "no XML snapshot") {
-		t.Errorf("rollback log should mention missing snapshot; got: %q", buf.String())
-	}
-}
-
-// TestPruneObsoleteServerTasks_ListFailureIsFatal guards against
-// silently pruning nothing when the backend cannot enumerate tasks.
-// The helper must surface the error so the install path can log a
-// clear "reconciliation skipped" warning instead of the install
-// appearing to succeed while obsolete tasks keep running.
 func TestPruneObsoleteServerTasks_ListFailureIsFatal(t *testing.T) {
-	sch := newFakeListScheduler(map[string][]byte{})
-	sch.listErr = errors.New("schtasks /Query exploded")
-
-	_, err := pruneObsoleteServerTasks(sch, "s", map[string]struct{}{}, &bytes.Buffer{})
-	if err == nil {
-		t.Fatal("expected error when List fails, got nil")
-	}
-	if !strings.Contains(err.Error(), "schtasks /Query exploded") {
-		t.Errorf("error should wrap the underlying cause; got: %v", err)
+	sch := newFakeListScheduler(t, map[string][]byte{"mcp-local-hub-s-default": []byte("<Task/>")})
+	cause := errors.New("fixture: list unavailable")
+	sch.listErr = cause
+	var output bytes.Buffer
+	err := pruneObsoleteServerTasks(sch, "s", nil, &output)
+	if !errors.Is(err, cause) || len(sch.tasks) != 1 || len(sch.deletes) != 0 || len(sch.restores) != 0 || output.Len() != 0 {
+		t.Fatalf("list failure: %v tasks=%v output=%s", err, sch.tasks, output.String())
 	}
 }
 
-// TestPruneObsoleteServerTasks_DeleteFailureContinuesWithOthers: one
-// per-task delete failure must not abort pruning of siblings. The
-// helper logs the failure and moves on — an install that pruned 1 of 2
-// stale tasks is still an improvement over aborting and pruning 0.
-func TestPruneObsoleteServerTasks_DeleteFailureContinuesWithOthers(t *testing.T) {
-	sch := newFakeListScheduler(map[string][]byte{
-		"mcp-local-hub-s-weekly-refresh": []byte("<xml>a</xml>"),
-		"mcp-local-hub-s-stale-debug":    []byte("<xml>b</xml>"),
-	})
-	sch.deleteErrFor["mcp-local-hub-s-weekly-refresh"] = errors.New("access denied")
-
-	var buf bytes.Buffer
-	rollbacks, err := pruneObsoleteServerTasks(sch, "s", map[string]struct{}{}, &buf)
-	if err != nil {
-		t.Fatalf("prune: %v", err)
-	}
-	// One delete succeeded, so one rollback.
-	if len(rollbacks) != 1 {
-		t.Errorf("rollbacks = %d, want 1", len(rollbacks))
-	}
-	// Stale task 1 is still present (delete failed).
-	if _, ok := sch.tasks["mcp-local-hub-s-weekly-refresh"]; !ok {
-		t.Error("weekly-refresh should be present (Delete induced to fail)")
-	}
-	// Stale task 2 is gone (delete succeeded).
-	if _, ok := sch.tasks["mcp-local-hub-s-stale-debug"]; ok {
-		t.Error("stale-debug should have been pruned")
-	}
-	if !strings.Contains(buf.String(), "Failed to prune obsolete scheduler task") {
-		t.Errorf("log should report the failed delete; got: %q", buf.String())
-	}
-}
-
-// TestPruneObsoleteServerTasks_SerenaWeeklyRefreshFlip is the regression
-// scenario named by the reviewer: serena's manifest flipped weekly_refresh
-// from true to false, so a reinstall must delete the legacy
-// `mcp-local-hub-serena-weekly-refresh` task that prior installs created.
-// Without this helper, existing installs would keep running the old weekly
-// restart behavior silently.
 func TestPruneObsoleteServerTasks_SerenaWeeklyRefreshFlip(t *testing.T) {
-	sch := newFakeListScheduler(map[string][]byte{
-		"mcp-local-hub-serena-claude":         []byte("<xml>claude</xml>"),
-		"mcp-local-hub-serena-codex":          []byte("<xml>codex</xml>"),
-		"mcp-local-hub-serena-weekly-refresh": []byte("<xml>weekly</xml>"),
-	})
-	// New plan (WeeklyRefresh: false) covers only the two daemons.
-	planned := map[string]struct{}{
-		"mcp-local-hub-serena-claude": {},
-		"mcp-local-hub-serena-codex":  {},
+	const obsolete = "mcp-local-hub-serena-weekly-refresh"
+	sch := newFakeListScheduler(t, map[string][]byte{obsolete: []byte("<xml>weekly</xml>"), "mcp-local-hub-serena-codex": []byte("<xml>codex</xml>")})
+	var output bytes.Buffer
+	if err := pruneObsoleteServerTasks(sch, "serena", map[string]struct{}{"mcp-local-hub-serena-codex": {}}, &output); err != nil {
+		t.Fatal(err)
 	}
-
-	rollbacks, err := pruneObsoleteServerTasks(sch, "serena", planned, &bytes.Buffer{})
-	if err != nil {
-		t.Fatalf("prune: %v", err)
-	}
-	if len(rollbacks) != 1 {
-		t.Errorf("rollbacks = %d, want 1 (weekly-refresh)", len(rollbacks))
-	}
-	if _, still := sch.tasks["mcp-local-hub-serena-weekly-refresh"]; still {
-		t.Fatal("serena-weekly-refresh must be pruned after weekly_refresh flip")
+	if len(sch.tasks) != 2 || len(sch.deletes) != 0 || len(sch.restores) != 0 || !strings.Contains(output.String(), obsolete) || !strings.Contains(output.String(), ErrSchedulerReplacementUnowned.Error()) {
+		t.Fatalf("obsolete weekly task was silently removed or retained: %s", output.String())
 	}
 }
 
-// TestPruneObsoleteServerTasks_WindowsBackslashPrefix: Windows Task
-// Scheduler prefixes task names with a backslash (the task-folder
-// separator). The helper strips it before prefix/equality checks so
-// "\mcp-local-hub-X-weekly-refresh" matches both the prune prefix and
-// the planned-set key.
 func TestPruneObsoleteServerTasks_WindowsBackslashPrefix(t *testing.T) {
-	sch := newFakeListScheduler(map[string][]byte{
-		"\\mcp-local-hub-serena-claude":         []byte("<xml>claude</xml>"),
-		"\\mcp-local-hub-serena-weekly-refresh": []byte("<xml>weekly</xml>"),
-	})
-	planned := map[string]struct{}{"mcp-local-hub-serena-claude": {}}
-
-	_, err := pruneObsoleteServerTasks(sch, "serena", planned, &bytes.Buffer{})
-	if err != nil {
-		t.Fatalf("prune: %v", err)
+	sch := newFakeListScheduler(t, map[string][]byte{`\mcp-local-hub-serena-claude`: []byte("<xml>claude</xml>"), `\mcp-local-hub-serena-weekly-refresh`: []byte("<xml>weekly</xml>")})
+	var output bytes.Buffer
+	if err := pruneObsoleteServerTasks(sch, "serena", map[string]struct{}{"mcp-local-hub-serena-claude": {}}, &output); err != nil {
+		t.Fatal(err)
 	}
-	if _, still := sch.tasks["\\mcp-local-hub-serena-weekly-refresh"]; still {
-		t.Error("leading-backslash task name not recognized — weekly-refresh still present")
-	}
-	if _, still := sch.tasks["\\mcp-local-hub-serena-claude"]; !still {
-		t.Error("leading-backslash planned task was incorrectly pruned")
+	if len(sch.tasks) != 2 || len(sch.deletes) != 0 || len(sch.restores) != 0 || strings.Count(output.String(), "Skipped pruning obsolete scheduler task ") != 1 || !strings.Contains(output.String(), "mcp-local-hub-serena-weekly-refresh") || strings.Contains(output.String(), "mcp-local-hub-serena-claude") {
+		t.Fatalf("leading-backslash classification: %s", output.String())
 	}
 }

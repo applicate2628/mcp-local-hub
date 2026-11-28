@@ -302,19 +302,26 @@ func (c GUIOwnerControl) GUIStopIncludesDaemons() bool {
 // WithSavedHubEndpointGateIn reads the typed saved gate under the existing
 // preferences lease. The callback may not reenter that lease.
 func (a *API) WithSavedHubEndpointGateIn(ctx context.Context, path string, use func(bool) error) error {
-	return a.withSavedHubEndpointGate(ctx, path, nil, use)
+	return withSavedHubEndpointGate(ctx, path, nil, use)
 }
 
 // WithSavedHubEndpointGateBoundIn reads one settings document through the
 // held Product namespace. Qualified callers acquire H before this borrow.
 func (a *API) WithSavedHubEndpointGateBoundIn(ctx context.Context, path string, namespace *WindowsProductStateNamespace, use func(bool) error) error {
-	if namespace == nil {
-		return errors.New("original Product namespace required for saved Hub endpoint gate")
-	}
-	return a.withSavedHubEndpointGate(ctx, path, namespace, use)
+	return namespace.WithSavedHubEndpointGateIn(ctx, path, use)
 }
 
-func (a *API) withSavedHubEndpointGate(ctx context.Context, path string, namespace *WindowsProductStateNamespace, use func(bool) error) (retErr error) {
+// WithSavedHubEndpointGateIn reads one settings document through this held
+// Product namespace. Qualified callers acquire H before this borrow; the
+// callback may not reenter the preferences lease.
+func (s *WindowsProductStateNamespace) WithSavedHubEndpointGateIn(ctx context.Context, path string, use func(bool) error) error {
+	if s == nil {
+		return errors.New("original Product namespace required for saved Hub endpoint gate")
+	}
+	return withSavedHubEndpointGate(ctx, path, s, use)
+}
+
+func withSavedHubEndpointGate(ctx context.Context, path string, namespace *WindowsProductStateNamespace, use func(bool) error) (retErr error) {
 	if ctx == nil || use == nil {
 		return errors.New("saved Hub endpoint gate context and callback required")
 	}

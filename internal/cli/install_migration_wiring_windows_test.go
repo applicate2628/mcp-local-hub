@@ -408,20 +408,21 @@ func TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade(t *testing.T) {
 	cmd.SetErr(io.Discard)
 
 	err := runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd, f.candidate, f.target, upgradeGUIFencedDepsForCommand(cmd), f.input)
-	if err == nil {
-		t.Fatal("runV5UpgradeWindows must return non-nil error when supervisor-intent.json is unreadable; got nil")
-	}
-	if !strings.Contains(err.Error(), "supervisor-intent.json present but unreadable") {
-		t.Fatalf("error must name the unreadable-intent cause so operators can diagnose; got %v", err)
+	// The observed backend-hold read now refuses corrupt intent before the
+	// later legacy read. Preserve the syntax cause and the affected filename
+	// without requiring that later reader's diagnostic wording.
+	var syntaxErr *json.SyntaxError
+	if !errors.As(err, &syntaxErr) || !strings.Contains(err.Error(), filepath.Base(intentPath)) {
+		t.Errorf("unreadable %s must retain its JSON syntax cause and filename; got %v", filepath.Base(intentPath), err)
 	}
 	if runnerCalls != 0 {
-		t.Fatalf("unreadable intent entered upgrade runner %d times", runnerCalls)
+		t.Errorf("unreadable intent entered upgrade runner %d times", runnerCalls)
 	}
 	if got, readErr := os.ReadFile(f.target); readErr != nil || !bytes.Equal(got, f.priorBytes) {
-		t.Fatalf("unreadable intent changed prior Product: %v", readErr)
+		t.Errorf("unreadable intent changed prior Product: %v", readErr)
 	}
 	if got, readErr := os.ReadFile(intentPath); readErr != nil || !bytes.Equal(got, corruptIntent) {
-		t.Fatalf("unreadable intent changed its original bytes: %v", readErr)
+		t.Errorf("unreadable intent changed its original bytes: %v", readErr)
 	}
 }
 

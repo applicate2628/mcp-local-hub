@@ -1,0 +1,192 @@
+{
+  "schema": 1,
+  "scope": "Exact master + PR660 + five PR665 API TestMain isolation files + two new Windows composition test roots; not standalone PR660",
+  "source_head": "75dbc6406123e22468f168b861d5e0622c9d5769",
+  "source_tree": "cb3eec77c23f9400be962d91c9f23834b84f7643",
+  "source_pr660": "1cffaab021686a7ae27a5ffc038f280160f96a60",
+  "source_api_testmain": "b5cd530969b7089e7d7cbaf5308543be8c443f8c",
+  "overlay_files": 33,
+  "master_tracked_files": 3270,
+  "source_overlaps": [
+    "internal/api/install_parsed_manifest.go"
+  ],
+  "control_equals_historical_pr660_install_file": true,
+  "control_meaning": "Incorrect whole-file overlay on newer master drops two master hold invariants; no claim that normal Git merge drops them or standalone PR660 fails these tests",
+  "required_roots": [
+    "TestInstallMergePreservesBackendRunHold",
+    "TestInstallPreflightPreservesBackendRunHold",
+    "TestExecuteInstallToPruneSnapshotBeforeDelete",
+    "TestExecuteInstallToPruneRequiresRecoveryBeforeDelete",
+    "TestExecuteInstallToPruneDeleteUnconfirmedStopsAndRollsBack",
+    "TestExecuteInstallToPruneRollbackObservation",
+    "TestExecuteInstallToPruneRollbackPreservesExternalOccupant",
+    "TestExecuteAdoptPruneRecoveryPreservesProvenance",
+    "TestExecuteInstallToCurrentAndEarlierRecoveryNames",
+    "TestInstallSchedulerRecoveryTasksClassifiesCurrentAndLater"
+  ],
+  "phases": [
+    {
+      "phase": "format",
+      "command_outcome": "PASS",
+      "commands": [
+        {
+          "label": "go-version",
+          "exit_code": 0,
+          "seconds": 0.01523410005029291,
+          "timed_out": false
+        },
+        {
+          "label": "gofmt",
+          "exit_code": 0,
+          "seconds": 0.04359960008878261,
+          "timed_out": false
+        }
+      ],
+      "terminal_counts": {},
+      "source_before_after_equal": true,
+      "own_tmp_empty_after_exit": true,
+      "raw_receipt": "evidence/format/receipt.json"
+    },
+    {
+      "phase": "control",
+      "command_outcome": "EXPECTED_FAIL",
+      "commands": [
+        {
+          "label": "test",
+          "exit_code": 1,
+          "seconds": 50.78471499995794,
+          "timed_out": false
+        }
+      ],
+      "terminal_counts": {
+        "pass": {
+          "roots": 0,
+          "subtests": 0,
+          "packages": 0
+        },
+        "fail": {
+          "roots": 2,
+          "subtests": 0,
+          "packages": 1
+        },
+        "skip": {
+          "roots": 0,
+          "subtests": 0,
+          "packages": 0
+        }
+      },
+      "source_before_after_equal": true,
+      "own_tmp_empty_after_exit": true,
+      "raw_receipt": "evidence/control/receipt.json"
+    },
+    {
+      "phase": "candidate",
+      "command_outcome": "PASS",
+      "commands": [
+        {
+          "label": "test",
+          "exit_code": 0,
+          "seconds": 53.258608800009824,
+          "timed_out": false
+        }
+      ],
+      "terminal_counts": {
+        "pass": {
+          "roots": 10,
+          "subtests": 16,
+          "packages": 1
+        },
+        "fail": {
+          "roots": 0,
+          "subtests": 0,
+          "packages": 0
+        },
+        "skip": {
+          "roots": 0,
+          "subtests": 0,
+          "packages": 0
+        }
+      },
+      "source_before_after_equal": true,
+      "own_tmp_empty_after_exit": true,
+      "raw_receipt": "evidence/candidate/receipt.json"
+    },
+    {
+      "phase": "build",
+      "command_outcome": "PASS",
+      "commands": [
+        {
+          "label": "build",
+          "exit_code": 0,
+          "seconds": 18.793958900030702,
+          "timed_out": false
+        }
+      ],
+      "terminal_counts": {},
+      "source_before_after_equal": true,
+      "own_tmp_empty_after_exit": true,
+      "raw_receipt": "evidence/build/receipt.json"
+    },
+    {
+      "phase": "vet",
+      "command_outcome": "PASS",
+      "commands": [
+        {
+          "label": "vet",
+          "exit_code": 0,
+          "seconds": 20.82447140000295,
+          "timed_out": false
+        }
+      ],
+      "terminal_counts": {},
+      "source_before_after_equal": true,
+      "own_tmp_empty_after_exit": true,
+      "raw_receipt": "evidence/vet/receipt.json"
+    }
+  ],
+  "source_inventory_before_build": {
+    "schema": 1,
+    "observed_utc": "2026-11-22T08:51:21.997431+00:00",
+    "label": "before-build",
+    "source": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\source-master",
+    "git_metadata_excluded": ".git/",
+    "tracked_expected": 3270,
+    "actual_files": 3270,
+    "directories": 186,
+    "extra_files": [],
+    "missing_files": [],
+    "changed_files": [],
+    "reparse_entries": [],
+    "exact_file_inventory": true
+  },
+  "source_inventory_after_vet": {
+    "schema": 1,
+    "observed_utc": "2026-11-22T08:52:57.028233+00:00",
+    "label": "after-vet",
+    "source": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\source-master",
+    "git_metadata_excluded": ".git/",
+    "tracked_expected": 3270,
+    "actual_files": 3270,
+    "directories": 186,
+    "extra_files": [],
+    "missing_files": [],
+    "changed_files": [],
+    "reparse_entries": [],
+    "exact_file_inventory": true
+  },
+  "raw_archive": {
+    "archive": "qualification-evidence.zip",
+    "bytes": 416775,
+    "sha256": "52c1c863b1438c380d0c8c808a18a0f136c37765127bd48de6cc43f84a240728"
+  },
+  "raw_archive_members": 75,
+  "native_scheduler_operations": "NOT_RUN",
+  "installed_hub_product_or_serena": "NOT_RUN",
+  "full_default_or_tagged_go_tests": "NOT_RUN",
+  "standalone_pr660_runtime_qualification": "NOT_RUN",
+  "whole_process_tree_deadline_and_settlement": "NOT_PROVEN",
+  "external_exact_published_commit_review": "NOT_RUN",
+  "approval_review_rejections_observed": false,
+  "execution_observation_limit": "RDC session lookup was lost for test launchers; immutable on-disk receipts and logs were retrieved. No uncertain launch was repeated. Direct retained Popen handles settled without timeout.",
+  "residual": "Windows ListContext ownership compares short usernames. Domain/SID identity, native Run/RunOwned/Stop/Delete, cancellation/process tree lifetime, external replacement and snapshot retention remain open."
+}

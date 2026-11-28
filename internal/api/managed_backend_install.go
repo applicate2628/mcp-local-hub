@@ -176,17 +176,18 @@ func decodeManagedBackendInstallCapsule(b []byte) (managedBackendInstallCapsule,
 }
 
 type managedBackendInverseBackup struct {
-	ProjectRoot         string                    `json:"project_root"`
-	ProjectPlan         ProjectClientCreatePlanV1 `json:"project_plan"`
-	ProjectBeforeBase64 string                    `json:"project_before_base64"`
-	ProjectAfterSHA256  string                    `json:"project_after_sha256"`
-	ProjectOwnedDelta   projectClientOwnedDelta   `json:"project_owned_delta"`
-	IntentDefined       bool                      `json:"intent_defined"`
-	IntentBytesBase64   string                    `json:"intent_bytes_base64"`
-	PriorScope          managedBackendScope       `json:"prior_scope"`
-	ReceivedScope       managedBackendScope       `json:"received_scope"`
-	Server              string                    `json:"server"`
-	Daemon              string                    `json:"daemon"`
+	Private             *projectPrivateBackendBinding `json:"private_stdio,omitempty"`
+	ProjectRoot         string                        `json:"project_root"`
+	ProjectPlan         ProjectClientCreatePlanV1     `json:"project_plan"`
+	ProjectBeforeBase64 string                        `json:"project_before_base64"`
+	ProjectAfterSHA256  string                        `json:"project_after_sha256"`
+	ProjectOwnedDelta   projectClientOwnedDelta       `json:"project_owned_delta"`
+	IntentDefined       bool                          `json:"intent_defined"`
+	IntentBytesBase64   string                        `json:"intent_bytes_base64"`
+	PriorScope          managedBackendScope           `json:"prior_scope"`
+	ReceivedScope       managedBackendScope           `json:"received_scope"`
+	Server              string                        `json:"server"`
+	Daemon              string                        `json:"daemon"`
 }
 type managedBackendInstallOperation struct {
 	preparedInvocation  *PreparedSerenaConsumerInvocation
@@ -306,6 +307,12 @@ func (op *managedBackendInstallOperation) beginLocked(ctx context.Context, prior
 		return clients.ErrProjectClientInvalid
 	}
 	p := op.attachment
+	if p.private != nil {
+		if ownership != "reused" || server != BuiltinRouteServer || daemon != BuiltinRouteDaemonName {
+			return clients.ErrProjectClientInvalid
+		}
+		op.backup.Private = &projectPrivateBackendBinding{Server: p.private.target.Providers[0].Server, Provider: p.private.target.Providers[0], RouteManifestSHA256: after.Rows[0].ManifestHash}
+	}
 	logical, managed, mask, alias, separators := p.preparation.OwnedDelta()
 	op.backup.ProjectRoot = p.identity.CanonicalRoot()
 	op.backup.ProjectPlan = p.public
@@ -701,11 +708,18 @@ func (a *API) restoreOwnedBackendInstallWithOperation(ctx context.Context, recei
 	if err != nil {
 		return result, err
 	}
-	manifestBytes, err := loadManifestYAMLEmbedFirstFromDir(backup.Server, manifestDir)
+	manifestServer := backup.Server
+	if backup.Private != nil {
+		if c.Ownership != "reused" || backup.Server != BuiltinRouteServer || backup.Daemon != BuiltinRouteDaemonName || backup.ReceivedScope.Rows[0].TaskName != BuiltinRouteTaskName || backup.Private.RouteManifestSHA256 != backup.ReceivedScope.Rows[0].ManifestHash {
+			return result, clients.ErrProjectClientRollbackIncomplete
+		}
+		manifestServer = backup.Private.Server
+	}
+	manifestBytes, err := loadManifestYAMLEmbedFirstFromDir(manifestServer, manifestDir)
 	if err != nil {
 		return result, err
 	}
-	if ManifestHashContent(manifestBytes) != c.ManifestSHA256 || backup.ReceivedScope.Rows[0].ManifestHash != c.ManifestSHA256 {
+	if ManifestHashContent(manifestBytes) != c.ManifestSHA256 || backup.Private == nil && backup.ReceivedScope.Rows[0].ManifestHash != c.ManifestSHA256 {
 		return result, clients.ErrProjectClientRollbackIncomplete
 	}
 	if err := backup.ProjectPlan.validate(); err != nil || backup.ProjectPlan.PlanSHA256 != c.PlanSHA256 {

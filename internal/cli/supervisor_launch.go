@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"mcp-local-hub/internal/api"
 )
@@ -133,6 +134,10 @@ func captureCreatedSupervisorPeer(proc *os.Process, original api.SupervisorLockO
 // Product receiving and the GUI's original native creator. Native identity is
 // supplied by that creator; this observer owns no child, Job, Wait or handoff.
 func observeCreatedSupervisorControl(ctx context.Context, expected SupervisorControlExpectation, original api.SupervisorLockOwner, peer api.SupervisorProcessIdentityV1, validateNative func(api.SupervisorLockOwner) error, readOwner func(string) (api.SupervisorLockOwner, error)) (api.SupervisorLockOwner, error) {
+	return observeCreatedSupervisorControlTimed(ctx, expected, original, peer, validateNative, readOwner, nil)
+}
+
+func observeCreatedSupervisorControlTimed(ctx context.Context, expected SupervisorControlExpectation, original api.SupervisorLockOwner, peer api.SupervisorProcessIdentityV1, validateNative func(api.SupervisorLockOwner) error, readOwner func(string) (api.SupervisorLockOwner, error), recordIPC func(time.Duration)) (api.SupervisorLockOwner, error) {
 	if ctx == nil {
 		return api.SupervisorLockOwner{}, errors.New("supervisor control requires context")
 	}
@@ -154,6 +159,8 @@ func observeCreatedSupervisorControl(ctx context.Context, expected SupervisorCon
 		return api.SupervisorLockOwner{}, err
 	}
 	if owner != original {
+		// Publication can still describe a previous process. This mismatch is
+		// observation only, not proof that a live competitor won the singleton.
 		return api.SupervisorLockOwner{}, errSupervisorControlGenerationChanged
 	}
 	if err := validateNative(owner); err != nil {
@@ -162,8 +169,16 @@ func observeCreatedSupervisorControl(ctx context.Context, expected SupervisorCon
 	if err := api.ValidateSupervisorStatusServerIdentityV1(original, peer, peer.UserSID, peer.SessionID, expected.ProductPath); err != nil {
 		return api.SupervisorLockOwner{}, errors.Join(errSupervisorControlBinding, err)
 	}
-	if err := api.VerifySupervisorControlGenerationForPeerFromStateDir(ctx, expected.StateDir, owner, peer); err != nil {
-		return api.SupervisorLockOwner{}, err
+	var ipcStart time.Time
+	if recordIPC != nil {
+		ipcStart = time.Now()
+	}
+	ipcErr := api.VerifySupervisorControlGenerationForPeerFromStateDir(ctx, expected.StateDir, owner, peer)
+	if recordIPC != nil {
+		recordIPC(time.Since(ipcStart))
+	}
+	if ipcErr != nil {
+		return api.SupervisorLockOwner{}, ipcErr
 	}
 	current, err := readOwner(lockPath)
 	if err != nil || current != owner {

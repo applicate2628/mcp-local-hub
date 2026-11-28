@@ -10,6 +10,7 @@ base_args:
 daemons:
   - name: default
     port: 9124
+    mcp_stdio_state: session-local
 
 client_bindings:
   - client: claude-code

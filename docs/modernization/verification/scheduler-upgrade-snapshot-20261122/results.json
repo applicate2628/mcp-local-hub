@@ -1,0 +1,204 @@
+{
+  "schema": 1,
+  "status": "SCOPED_VERIFICATION_PASS_FULL_ACCEPTANCE_OPEN",
+  "date_utc": "2026-11-22",
+  "pr": 660,
+  "source_parent": "b575b2c1c44c03bd14da281f8b81f50c6aec4bb9",
+  "candidate": [
+    {
+      "path": "internal/api/scheduler_mgmt.go",
+      "bytes": 15700,
+      "sha256": "d00da25726b61636af69e6c3e53d2c6b4e77bf01f6e84161ea0fa1ee87f9372e"
+    },
+    {
+      "path": "internal/api/scheduler_upgrade_snapshot_test.go",
+      "bytes": 8453,
+      "sha256": "152e7ff4d122a1a2713d97c3602e52dada856d83259e91a45f1b6034e0ef8a08"
+    }
+  ],
+  "verification": {
+    "archive_bytes": 721029,
+    "archive_sha256": "37fa99c64880d4aef5bfa4ff1cf5c19ce0fef6a6c8022b590d1215c18b0db120",
+    "payloads_verified": 114,
+    "phases": [
+      {
+        "phase": "scheduler-red-green",
+        "manifest_sha256": "8c8afbb7a3313700504f053197adf39d3243d08d8fb147b3d218bdb3a9463234",
+        "source": {
+          "files": 3281,
+          "bytes": 50583217,
+          "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+        },
+        "inputs": {
+          "files": 50,
+          "bytes": 2489036,
+          "inventory_sha256": "e9e68219b749cd20bfffad10011a96478701aea0233c9a09e41c406a7bb305d4"
+        },
+        "commands": [
+          {
+            "label": "snapshot-red",
+            "exit_code": 1,
+            "seconds": 54.10307309997734,
+            "direct_child_waited": true,
+            "whole_process_tree_deadline_enforced": false,
+            "exact_events": {
+              "pass": [
+                "TestSchedulerUpgradeSnapshotAdmission/server/existing",
+                "TestSchedulerUpgradeSnapshotAdmission/server/delete_denied",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/permission_denied",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/unavailable",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/canceled",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/partial_failure",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/unsupported",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/existing",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/delete_denied"
+              ],
+              "fail": [
+                "TestSchedulerUpgradeSnapshotAdmission/server/permission_denied",
+                "TestSchedulerUpgradeSnapshotAdmission/server/unavailable",
+                "TestSchedulerUpgradeSnapshotAdmission/server/canceled",
+                "TestSchedulerUpgradeSnapshotAdmission/server/partial_failure",
+                "TestSchedulerUpgradeSnapshotAdmission/server/unsupported",
+                "TestSchedulerUpgradeSnapshotAdmission/server/nil_success",
+                "TestSchedulerUpgradeSnapshotAdmission/server/empty_success",
+                "TestSchedulerUpgradeSnapshotAdmission/server/conflicting_absence",
+                "TestSchedulerUpgradeSnapshotAdmission/server/absent",
+                "TestSchedulerUpgradeSnapshotAdmission/server/wrapped_absent",
+                "TestSchedulerUpgradeSnapshotAdmission/server/absent_conflict",
+                "TestSchedulerUpgradeSnapshotAdmission/server",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/nil_success",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/empty_success",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/conflicting_absence",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/absent",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/wrapped_absent",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/absent_conflict",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy",
+                "TestSchedulerUpgradeSnapshotAdmission",
+                "PACKAGE:mcp-local-hub/internal/api"
+              ],
+              "skip": []
+            },
+            "counts_including_package": {
+              "pass": 9,
+              "fail": 21,
+              "skip": 0
+            }
+          },
+          {
+            "label": "snapshot-green",
+            "exit_code": 0,
+            "seconds": 52.90340820001438,
+            "direct_child_waited": true,
+            "whole_process_tree_deadline_enforced": false,
+            "exact_events": {
+              "pass": [
+                "TestSchedulerUpgradeSnapshotAdmission/server/permission_denied",
+                "TestSchedulerUpgradeSnapshotAdmission/server/unavailable",
+                "TestSchedulerUpgradeSnapshotAdmission/server/canceled",
+                "TestSchedulerUpgradeSnapshotAdmission/server/partial_failure",
+                "TestSchedulerUpgradeSnapshotAdmission/server/unsupported",
+                "TestSchedulerUpgradeSnapshotAdmission/server/nil_success",
+                "TestSchedulerUpgradeSnapshotAdmission/server/empty_success",
+                "TestSchedulerUpgradeSnapshotAdmission/server/conflicting_absence",
+                "TestSchedulerUpgradeSnapshotAdmission/server/existing",
+                "TestSchedulerUpgradeSnapshotAdmission/server/absent",
+                "TestSchedulerUpgradeSnapshotAdmission/server/wrapped_absent",
+                "TestSchedulerUpgradeSnapshotAdmission/server/absent_conflict",
+                "TestSchedulerUpgradeSnapshotAdmission/server/delete_denied",
+                "TestSchedulerUpgradeSnapshotAdmission/server",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/permission_denied",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/unavailable",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/canceled",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/partial_failure",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/unsupported",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/nil_success",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/empty_success",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/conflicting_absence",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/existing",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/absent",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/wrapped_absent",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/absent_conflict",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/delete_denied",
+                "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy",
+                "TestSchedulerUpgradeSnapshotAdmission",
+                "PACKAGE:mcp-local-hub/internal/api"
+              ],
+              "fail": [],
+              "skip": []
+            },
+            "counts_including_package": {
+              "pass": 30,
+              "fail": 0,
+              "skip": 0
+            }
+          },
+          {
+            "label": "snapshot-adjacent",
+            "exit_code": 0,
+            "seconds": 7.385361999971792,
+            "direct_child_waited": true,
+            "whole_process_tree_deadline_enforced": false,
+            "exact_events": {
+              "pass": [
+                "TestSchedulerUpgrade_HyphenatedDaemon_RecreatesWithCorrectArgs",
+                "TestSchedulerUpgrade_TaskRoutingPredicates/global-weekly-refresh",
+                "TestSchedulerUpgrade_TaskRoutingPredicates/workspace-weekly-refresh",
+                "TestSchedulerUpgrade_TaskRoutingPredicates/lazy-proxy",
+                "TestSchedulerUpgrade_TaskRoutingPredicates/global-daemon",
+                "TestSchedulerUpgrade_TaskRoutingPredicates",
+                "TestParseWeeklyRefreshSchedule",
+                "TestUpgradeWorkspaceWeeklyRefreshTask_AbortOnExportError",
+                "TestUpgradeLazyProxyTask_AbortOnExportError",
+                "TestUpgradeHelpers_AllowNotFoundExport",
+                "TestSchedulerUpgradePreservesWeeklyTrigger",
+                "TestEnsureWeeklyRefreshTask_PreservesPriorOnCreateFailure",
+                "PACKAGE:mcp-local-hub/internal/api"
+              ],
+              "fail": [],
+              "skip": []
+            },
+            "counts_including_package": {
+              "pass": 13,
+              "fail": 0,
+              "skip": 0
+            }
+          },
+          {
+            "label": "build",
+            "exit_code": 0,
+            "seconds": 20.463882299955003,
+            "direct_child_waited": true,
+            "whole_process_tree_deadline_enforced": false
+          },
+          {
+            "label": "vet",
+            "exit_code": 0,
+            "seconds": 26.193844599998556,
+            "direct_child_waited": true,
+            "whole_process_tree_deadline_enforced": false
+          }
+        ]
+      }
+    ]
+  },
+  "review": {
+    "own": true,
+    "independent_source": true,
+    "external_exact_head": "PENDING"
+  },
+  "full_default_tagged_suites": "NOT_RUN",
+  "native_scheduler_operations": false,
+  "installed_product_operations": false,
+  "physical_source_head": "858812988833a84368c60fba1540ae601155fa71",
+  "physical_source_tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+  "standalone_pr_head_tested": false,
+  "overlay_mapping_counts": {
+    "control": 41,
+    "candidate": 42
+  },
+  "residuals": [
+    "ImportXML errors are still discarded after failed Create",
+    "Forced ImportXML may overwrite a competing task",
+    "Snapshot does not prove atomic task-generation ownership"
+  ]
+}

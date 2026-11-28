@@ -65,11 +65,11 @@ func TestW10_SyntheticReceivingCrossesFrozenInstallFileBoundary(t *testing.T) {
 	if !ok {
 		t.Fatalf("temporary client %T cannot read Codex entries", fixture.client)
 	}
-	logical, err := reader.GetEntry("serena")
+	logical, err := reader.GetEntry("demo")
 	if err != nil || logical != nil {
 		t.Fatalf("logical entry after receiving = %#v, %v", logical, err)
 	}
-	physical, err := reader.GetEntry("serena-mcphub")
+	physical, err := reader.GetEntry("demo-mcphub")
 	if err != nil || physical == nil || physical.ToolTimeoutSec != 45 {
 		t.Fatalf("physical entry after receiving = %#v, %v", physical, err)
 	}
@@ -90,7 +90,7 @@ func TestW10_SyntheticReceivingCrossesFrozenInstallFileBoundary(t *testing.T) {
 		t.Fatalf("enriched managed entries = %#v, %v", entries, err)
 	}
 	entry := entries.Entries[0]
-	if entry.Client != "codex-cli" || entry.Server != "serena" || entry.DesiredProjectionSHA256.String() == "" || entry.ConfigPathSHA256.String() == "" || entry.EntryKeySHA256.String() == "" {
+	if entry.Client != "codex-cli" || entry.Server != "demo" || entry.DesiredProjectionSHA256.String() == "" || entry.ConfigPathSHA256.String() == "" || entry.EntryKeySHA256.String() == "" {
 		t.Fatalf("enriched managed entry = %#v", entry)
 	}
 }

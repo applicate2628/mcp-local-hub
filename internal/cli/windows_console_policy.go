@@ -1,9 +1,11 @@
 package cli
 
+import "mcp-local-hub/internal/process"
+
 // WindowsDebugConsolePrefix is the sole public spelling for opting the
 // current Windows mcphub process into a console. It is a startup prefix, not a
 // Cobra/pflag option.
-const WindowsDebugConsolePrefix = "--debug-console"
+const WindowsDebugConsolePrefix = process.WindowsDebugConsolePrefix
 
 // WindowsConsolePolicy is the closed process-local startup policy. The zero
 // value is deliberately console-free.

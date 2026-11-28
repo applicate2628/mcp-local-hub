@@ -187,7 +187,11 @@ func (h *heldPIDObservation) Wait() (PIDWaitObservation, error) {
 }
 
 func observePIDZeroWait(handle windows.Handle, wait func(windows.Handle, uint32) (uint32, error)) (PIDWaitObservation, error) {
-	result, err := wait(handle, 0)
+	return observePIDWait(handle, wait, 0)
+}
+
+func observePIDWait(handle windows.Handle, wait func(windows.Handle, uint32) (uint32, error), timeout uint32) (PIDWaitObservation, error) {
+	result, err := wait(handle, timeout)
 	if result == windows.WAIT_FAILED || err != nil {
 		if err == nil {
 			err = errors.New("Windows wait failed without an immediate error")
@@ -653,23 +657,68 @@ type pidHandleObservationOps struct {
 	close    func(windows.Handle) error
 }
 
+type pidObservationStage string
+
+const (
+	pidObservationOpen    pidObservationStage = "OPEN"
+	pidObservationImage   pidObservationStage = "IMAGE"
+	pidObservationTimes   pidObservationStage = "TIMES"
+	pidObservationWait    pidObservationStage = "WAIT"
+	pidObservationClose   pidObservationStage = "CLOSE"
+	pidObservationContext pidObservationStage = "CONTEXT"
+)
+
+type pidObservationError struct {
+	stage   pidObservationStage
+	code    uint32
+	hasCode bool
+	cause   error
+}
+
+func (e *pidObservationError) Error() string { return e.cause.Error() }
+func (e *pidObservationError) Unwrap() error { return e.cause }
+
+func pidObservationFailure(stage pidObservationStage, cause, prior error) error {
+	var native windows.Errno
+	hasCode := errors.As(cause, &native) && native != 0 && windows.Errno(uint32(native)) == native
+	if prior != nil {
+		cause = errors.Join(prior, cause)
+	}
+	return &pidObservationError{stage: stage, code: uint32(native), hasCode: hasCode, cause: cause}
+}
+
+// PIDHandleObservationFailure returns only a closed operation name and that
+// operation's optional Win32 code. It never exposes private observation text.
+func PIDHandleObservationFailure(err error) (stage string, code uint32, hasCode bool) {
+	var failure *pidObservationError
+	if !errors.As(err, &failure) || failure == nil {
+		return "", 0, false
+	}
+	switch failure.stage {
+	case pidObservationOpen, pidObservationImage, pidObservationTimes, pidObservationWait, pidObservationClose, pidObservationContext:
+		return string(failure.stage), failure.code, failure.hasCode
+	default:
+		return "", 0, false
+	}
+}
+
 func readPIDHandleObservation(ctx context.Context, pid int, ops pidHandleObservationOps) (observation PIDHandleObservation, retErr error) {
 	if ctx == nil {
-		return observation, errors.New("process: PID observation context required")
+		return observation, pidObservationFailure(pidObservationContext, errors.New("process: PID observation context required"), nil)
 	}
 	if err := ctx.Err(); err != nil {
-		return observation, err
+		return observation, pidObservationFailure(pidObservationContext, err, nil)
 	}
 	if pid <= 0 || (ops.wait != nil && pid != int(uint32(pid))) {
-		return observation, fmt.Errorf("process: invalid PID %d", pid)
+		return observation, pidObservationFailure(pidObservationOpen, fmt.Errorf("process: invalid PID %d", pid), nil)
 	}
 
 	var firstErr error
 	handle, err := ops.open(windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.SYNCHRONIZE, false, uint32(pid))
 	if err != nil {
-		firstErr = fmt.Errorf("process: open PID %d for handle identity: %w", pid, err)
+		firstErr = pidObservationFailure(pidObservationOpen, fmt.Errorf("process: open PID %d for handle identity: %w", pid, err), nil)
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return observation, errors.Join(firstErr, ctxErr)
+			return observation, pidObservationFailure(pidObservationContext, ctxErr, firstErr)
 		}
 		if ops.wait == nil || err != windows.ERROR_INVALID_PARAMETER || handle != 0 {
 			return observation, firstErr
@@ -682,24 +731,34 @@ func readPIDHandleObservation(ctx context.Context, pid int, ops pidHandleObserva
 			if err == windows.ERROR_INVALID_PARAMETER && handle == 0 && ctxErr == nil {
 				return PIDHandleObservation{ConfirmedAbsent: true}, nil
 			}
-			return observation, errors.Join(firstErr, fmt.Errorf("process: reopen PID %d for liveness: %w", pid, err), ctxErr)
+			failure := pidObservationFailure(pidObservationOpen, fmt.Errorf("process: reopen PID %d for liveness: %w", pid, err), firstErr)
+			if ctxErr != nil {
+				failure = pidObservationFailure(pidObservationContext, ctxErr, failure)
+			}
+			return observation, failure
 		}
 	}
 	if handle == 0 || handle == windows.InvalidHandle {
-		return observation, errors.Join(firstErr, fmt.Errorf("process: missing opened PID %d handle", pid), ctx.Err())
+		failure := pidObservationFailure(pidObservationOpen, fmt.Errorf("process: missing opened PID %d handle", pid), firstErr)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			failure = pidObservationFailure(pidObservationContext, ctxErr, failure)
+		}
+		return observation, failure
 	}
 	defer func() {
 		closeErr := ops.close(handle)
-		if closeErr != nil {
-			closeErr = fmt.Errorf("process: close PID %d handle identity: %w", pid, closeErr)
-		}
 		ctxErr := ctx.Err()
 		if closeErr != nil || ctxErr != nil {
 			if retErr == nil {
 				retErr = firstErr
 			}
 			observation = PIDHandleObservation{}
-			retErr = errors.Join(retErr, closeErr, ctxErr)
+			if closeErr != nil {
+				retErr = pidObservationFailure(pidObservationClose, fmt.Errorf("process: close PID %d handle identity: %w", pid, closeErr), retErr)
+			}
+			if ctxErr != nil {
+				retErr = pidObservationFailure(pidObservationContext, ctxErr, retErr)
+			}
 		}
 	}()
 
@@ -708,27 +767,46 @@ func readPIDHandleObservation(ctx context.Context, pid int, ops pidHandleObserva
 	}
 	if firstErr == nil {
 		identity, identityErr := ops.identity(pid, handle)
-		if identityErr == nil {
-			if identity.ExecutablePath == "" || identity.CreationTime.IsZero() {
-				return observation, fmt.Errorf("process: PID %d handle identity is incomplete", pid)
-			}
+		switch {
+		case identityErr != nil:
+			firstErr = identityErr
+		case identity.ExecutablePath == "":
+			firstErr = pidObservationFailure(pidObservationImage, fmt.Errorf("process: PID %d handle image is incomplete", pid), nil)
+		case identity.CreationTime.IsZero():
+			firstErr = pidObservationFailure(pidObservationTimes, fmt.Errorf("process: PID %d handle creation time is incomplete", pid), nil)
+		default:
 			return PIDHandleObservation{Identity: PIDHandleIdentity{
 				PID: pid, ExecutablePath: identity.ExecutablePath, StartedAt: identity.CreationTime.UTC(),
 			}}, nil
 		}
-		imageErr, atImageQuery := identityErr.(*pidImagePathQueryError)
-		if ops.wait == nil || !atImageQuery || imageErr.err != windows.ERROR_ACCESS_DENIED {
-			return observation, identityErr
+		if ops.wait == nil {
+			return observation, firstErr
 		}
-		firstErr = identityErr
 	}
 
 	if ctx.Err() != nil {
 		return observation, firstErr // Settlement records cancellation after closing.
 	}
+	// Any failed identity read can race with exit. Only the original held
+	// object's signaled state proves absence; a live or unknown object fails.
 	wait, waitErr := observePIDZeroWait(handle, ops.wait)
 	if waitErr != nil {
-		return observation, errors.Join(firstErr, waitErr)
+		return observation, pidObservationFailure(pidObservationWait, waitErr, firstErr)
+	}
+	failure, imageDenied := firstErr.(*pidObservationError)
+	if wait.Result == uint32(windows.WAIT_TIMEOUT) && imageDenied &&
+		failure.stage == pidObservationImage && failure.code == uint32(windows.ERROR_ACCESS_DENIED) && ctx.Err() == nil {
+		// The measured teardown interval peaked at 1.244 ms across 24 samples.
+		window := 10 * time.Millisecond
+		if deadline, ok := ctx.Deadline(); ok {
+			window = min(window, time.Until(deadline))
+		}
+		if millis := window.Milliseconds(); millis > 0 {
+			wait, waitErr = observePIDWait(handle, ops.wait, uint32(millis))
+			if waitErr != nil {
+				return observation, errors.Join(firstErr, waitErr)
+			}
+		}
 	}
 	if wait.Result != windows.WAIT_OBJECT_0 {
 		return observation, errors.Join(firstErr, fmt.Errorf("process: PID %d is still running", pid))
@@ -793,25 +871,14 @@ func verifyHandleIdentity(proof PIDIdentityProof, h windows.Handle) error {
 	return nil
 }
 
-type pidImagePathQueryError struct {
-	pid int
-	err error
-}
-
-func (e *pidImagePathQueryError) Error() string {
-	return fmt.Sprintf("process: query PID %d image path: %v", e.pid, e.err)
-}
-
-func (e *pidImagePathQueryError) Unwrap() error { return e.err }
-
 func identityFromHandle(pid int, h windows.Handle) (processHandleIdentity, error) {
 	exe, err := queryProcessImagePath(h)
 	if err != nil {
-		return processHandleIdentity{}, &pidImagePathQueryError{pid: pid, err: err}
+		return processHandleIdentity{}, pidObservationFailure(pidObservationImage, fmt.Errorf("process: query PID %d image path: %w", pid, err), nil)
 	}
 	var creation, exit, kernel, user windows.Filetime
 	if err := windows.GetProcessTimes(h, &creation, &exit, &kernel, &user); err != nil {
-		return processHandleIdentity{}, fmt.Errorf("process: query PID %d process times: %w", pid, err)
+		return processHandleIdentity{}, pidObservationFailure(pidObservationTimes, fmt.Errorf("process: query PID %d process times: %w", pid, err), nil)
 	}
 	return processHandleIdentity{
 		Basename:       filepath.Base(exe),

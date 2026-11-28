@@ -33,11 +33,15 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -47,7 +51,74 @@ import (
 // wired to SecureCreateClientConfigIfMissing. Walks the same
 // hardened pipeline as secureWriteClientConfigImpl but with
 // no-replace rename + idempotent regular-file early-out.
-func secureCreateClientConfigIfMissingImpl(path string, contents []byte, skipParentGate bool) (created bool, err error) {
+func secureCreateClientConfigIfMissingImpl(path string, contents []byte, skipParentGate bool) (bool, error) {
+	created, err := secureCreateClientConfigIfMissingWindows(context.Background(), path, skipParentGate, secureCreatePayload{bytes: contents})
+	return created && err == nil, err
+}
+
+// SecureCreateOwnerOnlyFileStream has the same no-replace and private-file
+// policy as SecureCreateOwnerOnlyFile. It calls write synchronously for a
+// private temporary file. The writer is valid only inside write. A regular
+// file already at path is kept and returned as (false, nil).
+// If publication succeeded but subsequent verification or closure failed,
+// created is true and err is non-nil. Pre-publication failures cannot publish
+// a partial file. The caller must independently verify a published archive.
+func SecureCreateOwnerOnlyFileStream(ctx context.Context, path string, write func(io.Writer) error) (created bool, err error) {
+	if ctx == nil || write == nil {
+		return false, errors.New("secure stream create requires context and a writer callback")
+	}
+	created, err = secureCreateClientConfigIfMissingWindows(ctx, path, true /*skipParentGate*/, secureCreatePayload{stream: write})
+	return created, errors.Join(err, ctx.Err())
+}
+
+type secureCreatePayload struct {
+	bytes  []byte
+	stream func(io.Writer) error
+}
+
+type secureCreateStreamWriter struct {
+	mu          sync.Mutex
+	ctx         context.Context
+	destination io.Writer
+	err         error
+}
+
+func (w *secureCreateStreamWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.destination == nil {
+		return 0, io.ErrClosedPipe
+	}
+	if w.err != nil {
+		return 0, w.err
+	}
+	if err := w.ctx.Err(); err != nil {
+		w.err = err
+		return 0, err
+	}
+	n, err := w.destination.Write(p)
+	if err == nil && n != len(p) {
+		err = io.ErrShortWrite
+	}
+	w.err = err
+	return n, err
+}
+
+func writeSecureCreateBody(ctx context.Context, destination io.Writer, write func(io.Writer) error) (retErr error) {
+	writer := &secureCreateStreamWriter{ctx: ctx, destination: destination}
+	defer func() {
+		writer.mu.Lock()
+		defer writer.mu.Unlock()
+		writer.destination = nil
+		retErr = errors.Join(retErr, writer.err, ctx.Err())
+	}()
+	return write(writer)
+}
+
+func secureCreateClientConfigIfMissingWindows(ctx context.Context, path string, skipParentGate bool, payload secureCreatePayload) (created bool, retErr error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	parentDir, base := filepath.Split(path)
 	if parentDir == "" {
 		parentDir = "."
@@ -61,7 +132,18 @@ func secureCreateClientConfigIfMissingImpl(path string, contents []byte, skipPar
 	if err != nil {
 		return false, fmt.Errorf("secure create: open parent %s: %w", parentDir, err)
 	}
-	defer windows.CloseHandle(dirHandle)
+	streaming := payload.stream != nil
+	receiveClose := func(err error) {
+		if streaming && err != nil {
+			retErr = errors.Join(retErr, err)
+		}
+	}
+	defer func() { receiveClose(windows.CloseHandle(dirHandle)) }()
+	if streaming {
+		if err := refuseReparsePointHandle(dirHandle); err != nil {
+			return false, fmt.Errorf("secure create: verify parent %s: %w", parentDir, err)
+		}
+	}
 
 	// skipParentGate=true bypasses ONLY the parent-dir DACL gate.
 	// Per-file allowlist DACL at create time (step 5 below via
@@ -114,36 +196,57 @@ func secureCreateClientConfigIfMissingImpl(path string, contents []byte, skipPar
 	if err != nil {
 		return false, fmt.Errorf("secure create: ntcreate temp %s: %w", tempName, err)
 	}
+	var file *os.File
+	if streaming {
+		file = os.NewFile(uintptr(fileHandle), tempName)
+		if file == nil {
+			return false, errors.Join(errors.New("secure create: unavailable native temp file"), setFileDeleteOnClose(fileHandle), windows.CloseHandle(fileHandle))
+		}
+	}
+	closeTemp := func() error {
+		if file != nil {
+			return file.Close()
+		}
+		return windows.CloseHandle(fileHandle)
+	}
 	closed := false
 	defer func() {
 		if !closed {
-			windows.CloseHandle(fileHandle)
+			if !created {
+				receiveClose(setFileDeleteOnClose(fileHandle))
+			}
+			receiveClose(closeTemp())
 		}
 	}()
 
-	cleanup := func() {
-		_ = setFileDeleteOnClose(fileHandle)
-	}
-
 	if err := setRestrictiveDACL(fileHandle); err != nil {
-		cleanup()
 		return false, fmt.Errorf("secure create: set DACL: %w", err)
 	}
 
-	if err := windowsWriteAll(fileHandle, contents); err != nil {
-		cleanup()
+	if streaming {
+		err = writeSecureCreateBody(ctx, file, payload.stream)
+	} else {
+		err = windowsWriteAll(fileHandle, payload.bytes)
+	}
+	if err != nil {
 		return false, fmt.Errorf("secure create: write temp: %w", err)
 	}
 	if err := windows.FlushFileBuffers(fileHandle); err != nil {
-		cleanup()
 		return false, fmt.Errorf("secure create: flush temp: %w", err)
+	}
+	if streaming {
+		if err := verifyWindowsDACLFromHandle(fileHandle); err != nil {
+			return false, fmt.Errorf("secure create: verify temp DACL: %w", err)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
 	}
 
 	// No-replace rename. STATUS_OBJECT_NAME_COLLISION (kernel) maps
 	// to ERROR_ALREADY_EXISTS (Win32) via the NtSetInformationFile
 	// shim — handled by re-classifying the winner.
 	if renameErr := ntRenameRelativeNoReplace(fileHandle, dirHandle, base); renameErr != nil {
-		cleanup()
 		// Distinguish "destination exists" from any other rename
 		// failure. STATUS_OBJECT_NAME_COLLISION surfaces as
 		// ERROR_OBJECT_NAME_EXISTS or its Win32 equivalent.
@@ -167,10 +270,10 @@ func secureCreateClientConfigIfMissingImpl(path string, contents []byte, skipPar
 		return false, fmt.Errorf("secure create: ntrename %s -> %s: %w", tempName, base, renameErr)
 	}
 
-	closeErr := windows.CloseHandle(fileHandle)
+	closeErr := closeTemp()
 	closed = true
 	if closeErr != nil {
-		return false, fmt.Errorf("secure create: close temp: %w", closeErr)
+		return true, fmt.Errorf("secure create: close published file: %w", closeErr)
 	}
 
 	// Post-rename DACL re-verify. Symmetric with secure_write_windows.go
@@ -181,11 +284,11 @@ func secureCreateClientConfigIfMissingImpl(path string, contents []byte, skipPar
 		windows.GENERIC_READ|windows.READ_CONTROL,
 	)
 	if err != nil {
-		return false, fmt.Errorf("secure create: re-open %s: %w", base, err)
+		return true, fmt.Errorf("secure create: re-open %s: %w", base, err)
 	}
-	defer windows.CloseHandle(verifyHandle)
+	defer func() { receiveClose(windows.CloseHandle(verifyHandle)) }()
 	if err := verifyWindowsDACLFromHandle(verifyHandle); err != nil {
-		return false, fmt.Errorf("secure create: post-rename DACL verify %s: %w", base, err)
+		return true, fmt.Errorf("secure create: post-rename DACL verify %s: %w", base, err)
 	}
 	return true, nil
 }

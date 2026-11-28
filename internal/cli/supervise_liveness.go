@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -142,7 +143,7 @@ func hydrateControllerRunningStates(ctrl *supervisorController, currentRunning m
 }
 
 func startSupervisorLivenessMonitor(
-	ctxDone <-chan struct{},
+	ctx context.Context,
 	stateDir string,
 	intent *api.SupervisorIntentFile,
 	tracker *DaemonRuntimeTracker,
@@ -150,6 +151,7 @@ func startSupervisorLivenessMonitor(
 	events *api.SupervisorEventLog,
 	squatterReapFn squatterReapFunc,
 	stoppedFn func(task string) bool,
+	querySnapshot func(context.Context) (map[int]int, error),
 ) {
 	ticker := time.NewTicker(supervisorLivenessInterval)
 	defer ticker.Stop()
@@ -191,13 +193,21 @@ func startSupervisorLivenessMonitor(
 	// deadline), so even the longer P1b deadline is already expired at this
 	// first sweep and they terminate immediately — the handoff behavior is
 	// preserved.
-	sweepSupervisorLivenessOnce(stateDir, livenessSweepIntent(stateDir, intent), tracker, loop, events, bindLatch, squatterReap, mismatchLatch)
+	sweep := func() {
+		if ctx.Err() != nil {
+			return
+		}
+		sweepSupervisorLivenessWithSnapshot(stateDir, livenessSweepIntent(stateDir, intent), tracker, loop, events, bindLatch, squatterReap, mismatchLatch, func() (map[int]int, error) {
+			return querySnapshot(ctx)
+		})
+	}
+	sweep()
 	for {
 		select {
-		case <-ctxDone:
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			sweepSupervisorLivenessOnce(stateDir, livenessSweepIntent(stateDir, intent), tracker, loop, events, bindLatch, squatterReap, mismatchLatch)
+			sweep()
 		}
 	}
 }
@@ -252,6 +262,20 @@ func sweepSupervisorLivenessOnce(
 	bindLatch map[string]int,
 	squatterReap *squatterSweepReaper,
 	mismatchLatch map[string]identityMismatchStrike,
+) {
+	sweepSupervisorLivenessWithSnapshot(stateDir, intent, tracker, loop, events, bindLatch, squatterReap, mismatchLatch, loopbackPortOwnersSnapshotFn)
+}
+
+func sweepSupervisorLivenessWithSnapshot(
+	stateDir string,
+	intent *api.SupervisorIntentFile,
+	tracker *DaemonRuntimeTracker,
+	loop *api.EventLoop,
+	events *api.SupervisorEventLog,
+	bindLatch map[string]int,
+	squatterReap *squatterSweepReaper,
+	mismatchLatch map[string]identityMismatchStrike,
+	querySnapshot func() (map[int]int, error),
 ) {
 	if tracker == nil || loop == nil || intent == nil {
 		return
@@ -309,8 +333,9 @@ func sweepSupervisorLivenessOnce(
 	// the per-daemon PortLive TCP fallback is preserved unchanged.
 	livenessProbe := supervisorLivenessProbeFns
 	if supervisorLivenessUsesProductionPortOwnerProbe(livenessProbe.PortOwnerPID) {
-		snapshot, snapErr := loopbackPortOwnersSnapshotFn()
+		readSnapshot := sync.OnceValues(querySnapshot)
 		livenessProbe.PortOwnerPID = func(port int) (int, bool, error) {
+			snapshot, snapErr := readSnapshot()
 			if snapErr != nil {
 				return 0, false, snapErr
 			}

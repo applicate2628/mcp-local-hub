@@ -124,83 +124,25 @@ func TestStopSupervisorIPCUnavailableNoOwnerKeepsDescriptorKillFallback(t *testi
 	}
 }
 
-func TestStopForceSupervisorIPCUnavailableLiveOwnerReturnsRetryableErrorWithoutKill(t *testing.T) {
-	stopSupervisorTestSetup(t, stopSupervisorTestIntent(), nil)
-
-	origStatus := supervisorIPCStatusFn
-	supervisorIPCStatusFn = func(ctx context.Context) ([]DaemonStatus, error) {
-		return nil, fmt.Errorf("supervisor IPC status: dial: %w", ErrSupervisorIPCUnavailable)
-	}
-	t.Cleanup(func() { supervisorIPCStatusFn = origStatus })
-
-	origProbe := installSupervisorRunningProbeFn
-	var probed bool
-	installSupervisorRunningProbeFn = func(stateDir string) (bool, int, error) {
-		probed = true
-		return true, 43210, nil
-	}
-	t.Cleanup(func() { installSupervisorRunningProbeFn = origProbe })
-
-	origForceKill := forceKillByPortFn
-	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
-		t.Fatalf("forceKillByPortFn called for live-supervisor IPC-unavailable force stop on port %d", port)
-		return portKillNoListener, nil
-	}
-	t.Cleanup(func() { forceKillByPortFn = origForceKill })
-
-	results, handled, err := stopForceKillSupervisorOwned(context.Background(), "time", "")
-	if err != nil {
-		t.Fatalf("stopForceKillSupervisorOwned: %v", err)
-	}
-	if !handled {
-		t.Fatal("handled=false, want true for supervisor-owned force target")
-	}
-	if !probed {
-		t.Fatal("supervisor running probe was not called before handling IPC-unavailable force stop")
-	}
-	assertWedgedSupervisorRetryRow(t, results)
-}
-
-func TestStopForceSupervisorIPCUnavailableNoOwnerKeepsDescriptorKillFallback(t *testing.T) {
-	stopSupervisorTestSetup(t, stopSupervisorTestIntent(), nil)
-
-	origStatus := supervisorIPCStatusFn
-	supervisorIPCStatusFn = func(ctx context.Context) ([]DaemonStatus, error) {
-		return nil, fmt.Errorf("supervisor IPC status: dial: %w", ErrSupervisorIPCUnavailable)
-	}
-	t.Cleanup(func() { supervisorIPCStatusFn = origStatus })
-
-	origProbe := installSupervisorRunningProbeFn
-	var probed bool
-	installSupervisorRunningProbeFn = func(stateDir string) (bool, int, error) {
-		probed = true
-		return false, 0, nil
-	}
-	t.Cleanup(func() { installSupervisorRunningProbeFn = origProbe })
-
-	var forceKillPorts []int
-	origForceKill := forceKillByPortFn
-	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
-		forceKillPorts = append(forceKillPorts, port)
-		return portKillKilled, nil
-	}
-	t.Cleanup(func() { forceKillByPortFn = origForceKill })
-
-	results, handled, err := stopForceKillSupervisorOwned(context.Background(), "time", "")
-	if err != nil {
-		t.Fatalf("stopForceKillSupervisorOwned: %v", err)
-	}
-	if !handled {
-		t.Fatal("handled=false, want true for supervisor-owned force target")
-	}
-	if !probed {
-		t.Fatal("supervisor running probe was not called before descriptor kill fallback")
-	}
-	if len(forceKillPorts) != 1 || forceKillPorts[0] != 9128 {
-		t.Fatalf("forceKillByPortFn ports = %v, want [9128]", forceKillPorts)
-	}
-	if len(results) != 1 || results[0].TaskName != stopSupervisorTestTask || results[0].Err != "" {
-		t.Fatalf("results = %+v, want one descriptor kill success row", results)
+func TestStopForceSupervisorIPCUnavailableNeverFallsBackToObservedOwner(t *testing.T) {
+	for _, ownerLive := range []bool{false, true} {
+		t.Run(fmt.Sprintf("observed_owner_live_%t", ownerLive), func(t *testing.T) {
+			stopSupervisorTestSetup(t, stopSupervisorTestIntent(), nil)
+			sealForceStopNumericalFallbacks(t)
+			installForceStopReceipt(t, func(context.Context, string, int) (ForceStopResultV1, error) {
+				return ForceStopResultV1{}, fmt.Errorf("force_stop dial: %w", ErrSupervisorIPCUnavailable)
+			})
+			previousProbe := installSupervisorRunningProbeFn
+			installSupervisorRunningProbeFn = func(string) (bool, int, error) {
+				t.Error("force-stop used an observer liveness probe as kill authority")
+				return ownerLive, 43210, nil
+			}
+			t.Cleanup(func() { installSupervisorRunningProbeFn = previousProbe })
+			rows, handled, err := stopForceKillSupervisorOwned(context.Background(), "time", "")
+			if err != nil || !handled || len(rows) != 1 || rows[0].Code != ForceStopOwnerUnavailable || rows[0].Err == "" {
+				t.Fatalf("unavailable owner: handled=%t rows=%+v err=%v", handled, rows, err)
+			}
+		})
 	}
 }
 

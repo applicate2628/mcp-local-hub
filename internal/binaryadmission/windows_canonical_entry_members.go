@@ -35,6 +35,13 @@ type WindowsCanonicalEntryMemberEvidenceV2 struct {
 	Attributes     uint32                                   `json:"attributes"`
 }
 
+// WindowsCanonicalEntryRetainedMembersV2 describes an issued retained set.
+// The detached value does not grant move, discard or recovery authority.
+type WindowsCanonicalEntryRetainedMembersV2 struct {
+	MembersSHA256 string
+	Singletons    []string
+}
+
 type WindowsCanonicalEntryMemberDirectorySnapshotV2 struct {
 	Schema            string                                   `json:"schema"`
 	Root              string                                   `json:"root"`
@@ -133,6 +140,7 @@ type WindowsCanonicalEntryMembersRecoveryInputV2 struct {
 	Expected      WindowsCanonicalEntrySetSnapshotV2
 	TransactionID string
 	Purpose       WindowsCanonicalEntryRecoveryPurposeV2
+	Retained      *WindowsCanonicalEntryRetainedMembersV2
 	Members       []WindowsCanonicalEntryMemberRecoveryPlanV2
 	Directories   []WindowsCanonicalEntryMemberDirectoryRecordV2
 	Moves         []WindowsCanonicalEntryMemberMoveRecordV2
@@ -176,16 +184,27 @@ type canonicalEntryMembersV2 struct {
 	probeCloseError            error
 	recoveryInput              *WindowsCanonicalEntryMembersRecoveryInputV2
 	recoveryAbsences           map[string]WindowsCanonicalEntryMemberCleanupRecordV2
+	recoveryRetained           map[string]RuntimeObjectV1
+	warmChanged                map[string]bool
 	recoverySide               WindowsCanonicalRecoverySideV1
 	captures                   []WindowsCanonicalEntryMemberEvidenceV2
 	moves, cleanup             []WindowsCanonicalEntryMoveResultV1
 }
 
 type StagedWindowsCanonicalEntrySetV2 struct {
-	original       canonicalEntryMembersV2
-	prior          *WindowsCanonicalEntryPriorSetV2
-	priorAttempted bool
-	priorError     error
+	original              canonicalEntryMembersV2
+	prior                 *WindowsCanonicalEntryPriorSetV2
+	priorAttempted        bool
+	priorError            error
+	launcherStageRelative string
+	ownsPrior             bool
+	retainsRuntime        bool
+	directoryCloseEntered bool
+}
+
+// RetainsRuntime reports the mode issued by successful Stage preparation.
+func (s *StagedWindowsCanonicalEntrySetV2) RetainsRuntime() bool {
+	return s != nil && s.retainsRuntime
 }
 
 type WindowsCanonicalEntryPriorSetV2 struct {
@@ -193,6 +212,7 @@ type WindowsCanonicalEntryPriorSetV2 struct {
 	observation   WindowsCanonicalEntryPriorObservationV2
 	artifact      WindowsArtifact
 	runtimeMember string
+	readOnly      bool
 }
 
 type WindowsCanonicalEntryRecoverySetV2 struct {
@@ -212,6 +232,11 @@ func cloneCanonicalEntryRecoveryTextV2(p *string) *string {
 
 func cloneCanonicalEntryMembersRecoveryInputV2(v WindowsCanonicalEntryMembersRecoveryInputV2) WindowsCanonicalEntryMembersRecoveryInputV2 {
 	v.Expected = cloneCanonicalEntrySnapshotV2(v.Expected)
+	if v.Retained != nil {
+		copy := *v.Retained
+		copy.Singletons = slices.Clone(copy.Singletons)
+		v.Retained = &copy
+	}
 	v.Members = slices.Clone(v.Members)
 	for i := range v.Members {
 		p := &v.Members[i]

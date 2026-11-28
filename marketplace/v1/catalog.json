@@ -5,12 +5,12 @@
     {
       "id": "filesystem",
       "name": "Filesystem MCP server",
-      "summary": "Read and write files in a sandboxed directory.",
+      "summary": "Read and write files in the configured workspace. Requires Node.js 24+. On Windows, use only a trusted workspace.",
       "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
       "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/filesystem/README.md",
       "transport": "stdio",
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${workspaceFolder}"],
+      "args": ["-y", "@modelcontextprotocol/server-filesystem@2.4.1", "${workspaceFolder}"],
       "env": {},
       "categories": ["filesystem", "io"],
       "license": "MIT"
@@ -23,7 +23,7 @@
       "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/git/README.md",
       "transport": "stdio",
       "command": "uvx",
-      "args": ["mcp-server-git", "--repository", "${workspaceFolder}"],
+      "args": ["mcp-server-git==2026.11.27", "--repository", "${workspaceFolder}"],
       "env": {},
       "categories": ["git", "vcs"],
       "license": "MIT"
@@ -33,13 +33,13 @@
       "name": "Fetch MCP server",
       "summary": "Fetch arbitrary HTTP URLs and return content.",
       "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch",
-      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/c799c8552b0f27b7a33a7b9233773da144dddcf5/src/fetch/README.md",
+      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/b502fd9fc711de7285977396db3b8a732d1c9f64/src/fetch/README.md",
       "transport": "stdio",
       "command": "uvx",
       "args": [
         "--with",
         "mcp==2.3.0",
-        "mcp-server-fetch@2026.11.18"
+        "mcp-server-fetch@2026.11.27"
       ],
       "env": {},
       "categories": ["http", "io"],
@@ -124,12 +124,12 @@
     {
       "id": "memory",
       "name": "Memory MCP server",
-      "summary": "Persistent knowledge-graph memory — store and recall entities, relations, and observations across sessions.",
+      "summary": "Persistent knowledge-graph memory — store and recall entities, relations, and observations across sessions. Requires Node.js 24+ for Memory.",
       "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/memory",
       "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/memory/README.md",
       "transport": "stdio",
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "args": ["-y", "@modelcontextprotocol/server-memory@2.2.2"],
       "env": {
         "MEMORY_FILE_PATH": "${HOME}/.local/share/mcp-memory/memory.jsonl"
       },

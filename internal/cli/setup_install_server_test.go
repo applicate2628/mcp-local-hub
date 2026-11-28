@@ -57,6 +57,7 @@ func seedSetupInstallManifests(t *testing.T, names ...string) {
 // server name and the fully constructed InstallOpts passed to the seam.
 func stubSetupSideEffects(t *testing.T) (*string, *api.InstallOpts) {
 	t.Helper()
+	stubUnelevatedSetup(t)
 	origBootstrap := setupBootstrapFn
 	origRouter := setupLSPClientRouterFn
 	origWatchdog := setupWatchdogFn

@@ -45,6 +45,7 @@ const NPM_DIR = __dirname;
 const PACKAGES_DIR = path.join(NPM_DIR, "packages");
 const META_PKG_PATH = path.join(NPM_DIR, "package.json");
 const WINIO_LICENSE_PATH = path.join(NPM_DIR, "..", "third_party", "go-winio", "LICENSE");
+const FLOCK_LICENSE_PATH = path.join(NPM_DIR, "..", "third_party", "gofrs-flock", "LICENSE");
 // Same ordered descriptor table as the Go V4 registry contract.
 const WINDOWS_RUNTIME_DESCRIPTOR_PATHS = [
   "runtimes/python/release.yaml",
@@ -175,14 +176,14 @@ function subPackageJson(meta, target, windowsContract) {
   return manifest;
 }
 
-function winioLicenseNotice() {
-  const original = fs.readFileSync(WINIO_LICENSE_PATH);
+function bundledLicenseNotice(licensePath, component, licenseName) {
+  const original = fs.readFileSync(licensePath);
   const license = original.toString("utf8");
   if (license.trim() === "" || !original.equals(Buffer.from(license, "utf8"))) {
-    throw new Error("go-winio LICENSE must contain valid UTF-8 text");
+    throw new Error(`${component} LICENSE must contain valid UTF-8 text`);
   }
   return (
-    "The Windows Product includes go-winio under the MIT License.\n\n" +
+    `The Windows Product includes ${component} under the ${licenseName} License.\n\n` +
     "```text\n" +
     license +
     (license.endsWith("\n") ? "" : "\n") +
@@ -232,7 +233,8 @@ function subPackageReadme(target, windowsContract) {
             `The runtime index points to each immutable release descriptor and inventory; ` +
             `each descriptor lists the original license files shipped in its component root.\n\n`
           : "\n\n") +
-        winioLicenseNotice() +
+        bundledLicenseNotice(WINIO_LICENSE_PATH, "go-winio", "MIT") +
+        bundledLicenseNotice(FLOCK_LICENSE_PATH, "gofrs-flock", "BSD-3-Clause") +
         (windowsContract.runtime
           ? `## Terms and Abbreviations\n\n` +
             `MCP stands for Model Context Protocol. npm distributes Node packages. PE is the Windows executable format.\n`

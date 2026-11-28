@@ -2,10 +2,22 @@
 
 package binaryadmission
 
-import "context"
+import (
+	"context"
+	"io"
+)
 
 func (*WindowsCanonicalEntrySetV2) Stage(context.Context, string) (*StagedWindowsCanonicalEntrySetV2, error) {
 	return nil, errWindowsCanonicalEntryUnsupported
+}
+func (*WindowsCanonicalEntrySetV2) StageRetainingEqualRuntime(context.Context, string) (*StagedWindowsCanonicalEntrySetV2, *WindowsCanonicalEntryPriorSetV2, error) {
+	return nil, nil, errWindowsCanonicalEntryUnsupported
+}
+func (*WindowsCanonicalEntrySetV2) StageForUpgrade(context.Context, string) (*StagedWindowsCanonicalEntrySetV2, *WindowsCanonicalEntryPriorSetV2, error) {
+	return nil, nil, errWindowsCanonicalEntryUnsupported
+}
+func (*StagedWindowsCanonicalEntrySetV2) RetainedMembersWitness(context.Context) (WindowsCanonicalEntryRetainedMembersV2, error) {
+	return WindowsCanonicalEntryRetainedMembersV2{}, errWindowsCanonicalEntryUnsupported
 }
 func (*StagedWindowsCanonicalEntrySetV2) Snapshot() (WindowsCanonicalEntrySetSnapshotV2, error) {
 	return WindowsCanonicalEntrySetSnapshotV2{}, errWindowsCanonicalEntryUnsupported
@@ -31,6 +43,9 @@ func (*StagedWindowsCanonicalEntrySetV2) ObserveOriginalMember(context.Context, 
 func (*StagedWindowsCanonicalEntrySetV2) TakeForTransaction(context.Context, string) (WindowsCanonicalEntrySetSnapshotV2, error) {
 	return WindowsCanonicalEntrySetSnapshotV2{}, errWindowsCanonicalEntryUnsupported
 }
+func (*StagedWindowsCanonicalEntrySetV2) TakeRetainingForTransaction(context.Context, string, WindowsCanonicalEntryRetainedMembersV2) (WindowsCanonicalEntrySetSnapshotV2, error) {
+	return WindowsCanonicalEntrySetSnapshotV2{}, errWindowsCanonicalEntryUnsupported
+}
 func (*StagedWindowsCanonicalEntrySetV2) MoveOriginal(context.Context, string, string) (WindowsCanonicalEntryMoveResultV1, error) {
 	return WindowsCanonicalEntryMoveResultV1{}, errWindowsCanonicalEntryUnsupported
 }
@@ -40,7 +55,8 @@ func (*StagedWindowsCanonicalEntrySetV2) DiscardOriginal(context.Context, string
 func (*StagedWindowsCanonicalEntrySetV2) Disposition() WindowsCanonicalEntryMemberDispositionV2 {
 	return WindowsCanonicalEntryMemberDispositionV2{}
 }
-func (*StagedWindowsCanonicalEntrySetV2) Close() error { return nil }
+func (*StagedWindowsCanonicalEntrySetV2) CloseMembers() error { return nil }
+func (*StagedWindowsCanonicalEntrySetV2) Close() error        { return nil }
 func (*WindowsCanonicalEntryPriorSetV2) Observation(context.Context) (WindowsCanonicalEntryPriorObservationV2, error) {
 	return WindowsCanonicalEntryPriorObservationV2{}, errWindowsCanonicalEntryUnsupported
 }
@@ -75,6 +91,9 @@ func (*WindowsCanonicalEntryRecoverySetV2) Members(context.Context) ([]WindowsCa
 func (*WindowsCanonicalEntryRecoverySetV2) ObserveCleanupMember(context.Context, WindowsCanonicalRecoverySideV1, WindowsCanonicalEntryRecoveryPurposeV2, WindowsCanonicalEntryMemberEvidenceV2) (WindowsCanonicalEntryMemberEvidenceV2, bool, error) {
 	return WindowsCanonicalEntryMemberEvidenceV2{}, false, errWindowsCanonicalEntryUnsupported
 }
+func (*WindowsCanonicalEntryRecoverySetV2) CopyRollbackCleanupOriginal(context.Context, WindowsCanonicalEntryMemberEvidenceV2, io.Writer) (WindowsCanonicalEntryMemberEvidenceV2, bool, error) {
+	return WindowsCanonicalEntryMemberEvidenceV2{}, false, errWindowsCanonicalEntryUnsupported
+}
 func (*WindowsCanonicalEntryRecoverySetV2) VerifyCleanupAbsences(context.Context, WindowsCanonicalRecoverySideV1, WindowsCanonicalEntryRecoveryPurposeV2) error {
 	return errWindowsCanonicalEntryUnsupported
 }
@@ -93,6 +112,9 @@ func (*WindowsCanonicalEntryRecoverySetV2) MoveOriginal(context.Context, string,
 func (*WindowsCanonicalEntryRecoverySetV2) DiscardOriginal(context.Context, string, string) (WindowsCanonicalEntryMoveResultV1, error) {
 	return WindowsCanonicalEntryMoveResultV1{}, errWindowsCanonicalEntryUnsupported
 }
+func (*WindowsCanonicalEntryRecoverySetV2) DiscardArchivedRollbackCleanup(context.Context, string, []WindowsCanonicalEntryMemberEvidenceV2) ([]WindowsCanonicalEntryMoveResultV1, error) {
+	return nil, errWindowsCanonicalEntryUnsupported
+}
 func (*WindowsCanonicalEntryRecoverySetV2) Disposition() WindowsCanonicalEntryMemberDispositionV2 {
 	return WindowsCanonicalEntryMemberDispositionV2{}
 }
@@ -106,6 +128,10 @@ func (*WindowsCanonicalEntryRecoverySetV2) IssuedImagePaths(context.Context) ([]
 }
 
 func (*StagedWindowsCanonicalEntrySetV2) SuccessorRuntimeProduct(context.Context) (*WindowsCanonicalEntryRuntimeV1, error) {
+	return nil, errWindowsCanonicalEntryUnsupported
+}
+
+func (*StagedWindowsCanonicalEntrySetV2) SuccessorRuntimeProductWithStagedLauncher(context.Context) (*WindowsCanonicalEntryRuntimeV1, error) {
 	return nil, errWindowsCanonicalEntryUnsupported
 }
 

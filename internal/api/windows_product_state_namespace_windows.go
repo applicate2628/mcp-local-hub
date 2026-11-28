@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -26,6 +27,7 @@ type productStateNamespaceNative struct {
 	closed                 bool
 	closeErr, errorPending error
 	beforeLockCreate       func(string) error // controlled fixture collision
+	afterRollbackRename    func() error       // injected late native result
 }
 
 func openProductStateNamespace(ctx context.Context, path string) (*WindowsProductStateNamespace, error) {
@@ -246,6 +248,149 @@ func (n *productStateNamespaceNative) read(ctx context.Context, leaf string) ([]
 		return nil, errHubRouteStateChanged
 	}
 	return data.data, ctx.Err()
+}
+
+type productBoundFileSnapshot struct {
+	identity   ConfigParentDirectoryIdentityV1
+	extent     int64
+	attributes uint32
+	created    windows.Filetime
+	written    windows.Filetime
+}
+
+func snapshotProductBoundFile(h windows.Handle) (productBoundFileSnapshot, error) {
+	info, err := hubRouteFileInformation(h)
+	if err != nil {
+		return productBoundFileSnapshot{}, err
+	}
+	if err := verifyWindowsDACLFromHandle(h); err != nil {
+		return productBoundFileSnapshot{}, err
+	}
+	identity, err := queryConfigParentDirectoryIdentity(h)
+	if err != nil {
+		return productBoundFileSnapshot{}, err
+	}
+	extent := int64(info.FileSizeHigh)<<32 | int64(info.FileSizeLow)
+	if extent < 0 {
+		return productBoundFileSnapshot{}, errHubRouteStateUnavailable
+	}
+	return productBoundFileSnapshot{identity, extent, info.FileAttributes, info.CreationTime, info.LastWriteTime}, nil
+}
+
+func (n *productStateNamespaceNative) withBoundFileReader(ctx context.Context, leaf string, read func(io.Reader) error) (retErr error) {
+	if !ordinaryProductStateLeafName(leaf) {
+		return errHubRouteStateUnavailable
+	}
+	n.mu.Lock()
+	if err := n.validateLocked(ctx); err != nil {
+		n.mu.Unlock()
+		return err
+	}
+	parent, volume := n.parent.parent, n.identity.VolumeSerialNumber
+	n.borrows++
+	n.mu.Unlock()
+	var closeErr error
+	defer func() { retErr = n.finishBoundFileRead(ctx, retErr, closeErr) }()
+
+	const access = windows.GENERIC_READ | windows.READ_CONTROL
+	const share = windows.FILE_SHARE_READ
+	handle, err := ntOpenRelativeWithShareAccess(parent, leaf, access, share)
+	if isNotFoundErr(err) {
+		return os.ErrNotExist
+	}
+	if err != nil {
+		return err
+	}
+	file := os.NewFile(uintptr(handle), leaf)
+	if file == nil {
+		closeErr = windows.CloseHandle(handle)
+		return errHubRouteStateUnavailable
+	}
+	defer func() { closeErr = errors.Join(closeErr, file.Close()) }()
+	original, err := snapshotProductBoundFile(handle)
+	if err != nil {
+		return err
+	}
+	if original.identity.VolumeSerialNumber != volume {
+		return errHubRouteStateChanged
+	}
+
+	if err := readProductBoundFile(ctx, file, original.extent, read); err != nil {
+		return err
+	}
+	if err := n.validate(ctx); err != nil {
+		return err
+	}
+	// Reopen the exact name relative to the same guarded parent while the
+	// original file still denies writes and deletion.
+	fresh, err := ntOpenRelativeWithShareAccess(parent, leaf, access, share)
+	if err != nil {
+		return err
+	}
+	defer func() { closeErr = errors.Join(closeErr, windows.CloseHandle(fresh)) }()
+	actual, err := snapshotProductBoundFile(fresh)
+	if err != nil {
+		return err
+	}
+	if actual != original {
+		return errHubRouteStateChanged
+	}
+	return nil
+}
+
+func (n *productStateNamespaceNative) finishBoundFileRead(ctx context.Context, readErr, closeErr error) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if closeErr != nil {
+		n.keepLocked(closeErr)
+	}
+	n.borrows--
+	return errors.Join(readErr, closeErr, ctx.Err())
+}
+
+type productBoundFileReader struct {
+	mu     sync.Mutex
+	ctx    context.Context
+	source *io.LimitedReader
+	err    error
+}
+
+func (r *productBoundFileReader) Read(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.source == nil {
+		return 0, io.ErrClosedPipe
+	}
+	if r.err != nil {
+		return 0, r.err
+	}
+	if err := r.ctx.Err(); err != nil {
+		r.err = err
+		return 0, err
+	}
+	n, err := r.source.Read(p)
+	if err != io.EOF {
+		r.err = err
+	}
+	return n, err
+}
+
+func readProductBoundFile(ctx context.Context, source io.Reader, extent int64, read func(io.Reader) error) (retErr error) {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	limited := &io.LimitedReader{R: source, N: extent}
+	reader := &productBoundFileReader{ctx: ctx, source: limited}
+	defer func() {
+		reader.mu.Lock()
+		defer reader.mu.Unlock()
+		reader.source = nil
+		retErr = errors.Join(retErr, reader.err, ctx.Err())
+		if retErr == nil && limited.N != 0 {
+			retErr = io.ErrUnexpectedEOF
+		}
+	}()
+	return read(reader)
 }
 
 func (n *productStateNamespaceNative) withHub(ctx context.Context, run func(*HubRouteState) error) error {

@@ -23,6 +23,7 @@ type projectClientBackendReceipt struct {
 	Receipt   InstallMutationReceiptV1 `json:"receipt"`
 }
 type projectClientAttachmentCapsule struct {
+	Private            *projectPrivateCapsule              `json:"private_stdio,omitempty"`
 	Schema             string                              `json:"schema"`
 	Phase              string                              `json:"phase"`
 	GenerationID       string                              `json:"generation_id"`
@@ -46,7 +47,18 @@ func (c projectClientAttachmentCapsule) validate() error {
 		if c.Plan.Operation != "replace-enable-override" {
 			return clients.ErrProjectClientInvalid
 		}
+	} else if c.Schema == projectPrivateCapsuleSchema {
+		if c.Plan.Schema != projectPrivatePlanSchema || c.Private == nil || !c.Private.Enrollment.valid() || c.Private.Enrollment.AttachmentPlan != c.Plan.PlanSHA256 || c.Private.Enrollment.Project != c.Plan.ProjectIdentitySHA256 || c.Private.Enrollment.Credential == "" || c.Private.Enrollment.Revoked || c.Private.Enrollment.AttachmentReceipt != "" || c.BackendReceipt.Ownership != "reused" {
+			return clients.ErrProjectClientInvalid
+		}
+		leaf, err := projectClientCapsuleLeaf(c.BackupID, c.Schema)
+		if err != nil || c.Private.Enrollment.CapsuleLeaf != leaf {
+			return clients.ErrProjectClientInvalid
+		}
 	} else {
+		return clients.ErrProjectClientInvalid
+	}
+	if c.Schema != projectPrivateCapsuleSchema && c.Private != nil {
 		return clients.ErrProjectClientInvalid
 	}
 	switch c.Phase {
@@ -97,6 +109,9 @@ func decodeProjectClientAttachmentCapsule(data []byte) (projectClientAttachmentC
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return c, err
 	}
+	if c.Private != nil {
+		delete(fields, "private_stdio")
+	}
 	if !projectClientExactJSONFields(fields, "schema", "phase", "generation_id", "plan", "before_config_sha256", "after_config_sha256", "backup_id", "owned_delta", "backend_receipt") {
 		return c, clients.ErrProjectClientInvalid
 	}
@@ -128,6 +143,8 @@ func projectClientCapsuleLeaf(id clients.ManagedRegistrationBackupID, schema str
 		return id.String() + ".project-client-create-v1.json", nil
 	case "project-client-attachment-v2":
 		return id.String() + ".project-client-attachment-v2.json", nil
+	case projectPrivateCapsuleSchema:
+		return id.String() + ".project-client-private-v3.json", nil
 	default:
 		return "", clients.ErrProjectClientInvalid
 	}
@@ -143,6 +160,16 @@ func newProjectClientAttachmentCapsule(p *projectClientAttachmentPlan, id client
 		schema = "project-client-attachment-v2"
 	}
 	c := projectClientAttachmentCapsule{Schema: schema, Phase: "prepared", GenerationID: "project-" + p.public.PlanSHA256, Plan: p.public, BeforeConfigSHA256: p.public.ConfigBeforeSHA256, AfterConfigSHA256: p.preparation.AfterSHA256(), BackupID: id, OwnedDelta: projectClientOwnedDelta{LogicalKey: logical, ManagedKey: managed, MaskTokenBase64: base64.StdEncoding.EncodeToString(mask), AliasTokenBase64: base64.StdEncoding.EncodeToString(alias), SeparatorsBase64: base64.StdEncoding.EncodeToString(separators)}, BackendReceipt: backend}
+	if p.private != nil {
+		c.Schema = projectPrivateCapsuleSchema
+		leaf, err := projectClientCapsuleLeaf(id, c.Schema)
+		if err != nil {
+			return c, err
+		}
+		e := p.private.enrollment
+		e.CapsuleLeaf = leaf
+		c.Private = &projectPrivateCapsule{Enrollment: e, Endpoint: p.private.target.Endpoint, Provider: p.private.target.Providers[0]}
+	}
 	return c, c.validate()
 }
 

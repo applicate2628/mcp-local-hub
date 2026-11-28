@@ -1,0 +1,349 @@
+{
+  "schema": "public-liveness-source99-evidence-v1",
+  "source": {
+    "commit": "99c89e9fd12e7bf50a703940c099f568a5c99628",
+    "tree": "f74954deb26871bf2e292b5f2dd8e3bb6162cc90",
+    "parent": "25508f8bfe5950daca3df1b0faf338d77913640a"
+  },
+  "scope": "native Windows/amd64; selected API and CLI tests with substituted scheduler; standalone PR660 code revision",
+  "source_pins": [
+    {
+      "path": "internal/api/liveness_task.go",
+      "bytes": 23493,
+      "sha256": "7423c2a7fa8e20b117a5db72349e7840fa7adcbdc396ee26adf9caa5c0d09d61",
+      "git_blob": "6c852d6eb172b51708f2d5618163b8ebc4138ff2"
+    },
+    {
+      "path": "internal/api/liveness_task_test.go",
+      "bytes": 34055,
+      "sha256": "f4ee80c59c92fa87b81671d8063682322fb1c6cf665acb7161122c43131d0039",
+      "git_blob": "c9ac7dbd7f3f561cb192177cfa9158c13126a38d"
+    },
+    {
+      "path": "internal/cli/setup_watchdog_test.go",
+      "bytes": 34980,
+      "sha256": "1205eaa4edf0f779acfd595be22ca8c1abf90d12cc78932dc7501918fafc51c2",
+      "git_blob": "1801bb7925ea115839ac72b1d8d8807ac5e59045"
+    }
+  ],
+  "source_pins_equal_composed_source52": true,
+  "composed_source52": "52a2d9ef57b7c372b9fa149adf062ad7e503b22d",
+  "original_receipt_sha256": "87fc35a3455c8ce5cae2a4ae134466d3c5b8fee9361e3bc81406065bb83bbe13",
+  "original_parent": {
+    "controller_exit_code": 0,
+    "original_controller_reaped": true,
+    "controller_capture_handles_closed": true,
+    "seconds": 291.1030377999996
+  },
+  "commands": [
+    {
+      "name": "head.stdout.txt",
+      "exit_code": 0,
+      "seconds": 0.22850269998889416,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_owner_retained": true,
+      "original_readers_joined": true,
+      "lifecycle_state": "CLOSED",
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 41,
+          "bytes_stored": 41
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0
+        }
+      },
+      "stdout_sha256": "97318700176a15e2e24e144b2729813a3e8d37ba6a1ac7fbf86a85dbc43cda57",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "liveness-setup-public-default.stdout.txt",
+      "exit_code": 0,
+      "seconds": 161.16484529996524,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_owner_retained": true,
+      "original_readers_joined": true,
+      "lifecycle_state": "CLOSED",
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 57320,
+          "bytes_stored": 57320
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0
+        }
+      },
+      "stdout_sha256": "731906273e2503e355337b951cfbf30f58f91710738b5971b11010c854e2ddfd",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "liveness-setup-public-tagged.stdout.txt",
+      "exit_code": 0,
+      "seconds": 127.93769829999655,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_owner_retained": true,
+      "original_readers_joined": true,
+      "lifecycle_state": "CLOSED",
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 57335,
+          "bytes_stored": 57335
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0
+        }
+      },
+      "stdout_sha256": "e7fbde40914563bb54acf87a73d60c8ab15d1dd1c8c0f86b831092385c9ad8fd",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "public-source-clean-after-tests.stdout.txt",
+      "exit_code": 0,
+      "seconds": 0.20198839996010065,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_owner_retained": true,
+      "original_readers_joined": true,
+      "lifecycle_state": "CLOSED",
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0
+        }
+      },
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "public-source-status-after-tests.stdout.txt",
+      "exit_code": 0,
+      "seconds": 0.2943881000392139,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_owner_retained": true,
+      "original_readers_joined": true,
+      "lifecycle_state": "CLOSED",
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0
+        }
+      },
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "test_results": [
+    {
+      "name": "liveness-setup-public-default.stdout.txt",
+      "exit": 0,
+      "seconds": 161.16484529996524,
+      "counts": {
+        "pass": 61,
+        "top_pass": 29,
+        "skip": 1,
+        "top_skip": 1
+      },
+      "packages": [
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "action": "pass",
+          "elapsed": 13.21
+        },
+        {
+          "package": "mcp-local-hub/internal/api",
+          "action": "pass",
+          "elapsed": 43.039
+        }
+      ],
+      "failures": [],
+      "stdout_sha256": "731906273e2503e355337b951cfbf30f58f91710738b5971b11010c854e2ddfd",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "liveness-setup-public-tagged.stdout.txt",
+      "exit": 0,
+      "seconds": 127.93769829999655,
+      "counts": {
+        "pass": 61,
+        "top_pass": 29,
+        "skip": 1,
+        "top_skip": 1
+      },
+      "packages": [
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "action": "pass",
+          "elapsed": 2.892
+        },
+        {
+          "package": "mcp-local-hub/internal/api",
+          "action": "pass",
+          "elapsed": 81.515
+        }
+      ],
+      "failures": [],
+      "stdout_sha256": "e7fbde40914563bb54acf87a73d60c8ab15d1dd1c8c0f86b831092385c9ad8fd",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "logical_test_arguments": {
+    "default": [
+      "go",
+      "test",
+      "-json",
+      "-count=1",
+      "-timeout",
+      "5m",
+      "-run",
+      "^(TestLivenessTask.*|TestEnsureLivenessTask.*|TestInstallLivenessTask.*|TestLivenessWorkingDir_OSIndependent|TestUninstallLivenessTask_DeletesByName|TestRetainLegacyWatchdogTaskForSetup|TestSetup_.*)$",
+      "./internal/api/",
+      "./internal/cli/"
+    ],
+    "tagged": [
+      "go",
+      "test",
+      "-tags=test_state_path_env",
+      "-json",
+      "-count=1",
+      "-timeout",
+      "5m",
+      "-run",
+      "^(TestLivenessTask.*|TestEnsureLivenessTask.*|TestInstallLivenessTask.*|TestLivenessWorkingDir_OSIndependent|TestUninstallLivenessTask_DeletesByName|TestRetainLegacyWatchdogTaskForSetup|TestSetup_.*)$",
+      "./internal/api/",
+      "./internal/cli/"
+    ]
+  },
+  "expected_platform_skip": {
+    "test": "TestSetup_NonWindowsLivenessNotImplementedContinues",
+    "file": "internal/cli/setup_watchdog_test.go",
+    "line": 306,
+    "reason": "ErrNotImplemented liveness installs must fail closed on Windows",
+    "occurrences_per_lane": 1
+  },
+  "tracked_source_clean_after_tests": true,
+  "limits": {
+    "real_task_scheduler": "NOT_EXECUTED_BY_THIS_SELECTION",
+    "fixed_production_task_name_mutation": "NOT_EXECUTED_BY_THIS_SELECTION",
+    "full_standard_suite": "NOT_RUN",
+    "full_tagged_api_cli_suite": "NOT_RUN",
+    "installed_lifecycle": "NOT_RUN",
+    "source52_controller_failure": "PRESERVED",
+    "old_fail_unknown_v1": "PRESERVED"
+  },
+  "path_policy": "Native paths and process identifiers omitted; original receipt/capture hashes retained. This JSON is a derivative account, not the original native receipt."
+}

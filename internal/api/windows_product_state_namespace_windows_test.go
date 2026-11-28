@@ -1,8 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -82,5 +85,117 @@ func TestWindowsProductNamespaceLockCreation(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestWindowsProductNamespaceStreamsOriginalPrivateLeaf(t *testing.T) {
+	root := hardenedTempDir(t)
+	const leaf = "archive"
+	path := filepath.Join(root, leaf)
+	body := bytes.Repeat([]byte("inert archive block"), 100000)
+	created, err := SecureCreateOwnerOnlyFile(path, body)
+	if err != nil || !created {
+		t.Fatalf("archive fixture create: %v, %v", created, err)
+	}
+	scope, err := OpenWindowsProductStateNamespace(t.Context(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := scope.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	var saved io.Reader
+	received := sha256.New()
+	err = scope.WithBoundFileReader(t.Context(), leaf, func(r io.Reader) error {
+		saved = r
+		if err := scope.Close(); err == nil {
+			t.Fatal("active reader released its parent")
+		}
+		if err := os.Rename(path, filepath.Join(root, "replacement")); err == nil {
+			t.Fatal("held archive was renameable")
+		}
+		n, err := io.Copy(received, r)
+		if n != int64(len(body)) {
+			t.Fatalf("read %d bytes, want %d", n, len(body))
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := sha256.Sum256(body)
+	if !bytes.Equal(received.Sum(nil), want[:]) {
+		t.Fatal("archive digest changed")
+	}
+	if n, err := saved.Read(make([]byte, 1)); n != 0 || !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("retained reader was not revoked: %d, %v", n, err)
+	}
+	if err := os.Rename(path, filepath.Join(root, "after-read")); err != nil {
+		t.Fatalf("archive stream held a leaked leaf: %v", err)
+	}
+}
+
+func TestWindowsProductNamespaceRefusesIncompleteArchiveRead(t *testing.T) {
+	root := hardenedTempDir(t)
+	const leaf = "archive"
+	path := filepath.Join(root, leaf)
+	created, err := SecureCreateOwnerOnlyFile(path, []byte("controlled incomplete stream"))
+	if err != nil || !created {
+		t.Fatalf("archive fixture create: %v, %v", created, err)
+	}
+	scope, err := OpenWindowsProductStateNamespace(t.Context(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := scope.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	err = scope.WithBoundFileReader(t.Context(), leaf, func(r io.Reader) error {
+		_, err := io.ReadFull(r, make([]byte, 1))
+		return err
+	})
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("incomplete callback was accepted: %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	err = scope.WithBoundFileReader(ctx, leaf, func(r io.Reader) error {
+		_, err := io.Copy(io.Discard, r)
+		cancel()
+		return err
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled callback was accepted: %v", err)
+	}
+	for _, refused := range []string{"missing", "..\\archive", leaf + ":alternate"} {
+		if err := scope.WithBoundFileReader(t.Context(), refused, func(io.Reader) error {
+			t.Fatal("missing or unsafe leaf reached a reader")
+			return nil
+		}); err == nil {
+			t.Fatal("missing or unsafe leaf was accepted")
+		}
+	}
+}
+
+func TestWindowsProductNamespaceRetainsUnconfirmedArchiveClose(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	readErr := errors.New("fixture original read error")
+	closeErr := errors.New("fixture original close error")
+	native := &productStateNamespaceNative{borrows: 1}
+	scope := &WindowsProductStateNamespace{native: native}
+	err := native.finishBoundFileRead(ctx, readErr, closeErr)
+	if !errors.Is(err, readErr) || !errors.Is(err, closeErr) || !errors.Is(err, context.Canceled) || native.borrows != 0 {
+		t.Fatalf("original settlement incomplete: %v", err)
+	}
+	if err := scope.Validate(t.Context()); !errors.Is(err, closeErr) {
+		t.Fatalf("unconfirmed close left the namespace reusable: %v", err)
+	}
+	if err := scope.Close(); !errors.Is(err, closeErr) || native.closed {
+		t.Fatalf("unconfirmed close claimed final settlement: %v", err)
 	}
 }

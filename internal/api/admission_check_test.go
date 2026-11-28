@@ -26,9 +26,28 @@ func TestAdmissionCheckCorpusPreflightReadinessParity(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			preflightOK := Preflight(tc.manifest, "") == nil
-			ready := CheckServerReadiness(tc.manifest).Ready
-			if preflightOK != ready {
-				t.Fatalf("Preflight == nil is %t, readiness Ready is %t", preflightOK, ready)
+			report := CheckServerReadiness(tc.manifest)
+			if len(selectedSessionLocalDaemons(tc.manifest, "")) != 0 {
+				// Scope-independent admission may pass before a protected front
+				// is received. Readiness must retain the planner's refusal.
+				if !preflightOK {
+					t.Fatal("session-local corpus fixture failed scope-independent preflight")
+				}
+				if plan, err := BuildPlanWithOpts(tc.manifest, BuildPlanOpts{}); plan != nil || !errors.Is(err, ErrSessionLocalInstallUnavailable) {
+					t.Fatalf("unreceived protected front produced plan=%#v error=%v", plan, err)
+				}
+				if report.Ready {
+					t.Fatal("unreceived protected front was reported ready")
+				}
+				for _, requirement := range report.Requirements {
+					if requirement.Name == "install plan" && !requirement.OK && !requirement.Optional && strings.Contains(requirement.Reason, ErrSessionLocalInstallUnavailable.Error()) {
+						return
+					}
+				}
+				t.Fatalf("readiness lost the protected-front install blocker: %#v", report.Requirements)
+			}
+			if preflightOK != report.Ready {
+				t.Fatalf("Preflight == nil is %t, readiness Ready is %t; requirements: %#v", preflightOK, report.Ready, report.Requirements)
 			}
 		})
 	}

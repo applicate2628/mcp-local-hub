@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -486,5 +487,96 @@ func publishFixtureEndpoint(s *HubRouteState, selected HubRouteEndpointSelection
 		}
 		_, err := c.publishEndpoint(selected, row.TransactionID)
 		return err
+	})
+}
+
+func TestHubRouteEndpointOriginalSHA256(t *testing.T) {
+	f := newHubRouteFixture(t)
+	read := func(t *testing.T) (ep HubRouteEndpointSelection) {
+		t.Helper()
+		f.with(t, func(h *HubRouteState) error {
+			var err error
+			ep, err = h.ReadEndpoint()
+			return err
+		})
+		return ep
+	}
+	original := read(t)
+	raw := f.bytes(t, hubMcpEndpointFileLeaf)
+	if original.OriginalSHA256() != fmt.Sprintf("%x", sha256.Sum256(raw)) {
+		t.Fatal("selection did not retain the digest of the original file bytes")
+	}
+	toggled := original.endpoint
+	toggled.ReconcilePending = !toggled.ReconcilePending
+	body, err := json.Marshal(toggled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		body []byte
+		want hubRouteEndpoint
+	}{
+		{"formatting", append(bytes.Clone(raw), '\n'), original.endpoint},
+		{"reconcile_pending", body, toggled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Truncate and write the existing leaf, retaining its native file ID.
+			if err := os.WriteFile(filepath.Join(f.dir, hubMcpEndpointFileLeaf), tc.body, 0600); err != nil {
+				t.Fatal(err)
+			}
+			changed := read(t)
+			if changed.OriginalIdentity() != original.OriginalIdentity() || changed.endpoint != tc.want ||
+				changed.AuthoritySHA256() != original.AuthoritySHA256() || changed.ProvenanceSHA256() != original.ProvenanceSHA256() {
+				t.Fatal("rewrite did not preserve the native file and semantic projections")
+			}
+			if changed.OriginalSHA256() == original.OriginalSHA256() || changed.OriginalSHA256() != fmt.Sprintf("%x", sha256.Sum256(tc.body)) {
+				t.Fatal("original endpoint digest failed to distinguish the rewritten bytes")
+			}
+		})
+	}
+}
+
+func TestHubRouteServingOriginalReloadObservation(t *testing.T) {
+	f := newHubRouteFixture(t)
+	path := filepath.Join(f.dir, hubMcpControlTokenFileLeaf)
+	var selected HubRouteReloadSelection
+	f.with(t, func(h *HubRouteState) error {
+		if _, err := h.ObserveReloadToken(); err == nil {
+			t.Fatal("absent reload object accepted as a serving original")
+		}
+		return h.CheckReloadTokenAbsent()
+	})
+	payload := []byte(strings.Repeat("c", 64) + "\n")
+	if created, err := SecureCreateOwnerOnlyFile(path, payload); err != nil || !created {
+		t.Fatal("create protected reload original", err)
+	}
+	f.with(t, func(h *HubRouteState) error {
+		var err error
+		selected, err = h.ObserveReloadToken()
+		if err != nil {
+			return err
+		}
+		again, err := h.ObserveReloadToken()
+		if err != nil || !selected.Matches(again) || h.CheckReloadTokenAbsent() == nil {
+			t.Fatalf("same occupied reload object lost: %v", err)
+		}
+		return nil
+	})
+	if err := os.Rename(path, path+".original"); err != nil {
+		t.Fatal(err)
+	}
+	if created, err := SecureCreateOwnerOnlyFile(path, payload); err != nil || !created {
+		t.Fatal("create protected reload replacement", err)
+	}
+	f.with(t, func(h *HubRouteState) error {
+		changed, err := h.ObserveReloadToken()
+		if err != nil {
+			return err
+		}
+		if selected.Matches(changed) {
+			t.Fatal("same bytes on a substituted native object accepted")
+		}
+		return nil
 	})
 }

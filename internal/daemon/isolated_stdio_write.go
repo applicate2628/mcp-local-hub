@@ -83,7 +83,7 @@ func (s *isolatedStdioSession) beginPOST(w http.ResponseWriter, r *http.Request,
 	}
 	p := s.owner
 	p.mu.Lock()
-	if !s.activeLocked() || !p.allowed(r, s.role) {
+	if !s.activeLocked() || !p.allowed(r, s.grant) {
 		p.mu.Unlock()
 		http.Error(w, "unknown session id", http.StatusNotFound)
 		return nil, false
@@ -135,7 +135,7 @@ func (s *isolatedStdioSession) cancelPOST(w http.ResponseWriter, r *http.Request
 	}
 	var childID int64
 	p.mu.Lock()
-	if s.activeLocked() && p.allowed(r, s.role) && id != s.initializeID {
+	if s.activeLocked() && p.allowed(r, s.grant) && id != s.initializeID {
 		op := s.operationLocked(id)
 		if op != nil && !op.canceled {
 			op.canceled = true
@@ -208,7 +208,7 @@ func (s *isolatedStdioSession) deliver(r *http.Request, body []byte, op *isolate
 	var denied error
 	input, _ := s.host.stdin.(*stdioOriginalInput)
 	switch {
-	case !s.activeLocked() || !p.allowed(r, s.role):
+	case !s.activeLocked() || !p.allowed(r, s.grant):
 		denied = errStdioSIDRetired
 	case ctx.Err() != nil || op != nil && op.canceled:
 		denied = errStdioCanceled
@@ -273,7 +273,7 @@ func (s *isolatedStdioSession) resultAllowed(r *http.Request) bool {
 	p := s.owner
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return r.Context().Err() == nil && s.activeLocked() && p.allowed(r, s.role)
+	return r.Context().Err() == nil && s.activeLocked() && p.allowed(r, s.grant)
 }
 
 func sanitizeStdioPrivateResponse(method string, body []byte) []byte {
