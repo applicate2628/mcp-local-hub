@@ -3,9 +3,11 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"path/filepath"
+	"strings"
 	"time"
 	"unsafe"
 
@@ -133,4 +135,23 @@ func supervisorCstTokenIntegrityRID(token windows.Token) (uint32, error) {
 		return 0, fmt.Errorf("CST daemon token integrity SID has no RID")
 	}
 	return sid.SubAuthority(uint32(count - 1)), nil
+}
+
+// admitAggregateStatusOperator requires a verified interactive user matching
+// the original supervisor user and session on the actual accepted pipe.
+func admitAggregateStatusOperator(conn net.Conn, owner api.SupervisorProcessIdentityV1) bool {
+	peer, err := observeAggregateIPCClient(conn)
+	if err != nil || peer.UserSID == "" || peer.SessionID == 0 ||
+		peer.SessionID != owner.SessionID || !strings.EqualFold(peer.UserSID, owner.UserSID) {
+		return false
+	}
+	user, err := windows.StringToSid(peer.UserSID)
+	if err != nil || user.IsWellKnown(windows.WinLocalSystemSid) {
+		return false
+	}
+	service, _, _, err := windows.LookupSID("", `NT SERVICE\`+supervisorCstDaemonServiceName)
+	if err != nil {
+		return errors.Is(err, windows.ERROR_NONE_MAPPED)
+	}
+	return !user.Equals(service)
 }

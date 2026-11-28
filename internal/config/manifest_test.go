@@ -1,11 +1,15 @@
 package config
 
 import (
+	"errors"
+	"fmt"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestParseManifest_ExpandsEnvInBaseArgsAndEnv(t *testing.T) {
@@ -497,7 +501,7 @@ kind: global
 transport: remote-http
 url: https://mcp.context7.com/mcp
 headers:
-  Authorization: "Bearer ${secret:CONTEXT7_TOKEN}"
+  Authorization: "Bearer ${secret:FIXTURE_HEADER}"
   X-Tenant: acme
 client_bindings:
   - client: claude-code
@@ -513,7 +517,7 @@ client_bindings:
 	if m.URL != "https://mcp.context7.com/mcp" {
 		t.Errorf("URL = %q, want https://mcp.context7.com/mcp", m.URL)
 	}
-	if m.Headers["Authorization"] != "Bearer ${secret:CONTEXT7_TOKEN}" {
+	if m.Headers["Authorization"] != "Bearer ${secret:FIXTURE_HEADER}" {
 		t.Errorf("Authorization header lost ${secret:KEY} placeholder: %q", m.Headers["Authorization"])
 	}
 	if m.Headers["X-Tenant"] != "acme" {
@@ -1583,4 +1587,156 @@ daemons: [{name: default, port: 9123}]
 			t.Fatal("expected ParseCatalogFields to reject a manifest with no name")
 		}
 	})
+}
+
+func TestParseManifestMCPStdioStateWire(t *testing.T) {
+	const template = "name: fixture-server\nkind: global\ntransport: %s\ncommand: fixture-child\ndaemons:\n  - name: first\n    port: 9134\n%s"
+	cases := []struct {
+		name, transport, field string
+		want                   MCPStdioState
+		invalid                bool
+	}{
+		{name: "omitted", transport: TransportStdioBridge},
+		{name: "shared", transport: TransportStdioBridge, field: "mcp_stdio_state: shared", want: MCPStdioStateShared},
+		{name: "session local", transport: TransportStdioBridge, field: "mcp_stdio_state: session-local", want: MCPStdioStateSessionLocal},
+		{name: "explicit null", transport: TransportStdioBridge, field: "mcp_stdio_state: null", invalid: true},
+		{name: "explicit empty", transport: TransportStdioBridge, field: "mcp_stdio_state: ''", invalid: true},
+		{name: "sequence", transport: TransportStdioBridge, field: "mcp_stdio_state: [shared]", invalid: true},
+		{name: "mapping", transport: TransportStdioBridge, field: "mcp_stdio_state: {shared: true}", invalid: true},
+		{name: "number", transport: TransportStdioBridge, field: "mcp_stdio_state: 42", invalid: true},
+		{name: "binary scalar", transport: TransportStdioBridge, field: "mcp_stdio_state: !!binary c2hhcmVk", invalid: true},
+		{name: "unknown enum", transport: TransportStdioBridge, field: "mcp_stdio_state: session_stateful_stdio", invalid: true},
+		{name: "wrong transport", transport: TransportNativeHTTP, field: "mcp_stdio_state: shared", invalid: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			field := ""
+			if tc.field != "" {
+				field = "    " + tc.field + "\n"
+			}
+			m, err := ParseManifest(strings.NewReader(fmt.Sprintf(template, tc.transport, field)))
+			if tc.invalid {
+				if m != nil || !errors.Is(err, ErrInvalidDaemonMCPStdioState) {
+					t.Fatalf("manifest = %v, error = %v, want typed declaration refusal", m, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			selected, err := m.SelectDaemon("first")
+			if err != nil || selected == nil || selected.MCPStdioState != tc.want {
+				t.Fatalf("selected = %+v, error = %v, want %q", selected, err, tc.want)
+			}
+			raw, err := yaml.Marshal(m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.want == "" && strings.Contains(string(raw), "mcp_stdio_state") {
+				t.Fatal("legacy omission was serialized as a declaration")
+			}
+			if tc.want != "" && !strings.Contains(string(raw), "mcp_stdio_state: "+string(tc.want)) {
+				t.Fatalf("explicit %q declaration lost in YAML", tc.want)
+			}
+		})
+	}
+	if _, err := ParseManifest(strings.NewReader(fmt.Sprintf(template, TransportStdioBridge, "    mcp_stdio_state_typo: shared\n"))); err == nil {
+		t.Fatal("strict parser accepted a separate unknown field")
+	}
+}
+
+func TestDaemonMCPStdioStateCohorts(t *testing.T) {
+	shared, local := MCPStdioStateShared, MCPStdioStateSessionLocal
+	cases := []struct {
+		name          string
+		rows          []MCPStdioState
+		separateNames bool
+		wantErr       error
+	}{
+		{name: "omitted then isolated", rows: []MCPStdioState{"", local}, wantErr: ErrAmbiguousDaemonMCPStdioState},
+		{name: "isolated then omitted", rows: []MCPStdioState{local, ""}, wantErr: ErrAmbiguousDaemonMCPStdioState},
+		{name: "shared then isolated", rows: []MCPStdioState{shared, local}, wantErr: ErrAmbiguousDaemonMCPStdioState},
+		{name: "isolated then shared", rows: []MCPStdioState{local, shared}, wantErr: ErrAmbiguousDaemonMCPStdioState},
+		{name: "repeated isolated", rows: []MCPStdioState{local, local}, wantErr: ErrAmbiguousDaemonMCPStdioState},
+		{name: "legacy first row wins", rows: []MCPStdioState{"", shared}},
+		{name: "separate isolated name", rows: []MCPStdioState{shared, local}, separateNames: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &ServerManifest{
+				Name: "fixture-server", Kind: KindGlobal, Transport: TransportStdioBridge, Command: "fixture-child",
+				Daemons: []DaemonSpec{
+					{Name: "default", Port: 9134, MCPStdioState: tc.rows[0]},
+					{Name: "default", Port: 9135, MCPStdioState: tc.rows[1]},
+				},
+			}
+			if tc.separateNames {
+				m.Daemons[1].Name = "isolated"
+			}
+			if err := m.Validate(); !errors.Is(err, tc.wantErr) {
+				t.Fatalf("typed validation error = %v, want %v", err, tc.wantErr)
+			}
+			selected, err := m.SelectDaemon("default")
+			if !errors.Is(err, tc.wantErr) || (tc.wantErr != nil && selected != nil) {
+				t.Fatalf("selection = %+v, error = %v, want %v", selected, err, tc.wantErr)
+			}
+			if tc.wantErr == nil && selected != &m.Daemons[0] {
+				t.Fatalf("selected %+v instead of the original first row", selected)
+			}
+			var raw strings.Builder
+			raw.WriteString("name: fixture-server\nkind: global\ntransport: stdio-bridge\ncommand: fixture-child\ndaemons:\n")
+			for _, row := range m.Daemons {
+				fmt.Fprintf(&raw, "  - name: %s\n    port: %d\n", row.Name, row.Port)
+				if row.MCPStdioState != "" {
+					fmt.Fprintf(&raw, "    mcp_stdio_state: %s\n", row.MCPStdioState)
+				}
+			}
+			if _, err := ParseManifest(strings.NewReader(raw.String())); !errors.Is(err, tc.wantErr) {
+				t.Fatalf("parsed validation error = %v, want %v", err, tc.wantErr)
+			}
+		})
+	}
+	m := &ServerManifest{Name: "fixture-server", Kind: KindGlobal, Transport: TransportNativeHTTP, Command: "fixture-child",
+		Daemons: []DaemonSpec{{Name: "default", Port: 9134, MCPStdioState: shared}}}
+	if err := m.Validate(); !errors.Is(err, ErrInvalidDaemonMCPStdioState) {
+		t.Fatalf("typed incorrect transport error = %v", err)
+	}
+	m.Transport = TransportStdioBridge
+	m.Daemons[0].MCPStdioState = MCPStdioState("unsupported")
+	if err := m.Validate(); !errors.Is(err, ErrInvalidDaemonMCPStdioState) {
+		t.Fatalf("typed unknown state error = %v", err)
+	}
+}
+
+func TestParseFixedDaemonLaunchRefusalPrecedesEnvironmentExpansion(t *testing.T) {
+	const header = "name: fixture-server\nkind: global\ntransport: stdio-bridge\ncommand: fixture-child\nbase_args: ['${MCPHUB_TEST_MISSING_STDIO_STATE}']\ndaemons:\n"
+	const local = "    mcp_stdio_state: session-local\n"
+	const first = "  - name: default\n    port: 9134\n"
+	const second = "  - name: default\n    port: 9135\n"
+	cases := []struct {
+		name, rows string
+		want       error
+	}{
+		{"selected local", first + local, ErrSessionLocalDaemonSelection},
+		{"mixed name cohort", first + second + local, ErrAmbiguousDaemonMCPStdioState},
+		{"repeated local cohort", first + local + second + local, ErrAmbiguousDaemonMCPStdioState},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			lookups := 0
+			lookup := func(string) (string, bool) {
+				lookups++
+				return "", false
+			}
+			raw := header + tc.rows
+			m, spec, err := ParseFixedDaemonLaunchManifestWithEnvironment(strings.NewReader(raw), lookup, "fixture-server", "default")
+			if !errors.Is(err, tc.want) || m != nil || spec != nil || lookups != 0 {
+				t.Fatalf("launch error = %v, lookups = %d, want %v and no expansion", err, lookups, tc.want)
+			}
+			_, err = ParseManifestWithEnvironment(strings.NewReader(raw), lookup)
+			if err == nil || !strings.Contains(err.Error(), "manifest references unresolved environment variable(s)") || lookups == 0 {
+				t.Fatalf("generic parse error = %v, lookups = %d, want its original expansion error", err, lookups)
+			}
+		})
+	}
 }

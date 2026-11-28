@@ -72,15 +72,19 @@ func (o *WindowsCanonicalEntrySetV1) payloadDirectoryOwner() *WindowsCanonicalEn
 }
 
 type WindowsCanonicalEntryPayloadDirectoryV1 struct {
-	mu                sync.Mutex
-	guard             *WindowsCanonicalEntrySetV1
-	parent, directory *canonicalEntryNativeFile
-	snapshot          WindowsCanonicalEntryPayloadDirectorySnapshotV1
-	source            WindowsCanonicalEntryPayloadDirectoryRecoverySourceV1
-	borrowers         uint64
-	ready             bool
-	closed            bool
-	acquisitionError  error
-	closeError        error
-	disposition       *WindowsCanonicalEntryMoveResultV1
+	mu                  sync.Mutex
+	guard               *WindowsCanonicalEntrySetV1
+	parent, directory   *canonicalEntryNativeFile
+	snapshot            WindowsCanonicalEntryPayloadDirectorySnapshotV1
+	source              WindowsCanonicalEntryPayloadDirectoryRecoverySourceV1
+	borrowers           uint64
+	ready               bool
+	closed              bool
+	acquisitionError    error
+	closeError          error
+	disposition         *WindowsCanonicalEntryMoveResultV1
+	memberSnapshot      *WindowsCanonicalEntryMemberDirectorySnapshotV2
+	memberSource        WindowsCanonicalRecoverySourceV2
+	memberTransactionID string
+	memberRecoverySide  WindowsCanonicalRecoverySideV1
 }

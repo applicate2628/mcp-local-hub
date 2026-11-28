@@ -66,7 +66,7 @@ func TestCanonicalNonUpgradePartialPriorColdRecovery(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					req, err := windowsCanonicalEntryRecoveryRuntimeRequest(t.Context(), txn.Opts.StateDir, txn.Opts.CanonicalEntryPath, txn.Opts.LegacyWindowlessPath)
+					req, err := windowsCanonicalEntryRecoveryRequestForDomain(t.Context(), txn.Opts.StateDir, txn.Opts.CanonicalEntryPath, txn.Opts.LegacyWindowlessPath, false, txn.Opts.JournalAllowance, txn.journalReadEvidence)
 					if err != nil {
 						t.Fatal(err)
 					}
