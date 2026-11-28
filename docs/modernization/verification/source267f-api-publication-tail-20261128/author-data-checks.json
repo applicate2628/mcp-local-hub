@@ -1,0 +1,22 @@
+{
+  "schema": "closed-tail-author-DATA-checks-v1",
+  "originals": 185,
+  "original_bytes": 18541690,
+  "all_original_round_trips_match": true,
+  "exact_originals": 121,
+  "template_originals": 64,
+  "unique_payloads": 123,
+  "roles": 14,
+  "substitutions": 43143,
+  "original_native_events_controls_verified": true,
+  "command_capture_hashes_verified": 74,
+  "controller_captures_verified": 12,
+  "API_capture_hashes_verified": 4,
+  "API_control_check": "evidence.json",
+  "API_independent_ledger_check": "api-ledger-data-check.json",
+  "Source_independent_tree_check": "source-identity-data-check.json",
+  "Git_raw_commit_identity_check": "raw-commit-data-derivation.json",
+  "Source_or_cache_read": false,
+  "native_or_test_execution": false,
+  "root_independent_actual_saved_byte_verification_pending": true
+}

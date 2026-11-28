@@ -1,0 +1,223 @@
+#Requires -Version 5.1
+# DATA only: verify three closed reconstruction directories, preserve six receipts,
+# and write a move-candidate manifest. This script never moves or deletes anything.
+# Local capsule availability is the prerequisite; remote publication is UNPROVED.
+# On any failure retain partial KEEP/output files; do not remove them or retry blindly.
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+$Rec = '@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\recovery-inputs-v1'
+$Capsules = '@@RECOVERY_APPROVED_WORK_AREA@@\pub664-363b\docs\modernization\verification'
+$Keep = Join-Path $Rec 'root-replay-receipts-e2c0785b-20261128'
+$Trash = '@@RECOVERY_REPLAY_TRASH_BASE@@\mcp-acceptance-e2c0785b-replay-duplicates-20261128'
+$ManifestPath = Join-Path $Rec 'replay-duplicates-preflight-v1.json'
+
+function Assert-PlainPath([string]$Path, [bool]$Directory) {
+    $attributes = [IO.File]::GetAttributes($Path)
+    if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Reparse point refused: $Path" }
+    if ((($attributes -band [IO.FileAttributes]::Directory) -ne 0) -ne $Directory) { throw "Wrong path kind: $Path" }
+}
+function Assert-PlainAncestors([string]$Path) {
+    $current = [IO.Path]::GetFullPath($Path)
+    while ($current) {
+        Assert-PlainPath $current $true
+        $parent = [IO.Directory]::GetParent($current)
+        if ($null -eq $parent) { break }
+        $current = $parent.FullName
+    }
+}
+function Hash-Bytes([byte[]]$Bytes) {
+    $hash = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($hash.ComputeHash($Bytes)).Replace('-', '').ToLowerInvariant() }
+    finally { $hash.Dispose() }
+}
+function Measure-File([string]$Path) {
+    Assert-PlainPath $Path $false
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    $hash = [Security.Cryptography.SHA256]::Create()
+    try {
+        $size = $stream.Length
+        $digest = [BitConverter]::ToString($hash.ComputeHash($stream)).Replace('-', '').ToLowerInvariant()
+        if ($stream.Length -ne $size) { throw "File extent changed: $Path" }
+        return [pscustomobject]@{ bytes = $size; sha256 = $digest }
+    } finally { $hash.Dispose(); $stream.Dispose() }
+}
+function Assert-Measurement([string]$Path, [long]$Bytes, [string]$Sha256) {
+    $actual = Measure-File $Path
+    if ($actual.bytes -ne $Bytes -or $actual.sha256 -cne $Sha256) { throw "Byte pin mismatch: $Path" }
+    return $actual
+}
+function Read-PinnedBytes([string]$Path, [long]$Bytes, [string]$Sha256) {
+    Assert-PlainPath $Path $false
+    $raw = [IO.File]::ReadAllBytes($Path)
+    if ($raw.LongLength -ne $Bytes -or (Hash-Bytes $raw) -cne $Sha256) { throw "Receipt pin mismatch: $Path" }
+    return ,$raw
+}
+function Write-NewBytes([string]$Path, [byte[]]$Bytes) {
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    try { $stream.Write($Bytes, 0, $Bytes.Length); $stream.Flush($true) }
+    finally { $stream.Dispose() }
+}
+function Add-Expected($Group, [string]$Relative, [long]$Bytes, [string]$Sha256) {
+    $rel = $Relative.Replace('\', '/')
+    if ([IO.Path]::IsPathRooted($rel) -or $rel -match '(^|/)\.\.?(/|$)|:|//|/$' -or $rel.Length -eq 0) { throw "Invalid relative path: $Relative" }
+    if ($Bytes -lt 0 -or $Sha256 -cnotmatch '^[0-9a-f]{64}$') { throw "Invalid byte pin: $Relative" }
+    if ($Group.expected.ContainsKey($rel)) { throw "Duplicate expected path: $rel" }
+    $Group.expected.Add($rel, [pscustomobject]@{ bytes = $Bytes; sha256 = $Sha256 })
+}
+function Enumerate-PlainFiles([string]$Root) {
+    $result = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
+    $pending = [Collections.Generic.Stack[string]]::new()
+    $pending.Push($Root)
+    while ($pending.Count -gt 0) {
+        $dir = $pending.Pop()
+        Assert-PlainPath $dir $true
+        foreach ($entry in [IO.Directory]::EnumerateFileSystemEntries($dir)) {
+            $attributes = [IO.File]::GetAttributes($entry)
+            if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Reparse entry refused: $entry" }
+            if (($attributes -band [IO.FileAttributes]::Directory) -ne 0) { $pending.Push($entry); continue }
+            $rel = $entry.Substring($Root.Length + 1).Replace('\', '/')
+            $result.Add($rel, $entry)
+        }
+    }
+    return ,$result
+}
+
+$names = @('root-fixture-v2-replay-v1', 'source59f-closed-api-diagnostics-root-replay-v1', 'root-checkpoint-data-20261128-v1')
+$counts = @(334, 137, 501)
+$groups = @()
+for ($i = 0; $i -lt $names.Count; $i++) {
+    $groups += [pscustomobject]@{
+        name = $names[$i]; source = (Join-Path $Rec $names[$i]); destination = (Join-Path $Trash $names[$i])
+        expected_count = $counts[$i]
+        expected = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::Ordinal)
+    }
+}
+# Each row: group, prefix, original count, original receipt size/hash, source-bindings hash, retained filename.
+$receiptRows = @(
+    @(0, '', 333, 68335, 'd37e7adc007d9fbe5ae2f5c7f89457455c33e9bb7684bcda35ddcb560ea21656', 'd834d994d3091d0d3db1e027f4d0dc8eb81bac023b46be27f1b429209de8c3e0', 'fixture-v2-reconstruction.json'),
+    @(1, '', 136, 23910, '1ffbd50ce9d4d10242e85ff1dae70fb6f5554dd4fa670af3b286b6009639fb64', '6ddea5ed1c12036094b7d667e9c7868d5e0633384a9c02b2da2e6aa77bff2d47', 'api59f-reconstruction.json'),
+    @(2, 'captures333', 333, 68335, 'a657f015cdfda3afbd772af98bf08b996b6ea3c84621631da2455ea8721432fa', '19bd638d59031a7c8db0752135bd98075a2aa3cd96ff7ceaf4423187120ad6bd', 'checkpoint-captures333-reconstruction.json'),
+    @(2, 'preparation133', 133, 24195, 'f4ca1cab1726d0ac776984388e86ab2d6ed025b5aa1b27210e77d8d113b11ac6', 'f6291141e747d821f22f174a0b4db38e808fb6bd9b8ed53eabee7f87f5e56090', 'checkpoint-preparation133-reconstruction.json'),
+    @(2, 'prior-api4', 4, 1038, '2978d79109a49175cb9a41c6fe1bed1c1301daf814d7f82c64a201deebb468b6', '88e603b74b24ac13d3f1462194c7ae4546b96a357b195730f89a5695988a6fb7', 'checkpoint-prior-api4-reconstruction.json'),
+    @(2, 'prior-full20', 20, 3689, 'febdf001692bbe4b815f2544ca39f622a7bfbda3014126457a40d72f2aabe36d', '4cdec1bc4436a72f7e75df04ee78c78082c3dc9f07fc24d6911267bc83cb6af9', 'checkpoint-prior-full20-reconstruction.json')
+)
+# These exact local counterparts are outside all three move candidates.
+$counterpartRows = @(
+    @('root-artifact-verification.json', 'source59f-closed-api-diagnostics-20261128\exact\supplements\checkpoint\root-artifact-verification.json', 2651, '268eb39883be5c649c2a43f919ce8ebc6f59ddb07d16c6991043bb110ff9e275'),
+    @('root-data-verification.json', 'source59f-closed-api-diagnostics-20261128\exact\supplements\checkpoint\root-data-verification.json', 1495, 'd3c3ee6042e87c05d1cfb2ea0ce99186b409850c3f60b4bdf4b7cea0f329702b'),
+    @('root-full130-owner-verification.json', 'source59f-closed-api-diagnostics-20261128\exact\supplements\checkpoint\root-full130-owner-verification.json', 42351, 'dc3659fbbafea76b3df8cb672d33b5323e19a37a399774a9da87e82e2de48f9c'),
+    @('root-full566-verification.json', 'source59f-closed-api-diagnostics-20261128\exact\supplements\checkpoint\root-full566-verification.json', 778, '2297a5b987c60244bd1c2c82f7d4253c1301637ee7e4359c8e24a06e75c78a55'),
+    @('root-old-cli-parser-v2.json', 'source59f-closed-api-diagnostics-20261128\exact\supplements\budget-v2\root-old-cli-parser-v2.json', 567, 'e1cfd647a23b02da9a8a893027e6da645143bc0098a4cbbb8b0da4551f4d8e19'),
+    @('old-cli-budget-replay-v2/summary.json', 'source59f-closed-api-diagnostics-20261128\exact\supplements\budget-v2\summary.json', 31076, '5d43ab87593f292636ff377996d17b2e5e7f3bb73d363a4484a7da8159511acb'),
+    @('old-cli-budget-replay-v2/top-level-terminal-ledger.json', 'old-cli-budget-analysis-20261128\top-level-terminal-ledger.json', 456870, '6a687a7e45efcf069e46e0bbafd36edcf09247e8f09e49467c59278925c34ea8')
+)
+$manifestPins = @(
+    @('original-full-v6-complete-captures-20261128\artifact-manifest.json', 'e6d697ad37b8bc9a892496d2dad6ad00759bfc367b4a3cd18a70ece88689d861'),
+    @('source59f-closed-api-diagnostics-20261128\artifact-manifest.json', '606fae7b90c1c18c37adff72aa73410e0c3668fb945ee21f44e196ce0aedeed6'),
+    @('successor59f-preparation-20261128\artifact-manifest.json', 'ca61ea6352390bd9d2fd946bf2ece66c42e6741b0d1629e0f7f012f121f21029'),
+    @('original-full-v6-failure-20261128\artifact-manifest.json', 'dd9dcfebea9a645fb0bea0610d5f533a65089775e87ab4b34597834c2b620c7c'),
+    @('closed-api-failure-20261128\artifact-manifest.json', '1f1e4cf51a4a4548c492c2737028b81b38233c047d8c89790d9fc7f917155117'),
+    @('old-cli-budget-analysis-20261128\artifact-manifest.json', 'bcfeae39f1c96fc4656e5f0490497649545919dbc437e6577d464dd6b5df8252')
+)
+Assert-PlainAncestors $Rec
+Assert-PlainAncestors $Capsules
+Assert-PlainAncestors '@@RECOVERY_REPLAY_TRASH_BASE@@'
+foreach ($fresh in @($Keep, $ManifestPath, $Trash)) {
+    if (Test-Path -LiteralPath $fresh) { throw "Fresh output already exists: $fresh" }
+}
+$localManifestChecks = [Collections.Generic.List[object]]::new()
+foreach ($row in $manifestPins) {
+    $path = Join-Path $Capsules $row[0]
+    Assert-PlainAncestors ([IO.Path]::GetDirectoryName($path))
+    $actual = Measure-File $path
+    if ($actual.sha256 -cne $row[1]) { throw "Local capsule manifest changed: $path" }
+    $localManifestChecks.Add([pscustomobject]@{ path = $path; bytes = $actual.bytes; sha256 = $actual.sha256 })
+}
+$retained = [Collections.Generic.List[object]]::new()
+foreach ($row in $receiptRows) {
+    $group = $groups[[int]$row[0]]
+    Assert-PlainAncestors $group.source
+    $prefix = [string]$row[1]
+    $rel = if ($prefix) { $prefix + '/reconstruction-receipt.json' } else { 'reconstruction-receipt.json' }
+    $path = Join-Path $group.source $rel
+    Assert-PlainAncestors ([IO.Path]::GetDirectoryName($path))
+    $raw = Read-PinnedBytes $path ([long]$row[3]) $row[4]
+    $receipt = ConvertFrom-Json -InputObject ([Text.Encoding]::UTF8.GetString($raw))
+    if ($receipt.schema -cne 'original-v6-exact-data-reconstruction-v1' -or $receipt.status -cne 'EXACT_DATA_RECONSTRUCTED') { throw "Wrong reconstruction schema/status: $path" }
+    if ($receipt.source_bindings_sha256 -cne $row[5] -or @($receipt.files).Count -ne [int]$row[2]) { throw "Wrong reconstruction binding/count: $path" }
+    if ($receipt.sources_imported_or_executed -ne $false -or $receipt.qualification_inherited -ne $false) { throw "Unexpected reconstruction scope: $path" }
+    Add-Expected $group $rel ([long]$row[3]) $row[4]
+    foreach ($item in $receipt.files) {
+        $payloadRel = if ($prefix) { $prefix + '/' + $item.path } else { [string]$item.path }
+        Add-Expected $group $payloadRel ([long]$item.bytes) ([string]$item.sha256)
+    }
+    $retained.Add([pscustomobject]@{ source = $path; destination = (Join-Path $Keep $row[6]); bytes = [long]$row[3]; sha256 = $row[4]; raw = $raw })
+}
+$counterpartChecks = [Collections.Generic.List[object]]::new()
+foreach ($row in $counterpartRows) {
+    $path = Join-Path $Capsules $row[1]
+    Assert-PlainAncestors ([IO.Path]::GetDirectoryName($path))
+    $actual = Assert-Measurement $path ([long]$row[2]) $row[3]
+    Add-Expected $groups[2] $row[0] ([long]$row[2]) $row[3]
+    $counterpartChecks.Add([pscustomobject]@{ source_relative = $row[0]; local_counterpart = $path; bytes = $actual.bytes; sha256 = $actual.sha256 })
+}
+$verifiedGroups = [Collections.Generic.List[object]]::new()
+$totalFiles = 0
+$totalBytes = [long]0
+foreach ($group in $groups) {
+    if ($group.expected.Count -ne $group.expected_count) { throw "Wrong expected filename count: $($group.name)" }
+    $actualFiles = Enumerate-PlainFiles $group.source
+    if ($actualFiles.Count -ne $group.expected.Count) { throw "Extra or missing files: $($group.name)" }
+    foreach ($rel in $actualFiles.Keys) { if (-not $group.expected.ContainsKey($rel)) { throw "Unexpected file: $rel" } }
+    $records = [Collections.Generic.List[object]]::new()
+    $paths = [string[]]@($group.expected.Keys)
+    [Array]::Sort($paths, [StringComparer]::Ordinal)
+    $groupBytes = [long]0
+    foreach ($rel in $paths) {
+        $pin = $group.expected[$rel]
+        $actual = Assert-Measurement $actualFiles[$rel] $pin.bytes $pin.sha256
+        $records.Add([pscustomobject]@{ path = $rel; bytes = $actual.bytes; sha256 = $actual.sha256 })
+        $groupBytes += $actual.bytes
+    }
+    $verifiedGroups.Add([pscustomobject]@{ source = $group.source; proposed_destination = $group.destination; files = $records.ToArray(); file_count = $records.Count; bytes = $groupBytes; moved = $false })
+    $totalFiles += $records.Count
+    $totalBytes += $groupBytes
+}
+if ($totalFiles -ne 972 -or $totalBytes -ne 141722570) { throw 'Complete replay inventory count/extent mismatch' }
+
+# All source and counterpart checks must succeed before preserving any receipt.
+[void][IO.Directory]::CreateDirectory($Keep)
+Assert-PlainAncestors $Keep
+$preserved = [Collections.Generic.List[object]]::new()
+foreach ($item in $retained) {
+    Write-NewBytes $item.destination $item.raw
+    $actual = Assert-Measurement $item.destination $item.bytes $item.sha256
+    $preserved.Add([pscustomobject]@{ source = $item.source; retained_copy = $item.destination; bytes = $actual.bytes; sha256 = $actual.sha256; copied_with_create_new = $true })
+}
+if ($preserved.Count -ne 6) { throw 'Receipt preservation incomplete' }
+$manifest = [ordered]@{
+    schema = 'closed-replay-duplicate-preflight-v1'
+    status = 'VERIFIED_LOCAL_DUPLICATE_CANDIDATES'
+    observed_at_utc = [DateTime]::UtcNow.ToString('o')
+    source_file_count = $totalFiles
+    source_bytes = $totalBytes
+    local_capsule_manifests = $localManifestChecks.ToArray()
+    exact_local_counterparts = $counterpartChecks.ToArray()
+    preserved_receipts = $preserved.ToArray()
+    candidates = $verifiedGroups.ToArray()
+    remote_publication_proven = $false
+    capsule_payloads_previously_root_verified = $true
+    native_or_test_execution = $false
+    native_closure_re_received = $false
+    qualification_inherited = $false
+    moves_performed = $false
+    deletions_performed = $false
+    trash_created_or_written = $false
+    keep_root = $Keep
+    note = 'Root owns the separate purpose-built move operation after reviewing this actual DATA result; original FAIL/UNKNOWN verdicts are unchanged.'
+}
+$json = ($manifest | ConvertTo-Json -Depth 20) + [char]10
+$encoding = [Text.UTF8Encoding]::new($false)
+Write-NewBytes $ManifestPath ($encoding.GetBytes($json))
+$manifestMeasure = Measure-File $ManifestPath
+[pscustomobject]@{ status = $manifest.status; manifest = $ManifestPath; bytes = $manifestMeasure.bytes; sha256 = $manifestMeasure.sha256; source_files = $totalFiles; preserved_receipts = $preserved.Count; moves_performed = $false } | ConvertTo-Json -Compress

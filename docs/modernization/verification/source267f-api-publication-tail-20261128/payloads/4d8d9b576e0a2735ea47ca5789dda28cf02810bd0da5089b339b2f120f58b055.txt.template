@@ -1,0 +1,180 @@
+# Namespace admission diagnostic driver — Source59f
+
+## Содержание
+
+1. [Область и фактический статус](#1-область-и-фактический-статус)
+2. [Что переиспользуется](#2-что-переиспользуется)
+3. [Входы и среда](#3-входы-и-среда)
+4. [Один original invocation](#4-один-original-invocation)
+5. [Приём и UNKNOWN](#5-приём-и-unknown)
+6. [Проверки и ограничения](#6-проверки-и-ограничения)
+7. [Термины](#7-термины)
+
+## 1. Область и фактический статус
+
+Подготовлен отдельный caller для одной диагностической попытки default API image.
+Caller, внешний launcher и runtime не исполнялись автором. Root отдельно завершил
+сборку timing helper в stage27: PASS/CLOSED, три команды, шесть captures,
+сборка 17.2609463 s; helper 6 558 720 B, SHA256 1d4e95dbd3fbfeb5f35ff43151bf00e71d237d0acf64e6d97e181ed52cffe0ce.
+Это квалификация компиляции auxiliary, не API suite.
+
+Сохраняется исходный image 38 868 992 B, SHA256 d237704913484fe2931860793badbfdaadb3bb216f5c436b8d01bdf2301d3e60
+из CLOSED API subtree. Его предыдущая namespace admission завершилась до запуска
+API tests как FAIL/CLOSED. Новый request не переименовывает и не продолжает старый.
+Source — неизменённая изолированная копия commit 59f618ebfbf6d9f52c6994d68586e3c2ebc202a8,
+tree 03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1, 3369 файлов.
+
+Timing candidate сохраняет 5 s admission, полный набор четырёх Go test arguments,
+5 min test timeout, 10 s native cleanup, Sync и прежние проверки. Admission-only mode
+в нём отсутствует: успешный admission запускает весь переданный API image.
+Флаги выбора тестов не добавляются.
+
+## 2. Что переиспользуется
+
+Таблица 1. Владельцы и входы композиции.
+
+| Компонент | Использование |
+|---|---|
+| Existing run_owned_commands.py | Импортируется только как модуль; используется metadata class CoreRun. Его parent/worker entrypoint не вызывается. |
+| Existing guard-custody.py + windows_job.py | Неизменённая named/external Popen ветка с defer_output и prebound physical_receiver. |
+| namespace_receiving_v2.fragment.py | Неизменённые typed terminal и one-shot original reader. |
+| namespace_qualification.fragment.py | Неизменённые семь обязательных namespace/API roots. |
+| owner_receiving.fragment.py | Неизменённые native_settled и finalize_owner_capture. |
+| Frozen adapter template | AST выбирает только flags_are_literal; hash точного function slice проверяется. Full adapter/core не импортируются. |
+| private_scope.py | Прежний helper с ровно двумя literal replacements RUNS/ARTIFACTS. Вызывается только create_private_run_scope; Source/.scratch не создаётся. |
+| Original .NET launcher | Прежний 64-line Start/WaitForExit/Dispose lifecycle; восемь строк меняют bindings/labels. |
+
+Новый caller содержит single-invocation orchestration и HOLD. Логика существующих
+native owner и receiver fragments в него не скопирована. Точные внешние pins
+находятся в runtime-inputs.json и source-reuse.json. source-reuse-delta.patch
+показывает две производные правки; new-caller.patch показывает новый caller целиком.
+
+## 3. Входы и среда
+
+Таблица 2. Конкретные пути новой попытки.
+
+| Роль | Путь |
+|---|---|
+| Source | @@RECOVERY_APPROVED_WORK_AREA@@\pub666-acceptance-20261128-v2 |
+| Overlay | @@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\inputs-successor33-v1\namespace-admission-diagnostic-driver-v1\namespace-timing-overlay.json |
+| Скомпилированный helper | @@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\namespace-admission-diagnostic-build-v1\namespace-timing-owner.exe |
+| Новая копия incoming image | @@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\namespace-admission-diagnostic-inputs-v1\incoming-original.exe |
+| Metadata/captures caller | @@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\namespace-admission-diagnostic-run-v1 |
+| Защищённый private scope | @@RECOVERY_APPROVED_WORK_AREA@@\nt9\api |
+| Пустой namespace parent | @@RECOVERY_APPROVED_WORK_AREA@@\nt9\api\n |
+| Execution image, создаваемый owner | @@RECOVERY_APPROVED_WORK_AREA@@\nt9\api\n\r\bin\api.test.exe |
+| Runtime temp до owner | @@RECOVERY_APPROVED_WORK_AREA@@\nt9\api\tmp |
+| Runtime temp внутри owner | @@RECOVERY_APPROVED_WORK_AREA@@\nt9\api\n\r\temp |
+
+Overlay использует штатный Go -overlay Replace map: исходный
+tools/test-recovery-namespace/main_windows.go представлен timing main,
+а виртуальный соседний prebuilt_windows.go — timing prebuilt. Source files
+не меняются. Документированное поведение прочитано в установленном
+@@RECOVERY_GO_DISTRIBUTION_ROOT@@\ucrt64\lib\go\src\cmd\go\internal\work\build.go,
+описание -overlay. Runtime сам overlay не использует.
+
+GOCACHE=@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\cli-focused59f-baseline-v2\private\go-build
+GOMODCACHE=@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\cli-focused59f-baseline-v2\private\go-mod
+
+Последний cache consumer — CLOSED stage28; его actual receiving pin
+159301c3c5b9018ee05894e859b3a1fb3ef33f4c0947672898b26c5eeb4adc8c. Stage27 остаётся compile provenance.
+Root передаёт cache исключительно следующему consumer после closure.
+Runtime не берёт cache из UNKNOWN full59f.
+
+Environment — явный dict. HOME/USERPROFILE/SERENA_HOME используют private profile;
+APPDATA/LOCALAPPDATA/GOPATH — private scope. GOENV/GOWORK=off,
+GOTOOLCHAIN=local, GOOS=windows, GOARCH=amd64, CGO_ENABLED=1, GOPROXY=off.
+Runtime GOFLAGS=-mod=readonly -ldflags=-H=windowsgui, как у исходного API receiver.
+OS/ProgramFiles/ProgramFiles(x86) сохранены явно; GIT_ALLOW_PROTOCOL отсутствует.
+Ambient MCPHUB_* не копируются. Default image не получает tagged attach Product.
+
+## 4. Один original invocation
+
+Caller сначала проверяет inputs pins, исходный CLOSED API receiving, compile
+receiving, latest cache receiving и все 3369 Source files по bytes. Затем существующий
+helper создаёт fresh private scope; incoming image копируется эксклюзивно и
+проверяется по bytes/SHA. Эти действия происходят до пятисекундного admission
+таймера namespace controller.
+
+Новый nonce получается через secrets.token_hex(16). Request JSON пишется
+эксклюзивно, flush/fsync/close завершаются; SHA вычисляется из записанных bytes.
+До Popen формируется точный namespace binding и prebound two-argument receiver.
+Ни nonce, ни SHA прежнего запроса не переиспользуются.
+
+Controller argv хранит новый image/helper/source/parent и заканчивается точно:
+
+```text
+--test-timeout 5m
+--request-sha256 <actual new request SHA>
+--request-nonce <actual new nonce>
+--
+-test.paniconexit0
+-test.v=test2json
+-test.count=1
+-test.timeout=5m0s
+```
+
+Parent проверяет фактическое отсутствие enclosing Job. Existing guard сохраняет
+тот же Popen и capture handles, вызывает wait с прежними 320 s и не делает timeout
+kill. Namespace auxiliary сам владеет API process/Job/IO через
+RunContainedStreamObserved. Внешний .NET Process удерживается до original Wait,
+затем Dispose и эксклюзивной записи parent record.
+
+Root запускает launch_namespace_diagnostic_original.ps1 с точным -PlanSHA
+runtime-inputs.json после own review. Этот пакет не является разрешением запуска.
+
+## 5. Приём и UNKNOWN
+
+Prechild result принимается прежним typed receiver: exact four-field
+api-namespace-prechild-refusal-v1, полное равенство binding,
+contained_stage_entered=false и actual nonzero controller exit.
+Только после finalize_owner_capture и original capture close возникает
+FAIL/CLOSED с доступными diagnostic bytes. Timing marks остаются в исходном
+failure string; JSON schema и исходная %w cause не заменяются.
+
+Normal result требует прежних native/IO settlement predicates и exact image,
+cwd,args,tags binding. Namespace suite contract PASS дополнительно требует
+root exit 0, неизменность incoming/execution image, четыре observations и семь
+обязательных roots по одному RUN/PASS без FAIL/SKIP. Optional admission_marks
+predicate не меняет.
+
+Если direct process или nested proof не закрыты, caller сохраняет original Run,
+Popen, callback и holders; namespace owner сохраняет свои исходные handles/sinks.
+HOLD вызывает только существующий receive_failed_worker_closure на тех же
+объектах. Он не запускает новые команды, не открывает PID заново, не читает
+captures/Source/cache и не даёт времени для новой квалификации.
+
+Позднее фактическое CLOSED записывается отдельно с original gate FAIL,
+capture_access_issued=false и source_or_cache_access_issued=false. Неудача
+записи после фактического closure не превращается в повторный execution.
+
+## 6. Проверки и ограничения
+
+Автор проверил композицию по исходникам, exact reference pins, два literal
+scope changes, восемь launcher binding/label changes и JSON inputs.
+Python AST/native execution caller и PowerShell parser автор не запускал.
+Root независимо читает код и выполняет необходимые DATA/native проверки.
+
+PASS этого caller относится к namespace contract этой диагностической попытки.
+Полный API inventory receiving здесь не реализован:
+full_api_inventory_qualified=false. Обе обязательные repository literal gates
+этим запуском не заменяются: literal_repository_gate_passed=false.
+
+Source/image hashes до admission прогревают часть файлового cache, как и
+подготовка исходного incoming image. Timing marks отражают эту конкретную
+попытку, включая scheduler/IO задержки; они не доказывают причину прежних 5 s
+без сопоставления фактических наблюдений. Никакая Sync операция не удалена.
+
+Исходный UNKNOWN full59f, CLI, его Source/cache и прежние inputs не изменяются.
+Все private outputs сохраняются при failure; автоматического удаления нет.
+Для PR этот рабочий пакет должен пройти существующую transparent-template
+проекцию host paths; native binaries и cache не выдаются за sources.
+
+## 7. Термины
+
+- API — application programming interface; здесь Go package internal/api.
+- DATA — чтение/сборка метаданных без утверждения о тестовом результате.
+- Native owner — объект, сохраняющий исходные Windows process/Job handles.
+- CLOSED — принятый факт физического завершения соответствующих original owners.
+- UNKNOWN — физическое завершение не подтверждено; исходная custody сохраняется.
+- HOLD — удержание тех же original объектов без нового execution или timeout kill.

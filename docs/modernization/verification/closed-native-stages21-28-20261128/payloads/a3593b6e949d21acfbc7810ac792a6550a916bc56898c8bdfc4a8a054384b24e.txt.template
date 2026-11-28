@@ -1,0 +1,77 @@
+--- copy_closed_runtime_caches.original.py.txt
++++ copy_closed_product_caches.py
+@@ -14,12 +14,12 @@
+ import types
+ 
+ TASK = Path(r"@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1")
+-PRIOR = TASK / "original-helper-cache-warm-v7"
+-RUNTIME_OUTPUT = Path(r"@@RECOVERY_APPROVED_WORK_AREA@@\r7\full59f")
+-PLAN = TASK / "inputs-successor33-v1" / "warm-cache" / "helper-cache-warm-v7-plan.json"
+-PLAN_SHA = "bf28e617ee0e319ec4c085d13ee0c16b7536552bac92f28070138835d8286fb6"
++PRIOR = TASK / "successor-product-only-inputs-v2"
++RUNTIME_OUTPUT = TASK / "cli-focused59f-baseline-v2"
++PLAN = TASK / "inputs-successor33-v1" / "product-continuation-v2" / "successor-product-only-inputs-v2-plan.json"
++PLAN_SHA = "f6fd52b9a3d653b87bae7e51c1264ee27bb2a5b692219b36c9213a59a8b7fca5"
+ EXECUTION = PRIOR / "commands" / "execution.json"
+-EXECUTION_SHA = "7f6cd144b02ecc796a5fa1506c19b72d50a6a65816b508a902689535c13671cd"
++EXECUTION_SHA = "a5992a80253c4e3f14de1f1ccecf37d8c24b897652b78a5c56598027ba054c12"
+ RUNNER_SHA = "6d16652d4893273b7e9d584920892ce5f5917622e7e242a62eb78ec824bcfb93"
+ SCHEMA = "fresh-owned-commands-v1"
+ REPARSE = 0x400
+@@ -97,7 +97,7 @@
+     need(re.fullmatch(r"[0-9a-f]{64}", parent_sha) is not None, "exact prior parent pin required")
+     need(output == RUNTIME_OUTPUT
+          and not output.is_relative_to(PRIOR) and not PRIOR.is_relative_to(output),
+-         "new output must be the exact approved fresh r7/full59f runtime owner")
++         "new output must be the exact approved fresh cli-focused59f-baseline-v2 owner")
+     parent_path = PRIOR / "parent.json"
+     parent = json.loads(pinned(parent_path, parent_sha))
+     need(parent.get("schema") == SCHEMA + "-parent" and parent.get("status") == "PASS"
+@@ -132,18 +132,18 @@
+     exec(compile(runner_raw, str(runner_path), "exec"), receiver.__dict__)
+     need(receiver.receive_execution(plan, execution) == "PASS", "original DATA receiver refused the run")
+ 
+-    # Receive the immutable warm producer's Source04e evidence. The currently
+-    # authorized Source may have advanced; no live Source04e bytes are borrowed.
+-    historical_map_path = TASK / "inputs-successor33-v1" / "warm-cache" / "source04e-input-sha256.json"
+-    historical_map_sha = "0469ae9723b651dad46cc35b1e2365a3325785264c2b5d6ad8fe44d28c109697"
+-    root_receiving_path = TASK / "inputs-successor33-v1" / "warm-cache" / "warm-v7-root-receiving.json"
+-    root_receiving_sha = "9e418d2bcf526571331b1052b8660070e159978fcc4fddeccee9213474a1a3ce"
++    # Receive the immutable Product-only v2 producer's Source59f evidence.
++    # No live Source or current full-run cache is borrowed.
++    historical_map_path = TASK / "inputs-successor33-v1" / "source-binding" / "source59f-input-sha256.json"
++    historical_map_sha = "e8c3fc2f577a130f92ba4eee7f8eee7153afc032dee909557cf1156890917c06"
++    root_receiving_path = TASK / "inputs-successor33-v1" / "product-continuation-v2" / "successor-product-only-inputs-v2-root-receiving.json"
++    root_receiving_sha = "14e9a11dd5d82507d9faf984ea2ba0cb82f795dee8c75630c4f8280fc8a0da98"
+     history = json.loads(pinned(historical_map_path, historical_map_sha))
+     received = json.loads(pinned(root_receiving_path, root_receiving_sha))
+-    need(history.get("commit") == "04e5b4eadd6407cbff4e04ba453546d278314bd7"
+-         and history.get("tree") == "f68f7584dba7744e7607b07f615758f3ff633f54"
++    need(history.get("commit") == "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8"
++         and history.get("tree") == "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1"
+          and history.get("tracked_files") == 3369 and len(history.get("files", {})) == 3369,
+-         "closed historical Source04e map differs")
++         "closed historical Source59f map differs")
+     need(received.get("status") == "PASS" and received.get("physical_complete") is True
+          and received.get("source_commit") == history["commit"]
+          and received.get("source_tree") == history["tree"]
+@@ -151,10 +151,10 @@
+          and received.get("parent_sha256") == parent_sha
+          and received.get("execution_sha256") == EXECUTION_SHA
+          and received.get("input_files_verified") == len(plan["input_files"]),
+-         "original warm root receiving differs")
++         "original Product-only v2 root receiving differs")
+     need(all(plan["input_files"].get(str(Path(history["source_root"]) / relative)) == expected
+              for relative, expected in history["files"].items()),
+-         "immutable warm plan does not bind all Source04e bytes")
++         "immutable Product-only v2 plan does not bind all Source59f bytes")
+ 
+     own_path = ordinary(Path(__file__).absolute(), False)
+     pins = {str(PLAN): PLAN_SHA, str(EXECUTION): EXECUTION_SHA, str(parent_path): parent_sha,
+@@ -208,5 +208,5 @@
+ 
+ 
+ if __name__ == "__main__":
+-    need(len(sys.argv)==3,"usage: copy_closed_runtime_caches.py NEW_OUTPUT PRIOR_PARENT_SHA256")
++    need(len(sys.argv)==3,"usage: copy_closed_product_caches.py NEW_OUTPUT PRIOR_PARENT_SHA256")
+     print(json.dumps(copy_closed_caches(sys.argv[1],sys.argv[2],dict(os.environ))))

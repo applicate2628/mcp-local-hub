@@ -1,0 +1,36 @@
+{
+  "schema": "namespace-admission-timing-candidate-v1",
+  "status": "FROZEN_FUTURE_ONLY_NOT_COMPILED",
+  "original_sources": {
+    "main_windows.go": "4e91b8ce877400a91a4f315b68a166ae3d2c7c19d4963d52ade521f03f2ac4b4",
+    "prebuilt_windows.go": "2fc1016b4eff51c77a3c0e342de14d938b3f39b6a67c438b04ef262e09d8eeed"
+  },
+  "files": {
+    "main_windows.go": {
+      "bytes": 25608,
+      "lines": 669,
+      "sha256": "41e7cda8cf174a27a0380a93ad3c89881692d9055d771dae872793f6726ef96d"
+    },
+    "prebuilt_windows.go": {
+      "bytes": 20377,
+      "lines": 488,
+      "sha256": "60556af6afce055f7ab3aaea3819d919abeafc6d11b5a88e0fb06a94eedc83a6"
+    },
+    "source-delta.patch": {
+      "bytes": 10209,
+      "lines": 264,
+      "sha256": "96747185ab5c80bc71dcafb3c8aec100ffda8f2049ebd459f5f9958938185d1c"
+    },
+    "README.md": {
+      "bytes": 4267,
+      "lines": 81,
+      "sha256": "296d89a0191c857e4a54780f10127f067a75aac2b9dc7a7948395933af5f9693"
+    }
+  },
+  "removing_only_timing_additions_restores_original_bytes": true,
+  "original_copy_sync_retained": true,
+  "source_files_written": false,
+  "go_compiled": false,
+  "native_helper_or_test_executed": false,
+  "deadline_or_predicate_changes": false
+}

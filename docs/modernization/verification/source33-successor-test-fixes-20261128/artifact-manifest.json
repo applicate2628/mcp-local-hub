@@ -8,8 +8,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 4984,
-      "sha256": "872350197228d76a352a42db86e5d1333aa97ee137c908f49bff60859c39349d"
+      "bytes": 5182,
+      "sha256": "d6a004c258931986ff32a6c7d90d88e4738f9d6b8e4310f7a25fce5ab8cf36ab"
     },
     {
       "path": "evidence.json",
@@ -32,37 +32,37 @@
       "sha256": "b5c3f20037181b239270a94ad8e7d0453adb7893829999ae52a6242bb89b4781"
     },
     {
-      "path": "afterimages/internal/cli/upgrade_gui_qualified_fixture_windows_test.go",
+      "path": "afterimages/internal/cli/upgrade_gui_qualified_fixture_windows_test.go.txt",
       "bytes": 19391,
       "sha256": "71025f02841e50046c350e09f762f0f9033aaca8860299f118be29be4b4e177c"
     },
     {
-      "path": "afterimages/internal/cli/windows_canonical_entry_gui_native_replay_windows_test.go",
+      "path": "afterimages/internal/cli/windows_canonical_entry_gui_native_replay_windows_test.go.txt",
       "bytes": 16861,
       "sha256": "d3a92b53031e01c5d37117b2feb28a8135c528215934d68939220547b206aa1e"
     },
     {
-      "path": "afterimages/internal/cli/supervisor_launch_successor_runtime_windows_test.go",
+      "path": "afterimages/internal/cli/supervisor_launch_successor_runtime_windows_test.go.txt",
       "bytes": 8124,
       "sha256": "584399c8997095b10e1fe3b32ae47e352da4201734d252dec8cb0847dd9bbb59"
     },
     {
-      "path": "afterimages/internal/cli/windows_product_preflight_original_windows_test.go",
+      "path": "afterimages/internal/cli/windows_product_preflight_original_windows_test.go.txt",
       "bytes": 6511,
       "sha256": "af3332378f7e3b53369fc95ec5967633a2b119eb5aa74fe4dbe6548302e06fc8"
     },
     {
-      "path": "afterimages/internal/cli/attach_client_real_supervisor_windows_test.go",
+      "path": "afterimages/internal/cli/attach_client_real_supervisor_windows_test.go.txt",
       "bytes": 10009,
       "sha256": "aea69265d2fc7d7441bc63a52e9045b50f7b6211dd04698bb11e58686ab8a4f2"
     },
     {
-      "path": "afterimages/internal/process/run_strictly_contained_windows_test.go",
+      "path": "afterimages/internal/process/run_strictly_contained_windows_test.go.txt",
       "bytes": 23136,
       "sha256": "bb9a34680c414559562e38fd90342d5efb654b7222dcd2514e42c0fc2f331893"
     },
     {
-      "path": "afterimages/internal/process/jobobject_windows_test.go",
+      "path": "afterimages/internal/process/jobobject_windows_test.go.txt",
       "bytes": 110200,
       "sha256": "43fb4e9b0a20b399038743fc24fb5ad1b3af7b61cf95b2e06e677d575a8d990f"
     }

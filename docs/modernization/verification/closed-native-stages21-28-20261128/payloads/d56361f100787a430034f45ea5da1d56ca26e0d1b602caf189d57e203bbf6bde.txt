@@ -1,0 +1,63 @@
+{
+  "schema": "cli-prespawn-barrier-candidate-v1",
+  "status": "DATA_ONLY_DRAFT_NOT_APPLIED_NOT_RUN",
+  "source_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+  "source_tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+  "source_relative_path": "internal/cli/supervise_prespawn_binary_gate_test.go",
+  "before": {
+    "bytes": 32425,
+    "sha256": "e6f4c4f1304f8d29064e034694155bf378cd248ce7ebc25f6be8e3707a777acc",
+    "git_blob": "9d4a403e4d45794681a960ba357301506ef652eb"
+  },
+  "after": {
+    "file": "supervise_prespawn_binary_gate_test.go.after.txt",
+    "bytes": 32663,
+    "sha256": "5e3a6517a9fed3a329cea60d12915965720b37c2bb6a865880d3c0c05ed48feb"
+  },
+  "patch": {
+    "file": "prespawn-barrier.patch",
+    "bytes": 1040,
+    "sha256": "60b608c3e807daae25158334d347da5546c8587e4eccc608df0e7bfb03fb30b8",
+    "hunks": 1
+  },
+  "scope": {
+    "tracked_files_changed": 1,
+    "production_files_changed": 0,
+    "assertions_changed": 0,
+    "imports_changed": 0,
+    "tail_bound_seconds": 2,
+    "enqueue_and_ack_share_context": true,
+    "original_event_count_and_pacing_unchanged": true,
+    "original_cancel_and_join_unchanged": true
+  },
+  "data_checks": {
+    "source_sha256_matches_frozen_map": true,
+    "source_bytes": 32425,
+    "single_hunk_reconstructs_afterimage": true
+  },
+  "runtime_checks": {
+    "go_parser": false,
+    "compiler": false,
+    "tests": false,
+    "pre_fix_red_execution": false,
+    "source_applied": false,
+    "full_gate": false
+  },
+  "files": [
+    {
+      "name": "supervise_prespawn_binary_gate_test.go.after.txt",
+      "bytes": 32663,
+      "sha256": "5e3a6517a9fed3a329cea60d12915965720b37c2bb6a865880d3c0c05ed48feb"
+    },
+    {
+      "name": "prespawn-barrier.patch",
+      "bytes": 1040,
+      "sha256": "60b608c3e807daae25158334d347da5546c8587e4eccc608df0e7bfb03fb30b8"
+    },
+    {
+      "name": "README.md",
+      "bytes": 3409,
+      "sha256": "0ccd6a521a5e88084179b6e7b2fc37ab6c976583e09d90cd2182a8b762fdc294"
+    }
+  ]
+}

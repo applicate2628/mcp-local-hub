@@ -1,0 +1,19 @@
+{
+    "schema":  "root-fixture-v2-exact-data-verification-v2",
+    "prior_wrapper_summary_error":  "PowerShell case-insensitive M/m collision after successful333 reconstruction and566 verification; runtime history unchanged",
+    "status":  "PASS",
+    "artifacts":  350,
+    "artifact_bytes":  50613722,
+    "original_files":  333,
+    "all_capture_paths":  566,
+    "historical_qualification":  "FAIL/CLOSED",
+    "manifest_sha256":  "e6d697ad37b8bc9a892496d2dad6ad00759bfc367b4a3cd18a70ece88689d861",
+    "bindings_sha256":  "d834d994d3091d0d3db1e027f4d0dc8eb81bac023b46be27f1b429209de8c3e0",
+    "renderer_sha256":  "bd11a78a61638056b66ff9c25b203d6e19245f337b2a1e6e55c23e8cc21fed7c",
+    "materializer_sha256":  "bdc5d8a21ce573445ee2cdd2846f196823c7e262be0846a170d5a32ade70ff21",
+    "reconstruction_sha256":  "d37e7adc007d9fbe5ae2f5c7f89457455c33e9bb7684bcda35ddcb560ea21656",
+    "captures_receipt_sha256":  "2297a5b987c60244bd1c2c82f7d4253c1301637ee7e4359c8e24a06e75c78a55",
+    "native_or_test_execution":  false,
+    "scanner_or_policy_modified":  false,
+    "publication_authority":  false
+}

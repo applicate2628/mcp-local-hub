@@ -1,0 +1,264 @@
+--- namespace-candidate/main_windows.go
++++ namespace-admission-timing-candidate-v1/main_windows.go
+@@ -68,6 +68,13 @@
+ 	requestNonce := flag.String("request-nonce", "", "original full-suite issuer request nonce")
+ 	flag.Parse()
+ 	wholeSuite := *testBinary != ""
++	var admissionMarks []namespaceAdmissionMark
++	mark := func(stage string) {
++		if wholeSuite {
++			admissionMarks = append(admissionMarks, namespaceAdmissionMark{Stage: stage, ElapsedNS: time.Since(started).Nanoseconds()})
++		}
++	}
++	mark("arguments:parsed")
+ 	if !wholeSuite && (*requestSHA256 != "" || *requestNonce != "") {
+ 		return errors.New("issuer request binding requires a supplied API binary")
+ 	}
+@@ -128,6 +135,17 @@
+ 			returned = errors.Join(returned, publishNamespacePrechildRefusal(refusalBinding, parentPinned, stageEntered, returned))
+ 		}
+ 	}()
++	// Registered after the existing refusal publisher: preserve its exact wire
++	// and original cause, adding timing DATA only to an actual pre-child error.
++	defer func() {
++		if wholeSuite && !stageEntered && returned != nil {
++			mark("pre-child-refusal")
++			if raw, err := json.Marshal(admissionMarks); err == nil {
++				returned = fmt.Errorf("namespace admission marks=%s: %w", raw, returned)
++			}
++		}
++	}()
++	mark("tool-path-pins:begin")
+ 	for index, entry := range []struct {
+ 		path      string
+ 		directory bool
+@@ -144,9 +162,10 @@
+ 			parentPinned = true
+ 		}
+ 	}
++	mark("tool-path-pins:end")
+ 	var suite *namespaceSuiteInput
+ 	if wholeSuite {
+-		suite, err = prepareNamespaceSuite(admission, repo, parent, *testBinary, *expectedSHA256, *sourceDir, *testStatePathEnv, flag.Args(), &pins)
++		suite, err = prepareNamespaceSuite(admission, repo, parent, *testBinary, *expectedSHA256, *sourceDir, *testStatePathEnv, flag.Args(), &pins, mark)
+ 		if err != nil {
+ 			return err
+ 		}
+@@ -155,6 +174,7 @@
+ 	if wholeSuite {
+ 		diagnostics = os.Stderr
+ 	}
++	mark("private-directories:begin")
+ 	var nonce [16]byte
+ 	if _, err := rand.Read(nonce[:]); err != nil {
+ 		return err
+@@ -194,6 +214,7 @@
+ 	}
+ 	runtime.KeepAlive(sd)
+ 	fmt.Fprintln(diagnostics, "Private evidence root:", root)
++	mark("private-directories:end")
+ 
+ 	sourceLeaves := []string{"go.mod", "go.sum", "internal/api/secrets_init_recovery_test.go", "internal/api/secrets_init_recovery_directory_windows.go", "tools/test-recovery-namespace/main_windows.go", "scripts/test-recovery-namespace/helper.ps1"}
+ 	if wholeSuite {
+@@ -205,6 +226,7 @@
+ 		if err := admission.Err(); err != nil {
+ 			return err
+ 		}
++		mark("source-leaf:" + leaf + ":begin")
+ 		path := filepath.Join(repo, filepath.FromSlash(leaf))
+ 		held, err := pinOrdinaryPath(path, false)
+ 		if err != nil {
+@@ -220,16 +242,21 @@
+ 		if leaf == "scripts/test-recovery-namespace/helper.ps1" {
+ 			helper = raw
+ 		}
+-	}
++		mark("source-leaf:" + leaf + ":end")
++	}
++	mark("helper-copy:begin")
+ 	helperPath := filepath.Join(root, "helper.ps1")
+ 	if err := writeFresh(helperPath, helper); err != nil {
+ 		return err
+ 	}
++	mark("helper-copy:end")
++	mark("helper-pin:begin")
+ 	helperPins, err := pinOrdinaryPath(helperPath, false)
+ 	if err != nil {
+ 		return err
+ 	}
+ 	pins = append(pins, helperPins...)
++	mark("helper-pin:end")
+ 
+ 	binary := filepath.Join(root, "bin", "api.test.exe")
+ 	buildArgs := []string{"test", "-mod=readonly", "-c", "-o", binary}
+@@ -241,10 +268,13 @@
+ 	buildArgv := append([]string{goPath}, buildArgs...)
+ 	if wholeSuite {
+ 		buildArgs, buildArgv, tests = nil, nil, ""
++		mark("execution-copy:begin")
+ 		if err := copyNamespaceSuiteImage(suite, binary); err != nil {
+ 			return err
+ 		}
+-	}
++		mark("execution-copy:end")
++	}
++	mark("inputs-proof:begin")
+ 	if err := writeJSON(filepath.Join(root, "proof", "inputs.json"), struct {
+ 		Repository           string            `json:"repository"`
+ 		SelectedSourceSHA256 map[string]string `json:"selected_source_sha256"`
+@@ -259,6 +289,8 @@
+ 	}{repo, sourceHashes, goPath, pwsh, tests, *testStatePathEnv, buildArgv, wholeSuite, *sourceDir, append([]string(nil), flag.Args()...)}); err != nil {
+ 		return err
+ 	}
++	mark("inputs-proof:end")
++	mark("environment:begin")
+ 	envValues := map[string]string{
+ 		"GOTOOLCHAIN": "local", "GOPROXY": "off", "GOSUMDB": "off", "GOFLAGS": "", "GOWORK": "off",
+ 		"GOOS": "windows", "GOARCH": runtime.GOARCH,
+@@ -281,6 +313,7 @@
+ 		suite.Environment = envValues
+ 	}
+ 	env := fixtureEnvironment(envValues)
++	mark("environment:end")
+ 	if !wholeSuite {
+ 		build := exec.Command(goPath, buildArgs...)
+ 		build.Dir, build.Env = repo, env
+@@ -292,11 +325,14 @@
+ 	if err := admission.Err(); err != nil {
+ 		return err
+ 	}
++	mark("execution-pin:begin")
+ 	held, err := pinOrdinaryPath(binary, false)
+ 	if err != nil {
+ 		return err
+ 	}
+ 	pins = append(pins, held...)
++	mark("execution-pin:end")
++	mark("execution-readback:begin")
+ 	binaryFile, err := os.Open(binary)
+ 	if err != nil {
+ 		return err
+@@ -306,9 +342,12 @@
+ 	if err := errors.Join(hashErr, binaryFile.Close()); err != nil {
+ 		return err
+ 	}
++	mark("execution-readback:end")
++	mark("binary-proof:begin")
+ 	if err := writeJSON(filepath.Join(root, "proof", "binary.json"), map[string]string{"path": binary, "sha256": hex.EncodeToString(binaryDigest.Sum(nil))}); err != nil {
+ 		return err
+ 	}
++	mark("binary-proof:end")
+ 	if wholeSuite {
+ 		if hex.EncodeToString(binaryDigest.Sum(nil)) != suite.ExpectedSHA256 {
+ 			return errors.New("API receiver changed after admission")
+@@ -318,6 +357,8 @@
+ 		if err := admission.Err(); err != nil {
+ 			return err
+ 		}
++		mark("admission-ready")
++		suite.AdmissionMarks = admissionMarks
+ 		cmd := exec.Command(binary, suite.Args...)
+ 		cmd.Dir, cmd.Env = suite.SourceDir, env
+ 		workDeadline := started.Add(5*time.Second + *testTimeout)
+--- namespace-candidate/prebuilt_windows.go
++++ namespace-admission-timing-candidate-v1/prebuilt_windows.go
+@@ -34,11 +34,19 @@
+ 	"TestSupervisorStderrSinkOversize_MatchesRotationThreshold",
+ }
+ 
++// Monotonic elapsed times from the unchanged original admission start.
++// These observations never grant admission or native/IO closure.
++type namespaceAdmissionMark struct {
++	Stage     string `json:"stage"`
++	ElapsedNS int64  `json:"elapsed_ns"`
++}
++
+ type namespaceSuiteInput struct {
+ 	Binary, ExpectedSHA256, BinarySHA256, SourceDir, GoVersion string
+ 	Args, CompiledTags                                         []string
+ 	Environment                                                map[string]string
+ 	ExecutionBinary, ExecutionSHA256                           string
++	AdmissionMarks                                            []namespaceAdmissionMark
+ }
+ 
+ type namespaceStageCustody struct {
+@@ -100,6 +108,7 @@
+ 	StderrSHA256         string                           `json:"stderr_sha256"`
+ 	Forwarding           string                           `json:"forwarding"`
+ 	Failure              string                           `json:"failure,omitempty"`
++	AdmissionMarks       []namespaceAdmissionMark          `json:"admission_marks,omitempty"`
+ }
+ 
+ // The receipt never turns a known failing receiver into the tool's generic
+@@ -246,13 +255,14 @@
+ 	return hex.EncodeToString(h.Sum(nil)), nil
+ }
+ 
+-func prepareNamespaceSuite(ctx context.Context, repo, parent, binary, expected, source string, state bool, args []string, pins *[]windows.Handle) (*namespaceSuiteInput, error) {
++func prepareNamespaceSuite(ctx context.Context, repo, parent, binary, expected, source string, state bool, args []string, pins *[]windows.Handle, mark func(string)) (*namespaceSuiteInput, error) {
+ 	if err := ctx.Err(); err != nil {
+ 		return nil, err
+ 	}
+ 	if !namespaceSHA256(expected) {
+ 		return nil, errors.New("full API suite requires its expected lowercase SHA-256")
+ 	}
++	mark("input-path-pins:begin")
+ 	for _, entry := range []struct {
+ 		path string
+ 		dir  bool
+@@ -269,6 +279,8 @@
+ 		}
+ 		*pins = append(*pins, held...)
+ 	}
++	mark("input-path-pins:end")
++	mark("input-format:begin")
+ 	if !strings.EqualFold(source, filepath.Join(repo, "internal", "api")) {
+ 		return nil, errors.New("full API suite cwd must be the original repository internal/api directory")
+ 	}
+@@ -294,10 +306,14 @@
+ 	if machine != pe.IMAGE_FILE_MACHINE_AMD64 {
+ 		return nil, errors.New("full API receiver must be the incoming Windows AMD64 Go test image")
+ 	}
++	mark("input-format:end")
++	mark("input-sha256:begin")
+ 	actual, err := namespaceFileHash(binary)
+ 	if err != nil || actual != expected {
+ 		return nil, errors.Join(err, errors.New("incoming API executable SHA-256 differs from its original request"))
+ 	}
++	mark("input-sha256:end")
++	mark("input-build-info:begin")
+ 	compiled, err := buildinfo.ReadFile(binary)
+ 	if err != nil {
+ 		return nil, err
+@@ -306,6 +322,7 @@
+ 	if err != nil {
+ 		return nil, err
+ 	}
++	mark("input-build-info:end")
+ 	input := &namespaceSuiteInput{
+ 		Binary: binary, ExpectedSHA256: expected, BinarySHA256: actual, SourceDir: source, GoVersion: compiled.GoVersion,
+ 		Args: append([]string(nil), args...), CompiledTags: tags,
+@@ -318,6 +335,7 @@
+ 		}
+ 		return input, ctx.Err()
+ 	}
++	mark("tagged-product:begin")
+ 	if err := namespaceDPath(attach); err != nil || !namespaceSHA256(attachSHA) {
+ 		return nil, errors.Join(err, errors.New("tagged suite requires the actual isolated Product and exact digest"))
+ 	}
+@@ -357,6 +375,7 @@
+ 	}
+ 	input.Environment["MCPHUB_ATTACH_TEST_BIN"] = attach
+ 	input.Environment["MCPHUB_ATTACH_TEST_BIN_SHA256"] = attachSHA
++	mark("tagged-product:end")
+ 	return input, ctx.Err()
+ }
+ 
+@@ -403,6 +422,7 @@
+ 		Schema: "api-namespace-full-suite-v2", Mode: "incoming-go-image-copy", EvidenceRoot: root,
+ 		Binary: input.Binary, ExpectedSHA256: input.ExpectedSHA256, BinarySHA256: input.BinarySHA256, SourceDir: input.SourceDir,
+ 		Args: append([]string(nil), input.Args...), GoVersion: input.GoVersion, CompiledTags: input.CompiledTags,
++		AdmissionMarks: input.AdmissionMarks,
+ 		Environment: input.Environment, ExecutionBinary: input.ExecutionBinary, ExecutionSHA256: input.ExecutionSHA256,
+ 		Started: started.UTC().Format(time.RFC3339Nano), WorkDeadline: workDeadline, CleanupDeadline: workDeadline.Add(10 * time.Second), Root: receipt.RootIdentity, IO: receipt.IOSettlement,
+ 		Stage: receipt.Stage, PrimaryError: errorText(receipt.PrimaryError), CleanupError: errorText(receipt.CleanupError),

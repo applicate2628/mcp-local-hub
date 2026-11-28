@@ -1,0 +1,44 @@
+{
+    "schema":  "publication-original-root-data-audit-v1",
+    "status":  "PASS",
+    "physical_complete":  true,
+    "scope":  "cache-acceptance-stage-20261128-v30",
+    "config_sha256":  "f466c2027e5d538a6c6e3a76cdf206983f4e8aebec6b1942c49101a7732328ce",
+    "receipt_sha256":  "f972663a310be80a899087080d48b20ec4ceb9a0306cfbb8fda8d4cf2b8a0adf",
+    "root_sha256":  "c06ceb24cf1953b9ab8567b81011aaecb01cc67808a32e8798441df23ccc4dad",
+    "outer_sha256":  "8d242c89f8be4d57992d1594b70dbd4b7a26d64de8f664cf471718f7ebd54a49",
+    "commands_verified":  2,
+    "captures_verified":  4,
+    "results":  [
+                    {
+                        "name":  "head.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rev-parse",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.05207700002938509,
+                        "exit_code":  0,
+                        "stdout_sha256":  "d8bcae82382fb00452a889974cd74d7a29a6830e349fc38502d06dccd717956a",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "267f076500b982475b57be45e8a7d8a03edcc2a6\n"
+                    },
+                    {
+                        "name":  "verify-exact-predicate-slice-composition.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+                                     "-I",
+                                     "-S",
+                                     "-B",
+                                     "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-admission-diagnostic-driver-v2\\verify_slice_composition.py"
+                                 ],
+                        "seconds":  1.0800439999438822,
+                        "exit_code":  0,
+                        "stdout_sha256":  "23e7b762494c32113a087ecfbba23ad09ac0d300293bd8c7506fb4b8d3ded6b2",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "{\"status\": \"PASS\", \"scope\": \"DATA_ONLY\", \"result\": \"@@RECOVERY_APPROVED_WORK_AREA_JSON2@@\\\\mcp-acceptance-rebuild-20261127-v1\\\\inputs-successor33-v1\\\\namespace-admission-diagnostic-driver-v2\\\\slice-composition-data.json\", \"sha256\": \"f07db966a9d5516d1d20e2fe1e6025e27bcccac6c3f2545ff87bdfb82bb71df7\"}\r\n"
+                    }
+                ],
+    "tests_executed":  false,
+    "reviewed_utc":  "2026-11-28T17:13:47.6748831Z"
+}

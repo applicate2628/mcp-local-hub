@@ -1,0 +1,39 @@
+{
+  "run": "runs/cache-acceptance-stage-20261128-v25",
+  "source": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub664-363b",
+  "head": "264a0601b7d027652c12ec88ae4debd6c3bfb69f",
+  "environment": {
+    "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_NO_REPLACE_OBJECTS": "1",
+    "GIT_NO_LAZY_FETCH": "1"
+  },
+  "observed_files": [
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\capture-publication-locations-v1.py",
+    "@@RECOVERY_ORCHESTRARIUM_INSTALLATION_ROOT_JSON@@\\releases\\dad4875f\\app\\scripts\\universal-hooks\\scripts\\check-publication-safety.py",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\publication-checkpoint-615-v1\\transfer-receipt.json"
+  ],
+  "steps": [
+    {
+      "name": "canonical-readonly-publication-locations",
+      "argv": [
+        "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+        "-I",
+        "-S",
+        "-B",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\capture-publication-locations-v1.py"
+      ],
+      "timeout": 360
+    },
+    {
+      "name": "publication-source-unchanged",
+      "argv": [
+        "git",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all"
+      ],
+      "timeout": 30
+    }
+  ]
+}

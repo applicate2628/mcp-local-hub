@@ -1,0 +1,81 @@
+# Future namespace admission timing candidate
+
+This is a diagnostic-only auxiliary candidate, not an applied Source change or
+a claimed admission fix. It is based on the already-reviewed namespace
+auxiliary compiled against Source59f. The original candidate and its active
+compiled helper remain unchanged. The separate temporary-copy Sync draft is
+not included here: every existing Sync call remains present.
+
+## Existing result and purpose
+
+The received default API subtree failed before any API test ran. Its original
+pre-child refusal has `contained_stage_entered: false` and a context deadline error.
+The original `proof/inputs.json` exists and `proof/binary.json` is absent.
+That localizes the error to the original admission check after inputs-proof
+publication, before destination pin/readback.
+
+The root's separate copy probe measured about256ms in its single Sync call,
+which does not establish the cause of the five-second admission refusal.
+This candidate measures the complete original preparation path. No operation
+is removed, moved across the admission boundary, retried, or granted more time.
+
+## Timing data
+
+The candidate appends in-memory boundary marks with a stage name and
+`elapsed_ns`, measured by `time.Since(started).Nanoseconds()`.
+`started` is the original time used to create the unchanged five-second
+admission deadline. Subtract a stage's begin value from its end value and divide
+by1,000,000 for milliseconds. A begin mark without an end mark identifies an
+operation that failed before returning successfully. Marks measure elapsed
+wall time, including scheduler and I/O delays; they are not CPU-time samples.
+
+Measured groups are:
+
+- Initial repository/parent/compiler/PowerShell ordinary-path pins.
+- Incoming parent/source/image pins, image format admission, full SHA256,
+  and Go build-info/tag reading.
+- Separate tagged Product admission, only in the existing tagged branch.
+- Protected private directory creation, including nonce/security setup.
+- Each of the ten existing Source leaves: pin, read and hash.
+- Helper copy/Sync and helper pinning.
+- Execution-image copy, hashing and Sync.
+- Existing inputs-proof JSON creation/Sync.
+- Existing environment construction.
+- Execution-image pinning and full readback hash.
+- Existing binary-proof JSON creation/Sync, followed by the original final check.
+
+There is no3369-file Source scan inside this auxiliary's admission interval.
+The main runtime has separate Source snapshot/identity checks. This candidate
+adds no Source leaves, map checks, child process or helper invocation.
+
+## Publication without an additional file or flush
+
+Normal full-suite receipts gain only optional diagnostic DATA
+`admission_marks`, in their existing single receipt write. The existing
+normal receiver accepts this additional field without a predicate change.
+
+For an actual pre-child failure, a defer registered immediately after the
+existing refusal publisher wraps the original error with compact JSON marks.
+The wrapping uses `%w`, preserving the original error cause. The existing
+publisher still writes exactly the same four-field refusal schema and original
+binding. No new timing file, stdout stream, success-path stderr output, Sync,
+or receiving/closure authority is introduced.
+
+The timing defer does not change an entered test stage or its error. Original
+UNKNOWN retention, path-pin custody, native/IO checks, and both publication
+and pin-closing defers keep their existing order and behavior. A timing result
+does not prove physical closure or qualify any test.
+
+## Review and execution boundary
+
+The DATA verifier proves that removing only the added timing declarations,
+marks, error diagnostic and optional normal-receipt field restores both original
+Go files byte-for-byte. It also preserves the one-line Sync-removal draft
+separately as UNAPPLIED. No Go formatter, compiler, helper or test was run by
+the author.
+
+A future compile/run needs the root's new exact prepared Source/runtime and
+fresh invocation bindings. The old closed incoming image is available only to
+DATA probes; it is not authorization to execute the namespace helper or tests.
+Five seconds, five minutes, original four arguments, every Sync/hash/pin and
+all existing qualification predicates remain unchanged.

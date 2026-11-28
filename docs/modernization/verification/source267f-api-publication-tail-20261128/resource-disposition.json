@@ -1,0 +1,36 @@
+{
+  "schema": "closed-tail-resource-disposition-v1",
+  "performed_by_preservation_author": {
+    "moves": 0,
+    "permanent_deletions": 0
+  },
+  "recorded_original_root_action": {
+    "preflight": {
+      "role": "cleanup/replay-duplicates-preflight-v1.json",
+      "bytes": 403075,
+      "sha256": "7d7df92a5cd7e5898c3eca400199884528f017a940e6b7efb2aedc610d15beaf"
+    },
+    "actual_move_receipt": {
+      "role": "cleanup/replay-duplicates-trash-receipt-v1.json",
+      "bytes": 6819,
+      "sha256": "7bca05c735661f95856c9ed155f5db9d8e280be2fdf4f0d9f8321b214e0b5232"
+    },
+    "moves": 3,
+    "files": 972,
+    "bytes": 141722570,
+    "exact_destination_hashes_checked_by_root": true,
+    "source_directories_absent_checked_by_root": true,
+    "unique_reconstruction_receipts_kept_and_preserved_here": 6,
+    "permanent_deletion_performed": false,
+    "trash_emptied": false,
+    "UNKNOWN_source_or_cache_touched": false,
+    "remote_publication_proven_in_original_move_record": false,
+    "local_capsule_counterparts_verified_by_preflight": true,
+    "primary_evidence_and_capsules_remained_outside_trash": true
+  },
+  "primary_closed_originals": "KEEP pending independent public readback and unused proof",
+  "operator_roles": "KEEP_PRIVATE for exact reconstruction",
+  "future_185_replay_duplicates": "Do not create an unnecessary duplicate tree; in-memory verification is sufficient when the root chooses it.",
+  "active_or_UNKNOWN_roots": "KEEP; no new access or closure from this capsule",
+  "newer_diagnostics_and_candidates": "Outside fixed185 scope; must be preserved in later explicit supplements"
+}

@@ -1,0 +1,14 @@
+{
+    "schema":  "namespace-diagnostic-original-parent-v2",
+    "plan_sha256":  "80ec6a8bca0c0a7a8ff75ca5e1d9b8ddef1876289fb458b3cb3c7fa7e591ac2c",
+    "same_process_start_object":  true,
+    "original_pid":  306724,
+    "exit_code":  2,
+    "wait_returned":  true,
+    "original_process_object_disposed":  true,
+    "new_job_or_tree_wait":  false,
+    "create_no_window":  true,
+    "wait_errors":  [
+
+                    ]
+}

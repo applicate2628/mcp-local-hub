@@ -1,0 +1,17 @@
+{
+  "schema": "closed-native-supplement-disclosure-review-v1",
+  "publication_payloads": 112,
+  "explicit_host_path_roles": 9,
+  "operator_values_embedded": false,
+  "secret_token_format_findings": 0,
+  "native_ephemeral_process_and_handle_numbers_preserved": true,
+  "source_fixture_path_occurrences": 16,
+  "source_fixture_scope": "Seven canonical machine-path findings in the barrier afterimage are represented by three explicit source-defined fixture roles. Nine other original source fixture/comment occurrences remain unchanged; no blanket path suppression.",
+  "source_fixture_provenance": "source-provenance.json",
+  "actual_host_path_pattern_findings_outside_proven_public_test_source": 0,
+  "new_canonical_scan_PASS_claimed": false,
+  "explicit_public_fixture_roles": 3,
+  "template_revision": "fixture-template-revision.json",
+  "canonical_prior_findings": 7,
+  "canonical_revised_scan_status": "NOT_RUN"
+}

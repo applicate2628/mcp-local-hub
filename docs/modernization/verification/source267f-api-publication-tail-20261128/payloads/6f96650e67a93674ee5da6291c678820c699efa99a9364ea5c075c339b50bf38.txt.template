@@ -1,0 +1,342 @@
+[
+    {
+        "test":  "TestAttachExisting_ForegroundAdmissionExpiresAtFiveSeconds",
+        "line":  1980,
+        "preceding":  [
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestAttachExisting_PostwriteGenerationDriftRetainsRecoveryReceipt",
+                          "\u0016--- PASS: TestAttachExisting_PostwriteGenerationDriftRetainsRecoveryReceipt (3.10s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestAttachExisting_LeaseReleaseFailureAfterWriteRetainsRecoveryReceipt",
+                          "\u0016--- PASS: TestAttachExisting_LeaseReleaseFailureAfterWriteRetainsRecoveryReceipt (1.89s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestAttachExisting_ForegroundAdmissionExpiresAtFiveSeconds",
+                          "    attach_client_plan_windows_test.go:127: foreground final admission settled in 12.4527991s; result=\u003cnil\u003e err=ATTACH_FINAL_ADMISSION_DRIFT at prewrite",
+                          "\u000f    attach_client_plan_windows_test.go:127: foreground timeout did not veto after five seconds: result=\u003cnil\u003e err=ATTACH_FINAL_ADMISSION_DRIFT at prewrite elapsed=12.4527991s\u000e",
+                          "\u0016--- FAIL: TestAttachExisting_ForegroundAdmissionExpiresAtFiveSeconds (12.76s)"
+                      ]
+    },
+    {
+        "test":  "TestCheckServerReadinessWithScope_ValidatesExplicitlySelectedClients",
+        "line":  3962,
+        "preceding":  [
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallUsingEmbedFirst_HonorsPersistedDefaultClientsOverride",
+                          "warning: MCPHUB_E2E_SCHEDULER=none — scheduler returns empty/noop responses. This flag is for E2E tests only; never set it in production.",
+                          "\u0016--- PASS: TestInstallUsingEmbedFirst_HonorsPersistedDefaultClientsOverride (0.01s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestRegisterBindings_HonorPersistedDefaultClientsOverride",
+                          "\u0016--- PASS: TestRegisterBindings_HonorPersistedDefaultClientsOverride (0.92s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestCheckServerReadinessWithScope_ValidatesExplicitlySelectedClients",
+                          "\u000f    default_client_scope_test.go:322: test premise broken: the default-scoped plan must succeed, got: E_RUNTIME_PRODUCT_IMAGE: admit runtime product image: E_WINDOWS_PRODUCT_PAIR_INCOMPLETE: @@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api2\\n\\r\\bin\\api.test.exe: VERSIONINFO: invalid PE resource directory rva=0x0 size=0\u000e",
+                          "\u0016--- FAIL: TestCheckServerReadinessWithScope_ValidatesExplicitlySelectedClients (0.00s)"
+                      ]
+    },
+    {
+        "test":  "TestPerServerInstallSkipsHubEntryRemoval",
+        "line":  6145,
+        "preceding":  [
+                          "\u0016--- PASS: TestBuildHubReconcilePlanGateOffRemovesMcphubHubAndRestoresPerDaemon (0.00s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestApplyHubReconcileAddsBeforeRemoves",
+                          "\u0016--- PASS: TestApplyHubReconcileAddsBeforeRemoves (0.00s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestApplyHubReconcileReportsSkipListedClient",
+                          "\u0016--- PASS: TestApplyHubReconcileReportsSkipListedClient (0.00s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestPerServerInstallSkipsHubEntryRemoval",
+                          "\u000f    install_hub_reconcile_test.go:557: BuildPlan: E_RUNTIME_PRODUCT_IMAGE: admit runtime product image: E_WINDOWS_PRODUCT_PAIR_INCOMPLETE: @@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api2\\n\\r\\bin\\api.test.exe: VERSIONINFO: invalid PE resource directory rva=0x0 size=0\u000e",
+                          "\u0016--- FAIL: TestPerServerInstallSkipsHubEntryRemoval (0.00s)"
+                      ]
+    },
+    {
+        "test":  "TestInstallParsedManifest_KillsDroppedWorkspaceRowAfterNudgeOnly",
+        "line":  6592,
+        "preceding":  [
+                          "\u0016--- PASS: TestPortHeldBySupervisorIntentDaemon_Port0StdioBridgeRecognized (0.01s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestIsHubDaemonSchedulerTaskName_WeeklyRefreshExcluded",
+                          "\u0016--- PASS: TestIsHubDaemonSchedulerTaskName_WeeklyRefreshExcluded (0.00s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestRemoveServerFromSupervisorIntentBestEffort_KillsRemovedDaemonsAfterNudge",
+                          "\u0016--- PASS: TestRemoveServerFromSupervisorIntentBestEffort_KillsRemovedDaemonsAfterNudge (0.01s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_KillsDroppedWorkspaceRowAfterNudgeOnly",
+                          "\u000f    install_parsed_manifest_lane_b_test.go:197: InstallParsedManifest: SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE\u000e",
+                          "\u0016--- FAIL: TestInstallParsedManifest_KillsDroppedWorkspaceRowAfterNudgeOnly (0.02s)"
+                      ]
+    },
+    {
+        "test":  "TestInstallParsedManifest_PrunesStopsForDroppedWorkspaceRows",
+        "line":  6608,
+        "preceding":  [
+                          "\u0016=== RUN   TestInstallPlanCore_RemovedTargetKillDependsOnNudgeOutcome/hard_nudge_failure_skips_kill",
+                          "\u0016--- PASS: TestInstallPlanCore_RemovedTargetKillDependsOnNudgeOutcome/hard_nudge_failure_skips_kill (0.02s)",
+                          "\u0016=== NAME  TestInstallPlanCore_RemovedTargetKillDependsOnNudgeOutcome",
+                          "\u0016--- PASS: TestInstallPlanCore_RemovedTargetKillDependsOnNudgeOutcome (0.04s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallPlanCore_GlobalInstall_HeldSupervisorLockAfterIPCFailureSkipsRemovedTargetKill",
+                          "\u0016--- PASS: TestInstallPlanCore_GlobalInstall_HeldSupervisorLockAfterIPCFailureSkipsRemovedTargetKill (0.02s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_PrunesStopsForDroppedWorkspaceRows",
+                          "\u000f    install_parsed_manifest_lane_b_test.go:419: InstallParsedManifest: SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE\u000e",
+                          "\u0016--- FAIL: TestInstallParsedManifest_PrunesStopsForDroppedWorkspaceRows (0.01s)"
+                      ]
+    },
+    {
+        "test":  "TestInstallParsedManifest_NoSchedulerOnNoWork",
+        "line":  6648,
+        "preceding":  [
+                          "\u0016--- PASS: TestInstallParsedManifest_RejectsWorkspaceScopedWithoutTemplate (0.00s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_RejectsNilWorkspacesNonDry",
+                          "\u0016--- PASS: TestInstallParsedManifest_RejectsNilWorkspacesNonDry (0.00s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_EmptyWorkspacesValid",
+                          "\u0016--- PASS: TestInstallParsedManifest_EmptyWorkspacesValid (0.03s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_NoSchedulerOnNoWork",
+                          "\u000f    install_parsed_manifest_test.go:564: workspace-scoped install must not require a working scheduler, got: SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE\u000e",
+                          "\u0016--- FAIL: TestInstallParsedManifest_NoSchedulerOnNoWork (0.01s)"
+                      ]
+    },
+    {
+        "test":  "TestInstallParsedManifest_DefersDaemonSpawn",
+        "line":  6652,
+        "preceding":  [
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_EmptyWorkspacesValid",
+                          "\u0016--- PASS: TestInstallParsedManifest_EmptyWorkspacesValid (0.03s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_NoSchedulerOnNoWork",
+                          "\u000f    install_parsed_manifest_test.go:564: workspace-scoped install must not require a working scheduler, got: SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE\u000e",
+                          "\u0016--- FAIL: TestInstallParsedManifest_NoSchedulerOnNoWork (0.01s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_DefersDaemonSpawn",
+                          "\u000f    install_parsed_manifest_test.go:601: InstallParsedManifest: SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE\u000e",
+                          "\u0016--- FAIL: TestInstallParsedManifest_DefersDaemonSpawn (0.00s)"
+                      ]
+    },
+    {
+        "test":  "TestInstallParsedManifest_FansOutPerWorkspaceDaemons",
+        "line":  6659,
+        "preceding":  [
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_DefersDaemonSpawn",
+                          "\u000f    install_parsed_manifest_test.go:601: InstallParsedManifest: SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE\u000e",
+                          "\u0016--- FAIL: TestInstallParsedManifest_DefersDaemonSpawn (0.00s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_WorkspaceScoped_NotRefused",
+                          "\u0016--- PASS: TestInstallParsedManifest_WorkspaceScoped_NotRefused (0.03s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_FansOutPerWorkspaceDaemons",
+                          "\u000f    install_parsed_manifest_test.go:705: InstallParsedManifest(workspaces): SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE\u000e",
+                          "\u0016--- FAIL: TestInstallParsedManifest_FansOutPerWorkspaceDaemons (0.02s)"
+                      ]
+    },
+    {
+        "test":  "TestInstallParsedManifest_FanOut_AuditsWorkspaceTasks",
+        "line":  6669,
+        "preceding":  [
+                          "\u0016--- FAIL: TestInstallParsedManifest_FansOutPerWorkspaceDaemons (0.02s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_FanOut_AuditsWorkspaceTasks",
+                          "\u0016=== RUN   TestInstallParsedManifest_FanOut_AuditsWorkspaceTasks/records_server_install_audit_per_workspace_task",
+                          "\u000f    install_parsed_manifest_test.go:844: InstallParsedManifest(fan-out): SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE\u000e",
+                          "\u0016--- FAIL: TestInstallParsedManifest_FanOut_AuditsWorkspaceTasks/records_server_install_audit_per_workspace_task (0.01s)",
+                          "\u0016=== NAME  TestInstallParsedManifest_FanOut_AuditsWorkspaceTasks",
+                          "\u0016=== RUN   TestInstallParsedManifest_FanOut_AuditsWorkspaceTasks/audit_failure_aborts_before_intent_write",
+                          "\u0016--- PASS: TestInstallParsedManifest_FanOut_AuditsWorkspaceTasks/audit_failure_aborts_before_intent_write (0.00s)",
+                          "\u0016=== NAME  TestInstallParsedManifest_FanOut_AuditsWorkspaceTasks",
+                          "\u0016--- FAIL: TestInstallParsedManifest_FanOut_AuditsWorkspaceTasks (0.01s)"
+                      ]
+    },
+    {
+        "test":  "TestInstallParsedManifest_PreservesPriorMaintenanceTimers",
+        "line":  6679,
+        "preceding":  [
+                          "\u0016--- FAIL: TestInstallParsedManifest_FanOut_AuditsWorkspaceTasks (0.01s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_DryRun_NoWriteNoPath",
+                          "\u0016--- PASS: TestInstallParsedManifest_DryRun_NoWriteNoPath (0.00s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_DryRun_CorruptExistingIntentStillSucceeds",
+                          "\u0016--- PASS: TestInstallParsedManifest_DryRun_CorruptExistingIntentStillSucceeds (0.00s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_PreservesPriorMaintenanceTimers",
+                          "\u000f    install_parsed_manifest_test.go:1090: InstallParsedManifest: SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE\u000e",
+                          "\u0016--- FAIL: TestInstallParsedManifest_PreservesPriorMaintenanceTimers (0.01s)"
+                      ]
+    },
+    {
+        "test":  "TestInstallParsedManifest_WorkspaceScoped_SkipsPrune",
+        "line":  6692,
+        "preceding":  [
+                          "\u0016--- PASS: TestMergeServerWeeklyRefreshTimer_FullInstallWeeklyFalseDropsOnlyThisServer (0.00s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestMergeServerWeeklyRefreshTimer_BlankServerNameFallbackReplacesWithoutDuplicate",
+                          "\u0016--- PASS: TestMergeServerWeeklyRefreshTimer_BlankServerNameFallbackReplacesWithoutDuplicate (0.00s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_ConcurrentInstalls_PreserveSiblingRows",
+                          "\u0016--- PASS: TestInstallParsedManifest_ConcurrentInstalls_PreserveSiblingRows (0.03s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_WorkspaceScoped_SkipsPrune",
+                          "\u000f    install_parsed_manifest_test.go:1368: InstallParsedManifest(workspace-scoped): SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE\u000e",
+                          "\u0016--- FAIL: TestInstallParsedManifest_WorkspaceScoped_SkipsPrune (0.01s)"
+                      ]
+    },
+    {
+        "test":  "TestInstallParsedManifest_FiltersStaleWorkspaceRows",
+        "line":  6696,
+        "preceding":  [
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_ConcurrentInstalls_PreserveSiblingRows",
+                          "\u0016--- PASS: TestInstallParsedManifest_ConcurrentInstalls_PreserveSiblingRows (0.03s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_WorkspaceScoped_SkipsPrune",
+                          "\u000f    install_parsed_manifest_test.go:1368: InstallParsedManifest(workspace-scoped): SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE\u000e",
+                          "\u0016--- FAIL: TestInstallParsedManifest_WorkspaceScoped_SkipsPrune (0.01s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_FiltersStaleWorkspaceRows",
+                          "\u000f    install_parsed_manifest_test.go:1429: InstallParsedManifest: SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE\u000e",
+                          "\u0016--- FAIL: TestInstallParsedManifest_FiltersStaleWorkspaceRows (0.00s)"
+                      ]
+    },
+    {
+        "test":  "TestInstallParsedManifest_RefusesSpecBearingWriteWhileSupervisorRunning",
+        "line":  6716,
+        "preceding":  [
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_AcceptsNativeHTTPDaemonTemplate",
+                          "\u0016--- PASS: TestInstallParsedManifest_AcceptsNativeHTTPDaemonTemplate (0.18s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_RefusesSpecBearingWriteWhileSupervisorRunning",
+                          "\u000f    install_parsed_manifest_test.go:1697: refuse error \"SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE\" missing \"refusing to write spec-bearing\"\u000e",
+                          "\u000f    install_parsed_manifest_test.go:1697: refuse error \"SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE\" missing \"supervisor is running\"\u000e",
+                          "\u000f    install_parsed_manifest_test.go:1697: refuse error \"SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE\" missing \"STOP the running supervisor\"\u000e",
+                          "\u000f    install_parsed_manifest_test.go:1697: refuse error \"SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE\" missing \"§7.1\"\u000e",
+                          "\u000f    install_parsed_manifest_test.go:1709: expected durable spec-bearing-install-refused event in supervisor-events.log; got: \u000e",
+                          "\u0016--- FAIL: TestInstallParsedManifest_RefusesSpecBearingWriteWhileSupervisorRunning (0.01s)"
+                      ]
+    },
+    {
+        "test":  "TestInstallParsedManifest_SpecBearingWrite_BypassedWhenCallerHoldsMatchingLock",
+        "line":  6723,
+        "preceding":  [
+                          "\u000f    install_parsed_manifest_test.go:1697: refuse error \"SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE\" missing \"STOP the running supervisor\"\u000e",
+                          "\u000f    install_parsed_manifest_test.go:1697: refuse error \"SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE\" missing \"§7.1\"\u000e",
+                          "\u000f    install_parsed_manifest_test.go:1709: expected durable spec-bearing-install-refused event in supervisor-events.log; got: \u000e",
+                          "\u0016--- FAIL: TestInstallParsedManifest_RefusesSpecBearingWriteWhileSupervisorRunning (0.01s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_NonSpecInstallNotGatedByRunningSupervisor",
+                          "\u0016--- PASS: TestInstallParsedManifest_NonSpecInstallNotGatedByRunningSupervisor (0.01s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_SpecBearingWrite_BypassedWhenCallerHoldsMatchingLock",
+                          "\u000f    install_parsed_manifest_test.go:1801: spec-bearing install with a matching held-lock token must SUCCEED, got: SERENA_PARSED_PREACQUIRED_INVOCATION_REQUIRED\u000e",
+                          "\u0016--- FAIL: TestInstallParsedManifest_SpecBearingWrite_BypassedWhenCallerHoldsMatchingLock (0.01s)"
+                      ]
+    },
+    {
+        "test":  "TestInstallParsedManifest_SpecBearingWrite_StillRefusesWithoutToken",
+        "line":  6728,
+        "preceding":  [
+                          "\u0016=== RUN   TestInstallParsedManifest_NonSpecInstallNotGatedByRunningSupervisor",
+                          "\u0016--- PASS: TestInstallParsedManifest_NonSpecInstallNotGatedByRunningSupervisor (0.01s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_SpecBearingWrite_BypassedWhenCallerHoldsMatchingLock",
+                          "\u000f    install_parsed_manifest_test.go:1801: spec-bearing install with a matching held-lock token must SUCCEED, got: SERENA_PARSED_PREACQUIRED_INVOCATION_REQUIRED\u000e",
+                          "\u0016--- FAIL: TestInstallParsedManifest_SpecBearingWrite_BypassedWhenCallerHoldsMatchingLock (0.01s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_SpecBearingWrite_StillRefusesWithoutToken",
+                          "\u000f    install_parsed_manifest_test.go:1859: refuse error \"SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE\" missing the gate signature\u000e",
+                          "\u000f    install_parsed_manifest_test.go:1863: expected spec-bearing-install-refused event in supervisor-events.log; got: \u000e",
+                          "\u0016--- FAIL: TestInstallParsedManifest_SpecBearingWrite_StillRefusesWithoutToken (0.01s)"
+                      ]
+    },
+    {
+        "test":  "TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockPathMismatches",
+        "line":  6732,
+        "preceding":  [
+                          "\u000f    install_parsed_manifest_test.go:1801: spec-bearing install with a matching held-lock token must SUCCEED, got: SERENA_PARSED_PREACQUIRED_INVOCATION_REQUIRED\u000e",
+                          "\u0016--- FAIL: TestInstallParsedManifest_SpecBearingWrite_BypassedWhenCallerHoldsMatchingLock (0.01s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_SpecBearingWrite_StillRefusesWithoutToken",
+                          "\u000f    install_parsed_manifest_test.go:1859: refuse error \"SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE\" missing the gate signature\u000e",
+                          "\u000f    install_parsed_manifest_test.go:1863: expected spec-bearing-install-refused event in supervisor-events.log; got: \u000e",
+                          "\u0016--- FAIL: TestInstallParsedManifest_SpecBearingWrite_StillRefusesWithoutToken (0.01s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockPathMismatches",
+                          "\u000f    install_parsed_manifest_test.go:1918: refuse error \"preflight: E_RUNTIME_PRODUCT_IMAGE: runtime product supervisor exclusion is absent, released, or belongs to another state directory\\n  Fix: Run `mcphub setup` to install the canonical mcphub binary on PATH.\" missing the gate signature (path-mismatch token must NOT bypass)\u000e",
+                          "\u0016--- FAIL: TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockPathMismatches (0.02s)"
+                      ]
+    },
+    {
+        "test":  "TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockAlreadyReleased",
+        "line":  6736,
+        "preceding":  [
+                          "\u000f    install_parsed_manifest_test.go:1859: refuse error \"SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE\" missing the gate signature\u000e",
+                          "\u000f    install_parsed_manifest_test.go:1863: expected spec-bearing-install-refused event in supervisor-events.log; got: \u000e",
+                          "\u0016--- FAIL: TestInstallParsedManifest_SpecBearingWrite_StillRefusesWithoutToken (0.01s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockPathMismatches",
+                          "\u000f    install_parsed_manifest_test.go:1918: refuse error \"preflight: E_RUNTIME_PRODUCT_IMAGE: runtime product supervisor exclusion is absent, released, or belongs to another state directory\\n  Fix: Run `mcphub setup` to install the canonical mcphub binary on PATH.\" missing the gate signature (path-mismatch token must NOT bypass)\u000e",
+                          "\u0016--- FAIL: TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockPathMismatches (0.02s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockAlreadyReleased",
+                          "\u000f    install_parsed_manifest_test.go:1972: refuse error \"preflight: E_RUNTIME_PRODUCT_IMAGE: runtime product supervisor exclusion is absent, released, or belongs to another state directory\\n  Fix: Run `mcphub setup` to install the canonical mcphub binary on PATH.\" missing the gate signature (released token must NOT bypass)\u000e",
+                          "\u0016--- FAIL: TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockAlreadyReleased (0.01s)"
+                      ]
+    },
+    {
+        "test":  "TestBuildMergedSupervisorIntent_FullInstall_BlankServerRowNotDuplicated",
+        "line":  6824,
+        "preceding":  [
+                          "\u0016--- PASS: TestBuildMergedSupervisorIntent_PreservesStopsSubBlock (0.17s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallPlanCore_GlobalFilteredInstall_BlankDaemonRowNotDuplicated",
+                          "\u0016--- PASS: TestInstallPlanCore_GlobalFilteredInstall_BlankDaemonRowNotDuplicated (0.02s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestBuildMergedSupervisorIntent_FilteredInstall_PreservesSiblingStop",
+                          "\u0016--- PASS: TestBuildMergedSupervisorIntent_FilteredInstall_PreservesSiblingStop (0.01s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestBuildMergedSupervisorIntent_FullInstall_BlankServerRowNotDuplicated",
+                          "\u000f    install_parsed_manifest_test.go:3304: buildMergedSupervisorIntent(full install): resolve weekly-refresh runtime image: E_RUNTIME_PRODUCT_IMAGE: admit runtime product image: E_WINDOWS_PRODUCT_PAIR_INCOMPLETE: @@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api2\\n\\r\\bin\\api.test.exe: VERSIONINFO: invalid PE resource directory rva=0x0 size=0\u000e",
+                          "\u0016--- FAIL: TestBuildMergedSupervisorIntent_FullInstall_BlankServerRowNotDuplicated (0.01s)"
+                      ]
+    },
+    {
+        "test":  "TestBuildPlanWithOpts_CodexCrossLayerCollisionFreezesAlias",
+        "line":  6849,
+        "preceding":  [
+                          "\u0016--- PASS: TestBuildPlanWithOpts_SerenaInstallWritePlaneSkipsWhenGUIPortUnknown (0.00s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestBuildPlanWithOpts_NonSerenaIgnoresGUIPort",
+                          "\u0016--- PASS: TestBuildPlanWithOpts_NonSerenaIgnoresGUIPort (0.00s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestBuildPlanWithOpts_SerenaRouterEntryNotRevertedToLegacyURL",
+                          "\u0016--- PASS: TestBuildPlanWithOpts_SerenaRouterEntryNotRevertedToLegacyURL (0.00s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestBuildPlanWithOpts_CodexCrossLayerCollisionFreezesAlias",
+                          "\u000f    install_test.go:242: repeat BuildPlanWithOpts: CODEX_TARGET_NAME_CONFLICT: global target \"serena-latest-mcphub\" already exists\u000e",
+                          "\u0016--- FAIL: TestBuildPlanWithOpts_CodexCrossLayerCollisionFreezesAlias (0.01s)"
+                      ]
+    },
+    {
+        "test":  "TestPrintPlanTo_SerenaDryRunShowsRouterURLAndDeferredNotice",
+        "line":  6877,
+        "preceding":  [
+                          "\u0016--- PASS: TestInstallAppliedReleaseUnconfirmedIntentFailureReturnsBothWithoutRollback (0.00s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallRollbackRestoreAppliedReleaseUnconfirmedIsReconciled",
+                          "\u0016--- PASS: TestInstallRollbackRestoreAppliedReleaseUnconfirmedIsReconciled (0.01s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestInstallAddEntryBodyErrorStillRunsPrearmedRestore",
+                          "\u0016--- PASS: TestInstallAddEntryBodyErrorStillRunsPrearmedRestore (0.01s)",
+                          "\u0016=== NAME  ",
+                          "\u0016=== RUN   TestPrintPlanTo_SerenaDryRunShowsRouterURLAndDeferredNotice",
+                          "\u000f    install_test.go:566: BuildPlanWithOpts(GUIPort): E_RUNTIME_PRODUCT_IMAGE: admit runtime product image: E_WINDOWS_PRODUCT_PAIR_INCOMPLETE: @@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api2\\n\\r\\bin\\api.test.exe: VERSIONINFO: invalid PE resource directory rva=0x0 size=0\u000e",
+                          "\u0016--- FAIL: TestPrintPlanTo_SerenaDryRunShowsRouterURLAndDeferredNotice (0.00s)"
+                      ]
+    }
+]

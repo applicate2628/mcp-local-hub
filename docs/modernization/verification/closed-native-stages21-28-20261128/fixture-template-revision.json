@@ -1,0 +1,195 @@
+{
+  "schema": "prespawn-public-fixture-template-revision-v2",
+  "reason": "Canonical publication range scan reported seven machine-path occurrences in one exact source afterimage. The preserved test/runtime outcomes are unchanged.",
+  "canonical_diagnostic": {
+    "reported_by": "root",
+    "event": "cache-acceptance-stage-20261128-v44",
+    "status": "DIAGNOSTIC_FINDINGS/CLOSED",
+    "audit_sha256": "ccb519fef2906747bf8cc506975e170161d2697089e29965d04505ee59cd5e08",
+    "finding_kind": "history-blob",
+    "finding_class": "machine-path",
+    "afterimage_lines": [
+      349,
+      426,
+      463,
+      520,
+      546,
+      552,
+      645
+    ],
+    "policy_or_scanner_changed": false,
+    "new_scan_PASS_claimed": false
+  },
+  "historical_rejected_publication": {
+    "event": "cache-acceptance-push-20261128-v11",
+    "status": "FAIL/CLOSED",
+    "root_audit_sha256": "b955a35863b09ca6ef07ca2267825f25463824196a865fd8b06b793293c8f18c",
+    "remote_ref_updated": false
+  },
+  "prior_capsule": {
+    "manifest_sha256": "491937bd9d00867c84d52d207450515bdebad239669b60fe7477b6db4f6a6676",
+    "bindings_sha256": "bed3292a119d1cb2b26a856954e583c3d73fef091af7ea8395ac6a0dfa53a1f0",
+    "frozen_directory_unchanged": true
+  },
+  "original_source": {
+    "public_commit": "5ad374eb60cadb8ad56ea167e3fb06edb44bdc18",
+    "relative_path": "internal/cli/supervise_prespawn_binary_gate_test.go",
+    "public_blob": "9d4a403e4d45794681a960ba357301506ef652eb",
+    "public_url": "https://github.com/applicate2628/mcp-local-hub/blob/5ad374eb60cadb8ad56ea167e3fb06edb44bdc18/internal/cli/supervise_prespawn_binary_gate_test.go",
+    "blob_api_url": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/blobs/9d4a403e4d45794681a960ba357301506ef652eb",
+    "bytes": 32425,
+    "sha256": "e6f4c4f1304f8d29064e034694155bf378cd248ce7ebc25f6be8e3707a777acc",
+    "whole_blob_fetched_and_sha256_verified": true
+  },
+  "original_afterimage": {
+    "bytes": 32663,
+    "sha256": "5e3a6517a9fed3a329cea60d12915965720b37c2bb6a865880d3c0c05ed48feb"
+  },
+  "published_template": {
+    "path": "payloads/5e3a6517a9fed3a329cea60d12915965720b37c2bb6a865880d3c0c05ed48feb.txt.template",
+    "bytes": 32765,
+    "sha256": "2228acf2690b9fb7472c9ad9af5805cb08f009dda006a8c9406a34b14a61fb7a"
+  },
+  "literal_values_embedded_or_encoded": false,
+  "publicly_recoverable_role_values": true,
+  "explicit_roles": [
+    {
+      "role": "prespawn_missing_windows_fixture",
+      "marker": "@@RECOVERY_PRESPAWN_MISSING_WINDOWS_FIXTURE@@",
+      "occurrences": 4,
+      "original_utf8_bytes": 34,
+      "original_sha256": "01597905f39163c69296a1c714c7b96f9ea01a5f1cec1b3bd844189fbc9fc4bb",
+      "public_before_lines": [
+        342,
+        419,
+        456,
+        638
+      ],
+      "afterimage_lines": [
+        349,
+        426,
+        463,
+        645
+      ],
+      "public_before_lexical_ranges": [
+        {
+          "line": 342,
+          "column_start_0": 44,
+          "column_end_exclusive_0": 78
+        },
+        {
+          "line": 419,
+          "column_start_0": 12,
+          "column_end_exclusive_0": 46
+        },
+        {
+          "line": 456,
+          "column_start_0": 14,
+          "column_end_exclusive_0": 48
+        },
+        {
+          "line": 638,
+          "column_start_0": 19,
+          "column_end_exclusive_0": 53
+        }
+      ],
+      "afterimage_lexical_ranges": [
+        {
+          "line": 349,
+          "column_start_0": 44,
+          "column_end_exclusive_0": 78
+        },
+        {
+          "line": 426,
+          "column_start_0": 12,
+          "column_end_exclusive_0": 46
+        },
+        {
+          "line": 463,
+          "column_start_0": 14,
+          "column_end_exclusive_0": 48
+        },
+        {
+          "line": 645,
+          "column_start_0": 19,
+          "column_end_exclusive_0": 53
+        }
+      ],
+      "unchanged_from_public_beforeimage": true
+    },
+    {
+      "role": "prespawn_hostile_unix_fixture",
+      "marker": "@@RECOVERY_PRESPAWN_HOSTILE_UNIX_FIXTURE@@",
+      "occurrences": 1,
+      "original_utf8_bytes": 30,
+      "original_sha256": "d85543097ab57e54c3e31a261f17b900710ce20d157d857f370d5f01b918a415",
+      "public_before_lines": [
+        513
+      ],
+      "afterimage_lines": [
+        520
+      ],
+      "public_before_lexical_ranges": [
+        {
+          "line": 513,
+          "column_start_0": 14,
+          "column_end_exclusive_0": 44
+        }
+      ],
+      "afterimage_lexical_ranges": [
+        {
+          "line": 520,
+          "column_start_0": 14,
+          "column_end_exclusive_0": 44
+        }
+      ],
+      "unchanged_from_public_beforeimage": true
+    },
+    {
+      "role": "prespawn_hold_windows_fixture",
+      "marker": "@@RECOVERY_PRESPAWN_HOLD_WINDOWS_FIXTURE@@",
+      "occurrences": 2,
+      "original_utf8_bytes": 19,
+      "original_sha256": "6a6bbc1bc43ca276e22701fd207e467ee7ad91d3a6af07a810683bb7541d5462",
+      "public_before_lines": [
+        539,
+        545
+      ],
+      "afterimage_lines": [
+        546,
+        552
+      ],
+      "public_before_lexical_ranges": [
+        {
+          "line": 539,
+          "column_start_0": 23,
+          "column_end_exclusive_0": 42
+        },
+        {
+          "line": 545,
+          "column_start_0": 71,
+          "column_end_exclusive_0": 90
+        }
+      ],
+      "afterimage_lexical_ranges": [
+        {
+          "line": 546,
+          "column_start_0": 23,
+          "column_end_exclusive_0": 42
+        },
+        {
+          "line": 552,
+          "column_start_0": 71,
+          "column_end_exclusive_0": 90
+        }
+      ],
+      "unchanged_from_public_beforeimage": true
+    }
+  ],
+  "unchanged_original_count": 197,
+  "unchanged_other_payload_count": 111,
+  "actual_runtime_inputs_changed": false,
+  "native_or_test_commands_executed_by_revision": false,
+  "author_DATA_reconstruction_byte_equal": true,
+  "root_independent_verification_pending": true
+}

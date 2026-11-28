@@ -1,0 +1,113 @@
+# Namespace diagnostic driver v2 — exact slice correction
+
+## Содержание
+
+1. [Подтверждённый дефект v1](#1-подтверждённый-дефект-v1)
+2. [Узкая дельта v2](#2-узкая-дельта-v2)
+3. [Фиксированные входы и новые пути](#3-фиксированные-входы-и-новые-пути)
+4. [DATA probe](#4-data-probe)
+5. [Границы статуса](#5-границы-статуса)
+
+## 1. Подтверждённый дефект v1
+
+Frozen v1 остаётся в @@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\inputs-successor33-v1\namespace-admission-diagnostic-driver-v1. Его caller SHA
+bc21860fc9258de002a5e038b805f71e05ba7df1cb3dff6bcb899c88f14e20ac
+вызывает ast.parse(source) по целому несобранному adapter_successor.py.in.
+В точном template 48c5d6af30d62c1e63c1455689a19c1ce0b67ab761fc9b1683e5a522494b98bd
+строка 12 содержит WORK = Path(@@TASK_PATH_REPR@@); это синтаксически
+невалидный Python. Весь template разбирать до подстановок нельзя.
+
+Root сообщил возврат первого outer с exit 1 через 5.01 s. Автор отдельно
+прочёл его namespace-diagnostic-outer-original.json: original_pid=443112,
+exit_code=1, same_process_start_object=true, wait_returned=true,
+original_process_object_disposed=true, new_job_or_tree_wait=false.
+Root подтвердил отсутствие output Run и наличие private scope n.
+Это ранний pre-CoreRun отказ; тестовый namespace command не запускался.
+Первичный traceback не был захвачен CreateNoWindow outer. Поэтому точный
+SyntaxError воспроизводится отдельным DATA probe, а не выдаётся за
+прочитанный original stderr. Исходный результат и созданные v1 файлы не меняются.
+
+## 2. Узкая дельта v2
+
+Точная дельта трёх существующих файлов находится в v1-to-v2.patch.
+
+- Из уже pinned template берутся только строки 100–111; до AST проверяется SHA256
+  96bd52faae2a107b929170b7884b3211f0d7df1fbd66a4fdc1375e8eba60b601.
+  Только этот slice разбирается, допускается ровно одна FunctionDef с именем
+  flags_are_literal. Полных template substitutions или imports нет.
+- Существующий вызов receiving_functions перенесён перед receive_source и
+  созданием private scope/image. Логика receiver fragments не меняется.
+- Top-level error handler пишет exclusive preflight-failure.json только при
+  пустом RETAINED_INVOCATION. В нём type/message и filename/function/lineno
+  из code objects; linecache и чтение source/capture/cache не используются.
+  Затем исходное исключение повторно выбрасывается. Ошибка записи выводится
+  в stderr без замены исходного исключения.
+- Обновлены только fresh output/image/scope operands и связанные environment paths.
+  Original outer Start/WaitForExit/Dispose lifecycle и native guard не меняются.
+
+preflight-failure.json — будущий runtime artifact, не manifest input.
+Он не утверждает физическое завершение outer и не превращает FAIL в PASS.
+Если original invocation уже удерживается, этот обработчик не создаёт
+preflight proof и не вмешивается в существующий HOLD.
+
+## 3. Фиксированные входы и новые пути
+
+Таблица 1. Входы и области v2.
+
+| Роль | Значение |
+|---|---|
+| Source commit | 59f618ebfbf6d9f52c6994d68586e3c2ebc202a8 |
+| Source tree | 03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1 |
+| Source | @@RECOVERY_APPROVED_WORK_AREA@@\pub666-acceptance-20261128-v2 |
+| Incoming origin SHA256 | d237704913484fe2931860793badbfdaadb3bb216f5c436b8d01bdf2301d3e60 |
+| Helper SHA256 | 1d4e95dbd3fbfeb5f35ff43151bf00e71d237d0acf64e6d97e181ed52cffe0ce |
+| Helper compile receiving | stage27 / 5e94cb3e1697c4bdfc0a4c0b71601bbbb54749d9656223ccadc7d88037b5d9d8 |
+| Latest cache receiving | stage28 / 159301c3c5b9018ee05894e859b3a1fb3ef33f4c0947672898b26c5eeb4adc8c |
+| Новая incoming copy | @@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\namespace-admission-diagnostic-inputs-v2\incoming-original.exe |
+| Новый Run | @@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\namespace-admission-diagnostic-run-v2 |
+| Новый private scope | @@RECOVERY_APPROVED_WORK_AREA@@\nt9\api2 |
+| Новый namespace parent | @@RECOVERY_APPROVED_WORK_AREA@@\nt9\api2\n |
+
+Existing private_scope.py из frozen driver-v1 используется без изменения;
+его RUNS=nt9 допускает новый непосредственный child api2. Старый scope api
+не используется и не очищается. Existing overlay, helper, receiver fragments,
+tool pins и source map остаются прежними.
+
+GOCACHE/GOMODCACHE остаются закрытыми baseline-v2 private caches.
+V1 не дошёл до CoreRun/Popen и не был их runtime consumer. Новый потребитель
+допускается root после exact inputs review. TEMP/TMP/TMPDIR/GOTMPDIR,
+HOME/USERPROFILE/SERENA_HOME, APPDATA/LOCALAPPDATA/GOPATH указывают на api2.
+Пределы 5 s admission / 5 min suite / +10 s native cleanup / 320 s direct wait
+не меняются, все исходные четыре тестовых аргумента сохраняются.
+
+## 4. DATA probe
+
+verify_slice_composition.py читает и хеширует только три явно заданных
+Python inputs: frozen v1 caller, pinned template, v2 caller. Он:
+
+1. Проверяет AST самого v1 caller и его whole-template parse.
+2. Воспроизводит SyntaxError по actual pinned template с exact filename,
+   строкой 12 и исходным @@TASK_PATH_REPR@@.
+3. Проверяет SHA строки 100–111 и AST ровно одной функции.
+4. Проверяет AST v2 caller и порядок композиции до Source reads/scope creation.
+5. Пишет новый exclusive slice-composition-data.json.
+
+Probe не импортирует ни один caller, не вызывает main/private scope/Run/Popen
+и не запускает helper, runtime или тест. Его main — собственная DATA функция.
+Ни probe, ни v2 caller автор не исполнял. Root выполняет DATA probe отдельно;
+его result не включён в input manifest до фактического появления.
+
+После успешного root DATA receiving внешний launcher получает точный -PlanSHA
+runtime-inputs.json. Этот документ не заменяет root review и actual receiving.
+
+## 5. Границы статуса
+
+Пакет PREPARED_NOT_EXECUTED. Namespace helper ранее COMPILED/CLOSED в stage27;
+это не прохождение API suite. У v2 пока нет результата ни admission, ни tests.
+
+Даже успешный диагностический namespace contract сохраняет
+full_api_inventory_qualified=false и literal_repository_gate_passed=false.
+Existing UNKNOWN full59f/CLI/Source/cache не читаются и не меняются.
+Старый preflight FAIL сохраняется отдельно. Native binaries и cache
+в состав source package не входят. Для PR применима прежняя прозрачная
+template-проекция host values; этот рабочий пакет сам не является public payload.
