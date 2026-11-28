@@ -1,0 +1,906 @@
+{
+  "schema": "composed-functional-source-receiving-v1",
+  "repository": "applicate2628/mcp-local-hub",
+  "source": "e66f5c6fab7da2a2eff16ff1f0891991ca1a839c",
+  "tree": "4df69e99dca3f808b26e6a5bf7721bdd0ba3a91c",
+  "source_paths": 3867,
+  "changed_paths_from_P02": 43,
+  "status": "SCOPED_FUNCTIONAL_BUILD_VET_PASS_NOT_FULLY_QUALIFIED",
+  "source_reconstruction": "source/composed-source-verification.json",
+  "source_after_tests": "git diff --exit-code e66f5c6fab7da2a2eff16ff1f0891991ca1a839c returned zero under original custody",
+  "native_phases": [
+    {
+      "run": "p02-functional-composition-v1",
+      "status": "PASS",
+      "error": null,
+      "source_head_at_entry": "b6f82b3f531bb3eec197049167cdc5971b44e2b0",
+      "command_count": 7,
+      "reader_count": 14,
+      "all_originals_closed": true,
+      "parent_exit": 0,
+      "parent_seconds": 2.4124408999923617,
+      "receipt_sha256": "5de484f390958f51ad6af595266db49f4be8c38da122f883125643c0d521d5cf",
+      "root_receiving_sha256": "0d63df7cfa451028d64484b210cbd8e9e07ba68e640348fc6f38a4c6ce97b0f0",
+      "root_receiving_native_hash_verified": true
+    },
+    {
+      "run": "p02-source-commit-v1",
+      "status": "PASS",
+      "error": null,
+      "source_head_at_entry": "b6f82b3f531bb3eec197049167cdc5971b44e2b0",
+      "command_count": 2,
+      "reader_count": 4,
+      "all_originals_closed": true,
+      "parent_exit": 0,
+      "parent_seconds": 0.3175160000100732,
+      "receipt_sha256": "06bf0cf583dcb91032ad8202dca8ab0fea1086b98f02770cb9aa82098b105ebd",
+      "root_receiving_sha256": "057239ef54f6efca17bf3f15090723561a6f253b0d9e801e65306c980b0c38e3",
+      "root_receiving_native_hash_verified": true
+    },
+    {
+      "run": "p02-source-checkout-v1",
+      "status": "PASS",
+      "error": null,
+      "source_head_at_entry": "b6f82b3f531bb3eec197049167cdc5971b44e2b0",
+      "command_count": 4,
+      "reader_count": 8,
+      "all_originals_closed": true,
+      "parent_exit": 0,
+      "parent_seconds": 0.8547756999614649,
+      "receipt_sha256": "a8d7dc75b82f355757d7e871c6325c767df38c4ac4774c7b6dbc482719de78a6",
+      "root_receiving_sha256": "8c4d64bafbd503ffc9988711da5991794d4b55ad5be63ee5e20c4f286e33cbef",
+      "root_receiving_native_hash_verified": true
+    },
+    {
+      "run": "p02-functional-focused-v1",
+      "status": "FAIL",
+      "error": "RuntimeError: composition-functional-default exit 1 expected 0",
+      "source_head_at_entry": "d9f809e58ec1d55efb7b6a50a9ac3c42d7461835",
+      "command_count": 2,
+      "reader_count": 4,
+      "all_originals_closed": true,
+      "parent_exit": 1,
+      "parent_seconds": 110.55023200000869,
+      "receipt_sha256": "15e89180ecf2b2e20ea9455a681649b2cbe4186096c5af7c326c7cebba9debba",
+      "root_receiving_sha256": "96051da4a41ff61704b96c1e11ac2219fcb4d38d0fa99bc2e2b7ff75306cd414",
+      "root_receiving_native_hash_verified": true
+    },
+    {
+      "run": "p02-functional-composition-v2",
+      "status": "PASS",
+      "error": null,
+      "source_head_at_entry": "d9f809e58ec1d55efb7b6a50a9ac3c42d7461835",
+      "command_count": 7,
+      "reader_count": 14,
+      "all_originals_closed": true,
+      "parent_exit": 0,
+      "parent_seconds": 0.8252846000250429,
+      "receipt_sha256": "6c9e0e7a8d0eaf36bd015a110644a874c538a74a93d81769e2d29eb6d0d25c3d",
+      "root_receiving_sha256": "5608109d4e9805c2ee2a2f944d4c928fbaff3f5b99615ba7a1d5c763ff359c90",
+      "root_receiving_native_hash_verified": true
+    },
+    {
+      "run": "p02-source-checkout-v2",
+      "status": "PASS",
+      "error": null,
+      "source_head_at_entry": "d9f809e58ec1d55efb7b6a50a9ac3c42d7461835",
+      "command_count": 4,
+      "reader_count": 8,
+      "all_originals_closed": true,
+      "parent_exit": 0,
+      "parent_seconds": 0.4278825999936089,
+      "receipt_sha256": "378bb7f9bc680731d1b1a23988cd67df387b909eee797bf81ccc804c6e14cb34",
+      "root_receiving_sha256": "3be0c9fdbda6dcb633e50ef507750f1708f4884e1aeb563008563eb51cc9414c",
+      "root_receiving_native_hash_verified": true
+    },
+    {
+      "run": "p02-functional-focused-v2",
+      "status": "FAIL",
+      "error": "RuntimeError: composition-owner-inventory-default exit 1 expected 0",
+      "source_head_at_entry": "20807d2b0a713fff7900f3cd62b3db5561a0bdcf",
+      "command_count": 2,
+      "reader_count": 4,
+      "all_originals_closed": true,
+      "parent_exit": 1,
+      "parent_seconds": 60.832693100033794,
+      "receipt_sha256": "7c549e3a20f1a115168f80c88d2a1647aadc2361accbc1e546037fe33f33cfbe",
+      "root_receiving_sha256": "620b81992f682b51f6a2c02f25538adae012bf1eecdab23740d80ea9b4fa6a0c",
+      "root_receiving_native_hash_verified": true
+    },
+    {
+      "run": "p02-functional-composition-v3",
+      "status": "FAIL",
+      "error": "RuntimeError: create-v3-source-commit exit 128 expected 0",
+      "source_head_at_entry": "20807d2b0a713fff7900f3cd62b3db5561a0bdcf",
+      "command_count": 5,
+      "reader_count": 10,
+      "all_originals_closed": true,
+      "parent_exit": 1,
+      "parent_seconds": 7.442241800017655,
+      "receipt_sha256": "2cededaac9152d3337ffcead2b9a509f94d9416722ac434431e30fef64065874",
+      "root_receiving_sha256": "cf605903e265918bc4cfc0a1c6f070c6dbda835766bfb75ec68701c4c50240e0",
+      "root_receiving_native_hash_verified": true
+    },
+    {
+      "run": "p02-source-commit-v3",
+      "status": "PASS",
+      "error": null,
+      "source_head_at_entry": "20807d2b0a713fff7900f3cd62b3db5561a0bdcf",
+      "command_count": 3,
+      "reader_count": 6,
+      "all_originals_closed": true,
+      "parent_exit": 0,
+      "parent_seconds": 2.296407000045292,
+      "receipt_sha256": "ddd1f57b813d80221dd8593dbf1858f4a905663608e96cbdbddcabeea4a683f4",
+      "root_receiving_sha256": "04d3c675fd85c46782bc6472a403ae93dc360f0fef3352d7ee898f9cf9d59cfd",
+      "root_receiving_native_hash_verified": true
+    },
+    {
+      "run": "p02-source-checkout-v3",
+      "status": "PASS",
+      "error": null,
+      "source_head_at_entry": "20807d2b0a713fff7900f3cd62b3db5561a0bdcf",
+      "command_count": 4,
+      "reader_count": 8,
+      "all_originals_closed": true,
+      "parent_exit": 0,
+      "parent_seconds": 1.7890903999796137,
+      "receipt_sha256": "fb2e25517966392816da76d237c7db29869f38904dd6f107b1f20e47a2f0ebc7",
+      "root_receiving_sha256": "d7f7ba1e9744bc872a529d31cb6c6356c815a07778ab96ec991091d5856013bc",
+      "root_receiving_native_hash_verified": true
+    },
+    {
+      "run": "p02-functional-focused-v3",
+      "status": "PASS",
+      "error": null,
+      "source_head_at_entry": "e66f5c6fab7da2a2eff16ff1f0891991ca1a839c",
+      "command_count": 6,
+      "reader_count": 12,
+      "all_originals_closed": true,
+      "parent_exit": 0,
+      "parent_seconds": 244.14110509998864,
+      "receipt_sha256": "a4582d8c5028fbd2546eeb650ed7f569e94d9413c01b7428b042c992a2f27045",
+      "root_receiving_sha256": "a84ea499de2d35b004dce15b78327caebed8844bfc4822104cb6ecf643483f46",
+      "root_receiving_native_hash_verified": true
+    },
+    {
+      "run": "p02-final-source-snapshot-v1",
+      "status": "PASS",
+      "error": null,
+      "source_head_at_entry": "e66f5c6fab7da2a2eff16ff1f0891991ca1a839c",
+      "command_count": 3,
+      "reader_count": 6,
+      "all_originals_closed": true,
+      "parent_exit": 0,
+      "parent_seconds": 0.36669009999604896,
+      "receipt_sha256": "0a66f294235bffa8b10e7c87de2f9b34ba95721921ba850f2f7d7da526110700",
+      "root_receiving_sha256": "db7e1bb52735e61a91ff68829b6452b40bcf4eb7997580c574a27b860758d853",
+      "root_receiving_native_hash_verified": false
+    }
+  ],
+  "go_event_results": {
+    "native/p02-functional-focused-v1/composition-functional-default.stdout.txt": {
+      "roots": {
+        "pass": 27,
+        "fail": 1
+      },
+      "subtests": {
+        "pass": 29
+      },
+      "packages": {
+        "pass": 1,
+        "fail": 1
+      },
+      "root_results": [
+        {
+          "Package": "mcp-local-hub/internal/cli",
+          "Test": "TestSetup_InstallsLivenessBeforeObservingLegacyWatchdog",
+          "Action": "pass",
+          "Elapsed": 0.15
+        },
+        {
+          "Package": "mcp-local-hub/internal/cli",
+          "Test": "TestSetup_RunsTwice_Idempotent",
+          "Action": "pass",
+          "Elapsed": 2.68
+        },
+        {
+          "Package": "mcp-local-hub/internal/cli",
+          "Test": "TestSetup_LegacyWatchdogObservationErrorIsNonFatal",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/cli",
+          "Test": "TestUninstall_OrderingDisableWatchdogFirst",
+          "Action": "pass",
+          "Elapsed": 2
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestCleanupLegacySchedulerTasksRetainsObservedGeneration",
+          "Action": "pass",
+          "Elapsed": 5.33
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestLegacySchedulerFilteredPreviewUsesListedScopeWithoutWriting",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/cli",
+          "Test": "TestUninstall_LastServer_RemovesWatchdog",
+          "Action": "pass",
+          "Elapsed": 0.87
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestWeeklyRefreshSetPreservesExistingTaskAndCreatesOnlyAbsent",
+          "Action": "pass",
+          "Elapsed": 1.83
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestInstallPlanCoreGlobalDryRunReportsUnknownLegacyInventory",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/cli",
+          "Test": "TestUninstall_LastServer_RemovesLivenessTask",
+          "Action": "pass",
+          "Elapsed": 2.16
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestRemoveServerFromSupervisorIntentBestEffort_KillsRemovedDaemonsAfterNudge",
+          "Action": "pass",
+          "Elapsed": 2.94
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestInstallParsedManifest_MissingSerenaAssemblyPreservesWorkspaceRowsBeforeCleanup",
+          "Action": "pass",
+          "Elapsed": 1.37
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestInstallPlanCore_RemovedTargetKillDependsOnNudgeOutcome",
+          "Action": "pass",
+          "Elapsed": 15.32
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestInstallPlanCore_GlobalInstall_HeldSupervisorLockAfterIPCFailureSkipsRemovedTargetKill",
+          "Action": "pass",
+          "Elapsed": 5.65
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestInstallParsedManifest_MissingSerenaAssemblyPreservesStopsBeforeCleanup",
+          "Action": "pass",
+          "Elapsed": 0.72
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestInstallPlanCore_GlobalDryRunPrintsSupervisorMutationPlan",
+          "Action": "pass",
+          "Elapsed": 0.51
+        },
+        {
+          "Package": "mcp-local-hub/internal/cli",
+          "Test": "TestStrictModeWindowsExplicitAutorunOffSurvivesMutationAndRecovery",
+          "Action": "pass",
+          "Elapsed": 26.35
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestInstallPlanCore_GlobalDryRunSerenaDoesNotRequirePreparedSelection",
+          "Action": "pass",
+          "Elapsed": 0.85
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestInstallPlanCore_GlobalDryRunDoesNotCreateMissingStateDir",
+          "Action": "pass",
+          "Elapsed": 0.12
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestInstallPlanCore_GlobalDryRunCorruptIntentStillPrintsPlan",
+          "Action": "pass",
+          "Elapsed": 0.01
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestInstallPlanCore_GlobalFullReinstall_RemovesSupervisorDaemon",
+          "Action": "pass",
+          "Elapsed": 0.16
+        },
+        {
+          "Package": "mcp-local-hub/internal/cli",
+          "Test": "TestAutostartWindowsExplicitEnablePreservesQuitAndAppliedProjectionFailure",
+          "Action": "pass",
+          "Elapsed": 0.32
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestInstallPlanCore_WindowsFullReinstallRetainsLegacyGeneration",
+          "Action": "pass",
+          "Elapsed": 0.24
+        },
+        {
+          "Package": "mcp-local-hub/internal/cli",
+          "Test": "TestStrictModeWindowsExistingTaskRefusalPreservesRecovery",
+          "Action": "pass",
+          "Elapsed": 0.24
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestSecretsInitRecoveryLockSettlement",
+          "Action": "pass",
+          "Elapsed": 0.03
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestSecretsInitRecoveryLockAcquireFailure",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestSecretsInitRecoveryLockReleasesOnPanic",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestSupervisorIntentLockOwnershipProductionInventory",
+          "Action": "fail",
+          "Elapsed": 10.83
+        }
+      ]
+    },
+    "native/p02-functional-focused-v2/composition-owner-inventory-default.stdout.txt": {
+      "roots": {
+        "fail": 1
+      },
+      "subtests": {},
+      "packages": {
+        "fail": 1
+      },
+      "root_results": [
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestSupervisorIntentLockOwnershipProductionInventory",
+          "Action": "fail",
+          "Elapsed": 24.88
+        }
+      ]
+    },
+    "native/p02-functional-focused-v3/composition-owner-inventory-default.stdout.txt": {
+      "roots": {
+        "pass": 3
+      },
+      "subtests": {
+        "pass": 14
+      },
+      "packages": {
+        "pass": 1
+      },
+      "root_results": [
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestSupervisorIntentLockOwnershipProductionInventory",
+          "Action": "pass",
+          "Elapsed": 17.79
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestSupervisorIntentLockOwnershipFixtureMatrix",
+          "Action": "pass",
+          "Elapsed": 0.81
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestAppliedReleaseClassifierFixtureRejectsSibling",
+          "Action": "pass",
+          "Elapsed": 0
+        }
+      ]
+    },
+    "native/p02-functional-focused-v3/composition-functional-tagged.stdout.txt": {
+      "roots": {
+        "pass": 28
+      },
+      "subtests": {
+        "pass": 29
+      },
+      "packages": {
+        "pass": 2
+      },
+      "root_results": [
+        {
+          "Package": "mcp-local-hub/internal/cli",
+          "Test": "TestSetup_InstallsLivenessBeforeObservingLegacyWatchdog",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/cli",
+          "Test": "TestSetup_RunsTwice_Idempotent",
+          "Action": "pass",
+          "Elapsed": 0.01
+        },
+        {
+          "Package": "mcp-local-hub/internal/cli",
+          "Test": "TestSetup_LegacyWatchdogObservationErrorIsNonFatal",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/cli",
+          "Test": "TestUninstall_OrderingDisableWatchdogFirst",
+          "Action": "pass",
+          "Elapsed": 0.01
+        },
+        {
+          "Package": "mcp-local-hub/internal/cli",
+          "Test": "TestUninstall_LastServer_RemovesWatchdog",
+          "Action": "pass",
+          "Elapsed": 0.01
+        },
+        {
+          "Package": "mcp-local-hub/internal/cli",
+          "Test": "TestUninstall_LastServer_RemovesLivenessTask",
+          "Action": "pass",
+          "Elapsed": 0.01
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestCleanupLegacySchedulerTasksRetainsObservedGeneration",
+          "Action": "pass",
+          "Elapsed": 0.22
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestLegacySchedulerFilteredPreviewUsesListedScopeWithoutWriting",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestWeeklyRefreshSetPreservesExistingTaskAndCreatesOnlyAbsent",
+          "Action": "pass",
+          "Elapsed": 0.02
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestInstallPlanCoreGlobalDryRunReportsUnknownLegacyInventory",
+          "Action": "pass",
+          "Elapsed": 0.01
+        },
+        {
+          "Package": "mcp-local-hub/internal/cli",
+          "Test": "TestStrictModeWindowsExplicitAutorunOffSurvivesMutationAndRecovery",
+          "Action": "pass",
+          "Elapsed": 0.26
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestRemoveServerFromSupervisorIntentBestEffort_KillsRemovedDaemonsAfterNudge",
+          "Action": "pass",
+          "Elapsed": 0.01
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestInstallParsedManifest_MissingSerenaAssemblyPreservesWorkspaceRowsBeforeCleanup",
+          "Action": "pass",
+          "Elapsed": 0.01
+        },
+        {
+          "Package": "mcp-local-hub/internal/cli",
+          "Test": "TestAutostartWindowsExplicitEnablePreservesQuitAndAppliedProjectionFailure",
+          "Action": "pass",
+          "Elapsed": 0.24
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestInstallPlanCore_RemovedTargetKillDependsOnNudgeOutcome",
+          "Action": "pass",
+          "Elapsed": 0.23
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestInstallPlanCore_GlobalInstall_HeldSupervisorLockAfterIPCFailureSkipsRemovedTargetKill",
+          "Action": "pass",
+          "Elapsed": 0.02
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestInstallParsedManifest_MissingSerenaAssemblyPreservesStopsBeforeCleanup",
+          "Action": "pass",
+          "Elapsed": 0.01
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestInstallPlanCore_GlobalDryRunPrintsSupervisorMutationPlan",
+          "Action": "pass",
+          "Elapsed": 0.01
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestInstallPlanCore_GlobalDryRunSerenaDoesNotRequirePreparedSelection",
+          "Action": "pass",
+          "Elapsed": 0.01
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestInstallPlanCore_GlobalDryRunDoesNotCreateMissingStateDir",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestInstallPlanCore_GlobalDryRunCorruptIntentStillPrintsPlan",
+          "Action": "pass",
+          "Elapsed": 0.01
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestInstallPlanCore_GlobalFullReinstall_RemovesSupervisorDaemon",
+          "Action": "pass",
+          "Elapsed": 0.2
+        },
+        {
+          "Package": "mcp-local-hub/internal/cli",
+          "Test": "TestStrictModeWindowsExistingTaskRefusalPreservesRecovery",
+          "Action": "pass",
+          "Elapsed": 0.32
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestInstallPlanCore_WindowsFullReinstallRetainsLegacyGeneration",
+          "Action": "pass",
+          "Elapsed": 0.11
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestSecretsInitRecoveryLockSettlement",
+          "Action": "pass",
+          "Elapsed": 0.01
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestSecretsInitRecoveryLockAcquireFailure",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestSecretsInitRecoveryLockReleasesOnPanic",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/api",
+          "Test": "TestSupervisorIntentLockOwnershipProductionInventory",
+          "Action": "pass",
+          "Elapsed": 11.67
+        }
+      ]
+    },
+    "native/p02-functional-focused-v3/current-cmake-contracts.stdout.txt": {
+      "roots": {
+        "pass": 46
+      },
+      "subtests": {
+        "pass": 28
+      },
+      "packages": {
+        "pass": 1
+      },
+      "root_results": [
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestTrace_WellFormed_IncludeChainAndExecutedLines",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestTrace_NoVersionHeader_ParsedAnyway",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestTrace_MalformedLinesCountedAndParseContinues",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestTrace_EmptyFile",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestTrace_NotJSONLines",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestTrace_MissingPath",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestTrace_Unreadable",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestTrace_FileAndCommandFilters",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestTrace_MaxRecordsCapsAndSetsTruncated",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestTrace_MaxRecordsZeroUsesDefaultAndDoesNotTruncateASmallTrace",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestTrace_ArgsPreservedVerbatim",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestTrace_MidRecordInputIsIndependentlyMarkedIncomplete",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestTrace_InvalidMandatoryRecordFieldsAreMalformedNotEvidence",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestF26_CancellationDuringTheParseStopsReadingMidStream",
+          "Action": "pass",
+          "Elapsed": 0.06
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestF26_CanceledRequestFailsClosedAndStopsReading",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestF26_TraceReaderIsClosedOnTheSuccessPath",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestF26_OverlongLineIsRefusedAndReportedAsIncomplete",
+          "Action": "pass",
+          "Elapsed": 0.04
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestF26_MultipleIncompletenessCausesAreAllReported",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestF26_EmptyAndWhitespaceOnlyTracesStillReportTraceEmpty",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestF26_RecordCeilingBoundsParseIndexAndResponseTogether",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestF26_ByteCeilingStopsTheReadAndIsReported",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestF26_LineCeilingBoundsTheReadNotJustTheClassification",
+          "Action": "pass",
+          "Elapsed": 0.01
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestTraceRejectsSpecialFileFromOpenedHandle",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestRelativeTracePathIsRefusedBeforeFilesystemAccess",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestUnsupportedTraceMajorFailsClosedWithoutPartialRecords",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestR16TraceProjectionRetainsIdentityAndEnumeratesCollections",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestR16TraceAdmissionRejectsLargeAggregateBeforeEncoding",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestR18TraceAdmissionAccountsForEncodedLineNumberBytes",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestR19TraceAdmissionAccountsForExecutedLineEntrySyntax",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestR21TraceUsesSameHandleForOpenAndRegularFileValidation",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestR22TraceAdmissionAccountsForEscapedJSONStringBytes",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestR22EncodedJSONStringBytesMatchesJSONEncoder",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestR23TraceAdmissionAccountsForRecordObjectSyntax",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestR23ParserRetainedRecordByteCeiling",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestR28DerivedTraceIndexesShareRetainedByteBudget",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestR32TraceRequiresPresentNonNullArgsArray",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestR32OversizedLineDrainStopsOnCancellation",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestParseTraceStreamReportsNoProgress",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestTraceBenchmarkFixtures",
+          "Action": "pass",
+          "Elapsed": 0.01
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestTraceBenchmarkPublicProjection",
+          "Action": "pass",
+          "Elapsed": 0.14
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestTrace_SuppliedButAbsentPath_IsStillAVerifiedAbsence",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestTraceReadErrorAtLimitIsUnknown",
+          "Action": "pass",
+          "Elapsed": 0
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestTraceReturnedRecordsClearDiscardedReferences",
+          "Action": "pass",
+          "Elapsed": 0.01
+        },
+        {
+          "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "Test": "TestTraceCancellationAtTerminalRead",
+          "Action": "pass",
+          "Elapsed": 0
+        }
+      ]
+    }
+  },
+  "full_default_suite": "NOT_RUN",
+  "full_tagged_API_CLI_suite": "NOT_RUN",
+  "full_original_failures_reclassified": false,
+  "V1_and_V2_reclassified": false,
+  "runtime_external_adapter_enabled": false,
+  "external_review_exact_heads": "REVIEW_PENDING",
+  "references": {
+    "scheduler_owner": "https://github.com/applicate2628/mcp-local-hub/pull/660",
+    "scheduler_head": "e6f1ce535db0e2b2d626fba87ae62d83fe49c2a2",
+    "recovery_owner_head": "ec2248643d875390c41b519b85424a5ca0ce90d1",
+    "CMake_owner_head": "beff0af24862a552a3e54360166728181c2ee00e",
+    "B_candidate_published_head": "8b1d27290812717736691fc9745e0da9509da9f6",
+    "Rust_reader_head": "1d927f5e38b353abe841f974f65a145e2cd50411"
+  },
+  "limits": [
+    "Targeted default and tagged runs are not complete API/CLI suites.",
+    "Default v1 functional passes retain v1 scope; v1/v2 census failures remain failures.",
+    "No installed Product/Serena lifecycle, external debug-owner late receiving or ARM64 run is certified here.",
+    "CMake package tests do not renew the historical consumer performance measurements.",
+    "The base capsule preserves a source snapshot, not missing older ancestry.",
+    "The final snapshot root receipt is a preserved controller record without a separate later native hash measurement; prior eleven roots were measured exactly."
+  ]
+}

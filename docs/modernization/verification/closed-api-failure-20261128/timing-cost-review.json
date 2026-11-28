@@ -1,0 +1,283 @@
+{
+  "schema": "closed-api-timing-and-cost-review-v1",
+  "scope": "Source727 default API closed FAIL; static cost attribution and proposed cache preparation only",
+  "measured": {
+    "duration_source": "Original Go test terminal frames, two decimal places; derived test2json contains no Time or Elapsed fields.",
+    "top_level_tests": 3523,
+    "total_rounded_root_seconds": 298.2,
+    "namespace_owner_elapsed_seconds_approximate": 299.736,
+    "top15_rounded_seconds": 122.91,
+    "top15": [
+      {
+        "test": "TestProbeProviderProcessWorkingDirectoryReadsOwnedWOW64Helper",
+        "outcome": "pass",
+        "elapsed_rounded_seconds": 26.39,
+        "before_diagnostics": true
+      },
+      {
+        "test": "TestSecretsInit_RecoveryNamespaceBoundary",
+        "outcome": "pass",
+        "elapsed_rounded_seconds": 19.07,
+        "before_diagnostics": true
+      },
+      {
+        "test": "TestProviderWorkingDirectoryIdentityOwnsOnlySelectedLiveInstance",
+        "outcome": "pass",
+        "elapsed_rounded_seconds": 12.89,
+        "before_diagnostics": true
+      },
+      {
+        "test": "TestSupervisorIntentLockOwnershipProductionInventory",
+        "outcome": "pass",
+        "elapsed_rounded_seconds": 11.71,
+        "before_diagnostics": false
+      },
+      {
+        "test": "TestAttachExisting_ConfigLockWaitExpiresAtTenSeconds",
+        "outcome": "pass",
+        "elapsed_rounded_seconds": 10.25,
+        "before_diagnostics": true
+      },
+      {
+        "test": "TestCanonicalManifestDirIgnoresExecutableContextAndExistence",
+        "outcome": "pass",
+        "elapsed_rounded_seconds": 9.03,
+        "before_diagnostics": true
+      },
+      {
+        "test": "TestAttachExisting_ForegroundAdmissionExpiresAtFiveSeconds",
+        "outcome": "pass",
+        "elapsed_rounded_seconds": 6.28,
+        "before_diagnostics": true
+      },
+      {
+        "test": "TestRunDaemonIntentCollapse_LargeLegacyStopsStayUnderIntentCapWithAbsentOnlyWatermarks",
+        "outcome": "pass",
+        "elapsed_rounded_seconds": 5.72,
+        "before_diagnostics": true
+      },
+      {
+        "test": "TestAttachExisting_CommittedRepeatRefusesUnownedRecoveryAndDrift",
+        "outcome": "pass",
+        "elapsed_rounded_seconds": 3.71,
+        "before_diagnostics": true
+      },
+      {
+        "test": "TestAttachExisting_CancelDuringSlowSessionCleanupVetoesWrite",
+        "outcome": "pass",
+        "elapsed_rounded_seconds": 3.32,
+        "before_diagnostics": true
+      },
+      {
+        "test": "TestIntentAudit_CallerStartTimeAgainstIndependentOracle",
+        "outcome": "pass",
+        "elapsed_rounded_seconds": 3.26,
+        "before_diagnostics": true
+      },
+      {
+        "test": "TestWeeklyRefreshWritersSerializeAtTransactionOwner",
+        "outcome": "pass",
+        "elapsed_rounded_seconds": 3.01,
+        "before_diagnostics": false
+      },
+      {
+        "test": "TestAttachExisting_FreshCommittedPlanApplyRefusesDrift",
+        "outcome": "pass",
+        "elapsed_rounded_seconds": 2.86,
+        "before_diagnostics": true
+      },
+      {
+        "test": "TestProviderAdmissionUnknownMarkerBlocksProbe",
+        "outcome": "pass",
+        "elapsed_rounded_seconds": 2.76,
+        "before_diagnostics": true
+      },
+      {
+        "test": "TestAdoptRepeatRejectsMalformedProvenance",
+        "outcome": "pass",
+        "elapsed_rounded_seconds": 2.65,
+        "before_diagnostics": true
+      }
+    ],
+    "compact_attempt": {
+      "prior_sequential_roots": 2823,
+      "prior_rounded_seconds": 260.95,
+      "elapsed_rounded_seconds": 0.01
+    },
+    "diagnostics": {
+      "prior_sequential_roots": 2832,
+      "prior_rounded_seconds": 260.96,
+      "elapsed_rounded_seconds": 0,
+      "subsequent_rounded_root_seconds": 37.24
+    },
+    "prior_top_level_pauses": 0
+  },
+  "diagnosis": {
+    "git_transport": {
+      "capture_proves": "Local submodule-add file transport was refused with exit128.",
+      "fixture_sets": "GIT_CONFIG_COUNT=1; GIT_CONFIG_KEY_0=protocol.file.allow; GIT_CONFIG_VALUE_0=always",
+      "frozen_harness_configuration": "Preparation owner independently reviewed GIT_ALLOW_PROTOCOL=\"\" in the frozen full config.",
+      "frozen_binding_sha256": "b5a15b47e09a4c3476205778b85c1d83a22275ddf664cf0bdcde377e896136ce",
+      "new_active_input_reads": false,
+      "source_change_indicated": false
+    },
+    "diagnostics": {
+      "test_source": "internal/api/serena_prepared_diagnostics_windows_test.go:20-27",
+      "policy_source": "internal/api/serena_preparation_policy.go:76-78",
+      "cleanup_limit_seconds": 45,
+      "formula": "cleanupEnd=min(now+60s, packageDeadline-1s); workEnd=cleanupEnd-45s",
+      "proven_remaining_upper_bound_seconds": 46,
+      "approximate_remaining_from_rounded_root_sum_seconds": 39,
+      "exact_start_timestamp_available": false,
+      "refusal_precedes_child_creation": true,
+      "compact_start_failure_consumes_material_budget": false
+    },
+    "compact_attempt": {
+      "captured_stage": "start",
+      "underlying_win32_error": "NOT_RECORDED",
+      "source_work_limit_seconds": 60,
+      "source_cleanup_limit_seconds": 60,
+      "separate_fresh_budget": true,
+      "adapter_short_temp_characters": 31,
+      "namespace_owner_temp_characters": 97,
+      "source_test_name_characters": 56,
+      "generation_cwd_characters_if_ten_digit_suffix": 265,
+      "generation_cwd_characters_with_one_to_ten_digit_suffix": [
+        256,
+        265
+      ],
+      "generation_cwd_with_short_temp_and_ten_digit_suffix": 199,
+      "actual_suffix_not_recorded": true,
+      "explanation": "The namespace owner overrides the previously created short temp with a longer namespace path. This is a concrete path-length risk, not proof of a particular Win32 errno.",
+      "source_locations": [
+        "internal/api/hardened_tempdir_windows_test.go:32-43",
+        "internal/api/serena_prepared_acquisition.go:99",
+        "internal/api/serena_prepared_build_constraint_integration_windows_test.go:57-68",
+        "internal/process/contained_stream.go:69-74",
+        "internal/process/contained_stream_windows.go:154-186"
+      ]
+    }
+  },
+  "cost_attribution": {
+    "exact_provider_test_source": {
+      "base_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+      "base_sha256": "5eb2fa9d2605388feb5735566a52fd4e820398e767c2c5bf2ba0963126c7a357",
+      "exact727_sha256": "1427099b98f5d851cb8bb2462bfa166ea7687d8ab34cc14142e9344fb39bb4f9",
+      "exact727_bytes": 44798,
+      "public_patch": "../original-source727d-recovery-20261128/3ebe-to-0145.patch",
+      "data_replay_hunks": 2,
+      "source_path": "internal/api/adopt_provider_working_directory_windows_test.go",
+      "helper_build_lines": [
+        611,
+        638
+      ]
+    },
+    "provider_wow64": {
+      "test": "TestProbeProviderProcessWorkingDirectoryReadsOwnedWOW64Helper",
+      "seconds": 26.39,
+      "first_architecture": "386",
+      "contains_go_build": true,
+      "build_phase_elapsed_recorded": false,
+      "cache_miss_recorded": false
+    },
+    "provider_first_amd64": {
+      "test": "TestProviderWorkingDirectoryPEBDOSPathNamedPipeDoesNotConnect",
+      "seconds": 2.35,
+      "first_architecture": "amd64",
+      "contains_go_build": true,
+      "build_phase_elapsed_recorded": false,
+      "cache_miss_recorded": false
+    },
+    "provider_identity": {
+      "test": "TestProviderWorkingDirectoryIdentityOwnsOnlySelectedLiveInstance",
+      "seconds": 12.89,
+      "architecture": "amd64",
+      "helper_image_reused_from_same_package_process": true,
+      "new_helper_build_on_this_path": false,
+      "source_line": 887,
+      "other_work": "Starts two fresh owned helpers, reads and compares process/working-directory identity, exercises adopt/repeat/de-adopt, retains and checks the unselected helper."
+    },
+    "namespace_boundary": {
+      "test": "TestSecretsInit_RecoveryNamespaceBoundary",
+      "seconds": 19.07,
+      "go_build_in_test": false,
+      "original_powershell_fixture_invocations": 16,
+      "subtests": [
+        {
+          "name": "protected_empty",
+          "seconds": 5.61
+        },
+        {
+          "name": "missing",
+          "seconds": 2.99
+        },
+        {
+          "name": "not_directory",
+          "seconds": 1.53
+        },
+        {
+          "name": "broadened_empty",
+          "seconds": 2.38
+        },
+        {
+          "name": "broadened_ignored",
+          "seconds": 2.87
+        },
+        {
+          "name": "reparse",
+          "seconds": 3.12
+        }
+      ],
+      "source_path": "internal/api/secrets_init_recovery_test.go",
+      "source_lines": [
+        541,
+        698
+      ],
+      "wrong_owner_assignment_already_refused": true
+    }
+  },
+  "proposed_preparation": {
+    "status": "NOT_RUN",
+    "purpose": "Populate ordinary Go build caches for the exact helper while preserving fresh test-owned images/children and all test inventory.",
+    "mandatory_preconditions": [
+      "Receive the whole original full-run closure before reading or copying its caches.",
+      "Create a fresh donor scope and retain immutable FAIL evidence.",
+      "Use the original native owner/controller route, exact pinned toolchain and source.",
+      "Copy only the now-closed cache data under the approved boundary.",
+      "Receive both build commands and all readers physically CLOSED before any cache handoff.",
+      "Keep the mandatory five-minute test timeout and source inventory unchanged."
+    ],
+    "cwd_role": "exact-Source727/internal/api",
+    "architectures": [
+      "386",
+      "amd64"
+    ],
+    "argv": [
+      "go",
+      "build",
+      "-ldflags=-H=windowsgui",
+      "-o",
+      "<fresh-owned-output>/provider-cwd-helper-<arch>.exe",
+      "./testdata/provider-cwd-helper"
+    ],
+    "environment": {
+      "GOOS": "windows",
+      "GOARCH": "<arch>",
+      "CGO_ENABLED": "0",
+      "GOFLAGS": "-mod=readonly -ldflags=-H=windowsgui",
+      "GOENV": "off",
+      "GOWORK": "off",
+      "GOTOOLCHAIN": "local",
+      "GOCACHE": "<new-closed-donor>/private/go-build",
+      "GOMODCACHE": "<new-closed-donor>/private/go-mod",
+      "GOROOT": "<pinned-existing-Go-distribution>",
+      "go_version": "go1.27.4"
+    },
+    "output_images_substituted_into_tests": false,
+    "exact_source_path_matters_for_package_cache_identity": true,
+    "cache_data_only_not_process_custody": true,
+    "cache_miss_claim": false,
+    "claimed_seconds_saved": null,
+    "new_test_execution_claim": false
+  }
+}

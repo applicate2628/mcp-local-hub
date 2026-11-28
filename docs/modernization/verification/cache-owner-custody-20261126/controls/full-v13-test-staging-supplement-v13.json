@@ -1,0 +1,44 @@
+{
+  "schema": "reviewed-source-test-staging-supplement-v2",
+  "status": "REVIEWED_SCOPE_ONLY_NO_EXECUTION",
+  "repository": "<TASK>\\native-consumer-source-v3",
+  "source_commit": "aca81a1743ccfbf3e10902769a9b071eb911919e",
+  "product_source_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+  "source_root_receiving": {
+    "path": "<TASK>\\runs\\test-source-update-v1\\root-receiving.json",
+    "sha256": "8b04a4902ca7d08e6d6acd27ec0a765a0ea859ea2d3ffb3a90545f0fa8bc5998"
+  },
+  "product_donor_admission": {
+    "path": "<TASK>\\final-gates-v7\\product-admission.json",
+    "sha256": "9d967cbb76407fe6fada96a1b51ec94303c1c12960aa1c313804c4ace07ea404"
+  },
+  "delta_map": {
+    "path": "<TASK>\\test-source-update-inputs-v1\\delta-map.json",
+    "sha256": "b0fb77499a3e2f5dd20a543047d65b6e0f96afc40101ec7c0ccbe143a8312234"
+  },
+  "scopes": {
+    "literal-final-v10": {
+      "private_parent": ".scratch",
+      "private_scopes": [
+        ".scratch/qualified-literal-final-v10-receiver",
+        ".scratch/qualified-literal-final-v10-canonical"
+      ],
+      "fixed_files": [
+        "internal/api/zz_qualified_api_versioninfo_windows_amd64.syso"
+      ]
+    }
+  },
+  "conditions": {
+    "tracked_source_bytes_and_git_controls_unchanged": true,
+    "create_only_owned_scopes_no_repair_of_existing_paths": true,
+    "controller_inputs_bound_by_exact_reviewed_helper_manifest": true,
+    "versioninfo_bytes_copied_only_from_exact_received_product_donor": true,
+    "exact_reviewed_test_source_delta_received": true,
+    "no_disposition_before_original_native_and_io_closure": true,
+    "retain_required_outputs_outside_trash_before_owned_disposition": true,
+    "tracked_source_snapshot_and_clean_status_after": true,
+    "no_cache_access_grant": true,
+    "no_ready_or_native_authority_issued": true,
+    "no_test_deadline_change": true
+  }
+}

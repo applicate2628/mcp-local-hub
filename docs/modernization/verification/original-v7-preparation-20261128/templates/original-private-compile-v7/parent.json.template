@@ -1,0 +1,48 @@
+{
+  "schema": "fresh-owned-commands-v1-parent",
+  "status": "PASS",
+  "plan_sha256": "6d6cb0233685566894d4e5ef426dedc07daa13948dfeeab2a446064af79382eb",
+  "argv": [
+    "@@RECOVERY_CONTROLLER_PYTHON_HOME_ESCAPED@@\\python.exe",
+    "-I",
+    "-S",
+    "-B",
+    "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-error-dword-v4\\run_owned_commands.py",
+    "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\original-private-compile-v7-plan.json",
+    "6d6cb0233685566894d4e5ef426dedc07daa13948dfeeab2a446064af79382eb",
+    "--worker"
+  ],
+  "original_pid": 55536,
+  "terminal_exit_received": true,
+  "parent_capture_files_closed": true,
+  "deadline_exceeded": false,
+  "exit_code": 0,
+  "seconds": 568.6791257000295,
+  "execution_sha256": "b1c4a3d3f5e4ca1a65227f05bb648487cad8dfd43af49927e1cd3e6d1f0e780a",
+  "child_status": "PASS",
+  "physical_complete": true,
+  "capture_closure": [
+    {
+      "name": "stdout",
+      "close_attempted": true,
+      "close_returned": true,
+      "wrapper_closed": true
+    },
+    {
+      "name": "stderr",
+      "close_attempted": true,
+      "close_returned": true,
+      "wrapper_closed": true
+    }
+  ],
+  "parent_captures": {
+    "stdout": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  }
+}

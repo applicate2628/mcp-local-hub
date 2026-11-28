@@ -1,0 +1,75 @@
+diff --git a/internal/api/main_helper_dispatch_test.go b/internal/api/main_helper_dispatch_test.go
+index 05c3c8d831013ebd4114dcb372d55137132ce606..16a795c01c81471e90bf356573da48d3f8984820 100644
+--- a/internal/api/main_helper_dispatch_test.go
++++ b/internal/api/main_helper_dispatch_test.go
+@@ -10,7 +10,7 @@ type apiTestHelperDispatch struct {
+ 	invalid                 bool
+ 	runSelectedTest         bool
+ 	mustExit                bool
+-	callerStartTimeStateDir string
++	callerStartTimeOracle   bool
+ }
+ 
+ // classifyAPITestHelperDispatch validates only the child invocations issued
+@@ -22,10 +22,8 @@ func classifyAPITestHelperDispatch(args []string, getenv func(string) string) ap
+ 		selector = strings.TrimPrefix(args[1], "-test.run=")
+ 	}
+ 
+-	oracleState := getenv(callerStartTimeChildStateDirEnv)
+-	// The child converts milliseconds to a nanosecond time.Duration. Reject
+-	// malformed values and multiplication overflow before its first write.
+-	delayMS, delayErr := strconv.Atoi(getenv(callerStartTimeChildDelayEnv))
++	oracleRole := getenv(callerStartTimeChildStateDirEnv)
++	oracleDelay := getenv(callerStartTimeChildDelayEnv)
+ 	vaultMarker := getenv("MCPHUB_TEST_HOLD_VAULT_LOCK")
+ 	fenceMarker := getenv("MCPHUB_TEST_UPGRADE_FENCE_HOLDER")
+ 	adoptRole := getenv("MCPHUB_A2_ROLE")
+@@ -47,10 +45,10 @@ func classifyAPITestHelperDispatch(args []string, getenv func(string) string) ap
+ 	}
+ 	candidates := []candidate{
+ 		{
+-			active: oracleState != "",
++			active: oracleRole != "" || oracleDelay != "",
+ 			valid: selector == "^TestIntentAudit_CallerStartTimeAgainstIndependentOracle$" &&
+-				validAPITestHelperPath(oracleState) && delayErr == nil && delayMS >= 0 && int64(delayMS) <= (1<<63-1)/1_000_000,
+-			dispatch: apiTestHelperDispatch{callerStartTimeStateDir: oracleState},
++				oracleRole == callerStartTimeChildRole && oracleDelay == callerStartTimeOracleDelayValue(),
++			dispatch: apiTestHelperDispatch{callerStartTimeOracle: true},
+ 		},
+ 		{
+ 			active: vaultMarker != "",
+diff --git a/internal/api/main_helper_dispatch_validation_test.go b/internal/api/main_helper_dispatch_validation_test.go
+index 86b8a81a3bd8cb0219bd99f8a4aba5899f792bb0..d5713ff828b147aae5eceef2df3ebcfbc7c3b9e1 100644
+--- a/internal/api/main_helper_dispatch_validation_test.go
++++ b/internal/api/main_helper_dispatch_validation_test.go
+@@ -23,8 +23,8 @@ func TestClassifyAPITestHelperDispatch(t *testing.T) {
+ 		{name: "fence parent", selector: "^TestUpgradeFenceReacquiresAfterHolderProcessDeath$"},
+ 		{
+ 			name: "oracle child", selector: "^TestIntentAudit_CallerStartTimeAgainstIndependentOracle$",
+-			env:  map[string]string{callerStartTimeChildStateDirEnv: root, callerStartTimeChildDelayEnv: "3000"},
+-			want: apiTestHelperDispatch{callerStartTimeStateDir: root},
++			env:  map[string]string{callerStartTimeChildStateDirEnv: callerStartTimeChildRole, callerStartTimeChildDelayEnv: callerStartTimeOracleDelayValue()},
++			want: apiTestHelperDispatch{callerStartTimeOracle: true},
+ 		},
+ 		{
+ 			name: "vault child", selector: "^TestVaultFlockHelperProcess$",
+@@ -78,7 +78,7 @@ func TestClassifyAPITestHelperDispatchRejectsUnsafeInputs(t *testing.T) {
+ 		selector string
+ 		env      map[string]string
+ 	}{
+-		{"oracle", "^TestIntentAudit_CallerStartTimeAgainstIndependentOracle$", map[string]string{callerStartTimeChildStateDirEnv: root, callerStartTimeChildDelayEnv: "3000"}},
++		{"oracle", "^TestIntentAudit_CallerStartTimeAgainstIndependentOracle$", map[string]string{callerStartTimeChildStateDirEnv: callerStartTimeChildRole, callerStartTimeChildDelayEnv: callerStartTimeOracleDelayValue()}},
+ 		{"vault", "^TestVaultFlockHelperProcess$", map[string]string{"MCPHUB_TEST_HOLD_VAULT_LOCK": "1", "MCPHUB_TEST_VAULT_PATH": filepath.Join(root, "vault"), "MCPHUB_TEST_READY_PATH": filepath.Join(root, "ready"), "MCPHUB_TEST_RELEASE_PATH": filepath.Join(root, "release")}},
+ 		{"fence", "^TestUpgradeFenceReacquiresAfterHolderProcessDeath$", map[string]string{"MCPHUB_TEST_UPGRADE_FENCE_HOLDER": "1", "MCPHUB_TEST_UPGRADE_FENCE_STATE_DIR": root}},
+ 		{"adopt", "^TestAdoptLeaseRaceChild$", map[string]string{"MCPHUB_A2_ROLE": "try", "MCPHUB_A2_STATE": root, "MCPHUB_A2_ENTRY": "owned-entry"}},
+@@ -123,8 +123,8 @@ func TestClassifyAPITestHelperDispatchRejectsUnsafeInputs(t *testing.T) {
+ 		key     string
+ 		values  []string
+ 	}{
+-		{0, callerStartTimeChildStateDirEnv, []string{"relative", root + string(filepath.Separator) + ".."}},
+-		{0, callerStartTimeChildDelayEnv, []string{"", "-1", "not-an-integer", "999999999999999999999999999"}},
++		{0, callerStartTimeChildStateDirEnv, []string{"", "relative", root, root + string(filepath.Separator) + ".."}},
++		{0, callerStartTimeChildDelayEnv, []string{"", "-1", "0", "2999", "3001", "not-an-integer", "999999999999999999999999999"}},
+ 		{1, "MCPHUB_TEST_HOLD_VAULT_LOCK", []string{"2"}},
+ 		{1, "MCPHUB_TEST_VAULT_PATH", []string{"", "relative", root + "\x00"}},
+ 		{1, "MCPHUB_TEST_READY_PATH", []string{"", "relative"}},

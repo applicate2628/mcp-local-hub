@@ -1,0 +1,270 @@
+{
+  "schema": "closed-execution-plan-map-projection-v1",
+  "original_execution": {
+    "role_path": "original-runtime-compose-v6/commands/execution.json",
+    "sha256": "eac444852333c7b2891fe2cd856098df14398291b45d755636b4f99f3b1fbd39",
+    "bytes": 47978
+  },
+  "original_plan": {
+    "role_path": "inputs-original-v6/original-runtime-compose-v6-plan.json",
+    "sha256": "1f16a94cbf4c9e98c35a170395596f2feabc1b313bc6b9dc29c0894d35a9eb89"
+  },
+  "input_map_entries": 107,
+  "serialization": {
+    "ensure_ascii": false,
+    "indent": 2,
+    "trailing_newline": true
+  },
+  "execution": {
+    "schema": "fresh-owned-commands-v1",
+    "status": "PASS",
+    "commands": [
+      {
+        "argv": [
+          "@@RECOVERY_CONTROLLER_PYTHON_HOME_ESCAPED@@\\python.exe",
+          "-I",
+          "-S",
+          "-B",
+          "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\prepare_literal_v6.py",
+          "--bindings",
+          "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\literal-original-v6-bindings.candidate.json",
+          "--bindings-sha256",
+          "b5a15b47e09a4c3476205778b85c1d83a22275ddf664cf0bdcde377e896136ce",
+          "--output",
+          "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\runtime-original-v6",
+          "--reviewed"
+        ],
+        "cwd": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1",
+        "stdout": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-runtime-compose-v6\\commands\\compose-reviewed-original-literal-runtime.stdout.txt",
+        "stderr": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-runtime-compose-v6\\commands\\compose-reviewed-original-literal-runtime.stderr.txt",
+        "captures_measured": true,
+        "command_success": true,
+        "io": {
+          "stdout": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 940,
+            "bytes_stored": 940,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 579950.6715879
+          },
+          "stderr": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 0,
+            "bytes_stored": 0,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 579950.6715642
+          }
+        },
+        "work_seconds": 120,
+        "cleanup_seconds": 10,
+        "native_owner": {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-error-dword-v4\\windows_job.py",
+          "sha256": "d94583001a33ef34adb67feec34b4f4b0bf3626df9f63da3c7a7c85bf3e0b552"
+        },
+        "console": {
+          "attached": true,
+          "visible": false
+        },
+        "stdin_mode": "null",
+        "before_resume_entered": true,
+        "before_resume_returned": true,
+        "before_resume_deadline_exceeded": false,
+        "phases_elapsed_seconds": {
+          "initial_save_started": 2.6899971999228e-05,
+          "initial_save_finished": 0.0032635999377816916,
+          "launch_entered": 0.0032652999507263303,
+          "before_resume_entered": 0.009613299975171685,
+          "before_resume_returned": 0.009614599985070527,
+          "launch_returned": 0.009628699976019561,
+          "launch_exception": null,
+          "external_settle_end": 0.4422310999361798
+        },
+        "quiescence_state": "complete",
+        "original_pid": 161684,
+        "original_owner_binding": {
+          "schema": "ordinary-original-native-owner-binding-v1",
+          "object_id": 1986939026608,
+          "pid": 161684,
+          "process": 500,
+          "job": 492
+        },
+        "timed_out": false,
+        "work_deadline_exceeded": false,
+        "work_elapsed_seconds": 0.44209979998413473,
+        "cleanup_interval_seconds": 10.0,
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "exit_code": 0,
+        "worker_join_observations": [
+          {
+            "name": "compose-reviewed-original-literal-runtime-stdout",
+            "ident": 355656,
+            "native_id": 355656,
+            "alive_before": false,
+            "alive_after": false,
+            "stream_before": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true
+            },
+            "join_attempted": true,
+            "join_attempt_count": 1,
+            "join_error_count": 0,
+            "join_timeout_seconds": 0,
+            "joined": true,
+            "entered_seconds": 0.44226589996833354,
+            "remaining_seconds": 9.999833900015801,
+            "last_entered_seconds": 0.44226589996833354,
+            "last_remaining_seconds": 9.999833900015801,
+            "returned_seconds": 0.4422723000170663,
+            "stream_after": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true
+            },
+            "worker_complete_seconds": 0.4410632000071928
+          },
+          {
+            "name": "compose-reviewed-original-literal-runtime-stderr",
+            "ident": 207736,
+            "native_id": 207736,
+            "alive_before": false,
+            "alive_after": false,
+            "stream_before": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true
+            },
+            "join_attempted": true,
+            "join_attempt_count": 1,
+            "join_error_count": 0,
+            "join_timeout_seconds": 0,
+            "joined": true,
+            "entered_seconds": 0.4422755999257788,
+            "remaining_seconds": 9.999824200058356,
+            "last_entered_seconds": 0.4422755999257788,
+            "last_remaining_seconds": 9.999824200058356,
+            "returned_seconds": 0.44227949995547533,
+            "stream_after": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true
+            },
+            "worker_complete_seconds": 0.4410394999431446
+          }
+        ],
+        "seconds": 0.4422919999342412,
+        "cleanup_deadline_exceeded": false,
+        "original_owner_retained": true,
+        "original_readers_retained": true,
+        "original_readers_joined": true,
+        "original_input_writers_retained": true,
+        "original_input_writer_joined": false,
+        "completion_receiving": {
+          "schema": "ordinary-original-native-io-completion-v1",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "io": {
+            "stdout": {
+              "acquired": true,
+              "worker_started": true,
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 940,
+              "bytes_stored": 940,
+              "limit_bytes": null,
+              "limit_exceeded": false,
+              "worker_complete_monotonic": 579950.6715879
+            },
+            "stderr": {
+              "acquired": true,
+              "worker_started": true,
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0,
+              "limit_bytes": null,
+              "limit_exceeded": false,
+              "worker_complete_monotonic": 579950.6715642
+            }
+          },
+          "stdin_mode": "null",
+          "stdin": {},
+          "original_owner_retained": true,
+          "original_readers_joined": true,
+          "original_input_writer_joined": false,
+          "lifecycle_state": "CLOSED"
+        },
+        "stdout_sha256": "ec671059824a34bdb83f7c7d245a4d88f08540fc6dc3a615199cc09a5738eb52",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "plan_sha256": "1f16a94cbf4c9e98c35a170395596f2feabc1b313bc6b9dc29c0894d35a9eb89",
+    "payload": {
+      "guard": "e7c663f4ba2fd558005bc110173609cb19465ff33d3f4678aeb53b5ba00e0924",
+      "runner": "6d16652d4893273b7e9d584920892ce5f5917622e7e242a62eb78ec824bcfb93",
+      "windows_job": "d94583001a33ef34adb67feec34b4f4b0bf3626df9f63da3c7a7c85bf3e0b552"
+    },
+    "step_inputs": [
+      {
+        "name": "compose-reviewed-original-literal-runtime",
+        "before": {
+          "preserved_input_map": "original_plan.input_files"
+        },
+        "after": {
+          "preserved_input_map": "original_plan.input_files"
+        }
+      }
+    ],
+    "command_quiescence": {
+      "complete": true,
+      "commands": [
+        {
+          "name": "compose-reviewed-original-literal-runtime",
+          "state": "complete",
+          "reason": "",
+          "direct_exit_known": true
+        }
+      ]
+    },
+    "commands_quiescent": true,
+    "no_command_started": false,
+    "input_files_unchanged": true
+  }
+}

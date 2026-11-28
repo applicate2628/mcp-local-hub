@@ -1,0 +1,113 @@
+{
+  "schema": "failed-owner-native-controller-unit-receiving-v1",
+  "status": "PASS_SCOPED_CONTROLLER_UNIT",
+  "source_commit": "b6f82b3f531bb3eec197049167cdc5971b44e2b0",
+  "native_receipt": {
+    "path": "receipt.json",
+    "bytes": 36604,
+    "sha256": "8b8c8a5172331b8b258c7765ef4d52f8c9cbfb8ad68512e8ee474c74ea480216",
+    "line_endings": "CRLF",
+    "local_import_lf_bytes": 35694,
+    "local_import_lf_sha256": "2d5be6fa0240cf19808e3a8256fcc6553b5fedf955ddfd0f27adf3ae478f644b",
+    "exact_crlf_reconstruction_verified": true
+  },
+  "parent_receiving": {
+    "controller_exit_code": 0,
+    "original_controller_reaped": true,
+    "controller_capture_handles_closed": true,
+    "seconds": 32.56791919999523,
+    "receipt_sha256": "8b8c8a5172331b8b258c7765ef4d52f8c9cbfb8ad68512e8ee474c74ea480216"
+  },
+  "controller_pid_reported_by_root": 407508,
+  "commands": [
+    {
+      "argv": [
+        "C:\\Program Files\\Git\\cmd\\git.exe",
+        "rev-parse",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "seconds": 0.25930209999205545,
+      "lifecycle_state": "CLOSED",
+      "readers_joined": 2,
+      "job_terminated": false,
+      "stdout_sha256": "a7834ae454abe29733d4a15f2751f2dc0c5917f7dde06b3667ebaff7071e78f9",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "Q:\\msys64\\ucrt64\\lib\\go\\bin\\gofmt.exe",
+        "-w",
+        ".scratch/failed-owner-review-20261126-v1/controller/cases_windows.go",
+        ".scratch/failed-owner-review-20261126-v1/controller/inputs_windows.go",
+        ".scratch/failed-owner-review-20261126-v1/controller/main_windows.go",
+        ".scratch/failed-owner-review-20261126-v1/controller/physical_windows.go",
+        ".scratch/failed-owner-review-20261126-v1/controller/physical_windows_test.go",
+        ".scratch/failed-owner-review-20261126-v1/canonicalcaseowner/capture_windows_amd64.go",
+        ".scratch/failed-owner-review-20261126-v1/canonicalcaseowner/events_windows_amd64.go",
+        ".scratch/failed-owner-review-20261126-v1/canonicalcaseowner/native_windows_amd64.go",
+        ".scratch/failed-owner-review-20261126-v1/canonicalcaseowner/owner_windows_amd64.go",
+        ".scratch/failed-owner-review-20261126-v1/canonicalcaseowner/physical_windows_amd64.go"
+      ],
+      "exit_code": 0,
+      "seconds": 0.33419260004302487,
+      "lifecycle_state": "CLOSED",
+      "readers_joined": 2,
+      "job_terminated": false,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "Q:\\msys64\\ucrt64\\lib\\go\\bin\\go.exe",
+        "test",
+        "-json",
+        "-count=1",
+        "-timeout",
+        "5m",
+        "-run",
+        "^TestFailedPhysicalOuterOriginalReturnAndFrozenIO$",
+        "./.scratch/failed-owner-review-20261126-v1/controller"
+      ],
+      "exit_code": 0,
+      "seconds": 31.768681599991396,
+      "lifecycle_state": "CLOSED",
+      "readers_joined": 2,
+      "job_terminated": false,
+      "stdout_sha256": "2547d0eb7cc0e701cff003e04280594d85a5ca3181176aefb2fb0157449032ee",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "C:\\Program Files\\Git\\cmd\\git.exe",
+        "diff",
+        "--exit-code"
+      ],
+      "exit_code": 0,
+      "seconds": 0.06312850001268089,
+      "lifecycle_state": "CLOSED",
+      "readers_joined": 2,
+      "job_terminated": false,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "command_count": 4,
+  "original_reader_joins": 8,
+  "test_root_pass": 1,
+  "test_subtest_pass": 2,
+  "package_pass": 1,
+  "fail_events": 0,
+  "skip_events": 0,
+  "tested_root": "TestFailedPhysicalOuterOriginalReturnAndFrozenIO",
+  "real_windows_execution": true,
+  "real_os_pipe_sink_close_test": true,
+  "separate_go_build_command_run": false,
+  "compiled_by_go_test": true,
+  "race_detector_run": false,
+  "actual_debug_owner_started_by_test": false,
+  "native_late_owner_receiving_qualified": false,
+  "adapter_runtime_enabled": false,
+  "scope": "Windows compilation and deterministic controller original-channel/OS-pipe sink boundary. Source-owned native receipt fields are fixture values; no debug-owner late-receiving integration was executed.",
+  "empty_capture_projection": "Six empty files are reconstructed from closed original capture byte-count 0 and SHA-256 of empty bytes; the two nonempty captures were supplied by root."
+}

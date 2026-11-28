@@ -1,0 +1,283 @@
+{
+  "schema": "provider-helper-qualification-publication-20261126-v1",
+  "artifact_kind": "Derived scoped qualification; original controls remain authoritative",
+  "status": "PASS_THREE_PROVIDER_TESTS_FULL_GATE_REMAINS_FAIL",
+  "source_commit": "aca81a1743ccfbf3e10902769a9b071eb911919e",
+  "source_file_count": 3508,
+  "scope": {
+    "physical_source_unchanged": true,
+    "virtual_test_file_replacements": 2,
+    "overlay_map_sha256": "57b8d2695bba358ebf28166e341a1a3236fa23af4bec4642df250f52036f95e4",
+    "fresh_module_and_build_caches": true,
+    "cache_directory_identities_unchanged": true,
+    "new_source_commit_claimed": false,
+    "full_regression_executed": false,
+    "serena_qualification_repeated": false,
+    "old_unknown_reclassified": false,
+    "qualified_Product": false,
+    "literal_inventory_preparation_rerun": false,
+    "before_after_speedup_measured": false,
+    "exact_public_head_full_gate_pass": false
+  },
+  "candidate": {
+    "owner_pr": 665,
+    "preimage_public_commit": "03719d32a13a20f3254eccc148684efae3c3287a",
+    "published_commit": "d30326c099ced46984cee38d4455498d3209a967",
+    "publication_readback_sha256": "ea29da24f9ffe7636c2d64daf7a06e065c72704d217e0d2b5a4d660aec11e9ef",
+    "patch_sha256": "0e711f445fc2dc7f7306406b2bfa1444621a57cb93c1219863a330ca0f56c73d",
+    "files": [
+      {
+        "path": "internal/api/main_test.go",
+        "before_sha256": "2c93ff894595a54b13f4409492a807aae3dba3dda5145af22b191b2bbd8b4cd1",
+        "before_git_blob": "665f48f9d658fed3708700a30c3d60df3a979bcd",
+        "after_sha256": "338e9c528d8d00bf5824b2d192f7637fd761e2674d7243160c7994dfbd8e9415",
+        "after_git_blob": "88b0c35c6848e775c08fcefaa32207486bf4af8f"
+      },
+      {
+        "path": "internal/api/adopt_provider_working_directory_windows_test.go",
+        "before_sha256": "5eb2fa9d2605388feb5735566a52fd4e820398e767c2c5bf2ba0963126c7a357",
+        "before_git_blob": "4ff265d838646e1338eacce5c67106fe8c1b204a",
+        "after_sha256": "1427099b98f5d851cb8bb2462bfa166ea7687d8ab34cc14142e9344fb39bb4f9",
+        "after_git_blob": "e86bfecabc0a05a37099cd30dc1108805cc43988"
+      }
+    ]
+  },
+  "original_controls": {
+    "parent.json": {
+      "sha256": "e9eb5ede7290b4bfa0483ce2b409be78b40d5a8b15aa1efc09a82f02ddf42245",
+      "bytes": 2506
+    },
+    "result.json": {
+      "sha256": "d3cfb4e8f75a551efe2448263ac4b4abd317d8e4e8568b3d4a94aae6c6d8fd51",
+      "bytes": 8415
+    },
+    "receipt.json": {
+      "sha256": "62b794235d54661728b4f120691991f5f0265db229b481aecca20a9aeffaabbf",
+      "bytes": 44676
+    }
+  },
+  "reviewed_input_pins": {
+    "runner_sha256": "e9b244ec1a5fc8b64e7ce51f4750b651a8be557fd5ef4329ddc7bbd5fb829656",
+    "launcher_sha256": "d7234e920c386db71af8ed842ba30bf76aafaf2a6eddfdb666a594a51394d9ef",
+    "plan_sha256": "99ec13620e3dee0063d9eebb2d4f31339d8e29b8e8817c118514bd68dd53740e",
+    "overlay_sha256": "57b8d2695bba358ebf28166e341a1a3236fa23af4bec4642df250f52036f95e4",
+    "guard_sha256": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2",
+    "partitioned_driver_sha256": "83cb6329605039e6cee517d9a530881030f6d614ce568e03c96dad2655ea82bd",
+    "core_sha256": "a19fde2ae8ee6a79f8afff37fd669707bd4ba1258edd779bfb1fb9d201d9db69",
+    "data_helper_sha256": "e70c707715c0d310c6c3c407dc9e76d6e9a64886c9b701ab658130cc3e9277b2"
+  },
+  "image": {
+    "sha256": "646d659defb717878f7f3e9732d0d311c3716c5f01b421b5c047f98bb624d717",
+    "bytes": 51791872,
+    "machine": "amd64",
+    "subsystem": "windowsgui",
+    "qualified_Product": false
+  },
+  "test2json_sha256": "3b3b7d64720e64a7f59d9e64da85fe7fc39c4fae0ef740cd76fb3df5a41ac681",
+  "build_information": {
+    "GoVersion": "go1.27.4",
+    "Path": "mcp-local-hub/internal/api.test",
+    "Main": {
+      "Path": "mcp-local-hub",
+      "Version": "(devel)"
+    },
+    "Settings": [
+      {
+        "Key": "-buildmode",
+        "Value": "exe"
+      },
+      {
+        "Key": "-compiler",
+        "Value": "gc"
+      },
+      {
+        "Key": "-ldflags",
+        "Value": "-H=windowsgui"
+      },
+      {
+        "Key": "-tags",
+        "Value": "test_state_path_env"
+      },
+      {
+        "Key": "DefaultGODEBUG",
+        "Value": "tracebacklabels=0,x509sslcertoverrideplatform=0"
+      },
+      {
+        "Key": "CGO_ENABLED",
+        "Value": "1"
+      },
+      {
+        "Key": "CGO_CFLAGS"
+      },
+      {
+        "Key": "CGO_CPPFLAGS"
+      },
+      {
+        "Key": "CGO_CXXFLAGS"
+      },
+      {
+        "Key": "CGO_LDFLAGS"
+      },
+      {
+        "Key": "GOARCH",
+        "Value": "amd64"
+      },
+      {
+        "Key": "GOOS",
+        "Value": "windows"
+      },
+      {
+        "Key": "GOAMD64",
+        "Value": "v1"
+      }
+    ]
+  },
+  "timing": {
+    "parent_seconds": 222.10453690000577,
+    "parent_diagnostic_seconds": 1200,
+    "go_test_timeout_seconds": 300,
+    "original_helper_readiness_stop_seconds": 5,
+    "commands": [
+      {
+        "name": "compile-api-provider",
+        "seconds": 155.4445490000071,
+        "work_seconds": 600,
+        "cleanup_seconds": 10,
+        "exit_code": 0,
+        "native_closed": true,
+        "original_workers_joined": 2,
+        "io_closed_without_errors": true,
+        "captures_measured": true,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "ced0a259d1c71c72531ea4839c31ee161f700b71c5b33e642c9df714ed4eec03"
+      },
+      {
+        "name": "api-build-info",
+        "seconds": 0.34489180002128705,
+        "work_seconds": 5,
+        "cleanup_seconds": 10,
+        "exit_code": 0,
+        "native_closed": true,
+        "original_workers_joined": 2,
+        "io_closed_without_errors": true,
+        "captures_measured": true,
+        "stdout_sha256": "e037e0161231b8f04c67700eef605b19467b77268af7e439f8937927dd5ccf70",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "resolve-original-test2json",
+        "seconds": 2.2136258999817073,
+        "work_seconds": 180,
+        "cleanup_seconds": 10,
+        "exit_code": 0,
+        "native_closed": true,
+        "original_workers_joined": 2,
+        "io_closed_without_errors": true,
+        "captures_measured": true,
+        "stdout_sha256": "d7eda370a9fc4189782f7aaa4613d858e92aff8e7f3abc11f30ebfa2158e8bf4",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "provider-three-roots",
+        "seconds": 56.81008379999548,
+        "work_seconds": 330,
+        "cleanup_seconds": 10,
+        "exit_code": 0,
+        "native_closed": true,
+        "original_workers_joined": 2,
+        "io_closed_without_errors": true,
+        "captures_measured": true,
+        "stdout_sha256": "a5e6be0b80482ebbc9665e1d99d407878bcc290e99cdffacc59837c934706f3e",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "provider-events",
+        "seconds": 0.0925831000204198,
+        "work_seconds": 30,
+        "cleanup_seconds": 10,
+        "exit_code": 0,
+        "native_closed": true,
+        "original_workers_joined": 3,
+        "io_closed_without_errors": true,
+        "captures_measured": true,
+        "stdout_sha256": "cdd4bb519af8d0c0bc493128849f83912850baf5eb2180f068bb3475256b82b3",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ]
+  },
+  "closure": {
+    "parent_exit_code": 0,
+    "parent_terminal_exit_received": true,
+    "parent_capture_handles_closed": true,
+    "commands_received": 5,
+    "all_original_command_states_complete": true,
+    "all_native_direct_children_reaped": true,
+    "all_native_trees_active_zero": true,
+    "all_native_handles_closed": true,
+    "all_native_issue_lists_empty": true,
+    "original_io_workers_joined": 11,
+    "output_readers": 10,
+    "input_writers": 1,
+    "all_output_eof_received": true,
+    "all_original_pipe_and_capture_handles_closed": true,
+    "io_errors": [],
+    "all_captures_measured_after_closure": true,
+    "source_and_inputs_unchanged": true,
+    "test_and_converter_images_unchanged": true
+  },
+  "coverage": {
+    "package": "mcp-local-hub/internal/api",
+    "passed": 3,
+    "skipped": 0,
+    "failed": 0,
+    "tests": [
+      {
+        "package": "mcp-local-hub/internal/api",
+        "test": "TestProbeProviderProcessWorkingDirectoryReadsOwnedWOW64Helper",
+        "outcome": "pass"
+      },
+      {
+        "package": "mcp-local-hub/internal/api",
+        "test": "TestProviderWorkingDirectoryIdentityOwnsOnlySelectedLiveInstance",
+        "outcome": "pass"
+      },
+      {
+        "package": "mcp-local-hub/internal/api",
+        "test": "TestProviderWorkingDirectoryPEBDOSPathNamedPipeDoesNotConnect",
+        "outcome": "pass"
+      }
+    ],
+    "package_terminal": "pass",
+    "package_terminal_count": 1,
+    "missing_or_unsettled_tests": [],
+    "duplicate_starts_or_terminals": [],
+    "unexpected_roots": []
+  },
+  "source_derived_expectations": {
+    "fresh_start_calls": 4,
+    "successful_arch_builds": {
+      "386": 1,
+      "amd64": 1
+    },
+    "basis": "exact two-file candidate and three actual PASS roots; no separate per-child identity/build ledger emitted",
+    "observed_as_individual_native_rows": false,
+    "not_individually_observed": [
+      "four helper birth/PID records",
+      "two helper image hashes",
+      "per-helper-build elapsed times"
+    ]
+  },
+  "interpretation": {
+    "qualified_behavior": "The three existing provider tests pass with package-owned per-architecture helper-image reuse and unchanged child startup/wait/cleanup paths.",
+    "not_proven": [
+      "cause or repair of prior 30-second preparation failure",
+      "complete default or tagged regression",
+      "timing speedup relative to a matched baseline",
+      "current public head full-gate acceptance",
+      "reclassification of previous UNKNOWN owners"
+    ],
+    "external_review": "REVIEW_PENDING",
+    "prior_full_v10_status": "FAIL"
+  },
+  "independent_receiving_sha256": "b53c2d3e6f0b3944c585c475298e8b6849e4d63500c0d5aff54173baf0fc6d6a"
+}

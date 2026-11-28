@@ -1,0 +1,135 @@
+{
+  "schema": "ab-source52-parole-diagnostic-v1",
+  "status": "FAIL",
+  "physical_closure": "CLOSED",
+  "source": {
+    "commit": "52a2d9ef57b7c372b9fa149adf062ad7e503b22d",
+    "tree": "51258ebd9ad3a654418b6ecb9163947734ef0314",
+    "immutable_source_modified": false,
+    "reconstruction_capsule": "../composed-functional-source-20261126/source52-363b/README.md"
+  },
+  "overlay": {
+    "scope": "Failure-only bounded stack diagnostic; not an unchanged-Source test result",
+    "file": "internal/cli/supervise_lostchild_f6_f2_test.go",
+    "before_sha256": "8bd40a8b1d41becc6d21192044883f994516e666951d781a61cc1eda71e65be4",
+    "after_sha256": "3ac226efd68d34c6109aa79b2e36b91d9f4cb16add8bff57416fe026748b3d66",
+    "patch_sha256": "1c645109a1665b3baeadff2a3bf35cf34c1f74b9c1fd1223306b4f489902f858",
+    "added_lines": 3,
+    "buffer_limit_bytes": 1048576,
+    "all_original_goroutine_stacks": true,
+    "stack_truncated": false,
+    "state_wait_seconds": 2,
+    "cleanup_join_changed": false
+  },
+  "campaign": {
+    "original_receipt_sha256": "99124603fad77b49a254559dda80025e1ef7ba5b74f91a40b5990caec92d888f",
+    "receipt_hash_provenance": "Reported by the original root receiving owner; local inputs are parsed derivative JSON, not original receipt byte verification.",
+    "original_commands": 2,
+    "original_readers": 4,
+    "all_original_commands_and_readers_closed": true,
+    "controller_exit_code": 1,
+    "controller_reaped": true,
+    "controller_capture_handles_closed": true,
+    "controller_seconds_reported": 26.314,
+    "controller_timing_provenance": "Root receiving report, rounded seconds",
+    "exact_test": "TestSupervisorController_ParoleQueuedStop_PostSelfHonorsStop",
+    "mode": "default",
+    "run_filter": "^TestSupervisorController_ParoleQueuedStop_PostSelfHonorsStop$",
+    "count": 1,
+    "outer_test_timeout": "5m",
+    "test_action": "fail",
+    "test_seconds": 3.16,
+    "package_action": "fail",
+    "package_seconds": 4.639,
+    "command_exit_code": 1,
+    "command_seconds": 25.568672999972478,
+    "stdout_sha256_reported_in_receipt": "66b85c4cd902ff9638550f433d1fe06f0a599d1295b819b7c2a20c93a9a29150",
+    "stderr_sha256_reported_in_receipt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "observation": {
+    "actual_state": "spawning",
+    "expected_state": "exiting",
+    "original_loop_instruction_localized": true,
+    "selected_stack_frames": [
+      {
+        "function": "windows.FlushFileBuffers",
+        "classification": "instruction observed in the original loop stack"
+      },
+      {
+        "function": "secureWriteClientConfigToResolvedParentObserved",
+        "path": "internal/api/secure_write_windows.go",
+        "line": 330
+      },
+      {
+        "function": "WriteStateFileBytesLockHeld",
+        "path": "internal/api/state_file_helper.go",
+        "line": 115
+      },
+      {
+        "function": "MutateSupervisorStateIfChangedContext",
+        "path": "internal/api/supervisor_state.go",
+        "line": 455
+      },
+      {
+        "function": "DaemonRuntimeTracker.PersistTo",
+        "path": "internal/cli/supervisor_runtime_tracker.go",
+        "line": 1320
+      },
+      {
+        "function": "persistDaemonRuntimeTracker",
+        "path": "internal/cli/supervisor_runtime_tracker.go",
+        "line": 1385
+      },
+      {
+        "function": "supervisorController.handleLoopEvent",
+        "path": "internal/cli/supervisor_controller.go",
+        "line": 3427
+      },
+      {
+        "function": "EventLoop.Run",
+        "path": "internal/api/supervisor_event_loop.go",
+        "line": 271
+      },
+      {
+        "function": "startLostChildParoleLoop.func2",
+        "path": "internal/cli/supervise_lostchild_f6_f2_test.go",
+        "line": 294
+      }
+    ],
+    "ordering": "The published spawning state precedes synchronous persistence at controller line 3427; fake spawn at line 3698 and HealthOK self-post at line 3755 had not been reached at the captured point.",
+    "syscall_duration": "UNDETERMINED",
+    "external_cause_of_flush_latency": "UNDETERMINED",
+    "production_postself_ordering_defect_proven": false
+  },
+  "initial_failure_preserved": {
+    "original_receipt_sha256": "5ce22474571013d116634bf2b08043372487b594e577122e341f08eb8ca7b430",
+    "status": "FAIL",
+    "physical_closure": "CLOSED",
+    "test_seconds": 14.05,
+    "exact_blocking_instruction": "UNDETERMINED",
+    "historically_reclassified": false,
+    "overview": "README.md"
+  },
+  "candidate_followup": {
+    "status": "PREPARED_NOT_RUN",
+    "scope": "One test waits for existing original dispatch barrier then directly asserts exiting; all production durability and lifecycle cleanup are unchanged.",
+    "test_file_sha256": "ab655745fd82f65864dc82d35face33f367201e8db12a9996868628d8025f13a",
+    "existing_barrier_seconds": 5,
+    "other_state_helper_seconds": 2,
+    "negative_control": "Isolated one-site parole PostSelf -> TryPost with require_running_intent unchanged; expect the exact state assertion to fail with quarantined.",
+    "negative_control_run": "NOT_RUN",
+    "source_change_committed": false
+  },
+  "claim_limits": [
+    "This is a failure-only diagnostic overlay result on immutable Source52, not full qualification of that source.",
+    "The stack locates the original loop instruction at this diagnostic snapshot; it neither measures the syscall duration nor proves the earlier run blocked at the same instruction.",
+    "Build and vet PASS and prior focused FAIL remain recorded separately in the original Source52 overview.",
+    "Tagged focused and full suites are not newly qualified by this default single-test diagnostic.",
+    "No production durability, timeout or source-level generation refusal was changed."
+  ],
+  "input_provenance": {
+    "parsed_receipt_sha256": "8c71d4eb896dd54446dd247084e88fac530c9540f5b5988281f4fa285668c760",
+    "parsed_test_events_sha256": "7191ae25ae1b43e65906b697d880ce31085dc34295aacac05ec549e9d9e05931",
+    "public_representation": "Sanitized selected metadata and repository-relative frames; private paths, account names, process identifiers and pointer values omitted."
+  }
+}

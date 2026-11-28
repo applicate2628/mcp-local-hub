@@ -1,0 +1,39 @@
+{
+  "schema": "closed-api-public-disclosure-review-v1",
+  "scope": {
+    "files_scanned_before_this_report": 12,
+    "bytes": 3627721,
+    "full_template_bytes_scanned": true
+  },
+  "absolute_host_path_findings": 0,
+  "actual_account_sid_findings": 0,
+  "credential_shape_findings": 0,
+  "original_role_values_remaining": 0,
+  "role_substitutions": {
+    "actual_path_prefix_or_form_roles": 7,
+    "source_defined_synthetic_launcher_prefix_roles": 2,
+    "owner_sid_roles": 1,
+    "total_roles": 10,
+    "total_occurrences": 329,
+    "encoded_payloads_or_defaults": false
+  },
+  "native_ids": {
+    "retained": true,
+    "reason": "Closed sandbox process and file numbers are original correlation evidence; no production identity or personal information is inferred from them."
+  },
+  "synthetic_network_literals": {
+    "retained": true,
+    "description": "Loopback and reserved/private IP URLs occur only in source-defined marketplace rejection subtest names; they are not observed private network endpoints."
+  },
+  "go_control_bytes": {
+    "retained": true,
+    "description": "Original Go test framing bytes are preserved as data, including terminal/output frame delimiters."
+  },
+  "primary_receipts": {
+    "native_integer_precision_preserved": true,
+    "json_reserialized": false,
+    "native_owner_qualification_not_relabelled": true
+  },
+  "scan_limitations": "Pattern checks plus review of all observed path/SID/credential-shaped candidates; not proof that every possible encoding or undisclosed semantic secret is detectable. No encoded host data was introduced.",
+  "new_product_or_test_execution": false
+}

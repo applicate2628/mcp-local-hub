@@ -1,0 +1,95 @@
+{
+  "schema": "recovered-unpublished-commit-inputs-v1",
+  "status": "LOCAL_RECOVERY_DATA",
+  "source_role": "historical-publication-repository immutable Git objects",
+  "observed_pr666_head": "5ad374eb60cadb8ad56ea167e3fb06edb44bdc18",
+  "pr666_branch": "fix/cli-test-helper-dispatch-20261121",
+  "chain_descends_directly_from_current_observed_pr666": true,
+  "commits": [
+    {
+      "commit": "06f77b3856e43ec5e8e3736123aedb896ae58817",
+      "parent": "5ad374eb60cadb8ad56ea167e3fb06edb44bdc18",
+      "tree": "645fd0dd7281cbf66a334500fe8aa31cd9469885",
+      "raw_commit_file": "06f77b3856e43ec5e8e3736123aedb896ae58817.commit",
+      "raw_commit_sha256": "3748cc26cfe2bbcd38f8eb25409f4339e92b58992770308e1e77b5e010939c36",
+      "raw_commit_bytes": 812,
+      "original_git_author_and_committer_metadata_retained": true,
+      "patch_file": "06f77b3856e43ec5e8e3736123aedb896ae58817.patch",
+      "patch_sha256": "c9e7eda48363283f846ddfd08088927ae23b94f5df3bc7580ef67086923e8f43",
+      "patch_bytes": 13846,
+      "paths": [
+        "internal/cli/supervise_respawn_arm_gen_test.go",
+        "internal/cli/supervise_test.go",
+        "internal/cli/supervisor_controller_orphan_reap_test.go",
+        "internal/cli/upgrade_gui_fence_windows_test.go",
+        "internal/cli/upgrade_gui_qualified_fixture_windows_test.go"
+      ]
+    },
+    {
+      "commit": "33eaf8af8fc46cb231f48c70f4775922393245b1",
+      "parent": "06f77b3856e43ec5e8e3736123aedb896ae58817",
+      "tree": "9e46575153d8a70c98c5629fdaa4767f61401f6c",
+      "raw_commit_file": "33eaf8af8fc46cb231f48c70f4775922393245b1.commit",
+      "raw_commit_sha256": "3c4d7f090083fdc2c5d82ac0a1158993d2e6102ff8f50b4fcf612e4eb29d28cf",
+      "raw_commit_bytes": 270,
+      "original_git_author_and_committer_metadata_retained": true,
+      "patch_file": "33eaf8af8fc46cb231f48c70f4775922393245b1.patch",
+      "patch_sha256": "32e395148d91497def1ccf354ade7f342424c5e6780c08fc139dc8a296c87385",
+      "patch_bytes": 2388,
+      "paths": [
+        "internal/cli/supervise_reconcile_ipc_test.go",
+        "internal/cli/workspace_cmd_test.go"
+      ]
+    }
+  ],
+  "original_closed_commit_runs": [
+    {
+      "run": "publication-commit-pr666-v1",
+      "parent_sha256": "e1df9c1b2fcc6ee6496980a8b437f06b82a6c3fca876b43d9a1973569d424e9c",
+      "execution_sha256": "c46b101c58dbb4c011ad3bb8ecef6600b4d4268d87d67fcdeecaa0d25bda78c6",
+      "commands": 24,
+      "status": "PASS",
+      "original_native_owners_and_readers_closed": true
+    },
+    {
+      "run": "pr666-short-state-commit-v1",
+      "parent_sha256": "fbabc579deafc183f52ad5dfb37038c4331d26ebf3934f367f5c12f14d728297",
+      "execution_sha256": "401612d49b73889f231bea517a242f721d0fdc7480d97da06903059fdc75ca59",
+      "commands": 22,
+      "status": "PASS",
+      "original_native_owners_and_readers_closed": true
+    }
+  ],
+  "fallback_patch_comparison": {
+    "fallback_source_commit": "4ac73379a10e09766fe8274a129129a2b565f757",
+    "fallback_patch_sha256": "f39a10a395675c93068ff8f19a98de1ce856b616de3fc911e28d6b4a2e88ef89",
+    "fallback_paths": [
+      "internal/api/main_helper_dispatch_test.go",
+      "internal/api/main_helper_dispatch_validation_test.go",
+      "internal/api/required_secret_gate_test.go",
+      "internal/cli/supervise_lostchild_f1_f3_test.go",
+      "internal/cli/supervise_lostchild_f6_f2_test.go"
+    ],
+    "recovered_paths": [
+      "internal/cli/supervise_reconcile_ipc_test.go",
+      "internal/cli/supervise_respawn_arm_gen_test.go",
+      "internal/cli/supervise_test.go",
+      "internal/cli/supervisor_controller_orphan_reap_test.go",
+      "internal/cli/upgrade_gui_fence_windows_test.go",
+      "internal/cli/upgrade_gui_qualified_fixture_windows_test.go",
+      "internal/cli/workspace_cmd_test.go"
+    ],
+    "overlapping_paths": [],
+    "limit": "Path comparison only; per-file source content comparison remains separate."
+  },
+  "original_source_observation": {
+    "commit": "727d66753814dc218e26d699e57402db2d13190a",
+    "tree": "d959ed0a4f8ab02947aec7569f3c0535a3cff533",
+    "parent": "0145a2547a3025cc518cf3e2fa89d2e22cb73c08",
+    "raw_commit_bytes": 430,
+    "raw_commit_sha256": "e208eff80fa6a228f3434917d6457dcdb14d461b054952f3e869fb9394ca0cb2",
+    "observation": "Immutable commit metadata verified; physical Source/cache postclosure finalization remains separate."
+  },
+  "execution": "No model, Go tests, controller execution, source mutation, Git index, commit or push performed. Exports are recovery data.",
+  "historical_missing_observations": "Previous absent-object checks retain their original repositories and times; this is a new successful lookup in the recovered publication repository."
+}

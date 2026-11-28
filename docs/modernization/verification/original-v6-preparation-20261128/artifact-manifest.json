@@ -1,0 +1,60 @@
+{
+  "schema": "original-v6-evidence-publication-manifest-v2",
+  "prepared_date": "2026-11-28",
+  "extends_frozen_candidate_manifest_sha256": "eba3db366f570b9c0b499504ad5078a296aef11c5fc8342ab333016473532221",
+  "previous_candidate_modified": false,
+  "unchanged_payloads_from_v1": [
+    ".gitattributes",
+    "helper-preparation-v6-evidence.json",
+    "history-publication-v3-evidence.json",
+    "unresolved-expected-refusal.json"
+  ],
+  "content_scope": "Closed helper and external-helper preparation, original Product v6 FAIL/CLOSED, immutable failed history-publication wrapper with late physical closure and independent public commit readback, and unresolved remaining expected-refusal.",
+  "artifact_count_excluding_manifest": 7,
+  "files": [
+    {
+      "path": ".gitattributes",
+      "bytes": 8,
+      "sha256": "705fd4d6451a31d36b3df7de96f83f30ac976c9b4a6d1e51671d8e2f33e2d0da"
+    },
+    {
+      "path": "README.md",
+      "bytes": 18973,
+      "sha256": "c7a5f1db513cb0c826c5dd10fb298af9d495c722f972578fc44981f318c1150c"
+    },
+    {
+      "path": "helper-preparation-v6-evidence.json",
+      "bytes": 14002,
+      "sha256": "44eb3170f65dc95ea36834f410c7a8aab201c1c49b3f9b83a62576f67cd7ec69"
+    },
+    {
+      "path": "external-helper-preparation-v6-evidence.json",
+      "bytes": 16136,
+      "sha256": "a3fa9413fc217393365ae054c3b8537c578decd232de816beda2c8067d1cf572"
+    },
+    {
+      "path": "product-preparation-v6-evidence.json",
+      "bytes": 8883,
+      "sha256": "3cc14d034680d20cd1f62c21d2c3b7f93f934bd6ef735f6b48a3a4dda47d25af"
+    },
+    {
+      "path": "history-publication-v3-evidence.json",
+      "bytes": 17183,
+      "sha256": "2a1b4d3061e294ed054d79b6349dfe1eeaed6d596b87a7a293f822122ec141dc"
+    },
+    {
+      "path": "unresolved-expected-refusal.json",
+      "bytes": 8902,
+      "sha256": "e91c565132ef03f65b9970b8a991239e8e5a6ce4e4b77f7cd778a69adcfe45f4"
+    }
+  ],
+  "public_commit_evidence": "5e95aab6d9765701ec6c49ddcecc6cde3293eb65",
+  "full_acceptance_pass_claimed": false,
+  "failed_push_capture_accessed": false,
+  "powershell_runtime_type_probe_v7_result_included": false,
+  "host_specific_paths_or_process_identities_published": false,
+  "preparation_launched_product_tests_builds_or_git": false,
+  "preparation_changed_publication_worktree": false,
+  "byte_preservation": ".gitattributes contains * -text",
+  "qualification_scope": "No FAIL or UNKNOWN is reclassified. Physical closure and helper compilation remain separate from full acceptance."
+}

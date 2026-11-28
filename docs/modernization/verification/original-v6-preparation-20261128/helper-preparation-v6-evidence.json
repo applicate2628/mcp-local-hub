@@ -1,0 +1,375 @@
+{
+  "schema": "original-helper-inputs-v6-public-evidence-v1",
+  "status": "PASS",
+  "physical_state": "CLOSED",
+  "scope": "Five-command helper preparation: one closed cache copy and four Go helper builds. This is not the requested full acceptance run.",
+  "original_source": {
+    "commit": "727d66753814dc218e26d699e57402db2d13190a",
+    "tree": "d959ed0a4f8ab02947aec7569f3c0535a3cff533",
+    "tracked_files": 3509,
+    "receiving_sha256": "a3483e469b606fa297a4b33698cd22db7bf25493023f3117feeafb52bb9db5f1",
+    "worktree_role": "fresh-independent-original727d-v2"
+  },
+  "primary_artifacts": [
+    {
+      "role_path": "original-helper-inputs-v6/parent.json",
+      "bytes": 1472,
+      "sha256": "a32ddbdea1de36963d3c9b333543e9c79629034c68a5717b051620ef2ae08377",
+      "actual_metadata_bytes_reread": true
+    },
+    {
+      "role_path": "original-helper-inputs-v6/commands/execution.json",
+      "bytes": 7260313,
+      "sha256": "bf3fb41e16c11fecabd923749b4b43a76e085cd085f093ef786c860c14ea7d2c",
+      "actual_metadata_bytes_reread": true
+    },
+    {
+      "role_path": "inputs-original-v6/original-helper-inputs-v6-outer-original.json",
+      "bytes": 440,
+      "sha256": "d3b06271e827050169ac1ca0462931e0b18521cc7b7880c9e511890330166b17",
+      "actual_metadata_bytes_reread": true
+    },
+    {
+      "role_path": "inputs-original-v6/original-helper-inputs-v6-plan.json",
+      "bytes": 713948,
+      "sha256": "c71ef1a81d8f70a7bb3ec0bc50edd3c38ed3a6907c0346705ec3f70c898a6856",
+      "actual_metadata_bytes_reread": true
+    },
+    {
+      "role_path": "original-helper-inputs-v6/cache-copy-receipt.json",
+      "bytes": 1999,
+      "sha256": "8cc899263f8c3000a25cffb3eda141495bf51eec8f1c789b44406570034f76ae",
+      "actual_metadata_bytes_reread": true
+    },
+    {
+      "role_path": "original-helper-inputs-v6/cache-copy-inventory.json",
+      "bytes": 2099877,
+      "sha256": "07bdc579c7a995c6db48e6567b2825fc0ddb406c3e57903913227ebfa77dbab2",
+      "actual_metadata_bytes_reread": true
+    }
+  ],
+  "parent": {
+    "schema": "fresh-owned-commands-v1-parent",
+    "status": "PASS",
+    "plan_sha256": "c71ef1a81d8f70a7bb3ec0bc50edd3c38ed3a6907c0346705ec3f70c898a6856",
+    "terminal_exit_received": true,
+    "parent_capture_files_closed": true,
+    "deadline_exceeded": false,
+    "exit_code": 0,
+    "seconds": 192.05456309998408,
+    "execution_sha256": "bf3fb41e16c11fecabd923749b4b43a76e085cd085f093ef786c860c14ea7d2c",
+    "child_status": "PASS",
+    "physical_complete": true,
+    "capture_closure": [
+      {
+        "name": "stdout",
+        "close_attempted": true,
+        "close_returned": true,
+        "wrapper_closed": true
+      },
+      {
+        "name": "stderr",
+        "close_attempted": true,
+        "close_returned": true,
+        "wrapper_closed": true
+      }
+    ]
+  },
+  "outer": {
+    "schema": "original-helper-build-original-parent-v1",
+    "plan_sha256": "c71ef1a81d8f70a7bb3ec0bc50edd3c38ed3a6907c0346705ec3f70c898a6856",
+    "same_process_start_object": true,
+    "exit_code": 0,
+    "wait_returned": true,
+    "original_process_object_disposed": true,
+    "new_job_or_tree_wait": false,
+    "create_no_window": true,
+    "wait_errors": []
+  },
+  "control_payload_sha256": {
+    "guard": "e7c663f4ba2fd558005bc110173609cb19465ff33d3f4678aeb53b5ba00e0924",
+    "runner": "6d16652d4893273b7e9d584920892ce5f5917622e7e242a62eb78ec824bcfb93",
+    "windows_job": "d94583001a33ef34adb67feec34b4f4b0bf3626df9f63da3c7a7c85bf3e0b552"
+  },
+  "recorded_input_validation": {
+    "command_count": 5,
+    "pins_before_each_command": 3520,
+    "pins_after_each_command": 3520,
+    "source_file_pins": 3509,
+    "other_pins": 11,
+    "all_recorded_before_and_after_maps_recompared_equal_to_plan": true,
+    "source_worktree_files_rehashed_for_this_capsule": false,
+    "meaning": "The primary execution recorded the pins before and after each command. This evidence preparation rechecked those recorded maps and hashed the closed captures and helper outputs; it did not perform a new source or cache receiving run."
+  },
+  "commands": [
+    {
+      "name": "copy-closed-cache-inputs",
+      "seconds": 166.1583507999312,
+      "captures": {
+        "stdout": {
+          "file": "commands/copy-closed-cache-inputs.stdout.txt",
+          "bytes": 673,
+          "sha256": "5558020aa12f8b4e8f6e3d7fd4c6205b6333a6c5fdd1faac03536e3892852d13",
+          "actual_bytes_reread_after_closure": true
+        },
+        "stderr": {
+          "file": "commands/copy-closed-cache-inputs.stderr.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "actual_bytes_reread_after_closure": true
+        }
+      },
+      "recorded_input_pin_count_before": 3520,
+      "recorded_input_pin_count_after": 3520,
+      "recorded_maps_equal_to_plan": true,
+      "completion_lifecycle_state": "CLOSED",
+      "completion_schema": "ordinary-original-native-io-completion-v1",
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_owner_binding_present": true,
+      "exit_code": 0,
+      "command_success": true,
+      "captures_measured": true,
+      "quiescence_state": "complete",
+      "original_readers_joined": true,
+      "original_owner_retained": true,
+      "both_pipes_and_captures_closed": true,
+      "io_errors": [],
+      "work_or_cleanup_deadline_exceeded": false
+    },
+    {
+      "name": "compile-windows-product-validate",
+      "seconds": 4.240385100012645,
+      "captures": {
+        "stdout": {
+          "file": "commands/compile-windows-product-validate.stdout.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "actual_bytes_reread_after_closure": true
+        },
+        "stderr": {
+          "file": "commands/compile-windows-product-validate.stderr.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "actual_bytes_reread_after_closure": true
+        }
+      },
+      "recorded_input_pin_count_before": 3520,
+      "recorded_input_pin_count_after": 3520,
+      "recorded_maps_equal_to_plan": true,
+      "completion_lifecycle_state": "CLOSED",
+      "completion_schema": "ordinary-original-native-io-completion-v1",
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_owner_binding_present": true,
+      "exit_code": 0,
+      "command_success": true,
+      "captures_measured": true,
+      "quiescence_state": "complete",
+      "original_readers_joined": true,
+      "original_owner_retained": true,
+      "both_pipes_and_captures_closed": true,
+      "io_errors": [],
+      "work_or_cleanup_deadline_exceeded": false
+    },
+    {
+      "name": "compile-test-recovery-namespace",
+      "seconds": 2.2531986999092624,
+      "captures": {
+        "stdout": {
+          "file": "commands/compile-test-recovery-namespace.stdout.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "actual_bytes_reread_after_closure": true
+        },
+        "stderr": {
+          "file": "commands/compile-test-recovery-namespace.stderr.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "actual_bytes_reread_after_closure": true
+        }
+      },
+      "recorded_input_pin_count_before": 3520,
+      "recorded_input_pin_count_after": 3520,
+      "recorded_maps_equal_to_plan": true,
+      "completion_lifecycle_state": "CLOSED",
+      "completion_schema": "ordinary-original-native-io-completion-v1",
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_owner_binding_present": true,
+      "exit_code": 0,
+      "command_success": true,
+      "captures_measured": true,
+      "quiescence_state": "complete",
+      "original_readers_joined": true,
+      "original_owner_retained": true,
+      "both_pipes_and_captures_closed": true,
+      "io_errors": [],
+      "work_or_cleanup_deadline_exceeded": false
+    },
+    {
+      "name": "compile-test-job-entry",
+      "seconds": 2.398443099926226,
+      "captures": {
+        "stdout": {
+          "file": "commands/compile-test-job-entry.stdout.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "actual_bytes_reread_after_closure": true
+        },
+        "stderr": {
+          "file": "commands/compile-test-job-entry.stderr.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "actual_bytes_reread_after_closure": true
+        }
+      },
+      "recorded_input_pin_count_before": 3520,
+      "recorded_input_pin_count_after": 3520,
+      "recorded_maps_equal_to_plan": true,
+      "completion_lifecycle_state": "CLOSED",
+      "completion_schema": "ordinary-original-native-io-completion-v1",
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_owner_binding_present": true,
+      "exit_code": 0,
+      "command_success": true,
+      "captures_measured": true,
+      "quiescence_state": "complete",
+      "original_readers_joined": true,
+      "original_owner_retained": true,
+      "both_pipes_and_captures_closed": true,
+      "io_errors": [],
+      "work_or_cleanup_deadline_exceeded": false
+    },
+    {
+      "name": "compile-test2json",
+      "seconds": 6.062758399988525,
+      "captures": {
+        "stdout": {
+          "file": "commands/compile-test2json.stdout.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "actual_bytes_reread_after_closure": true
+        },
+        "stderr": {
+          "file": "commands/compile-test2json.stderr.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "actual_bytes_reread_after_closure": true
+        }
+      },
+      "recorded_input_pin_count_before": 3520,
+      "recorded_input_pin_count_after": 3520,
+      "recorded_maps_equal_to_plan": true,
+      "completion_lifecycle_state": "CLOSED",
+      "completion_schema": "ordinary-original-native-io-completion-v1",
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_owner_binding_present": true,
+      "exit_code": 0,
+      "command_success": true,
+      "captures_measured": true,
+      "quiescence_state": "complete",
+      "original_readers_joined": true,
+      "original_owner_retained": true,
+      "both_pipes_and_captures_closed": true,
+      "io_errors": [],
+      "work_or_cleanup_deadline_exceeded": false
+    }
+  ],
+  "helper_outputs": [
+    {
+      "file": "windows-product-validate.exe",
+      "bytes": 6476288,
+      "sha256": "fe21d04537c56fd3a7ad0a13189d339d38c9de9fcc83528aaa36d39ef5cf5a98",
+      "actual_bytes_reread_after_closure": true,
+      "executed_for_this_evidence_preparation": false
+    },
+    {
+      "file": "test-recovery-namespace.exe",
+      "bytes": 7203328,
+      "sha256": "70c9b42edce01839b5afc3e302f85663fb48a543d40546bdeb766824c4622bf0",
+      "actual_bytes_reread_after_closure": true,
+      "executed_for_this_evidence_preparation": false
+    },
+    {
+      "file": "test-job-entry.exe",
+      "bytes": 6190592,
+      "sha256": "dbf87e6acc38df0b6ebde89ce6b0db05290dbf2a5802cf5a8e22d620db1d33f7",
+      "actual_bytes_reread_after_closure": true,
+      "executed_for_this_evidence_preparation": false
+    },
+    {
+      "file": "test2json.exe",
+      "bytes": 4952576,
+      "sha256": "ce7091b85741dd4b5ab1f2f278670e4f2ea0485faddaaed36967409a9ddf2c85",
+      "actual_bytes_reread_after_closure": true,
+      "executed_for_this_evidence_preparation": false
+    }
+  ],
+  "cache_copy": {
+    "schema": "fresh-closed-cache-copy-v1",
+    "status": "COPIED",
+    "inventory_sha256": "07bdc579c7a995c6db48e6567b2825fc0ddb406c3e57903913227ebfa77dbab2",
+    "source_and_destination_byte_inventories_equal": true,
+    "prior_modified": false,
+    "prior_original_receiver": "PASS",
+    "cache_consumer_execution_performed": false,
+    "source_role": "closed-serena-product-inputs-v2/private-cache",
+    "destination_role": "original-helper-inputs-v6/private-cache",
+    "caches": {
+      "GOCACHE": {
+        "files": 6200,
+        "bytes": 950754890
+      },
+      "GOMODCACHE": {
+        "files": 3663,
+        "bytes": 104585145
+      }
+    },
+    "source_receiving_parent_sha256": "4a11f613e91c10121bacf9438eb7849962e880277a9e7f4c0809491bc453d440",
+    "source_execution_sha256": "f1ae3cd770c7a4cc6437735c97cc6e87c7cf6344a1d65f153aded23c9674a8c0",
+    "cache_payload_read_for_this_capsule": false,
+    "final_completed_full_run_cache_handoff_qualified": false,
+    "scope": "The copy receipt concerns preparation from the already closed prior product run. It does not grant the later full acceptance run or certify its eventual cache handoff."
+  },
+  "exclusions": {
+    "full_build_vet_test_qualified": false,
+    "state_path_env_test_qualified": false,
+    "migration_14_plus_canonical_2_both_modes_qualified": false,
+    "three_stderr_scenarios_qualified": false,
+    "remaining_expected_refusal_qualified": false,
+    "new_product_or_test_commands_launched_for_this_capsule": false
+  }
+}

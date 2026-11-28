@@ -1,0 +1,119 @@
+{
+  "schema": "source727d-pr666-qualification-scope-v1",
+  "observed_date_utc": "2026-11-28",
+  "scope": "DATA_ONLY_NO_NATIVE_TEST_EXECUTION",
+  "public_pr": {
+    "number": 666,
+    "head": "5ad374eb60cadb8ad56ea167e3fb06edb44bdc18",
+    "branch": "fix/cli-test-helper-dispatch-20261121",
+    "pr_base_sha": "b884b1ea90edd041204bc15ac6c9f0f3fb8b6da0",
+    "pr_base_branch": "fix/p0-test-entry-preserve-20261121"
+  },
+  "sources": {
+    "public_5ad": {
+      "commit": "5ad374eb60cadb8ad56ea167e3fb06edb44bdc18",
+      "tree": "0f062e2bc3ae31bb9eab2c44862f1ec1a7a0ddd3",
+      "files": 3369
+    },
+    "recovered_06": {
+      "commit": "06f77b3856e43ec5e8e3736123aedb896ae58817",
+      "parent": "5ad374eb60cadb8ad56ea167e3fb06edb44bdc18",
+      "tree": "645fd0dd7281cbf66a334500fe8aa31cd9469885",
+      "raw_commit_sha256": "3748cc26cfe2bbcd38f8eb25409f4339e92b58992770308e1e77b5e010939c36",
+      "patch_sha256": "c9e7eda48363283f846ddfd08088927ae23b94f5df3bc7580ef67086923e8f43"
+    },
+    "recovered_33": {
+      "commit": "33eaf8af8fc46cb231f48c70f4775922393245b1",
+      "parent": "06f77b3856e43ec5e8e3736123aedb896ae58817",
+      "tree": "9e46575153d8a70c98c5629fdaa4767f61401f6c",
+      "files": 3369,
+      "raw_commit_sha256": "3c4d7f090083fdc2c5d82ac0a1158993d2e6102ff8f50b4fcf612e4eb29d28cf",
+      "patch_sha256": "32e395148d91497def1ccf354ade7f342424c5e6780c08fc139dc8a296c87385"
+    },
+    "source3ebe": {
+      "commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+      "tree": "67c13b8fc1317b4fd60e3135a3eb8a376fe01817",
+      "files": 3508
+    },
+    "source727d": {
+      "commit": "727d66753814dc218e26d699e57402db2d13190a",
+      "parent": "0145a2547a3025cc518cf3e2fa89d2e22cb73c08",
+      "tree": "d959ed0a4f8ab02947aec7569f3c0535a3cff533",
+      "files": 3509,
+      "receiving_sha256": "a3483e469b606fa297a4b33698cd22db7bf25493023f3117feeafb52bb9db5f1"
+    }
+  },
+  "comparison": {
+    "direction": "recovered33 -> Source727d",
+    "total_different_paths": 802,
+    "changed": 306,
+    "source_only": 318,
+    "public_only": 178,
+    "go_files": {
+      "changed_non_test": 149,
+      "changed_test": 128,
+      "source727d_only_non_test": 62,
+      "source727d_only_test": 161,
+      "recovered33_only_non_test": 48,
+      "recovered33_only_test": 49
+    },
+    "seven_changed_test_paths": 7,
+    "exact_complete_afterimages_equal": 2,
+    "additional_different_afterimages": 5,
+    "source3ebe_vs_recovered33_paths": 796,
+    "five_file_delta_line_counts": {
+      "added": 25,
+      "removed": 9
+    }
+  },
+  "method": {
+    "public_tree_recursive": true,
+    "public_tree_truncated": false,
+    "public_tree_recomputed": true,
+    "recovered06_tree_recomputed": true,
+    "recovered33_tree_recomputed": true,
+    "all_seven_local_afterimages_match_original_patch_blobs": true,
+    "comparison_includes_file_modes": true,
+    "git_commit_objects_not_rewritten": true,
+    "whole_tree_blob_comparison": true,
+    "source727d_receiving_previously_closed": true,
+    "go_or_tests_executed": false,
+    "qualification_transferred": false,
+    "local_git_index_or_refs_modified": false
+  },
+  "native_publication_gate": {
+    "source_sha256": "04285948382b6e42c2a1fed826ea98fec3ca5ff98373549361da7ad363f72c7f",
+    "entrypoint": "--target-local-push REPOSITORY origin FULL_SOURCE_OID refs/heads/fix/cli-test-helper-dispatch-20261121",
+    "direct_target_arg_contract_lines": [
+      3919,
+      3959
+    ],
+    "native_push_qualification_lines": [
+      3537,
+      3609
+    ],
+    "native_callback_coverage_lines": [
+      3798,
+      3909
+    ],
+    "requires_actual_git_native_wire": true,
+    "range_receipt": "v3",
+    "native_receipt": "v4",
+    "scan_policy_or_configuration_changed": false,
+    "go_regression_execution_implemented": false
+  },
+  "qualifications": {
+    "source727d_full": "PENDING_OWN_NATIVE_RUN",
+    "recovered33_full": "NOT_RUN",
+    "remaining_expected_refusal": "NOT_RUN_UNRESOLVED_ORIGINAL_IDENTITY",
+    "same_fixed_test_logic_present_is_full_revision_pass": false
+  },
+  "external_review_scope": {
+    "pre_push_gate": false,
+    "post_push_review_state": "NOT_FULLY_REVIEWED_IF_UNAVAILABLE",
+    "required_before_push": "own reviewed diff and mandatory exact-source local checks plus original native publication gate",
+    "source": "docs/agent-runbook.md: Step 3 Push, Step 4 Codex review; AGENTS.md Pull request quality",
+    "model_or_ci_dispatch_authorized": false,
+    "agent_merge_authorized": false
+  }
+}

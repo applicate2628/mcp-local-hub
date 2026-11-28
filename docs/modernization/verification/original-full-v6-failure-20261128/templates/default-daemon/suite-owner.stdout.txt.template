@@ -1,0 +1,1295 @@
+=== RUN   TestBackendLifecycle_StdioMaterializeStops
+--- PASS: TestBackendLifecycle_StdioMaterializeStops (0.09s)
+=== NAME  
+=== RUN   TestBackendLifecycle_MissingBinarySurfaces
+--- PASS: TestBackendLifecycle_MissingBinarySurfaces (0.00s)
+=== NAME  
+=== RUN   TestBackendLifecycle_MissingWrappedLSPClassifiedAsMissing
+--- PASS: TestBackendLifecycle_MissingWrappedLSPClassifiedAsMissing (0.00s)
+=== NAME  
+=== RUN   TestBackendLifecycle_GoplsMissingBinarySurfaces
+--- PASS: TestBackendLifecycle_GoplsMissingBinarySurfaces (0.00s)
+=== NAME  
+=== RUN   TestBackendLifecycle_SendRequestPreservesClientID
+--- PASS: TestBackendLifecycle_SendRequestPreservesClientID (0.09s)
+=== NAME  
+=== RUN   TestBackendLifecycle_SendRequestAfterStopErrors
+--- PASS: TestBackendLifecycle_SendRequestAfterStopErrors (0.09s)
+=== NAME  
+=== RUN   TestBackendLifecycle_EndpointCloseIsIdempotent
+--- PASS: TestBackendLifecycle_EndpointCloseIsIdempotent (0.09s)
+=== NAME  
+=== RUN   TestBackendLifecycle_MaterializeCompletesMCPHandshake_McpLanguageServer
+    backend_lifecycle_test.go:344: mcp-language-server not on PATH; skipping live probe
+--- SKIP: TestBackendLifecycle_MaterializeCompletesMCPHandshake_McpLanguageServer (0.00s)
+=== NAME  
+=== RUN   TestBackendLifecycle_MaterializeCompletesMCPHandshake_GoplsMCP
+    backend_lifecycle_test.go:376: gopls not on PATH; skipping live probe
+--- SKIP: TestBackendLifecycle_MaterializeCompletesMCPHandshake_GoplsMCP (0.00s)
+=== NAME  
+=== RUN   TestBackendLifecycle_HandshakeTimeoutTearsDownSubprocess
+--- PASS: TestBackendLifecycle_HandshakeTimeoutTearsDownSubprocess (1.11s)
+=== NAME  
+=== RUN   TestBackendLifecycle_MaterializeReturnsExistingEndpoint
+--- PASS: TestBackendLifecycle_MaterializeReturnsExistingEndpoint (0.08s)
+=== NAME  
+=== RUN   TestBackendLifecycle_SendRPCPendingCapRefusesPreDelivery
+--- PASS: TestBackendLifecycle_SendRPCPendingCapRefusesPreDelivery (0.09s)
+=== NAME  
+=== RUN   TestBackendLifecycle_DummyOwnedResourcesSettle
+=== RUN   TestBackendLifecycle_DummyOwnedResourcesSettle/shared_sessions_and_owner_shutdown
+--- PASS: TestBackendLifecycle_DummyOwnedResourcesSettle/shared_sessions_and_owner_shutdown (0.21s)
+=== NAME  TestBackendLifecycle_DummyOwnedResourcesSettle
+=== RUN   TestBackendLifecycle_DummyOwnedResourcesSettle/materialize_cancellation
+--- PASS: TestBackendLifecycle_DummyOwnedResourcesSettle/materialize_cancellation (0.24s)
+=== NAME  TestBackendLifecycle_DummyOwnedResourcesSettle
+=== RUN   TestBackendLifecycle_DummyOwnedResourcesSettle/handshake_failure
+--- PASS: TestBackendLifecycle_DummyOwnedResourcesSettle/handshake_failure (0.21s)
+=== NAME  TestBackendLifecycle_DummyOwnedResourcesSettle
+--- PASS: TestBackendLifecycle_DummyOwnedResourcesSettle (0.66s)
+=== NAME  
+=== RUN   TestCstDirectSysProcAttrAppliesOnlySingletonCapability
+--- PASS: TestCstDirectSysProcAttrAppliesOnlySingletonCapability (0.00s)
+=== NAME  
+=== RUN   TestCstDirectSysProcAttrRejectsEveryConflict
+=== RUN   TestCstDirectSysProcAttrRejectsEveryConflict/token
+--- PASS: TestCstDirectSysProcAttrRejectsEveryConflict/token (0.00s)
+=== NAME  TestCstDirectSysProcAttrRejectsEveryConflict
+=== RUN   TestCstDirectSysProcAttrRejectsEveryConflict/parent
+--- PASS: TestCstDirectSysProcAttrRejectsEveryConflict/parent (0.00s)
+=== NAME  TestCstDirectSysProcAttrRejectsEveryConflict
+=== RUN   TestCstDirectSysProcAttrRejectsEveryConflict/process-security
+--- PASS: TestCstDirectSysProcAttrRejectsEveryConflict/process-security (0.00s)
+=== NAME  TestCstDirectSysProcAttrRejectsEveryConflict
+=== RUN   TestCstDirectSysProcAttrRejectsEveryConflict/thread-security
+--- PASS: TestCstDirectSysProcAttrRejectsEveryConflict/thread-security (0.00s)
+=== NAME  TestCstDirectSysProcAttrRejectsEveryConflict
+=== RUN   TestCstDirectSysProcAttrRejectsEveryConflict/no-inherit
+--- PASS: TestCstDirectSysProcAttrRejectsEveryConflict/no-inherit (0.00s)
+=== NAME  TestCstDirectSysProcAttrRejectsEveryConflict
+=== RUN   TestCstDirectSysProcAttrRejectsEveryConflict/preexisting-handle
+--- PASS: TestCstDirectSysProcAttrRejectsEveryConflict/preexisting-handle (0.00s)
+=== NAME  TestCstDirectSysProcAttrRejectsEveryConflict
+=== RUN   TestCstDirectSysProcAttrRejectsEveryConflict/custom-command-line
+--- PASS: TestCstDirectSysProcAttrRejectsEveryConflict/custom-command-line (0.00s)
+=== NAME  TestCstDirectSysProcAttrRejectsEveryConflict
+=== RUN   TestCstDirectSysProcAttrRejectsEveryConflict/extra-creation-flag
+--- PASS: TestCstDirectSysProcAttrRejectsEveryConflict/extra-creation-flag (0.00s)
+=== NAME  TestCstDirectSysProcAttrRejectsEveryConflict
+--- PASS: TestCstDirectSysProcAttrRejectsEveryConflict (0.00s)
+=== NAME  
+=== RUN   TestVerifyCstDirectImageBindsW2ImageAndManifest
+--- PASS: TestVerifyCstDirectImageBindsW2ImageAndManifest (0.00s)
+=== NAME  
+=== RUN   TestCstDirectImageAdmissionIsOwnedByExistingSpawnPath
+--- PASS: TestCstDirectImageAdmissionIsOwnedByExistingSpawnPath (0.00s)
+=== NAME  
+=== RUN   TestInheritedHandleFrontendTupleIsExactlyFour
+--- PASS: TestInheritedHandleFrontendTupleIsExactlyFour (0.00s)
+=== NAME  
+=== RUN   TestInheritedHandleConflictingSysProcAttrFailsClosed
+--- PASS: TestInheritedHandleConflictingSysProcAttrFailsClosed (0.00s)
+=== NAME  
+=== RUN   TestCstDirectFrontendCrossesGoCapabilityAndFixedLocalPipe
+    cst_direct_frontend_e2e_windows_test.go:53: build test-only native frontend: exit status 1
+        CST test frontend requires the Windows ProgramFiles(x86) toolchain location.
+        At @@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\source-original727d-v2\servers\electromagnetics-mcp\native\cst-run
+        time\build_test_frontend.ps1:7 char:5
+        +     throw 'CST test frontend requires the Windows ProgramFiles(x86) t ...
+        +     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            + CategoryInfo          : OperationStopped: (CST test fronte...chain location.:String) [], RuntimeException
+            + FullyQualifiedErrorId : CST test frontend requires the Windows ProgramFiles(x86) toolchain location.
+         
+--- FAIL: TestCstDirectFrontendCrossesGoCapabilityAndFixedLocalPipe (0.22s)
+=== NAME  
+=== RUN   TestStdioHostLegacyProfileAcceptsLLDBStyleTCPJSONL
+--- PASS: TestStdioHostLegacyProfileAcceptsLLDBStyleTCPJSONL (0.09s)
+=== NAME  
+=== RUN   TestNewStdioHostRejectsUnknownCompatibilityProfileBeforeStart
+--- PASS: TestNewStdioHostRejectsUnknownCompatibilityProfileBeforeStart (0.00s)
+=== NAME  
+=== RUN   TestStdioOriginalLifecycleTiming
+    host_original_timing_windows_test.go:27: requires the common pinned lifecycle comparison child
+--- SKIP: TestStdioOriginalLifecycleTiming (0.00s)
+=== NAME  
+=== RUN   TestStdioOriginalHelper
+--- PASS: TestStdioOriginalHelper (0.00s)
+=== NAME  
+=== RUN   TestStdioOriginalMemberBridgeUnavailableStates
+=== RUN   TestStdioOriginalMemberBridgeUnavailableStates/nil-host
+--- PASS: TestStdioOriginalMemberBridgeUnavailableStates/nil-host (0.00s)
+=== NAME  TestStdioOriginalMemberBridgeUnavailableStates
+=== RUN   TestStdioOriginalMemberBridgeUnavailableStates/unstarted
+--- PASS: TestStdioOriginalMemberBridgeUnavailableStates/unstarted (0.00s)
+=== NAME  TestStdioOriginalMemberBridgeUnavailableStates
+=== RUN   TestStdioOriginalMemberBridgeUnavailableStates/legacy-no-original
+--- PASS: TestStdioOriginalMemberBridgeUnavailableStates/legacy-no-original (0.00s)
+=== NAME  TestStdioOriginalMemberBridgeUnavailableStates
+=== RUN   TestStdioOriginalMemberBridgeUnavailableStates/no-process-acquisition
+--- PASS: TestStdioOriginalMemberBridgeUnavailableStates/no-process-acquisition (0.00s)
+=== NAME  TestStdioOriginalMemberBridgeUnavailableStates
+=== RUN   TestStdioOriginalMemberBridgeUnavailableStates/partial-process
+--- PASS: TestStdioOriginalMemberBridgeUnavailableStates/partial-process (0.00s)
+=== NAME  TestStdioOriginalMemberBridgeUnavailableStates
+=== RUN   TestStdioOriginalMemberBridgeUnavailableStates/specialized
+--- PASS: TestStdioOriginalMemberBridgeUnavailableStates/specialized (0.00s)
+=== NAME  TestStdioOriginalMemberBridgeUnavailableStates
+=== RUN   TestStdioOriginalMemberBridgeUnavailableStates/terminal-started
+--- PASS: TestStdioOriginalMemberBridgeUnavailableStates/terminal-started (0.00s)
+=== NAME  TestStdioOriginalMemberBridgeUnavailableStates
+--- PASS: TestStdioOriginalMemberBridgeUnavailableStates (0.00s)
+=== NAME  
+=== RUN   TestStdioOriginalContainmentRefusalBeforeExecution
+--- PASS: TestStdioOriginalContainmentRefusalBeforeExecution (0.00s)
+=== NAME  
+=== RUN   TestStdioOriginalFastWrapperDescendantAndForeignSentinel
+--- PASS: TestStdioOriginalFastWrapperDescendantAndForeignSentinel (0.40s)
+=== NAME  
+=== RUN   TestStdioOriginalConcurrentStopRetainsCloseFailure
+--- PASS: TestStdioOriginalConcurrentStopRetainsCloseFailure (0.16s)
+=== NAME  
+=== RUN   TestStdioOriginalFinalReplyPrecedesExit
+--- PASS: TestStdioOriginalFinalReplyPrecedesExit (0.11s)
+=== NAME  
+=== RUN   TestStdioOriginalDelayedReaderRetainsPendingAttempt
+--- PASS: TestStdioOriginalDelayedReaderRetainsPendingAttempt (0.51s)
+=== NAME  
+=== RUN   TestStdioOriginalNativeObservationFailureIsCached
+--- PASS: TestStdioOriginalNativeObservationFailureIsCached (0.16s)
+=== NAME  
+=== RUN   TestStdioOriginalRepeatedStartPreservesRunningOwner
+--- PASS: TestStdioOriginalRepeatedStartPreservesRunningOwner (0.17s)
+=== NAME  
+=== RUN   TestStdioOriginalCanceledAcquisitionAndConcurrentStop
+--- PASS: TestStdioOriginalCanceledAcquisitionAndConcurrentStop (0.00s)
+=== NAME  
+=== RUN   TestStdioRustOriginalRetainsBeforeActualCreate
+=== RUN   TestStdioRustOriginalRetainsBeforeActualCreate/accepted
+    host_rust_original_boundaries_windows_test.go:80: requires the qualified native tuple and marked mcphub.exe test layout
+--- SKIP: TestStdioRustOriginalRetainsBeforeActualCreate/accepted (0.00s)
+=== NAME  TestStdioRustOriginalRetainsBeforeActualCreate
+=== RUN   TestStdioRustOriginalRetainsBeforeActualCreate/refused
+    host_rust_original_boundaries_windows_test.go:80: requires the qualified native tuple and marked mcphub.exe test layout
+--- SKIP: TestStdioRustOriginalRetainsBeforeActualCreate/refused (0.00s)
+=== NAME  TestStdioRustOriginalRetainsBeforeActualCreate
+--- PASS: TestStdioRustOriginalRetainsBeforeActualCreate (0.00s)
+=== NAME  
+=== RUN   TestStdioRustOriginalLateActualFactoryErrorKeepsCustody
+    host_rust_original_boundaries_windows_test.go:150: requires the qualified native tuple and marked mcphub.exe test layout
+--- SKIP: TestStdioRustOriginalLateActualFactoryErrorKeepsCustody (0.00s)
+=== NAME  
+=== RUN   TestStdioRustOriginalInvalidCommandRetainsNoChildFacade
+=== RUN   TestStdioRustOriginalInvalidCommandRetainsNoChildFacade/wait-delay
+    host_rust_original_boundaries_windows_test.go:217: requires the qualified native tuple and marked mcphub.exe test layout
+--- SKIP: TestStdioRustOriginalInvalidCommandRetainsNoChildFacade/wait-delay (0.00s)
+=== NAME  TestStdioRustOriginalInvalidCommandRetainsNoChildFacade
+=== RUN   TestStdioRustOriginalInvalidCommandRetainsNoChildFacade/malformed-hidden-drive-entry
+    host_rust_original_boundaries_windows_test.go:217: requires the qualified native tuple and marked mcphub.exe test layout
+--- SKIP: TestStdioRustOriginalInvalidCommandRetainsNoChildFacade/malformed-hidden-drive-entry (0.00s)
+=== NAME  TestStdioRustOriginalInvalidCommandRetainsNoChildFacade
+--- PASS: TestStdioRustOriginalInvalidCommandRetainsNoChildFacade (0.00s)
+=== NAME  
+=== RUN   TestStdioRustOriginalDelayedReaderKeepsFirstPendingReceipt
+    host_rust_original_boundaries_windows_test.go:258: requires the qualified native tuple and marked mcphub.exe test layout
+--- SKIP: TestStdioRustOriginalDelayedReaderKeepsFirstPendingReceipt (0.00s)
+=== NAME  
+=== RUN   TestStdioOriginalDriveEnvironmentHelper
+--- PASS: TestStdioOriginalDriveEnvironmentHelper (0.00s)
+=== NAME  
+=== RUN   TestStdioRustOriginalPreservesCapturedDriveContext
+    host_rust_original_environment_windows_test.go:71: requires the qualified native tuple and marked mcphub.exe test layout
+--- SKIP: TestStdioRustOriginalPreservesCapturedDriveContext (0.00s)
+=== NAME  
+=== RUN   TestStdioRustOriginalPreparationUsesCapturedContext
+    host_rust_original_preparation_windows_test.go:18: requires the qualified native tuple and marked mcphub.exe test layout
+--- SKIP: TestStdioRustOriginalPreparationUsesCapturedContext (0.00s)
+=== NAME  
+=== RUN   TestStdioRustOriginalFinalHTTPReplyAndDrain
+    host_rust_original_windows_test.go:239: requires the qualified native tuple and marked mcphub.exe test layout
+--- SKIP: TestStdioRustOriginalFinalHTTPReplyAndDrain (0.00s)
+=== NAME  
+=== RUN   TestStdioRustOriginalRootBeforeDescendantEOFAndForeignSentinel
+    host_rust_original_windows_test.go:254: requires the qualified native tuple and marked mcphub.exe test layout
+--- SKIP: TestStdioRustOriginalRootBeforeDescendantEOFAndForeignSentinel (0.00s)
+=== NAME  
+=== RUN   TestStdioRustOriginalCanceledObserversKeepHealthyRPC
+    host_rust_original_windows_test.go:321: requires the qualified native tuple and marked mcphub.exe test layout
+--- SKIP: TestStdioRustOriginalCanceledObserversKeepHealthyRPC (0.00s)
+=== NAME  
+=== RUN   TestStdioRustOriginalLifetimeCancellationJoinsSameOwner
+    host_rust_original_windows_test.go:389: requires the qualified native tuple and marked mcphub.exe test layout
+--- SKIP: TestStdioRustOriginalLifetimeCancellationJoinsSameOwner (0.00s)
+=== NAME  
+=== RUN   TestStdioRustOriginalCanceledStopReceiverKeepsOneDeadline
+    host_rust_original_windows_test.go:407: requires the qualified native tuple and marked mcphub.exe test layout
+--- SKIP: TestStdioRustOriginalCanceledStopReceiverKeepsOneDeadline (0.00s)
+=== NAME  
+=== RUN   TestStdioHostInitializeChildExitWritesTypedFailureWithoutSession
+--- PASS: TestStdioHostInitializeChildExitWritesTypedFailureWithoutSession (0.09s)
+=== NAME  
+=== RUN   TestStdioHostHTTPProtocolAndSessionContractR1
+=== RUN   TestStdioHostHTTPProtocolAndSessionContractR1/missing_session
+--- PASS: TestStdioHostHTTPProtocolAndSessionContractR1/missing_session (0.00s)
+=== NAME  TestStdioHostHTTPProtocolAndSessionContractR1
+=== RUN   TestStdioHostHTTPProtocolAndSessionContractR1/unknown_session
+--- PASS: TestStdioHostHTTPProtocolAndSessionContractR1/unknown_session (0.00s)
+=== NAME  TestStdioHostHTTPProtocolAndSessionContractR1
+=== RUN   TestStdioHostHTTPProtocolAndSessionContractR1/unsupported_version
+--- PASS: TestStdioHostHTTPProtocolAndSessionContractR1/unsupported_version (0.00s)
+=== NAME  TestStdioHostHTTPProtocolAndSessionContractR1
+=== RUN   TestStdioHostHTTPProtocolAndSessionContractR1/session_version_mismatch
+--- PASS: TestStdioHostHTTPProtocolAndSessionContractR1/session_version_mismatch (0.00s)
+=== NAME  TestStdioHostHTTPProtocolAndSessionContractR1
+--- PASS: TestStdioHostHTTPProtocolAndSessionContractR1 (0.10s)
+=== NAME  
+=== RUN   TestStdioHostInvalidInitializeResponseDoesNotPoisonCache
+--- PASS: TestStdioHostInvalidInitializeResponseDoesNotPoisonCache (0.09s)
+=== NAME  
+=== RUN   TestStdioHostSessionRegistryEvictsOldestAtBoundR1
+--- PASS: TestStdioHostSessionRegistryEvictsOldestAtBoundR1 (0.00s)
+=== NAME  
+=== RUN   TestExecStartClosesParentPipesOnFailure
+--- PASS: TestExecStartClosesParentPipesOnFailure (0.00s)
+=== NAME  
+=== RUN   TestStdioHostStartFailureNoGoroutineLeak
+--- PASS: TestStdioHostStartFailureNoGoroutineLeak (0.00s)
+=== NAME  
+=== RUN   TestClosePipeChildEndReclaimsLeakedChildDescriptor
+--- PASS: TestClosePipeChildEndReclaimsLeakedChildDescriptor (0.00s)
+=== NAME  
+=== RUN   TestClosePipeChildEndIsNilSafe
+--- PASS: TestClosePipeChildEndIsNilSafe (0.00s)
+=== NAME  
+=== RUN   TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE
+=== RUN   TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE/post_hostile_host_same-origin_fetch
+--- PASS: TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE/post_hostile_host_same-origin_fetch (0.00s)
+=== NAME  TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE
+=== RUN   TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE/post_hostile_origin_cross-site_fetch
+--- PASS: TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE/post_hostile_origin_cross-site_fetch (0.00s)
+=== NAME  TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE
+=== RUN   TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE/sse_hostile_host_same-origin_fetch
+--- PASS: TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE/sse_hostile_host_same-origin_fetch (0.00s)
+=== NAME  TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE
+=== RUN   TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE/sse_hostile_origin_cross-site_fetch
+--- PASS: TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE/sse_hostile_origin_cross-site_fetch (0.00s)
+=== NAME  TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE
+--- PASS: TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE (0.06s)
+=== NAME  
+=== RUN   TestStdioHostLoopbackGuardAllowsNoOriginPOST
+--- PASS: TestStdioHostLoopbackGuardAllowsNoOriginPOST (0.06s)
+=== NAME  
+=== RUN   TestHostSubprocessLifecycle
+--- PASS: TestHostSubprocessLifecycle (0.09s)
+=== NAME  
+=== RUN   TestHostEnvAppendsToOSEnviron
+--- PASS: TestHostEnvAppendsToOSEnviron (0.09s)
+=== NAME  
+=== RUN   TestHostWorkingDirSetsSubprocessCwd
+--- PASS: TestHostWorkingDirSetsSubprocessCwd (0.09s)
+=== NAME  
+=== RUN   TestStdioHost_TeesStderrToLogFile
+--- PASS: TestStdioHost_TeesStderrToLogFile (0.58s)
+=== NAME  
+=== RUN   TestHostHTTPIDMultiplexing
+--- PASS: TestHostHTTPIDMultiplexing (0.08s)
+=== NAME  
+=== RUN   TestHostHTTPRejectsOversizedPOSTBody
+--- PASS: TestHostHTTPRejectsOversizedPOSTBody (0.51s)
+=== NAME  
+=== RUN   TestHostInitializeCached
+--- PASS: TestHostInitializeCached (0.09s)
+=== NAME  
+=== RUN   TestHostInitializeCacheSkipsErrors
+--- PASS: TestHostInitializeCacheSkipsErrors (0.09s)
+=== NAME  
+=== RUN   TestHostStopUnblocksPendingHandlers
+--- PASS: TestHostStopUnblocksPendingHandlers (0.26s)
+=== NAME  
+=== RUN   TestHostStopUnblocksSSE
+--- PASS: TestHostStopUnblocksSSE (0.25s)
+=== NAME  
+=== RUN   TestStdioHost_ChildExitsUnexpectedly_UnblocksPendingRequest
+--- PASS: TestStdioHost_ChildExitsUnexpectedly_UnblocksPendingRequest (0.09s)
+=== NAME  
+=== RUN   TestStdioHost_Stop_DoesNotRaceWithChildExit
+--- PASS: TestStdioHost_Stop_DoesNotRaceWithChildExit (0.05s)
+=== NAME  
+=== RUN   TestStdioHost_SSE_ChildExitUnblocksStream
+--- PASS: TestStdioHost_SSE_ChildExitUnblocksStream (0.58s)
+=== NAME  
+=== RUN   TestHostDELETETerminates
+--- PASS: TestHostDELETETerminates (0.06s)
+=== NAME  
+=== RUN   TestHostSSERequiresSessionID
+--- PASS: TestHostSSERequiresSessionID (0.06s)
+=== NAME  
+=== RUN   TestComposeChildEnv_RemovesUnsetKeysAndAddsOverrides
+--- PASS: TestComposeChildEnv_RemovesUnsetKeysAndAddsOverrides (0.00s)
+=== NAME  
+=== RUN   TestHTTPHostEndpointReleaseRetriesPending
+--- PASS: TestHTTPHostEndpointReleaseRetriesPending (0.17s)
+=== NAME  
+=== RUN   TestHTTPHostEndpointReleaseCallerCancellationDoesNotPoisonFinal
+=== RUN   TestHTTPHostEndpointReleaseCallerCancellationDoesNotPoisonFinal/success
+--- PASS: TestHTTPHostEndpointReleaseCallerCancellationDoesNotPoisonFinal/success (0.16s)
+=== NAME  TestHTTPHostEndpointReleaseCallerCancellationDoesNotPoisonFinal
+=== RUN   TestHTTPHostEndpointReleaseCallerCancellationDoesNotPoisonFinal/reported-error
+--- PASS: TestHTTPHostEndpointReleaseCallerCancellationDoesNotPoisonFinal/reported-error (0.16s)
+=== NAME  TestHTTPHostEndpointReleaseCallerCancellationDoesNotPoisonFinal
+--- PASS: TestHTTPHostEndpointReleaseCallerCancellationDoesNotPoisonFinal (0.33s)
+=== NAME  
+=== RUN   TestHTTPHostEndpointReleaseLatePendingCannotReplaceFinal
+--- PASS: TestHTTPHostEndpointReleaseLatePendingCannotReplaceFinal (0.11s)
+=== NAME  
+=== RUN   TestHTTPHostEndpointReleaseRetainsFinalReportedError
+--- PASS: TestHTTPHostEndpointReleaseRetainsFinalReportedError (0.16s)
+=== NAME  
+=== RUN   TestHTTPHostEndpointReleaseRejectsUnqualifiedProof
+=== RUN   TestHTTPHostEndpointReleaseRejectsUnqualifiedProof/nil
+--- PASS: TestHTTPHostEndpointReleaseRejectsUnqualifiedProof/nil (0.16s)
+=== NAME  TestHTTPHostEndpointReleaseRejectsUnqualifiedProof
+=== RUN   TestHTTPHostEndpointReleaseRejectsUnqualifiedProof/zero
+--- PASS: TestHTTPHostEndpointReleaseRejectsUnqualifiedProof/zero (0.29s)
+=== NAME  TestHTTPHostEndpointReleaseRejectsUnqualifiedProof
+--- PASS: TestHTTPHostEndpointReleaseRejectsUnqualifiedProof (0.45s)
+=== NAME  
+=== RUN   TestHTTPHostEndpointReleaseStopRefreshesOriginalTerminal
+=== RUN   TestHTTPHostEndpointReleaseStopRefreshesOriginalTerminal/success
+--- PASS: TestHTTPHostEndpointReleaseStopRefreshesOriginalTerminal/success (0.11s)
+=== NAME  TestHTTPHostEndpointReleaseStopRefreshesOriginalTerminal
+=== RUN   TestHTTPHostEndpointReleaseStopRefreshesOriginalTerminal/final-error
+--- PASS: TestHTTPHostEndpointReleaseStopRefreshesOriginalTerminal/final-error (0.16s)
+=== NAME  TestHTTPHostEndpointReleaseStopRefreshesOriginalTerminal
+=== RUN   TestHTTPHostEndpointReleaseStopRefreshesOriginalTerminal/still-pending
+--- PASS: TestHTTPHostEndpointReleaseStopRefreshesOriginalTerminal/still-pending (0.11s)
+=== NAME  TestHTTPHostEndpointReleaseStopRefreshesOriginalTerminal
+--- PASS: TestHTTPHostEndpointReleaseStopRefreshesOriginalTerminal (0.39s)
+=== NAME  
+=== RUN   TestHTTPHostEndpointReleasePreservesPublishedStartOnStartedFailure
+--- PASS: TestHTTPHostEndpointReleasePreservesPublishedStartOnStartedFailure (0.11s)
+=== NAME  
+=== RUN   TestNewHTTPHost_DerivesReadyBudgetFromOuterBindDeadline
+--- PASS: TestNewHTTPHost_DerivesReadyBudgetFromOuterBindDeadline (0.00s)
+=== NAME  
+=== RUN   TestNewHTTPHost_ReadyBudgetOrderingInvariant
+--- PASS: TestNewHTTPHost_ReadyBudgetOrderingInvariant (0.00s)
+=== NAME  
+=== RUN   TestNewHTTPHost_ClampsAndWarnsOnMisorderedReadyBudget
+--- PASS: TestNewHTTPHost_ClampsAndWarnsOnMisorderedReadyBudget (0.00s)
+=== NAME  
+=== RUN   TestNewHTTPHost_GenericDefaultUnchangedWithoutOuterDeadline
+--- PASS: TestNewHTTPHost_GenericDefaultUnchangedWithoutOuterDeadline (0.00s)
+=== NAME  
+=== RUN   TestNewHTTPHost_ExplicitBudgetUnderOuterDeadlineIsRespected
+--- PASS: TestNewHTTPHost_ExplicitBudgetUnderOuterDeadlineIsRespected (0.00s)
+=== NAME  
+=== RUN   TestHTTPHost_JSON_InjectsReadResourceOnToolsList
+--- PASS: TestHTTPHost_JSON_InjectsReadResourceOnToolsList (0.00s)
+=== NAME  
+=== RUN   TestHTTPHost_JSON_RewritesReadResourceCall
+--- PASS: TestHTTPHost_JSON_RewritesReadResourceCall (0.00s)
+=== NAME  
+=== RUN   TestHTTPHost_SSE_InjectsAndReshapes
+--- PASS: TestHTTPHost_SSE_InjectsAndReshapes (0.00s)
+=== NAME  
+=== RUN   TestHTTPHost_POSTBodyTooLarge
+--- PASS: TestHTTPHost_POSTBodyTooLarge (0.03s)
+=== NAME  
+=== RUN   TestHTTPHost_InitializeForwardsAndPreservesSessionID
+--- PASS: TestHTTPHost_InitializeForwardsAndPreservesSessionID (0.00s)
+=== NAME  
+=== RUN   TestHTTPHost_InitializeCapabilitiesCachedForInjection
+--- PASS: TestHTTPHost_InitializeCapabilitiesCachedForInjection (0.00s)
+=== NAME  
+=== RUN   TestHTTPHost_POSTBodyTooLargeRejected
+--- PASS: TestHTTPHost_POSTBodyTooLargeRejected (0.01s)
+=== NAME  
+=== RUN   TestHTTPHost_UpstreamJSONBodyTooLargeRejected
+--- PASS: TestHTTPHost_UpstreamJSONBodyTooLargeRejected (0.02s)
+=== NAME  
+=== RUN   TestStreamSSE_PassesThroughNonJSONDataLines
+--- PASS: TestStreamSSE_PassesThroughNonJSONDataLines (0.00s)
+=== NAME  
+=== RUN   TestHTTPHost_GETUsesStreamClient_NoClientTimeout
+--- PASS: TestHTTPHost_GETUsesStreamClient_NoClientTimeout (0.00s)
+=== NAME  
+=== RUN   TestHTTPHost_GETPassthrough_RejectsWhenStreamLimitReached
+--- PASS: TestHTTPHost_GETPassthrough_RejectsWhenStreamLimitReached (0.00s)
+=== NAME  
+=== RUN   TestHTTPHost_WaitForReady_ReturnsImmediatelyWhenUpstreamReady
+--- PASS: TestHTTPHost_WaitForReady_ReturnsImmediatelyWhenUpstreamReady (0.00s)
+=== NAME  
+=== RUN   TestHTTPHost_WaitForReady_HangingProbeBoundedByHealthTimeout
+--- PASS: TestHTTPHost_WaitForReady_HangingProbeBoundedByHealthTimeout (0.30s)
+=== NAME  
+=== RUN   TestHTTPHost_ExitState_NilBeforeStart
+--- PASS: TestHTTPHost_ExitState_NilBeforeStart (0.00s)
+=== NAME  
+=== RUN   TestHTTPHost_DELETE_ForwardsSessionTerminationUpstream
+--- PASS: TestHTTPHost_DELETE_ForwardsSessionTerminationUpstream (0.00s)
+=== NAME  
+=== RUN   TestHTTPHost_DELETE_BestEffortWhenUpstreamRejects
+--- PASS: TestHTTPHost_DELETE_BestEffortWhenUpstreamRejects (0.00s)
+=== NAME  
+=== RUN   TestHTTPHost_DELETE_ForwardsAuthorizationUpstream
+--- PASS: TestHTTPHost_DELETE_ForwardsAuthorizationUpstream (0.00s)
+=== NAME  
+=== RUN   TestHTTPHost_DELETE_DetachedFromInboundContext
+--- PASS: TestHTTPHost_DELETE_DetachedFromInboundContext (0.00s)
+=== NAME  
+=== RUN   TestInflight_FirstCallMaterializes
+--- PASS: TestInflight_FirstCallMaterializes (0.00s)
+=== NAME  
+=== RUN   TestInflight_ConcurrentCallsShareOne
+--- PASS: TestInflight_ConcurrentCallsShareOne (0.05s)
+=== NAME  
+=== RUN   TestInflight_FailureReturnsError
+--- PASS: TestInflight_FailureReturnsError (0.00s)
+=== NAME  
+=== RUN   TestInflight_RetryThrottleHonored
+--- PASS: TestInflight_RetryThrottleHonored (0.08s)
+=== NAME  
+=== RUN   TestInflight_SuccessResetsThrottle
+--- PASS: TestInflight_SuccessResetsThrottle (0.08s)
+=== NAME  
+=== RUN   TestInflight_ForgetClearsThrottle
+--- PASS: TestInflight_ForgetClearsThrottle (0.00s)
+=== NAME  
+=== RUN   TestInflight_WinnerCancellationDoesNotAbortLosers
+--- PASS: TestInflight_WinnerCancellationDoesNotAbortLosers (0.00s)
+=== NAME  
+=== RUN   TestInflight_MaterializeContextUsesFixedHardCeilingNotWinnerDeadline
+--- PASS: TestInflight_MaterializeContextUsesFixedHardCeilingNotWinnerDeadline (0.00s)
+=== NAME  
+=== RUN   TestInflightGate_DoBounded_TimerExpiryReturnsInFlightWhileWinnerContinues
+--- PASS: TestInflightGate_DoBounded_TimerExpiryReturnsInFlightWhileWinnerContinues (0.02s)
+=== NAME  
+=== RUN   TestInflightGate_DoBounded_CtxCancelReturnsCtxErr
+--- PASS: TestInflightGate_DoBounded_CtxCancelReturnsCtxErr (0.00s)
+=== NAME  
+=== RUN   TestInflightGate_HasActiveFlight_TrueWhileFnRunsThenFalse
+--- PASS: TestInflightGate_HasActiveFlight_TrueWhileFnRunsThenFalse (0.00s)
+=== NAME  
+=== RUN   TestInflight_IndependentKeysDoNotInterfere
+--- PASS: TestInflight_IndependentKeysDoNotInterfere (0.00s)
+=== NAME  
+=== RUN   TestInflight_ConcurrentFailureBurstHonorsRetryThrottle
+--- PASS: TestInflight_ConcurrentFailureBurstHonorsRetryThrottle (0.01s)
+=== NAME  
+=== RUN   TestLaunchCapabilityLifecycleAllReturns
+=== RUN   TestLaunchCapabilityLifecycleAllReturns/enroll_and_start
+--- PASS: TestLaunchCapabilityLifecycleAllReturns/enroll_and_start (0.00s)
+=== NAME  TestLaunchCapabilityLifecycleAllReturns
+=== RUN   TestLaunchCapabilityLifecycleAllReturns/enroll_failure_cancels_and_degrades_without_capability
+--- PASS: TestLaunchCapabilityLifecycleAllReturns/enroll_failure_cancels_and_degrades_without_capability (0.00s)
+=== NAME  TestLaunchCapabilityLifecycleAllReturns
+=== RUN   TestLaunchCapabilityLifecycleAllReturns/start_failure_cancels
+--- PASS: TestLaunchCapabilityLifecycleAllReturns/start_failure_cancels (0.00s)
+=== NAME  TestLaunchCapabilityLifecycleAllReturns
+--- PASS: TestLaunchCapabilityLifecycleAllReturns (0.00s)
+=== NAME  
+=== RUN   TestLaunchCapabilityHandleListAndEnvironment
+--- PASS: TestLaunchCapabilityHandleListAndEnvironment (0.00s)
+=== NAME  
+=== RUN   TestLazyProxyReadinessPublisher_OrganicToolsSuccessPublishesReady
+--- PASS: TestLazyProxyReadinessPublisher_OrganicToolsSuccessPublishesReady (0.50s)
+=== NAME  
+=== RUN   TestLazyProxyReadinessPublisher_OrganicSuccessArms
+=== RUN   TestLazyProxyReadinessPublisher_OrganicSuccessArms/tools_call
+--- PASS: TestLazyProxyReadinessPublisher_OrganicSuccessArms/tools_call (0.02s)
+=== NAME  TestLazyProxyReadinessPublisher_OrganicSuccessArms
+=== RUN   TestLazyProxyReadinessPublisher_OrganicSuccessArms/other_forwarded_request
+--- PASS: TestLazyProxyReadinessPublisher_OrganicSuccessArms/other_forwarded_request (0.02s)
+=== NAME  TestLazyProxyReadinessPublisher_OrganicSuccessArms
+=== RUN   TestLazyProxyReadinessPublisher_OrganicSuccessArms/forwarded_document_notification
+--- PASS: TestLazyProxyReadinessPublisher_OrganicSuccessArms/forwarded_document_notification (0.02s)
+=== NAME  TestLazyProxyReadinessPublisher_OrganicSuccessArms
+=== RUN   TestLazyProxyReadinessPublisher_OrganicSuccessArms/nil_transport_error_with_JSON-RPC_error_payload
+--- PASS: TestLazyProxyReadinessPublisher_OrganicSuccessArms/nil_transport_error_with_JSON-RPC_error_payload (0.02s)
+=== NAME  TestLazyProxyReadinessPublisher_OrganicSuccessArms
+--- PASS: TestLazyProxyReadinessPublisher_OrganicSuccessArms (0.08s)
+=== NAME  
+=== RUN   TestLazyProxyReadinessPublisher_StartingAcknowledgedBeforeEndpointExposure
+--- PASS: TestLazyProxyReadinessPublisher_StartingAcknowledgedBeforeEndpointExposure (0.02s)
+=== NAME  
+=== RUN   TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady
+=== RUN   TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady/synthetic_and_absorbed
+--- PASS: TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady/synthetic_and_absorbed (0.00s)
+=== NAME  TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady
+=== RUN   TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady/pre-delivery_saturation_refusal
+--- PASS: TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady/pre-delivery_saturation_refusal (0.01s)
+=== NAME  TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady
+=== RUN   TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady/delivered_notification_without_response
+--- PASS: TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady/delivered_notification_without_response (0.08s)
+=== NAME  TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady
+=== RUN   TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady/client_cancellation
+--- PASS: TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady/client_cancellation (0.02s)
+=== NAME  TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady
+--- PASS: TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady (0.12s)
+=== NAME  
+=== RUN   TestLazyProxyReadinessPublisher_LifecycleOrdering
+=== RUN   TestLazyProxyReadinessPublisher_LifecycleOrdering/idle_and_rematerialize
+--- PASS: TestLazyProxyReadinessPublisher_LifecycleOrdering/idle_and_rematerialize (0.04s)
+=== NAME  TestLazyProxyReadinessPublisher_LifecycleOrdering
+=== RUN   TestLazyProxyReadinessPublisher_LifecycleOrdering/send_failure
+--- PASS: TestLazyProxyReadinessPublisher_LifecycleOrdering/send_failure (0.02s)
+=== NAME  TestLazyProxyReadinessPublisher_LifecycleOrdering
+=== RUN   TestLazyProxyReadinessPublisher_LifecycleOrdering/probation_reap
+--- PASS: TestLazyProxyReadinessPublisher_LifecycleOrdering/probation_reap (0.01s)
+=== NAME  TestLazyProxyReadinessPublisher_LifecycleOrdering
+--- PASS: TestLazyProxyReadinessPublisher_LifecycleOrdering (0.07s)
+=== NAME  
+=== RUN   TestLazyProxyReadinessPublisher_SupersededInvalidationIsHarmless
+--- PASS: TestLazyProxyReadinessPublisher_SupersededInvalidationIsHarmless (0.00s)
+=== NAME  
+=== RUN   TestLazyProxyReadinessPublisher_MailboxKeepsGreatestPendingState
+--- PASS: TestLazyProxyReadinessPublisher_MailboxKeepsGreatestPendingState (0.00s)
+=== NAME  
+=== RUN   TestLazyProxyReadinessPublisher_CurrentInvalidationFailureRetriesThenSignalsFatal
+--- PASS: TestLazyProxyReadinessPublisher_CurrentInvalidationFailureRetriesThenSignalsFatal (0.00s)
+=== NAME  
+=== RUN   TestLazyProxyReadinessPublisher_StaleInvalidationFailureDoesNotRetryOrSignalFatal
+--- PASS: TestLazyProxyReadinessPublisher_StaleInvalidationFailureDoesNotRetryOrSignalFatal (0.00s)
+=== NAME  
+=== RUN   TestLazyProxyReadinessPublisher_StopCancelsAndJoinsWorker
+--- PASS: TestLazyProxyReadinessPublisher_StopCancelsAndJoinsWorker (0.00s)
+=== NAME  
+=== RUN   TestLazyProxyReadinessPublisher_BackendExitInvalidatesCurrentEpoch
+--- PASS: TestLazyProxyReadinessPublisher_BackendExitInvalidatesCurrentEpoch (0.02s)
+=== NAME  
+=== RUN   TestLazyProxyLoopbackGuardRejectsHostilePOSTAndSSE
+=== RUN   TestLazyProxyLoopbackGuardRejectsHostilePOSTAndSSE/post_hostile_host_same-origin_fetch
+--- PASS: TestLazyProxyLoopbackGuardRejectsHostilePOSTAndSSE/post_hostile_host_same-origin_fetch (0.00s)
+=== NAME  TestLazyProxyLoopbackGuardRejectsHostilePOSTAndSSE
+=== RUN   TestLazyProxyLoopbackGuardRejectsHostilePOSTAndSSE/post_hostile_origin_cross-site_fetch
+--- PASS: TestLazyProxyLoopbackGuardRejectsHostilePOSTAndSSE/post_hostile_origin_cross-site_fetch (0.00s)
+=== NAME  TestLazyProxyLoopbackGuardRejectsHostilePOSTAndSSE
+=== RUN   TestLazyProxyLoopbackGuardRejectsHostilePOSTAndSSE/sse_hostile_host_same-origin_fetch
+--- PASS: TestLazyProxyLoopbackGuardRejectsHostilePOSTAndSSE/sse_hostile_host_same-origin_fetch (0.00s)
+=== NAME  TestLazyProxyLoopbackGuardRejectsHostilePOSTAndSSE
+=== RUN   TestLazyProxyLoopbackGuardRejectsHostilePOSTAndSSE/sse_hostile_origin_cross-site_fetch
+--- PASS: TestLazyProxyLoopbackGuardRejectsHostilePOSTAndSSE/sse_hostile_origin_cross-site_fetch (0.00s)
+=== NAME  TestLazyProxyLoopbackGuardRejectsHostilePOSTAndSSE
+--- PASS: TestLazyProxyLoopbackGuardRejectsHostilePOSTAndSSE (0.00s)
+=== NAME  
+=== RUN   TestLazyProxyLoopbackGuardAllowsNoOriginPOST
+--- PASS: TestLazyProxyLoopbackGuardAllowsNoOriginPOST (0.00s)
+=== NAME  
+=== RUN   TestLazyProxy_InitializeSyntheticNoMaterialize
+--- PASS: TestLazyProxy_InitializeSyntheticNoMaterialize (0.00s)
+=== NAME  
+=== RUN   TestLazyProxy_RejectsNonJSONContentType
+--- PASS: TestLazyProxy_RejectsNonJSONContentType (0.00s)
+=== NAME  
+=== RUN   TestLazyProxy_RejectsCrossSiteOrigin
+--- PASS: TestLazyProxy_RejectsCrossSiteOrigin (0.00s)
+=== NAME  
+=== RUN   TestLazyProxy_PingEchoesClientID
+--- PASS: TestLazyProxy_PingEchoesClientID (0.07s)
+=== NAME  
+=== RUN   TestLazyProxy_UnknownNotificationReturns202NoForward
+--- PASS: TestLazyProxy_UnknownNotificationReturns202NoForward (0.00s)
+=== NAME  
+=== RUN   TestLazyProxy_NotificationsReturn202NoBody
+--- PASS: TestLazyProxy_NotificationsReturn202NoBody (0.00s)
+=== NAME  
+=== RUN   TestLazyProxy_ToolsListSyntheticNoMaterialize
+--- PASS: TestLazyProxy_ToolsListSyntheticNoMaterialize (0.00s)
+=== NAME  
+=== RUN   TestLazyProxy_ResourcesAndPromptsListSyntheticNoMaterialize
+--- PASS: TestLazyProxy_ResourcesAndPromptsListSyntheticNoMaterialize (0.01s)
+=== NAME  
+=== RUN   TestLazyProxy_BackendKindSelectsCatalog
+--- PASS: TestLazyProxy_BackendKindSelectsCatalog (0.00s)
+=== NAME  
+=== RUN   TestLazyProxy_UnknownBackendKindRejectsSynthetic
+--- PASS: TestLazyProxy_UnknownBackendKindRejectsSynthetic (0.00s)
+=== NAME  
+=== RUN   TestLazyProxy_RepeatedInitializeStillSynthetic
+--- PASS: TestLazyProxy_RepeatedInitializeStillSynthetic (0.02s)
+=== NAME  
+=== RUN   TestLazyProxy_ToolsCallMaterializesOnce
+--- PASS: TestLazyProxy_ToolsCallMaterializesOnce (0.02s)
+=== NAME  
+=== RUN   TestLazyProxy_EnsureMaterializedReservesCachedEndpointAgainstIdleReaper
+--- PASS: TestLazyProxy_EnsureMaterializedReservesCachedEndpointAgainstIdleReaper (0.01s)
+=== NAME  
+=== RUN   TestLazyProxy_EnsureMaterializedWaitsForIdleReapStopBeforeLifecycleReuse
+--- PASS: TestLazyProxy_EnsureMaterializedWaitsForIdleReapStopBeforeLifecycleReuse (0.35s)
+=== NAME  
+=== RUN   TestLazyProxy_OnSendFailureWaitsForStopBeforeLifecycleReuse
+--- PASS: TestLazyProxy_OnSendFailureWaitsForStopBeforeLifecycleReuse (0.17s)
+=== NAME  
+=== RUN   TestLazyProxy_StopDuringMaterializeFailsClosed
+--- PASS: TestLazyProxy_StopDuringMaterializeFailsClosed (0.08s)
+=== NAME  
+=== RUN   TestLazyProxy_ConcurrentFirstCall
+--- PASS: TestLazyProxy_ConcurrentFirstCall (0.28s)
+=== NAME  
+=== RUN   TestLazyProxy_MissingBinaryYieldsMissingState
+--- PASS: TestLazyProxy_MissingBinaryYieldsMissingState (0.02s)
+=== NAME  
+=== RUN   TestLazyProxy_OtherFailureYieldsFailedState
+--- PASS: TestLazyProxy_OtherFailureYieldsFailedState (0.02s)
+=== NAME  
+=== RUN   TestLazyProxy_ThrottledRetryReturnsCachedError
+--- PASS: TestLazyProxy_ThrottledRetryReturnsCachedError (0.02s)
+=== NAME  
+=== RUN   TestLazyProxy_ClientCancelDoesNotTearDownBackend
+--- PASS: TestLazyProxy_ClientCancelDoesNotTearDownBackend (0.01s)
+=== NAME  
+=== RUN   TestLazyProxy_ServeBeforeBindErrors
+--- PASS: TestLazyProxy_ServeBeforeBindErrors (0.00s)
+=== NAME  
+=== RUN   TestLazyProxy_BackendCrashReMaterializes
+--- PASS: TestLazyProxy_BackendCrashReMaterializes (0.10s)
+=== NAME  
+=== RUN   TestLazyProxy_LastToolsCallAtDebounced
+--- PASS: TestLazyProxy_LastToolsCallAtDebounced (0.02s)
+=== NAME  
+=== RUN   TestLazyProxy_MaterializedHardCapRejectsWhenOtherBackendActive
+--- PASS: TestLazyProxy_MaterializedHardCapRejectsWhenOtherBackendActive (0.01s)
+=== NAME  
+=== RUN   TestLazyProxy_MaterializedHardCapIgnoresStaleDeadRows
+--- PASS: TestLazyProxy_MaterializedHardCapIgnoresStaleDeadRows (0.09s)
+=== NAME  
+=== RUN   TestLazyProxy_DefaultMaterializedHardCapAllowsNineConcurrentWorkspaceProbes
+--- PASS: TestLazyProxy_DefaultMaterializedHardCapAllowsNineConcurrentWorkspaceProbes (0.07s)
+=== NAME  
+=== RUN   TestLazyProxy_IdleTTLStopsMaterializedBackend
+--- PASS: TestLazyProxy_IdleTTLStopsMaterializedBackend (0.13s)
+=== NAME  
+=== RUN   TestLazyProxy_ShutdownStopsEndpoint
+--- PASS: TestLazyProxy_ShutdownStopsEndpoint (0.02s)
+=== NAME  
+=== RUN   TestLazyProxy_ConfiguredStateOnStartup
+--- PASS: TestLazyProxy_ConfiguredStateOnStartup (0.04s)
+=== NAME  
+=== RUN   TestLazyProxy_ListenAndServeBindsLoopback
+--- PASS: TestLazyProxy_ListenAndServeBindsLoopback (0.02s)
+=== NAME  
+=== RUN   TestLazyProxy_DidOpenMultiOpenSingleClose
+--- PASS: TestLazyProxy_DidOpenMultiOpenSingleClose (0.02s)
+=== NAME  
+=== RUN   TestLazyProxy_DidCloseAfterLastCloseReopensCleanly
+--- PASS: TestLazyProxy_DidCloseAfterLastCloseReopensCleanly (0.01s)
+=== NAME  
+=== RUN   TestLazyProxy_DidCloseSingleOpenMultiClose
+--- PASS: TestLazyProxy_DidCloseSingleOpenMultiClose (0.02s)
+=== NAME  
+=== RUN   TestLazyProxy_DidOpenDistinctURIsForwardIndependently
+--- PASS: TestLazyProxy_DidOpenDistinctURIsForwardIndependently (0.02s)
+=== NAME  
+=== RUN   TestLazyProxy_DidOpenMalformedURIAbsorbed
+--- PASS: TestLazyProxy_DidOpenMalformedURIAbsorbed (0.00s)
+=== NAME  
+=== RUN   TestLazyProxy_DocRefsRejectUniqueURIsOverCap
+--- PASS: TestLazyProxy_DocRefsRejectUniqueURIsOverCap (0.03s)
+=== NAME  
+=== RUN   TestLazyProxy_DocRefRollsBackOnBackendJSONRPCError
+--- PASS: TestLazyProxy_DocRefRollsBackOnBackendJSONRPCError (0.07s)
+=== NAME  
+=== RUN   TestLazyProxy_DocRefsResetOnBackendTeardown
+--- PASS: TestLazyProxy_DocRefsResetOnBackendTeardown (0.10s)
+=== NAME  
+=== RUN   TestLazyProxy_ColdToolsCall_BoundedWaitReturns503RetryAfter
+--- PASS: TestLazyProxy_ColdToolsCall_BoundedWaitReturns503RetryAfter (0.62s)
+=== NAME  
+=== RUN   TestLazyProxy_ColdToolsCall_FastMaterializeAnswersInline
+--- PASS: TestLazyProxy_ColdToolsCall_FastMaterializeAnswersInline (0.02s)
+=== NAME  
+=== RUN   TestLazyProxy_ConcurrentColdCallers_OneMaterialize_AllBoundedAtBudget
+--- PASS: TestLazyProxy_ConcurrentColdCallers_OneMaterialize_AllBoundedAtBudget (0.04s)
+=== NAME  
+=== RUN   TestLazyProxy_ColdToolsCall_AwaitsDeliveredResponse_ThenWarmActive
+--- PASS: TestLazyProxy_ColdToolsCall_AwaitsDeliveredResponse_ThenWarmActive (0.02s)
+=== NAME  
+=== RUN   TestLazyProxy_ColdToolsCall_CeilingExceeded_NonRetryableControlledError
+--- PASS: TestLazyProxy_ColdToolsCall_CeilingExceeded_NonRetryableControlledError (0.12s)
+=== NAME  
+=== RUN   TestLazyProxy_Probation_LifecycleActiveWrittenOnlyOnFirstSuccess
+--- PASS: TestLazyProxy_Probation_LifecycleActiveWrittenOnlyOnFirstSuccess (0.11s)
+=== NAME  
+=== RUN   TestLazyProxy_ColdToolsCall_CeilingExceeded_EndpointStaysCachedForRetry
+--- PASS: TestLazyProxy_ColdToolsCall_CeilingExceeded_EndpointStaysCachedForRetry (0.07s)
+=== NAME  
+=== RUN   TestLazyProxy_ProbationWatchdog_WedgedBackendTornDownAndSlotFreed
+--- PASS: TestLazyProxy_ProbationWatchdog_WedgedBackendTornDownAndSlotFreed (0.01s)
+=== NAME  
+=== RUN   TestLazyProxy_ColdStartSlots_BusyReturns503WithoutMaterialize
+--- PASS: TestLazyProxy_ColdStartSlots_BusyReturns503WithoutMaterialize (0.00s)
+=== NAME  
+=== RUN   TestLazyProxy_ColdStartSlots_StalePortDeadStartingRowIgnored
+--- PASS: TestLazyProxy_ColdStartSlots_StalePortDeadStartingRowIgnored (0.02s)
+=== NAME  
+=== RUN   TestLazyProxy_MissingLSPBinary_InstantMissingError
+--- PASS: TestLazyProxy_MissingLSPBinary_InstantMissingError (0.02s)
+=== NAME  
+=== RUN   TestLazyProxy_WarmGoesCold_ReentersBoundedColdPath
+--- PASS: TestLazyProxy_WarmGoesCold_ReentersBoundedColdPath (0.09s)
+=== NAME  
+=== RUN   TestLazyProxy_AbandonedMaterialize_StillPublishesAndLeavesStarting
+--- PASS: TestLazyProxy_AbandonedMaterialize_StillPublishesAndLeavesStarting (0.19s)
+=== NAME  
+=== RUN   TestLazyProxy_AbandonedMaterialize_FailureStampsFailed
+--- PASS: TestLazyProxy_AbandonedMaterialize_FailureStampsFailed (0.18s)
+=== NAME  
+=== RUN   TestLazyProxy_ProbationWatchdog_ReapsOrphanStartingRowWithNoEndpoint
+--- PASS: TestLazyProxy_ProbationWatchdog_ReapsOrphanStartingRowWithNoEndpoint (0.01s)
+=== NAME  
+=== RUN   TestLazyProxy_DocLifecycle_ProbationDeadlineDeliversOnceNoReplay
+--- PASS: TestLazyProxy_DocLifecycle_ProbationDeadlineDeliversOnceNoReplay (0.01s)
+=== NAME  
+=== RUN   TestLazyProxy_DocLifecycle_WarmForwardsOnceAndSetsWarmed
+--- PASS: TestLazyProxy_DocLifecycle_WarmForwardsOnceAndSetsWarmed (0.02s)
+=== NAME  
+=== RUN   TestLazyProxy_ColdStartSlots_OwnInFlightJoinNotRefused
+--- PASS: TestLazyProxy_ColdStartSlots_OwnInFlightJoinNotRefused (0.43s)
+=== NAME  
+=== RUN   TestLazyProxy_Stop_BoundedByCtxWhileMaterializeHoldsLifecycleMutex
+--- PASS: TestLazyProxy_Stop_BoundedByCtxWhileMaterializeHoldsLifecycleMutex (0.11s)
+=== NAME  
+=== RUN   TestLazyProxy_MarkWarmed_GenerationGuardSkipsAfterTeardown
+--- PASS: TestLazyProxy_MarkWarmed_GenerationGuardSkipsAfterTeardown (0.02s)
+=== NAME  
+=== RUN   TestLazyProxy_ProbationDwellRowRendersAsStartingContract
+--- PASS: TestLazyProxy_ProbationDwellRowRendersAsStartingContract (0.02s)
+=== NAME  
+=== RUN   TestLazyProxy_PublishMaterialized_DoesNotRepublishOverConcurrentWarm
+--- PASS: TestLazyProxy_PublishMaterialized_DoesNotRepublishOverConcurrentWarm (0.00s)
+=== NAME  
+=== RUN   TestLazyProxy_MarkWarmed_ConcurrentTeardownDoesNotOverwriteFailed
+--- PASS: TestLazyProxy_MarkWarmed_ConcurrentTeardownDoesNotOverwriteFailed (1.78s)
+=== NAME  
+=== RUN   TestLazyProxy_Reconcile_RestoresActiveAfterConcurrentStartingDowngrade
+--- PASS: TestLazyProxy_Reconcile_RestoresActiveAfterConcurrentStartingDowngrade (0.05s)
+=== NAME  
+=== RUN   TestLazyProxy_Reconcile_ConcurrentDowngradeSettlesActive
+--- PASS: TestLazyProxy_Reconcile_ConcurrentDowngradeSettlesActive (0.12s)
+=== NAME  
+=== RUN   TestLazyProxy_Reconcile_ShadowResetOnTeardownReenablesWrite
+--- PASS: TestLazyProxy_Reconcile_ShadowResetOnTeardownReenablesWrite (0.06s)
+=== NAME  
+=== RUN   TestLazyProxy_SlotScan_SkipsPortDialForNonStartingActiveRows
+--- PASS: TestLazyProxy_SlotScan_SkipsPortDialForNonStartingActiveRows (0.01s)
+=== NAME  
+=== RUN   TestLazyProxy_ColdRequestHoldCeilingInvariantClamped
+--- PASS: TestLazyProxy_ColdRequestHoldCeilingInvariantClamped (0.00s)
+=== NAME  
+=== RUN   TestLazyProxy_ColdForwardHeldEvent_FiresBeyondBudget
+--- PASS: TestLazyProxy_ColdForwardHeldEvent_FiresBeyondBudget (0.04s)
+=== NAME  
+=== RUN   TestLazyProxy_ReapSeveredDeliveredRequest_ControlledError
+=== RUN   TestLazyProxy_ReapSeveredDeliveredRequest_ControlledError/tools/call
+--- PASS: TestLazyProxy_ReapSeveredDeliveredRequest_ControlledError/tools/call (0.02s)
+=== NAME  TestLazyProxy_ReapSeveredDeliveredRequest_ControlledError
+=== RUN   TestLazyProxy_ReapSeveredDeliveredRequest_ControlledError/textDocument/definition
+--- PASS: TestLazyProxy_ReapSeveredDeliveredRequest_ControlledError/textDocument/definition (0.02s)
+=== NAME  TestLazyProxy_ReapSeveredDeliveredRequest_ControlledError
+--- PASS: TestLazyProxy_ReapSeveredDeliveredRequest_ControlledError (0.03s)
+=== NAME  
+=== RUN   TestLazyProxy_ColdForward_AwaitsDeliveredResponse_ThenWarmActive
+--- PASS: TestLazyProxy_ColdForward_AwaitsDeliveredResponse_ThenWarmActive (0.02s)
+=== NAME  
+=== RUN   TestLazyProxy_ColdForward_CeilingExceeded_NonRetryableControlledError
+--- PASS: TestLazyProxy_ColdForward_CeilingExceeded_NonRetryableControlledError (0.05s)
+=== NAME  
+=== RUN   TestLazyProxy_ColdForward_HeldEventFires
+--- PASS: TestLazyProxy_ColdForward_HeldEventFires (0.03s)
+=== NAME  
+=== RUN   TestLazyProxy_NegativeColdStartMaxProbation_NotClamped
+--- PASS: TestLazyProxy_NegativeColdStartMaxProbation_NotClamped (0.00s)
+=== NAME  
+=== RUN   TestLazyProxy_OnSendFailure_StaleGenerationNoOp
+--- PASS: TestLazyProxy_OnSendFailure_StaleGenerationNoOp (0.04s)
+=== NAME  
+=== RUN   TestLazyProxy_ColdRequestHeldError_MessageDistinguishesWarmVsCold
+--- PASS: TestLazyProxy_ColdRequestHeldError_MessageDistinguishesWarmVsCold (0.00s)
+=== NAME  
+=== RUN   TestLazyProxy_Reconcile_FailedWriteDoesNotRecordShadow_RetriesNext
+--- PASS: TestLazyProxy_Reconcile_FailedWriteDoesNotRecordShadow_RetriesNext (0.38s)
+=== NAME  
+=== RUN   TestLazyProxy_CallerAbortAfterConcurrentWarm_ReconcilesActive
+--- PASS: TestLazyProxy_CallerAbortAfterConcurrentWarm_ReconcilesActive (0.01s)
+=== NAME  
+=== RUN   TestLazyProxy_DocRefRollback_AfterTeardownReset_NoPhantomRefcount
+--- PASS: TestLazyProxy_DocRefRollback_AfterTeardownReset_NoPhantomRefcount (0.20s)
+=== NAME  
+=== RUN   TestLazyProxy_Watchdog_RunsWithColdStartGateDisabled
+--- PASS: TestLazyProxy_Watchdog_RunsWithColdStartGateDisabled (0.02s)
+=== NAME  
+=== RUN   TestLazyProxy_WatchdogBranchB_TransientLoadErrorRetainsOrphanTimer
+--- PASS: TestLazyProxy_WatchdogBranchB_TransientLoadErrorRetainsOrphanTimer (0.01s)
+=== NAME  
+=== RUN   TestLazyProxy_IdleReap_StaleConfiguredWriteNoStompsNewerStarting
+--- PASS: TestLazyProxy_IdleReap_StaleConfiguredWriteNoStompsNewerStarting (0.02s)
+=== NAME  
+=== RUN   TestLazyProxy_RejectedPublish_ClearsStaleStartingSince_ReapSettlesConfigured
+--- PASS: TestLazyProxy_RejectedPublish_ClearsStaleStartingSince_ReapSettlesConfigured (0.04s)
+=== NAME  
+=== RUN   TestLazyProxy_AppliedReservationReleaseContinuesMaterialization
+--- PASS: TestLazyProxy_AppliedReservationReleaseContinuesMaterialization (0.01s)
+=== NAME  
+=== RUN   TestLazyProxy_DocLifecycle_WarmDeliveredThenClientCancel_KeepsRefcount
+--- PASS: TestLazyProxy_DocLifecycle_WarmDeliveredThenClientCancel_KeepsRefcount (1.30s)
+=== NAME  
+=== RUN   TestLazyProxy_DocLifecycle_WarmPreDeliveryFailure_RollsBackAndTearsDown
+--- PASS: TestLazyProxy_DocLifecycle_WarmPreDeliveryFailure_RollsBackAndTearsDown (0.40s)
+=== NAME  
+=== RUN   TestLazyProxy_DocLifecycle_CancelWithDeadBackend_TearsDownNotKeep
+--- PASS: TestLazyProxy_DocLifecycle_CancelWithDeadBackend_TearsDownNotKeep (0.21s)
+=== NAME  
+=== RUN   TestLazyProxy_DocLifecycle_BrokenPipeUnderCanceledCtx_RollsBackAndTearsDown
+--- PASS: TestLazyProxy_DocLifecycle_BrokenPipeUnderCanceledCtx_RollsBackAndTearsDown (0.37s)
+=== NAME  
+=== RUN   TestLazyProxy_ToolsCall_BrokenPipeUnderCanceledCtx_TearsDownGenericError
+--- PASS: TestLazyProxy_ToolsCall_BrokenPipeUnderCanceledCtx_TearsDownGenericError (0.03s)
+=== NAME  
+=== RUN   TestLazyProxy_ToolsCall_PendingCapSaturation_Retryable503NoTeardown
+--- PASS: TestLazyProxy_ToolsCall_PendingCapSaturation_Retryable503NoTeardown (0.20s)
+=== NAME  
+=== RUN   TestLazyProxy_ToolsCall_SaturationOutranksReapSeveredMarker
+--- PASS: TestLazyProxy_ToolsCall_SaturationOutranksReapSeveredMarker (0.02s)
+=== NAME  
+=== RUN   TestRotateIfLarge_RotatesWhenOverLimit
+--- PASS: TestRotateIfLarge_RotatesWhenOverLimit (0.02s)
+=== NAME  
+=== RUN   TestRotateIfLarge_SkipsSmall
+--- PASS: TestRotateIfLarge_SkipsSmall (0.00s)
+=== NAME  
+=== RUN   TestRotateIfLarge_PrunesOldestWhenOverCount
+--- PASS: TestRotateIfLarge_PrunesOldestWhenOverCount (0.01s)
+=== NAME  
+=== RUN   TestRotateIfLarge_NegativeKeepCountDoesNotPanic
+--- PASS: TestRotateIfLarge_NegativeKeepCountDoesNotPanic (0.01s)
+=== NAME  
+=== RUN   TestRunProcess_RunsInCwdAndSurfacesCleanExit
+--- PASS: TestRunProcess_RunsInCwdAndSurfacesCleanExit (0.02s)
+=== NAME  
+=== RUN   TestRunProcess_CtxCancelReturnsNil
+--- PASS: TestRunProcess_CtxCancelReturnsNil (0.25s)
+=== NAME  
+=== RUN   TestRunProcess_KillsWrapperGrandchildOnCancel
+--- PASS: TestRunProcess_KillsWrapperGrandchildOnCancel (0.61s)
+=== NAME  
+=== RUN   TestRunProcess_EmptyCommandErrors
+--- PASS: TestRunProcess_EmptyCommandErrors (0.00s)
+=== NAME  
+=== RUN   TestListPromptsTool_MapArgs_EmptyInputAcceptedAndNormalized
+--- PASS: TestListPromptsTool_MapArgs_EmptyInputAcceptedAndNormalized (0.00s)
+=== NAME  
+=== RUN   TestListPromptsTool_MapArgs_RejectsMalformedJSON
+--- PASS: TestListPromptsTool_MapArgs_RejectsMalformedJSON (0.00s)
+=== NAME  
+=== RUN   TestListPromptsTool_MapResult_WrapsPromptsArrayAsTextContent
+--- PASS: TestListPromptsTool_MapResult_WrapsPromptsArrayAsTextContent (0.00s)
+=== NAME  
+=== RUN   TestListPromptsTool_MapResult_EmptyPromptsReturnsEmptyArray
+--- PASS: TestListPromptsTool_MapResult_EmptyPromptsReturnsEmptyArray (0.00s)
+=== NAME  
+=== RUN   TestGetPromptTool_MapArgs_ForwardsNameAndArguments
+--- PASS: TestGetPromptTool_MapArgs_ForwardsNameAndArguments (0.00s)
+=== NAME  
+=== RUN   TestGetPromptTool_MapArgs_AcceptsNameWithoutArguments
+--- PASS: TestGetPromptTool_MapArgs_AcceptsNameWithoutArguments (0.00s)
+=== NAME  
+=== RUN   TestGetPromptTool_MapArgs_MissingNameErrors
+--- PASS: TestGetPromptTool_MapArgs_MissingNameErrors (0.00s)
+=== NAME  
+=== RUN   TestGetPromptTool_MapResult_WrapsMessagesAsTextContent
+--- PASS: TestGetPromptTool_MapResult_WrapsMessagesAsTextContent (0.00s)
+=== NAME  
+=== RUN   TestSyntheticTools_PromptsRegistered
+--- PASS: TestSyntheticTools_PromptsRegistered (0.00s)
+=== NAME  
+=== RUN   TestProtocolBridge_InjectTools_PromptsAndResources
+--- PASS: TestProtocolBridge_InjectTools_PromptsAndResources (0.00s)
+=== NAME  
+=== RUN   TestProtocolBridge_InjectTools_OnlyPrompts
+--- PASS: TestProtocolBridge_InjectTools_OnlyPrompts (0.00s)
+=== NAME  
+=== RUN   TestPromptBridge_EndToEnd_ListAndGet
+--- PASS: TestPromptBridge_EndToEnd_ListAndGet (0.09s)
+=== NAME  
+=== RUN   TestQualificationConnectionCloseReceivesOriginalResult
+=== RUN   TestQualificationConnectionCloseReceivesOriginalResult/concurrent-success
+--- PASS: TestQualificationConnectionCloseReceivesOriginalResult/concurrent-success (0.00s)
+=== NAME  TestQualificationConnectionCloseReceivesOriginalResult
+=== RUN   TestQualificationConnectionCloseReceivesOriginalResult/concurrent-failure
+--- PASS: TestQualificationConnectionCloseReceivesOriginalResult/concurrent-failure (0.00s)
+=== NAME  TestQualificationConnectionCloseReceivesOriginalResult
+=== RUN   TestQualificationConnectionCloseReceivesOriginalResult/closed-canceled
+--- PASS: TestQualificationConnectionCloseReceivesOriginalResult/closed-canceled (0.00s)
+=== NAME  TestQualificationConnectionCloseReceivesOriginalResult
+=== RUN   TestQualificationConnectionCloseReceivesOriginalResult/closed-expired
+--- PASS: TestQualificationConnectionCloseReceivesOriginalResult/closed-expired (0.00s)
+=== NAME  TestQualificationConnectionCloseReceivesOriginalResult
+=== RUN   TestQualificationConnectionCloseReceivesOriginalResult/inflight-canceled
+--- PASS: TestQualificationConnectionCloseReceivesOriginalResult/inflight-canceled (0.00s)
+=== NAME  TestQualificationConnectionCloseReceivesOriginalResult
+=== RUN   TestQualificationConnectionCloseReceivesOriginalResult/inflight-expired
+--- PASS: TestQualificationConnectionCloseReceivesOriginalResult/inflight-expired (0.00s)
+=== NAME  TestQualificationConnectionCloseReceivesOriginalResult
+=== RUN   TestQualificationConnectionCloseReceivesOriginalResult/no-deadline-inflight
+--- PASS: TestQualificationConnectionCloseReceivesOriginalResult/no-deadline-inflight (0.00s)
+=== NAME  TestQualificationConnectionCloseReceivesOriginalResult
+--- PASS: TestQualificationConnectionCloseReceivesOriginalResult (0.01s)
+=== NAME  
+=== RUN   TestQualificationConnectionCloseReceivesOriginalIO
+=== RUN   TestQualificationConnectionCloseReceivesOriginalIO/read-joined
+--- PASS: TestQualificationConnectionCloseReceivesOriginalIO/read-joined (0.00s)
+=== NAME  TestQualificationConnectionCloseReceivesOriginalIO
+=== RUN   TestQualificationConnectionCloseReceivesOriginalIO/write-joined
+--- PASS: TestQualificationConnectionCloseReceivesOriginalIO/write-joined (0.00s)
+=== NAME  TestQualificationConnectionCloseReceivesOriginalIO
+=== RUN   TestQualificationConnectionCloseReceivesOriginalIO/read-canceled
+--- PASS: TestQualificationConnectionCloseReceivesOriginalIO/read-canceled (0.00s)
+=== NAME  TestQualificationConnectionCloseReceivesOriginalIO
+=== RUN   TestQualificationConnectionCloseReceivesOriginalIO/write-canceled
+--- PASS: TestQualificationConnectionCloseReceivesOriginalIO/write-canceled (0.00s)
+=== NAME  TestQualificationConnectionCloseReceivesOriginalIO
+--- PASS: TestQualificationConnectionCloseReceivesOriginalIO (0.00s)
+=== NAME  
+=== RUN   TestQualificationSessionCloseCachesUnsettledOriginalClose
+--- PASS: TestQualificationSessionCloseCachesUnsettledOriginalClose (0.00s)
+=== NAME  
+=== RUN   TestQualificationExchangeUsesRealReceiver
+=== RUN   TestQualificationExchangeUsesRealReceiver/json
+--- PASS: TestQualificationExchangeUsesRealReceiver/json (0.00s)
+=== NAME  TestQualificationExchangeUsesRealReceiver
+=== RUN   TestQualificationExchangeUsesRealReceiver/wrong-id
+--- PASS: TestQualificationExchangeUsesRealReceiver/wrong-id (0.00s)
+=== NAME  TestQualificationExchangeUsesRealReceiver
+=== RUN   TestQualificationExchangeUsesRealReceiver/rpc-error
+--- PASS: TestQualificationExchangeUsesRealReceiver/rpc-error (0.00s)
+=== NAME  TestQualificationExchangeUsesRealReceiver
+=== RUN   TestQualificationExchangeUsesRealReceiver/sse-notification-before-reply
+--- PASS: TestQualificationExchangeUsesRealReceiver/sse-notification-before-reply (0.00s)
+=== NAME  TestQualificationExchangeUsesRealReceiver
+=== RUN   TestQualificationExchangeUsesRealReceiver/sse-missing
+--- PASS: TestQualificationExchangeUsesRealReceiver/sse-missing (0.00s)
+=== NAME  TestQualificationExchangeUsesRealReceiver
+=== RUN   TestQualificationExchangeUsesRealReceiver/initialized
+--- PASS: TestQualificationExchangeUsesRealReceiver/initialized (0.00s)
+=== NAME  TestQualificationExchangeUsesRealReceiver
+=== RUN   TestQualificationExchangeUsesRealReceiver/initialized-rejected
+--- PASS: TestQualificationExchangeUsesRealReceiver/initialized-rejected (0.00s)
+=== NAME  TestQualificationExchangeUsesRealReceiver
+=== RUN   TestQualificationExchangeUsesRealReceiver/close-fault
+--- PASS: TestQualificationExchangeUsesRealReceiver/close-fault (0.00s)
+=== NAME  TestQualificationExchangeUsesRealReceiver
+--- PASS: TestQualificationExchangeUsesRealReceiver (0.00s)
+=== NAME  
+=== RUN   TestQualificationSessionCloseIsCached
+--- PASS: TestQualificationSessionCloseIsCached (0.00s)
+=== NAME  
+=== RUN   TestQualificationZeroObservationRefuses
+--- PASS: TestQualificationZeroObservationRefuses (0.00s)
+=== NAME  
+=== RUN   TestQualificationLiveBindingPassesExactDigests
+--- PASS: TestQualificationLiveBindingPassesExactDigests (0.00s)
+=== NAME  
+=== RUN   TestQualificationReceivedObservationDoesNotReopenEndpoint
+=== RUN   TestQualificationReceivedObservationDoesNotReopenEndpoint/missing-close
+--- PASS: TestQualificationReceivedObservationDoesNotReopenEndpoint/missing-close (0.00s)
+=== NAME  TestQualificationReceivedObservationDoesNotReopenEndpoint
+=== RUN   TestQualificationReceivedObservationDoesNotReopenEndpoint/incomplete-close
+--- PASS: TestQualificationReceivedObservationDoesNotReopenEndpoint/incomplete-close (0.00s)
+=== NAME  TestQualificationReceivedObservationDoesNotReopenEndpoint
+=== RUN   TestQualificationReceivedObservationDoesNotReopenEndpoint/binding-drift
+--- PASS: TestQualificationReceivedObservationDoesNotReopenEndpoint/binding-drift (0.00s)
+=== NAME  TestQualificationReceivedObservationDoesNotReopenEndpoint
+=== RUN   TestQualificationReceivedObservationDoesNotReopenEndpoint/endpoint-drift
+--- PASS: TestQualificationReceivedObservationDoesNotReopenEndpoint/endpoint-drift (0.00s)
+=== NAME  TestQualificationReceivedObservationDoesNotReopenEndpoint
+--- PASS: TestQualificationReceivedObservationDoesNotReopenEndpoint (0.00s)
+=== NAME  
+=== RUN   TestQualificationDialPreservesRequestBudgets
+=== RUN   TestQualificationDialPreservesRequestBudgets/production-post-and-delete
+--- PASS: TestQualificationDialPreservesRequestBudgets/production-post-and-delete (0.00s)
+=== NAME  TestQualificationDialPreservesRequestBudgets
+=== RUN   TestQualificationDialPreservesRequestBudgets/earlier-transport-deadline
+--- PASS: TestQualificationDialPreservesRequestBudgets/earlier-transport-deadline (0.00s)
+=== NAME  TestQualificationDialPreservesRequestBudgets
+--- PASS: TestQualificationDialPreservesRequestBudgets (0.00s)
+=== NAME  
+=== RUN   TestQualificationDialRejectsInvalidRequestBudgets
+=== RUN   TestQualificationDialRejectsInvalidRequestBudgets/missing
+--- PASS: TestQualificationDialRejectsInvalidRequestBudgets/missing (0.00s)
+=== NAME  TestQualificationDialRejectsInvalidRequestBudgets
+=== RUN   TestQualificationDialRejectsInvalidRequestBudgets/foreign-owner
+--- PASS: TestQualificationDialRejectsInvalidRequestBudgets/foreign-owner (0.00s)
+=== NAME  TestQualificationDialRejectsInvalidRequestBudgets
+=== RUN   TestQualificationDialRejectsInvalidRequestBudgets/nil-original
+--- PASS: TestQualificationDialRejectsInvalidRequestBudgets/nil-original (0.00s)
+=== NAME  TestQualificationDialRejectsInvalidRequestBudgets
+=== RUN   TestQualificationDialRejectsInvalidRequestBudgets/wrong-value
+--- PASS: TestQualificationDialRejectsInvalidRequestBudgets/wrong-value (0.00s)
+=== NAME  TestQualificationDialRejectsInvalidRequestBudgets
+=== RUN   TestQualificationDialRejectsInvalidRequestBudgets/no-deadline
+--- PASS: TestQualificationDialRejectsInvalidRequestBudgets/no-deadline (0.00s)
+=== NAME  TestQualificationDialRejectsInvalidRequestBudgets
+=== RUN   TestQualificationDialRejectsInvalidRequestBudgets/original-canceled
+--- PASS: TestQualificationDialRejectsInvalidRequestBudgets/original-canceled (0.00s)
+=== NAME  TestQualificationDialRejectsInvalidRequestBudgets
+=== RUN   TestQualificationDialRejectsInvalidRequestBudgets/expired
+--- PASS: TestQualificationDialRejectsInvalidRequestBudgets/expired (0.00s)
+=== NAME  TestQualificationDialRejectsInvalidRequestBudgets
+=== RUN   TestQualificationDialRejectsInvalidRequestBudgets/transport-canceled
+--- PASS: TestQualificationDialRejectsInvalidRequestBudgets/transport-canceled (0.00s)
+=== NAME  TestQualificationDialRejectsInvalidRequestBudgets
+--- PASS: TestQualificationDialRejectsInvalidRequestBudgets (0.00s)
+=== NAME  
+=== RUN   TestQualificationDialCancellationKeepsValidationOwned
+=== RUN   TestQualificationDialCancellationKeepsValidationOwned/production-request
+--- PASS: TestQualificationDialCancellationKeepsValidationOwned/production-request (0.00s)
+=== NAME  TestQualificationDialCancellationKeepsValidationOwned
+=== RUN   TestQualificationDialCancellationKeepsValidationOwned/original-context
+--- PASS: TestQualificationDialCancellationKeepsValidationOwned/original-context (0.00s)
+=== NAME  TestQualificationDialCancellationKeepsValidationOwned
+=== RUN   TestQualificationDialCancellationKeepsValidationOwned/transport-context
+--- PASS: TestQualificationDialCancellationKeepsValidationOwned/transport-context (0.00s)
+=== NAME  TestQualificationDialCancellationKeepsValidationOwned
+--- PASS: TestQualificationDialCancellationKeepsValidationOwned (0.00s)
+=== NAME  
+=== RUN   TestRelay_InitializePOSTMintsSession
+--- PASS: TestRelay_InitializePOSTMintsSession (0.20s)
+=== NAME  
+=== RUN   TestRelay_NotificationGets202NoReply
+--- PASS: TestRelay_NotificationGets202NoReply (0.15s)
+=== NAME  
+=== RUN   TestRelay_SessionHeaderEchoedOnSubsequentPOSTs
+--- PASS: TestRelay_SessionHeaderEchoedOnSubsequentPOSTs (0.30s)
+=== NAME  
+=== RUN   TestRelay_SSEResponseOnPOST
+--- PASS: TestRelay_SSEResponseOnPOST (0.30s)
+=== NAME  
+=== RUN   TestRelay_HTTPErrorSynthesizesJSONRPCError
+--- PASS: TestRelay_HTTPErrorSynthesizesJSONRPCError (0.20s)
+=== NAME  
+=== RUN   TestRelay_GracefulShutdownSendsDELETE
+--- PASS: TestRelay_GracefulShutdownSendsDELETE (0.30s)
+=== NAME  
+=== RUN   TestRelay_ShutdownReleasesOwnedSessionReference
+=== RUN   TestRelay_ShutdownReleasesOwnedSessionReference/delete_accepted
+--- PASS: TestRelay_ShutdownReleasesOwnedSessionReference/delete_accepted (0.00s)
+=== NAME  TestRelay_ShutdownReleasesOwnedSessionReference
+=== RUN   TestRelay_ShutdownReleasesOwnedSessionReference/delete_HTTP_failure
+--- PASS: TestRelay_ShutdownReleasesOwnedSessionReference/delete_HTTP_failure (0.00s)
+=== NAME  TestRelay_ShutdownReleasesOwnedSessionReference
+--- PASS: TestRelay_ShutdownReleasesOwnedSessionReference (0.00s)
+=== NAME  
+=== RUN   TestReadJSONRPCLine_TooLong
+--- PASS: TestReadJSONRPCLine_TooLong (0.00s)
+=== NAME  
+=== RUN   TestReadJSONRPCLine_MaxLengthAccepted
+--- PASS: TestReadJSONRPCLine_MaxLengthAccepted (0.00s)
+=== NAME  
+=== RUN   TestRelay_StdinPumpCapsConcurrentPOSTs
+--- PASS: TestRelay_StdinPumpCapsConcurrentPOSTs (0.22s)
+=== NAME  
+=== RUN   TestProtocolBridge_InjectTools_AppendsSyntheticEntry
+--- PASS: TestProtocolBridge_InjectTools_AppendsSyntheticEntry (0.00s)
+=== NAME  
+=== RUN   TestProtocolBridge_InjectTools_EmptyTools
+--- PASS: TestProtocolBridge_InjectTools_EmptyTools (0.00s)
+=== NAME  
+=== RUN   TestProtocolBridge_InjectTools_NoCapability_NoInjection
+--- PASS: TestProtocolBridge_InjectTools_NoCapability_NoInjection (0.00s)
+=== NAME  
+=== RUN   TestProtocolBridge_InjectTools_MalformedBodyReturnsUnchanged
+--- PASS: TestProtocolBridge_InjectTools_MalformedBodyReturnsUnchanged (0.00s)
+=== NAME  
+=== RUN   TestProtocolBridge_TransformRequest_RewritesReadResource
+--- PASS: TestProtocolBridge_TransformRequest_RewritesReadResource (0.00s)
+=== NAME  
+=== RUN   TestProtocolBridge_TransformRequest_IgnoresOtherTools
+--- PASS: TestProtocolBridge_TransformRequest_IgnoresOtherTools (0.00s)
+=== NAME  
+=== RUN   TestProtocolBridge_TransformRequest_MissingURIReturnsError
+--- PASS: TestProtocolBridge_TransformRequest_MissingURIReturnsError (0.00s)
+=== NAME  
+=== RUN   TestProtocolBridge_TransformRequest_InvalidURISchemeReturnsError
+--- PASS: TestProtocolBridge_TransformRequest_InvalidURISchemeReturnsError (0.00s)
+=== NAME  
+=== RUN   TestProtocolBridge_TransformRequest_CapabilityGate
+--- PASS: TestProtocolBridge_TransformRequest_CapabilityGate (0.00s)
+=== NAME  
+=== RUN   TestReadResourceTool_MapResult_ConvertsContentsToContent
+--- PASS: TestReadResourceTool_MapResult_ConvertsContentsToContent (0.00s)
+=== NAME  
+=== RUN   TestReadResourceTool_MapResult_MalformedReturnsUnchanged
+--- PASS: TestReadResourceTool_MapResult_MalformedReturnsUnchanged (0.00s)
+=== NAME  
+=== RUN   TestReadResourceTool_MapResult_ErrorEnvelopeReturnsUnchangedR1
+--- PASS: TestReadResourceTool_MapResult_ErrorEnvelopeReturnsUnchangedR1 (0.00s)
+=== NAME  
+=== RUN   TestHasCapability_ReadsCachedInitialize
+--- PASS: TestHasCapability_ReadsCachedInitialize (0.00s)
+=== NAME  
+=== RUN   TestSyntheticTools_NamesAreUnique
+--- PASS: TestSyntheticTools_NamesAreUnique (0.00s)
+=== NAME  
+=== RUN   TestResourceBridge_EndToEnd_WrapsResourceAsTool
+--- PASS: TestResourceBridge_EndToEnd_WrapsResourceAsTool (0.10s)
+=== NAME  
+=== RUN   TestResourceBridge_NoResourcesCapability_NoInjection
+--- PASS: TestResourceBridge_NoResourcesCapability_NoInjection (0.09s)
+=== NAME  
+=== RUN   TestDaemonDiagWriter_NonTTYIsDiscard
+--- PASS: TestDaemonDiagWriter_NonTTYIsDiscard (0.00s)
+=== NAME  
+=== RUN   TestDaemonDiagWriter_TTYIsStderr
+--- PASS: TestDaemonDiagWriter_TTYIsStderr (0.00s)
+=== NAME  
+=== RUN   TestOpenStderrSink_LogPathEmptyNonTTY
+--- PASS: TestOpenStderrSink_LogPathEmptyNonTTY (0.00s)
+=== NAME  
+=== RUN   TestOpenStderrSink_LogPathEmptyTTY
+--- PASS: TestOpenStderrSink_LogPathEmptyTTY (0.00s)
+=== NAME  
+=== RUN   TestOpenStderrSink_LogPathSetNonTTY
+--- PASS: TestOpenStderrSink_LogPathSetNonTTY (0.00s)
+=== NAME  
+=== RUN   TestOpenLogWriters_LogPathEmptyNonTTY
+--- PASS: TestOpenLogWriters_LogPathEmptyNonTTY (0.00s)
+=== NAME  
+=== RUN   TestOpenStderrSink_FileOpenFailureFallsBackToDiscard
+--- PASS: TestOpenStderrSink_FileOpenFailureFallsBackToDiscard (0.00s)
+=== NAME  
+=== RUN   TestOpenLogWriters_FileOpenFailureFallsBackToDiscard
+--- PASS: TestOpenLogWriters_FileOpenFailureFallsBackToDiscard (0.00s)
+=== NAME  
+=== RUN   TestLogSupervisorEvent_NonTTYDiscardsStderrButAppendsToLogPath
+--- PASS: TestLogSupervisorEvent_NonTTYDiscardsStderrButAppendsToLogPath (0.00s)
+=== NAME  
+=== RUN   TestSetStderrIsTerminalForTest_OverlappingPanics
+--- PASS: TestSetStderrIsTerminalForTest_OverlappingPanics (0.00s)
+=== NAME  
+=== RUN   TestSetStderrIsTerminalForTest_SequentialReuse
+--- PASS: TestSetStderrIsTerminalForTest_SequentialReuse (0.00s)
+=== NAME  
+=== RUN   TestSetStderrIsTerminalForTest_DoubleRestoreIdempotent
+--- PASS: TestSetStderrIsTerminalForTest_DoubleRestoreIdempotent (0.00s)
+=== NAME  
+=== RUN   TestLogSupervisorEvent_NoLogPathNonTTYIsBenign
+--- PASS: TestLogSupervisorEvent_NoLogPathNonTTYIsBenign (0.00s)
+=== NAME  
+=== RUN   TestOpenLogWriters_LogPathSetNonTTY
+--- PASS: TestOpenLogWriters_LogPathSetNonTTY (0.00s)
+=== NAME  
+=== RUN   TestStdioLaunchEnvironmentRetainsDriveDirectories
+--- PASS: TestStdioLaunchEnvironmentRetainsDriveDirectories (0.06s)
+=== NAME  
+=== RUN   TestStdioLaunchExecutionProfileDataAndFingerprint
+--- PASS: TestStdioLaunchExecutionProfileDataAndFingerprint (0.10s)
+=== NAME  
+=== RUN   TestStdioLaunchExecutionProfileLifetime
+=== RUN   TestStdioLaunchExecutionProfileLifetime/nil_context
+--- PASS: TestStdioLaunchExecutionProfileLifetime/nil_context (0.01s)
+=== NAME  TestStdioLaunchExecutionProfileLifetime
+=== RUN   TestStdioLaunchExecutionProfileLifetime/foreign_context
+--- PASS: TestStdioLaunchExecutionProfileLifetime/foreign_context (0.01s)
+=== NAME  TestStdioLaunchExecutionProfileLifetime
+=== RUN   TestStdioLaunchExecutionProfileLifetime/cancelled
+--- PASS: TestStdioLaunchExecutionProfileLifetime/cancelled (0.01s)
+=== NAME  TestStdioLaunchExecutionProfileLifetime
+=== RUN   TestStdioLaunchExecutionProfileLifetime/consumed
+--- PASS: TestStdioLaunchExecutionProfileLifetime/consumed (0.01s)
+=== NAME  TestStdioLaunchExecutionProfileLifetime
+=== RUN   TestStdioLaunchExecutionProfileLifetime/generation_changed
+--- PASS: TestStdioLaunchExecutionProfileLifetime/generation_changed (0.01s)
+=== NAME  TestStdioLaunchExecutionProfileLifetime
+=== RUN   TestStdioLaunchExecutionProfileLifetime/ambient_changed
+--- PASS: TestStdioLaunchExecutionProfileLifetime/ambient_changed (0.01s)
+=== NAME  TestStdioLaunchExecutionProfileLifetime
+--- PASS: TestStdioLaunchExecutionProfileLifetime (0.06s)
+=== NAME  
+=== RUN   TestStdioLaunchExecutionProfilePartialOutcomes
+=== RUN   TestStdioLaunchExecutionProfilePartialOutcomes/expired_original_context
+--- PASS: TestStdioLaunchExecutionProfilePartialOutcomes/expired_original_context (0.00s)
+=== NAME  TestStdioLaunchExecutionProfilePartialOutcomes
+=== RUN   TestStdioLaunchExecutionProfilePartialOutcomes/invalid_effective_environment
+--- PASS: TestStdioLaunchExecutionProfilePartialOutcomes/invalid_effective_environment (0.01s)
+=== NAME  TestStdioLaunchExecutionProfilePartialOutcomes
+--- PASS: TestStdioLaunchExecutionProfilePartialOutcomes (0.01s)
+=== NAME  
+=== RUN   TestStdioLaunchProjectServicePortUsesOriginalOwner
+--- PASS: TestStdioLaunchProjectServicePortUsesOriginalOwner (0.16s)
+=== NAME  
+=== RUN   TestStdioLaunchPreparationRejectsForeignReceiver
+--- PASS: TestStdioLaunchPreparationRejectsForeignReceiver (0.02s)
+=== NAME  
+=== RUN   TestStdioLaunchPreparationActorlessComparison
+--- PASS: TestStdioLaunchPreparationActorlessComparison (0.07s)
+=== NAME  
+=== RUN   TestStdioLaunchContextFormatting
+=== RUN   TestStdioLaunchContextFormatting/pointer
+--- PASS: TestStdioLaunchContextFormatting/pointer (0.00s)
+=== NAME  TestStdioLaunchContextFormatting
+=== RUN   TestStdioLaunchContextFormatting/value
+--- PASS: TestStdioLaunchContextFormatting/value (0.00s)
+=== NAME  TestStdioLaunchContextFormatting
+=== RUN   TestStdioLaunchContextFormatting/zero_pointer
+--- PASS: TestStdioLaunchContextFormatting/zero_pointer (0.00s)
+=== NAME  TestStdioLaunchContextFormatting
+=== RUN   TestStdioLaunchContextFormatting/zero_value
+--- PASS: TestStdioLaunchContextFormatting/zero_value (0.00s)
+=== NAME  TestStdioLaunchContextFormatting
+=== RUN   TestStdioLaunchContextFormatting/nil
+--- PASS: TestStdioLaunchContextFormatting/nil (0.00s)
+=== NAME  TestStdioLaunchContextFormatting
+--- PASS: TestStdioLaunchContextFormatting (0.00s)
+=== NAME  
+=== RUN   TestStdioLaunchPreparationRefusesBeforeCreator
+=== RUN   TestStdioLaunchPreparationRefusesBeforeCreator/actual_ambient_changed
+--- PASS: TestStdioLaunchPreparationRefusesBeforeCreator/actual_ambient_changed (0.01s)
+=== NAME  TestStdioLaunchPreparationRefusesBeforeCreator
+=== RUN   TestStdioLaunchPreparationRefusesBeforeCreator/original_cancellation
+--- PASS: TestStdioLaunchPreparationRefusesBeforeCreator/original_cancellation (0.01s)
+=== NAME  TestStdioLaunchPreparationRefusesBeforeCreator
+=== RUN   TestStdioLaunchPreparationRefusesBeforeCreator/partial_cause_retained
+--- PASS: TestStdioLaunchPreparationRefusesBeforeCreator/partial_cause_retained (0.00s)
+=== NAME  TestStdioLaunchPreparationRefusesBeforeCreator
+=== RUN   TestStdioLaunchPreparationRefusesBeforeCreator/single_use_guard
+--- PASS: TestStdioLaunchPreparationRefusesBeforeCreator/single_use_guard (0.01s)
+=== NAME  TestStdioLaunchPreparationRefusesBeforeCreator
+--- PASS: TestStdioLaunchPreparationRefusesBeforeCreator (0.02s)
+=== NAME  
+=== RUN   TestStdioLaunchPreparationDetectsImageReplacement
+--- PASS: TestStdioLaunchPreparationDetectsImageReplacement (0.02s)
+=== NAME  
+=== RUN   TestPreparedStdioCapturedResolutionABA
+--- PASS: TestPreparedStdioCapturedResolutionABA (0.03s)
+=== NAME  
+=== RUN   TestPreparedStdioRelativeImageUsesCapturedParent
+--- PASS: TestPreparedStdioRelativeImageUsesCapturedParent (0.03s)
+=== NAME  
+=== RUN   TestPreparedStdioWindowsSelectionRefusals
+--- PASS: TestPreparedStdioWindowsSelectionRefusals (0.02s)
+=== NAME  
+=== RUN   TestPreparedStdioRejectsDotTokensBeforeSiblingSelection
+=== RUN   TestPreparedStdioRejectsDotTokensBeforeSiblingSelection/.
+--- PASS: TestPreparedStdioRejectsDotTokensBeforeSiblingSelection/. (0.00s)
+=== NAME  TestPreparedStdioRejectsDotTokensBeforeSiblingSelection
+=== RUN   TestPreparedStdioRejectsDotTokensBeforeSiblingSelection/..
+--- PASS: TestPreparedStdioRejectsDotTokensBeforeSiblingSelection/.. (0.00s)
+=== NAME  TestPreparedStdioRejectsDotTokensBeforeSiblingSelection
+--- PASS: TestPreparedStdioRejectsDotTokensBeforeSiblingSelection (0.01s)
+=== NAME  
+=== RUN   TestPreparedStdioOriginalNativePositiveShapes
+=== RUN   TestPreparedStdioOriginalNativePositiveShapes/bare-parent-path
+--- PASS: TestPreparedStdioOriginalNativePositiveShapes/bare-parent-path (1.75s)
+=== NAME  TestPreparedStdioOriginalNativePositiveShapes
+=== RUN   TestPreparedStdioOriginalNativePositiveShapes/relative-parent-child-cwd
+--- PASS: TestPreparedStdioOriginalNativePositiveShapes/relative-parent-child-cwd (1.24s)
+=== NAME  TestPreparedStdioOriginalNativePositiveShapes
+=== RUN   TestPreparedStdioOriginalNativePositiveShapes/absolute-image
+--- PASS: TestPreparedStdioOriginalNativePositiveShapes/absolute-image (0.64s)
+=== NAME  TestPreparedStdioOriginalNativePositiveShapes
+=== RUN   TestPreparedStdioOriginalNativePositiveShapes/exact-extensionless-image
+--- PASS: TestPreparedStdioOriginalNativePositiveShapes/exact-extensionless-image (5.33s)
+=== NAME  TestPreparedStdioOriginalNativePositiveShapes
+--- PASS: TestPreparedStdioOriginalNativePositiveShapes (8.96s)
+=== NAME  
+FAIL

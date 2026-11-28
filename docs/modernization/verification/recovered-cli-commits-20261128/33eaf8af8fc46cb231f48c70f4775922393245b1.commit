@@ -1,0 +1,6 @@
+tree 9e46575153d8a70c98c5629fdaa4767f61401f6c
+parent 06f77b3856e43ec5e8e3736123aedb896ae58817
+author applicate2628 <dima_den@inbox.ru> 1795732905 +0300
+committer applicate2628 <dima_den@inbox.ru> 1795732905 +0300
+
+test(cli): shorten isolated workspace preparation paths

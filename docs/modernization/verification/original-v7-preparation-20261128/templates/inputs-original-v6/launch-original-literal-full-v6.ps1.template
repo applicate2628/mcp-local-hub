@@ -1,0 +1,63 @@
+param([Parameter(Mandatory=$true)][ValidatePattern('^[0-9a-f]{64}$')][string]$ManifestSHA)
+$ErrorActionPreference = 'Stop'
+$TaskRoot = '@@RECOVERY_APPROVED_WORK_AREA_RAW@@\mcp-acceptance-rebuild-20261127-v1'
+$TaskRuntime = $TaskRoot + '\inputs-original-v6\runtime-original-v6'
+$TaskManifestFile = $TaskRuntime + '\runtime-manifest.json'
+$TaskLauncher = $TaskRuntime + '\launch_literal_v6.py'
+$TaskRecord = $TaskRoot + '\inputs-original-v6\original-literal-full-v6-outer-original.json'
+$TaskPython = '@@RECOVERY_CONTROLLER_PYTHON_HOME_RAW@@\python.exe'
+function Get-TaskSHA([string]$TaskPath) {
+    $TaskHasher = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($TaskHasher.ComputeHash([IO.File]::ReadAllBytes($TaskPath))).Replace('-','').ToLowerInvariant() }
+    finally { $TaskHasher.Dispose() }
+}
+if ((Get-TaskSHA $TaskPython) -cne 'd4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd' -or
+    (Get-TaskSHA $TaskManifestFile) -cne $ManifestSHA) { throw 'Original literal launch inputs changed' }
+$TaskManifest = [IO.File]::ReadAllText($TaskManifestFile) | ConvertFrom-Json
+if ($TaskManifest.schema -cne 'literal-original-runtime-v6' -or $TaskManifest.reviewed -ne $true -or
+    $TaskManifest.source_commit -cne '727d66753814dc218e26d699e57402db2d13190a') { throw 'Reviewed exact original runtime required' }
+$TaskLauncherSHA = $TaskManifest.files.'launch_literal_v6.py'
+if ($TaskLauncherSHA -cnotmatch '^[0-9a-f]{64}$' -or (Get-TaskSHA $TaskLauncher) -cne $TaskLauncherSHA) { throw 'Original launcher differs from reviewed manifest' }
+if ([IO.File]::Exists($TaskRecord) -or [IO.File]::Exists($TaskRoot + '\original-literal-full-v6-parent.json') -or
+    [IO.Directory]::Exists($TaskRoot + '\literal-original-runs-v6\original-literal-full-v6')) { throw 'Original full run scope already has state' }
+$TaskStart = New-Object System.Diagnostics.ProcessStartInfo
+$TaskStart.FileName = $TaskPython
+$TaskStart.Arguments = '-I -S -B "' + $TaskLauncher + '" --manifest "' + $TaskManifestFile + '" --manifest-sha256 ' + $ManifestSHA
+$TaskStart.WorkingDirectory = $TaskRoot
+$TaskStart.UseShellExecute = $false
+$TaskStart.CreateNoWindow = $true
+$TaskStart.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+$TaskStart.EnvironmentVariables['TEMP'] = $TaskRoot
+$TaskStart.EnvironmentVariables['TMP'] = $TaskRoot
+$TaskStart.EnvironmentVariables['PYTHONDONTWRITEBYTECODE'] = '1'
+$TaskOriginal = [System.Diagnostics.Process]::Start($TaskStart)
+if ($null -eq $TaskOriginal) { throw 'Original process object was not returned' }
+$TaskOriginalPID = $TaskOriginal.Id
+$TaskWaitReturned = $false
+$TaskWaitErrors = New-Object System.Collections.Generic.List[string]
+while (-not $TaskWaitReturned) {
+    try { $TaskOriginal.WaitForExit(); $TaskWaitReturned = $true }
+    catch { $TaskWaitErrors.Add($_.Exception.Message); Start-Sleep -Milliseconds 100 }
+}
+$TaskExitCode = $TaskOriginal.ExitCode
+$TaskOriginal.Dispose()
+$TaskFacts = [ordered]@{
+    schema = 'original-literal-full-original-parent-v6'
+    runtime_manifest_sha256 = $ManifestSHA
+    launcher_sha256 = $TaskLauncherSHA
+    same_process_start_object = $true
+    original_pid = $TaskOriginalPID
+    exit_code = $TaskExitCode
+    wait_returned = $TaskWaitReturned
+    original_process_object_disposed = $true
+    new_job_or_tree_wait = $false
+    create_no_window = $true
+    wait_errors = @($TaskWaitErrors)
+}
+$TaskJSON = ($TaskFacts | ConvertTo-Json -Depth 6) + [char]10
+$TaskBytes = (New-Object Text.UTF8Encoding($false)).GetBytes($TaskJSON)
+$TaskStream = [IO.File]::Open($TaskRecord, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+try { $TaskStream.Write($TaskBytes,0,$TaskBytes.Length); $TaskStream.Flush($true) }
+finally { $TaskStream.Dispose() }
+[Console]::WriteLine($TaskJSON)
+exit $TaskExitCode

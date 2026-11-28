@@ -1,0 +1,234 @@
+diff --git a/internal/api/main_helper_dispatch_test.go b/internal/api/main_helper_dispatch_test.go
+--- a/internal/api/main_helper_dispatch_test.go
++++ b/internal/api/main_helper_dispatch_test.go
+@@ -28,6 +28,7 @@
+ 	fenceMarker := getenv("MCPHUB_TEST_UPGRADE_FENCE_HOLDER")
+ 	adoptRole := getenv("MCPHUB_A2_ROLE")
+ 	adoptEntry := getenv("MCPHUB_A2_ENTRY")
++	canonicalManifest := getenv(canonicalManifestDirHelperEnv)
+ 	stdioMode := getenv(stdioBridgeAdmissionHelperEnv)
+ 	port, portErr := strconv.Atoi(getenv(stdioBridgeAdmissionHelperPortEnv))
+ 	portProbeDir := getenv(portProbeFixtureDirEnv)
+@@ -83,6 +84,12 @@
+ 			dispatch: apiTestHelperDispatch{runSelectedTest: true, mustExit: adoptRole == "crash"},
+ 		},
+ 		{
++			active: canonicalManifest != "",
++			valid: selector == "^TestCanonicalManifestDirHelperProcess$" &&
++				validAPITestHelperPath(canonicalManifest),
++			dispatch: apiTestHelperDispatch{runSelectedTest: true},
++		},
++		{
+ 			active: stdioMode != "",
+ 			valid: validStdioMode && selector == "^TestFrozenStdioBridgeAdmissionHelper$" &&
+ 				portErr == nil && port > 0 && port <= 65535,
+diff --git a/internal/api/main_helper_dispatch_validation_test.go b/internal/api/main_helper_dispatch_validation_test.go
+--- a/internal/api/main_helper_dispatch_validation_test.go
++++ b/internal/api/main_helper_dispatch_validation_test.go
+@@ -21,6 +21,12 @@
+ 		{name: "ordinary suite"},
+ 		{name: "oracle parent", selector: "^TestIntentAudit_CallerStartTimeAgainstIndependentOracle$"},
+ 		{name: "fence parent", selector: "^TestUpgradeFenceReacquiresAfterHolderProcessDeath$"},
++		{name: "canonical manifest without child marker", selector: "^TestCanonicalManifestDirHelperProcess$"},
++		{
++			name: "canonical manifest child", selector: "^TestCanonicalManifestDirHelperProcess$",
++			env:  map[string]string{canonicalManifestDirHelperEnv: filepath.Join(root, "canonical-bin", "mcphub.exe")},
++			want: apiTestHelperDispatch{runSelectedTest: true},
++		},
+ 		{
+ 			name: "oracle child", selector: "^TestIntentAudit_CallerStartTimeAgainstIndependentOracle$",
+ 			env:  map[string]string{callerStartTimeChildStateDirEnv: callerStartTimeChildRole, callerStartTimeChildDelayEnv: callerStartTimeOracleDelayValue()},
+@@ -83,6 +89,7 @@
+ 		{"fence", "^TestUpgradeFenceReacquiresAfterHolderProcessDeath$", map[string]string{"MCPHUB_TEST_UPGRADE_FENCE_HOLDER": "1", "MCPHUB_TEST_UPGRADE_FENCE_STATE_DIR": root}},
+ 		{"adopt", "^TestAdoptLeaseRaceChild$", map[string]string{"MCPHUB_A2_ROLE": "try", "MCPHUB_A2_STATE": root, "MCPHUB_A2_ENTRY": "owned-entry"}},
+ 		{"stdio", "^TestFrozenStdioBridgeAdmissionHelper$", map[string]string{stdioBridgeAdmissionHelperEnv: "ready", stdioBridgeAdmissionHelperPortEnv: "12345"}},
++		{"canonical manifest", "^TestCanonicalManifestDirHelperProcess$", map[string]string{canonicalManifestDirHelperEnv: filepath.Join(root, "canonical-bin", "mcphub.exe")}},
+ 	}
+ 	reject := func(t *testing.T, args []string, env map[string]string) {
+ 		t.Helper()
+@@ -143,6 +150,7 @@
+ 		{3, "MCPHUB_A2_ENTRY", []string{"", "../escape", "owned.lease", "NUL"}},
+ 		{4, stdioBridgeAdmissionHelperEnv, []string{"unknown"}},
+ 		{4, stdioBridgeAdmissionHelperPortEnv, []string{"", "0", "-1", "65536", "not-an-integer"}},
++		{5, canonicalManifestDirHelperEnv, []string{"relative", root + "\x00", root + string(filepath.Separator) + ".."}},
+ 	} {
+ 		fixture := fixtures[tt.fixture]
+ 		for _, value := range tt.values {
+diff --git a/internal/api/required_secret_gate_test.go b/internal/api/required_secret_gate_test.go
+--- a/internal/api/required_secret_gate_test.go
++++ b/internal/api/required_secret_gate_test.go
+@@ -108,11 +108,10 @@
+ // installs (Preflight passes / Ready=true). The vault is seeded with the
+ // required key, so the gate is satisfied.
+ func TestRequiredSecretGate_SecretSetNoBlock(t *testing.T) {
+-	// seedDefaultSecretForTest redirects LOCALAPPDATA/XDG_DATA_HOME to a temp dir
+-	// and seeds the vault with the key. preparePreflightBinaryChecks stubs the
+-	// canonical mcphub binary + mcphubShortName→"go" so the launcher checks pass.
++	// Isolate the unrelated launcher and port requirements, then seed the real
++	// vault so this test exercises required-secret admission.
++	setupAdmissionParityTest(t)
+ 	seedDefaultSecretForTest(t, "acedata_api_token", "live-token-value")
+-	preparePreflightBinaryChecks(t)
+ 
+ 	m := sunoStyleManifest()
+ 
+@@ -290,8 +289,8 @@
+ // TestRequiredSecretGate_ReadinessReadyWhenSet is the parity companion: with the
+ // secret SET, the required row is OK and Ready=true (the gate is satisfied).
+ func TestRequiredSecretGate_ReadinessReadyWhenSet(t *testing.T) {
++	setupAdmissionParityTest(t)
+ 	seedDefaultSecretForTest(t, "acedata_api_token", "live-token-value")
+-	preparePreflightBinaryChecks(t)
+ 
+ 	m := sunoStyleManifest()
+ 	rep := CheckServerReadiness(m)
+diff --git a/internal/cli/supervise_lostchild_f1_f3_test.go b/internal/cli/supervise_lostchild_f1_f3_test.go
+--- a/internal/cli/supervise_lostchild_f1_f3_test.go
++++ b/internal/cli/supervise_lostchild_f1_f3_test.go
+@@ -49,7 +49,6 @@
+ func f1Controller(t *testing.T, portOwnerFn func(int) (int, bool, error), spawn func(api.SupervisorDaemon) error, daemons ...api.SupervisorDaemon) (*supervisorController, *api.EventLoop, string) {
+ 	t.Helper()
+ 	tmpHome := apitest.HardenedTempDir(t)
+-	statePath := filepath.Join(tmpHome, "supervisor-state.json")
+ 	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+ 	events, err := api.OpenSupervisorEventLog(eventsPath)
+ 	if err != nil {
+@@ -59,6 +58,9 @@
+ 
+ 	loop := api.NewEventLoop(16)
+ 	ctx, cancel := context.WithCancel(context.Background())
++	// These cases assert gate scheduling and in-memory state, not persistence.
++	// Leave statePath empty so unrelated tracker writes cannot consume their
++	// three-second behavior deadlines; keep the real event log for assertions.
+ 	ctrl := &supervisorController{
+ 		intentCache:         newIntentCache(),
+ 		eventLoop:           loop,
+@@ -68,7 +70,6 @@
+ 		daemonIntent:        newDaemonIntentCache(),
+ 		spawn:               spawn,
+ 		terminate:           func(api.SupervisorDaemon) error { return nil },
+-		statePath:           statePath,
+ 		ctx:                 ctx,
+ 		failureWindow:       respawnFailureWindow,
+ 		quarantineThreshold: respawnQuarantineThreshold,
+diff --git a/internal/cli/supervise_lostchild_f6_f2_test.go b/internal/cli/supervise_lostchild_f6_f2_test.go
+--- a/internal/cli/supervise_lostchild_f6_f2_test.go
++++ b/internal/cli/supervise_lostchild_f6_f2_test.go
+@@ -141,10 +141,24 @@
+ 	loop = api.NewEventLoop(16)
+ 	ch := make(chan api.LoopEvent, 8)
+ 	loop.RegisterHandler(func(e api.LoopEvent) { ch <- e })
+-	ctx, cancel := context.WithCancel(context.Background())
+-	t.Cleanup(cancel)
+-	go loop.Run(ctx)
++	startLostChildEventLoop(t, context.Background(), loop)
+ 	return stateDir, intent, tracker, loop, ch, log, eventsPath
++}
++
++func startLostChildEventLoop(t *testing.T, ctx context.Context, loop *api.EventLoop) {
++	t.Helper()
++	loopCtx, cancel := context.WithCancel(ctx)
++	loopDone := make(chan struct{})
++	t.Cleanup(func() {
++		cancel()
++		// A published state can precede the handler's final file write.
++		// Join before fixture cleanup closes the log or removes its directory.
++		<-loopDone
++	})
++	go func() {
++		defer close(loopDone)
++		loop.Run(loopCtx)
++	}()
+ }
+ 
+ // TestSupervisorLivenessSweep_TwoStrike_DefersFirstMismatchThenDisowns proves
+@@ -305,7 +319,7 @@
+ 	ctrl.intentCache.Refresh(&api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{descriptor}})
+ 	ctrl.smStates.Store(task, api.StRunning)
+ 	loop.RegisterHandler(ctrl.handleLoopEvent)
+-	go loop.Run(ctrl.ctx)
++	startLostChildEventLoop(t, ctrl.ctx, loop)
+ 
+ 	// Drive the REAL threshold path: one non-clean child exit at StRunning →
+ 	// StBackoffWaiting → handleBackoffWaiting → failures(1) >= threshold(1) →
+@@ -369,7 +383,7 @@
+ 			restarts <- e
+ 		}
+ 	})
+-	go loop.Run(ctrl.ctx)
++	startLostChildEventLoop(t, ctrl.ctx, loop)
+ 
+ 	ctrl.smStates.Store(key, api.StQuarantined)
+ 	t0 := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+@@ -439,7 +453,7 @@
+ 			restarts <- e
+ 		}
+ 	})
+-	go loop.Run(ctrl.ctx)
++	startLostChildEventLoop(t, ctrl.ctx, loop)
+ 
+ 	ctrl.smStates.Store(key, api.StQuarantined)
+ 	t0 := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+@@ -479,7 +493,7 @@
+ 	key := canonicalSupervisorTaskName(task)
+ 	ctrl.intentCache.Refresh(&api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{{TaskName: task, Server: "test", Daemon: "default"}}})
+ 	loop.RegisterHandler(ctrl.handleLoopEvent)
+-	go loop.Run(ctrl.ctx)
++	startLostChildEventLoop(t, ctrl.ctx, loop)
+ 
+ 	// A quarantined daemon whose cooldown has already elapsed (nextAttemptAt in the
+ 	// past), running intent (default). Seeding the map from the test goroutine BEFORE
+@@ -512,7 +526,7 @@
+ 	key := canonicalSupervisorTaskName(task)
+ 	ctrl.intentCache.Refresh(&api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{{TaskName: task, Server: "test", Daemon: "default"}}})
+ 	loop.RegisterHandler(ctrl.handleLoopEvent)
+-	go loop.Run(ctrl.ctx)
++	startLostChildEventLoop(t, ctrl.ctx, loop)
+ 
+ 	// A daemon on the parole ladder (attempts=1) that has dwelled in StRunning past
+ 	// the stabilize dwell, so a parole tick would GRADUATE it (Delete the ladder).
+@@ -562,7 +576,7 @@
+ 	key := canonicalSupervisorTaskName(task)
+ 	ctrl.intentCache.Refresh(&api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{{TaskName: task, Server: "test", Daemon: "default"}}})
+ 	loop.RegisterHandler(ctrl.handleLoopEvent)
+-	go loop.Run(ctrl.ctx)
++	startLostChildEventLoop(t, ctrl.ctx, loop)
+ 
+ 	// The ONLY smStates row is canonical — production stores every StQuarantined row
+ 	// canonical (all 8 smStates.Store sites key canonical post-r8). No bare-key row
+@@ -627,7 +641,7 @@
+ 	loop.Post(api.LoopEvent{Kind: evParoleTick})
+ 	loop.Post(api.LoopEvent{Kind: flipStopsSentinel})
+ 	loop.Post(api.LoopEvent{Kind: api.EvIntentUpdate, TaskName: task})
+-	go loop.Run(ctrl.ctx)
++	startLostChildEventLoop(t, ctrl.ctx, loop)
+ 
+ 	// PostSelf: the restart drains first, the daemon spawns, then the queued stop
+ 	// drives it to StExiting. A TryPost revert leaves it stuck at StRunning → this
+@@ -679,7 +693,7 @@
+ 	ctrl.tracker.MarkSpawned(task, 200, time.Now().UTC())
+ 	ctrl.smStates.Store(task, api.StRunning)
+ 	loop.RegisterHandler(ctrl.handleLoopEvent)
+-	go loop.Run(ctrl.ctx)
++	startLostChildEventLoop(t, ctrl.ctx, loop)
+ 
+ 	// Stale disown (generation 1 < current 2): P1a drops it; the child survives.
+ 	loop.Post(api.LoopEvent{Kind: api.EvChildExit, TaskName: task, Body: map[string]any{"pid": 100, "pid_generation": 1, "reason": "pid_identity_mismatch"}})
+@@ -788,7 +802,7 @@
+ 	}
+ 	ctrl.smStates.Store(task, api.StRunning)
+ 	loop.RegisterHandler(ctrl.handleLoopEvent)
+-	go loop.Run(ctrl.ctx)
++	startLostChildEventLoop(t, ctrl.ctx, loop)
+ 
+ 	// Threshold quarantine via the real path (threshold=1) → eligibility recorded.
+ 	loop.Post(api.LoopEvent{Kind: api.EvChildExit, TaskName: task})
+@@ -843,7 +857,7 @@
+ 			restarts <- e
+ 		}
+ 	})
+-	go loop.Run(ctrl.ctx)
++	startLostChildEventLoop(t, ctrl.ctx, loop)
+ 
+ 	ctrl.runQuarantineParoleTick(t0.Add(quarantineParoleBaseDelay + time.Minute))
+ 	select {

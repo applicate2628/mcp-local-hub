@@ -1,0 +1,20 @@
+{
+    "schema":  "mcp-hub-fresh-native-outer-receiving-v1",
+    "source_commit":  "e66f5c6fab7da2a2eff16ff1f0891991ca1a839c",
+    "source_tree":  "4df69e99dca3f808b26e6a5bf7721bdd0ba3a91c",
+    "candidate_source_commit":  "8b1d27290812717736691fc9745e0da9509da9f6",
+    "platform":  "windows/amd64",
+    "go":  "go1.27.4",
+    "race":  true,
+    "repeats":  2,
+    "runner_exit":  0,
+    "parents_pass":  2,
+    "subcases_pass":  8,
+    "failed_or_skipped":  0,
+    "test_fixture_sha256":  "d2e2bca6965c63bc78b7cddb0ac8f7ebed237a81d0de363932bd2824a67e3009",
+    "original_log_sha256":  "11cd65b43b8a3afed18abb4d893b0ac1a369443b414977652b3c55065b81de78",
+    "event_projection_sha256":  "494626fc6045f45f4926b1b1835b32f5ed2b3e5bed42f2057f0505e90aa13401",
+    "historical_unknown_touched":  false,
+    "adapter_runtime_enabled":  false,
+    "full_native_qualification":  false
+}

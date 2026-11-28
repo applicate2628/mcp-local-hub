@@ -1,0 +1,2 @@
+test original wait known=true exit=1
+original full-suite receiver exited nonzero

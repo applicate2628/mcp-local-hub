@@ -143,7 +143,9 @@ API_KEY = "` + fixtureKey + `"
 	cmd := NewRootCmd()
 	var out bytes.Buffer
 	cmd.SetOut(&out)
-	cmd.SetArgs([]string{"adopt", "mui-dry-cli", "--client", "codex-cli", "--port", "9313"})
+	// Keep the real planner and secret canary while letting its normal allocator
+	// choose an available port instead of requiring a particular host socket.
+	cmd.SetArgs([]string{"adopt", "mui-dry-cli", "--client", "codex-cli"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("adopt dry-run: %v\n%s", err, out.String())
 	}
@@ -221,10 +223,22 @@ args = ["version"]
 		t.Fatalf("seed codex config: %v", err)
 	}
 
-	cmd := NewRootCmd()
+	// Exercise the real namespace preflight after a valid plan is supplied.
+	// Port allocation is outside this refusal oracle and must not preempt it.
+	buildPlan := func(_ *api.API, opts api.AdoptOpts) (*api.AdoptPlan, error) {
+		return &api.AdoptPlan{
+			EntryName:        opts.EntryName,
+			SourceClient:     opts.Client,
+			ManifestName:     opts.EntryName,
+			Port:             opts.Port,
+			AdoptClients:     []string{opts.Client},
+			TargetEntryNames: map[string]string{opts.Client: opts.EntryName},
+		}, nil
+	}
+	cmd := newAdoptCmdWithDepsAndPlanBuilder(api.NewAPI, nil, nil, buildPlan)
 	var out bytes.Buffer
 	cmd.SetOut(&out)
-	cmd.SetArgs([]string{"adopt", entry, "--client", "codex-cli", "--port", "9314"})
+	cmd.SetArgs([]string{entry, "--client", "codex-cli", "--port", "9314"})
 	err := cmd.Execute()
 	if err == nil || err.Error() != "E_ADOPT_LEASE_NAMESPACE_REFUSED reason=state-root-unavailable action=leave-unchanged" {
 		t.Fatalf("dry-run error=%v, want typed state-root refusal", err)

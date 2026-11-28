@@ -1,0 +1,72 @@
+$ErrorActionPreference='Stop'
+$t='@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1'
+function TaskSHA([string]$p){$h=[Security.Cryptography.SHA256]::Create();try{[BitConverter]::ToString($h.ComputeHash([IO.File]::ReadAllBytes($p))).Replace('-','').ToLowerInvariant()}finally{$h.Dispose()}}
+function Need($v,[string]$message){if(-not $v){throw $message}}
+function SameHash([string]$p,[string]$sha){Need ((TaskSHA $p) -ceq $sha) ('Hash mismatch '+$p)}
+function NativeClosed($n){Need ($n.RootWaitKnown -and $n.MembersExited -and $n.AccountingKnown -and $n.FinalActive -eq 0 -and $n.HandlesClosed -and -not $n.Error) 'Original native settlement incomplete'}
+function NativeIOClosed($io){
+ foreach($name in @('Stdin','StdoutRead','StdoutWrite','StderrRead','StderrWrite')){$v=$io.$name;Need (-not $v.Acquired -or ($v.CloseAttempted -and $v.Closed -and -not $v.CloseError)) ('Native pipe '+$name)}
+ foreach($name in @('Stdout','Stderr')){$v=$io.$name;Need ($v.WorkerStarted -and $v.WorkerComplete -and $v.EOF -and -not $v.LimitExceeded -and -not $v.Error) ('Native reader '+$name)}
+}
+$script:captureCount=0;$script:commandCount=0
+function CommandClosed($c){
+ Need ($c.quiescence_state -ceq 'complete' -and $c.captures_measured) 'Command closure/captures incomplete'
+ if($c.native){
+  Need ($c.native.direct_reaped -and $c.native.active_zero -and $c.native.handles_closed -and -not $c.native.issues -and $c.original_readers_joined) 'Native command incomplete'
+  foreach($name in @('stdout','stderr')){$v=$c.io.$name;Need ($v.worker_complete -and $v.eof -and $v.pipe_close_returned -and $v.capture_close_returned -and -not $v.error) 'Original reader incomplete'}
+ }else{Need ($null -ne $c.completion_receiving) 'No original receiving'}
+ foreach($name in @('stdout','stderr')){SameHash $c.$name $c.($name+'_sha256');$script:captureCount++}
+ $script:commandCount++
+}
+$mainPath=$t+'\literal-original-runs-v6\original-literal-full-v6\receipt.json'
+$parentPath=$t+'\original-literal-full-v6-parent.json'
+$outerPath=$t+'\inputs-original-v6\original-literal-full-v6-outer-original.json'
+SameHash $mainPath '6cd606a5ec4e6e1a3e74d4b8324786cc98dffe8cd587f4a41c89a751ea7f0c4a'
+SameHash $parentPath '062ab6f5a124d5e3b2338355e53c8bb6e7a9f15e26c99e3d5765cac7044fc794'
+$j=Get-Content -Raw -Encoding UTF8 $mainPath|ConvertFrom-Json
+$p=Get-Content -Raw -Encoding UTF8 $parentPath|ConvertFrom-Json
+$o=Get-Content -Raw -Encoding UTF8 $outerPath|ConvertFrom-Json
+Need ($p.state -ceq 'received' -and $p.exit_code -eq 1 -and $p.status -ceq 'FAIL' -and $p.physical_complete -and $p.terminal_exit_received -and $p.parent_capture_files_closed -and -not $p.deadline_exceeded -and $p.commands_quiescent) 'Parent not original FAIL/CLOSED'
+Need ($o.same_process_start_object -and $o.wait_returned -and $o.original_process_object_disposed -and $o.exit_code -eq 1 -and -not $o.wait_errors -and -not $o.new_job_or_tree_wait) 'Outer incomplete'
+Need ($j.status -ceq 'FAIL' -and -not $j.literal_pre_push_commands_passed -and $j.all_original_invocations_closed -and $j.commands_quiescent -and $j.source_unchanged -and $j.original_inputs_unchanged -and $j.actual_product_unchanged -and $j.private_migration_exports_unchanged) 'Main closed flags differ'
+Need ($j.original_invocation_issuer.worker_joined -and -not $j.original_invocation_issuer.failure -and -not $j.original_invocation_issuer.publication_errors) 'Issuer incomplete'
+foreach($c in $j.commands){CommandClosed $c}
+$received=@($j.commands|Where-Object{$_.argv[1] -ceq 'test'}|ForEach-Object{$_.completion_receiving.received})
+Need ($received.Count -eq 65) 'Unexpected package receiving count'
+$ownerCount=0;$packageCommands=0;$nonzero=@()
+foreach($item in $received){
+ SameHash $item.receipt $item.receipt_sha256
+ $r=Get-Content -Raw -Encoding UTF8 $item.receipt|ConvertFrom-Json
+ Need ($r.native_custody_settled -and $r.commands_quiescent) 'Package physical closure incomplete'
+ foreach($c in $r.commands){CommandClosed $c;$packageCommands++}
+ Need $item.original_replay.replayed_identical 'Original replay differs'
+ foreach($name in @('stdout','stderr')){$v=$item.original_replay.streams.$name;SameHash $v.path $v.sha256}
+ if($item.original_replay.exit_code -ne 0){$nonzero+=[ordered]@{phase=$r.phase;package=$item.package;exit=$item.original_replay.exit_code;receipt_sha256=$item.receipt_sha256}}
+ foreach($owner in $item.original_owners){
+  SameHash $owner.receipt $owner.receipt_sha256
+  $v=Get-Content -Raw -Encoding UTF8 $owner.receipt|ConvertFrom-Json
+  switch -Exact ($owner.kind){
+   'contained' {Need ($v.root_wait_known -and $v.settlement_complete -and -not $v.custody_retained) 'Contained custody retained';NativeClosed $v.native;NativeIOClosed $v.io}
+   'namespace' {Need ($v.root_wait_known -and $v.settlement_complete -and $v.native_complete -and $v.io_complete -and -not $v.custody_retained) 'Namespace custody retained';NativeClosed $v.native;NativeIOClosed $v.io;SameHash $v.stdout_path $v.stdout_sha256;SameHash $v.stderr_path $v.stderr_sha256}
+   'canonical' {Need ($v.composite_complete -and $v.captures_finalized -and -not $v.custody_retained -and $v.channel.joined -and $v.channel.stopped -and -not $v.channel.errors) 'Canonical composite incomplete';Need ($v.outer.root_wait_known -and $v.outer.settlement_complete -and -not $v.outer.custody_retained) 'Canonical outer incomplete';NativeClosed $v.outer.native;NativeIOClosed $v.outer.io;foreach($case in $v.cases){Need (-not $case.attempted) 'Unexpected native case requires separate receiving'}}
+   'job' {Need ($v.originalWaitKnown -and $v.settlementComplete -and $v.stdoutEOF -and $v.stderrEOF -and $v.streamsJoined -and $v.controlWriterJoined) 'Job original custody incomplete';NativeClosed $v.nativeSettlement}
+   default {throw ('Unreviewed owner kind '+$owner.kind)}
+  }
+  $ownerCount++
+ }
+}
+$resource=$t+'\source-original727d-v2\internal\api\zz_qualified_api_versioninfo_windows_amd64.syso'
+$inputCount=0;$restoredAbsent=@()
+foreach($kv in $j.input_files.PSObject.Properties){
+ if($kv.Name -ceq $resource -and -not [IO.File]::Exists($resource)){$restoredAbsent+=$kv.Name;continue}
+ SameHash $kv.Name $kv.Value;$inputCount++
+}
+Need ($restoredAbsent.Count -eq 1) 'Unexpected restored resource list'
+$sourceCount=0
+foreach($kv in $j.source_before.files.PSObject.Properties){SameHash ($t+'\source-original727d-v2\'+$kv.Name.Replace('/','\')) $kv.Value;$sourceCount++}
+$phases=@($j.literal_phases.PSObject.Properties|ForEach-Object{$v=$_.Value;[ordered]@{phase=$_.Name;command_exit_code=$v.command_exit_code;passed=$v.passed;native_custody_settled=$v.native_custody_settled;expected=@($v.expected_invocations).Count;started=@($v.started_invocations).Count;completed=@($v.completed_invocations).Count;missing=$v.missing_invocations;private_migration_passed=$v.private_migration_passed}})
+$result=[ordered]@{schema='full-v6-root-independent-receiving-v1';main_sha256=(TaskSHA $mainPath);parent_sha256=(TaskSHA $parentPath);outer_sha256=(TaskSHA $outerPath);classification='FAIL/CLOSED';qualification_passed=$false;original_failure_reclassified=$false;commands_checked=$script:commandCount;package_commands_checked=$packageCommands;command_captures_hashed=$script:captureCount;package_receipts_hashed=$received.Count;original_owner_receipts_hashed=$ownerCount;source_files_hashed=$sourceCount;input_files_hashed=$inputCount;restored_absent_resource=$restoredAbsent;literal_phases=$phases;nonzero_packages=$nonzero;cache_qualification_inherited=$false}
+$dest=$t+'\inputs-original-v6\full-v6-root-receiving-v1.json'
+Need (-not [IO.File]::Exists($dest)) 'Receiving output already exists'
+[IO.File]::WriteAllText($dest,($result|ConvertTo-Json -Depth 8)+[Environment]::NewLine,(New-Object Text.UTF8Encoding($false)))
+[ordered]@{path=$dest;sha256=(TaskSHA $dest);classification=$result.classification;commands=$script:commandCount;captures=$script:captureCount;packages=$received.Count;owners=$ownerCount;source=$sourceCount;inputs=$inputCount;phases=$phases}|ConvertTo-Json -Depth 4 -Compress

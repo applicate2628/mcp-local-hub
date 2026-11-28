@@ -1,0 +1,711 @@
+diff --git a/internal/api/adopt_codex_transport_test.go b/internal/api/adopt_codex_transport_test.go
+index ef55fd1..332b49f 100644
+--- a/internal/api/adopt_codex_transport_test.go
++++ b/internal/api/adopt_codex_transport_test.go
+@@ -1,6 +1,7 @@
+ package api
+ 
+ import (
++	"fmt"
+ 	"os"
+ 	"path/filepath"
+ 	"strings"
+@@ -23,7 +24,7 @@ tool_timeout_sec = 900
+ 		EntryName:    entry,
+ 		Client:       "codex-cli",
+ 		ManifestName: entry,
+-		Port:         9370,
++		Port:         nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 	})
+ 	if err != nil {
+ 		t.Fatalf("BuildAdoptPlan: %v", err)
+@@ -163,7 +164,7 @@ url = "http://127.0.0.1:9999/mcp"
+ 		EntryName:        entry,
+ 		Client:           "codex-cli",
+ 		ManifestName:     entry,
+-		Port:             9371,
++		Port:             nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 		CodexProjectRoot: projectRoot,
+ 		CodexWorkingDir:  projectRoot,
+ 	})
+@@ -211,7 +212,7 @@ url = "http://127.0.0.1:9999/mcp"
+ 		EntryName:        entry,
+ 		Client:           "codex-cli",
+ 		ManifestName:     entry,
+-		Port:             9372,
++		Port:             nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 		CodexProjectRoot: projectRoot,
+ 		CodexWorkingDir:  projectRoot,
+ 	})
+@@ -226,7 +227,7 @@ url = "http://127.0.0.1:9999/mcp"
+ 	if err != nil || global == nil {
+ 		t.Fatalf("read relocated Codex target: entry=%#v err=%v", global, err)
+ 	}
+-	if global.URL != "http://127.0.0.1:9372/mcp" {
++	if global.URL != fmt.Sprintf("http://127.0.0.1:%d/mcp", plan.Port) {
+ 		t.Fatalf("relocated URL = %q", global.URL)
+ 	}
+ 	if old, err := clients.AllClients()["codex-cli"].GetEntry(entry); err != nil || old != nil {
+@@ -243,7 +244,7 @@ url = "http://127.0.0.1:9999/mcp"
+ 		EntryName:        entry,
+ 		Client:           "codex-cli",
+ 		ManifestName:     entry,
+-		Port:             9372,
++		Port:             plan.Port,
+ 		CodexProjectRoot: projectRoot,
+ 		CodexWorkingDir:  projectRoot,
+ 	})
+diff --git a/internal/api/adopt_deadopt_lifecycle_test.go b/internal/api/adopt_deadopt_lifecycle_test.go
+index 37f34d6..3627973 100644
+--- a/internal/api/adopt_deadopt_lifecycle_test.go
++++ b/internal/api/adopt_deadopt_lifecycle_test.go
+@@ -50,7 +50,7 @@ args = ["version"]
+ 	}
+ 
+ 	// 1. ADOPT.
+-	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9308})
++	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())})
+ 	if err != nil {
+ 		t.Fatalf("BuildAdoptPlan: %v", err)
+ 	}
+diff --git a/internal/api/adopt_h4_summary_signal_test.go b/internal/api/adopt_h4_summary_signal_test.go
+index ab36c0d..229619d 100644
+--- a/internal/api/adopt_h4_summary_signal_test.go
++++ b/internal/api/adopt_h4_summary_signal_test.go
+@@ -33,7 +33,7 @@ url = "http://127.0.0.1:9999/mcp"
+ 	}
+ 
+ 	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9381,
++		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 		CodexProjectRoot: projectRoot, CodexWorkingDir: projectRoot,
+ 	})
+ 	if err != nil {
+@@ -77,7 +77,7 @@ url = "http://127.0.0.1:9999/mcp"
+ 	}
+ 	api := NewAPI()
+ 	plan, err := api.BuildAdoptPlan(AdoptOpts{
+-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9382,
++		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 		CodexProjectRoot: projectRoot, CodexWorkingDir: projectRoot,
+ 	})
+ 	if err != nil {
+@@ -110,7 +110,7 @@ url = "http://127.0.0.1:9999/mcp"
+ 		t.Fatalf("read global Codex config before repeat: %v", err)
+ 	}
+ 	repeat, err := api.BuildAdoptPlan(AdoptOpts{
+-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9382,
++		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: plan.Port,
+ 		CodexProjectRoot: projectRoot, CodexWorkingDir: projectRoot,
+ 	})
+ 	if err != nil {
+@@ -165,7 +165,7 @@ url = "http://127.0.0.1:9999/mcp"
+ 	}
+ 	api := NewAPI()
+ 	plan, err := api.BuildAdoptPlan(AdoptOpts{
+-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9383,
++		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 		CodexProjectRoot: projectRoot, CodexWorkingDir: projectRoot,
+ 	})
+ 	if err != nil {
+@@ -210,7 +210,7 @@ url = "http://127.0.0.1:9999/mcp"
+ `), 0o600); err != nil {
+ 		t.Fatal(err)
+ 	}
+-	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9384, CodexProjectRoot: projectRoot, CodexWorkingDir: projectRoot})
++	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()), CodexProjectRoot: projectRoot, CodexWorkingDir: projectRoot})
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+@@ -255,7 +255,7 @@ url = "http://127.0.0.1:9999/mcp"
+ 		t.Fatal(err)
+ 	}
+ 	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9385,
++		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 		CodexProjectRoot: projectRoot, CodexWorkingDir: projectRoot,
+ 	})
+ 	if err != nil {
+@@ -289,7 +289,7 @@ url = "http://127.0.0.1:9999/mcp"
+ }
+ 
+ func TestAdoptNonCodexCompatibilityMatrixDoesNotEmitHSettlement(t *testing.T) {
+-	for index, clientName := range []string{"claude-code", "cursor"} {
++	for _, clientName := range []string{"claude-code", "cursor"} {
+ 		t.Run(clientName, func(t *testing.T) {
+ 			entry := "noncodex-h4-" + strings.ReplaceAll(clientName, "-", "")
+ 			_, _, stateRoot := setupAdoptTestEnv(t, entry, `[mcp_servers.unrelated]
+@@ -307,7 +307,7 @@ args = ["version"]
+ 			if err := os.WriteFile(client.ConfigPath(), seed, 0o600); err != nil {
+ 				t.Fatal(err)
+ 			}
+-			port := 9391 + index
++			port := nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())
+ 			plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+ 				EntryName: entry, Client: clientName, ManifestName: entry, Port: port, Clients: []string{clientName},
+ 			})
+diff --git a/internal/api/adopt_lease_namespace_windows_test.go b/internal/api/adopt_lease_namespace_windows_test.go
+index 4dc6ac2..19da9df 100644
+--- a/internal/api/adopt_lease_namespace_windows_test.go
++++ b/internal/api/adopt_lease_namespace_windows_test.go
+@@ -84,7 +84,7 @@ args = ["version"]
+ 	beforeNames := readSortedNames(t, namespace)
+ 
+ 	if _, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9351,
++		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 	}); err != nil {
+ 		t.Fatalf("BuildAdoptPlan: %v", err)
+ 	}
+@@ -108,7 +108,7 @@ args = ["version"]
+ 	beforeNames := readSortedNames(t, namespace)
+ 
+ 	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9356,
++		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 	})
+ 	if err != nil {
+ 		t.Fatalf("BuildAdoptPlan: %v", err)
+@@ -139,7 +139,7 @@ command = "go"
+ args = ["version"]
+ `)
+ 	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9357,
++		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 	})
+ 	if err != nil {
+ 		t.Fatalf("BuildAdoptPlan: %v", err)
+@@ -172,7 +172,7 @@ command = "go"
+ args = ["version"]
+ `)
+ 		plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+-			EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9360,
++			EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 		})
+ 		if err != nil {
+ 			t.Fatalf("BuildAdoptPlan: %v", err)
+@@ -207,7 +207,7 @@ command = "go"
+ args = ["version"]
+ `)
+ 		plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+-			EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9358,
++			EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 		})
+ 		if err != nil {
+ 			t.Fatalf("BuildAdoptPlan: %v", err)
+@@ -240,7 +240,7 @@ command = "go"
+ args = ["version"]
+ `)
+ 		plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+-			EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9359,
++			EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 		})
+ 		if err != nil {
+ 			t.Fatalf("BuildAdoptPlan: %v", err)
+@@ -276,7 +276,7 @@ args = ["version"]
+ 	_, namespace, _ := seedRecognizedLegacyLeaseNamespace(t, []string{"existing.lease"}, false)
+ 
+ 	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9352,
++		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 	})
+ 	if err != nil {
+ 		t.Fatalf("BuildAdoptPlan: %v", err)
+@@ -298,7 +298,7 @@ args = ["version"]
+ 	beforeRepeat := readSortedNames(t, namespace)
+ 
+ 	repeatPlan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9352,
++		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: plan.Port,
+ 	})
+ 	if err != nil {
+ 		t.Fatalf("BuildAdoptPlan repeat: %v", err)
+@@ -332,7 +332,7 @@ args = ["version"]
+ 	t.Cleanup(func() { adoptLeaseNamespaceMigrationFailureHook = previous })
+ 
+ 	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9353,
++		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 	})
+ 	if err != nil {
+ 		t.Fatalf("BuildAdoptPlan: %v", err)
+@@ -381,7 +381,7 @@ args = ["version"]
+ 	t.Cleanup(func() { adoptLeaseNamespaceMigrationFailureHook = previous })
+ 
+ 	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9354,
++		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 	})
+ 	if err != nil {
+ 		t.Fatalf("BuildAdoptPlan: %v", err)
+@@ -480,7 +480,7 @@ args = ["version"]
+ `)
+ 	stateRoot, namespace, _ := seedRecognizedLegacyStateRoot(t, []string{"existing.lease"})
+ 	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9355,
++		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 	})
+ 	if err != nil {
+ 		t.Fatalf("BuildAdoptPlan: %v", err)
+diff --git a/internal/api/adopt_lease_owner_test.go b/internal/api/adopt_lease_owner_test.go
+index 8f19522..a0f540b 100644
+--- a/internal/api/adopt_lease_owner_test.go
++++ b/internal/api/adopt_lease_owner_test.go
+@@ -503,7 +503,7 @@ func TestAdoptExecutedEventRequiresLeaseSettlement(t *testing.T) {
+ command = "go"
+ args = ["version"]
+ `)
+-	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9364, Clients: []string{"codex-cli"}})
++	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()), Clients: []string{"codex-cli"}})
+ 	if err != nil {
+ 		t.Fatalf("BuildAdoptPlan: %v", err)
+ 	}
+diff --git a/internal/api/adopt_mcpcompat_test.go b/internal/api/adopt_mcpcompat_test.go
+index a43df81..6f336ba 100644
+--- a/internal/api/adopt_mcpcompat_test.go
++++ b/internal/api/adopt_mcpcompat_test.go
+@@ -23,7 +23,7 @@ args = ["version"]
+ 		EntryName:                       entry,
+ 		Client:                          "codex-cli",
+ 		ManifestName:                    entry,
+-		Port:                            9368,
++		Port:                            nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 		MCPProtocolCompatibilityProfile: "stdio-http-legacy-2024-11-05",
+ 	})
+ 	if err != nil {
+@@ -118,7 +118,7 @@ func TestAdoptWithoutLegacyProfileRemainsStrict(t *testing.T) {
+ command = "go"
+ args = ["version"]
+ `)
+-	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9370})
++	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())})
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+diff --git a/internal/api/adopt_project_plan_test.go b/internal/api/adopt_project_plan_test.go
+index b4eefa1..74b312a 100644
+--- a/internal/api/adopt_project_plan_test.go
++++ b/internal/api/adopt_project_plan_test.go
+@@ -203,7 +203,7 @@ MODE = "project"
+ 
+ func TestPrintAdoptPlanProjectSourceUsesProjectTargetText(t *testing.T) {
+ 	fixture := newProjectAdoptPlanFixture(t, "project-preview", "[mcp_servers.graphify]\ncommand = \"graphify\"\nargs = [\"--mcp\"]\n")
+-	plan, err := NewAPI().BuildAdoptPlan(projectAdoptPlanOpts(fixture, "graphify", 9308))
++	plan, err := NewAPI().BuildAdoptPlan(projectAdoptPlanOpts(fixture, "graphify", nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())))
+ 	if err != nil {
+ 		t.Fatalf("BuildAdoptPlan(project): %v", err)
+ 	}
+@@ -234,11 +234,11 @@ func TestBuildAdoptPlanProjectSourceDerivesDistinctSameNameIdentities(t *testing
+ 	const body = "[mcp_servers.graphify]\ncommand = \"graphify\"\nargs = [\"--mcp\"]\n"
+ 	fixtureA := newProjectAdoptPlanFixture(t, "project-a", body)
+ 	fixtureB := newProjectAdoptPlanFixture(t, "project-b", body)
+-	planA, err := NewAPI().BuildAdoptPlan(projectAdoptPlanOpts(fixtureA, "graphify", 9305))
++	planA, err := NewAPI().BuildAdoptPlan(projectAdoptPlanOpts(fixtureA, "graphify", nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())))
+ 	if err != nil {
+ 		t.Fatalf("BuildAdoptPlan(project A): %v", err)
+ 	}
+-	planB, err := NewAPI().BuildAdoptPlan(projectAdoptPlanOpts(fixtureB, "graphify", 9306))
++	planB, err := NewAPI().BuildAdoptPlan(projectAdoptPlanOpts(fixtureB, "graphify", nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())))
+ 	if err != nil {
+ 		t.Fatalf("BuildAdoptPlan(project B): %v", err)
+ 	}
+@@ -308,7 +308,7 @@ func TestBuildAdoptPlanGlobalLegacyBehaviorRemainsUnchanged(t *testing.T) {
+ 		EntryName:    "global-demo",
+ 		Client:       "codex-cli",
+ 		ManifestName: "global-demo",
+-		Port:         9304,
++		Port:         nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 		Clients:      []string{"codex-cli"},
+ 		ScanOpts: ScanOpts{ConfigPaths: map[string]string{
+ 			"codex-cli": globalConfig,
+diff --git a/internal/api/adopt_provider_working_directory_windows_test.go b/internal/api/adopt_provider_working_directory_windows_test.go
+index 4ff265d..e86bfec 100644
+--- a/internal/api/adopt_provider_working_directory_windows_test.go
++++ b/internal/api/adopt_provider_working_directory_windows_test.go
+@@ -15,6 +15,7 @@ import (
+ 	"path/filepath"
+ 	"reflect"
+ 	"runtime"
++	"sync"
+ 	"syscall"
+ 	"testing"
+ 	"time"
+@@ -598,19 +599,42 @@ type ownedProviderWorkingDirectoryHelper struct {
+ 	exited bool
+ }
+ 
++var ownedProviderWorkingDirectoryHelperImages struct {
++	sync.Mutex
++	byArch map[string]string
++}
++
+ func buildOwnedProviderWorkingDirectoryHelper(t *testing.T) string {
+ 	return buildOwnedProviderWorkingDirectoryHelperForArch(t, runtime.GOARCH)
+ }
+ 
+ func buildOwnedProviderWorkingDirectoryHelperForArch(t *testing.T, arch string) string {
+ 	t.Helper()
+-	path := filepath.Join(t.TempDir(), "provider-cwd-helper-"+arch+".exe")
++	if apiTestMainRoot == "" {
++		t.Fatal("owned provider helper requires the active TestMain fixture root")
++	}
++	ownedProviderWorkingDirectoryHelperImages.Lock()
++	defer ownedProviderWorkingDirectoryHelperImages.Unlock()
++	if path := ownedProviderWorkingDirectoryHelperImages.byArch[arch]; path != "" {
++		return path
++	}
++	// A completed test must not remove an image still needed by another test.
++	// TestMain owns this directory; each invocation still creates a fresh child.
++	dir, err := os.MkdirTemp(apiTestMainRoot, "provider-cwd-helper-"+arch+"-")
++	if err != nil {
++		t.Fatalf("create owned provider helper build directory: %v", err)
++	}
++	path := filepath.Join(dir, "provider-cwd-helper-"+arch+".exe")
+ 	cmd := exec.Command("go", "build", "-ldflags=-H=windowsgui", "-o", path, "./testdata/provider-cwd-helper")
+ 	cmd.Env = append(os.Environ(), "GOOS=windows", "GOARCH="+arch, "CGO_ENABLED=0")
+ 	process.HideToolConsole(cmd)
+ 	if output, err := cmd.CombinedOutput(); err != nil {
+ 		t.Fatalf("build owned provider helper: %v\n%s", err, output)
+ 	}
++	if ownedProviderWorkingDirectoryHelperImages.byArch == nil {
++		ownedProviderWorkingDirectoryHelperImages.byArch = make(map[string]string)
++	}
++	ownedProviderWorkingDirectoryHelperImages.byArch[arch] = path
+ 	return path
+ }
+ 
+diff --git a/internal/api/adopt_test.go b/internal/api/adopt_test.go
+index 19a853e..08b88a3 100644
+--- a/internal/api/adopt_test.go
++++ b/internal/api/adopt_test.go
+@@ -182,7 +182,7 @@ args = ["version"]
+ 		EntryName:    entry,
+ 		Client:       "codex-cli",
+ 		ManifestName: entry,
+-		Port:         9308,
++		Port:         nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 	})
+ 	if err != nil {
+ 		t.Fatalf("BuildAdoptPlan: %v", err)
+@@ -200,8 +200,8 @@ args = ["version"]
+ 	if err != nil {
+ 		t.Fatalf("ParseManifest: %v\n%s", err, manifestBytes)
+ 	}
+-	if m.Name != entry || m.Transport != config.TransportStdioBridge || m.Daemons[0].Port != 9308 {
+-		t.Fatalf("manifest = name %q transport %q port %d, want %q stdio-bridge 9308", m.Name, m.Transport, m.Daemons[0].Port, entry)
++	if m.Name != entry || m.Transport != config.TransportStdioBridge || m.Daemons[0].Port != plan.Port {
++		t.Fatalf("manifest = name %q transport %q port %d, want %q stdio-bridge %d", m.Name, m.Transport, m.Daemons[0].Port, entry, plan.Port)
+ 	}
+ 	if len(m.ClientBindings) != 1 || m.ClientBindings[0].Client != "codex-cli" {
+ 		t.Fatalf("client_bindings = %#v, want only codex-cli", m.ClientBindings)
+@@ -234,8 +234,8 @@ args = ["version"]
+ 		t.Fatalf("foreign mcp_servers.keep table was not preserved: %#v", servers)
+ 	}
+ 	adopted := servers[entry].(map[string]any)
+-	if adopted["url"] != "http://127.0.0.1:9308/mcp" {
+-		t.Fatalf("adopted url = %#v, want http://127.0.0.1:9308/mcp", adopted["url"])
++	if wantURL := fmt.Sprintf("http://127.0.0.1:%d/mcp", plan.Port); adopted["url"] != wantURL {
++		t.Fatalf("adopted url = %#v, want %s", adopted["url"], wantURL)
+ 	}
+ 	if _, hasCommand := adopted["command"]; hasCommand {
+ 		t.Fatalf("adopted entry still has command: %#v", adopted)
+@@ -261,7 +261,7 @@ args = ["version"]
+ 		EntryName:    entry,
+ 		Client:       "codex-cli",
+ 		ManifestName: entry,
+-		Port:         9324,
++		Port:         nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 		Clients:      []string{"codex-cli"},
+ 	})
+ 	if err != nil {
+@@ -296,7 +296,7 @@ command = "go"
+ args = ["version"]
+ `, entry))
+ 			plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+-				EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9325 + i, Clients: []string{"codex-cli"},
++				EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()), Clients: []string{"codex-cli"},
+ 			})
+ 			if err != nil {
+ 				t.Fatalf("BuildAdoptPlan: %v", err)
+@@ -364,7 +364,7 @@ args = ["version"]
+ 	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+ 		EntryName: entry,
+ 		Client:    "codex-cli",
+-		Port:      9318,
++		Port:      nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 	})
+ 	if err != nil {
+ 		t.Fatalf("BuildAdoptPlan: %v", err)
+@@ -459,7 +459,7 @@ args = ["version"]
+ 		EntryName:    entry,
+ 		Client:       "codex-cli",
+ 		ManifestName: entry,
+-		Port:         9315,
++		Port:         nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 		Clients:      []string{"claude-code", "codex-cli"},
+ 	})
+ 	if err != nil {
+@@ -511,7 +511,7 @@ VISIBLE = "not-secret"
+ 		EntryName:    entry,
+ 		Client:       "codex-cli",
+ 		ManifestName: entry,
+-		Port:         9309,
++		Port:         nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 	})
+ 	if err != nil {
+ 		t.Fatalf("BuildAdoptPlan: %v", err)
+@@ -958,7 +958,7 @@ args = ["version"]
+ 		EntryName:    entry,
+ 		Client:       "codex-cli",
+ 		ManifestName: entry,
+-		Port:         9316,
++		Port:         nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 		Clients:      []string{"codex-cli"},
+ 	})
+ 	if err != nil {
+@@ -978,7 +978,7 @@ args = ["version"]
+ 		EntryName:    entry,
+ 		Client:       "codex-cli",
+ 		ManifestName: entry,
+-		Port:         9316,
++		Port:         plan.Port,
+ 		Clients:      []string{"codex-cli"},
+ 	}); err != nil {
+ 		t.Fatalf("BuildAdoptPlan after failed adopt: %v", err)
+@@ -1059,7 +1059,7 @@ API_TOKEN = "`+literalToken+`"
+ 		EntryName:    entry,
+ 		Client:       "codex-cli",
+ 		ManifestName: entry,
+-		Port:         9310,
++		Port:         nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 	})
+ 	if err != nil {
+ 		t.Fatalf("BuildAdoptPlan: %v", err)
+@@ -1541,7 +1541,7 @@ args = ["version"]
+ 		EntryName:    entry,
+ 		Client:       "codex-cli",
+ 		ManifestName: entry,
+-		Port:         9312,
++		Port:         nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+ 		Clients:      []string{"codex-cli"},
+ 	})
+ 	if err != nil {
+diff --git a/internal/api/main_test.go b/internal/api/main_test.go
+index 665f48f..88b0c35 100644
+--- a/internal/api/main_test.go
++++ b/internal/api/main_test.go
+@@ -12,6 +12,10 @@ import (
+ 	"mcp-local-hub/internal/clients"
+ )
+ 
++// apiTestMainRoot owns immutable fixtures shared by tests only while m.Run is
++// active. Their lifetime ends with the existing package-root cleanup below.
++var apiTestMainRoot string
++
+ // TestMain installs the supervisor IPC test-pipe discriminator for the whole
+ // internal/api test binary. Without it, SupervisorIPCAddress resolves the
+ // kernel-authoritative user SID first (supervisor_ipc_address_windows.go) and
+@@ -268,7 +272,9 @@ func TestMain(m *testing.M) {
+ 	// internal/clients/config_path_sandbox_audit.go.
+ 	auditRestore := clients.EnforceSandboxedConfigPaths(tmp)
+ 
++	apiTestMainRoot = tmp
+ 	code := m.Run()
++	apiTestMainRoot = ""
+ 
+ 	if escapes := auditRestore(); escapes > 0 && code == 0 {
+ 		code = 1
+diff --git a/internal/cli/adopt_mcpcompat_test.go b/internal/cli/adopt_mcpcompat_test.go
+index 3a33178..403eefd 100644
+--- a/internal/cli/adopt_mcpcompat_test.go
++++ b/internal/cli/adopt_mcpcompat_test.go
+@@ -42,7 +42,7 @@ func TestAdoptCLIProfilePersistsAndBuildsLegacyHost(t *testing.T) {
+ 	cmd := newAdoptCmdWithDeps(api.NewAPI, nil, func(context.Context, *api.API, *api.AdoptPlan, *api.AdoptProvenanceRecord) error { return nil })
+ 	var out bytes.Buffer
+ 	cmd.SetOut(&out)
+-	cmd.SetArgs([]string{entry, "--client", "codex-cli", "--port", "9371", "--mcp-protocol-compatibility-profile", "stdio-http-legacy-2024-11-05", "--yes"})
++	cmd.SetArgs([]string{entry, "--client", "codex-cli", "--mcp-protocol-compatibility-profile", "stdio-http-legacy-2024-11-05", "--yes"})
+ 	if err := cmd.Execute(); err != nil {
+ 		t.Fatalf("adopt: %v\n%s", err, out.String())
+ 	}
+diff --git a/internal/cli/adopt_test.go b/internal/cli/adopt_test.go
+index 0cdd27c..78cdf77 100644
+--- a/internal/cli/adopt_test.go
++++ b/internal/cli/adopt_test.go
+@@ -143,7 +143,7 @@ API_KEY = "` + fixtureKey + `"
+ 	cmd := NewRootCmd()
+ 	var out bytes.Buffer
+ 	cmd.SetOut(&out)
+-	cmd.SetArgs([]string{"adopt", "mui-dry-cli", "--client", "codex-cli", "--port", "9313"})
++	cmd.SetArgs([]string{"adopt", "mui-dry-cli", "--client", "codex-cli"})
+ 	if err := cmd.Execute(); err != nil {
+ 		t.Fatalf("adopt dry-run: %v\n%s", err, out.String())
+ 	}
+@@ -224,7 +224,7 @@ args = ["version"]
+ 	cmd := NewRootCmd()
+ 	var out bytes.Buffer
+ 	cmd.SetOut(&out)
+-	cmd.SetArgs([]string{"adopt", entry, "--client", "codex-cli", "--port", "9314"})
++	cmd.SetArgs([]string{"adopt", entry, "--client", "codex-cli"})
+ 	err := cmd.Execute()
+ 	if err == nil || err.Error() != "E_ADOPT_LEASE_NAMESPACE_REFUSED reason=state-root-unavailable action=leave-unchanged" {
+ 		t.Fatalf("dry-run error=%v, want typed state-root refusal", err)
+@@ -338,7 +338,7 @@ args = ["version"]
+ 	var stdout, stderr bytes.Buffer
+ 	cmd.SetOut(&stdout)
+ 	cmd.SetErr(&stderr)
+-	cmd.SetArgs([]string{entry, "--client", "codex-cli", "--port", "9342", "--yes"})
++	cmd.SetArgs([]string{entry, "--client", "codex-cli", "--yes"})
+ 	err := cmd.Execute()
+ 	if err == nil || err.Error() != "E_ADOPT_LEASE_CLEANUP" {
+ 		t.Fatalf("CLI exit error=%v, want E_ADOPT_LEASE_CLEANUP", err)
+@@ -414,7 +414,7 @@ func TestAdoptCLI_GlobalCodexSameNamePathHasNoHSettlement(t *testing.T) {
+ 	cmd := newAdoptCmdWithDeps(api.NewAPI, nil, func(context.Context, *api.API, *api.AdoptPlan, *api.AdoptProvenanceRecord) error { return nil })
+ 	var out bytes.Buffer
+ 	cmd.SetOut(&out)
+-	cmd.SetArgs([]string{entry, "--client", "codex-cli", "--port", "9344", "--yes"})
++	cmd.SetArgs([]string{entry, "--client", "codex-cli", "--yes"})
+ 	if err := cmd.Execute(); err != nil {
+ 		t.Fatalf("global-only adopt: %v\n%s", err, out.String())
+ 	}
+diff --git a/internal/cli/gui_force_test.go b/internal/cli/gui_force_test.go
+index 3434d15..e2fe6d9 100644
+--- a/internal/cli/gui_force_test.go
++++ b/internal/cli/gui_force_test.go
+@@ -196,19 +196,26 @@ func TestForce_StuckIncumbent_RevealFlagOpensFolder(t *testing.T) {
+ // ---------------------------------------------------------------
+ 
+ func TestForce_KillHappyPath_SeamMocked(t *testing.T) {
+-	// This scenario uses a seam to bypass the three-part gate's
+-	// strict cmdline/image checks (which would reject the test
+-	// binary as non-mcphub). Real-process proof is in scenario 8.
++	// Exercise the finite force-kill recovery operation through its acquired
++	// ownership lock. Scenario 4b exercises full command startup and port
++	// publication. The identity seam admits our non-mcphub sleep helper;
++	// TestForce_KillRefusesNonMcphubImage separately tests real-image refusal.
+ 	prevGate := gui.IdentityGateForTest()
+ 	defer gui.RestoreIdentityGate(prevGate)
+ 	gui.SetIdentityGate(func(v gui.Verdict) (refused bool, reason string) { return false, "" })
+ 
+ 	dir := apitest.HardenedTempDir(t)
+ 	pidport := filepath.Join(dir, "gui.pidport")
++	fl := flock.New(pidport + ".lock")
++	if ok, _ := fl.TryLock(); !ok {
++		t.Fatal("could not pre-lock")
++	}
++	defer fl.Unlock()
++
+ 	// Spawn a child sleep process so we have a real PID we can kill.
+ 	var sleepCmd *exec.Cmd
+ 	if runtime.GOOS == "windows" {
+-		sleepCmd = exec.Command("powershell", "-NoExit", "-Command", "Start-Sleep -Seconds 60")
++		sleepCmd = exec.Command("powershell", "-NoProfile", "-NoExit", "-Command", "Start-Sleep -Seconds 60")
+ 	} else {
+ 		sleepCmd = exec.Command("sleep", "60")
+ 	}
+@@ -216,57 +223,64 @@ func TestForce_KillHappyPath_SeamMocked(t *testing.T) {
+ 	if err := sleepCmd.Start(); err != nil {
+ 		t.Skipf("cannot spawn sleep helper: %v", err)
+ 	}
++	// The original child has one waiter. Release the fixture lock only
++	// after it exits, and join this waiter before temporary-file cleanup.
++	holderDone := make(chan error, 1)
++	go func() {
++		_, err := sleepCmd.Process.Wait()
++		holderDone <- errors.Join(err, fl.Unlock())
++	}()
+ 	defer func() {
+ 		_ = sleepCmd.Process.Kill()
++		if err := <-holderDone; err != nil {
++			t.Errorf("reap sleep helper or release fixture lock: %v", err)
++		}
+ 	}()
++
+ 	pid := sleepCmd.Process.Pid
+-	if err := os.WriteFile(pidport, []byte(fmt.Sprintf("%d 1\n", pid)), 0o600); err != nil {
++	const stalePort = 1
++	if err := os.WriteFile(pidport, []byte(fmt.Sprintf("%d %d\n", pid, stalePort)), 0o600); err != nil {
+ 		t.Fatal(err)
+ 	}
+-	fl := flock.New(pidport + ".lock")
+-	if ok, _ := fl.TryLock(); !ok {
+-		t.Fatal("could not pre-lock")
+-	}
+-	// Release the flock when the child dies — simulate the OS
+-	// auto-release so the acquire-poll loop can succeed.
+-	go func() {
+-		_, _ = sleepCmd.Process.Wait()
+-		fl.Unlock()
+-	}()
+ 
+-	// Use a delayed cancel: ctx stays active long enough for the
+-	// kill+acquire path to complete (so iter-11's pre-kill ctx
+-	// check doesn't refuse), then cancels to make startGuiServer
+-	// exit via <-ctx.Done() rather than blocking until the test
+-	// timeout. Pre-iter-11 used immediate cancel; that legitimately
+-	// short-circuits the new cancel-before-kill safety check.
+-	ctx, cancel := context.WithCancel(context.Background())
++	// Recovery returns its acquired lock; no normal cancellation is needed.
++	// The timeout is only a watchdog, and reaching it must fail this scenario.
++	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+ 	defer cancel()
+-	go func() {
+-		// 3s gives runForceKill enough time for: cli Probe (~50ms +
+-		// any retry) + KillRecordedHolder's internal probe (~50ms) +
+-		// killProcess (instant) + wait-for-exit (~100ms typical) +
+-		// acquire-poll (~50ms when flock is released). Then cancel
+-		// triggers startGuiServer's <-ctx.Done() path so the test
+-		// terminates instead of blocking until the suite timeout.
+-		time.Sleep(3 * time.Second)
+-		cancel()
+-	}()
+-
+ 	c := newGuiCmdRealForTest()
+-	c.SetArgs([]string{"--port", "0", "--no-browser", "--no-tray", "--force", "--kill", "--yes"})
+-	t.Setenv("MCPHUB_GUI_TEST_PIDPORT_DIR", dir)
+-	err := c.ExecuteContext(ctx)
+-	if err != nil {
+-		// Acceptable outcomes: context.Canceled (startGuiServer exited
+-		// cleanly), forceExitError 0 (healthy-early-exit), or exit 3
+-		// (race-lost). Assert it is NOT exit 7 (refused) or exit 4 (failed).
+-		var fe interface{ ExitCode() int }
+-		if errors.As(err, &fe) {
+-			if fe.ExitCode() == 7 || fe.ExitCode() == 4 {
+-				t.Errorf("happy path exit code = %d (refused/failed); want 0, 3, or context cancel", fe.ExitCode())
++	recovered, exitCode := runForceKill(ctx, c, pidport, true)
++	contextErr := ctx.Err()
++	if recovered != nil {
++		// Carry the acquisition-bound lifecycle through cleanup. Like the
++		// production owner, never unlock an unsettled active record.
++		defer func() {
++			owner := recovered.OwnerLifecycle()
++			if owner == nil {
++				t.Error("recovered lock has no owner lifecycle")
++				return
+ 			}
+-		}
++			if err := owner.TerminalSettle(); err != nil {
++				t.Errorf("settle recovered owner record: %v", err)
++				return
++			}
++			if err := recovered.ReleaseErr(); err != nil {
++				t.Errorf("release recovered lock: %v", err)
++			}
++		}()
++	}
++	if contextErr != nil {
++		t.Fatalf("force-kill recovery reached watchdog: %v", contextErr)
++	}
++	if exitCode != 0 || recovered == nil {
++		t.Fatalf("force-kill recovery returned exit=%d, acquired lock=%t; want exit 0 and an acquired lock", exitCode, recovered != nil)
++	}
++
++	currentPID, port, err := gui.ReadPidport(pidport)
++	if err != nil {
++		t.Fatalf("read recovered pidport: %v", err)
++	}
++	if currentPID != os.Getpid() || port != stalePort {
++		t.Errorf("recovered pidport = %d:%d; want %d:%d before server startup", currentPID, port, os.Getpid(), stalePort)
+ 	}
+ }
+ 

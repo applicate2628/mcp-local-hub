@@ -1,0 +1,699 @@
+{
+  "schema": "mcphub-reviewed-owner-inputs-v1",
+  "scope": "Exact frozen source inputs mapped to seven prepared owner commits; owner documentation is excluded from source replay",
+  "owners": [
+    {
+      "lane": "cmake",
+      "pr": 624,
+      "base": "ee20f6009a8581c8141352cdbd261e1a97a0e805",
+      "head": "5c36f626467bc6c8446d621f3a2b3fc7fd507b4b",
+      "tree": "c1fc663b0049ecc66260639aa9841240776d8f35",
+      "publication_state_at_capture": "Prepared locally by Root; publication is tracked separately",
+      "files": [
+        {
+          "path": "internal/vcpkgmcp/cmaketrace/parse.go",
+          "mode": "100644",
+          "blob": "27d5f57e46012567c8ee9d33a81a21333ef3c6d6",
+          "sha256": "f08b85fac50fd90ea8f50ed7eb7523c9b111a8516d0e35cce87367a80657aaf3",
+          "bytes": 10924
+        },
+        {
+          "path": "internal/vcpkgmcp/cmaketrace/trace_read_error_limits_test.go",
+          "mode": "100644",
+          "blob": "9684ce036ae6de8ee0e6411318400d271c3a35be",
+          "sha256": "748cf7097aef11150c259ec0dcd9c6d21c7bc64c4a30d20eff7d167f411a6450",
+          "bytes": 1929
+        }
+      ]
+    },
+    {
+      "lane": "relay",
+      "pr": 629,
+      "base": "e33924ac97449c7cb8f103d80a39ecbb064310d3",
+      "head": "6808e99bacc0961fef2a511b1ae1a088f12a1e12",
+      "tree": "56da3274832fc5f8de5128f237e84f69850a0139",
+      "publication_state_at_capture": "Prepared locally by Root; publication is tracked separately",
+      "files": [
+        {
+          "path": "internal/daemon/relay.go",
+          "mode": "100644",
+          "blob": "f350d7d9de1eacb38eb94161e56953defd961649",
+          "sha256": "e1e0cba798571b6744b0e0b709140a5329d49f533b7bb95b00c0ae92b824ca7a",
+          "bytes": 35714
+        },
+        {
+          "path": "internal/daemon/relay_admission_contract_test.go",
+          "mode": "100644",
+          "blob": "6a206daae9c4137f5236cb8722fb5fae4b4c3929",
+          "sha256": "5ebab1a8146d0de4df04af6d33040301e701cb929b182c5521bc0c1f34c8448b",
+          "bytes": 12662
+        },
+        {
+          "path": "internal/daemon/relay_test.go",
+          "mode": "100644",
+          "blob": "8ea5160677f476c6f85e87cee9441477b92741ce",
+          "sha256": "d00371fc023f843208bc8a84d8e8e1640c641eee236a33cedc5af4b7adafb56b",
+          "bytes": 12455
+        }
+      ]
+    },
+    {
+      "lane": "serena",
+      "pr": 655,
+      "base": "1a5a7dd04fe732df5c539860dde813c8c703586d",
+      "head": "6743f3d552027395daf06bfd4fbc0123a374703b",
+      "tree": "bc4ad937a3f9f4ba2f1de31167e033085fa68176",
+      "publication_state_at_capture": "Prepared locally by Root; publication is tracked separately",
+      "files": [
+        {
+          "path": "internal/api/serena_idle_shutdown.go",
+          "mode": "100644",
+          "blob": "801b2643208da2fbf727ffea87ff4c22f7972061",
+          "sha256": "5f5c70049eb6131c2dcdc45f4a12afa81e9c3d68f5e1b105e630e3de955b6558",
+          "bytes": 26368
+        },
+        {
+          "path": "internal/api/serena_idle_shutdown_test.go",
+          "mode": "100644",
+          "blob": "1df4289e075405dadcc17920878408644cdb5cd4",
+          "sha256": "a57cec724983993b4952432dc236abc60054f26823b3a473fdc0c12673109919",
+          "bytes": 43172
+        },
+        {
+          "path": "internal/api/testhooks.go",
+          "mode": "100644",
+          "blob": "cd2f7a5aae13e30622fdb220ab6a69d756ac1fee",
+          "sha256": "d194aae066df6dfd9394ef7aecb3100f2f4d494a4a3412d94da152659d112ba7",
+          "bytes": 19114
+        },
+        {
+          "path": "internal/api/workspace_registry_snapshot.go",
+          "mode": "100644",
+          "blob": "6a4860bde385dfda31877965366aa1ea4d8cde6a",
+          "sha256": "190aced6b8ffdec922960bbe85d23458fcaf73650941e60be0522b0bd74101c0",
+          "bytes": 9149
+        },
+        {
+          "path": "internal/api/workspace_registry_snapshot_test.go",
+          "mode": "100644",
+          "blob": "59016e0a094f9d573a44a23c9bfab08ec04667c0",
+          "sha256": "09f548ca826f2df4455cd45c1157526783730342a80298ed4d4db57d655b7bc2",
+          "bytes": 9290
+        }
+      ]
+    },
+    {
+      "lane": "scheduler",
+      "pr": 660,
+      "base": "892fa82e0e1aa5746d97365f96a9b69ef7934168",
+      "head": "8d4f2606c9af7e20181e4ad290b29be0e0a2dd0f",
+      "tree": "b830f0afd37de133a98a2d4d21d6384329eee8c4",
+      "publication_state_at_capture": "Prepared locally by Root; publication is tracked separately",
+      "files": [
+        {
+          "path": "internal/api/api_surfaces.go",
+          "mode": "100644",
+          "blob": "c3b3562334bf0483be1df6ddc3891dec729e0b2a",
+          "sha256": "20742539d070de545193fd073fe6a0f2d476f5c8f93af5cef27a8bb8016867f2",
+          "bytes": 13963
+        },
+        {
+          "path": "internal/api/install.go",
+          "mode": "100644",
+          "blob": "07866a41e1524eb6dfff8f5175eb5e8fb009dc68",
+          "sha256": "f943587e54c40015274e4fd4411b32a0e1d19ce3488f25d6bf63de37c8dbe15e",
+          "bytes": 215206
+        },
+        {
+          "path": "internal/api/install_test.go",
+          "mode": "100644",
+          "blob": "7f9cf0212d38af8dac7fd894911fb51123fc062b",
+          "sha256": "1fa9242f341729c172ae207441627e8ea1447f22d2ceeb8118167caecdfee842",
+          "bytes": 67025
+        },
+        {
+          "path": "internal/api/lsp_auto_register.go",
+          "mode": "100644",
+          "blob": "f6643d185f7a9c17b4ba53042260224a63c5590e",
+          "sha256": "714c8afa908b4d00c65f95baa0aed14e7cc0e1bebfa7e5a5186174022ec26682",
+          "bytes": 13626
+        },
+        {
+          "path": "internal/api/register.go",
+          "mode": "100644",
+          "blob": "dd9538903fdeb440f359b047a4c1f7a16abbf1a3",
+          "sha256": "f2b9b3948dea8c1b65677aa74fb4c266d415dcd5d19526740d8d5f75ccf53caf",
+          "bytes": 133109
+        },
+        {
+          "path": "internal/api/register_supervisor.go",
+          "mode": "100644",
+          "blob": "60eb5d69d64af0485f6c58f5acc4b364f5a3ad7d",
+          "sha256": "4799df9e7b58990b9d84ddd219436ecd1350a433c792bfa8c2dc71fb8688cce3",
+          "bytes": 46175
+        },
+        {
+          "path": "internal/api/scheduler_mgmt.go",
+          "mode": "100644",
+          "blob": "1dab80e6d73a7148d3dd81555c74e44588a1e708",
+          "sha256": "a9bc2a40e7bf831b743d50691b65fbaea8ada84b8ef0b921182e0f07fbcb220f",
+          "bytes": 14855
+        },
+        {
+          "path": "internal/api/scheduler_operation_context_test.go",
+          "mode": "100644",
+          "blob": "6611a300bfd6fe56fbead55125d44c0331520494",
+          "sha256": "82ea914e7f71611e8f94d19163fbc464599200dd264d60f8985ad7e9d5e2646f",
+          "bytes": 8894
+        },
+        {
+          "path": "internal/api/status_enrich.go",
+          "mode": "100644",
+          "blob": "b651e3532eeee9c244bc3159ba39a0d3a008580f",
+          "sha256": "419d02e55ec30a1e11de282d7fa1ba49bfc731084d2b09f5dfcc4ef9a5c3c7bb",
+          "bytes": 18010
+        },
+        {
+          "path": "internal/api/types.go",
+          "mode": "100644",
+          "blob": "58ef313b69ba44e832867586c3a32aac88da9e47",
+          "sha256": "d26691d1c6cb7091c1c4628d58b278fc5a4f85b68b570527c30f9000660df3d7",
+          "bytes": 30624
+        },
+        {
+          "path": "internal/cli/install_migration_wiring_windows.go",
+          "mode": "100644",
+          "blob": "3a9b829f698018a2516cdfa7bde069353f31590c",
+          "sha256": "cf186cb0e5d2488780fc6c71a076bb6351e7b1d2a6060db2cbf9a3ad650a1d57",
+          "bytes": 209416
+        },
+        {
+          "path": "internal/cli/windows_product_pair.go",
+          "mode": "100644",
+          "blob": "d331820fe20bfd4b1fe4b0bc1016a7da92a62639",
+          "sha256": "e4e206d14756dac3ea5528dab2016c51b14a0cdb295a76902cd60f28680e994b",
+          "bytes": 113467
+        },
+        {
+          "path": "internal/cli/windows_product_pair_test.go",
+          "mode": "100644",
+          "blob": "c35c4021d5a9b5a522fed128f56ba86d74e7a97d",
+          "sha256": "5eeb240c806a2a9cb5c4fb828dd8ab5e0ee84e5cd4ec665cc17f25b0c9ebadce",
+          "bytes": 43429
+        },
+        {
+          "path": "internal/scheduler/entrypoint_migration_windows.go",
+          "mode": "100644",
+          "blob": "25bf990310b829330a6a62b47ade4fc9b983ae83",
+          "sha256": "38114e11105983df761e6890b3755d0a0e328126c102f0f7bcef35a32f8c6dbf",
+          "bytes": 47409
+        },
+        {
+          "path": "internal/scheduler/entrypoint_migration_windows_test.go",
+          "mode": "100644",
+          "blob": "8526d54320f65c4bf5e43dd972e6a44a96a0eb2c",
+          "sha256": "2e4afed065680cf5690c0a3505c466ae9a41f90991aaa0004e7a600fe4840229",
+          "bytes": 43618
+        },
+        {
+          "path": "internal/scheduler/enumerate_all_windows.go",
+          "mode": "100644",
+          "blob": "51e126c93f883ea09f62866295a155c51c47ba79",
+          "sha256": "76d6707a8715a20f91fe3aef410e07a27b27e5134a060cf9b35e6c260ff19eaa",
+          "bytes": 13598
+        },
+        {
+          "path": "internal/scheduler/scheduler.go",
+          "mode": "100644",
+          "blob": "35f6a5f3ad176c35fbcbfcafb18dbb3ec8ae5b5e",
+          "sha256": "97e09723d8e6f608aee7d24bf3d4e78a386f4ba094bb3c2e2ae9603c36f9312d",
+          "bytes": 7860
+        },
+        {
+          "path": "internal/scheduler/scheduler_com_windows.go",
+          "mode": "100644",
+          "blob": "d5bac88c068d18edeaa826604c75cc230c961ca3",
+          "sha256": "1f0d1c0b14c2e18bac89d03397b978ad9e45b7d37c3722ae40f5508e2fcdd5d3",
+          "bytes": 14508
+        },
+        {
+          "path": "internal/scheduler/scheduler_com_windows_test.go",
+          "mode": "100644",
+          "blob": "9bda7839263b892d490b8fe8f0c8a34ca1d37fd5",
+          "sha256": "adde081da6df556f3c812164d9f0cce13948912e4b8a37318317056dd8877c6f",
+          "bytes": 6979
+        },
+        {
+          "path": "internal/scheduler/scheduler_command_windows.go",
+          "mode": "100644",
+          "blob": "26169c7bdc8f1511c9031d790799cc979837a361",
+          "sha256": "9bc6351bf60960c1d7c96b1156c1a1a237dac16263b4ae86713973543673bed8",
+          "bytes": 4124
+        },
+        {
+          "path": "internal/scheduler/scheduler_context.go",
+          "mode": "100644",
+          "blob": "0222508573a44e283d26f4185ac1f902107c9adb",
+          "sha256": "a6ba80ca67990c82dd1b3363618d0ed592105ecfcb8d0fffb49d3ed3cf6d7eb8",
+          "bytes": 1707
+        },
+        {
+          "path": "internal/scheduler/scheduler_hidden_task_windows_test.go",
+          "mode": "100644",
+          "blob": "227475cd7e5f063ad96e0a71358d944293f0b7b0",
+          "sha256": "b1120b6b35d68cff82450c8ec258850613209eb0366d83fc9d1a9f882f000c73",
+          "bytes": 6222
+        },
+        {
+          "path": "internal/scheduler/scheduler_last_result_windows_test.go",
+          "mode": "100644",
+          "blob": "3c81976e7a89575c70824daa1ced64c12a62456c",
+          "sha256": "be4e1d97d9c08abe448639be8945746db0e6ae4fed53941b7fa884ef48662c35",
+          "bytes": 12660
+        },
+        {
+          "path": "internal/scheduler/scheduler_next_run_windows_test.go",
+          "mode": "100644",
+          "blob": "e6f0fef40b4bc97b4c00df991afa8a4d990f1842",
+          "sha256": "a82dcab574d64bd63cc1e4f447b563bbd08e1ab3bac8613101d042403f97493a",
+          "bytes": 5089
+        },
+        {
+          "path": "internal/scheduler/scheduler_noop.go",
+          "mode": "100644",
+          "blob": "1497b33fa33599664af530e17c292ee83d31a9a9",
+          "sha256": "9ce51fe6b253395db76f1844e84762461b3f7513169ac1ac59a07c742b9b6358",
+          "bytes": 3086
+        },
+        {
+          "path": "internal/scheduler/scheduler_operation_context_windows_test.go",
+          "mode": "100644",
+          "blob": "d4cc7df3a5ab089df90c81893a6cc0c8a8050354",
+          "sha256": "63be377ab9b9d6612a0e2a74c560009c06cd0174bd028970ea748900e1c23e23",
+          "bytes": 8567
+        },
+        {
+          "path": "internal/scheduler/scheduler_owner_sid_windows_test.go",
+          "mode": "100644",
+          "blob": "e5f0dd0aa6217b6d0c34168e7de6f4bd1e4bc741",
+          "sha256": "2f32b57002fb750f9d23f5eb6822ad14c0814f18b232e1235c8a7dc2d8f05265",
+          "bytes": 11293
+        },
+        {
+          "path": "internal/scheduler/scheduler_windows.go",
+          "mode": "100644",
+          "blob": "dab3127459f03cd1a118be0fe4172a56fc97460c",
+          "sha256": "859a7c1519a4c0877683ebc04230cdb94705b1dbbd5bcfbf17c35a38f5fee8da",
+          "bytes": 14901
+        },
+        {
+          "path": "internal/scheduler/scheduler_xml_create_windows.go",
+          "mode": "100644",
+          "blob": "b66c0857bebdbc358cdac553488e235a3cb50ff9",
+          "sha256": "8189d20e687b3d25bed74d81471a884b5b1137bb739b8a7f201772c13c912cc3",
+          "bytes": 2012
+        }
+      ]
+    },
+    {
+      "lane": "process",
+      "pr": 628,
+      "base": "e7fee02b5ce1b965486b15f13938bd0d67c841d8",
+      "head": "0b3a9e0edafc41e7e8567abfde878e8f169405ef",
+      "tree": "5d04d926ac128c403b4e2bc21c316850be60a6e1",
+      "publication_state_at_capture": "Prepared locally by Root; publication is tracked separately",
+      "files": [
+        {
+          "path": "internal/process/run_strictly_contained_windows_test.go",
+          "mode": "100644",
+          "blob": "689a75798135eb55556c964e5ea366ff4ca09cdd",
+          "sha256": "d1bbca38fac0fbc8253b739c6a3046e861334404a95c1210f0bd0a975eaceb6d",
+          "bytes": 22078
+        }
+      ]
+    },
+    {
+      "lane": "windows",
+      "pr": 671,
+      "base": "09dc07e01d1a3236ab5f45f384e11fe2f9dfd30d",
+      "head": "891ef8bfd0764a969db2f800578fd45acd5623d6",
+      "tree": "660ecb0afd1f6ed8126602b66acc78be5733a29a",
+      "publication_state_at_capture": "Prepared locally by Root; publication is tracked separately",
+      "files": [
+        {
+          "path": "internal/api/hub_mcp_aggregator.go",
+          "mode": "100644",
+          "blob": "5250ff4bf92593aa1456e4abc0b276df0f366f76",
+          "sha256": "816fcdcc543a97cd004265851244b1b4280c380b48bf310f1567b8b4f0a53bb1",
+          "bytes": 107860
+        },
+        {
+          "path": "internal/api/hub_mcp_handler.go",
+          "mode": "100644",
+          "blob": "7c9c46c200d19af348df9899943b59e46bb1977a",
+          "sha256": "ed2721a2a4aadf0971165971ae0fd079fe7163f4d6dfa93c29fcfc6250c3cdb6",
+          "bytes": 49018
+        },
+        {
+          "path": "internal/api/hub_mcp_resolver.go",
+          "mode": "100644",
+          "blob": "804ef80c4ba588560fdee6b87168af23acc85e96",
+          "sha256": "294e53f25767f26e7576cd2a881e4d41d902e520d265e69a5eb8ab790ce7e2b4",
+          "bytes": 28728
+        },
+        {
+          "path": "internal/api/hub_mcp_session.go",
+          "mode": "100644",
+          "blob": "a6c7304a988294e925bcf9c319f26a3ca56c51c6",
+          "sha256": "da98460c9a2147724d2085e1c2683643172bd76da215cd4a6246f87033f1046a",
+          "bytes": 29390
+        },
+        {
+          "path": "internal/api/hub_mcp_stdio.go",
+          "mode": "100644",
+          "blob": "3c5d42bb9c0492d49a43367aa07d6e1b18a47b07",
+          "sha256": "ed0f5c76bbfd5eaba50a36afbe3c23d4c28a624515efc7201171fe48632c09e6",
+          "bytes": 5757
+        },
+        {
+          "path": "internal/api/hub_mcp_stdio_test.go",
+          "mode": "100644",
+          "blob": "a68c8733851ebb7a9c12cf909dfcf0af030388d6",
+          "sha256": "224443d3eef39a2113b696abd6374e40c45388935896aa3749dd35965e492600",
+          "bytes": 2256
+        },
+        {
+          "path": "internal/api/testhooks.go",
+          "mode": "100644",
+          "blob": "4fed987bd6f2eedaef2e3c0fc16ee2b3bb0d06c4",
+          "sha256": "e70b1a58dfa13fe9c613b1cb57a517dbdc91a8fe63ab0cf5877f200e99a36874",
+          "bytes": 19620
+        },
+        {
+          "path": "internal/cli/gui_supervisor_owner.go",
+          "mode": "100644",
+          "blob": "25e3c05cb23e4951b0e3fad8c74ea0cb4da4543f",
+          "sha256": "9ea31f168b8180efdb9ec6a50aa71f47f495d150916ff3752d8460c1b880e4c9",
+          "bytes": 57020
+        },
+        {
+          "path": "internal/cli/gui_supervisor_owner_control_test.go",
+          "mode": "100644",
+          "blob": "858cbd0c42f8acc07b3ebd2c00c8f46beed5785c",
+          "sha256": "022355964adbdc941c1d7cff81bbef52abff8c727eb7f3c1b5c154d44e29ea10",
+          "bytes": 9517
+        },
+        {
+          "path": "internal/cli/gui_supervisor_owner_other.go",
+          "mode": "100644",
+          "blob": "b910a0be4a970e5989fba1e6ffec69406e8c2916",
+          "sha256": "3986dee256a38b9a018408ed64b7ddfb80444f3017d8bcdac34807cbd9005990",
+          "bytes": 2184
+        },
+        {
+          "path": "internal/cli/gui_supervisor_restart_windows.go",
+          "mode": "100644",
+          "blob": "606e17dee42ddb29089c4ae995e58650da6f6bce",
+          "sha256": "0a6238391d556c159a5988a021b0ee0e4bd3e66ed6ab1637f7560d47e56a3a1d",
+          "bytes": 31791
+        },
+        {
+          "path": "internal/cli/route_aggregate_windows.go",
+          "mode": "100644",
+          "blob": "2946da2007c9619160580171e53be8cde0fbdda6",
+          "sha256": "5e091fae7122721f1501a0584f047137f99fd1ce5277d05e65d1f2874fcab828",
+          "bytes": 9837
+        },
+        {
+          "path": "internal/cli/route_stdio.go",
+          "mode": "100644",
+          "blob": "566ef2a1253acc0388720c8fb6e19398bd09ef61",
+          "sha256": "8a3c0f5ef3fd5df2b370260d1f540c8ee45a566b80a879053388a8a4e26ce204",
+          "bytes": 2210
+        },
+        {
+          "path": "internal/cli/supervisor_launch.go",
+          "mode": "100644",
+          "blob": "12557bc0e1d28401946036131e05513fe206b034",
+          "sha256": "6e5d0336e0a109db80cf391a2532b31d08a192616a9337e5c54bd2f8ae89c074",
+          "bytes": 7229
+        },
+        {
+          "path": "internal/cli/supervisor_launch_windows.go",
+          "mode": "100644",
+          "blob": "b268dd4f3b557fbeeae076503cfec5a9d71aead3",
+          "sha256": "08e146bf7ced7e22f45d913d280d640f3b38a8216839ea501d149990989b168f",
+          "bytes": 17206
+        },
+        {
+          "path": "internal/cli/windows_canonical_entry_recovery_windows.go",
+          "mode": "100644",
+          "blob": "719b311192d20ed487d3a7d224695c348b724df7",
+          "sha256": "f819eb19df0f5813165c62c7774816f8fc7406307c61abe2e92beaa1075802d4",
+          "bytes": 86433
+        },
+        {
+          "path": "internal/cli/windows_v2_producttxn_native_windows_test.go",
+          "mode": "100644",
+          "blob": "5f8969f436d8a362e7ac67bbc45d4b44e444a54d",
+          "sha256": "e6d80f14d33d0d2d074fb5a8338e4a73c598c1ae6af9304de5fb0224686ef583",
+          "bytes": 110531
+        },
+        {
+          "path": "internal/daemon/isolated_stdio.go",
+          "mode": "100644",
+          "blob": "d1c0eba83624677d4e6bd36ed8fcce3e2f997c87",
+          "sha256": "d59c3881b41f5e3e1913e44f39d8a4d51ff71f2834abadf564ed5b982ac9164d",
+          "bytes": 14643
+        },
+        {
+          "path": "internal/daemon/isolated_stdio_windows_test.go",
+          "mode": "100644",
+          "blob": "e8a6ab1d8caf5a881385d195084a205f2ba70118",
+          "sha256": "38c86539658e6a3c2e2838464689f3ee70d859577b9a2483556333bf9ff5d117",
+          "bytes": 21598
+        },
+        {
+          "path": "internal/daemon/isolated_stdio_write.go",
+          "mode": "100644",
+          "blob": "ca84081c433760c04570607ce8f65a850fe71834",
+          "sha256": "aa92d9d501a38a8c4b466fc83a43e21758a1a297936dbbb058b2f0ae36b0e1da",
+          "bytes": 8514
+        },
+        {
+          "path": "internal/mcproute/hub_listener.go",
+          "mode": "100644",
+          "blob": "2ba9c10db304e05d7e1b2c65ebf423dd885ddd94",
+          "sha256": "03993826e571e6ebf0d4c33735ef3a9fae7493818451a3c78b58a49200f56b37",
+          "bytes": 31553
+        },
+        {
+          "path": "internal/mcproute/hub_stdio.go",
+          "mode": "100644",
+          "blob": "1c8f0f781a1bc51af66235a26fe8f67587ad637d",
+          "sha256": "88b50b50daa973aee836627018302be9cdada677e273ad20c6ecf95bb5f2fe7b",
+          "bytes": 4722
+        },
+        {
+          "path": "internal/mcproute/hub_stdio_windows_test.go",
+          "mode": "100644",
+          "blob": "81beb8e5a94abdbee63de0cce680ed65e6863103",
+          "sha256": "c5a0d3dcd0fa49eb6021b5e920b73740ab7c9f638c5619502b528ae763e586be",
+          "bytes": 14557
+        },
+        {
+          "path": "npm/generate-platform-packages.js",
+          "mode": "100644",
+          "blob": "901ea8fb508ce0379989c03e088acdb533a1aa93",
+          "sha256": "9ad920b31d5de8c458a3523e10f10bec261b5d8787e786033813c8e248eedffc",
+          "bytes": 13997
+        },
+        {
+          "path": "npm/packages/win32-x64/README.md",
+          "mode": "100644",
+          "blob": "65b69f77f502eefccc9f82b66fecef08c4b64b7d",
+          "sha256": "68fee9e91f0647fa6d6e9e46ce5ee570180f10ff924cf838195f9c37b8f62f8f",
+          "bytes": 4214
+        },
+        {
+          "path": "npm/platform-packages.test.js",
+          "mode": "100644",
+          "blob": "0147cff8c1376b9fd38ab87839bbafadeaa978c5",
+          "sha256": "38adffbb23caebb3435d3dbbd98cb424304ef777e6a7e68f52cd435b139d80b2",
+          "bytes": 20158
+        },
+        {
+          "path": "npm/postinstall.test.js",
+          "mode": "100644",
+          "blob": "cb59abda5c63632b7fbcba8ac1cc183ae40b0cd3",
+          "sha256": "70979d28eb134f28bd4cabad8d71b67b8096cdbbea43676cecbf7ac97e4df2d7",
+          "bytes": 7134
+        }
+      ]
+    },
+    {
+      "lane": "force_stop",
+      "pr": 659,
+      "base": "a3568dfe3426afaca4176d57a2310097e5214e77",
+      "head": "9043acae5a778b9b123b195d3c04cb213e5e568d",
+      "tree": "f616a685b8648a088b45be9b198137fe25b1be26",
+      "publication_state_at_capture": "Prepared locally by Root; publication is tracked separately",
+      "files": [
+        {
+          "path": "internal/api/install.go",
+          "mode": "100644",
+          "blob": "b287f66e0715d1ae1d182b97ed2312431df67543",
+          "sha256": "dd44698c603109ec0d483fb51d1141ac4e6a3e18197d5f3973c6ab1106933539",
+          "bytes": 212323
+        },
+        {
+          "path": "internal/api/install_intent.go",
+          "mode": "100644",
+          "blob": "25d0123583058a2bfd8655c652566c9de39230f8",
+          "sha256": "5bb7ad503b54c729bc7749a6d8f2e12a39771eb6a734d1c1be9472af92c5ced5",
+          "bytes": 32944
+        },
+        {
+          "path": "internal/api/install_parsed_manifest.go",
+          "mode": "100644",
+          "blob": "0e5e7171c86171ce99918ba1c8a3cc64372c7a2d",
+          "sha256": "8c3d106388c7db01deb312a86292407b068527160a4201f814833900b5ff3102",
+          "bytes": 143365
+        },
+        {
+          "path": "internal/api/install_parsed_manifest_lane_b_test.go",
+          "mode": "100644",
+          "blob": "d60735a237365d12ceeafa255c3dc687214ec2c3",
+          "sha256": "335593b0503bfec793cca5592c3ad369fab4aa0b78282e619db87681706339bc",
+          "bytes": 17890
+        },
+        {
+          "path": "internal/api/main_test.go",
+          "mode": "100644",
+          "blob": "94b36b1b98396fa382729ecc5200658ac42907d9",
+          "sha256": "dd3f392c84b1db87a48a29d59ed2528ccb239a5af25d353b753f883b8f3a3ff6",
+          "bytes": 16199
+        },
+        {
+          "path": "internal/api/original_process_owner_required_test.go",
+          "mode": "100644",
+          "blob": "97b211f4bdf0596a48fdd3f326764b19ae8dc03d",
+          "sha256": "bd4fb805baee10374803667167e2aabd4ccdb768df2326b147abb05586a395d5",
+          "bytes": 5682
+        },
+        {
+          "path": "internal/api/phase_f_lifecycle_test.go",
+          "mode": "100644",
+          "blob": "65327c7e7872c7b63c8b9b071d0c2d5d0737b4c0",
+          "sha256": "518db73eeff4dddef2f7cb07286dda2e821fac7d734b6f7769d2f16cd2181597",
+          "bytes": 45473
+        },
+        {
+          "path": "internal/api/stop_force_supervisor.go",
+          "mode": "100644",
+          "blob": "e67ecb457b87ce5d59a41d13c7506c38cafe56ff",
+          "sha256": "9dcc918db886d384aeb87a2790b0ceb78003d05bf25629f82a9a64abdfe83e17",
+          "bytes": 17132
+        },
+        {
+          "path": "internal/api/stop_force_supervisor_other.go",
+          "mode": "100644",
+          "blob": "75ce133537d0d21f911bab8202710199f1352bd3",
+          "sha256": "a75bb2e8aeef4826f32ab897fd3aa39ac31e36322f5d27bd61997beace66c032",
+          "bytes": 142
+        },
+        {
+          "path": "internal/api/stop_supervisor_lane_b_test.go",
+          "mode": "100644",
+          "blob": "dda6e2e03a905c4a741ca6f412c64055c34ef93c",
+          "sha256": "2937d0c5a0e78af892263abcd8f39a124447ae9ba0748af79d1713b92daf5fcb",
+          "bytes": 6242
+        },
+        {
+          "path": "internal/api/supervisor_force_stop.go",
+          "mode": "100644",
+          "blob": "2ddf5c7745663f17c19cfd7d1ba30765143b648e",
+          "sha256": "4c10a94f1dd2fc4d09207951dad34b232c3a1b3b4953db52175f277e55172291",
+          "bytes": 4870
+        },
+        {
+          "path": "internal/api/supervisor_force_stop_test.go",
+          "mode": "100644",
+          "blob": "c50cf504e3b92cd9bb98b164790cb8b8791ca72d",
+          "sha256": "1dbc0f9f762700ab7d6168f28fd9f48777ea5cfc6c546e2b9866fd82375a321d",
+          "bytes": 8064
+        },
+        {
+          "path": "internal/api/supervisor_ipc_force_stop_client.go",
+          "mode": "100644",
+          "blob": "3acbfefbcd9461c98cb2f740bcc4f4f56c4d4d9c",
+          "sha256": "68c3c7f8086c051823d7bd6a65f004fdd33e8b9df1ffa6c90110a2ad10a5af9e",
+          "bytes": 6450
+        },
+        {
+          "path": "internal/api/supervisor_ipc_status_client.go",
+          "mode": "100644",
+          "blob": "895b6e1d32f47dad3d5e8fa246edd6f9806281ec",
+          "sha256": "58a1c4eda2abf785ab096b722a2d044f8a2d03766f3a9b9714e5690e486bb819",
+          "bytes": 26986
+        },
+        {
+          "path": "internal/api/supervisor_seal_guard_test.go",
+          "mode": "100644",
+          "blob": "ea03fd023ef5de7fb6d2d15f32909d78bcd744ea",
+          "sha256": "0ba9737f71cafaa7a40b641a12056d9a2926adc42359870a18de15920d93d914",
+          "bytes": 8283
+        },
+        {
+          "path": "internal/cli/supervise.go",
+          "mode": "100644",
+          "blob": "e95d763c2dfcacbb45dc8fba96c270b4176c895a",
+          "sha256": "c3019870d1b0161ea08a0ababbf7f841c37c1d17bdafc6c95f15f7c9f8e93aaa",
+          "bytes": 210428
+        },
+        {
+          "path": "internal/cli/supervise_force_stop.go",
+          "mode": "100644",
+          "blob": "2e7788055a619a56c01e3dd04fa8d2c1c9aafc1b",
+          "sha256": "970c226446e206d95c168f831b74bc3b626d0aa13db9159ca4f02e9a0904cfa3",
+          "bytes": 11599
+        },
+        {
+          "path": "internal/cli/supervise_force_stop_test.go",
+          "mode": "100644",
+          "blob": "4456fd4199c3591331e1fae641fd0b8d823ad8b1",
+          "sha256": "39a151f56ae4094995c016e0a8c31772a6e2c9514c2a1a88244f8efa4e2c6d62",
+          "bytes": 6945
+        },
+        {
+          "path": "internal/cli/supervise_force_stop_windows_test.go",
+          "mode": "100644",
+          "blob": "3f99c60f02e9e54d70bc87ab329d63c3c32ad69a",
+          "sha256": "eb7da02d67fa201881f0d4ff9816344ccfcda61962839b663914372c5e0522fa",
+          "bytes": 7823
+        },
+        {
+          "path": "internal/cli/supervise_root_exit_test.go",
+          "mode": "100644",
+          "blob": "7fdfedc7487441ec48beb4258efbc99672c4bb51",
+          "sha256": "8193f363f7a31492593f0c85acb00b7cdd97c68e5a052e4d45dda52542c2fc1e",
+          "bytes": 5519
+        },
+        {
+          "path": "internal/cli/supervise_status.go",
+          "mode": "100644",
+          "blob": "f71cf0459a8aa2c5c02369e498540d8ffd4948cc",
+          "sha256": "97d206b9c77944f04ea156af46d7fbc44d2c803a9d361cbc50ae4b422c762662",
+          "bytes": 21096
+        },
+        {
+          "path": "internal/cli/supervisor_controller.go",
+          "mode": "100644",
+          "blob": "8dce8bf32ad04f0701a4b83fe8127e2123b9e883",
+          "sha256": "8bf0eb49338f0a8b41d4d11be612cf3530b82f6ec3f27736e4f2c56601c3b792",
+          "bytes": 245706
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+[
+  {
+    "id": "S1",
+    "paths": [
+      "internal/api/install_parsed_manifest_lane_b_test.go"
+    ],
+    "decision": "Restore only automatically merged generic-workspace/import/runtime/test-rename/out-variable hunks to P02 context. After nine-marker resolution the entire file equals original P02 blob 73d3a4ce670b4168c3c87abc8dedfe16fa2a0800.",
+    "reason": "P02 replaced the old successful unprepared workspace/numerical-kill fixture with explicit Serena preparation refusal and captured-original completion tests. Incoming neighbouring hunks belonged to the obsolete test; retaining them would leave a generic template under a Serena-refusal assertion and an undefined out variable."
+  },
+  {
+    "id": "S2",
+    "paths": [
+      "internal/api/install_parsed_manifest.go",
+      "internal/api/install_parsed_manifest_test.go"
+    ],
+    "decision": "Dry-run removal heading states that stop requires captured original owner after reconcile on all platforms; test retains new prior-row fixture and verifies this conditional statement.",
+    "reason": "P02 has an authenticated original capture path on Windows. Blanket Windows refusal would describe a different implementation; an unconditional targets-to-kill statement also overpromises closure."
+  },
+  {
+    "id": "S3",
+    "paths": [
+      "internal/api/install_parsed_manifest_test.go"
+    ],
+    "decision": "Keep the incoming three-case Windows legacy-generation retention regression. Explicitly refuse original capture through existing installRemovedPrepareFixture, require exactly one capture and one reconcile, preserve scheduler XML/recovery/no PID-or-port-kill assertions, and require the actual P02 cleanup-incomplete warning. Rename captured PID case to observed PID.",
+    "reason": "A numerical PID/port observation does not establish the original creator capture. Positive authenticated capture completion remains covered by the existing P02 test immediately before this regression."
+  },
+  {
+    "id": "S4",
+    "paths": [
+      "internal/api/supervisor_intent_lock_ownership_test.go"
+    ],
+    "decision": "Remove only the raw-flock inventory row internal/api/secrets_init_recovery.go:method:*secretsInitRecoveryOwner.locked.",
+    "reason": "P02 already contains lockLeafLedgered and ReleaseAndJoin, errors.Join Unwrap and the current PR669 regression file. Weekly refresh applied classifiers are already present and are retained verbatim."
+  },
+  {
+    "id": "S5",
+    "paths": [
+      "internal/api/phase_f_lifecycle_test.go",
+      "internal/api/r36_lane_a2_fixes_test.go",
+      "internal/cli/setup.go"
+    ],
+    "decision": "Accept clean three-way composition; no manual content edit.",
+    "reason": "P02 differs from patch base in these files, but incoming changes are confined to legacy registration preservation/autostart dispatch and preserve neighbouring P02 admission, classifier and running-image-safe setup changes."
+  }
+]

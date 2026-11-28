@@ -1,0 +1,75 @@
+{
+  "schema": "exact-seven-test-afterimages-v1",
+  "rows": [
+    {
+      "path": "internal/cli/supervise_respawn_arm_gen_test.go",
+      "public_5ad_git_blob": "62aafa1987c0593351228d4c34d299d9254d36d7",
+      "recovered_33_git_blob": "708409f19958636b503d6bb5d6310ca5ca18557a",
+      "recovered_33_sha256": "e6e24032a8c11b8a5fcaa3cd5a64acaec239ddd8254c8195b748bcca737093a7",
+      "source727d_git_blob": "708409f19958636b503d6bb5d6310ca5ca18557a",
+      "source727d_sha256": "e6e24032a8c11b8a5fcaa3cd5a64acaec239ddd8254c8195b748bcca737093a7",
+      "bytes_equal": true,
+      "additional_difference": "Exact complete afterimage is byte-identical."
+    },
+    {
+      "path": "internal/cli/supervise_test.go",
+      "public_5ad_git_blob": "a127781048624324139185ffa592e185010a6ed9",
+      "recovered_33_git_blob": "7885008429d09bdd0fbd74583b35a67eddf1f8c4",
+      "recovered_33_sha256": "a0f3f4af39253a8e9055d212db9783f8dc69c221301204af5840e45be502da55",
+      "source727d_git_blob": "c1985ab57bf2a5347547187730aef80d847fa139",
+      "source727d_sha256": "294f4bc40f7e5060ab8209e016ec0cb5f70e2c1f02c0bf735fb3d7f00d67f612",
+      "bytes_equal": false,
+      "additional_difference": "Source727d additionally binds the canonical path test seam in TestSuperviseCommand_StatusIPC_ReconcileReady; exact33 does not contain this four-line addition."
+    },
+    {
+      "path": "internal/cli/supervisor_controller_orphan_reap_test.go",
+      "public_5ad_git_blob": "14abb540847502c65473ed2a75446e34a73d16d3",
+      "recovered_33_git_blob": "57937cb9ea9c2c20afb498cfef0a75cbf414f2cf",
+      "recovered_33_sha256": "c5659a7da6192e4ac7d57d3d8734643befd7a9ecf16670f4c043540238be24f3",
+      "source727d_git_blob": "57937cb9ea9c2c20afb498cfef0a75cbf414f2cf",
+      "source727d_sha256": "c5659a7da6192e4ac7d57d3d8734643befd7a9ecf16670f4c043540238be24f3",
+      "bytes_equal": true,
+      "additional_difference": "Exact complete afterimage is byte-identical."
+    },
+    {
+      "path": "internal/cli/upgrade_gui_fence_windows_test.go",
+      "public_5ad_git_blob": "a6eee65676940097de514fac4327a76bc437a837",
+      "recovered_33_git_blob": "638ccc42dfbff11c7c9c711720388525f7b2f900",
+      "recovered_33_sha256": "1f8c429031fd0ceec6f9853b6628a5796b2196f2c97afa38dd2777530a02265b",
+      "source727d_git_blob": "5cce7e8804e16806575ba950eca551a6ee5d9836",
+      "source727d_sha256": "8774a51838b3a3947e9547de78b906a57a67d9f91e716fc13d5acd87bbd88eea",
+      "bytes_equal": false,
+      "additional_difference": "Exact33 uses journal allowances/contexts and context-aware process observation signatures; Source727d uses the earlier production contracts. Six lines differ in five hunks."
+    },
+    {
+      "path": "internal/cli/upgrade_gui_qualified_fixture_windows_test.go",
+      "public_5ad_git_blob": "63c46dba0f02b3a1eb100dac73ba28125c01e4ee",
+      "recovered_33_git_blob": "647c9568e0a5d8a82cff0ba60316cadfd5079259",
+      "recovered_33_sha256": "b64a2eb741ff522338b4e591600841a1f597f0e368d86bb22c2e14da8c6604b1",
+      "source727d_git_blob": "dcdac5b9138b1d12a32100620030abd127c1fd72",
+      "source727d_sha256": "bbda7cd86af4f41fce3fac07aa23f1a2d0f7c16c85f9bb0af254141712ef8fa6",
+      "bytes_equal": false,
+      "additional_difference": "Source727d additionally extracts receiveWindowsCanonicalEntryFixture for shared receiving; exact33 requires a JournalAllowance in transaction options. The independent CopyFileW fix is present in both."
+    },
+    {
+      "path": "internal/cli/supervise_reconcile_ipc_test.go",
+      "public_5ad_git_blob": "4fbe28e28679c5a48b4731057683ac6f19607137",
+      "recovered_33_git_blob": "82fcacfd60f4d51cc1efd094e391601b8a2107ce",
+      "recovered_33_sha256": "c389207c8b07ae3854a367ffc9f6ed4b8ceda9326ba14bf437ba06a82301cdad",
+      "source727d_git_blob": "899ee7e2d2b5f2cb6d9ed2e2cd1c37df853580da",
+      "source727d_sha256": "7b97cab7c6d68f642091d241845dea831c488acce0f785b69c242a2e29b3d71d",
+      "bytes_equal": false,
+      "additional_difference": "Source727d additionally disables builtin-route seeding in the common reconcile fixture. Both revisions have the explicit short-state-root seam from commit33eaf."
+    },
+    {
+      "path": "internal/cli/workspace_cmd_test.go",
+      "public_5ad_git_blob": "d267cab054419fccba218348777fe7ad2a714332",
+      "recovered_33_git_blob": "a5c940ea6683d140ade80e72c3ceb5535990c27f",
+      "recovered_33_sha256": "535d4679863d5ce78b3e7e021abcebadccebbce67a59252dc9b8ea6a17e3ef49",
+      "source727d_git_blob": "7f1a27cf92e7866205813ee350a64a90e0615101",
+      "source727d_sha256": "5f8b665f80e05d67709ceab6ea1eaae913ca7b0268d01a9bed868f9bb12d0784",
+      "bytes_equal": false,
+      "additional_difference": "Exact33 passes --backend serena for workspace register; Source727d invokes register without that option. Both revisions retain the short private workspace-state directory fix."
+    }
+  ]
+}

@@ -1,0 +1,100 @@
+{
+  "schema": "original-private-build-inputs-v6",
+  "reviewed": true,
+  "source_root": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\source-original3ebe-v2",
+  "source_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+  "source_snapshot": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\product3ebe-source-snapshot.json",
+    "sha256": "5f59bbe051cbd6e160e3e84e67180d96940b13191988b7e41eb760d3eea1ac6f"
+  },
+  "closed_producer_receipts": [
+    {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-source-restore-v2\\parent.json",
+      "sha256": "665099615fc911e5db3eef74de7c28e06ea35fcece33d290f5d0439fb3268f20"
+    },
+    {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-helper-inputs-v6\\parent.json",
+      "sha256": "a32ddbdea1de36963d3c9b333543e9c79629034c68a5717b051620ef2ae08377"
+    },
+    {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\passive-uv-seed-copy-v1\\parent.json",
+      "sha256": "c7c80e0e7577a1d1118d3e17ea98721e2a8f68f39d842bcacc02c532851bee59"
+    }
+  ],
+  "tools": {
+    "go": {
+      "path": "@@RECOVERY_MSYS2_HOME_ESCAPED@@\\ucrt64\\lib\\go\\bin\\go.exe",
+      "sha256": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113"
+    },
+    "python": {
+      "path": "@@RECOVERY_CONTROLLER_PYTHON_HOME_ESCAPED@@\\python.exe",
+      "sha256": "d4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd"
+    },
+    "validator": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-helper-inputs-v6\\windows-product-validate.exe",
+      "sha256": "fe21d04537c56fd3a7ad0a13189d339d38c9de9fcc83528aaa36d39ef5cf5a98"
+    },
+    "winps": {
+      "path": "@@RECOVERY_WINDOWS_HOME_ESCAPED@@\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      "sha256": "75f490d70f821afbbbb28d8ae45fa712c0ef39f73832af5ff0df284beb22a9fc"
+    }
+  },
+  "scope_helper": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\private_migration_scope_v6.py",
+    "sha256": "a56e6730bc39307374d811222ee164213f6a73a1513b360688d2e0b925ee36c0"
+  },
+  "graph_helper": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\receive_private_graph_v6.py",
+    "sha256": "1d6895719d79d1b53edaab13d6aa8bd7d19e2efe2c87b0003e543f44cd64fe01"
+  },
+  "utf8_loader": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\invoke_fixed_build_utf8.ps1",
+    "sha256": "4cb35eb80e029269732eeaf0409de92ff00a58b59070abd3ebff2cb9281ad79b"
+  },
+  "product_fixture": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\native-actor-fixture-v6.json",
+    "sha256": "4d92e007d57c09b412eb4b6f04d810a7e0f49beb1350c73eccb1fbd1857f8a15"
+  },
+  "cache_seed": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\passive-uv-seed-copy-v1\\seed\\seed-descriptor.json",
+    "sha256": "0285a1be7101fe62c3c60f4375772dc3b791488594c686a931f0d3e72eb007cd"
+  },
+  "preparation_tools": {
+    "uv": {
+      "path": "@@RECOVERY_SERENA_UV_HOME_ESCAPED@@\\uv.exe",
+      "sha256": "81ea623608f8c17720c62efd0a380a8ead380c4d365ba6968e9d279a2319c674"
+    },
+    "uvx": {
+      "path": "@@RECOVERY_SERENA_UV_HOME_ESCAPED@@\\uvx.exe",
+      "sha256": "836554a2ec223159df425d8c71292fef20ef7659469dd83bab840e80af81f5cc"
+    },
+    "python": {
+      "path": "@@RECOVERY_SERENA_PYTHON_HOME_ESCAPED@@\\python.exe",
+      "sha256": "204d51f19707da17766bccecce2ceececadab350663a8190420d1377bac1150d"
+    }
+  },
+  "release_version": "0.4.60",
+  "release_build_date": "2026-11-28T11:11:34Z",
+  "evidence_parents": {
+    "default": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\o6d28",
+    "state": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\o6s28"
+  },
+  "input_files": [
+    {
+      "path": "@@RECOVERY_WINDOWS_HOME_ESCAPED@@\\System32\\WindowsPowerShell\\v1.0\\Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1",
+      "sha256": "c09df190addc67f7c6c38e7ea1dca719fd87807107f688c3f60ed8816e1c48a6"
+    },
+    {
+      "path": "@@RECOVERY_WINDOWS_HOME_ESCAPED@@\\System32\\WindowsPowerShell\\v1.0\\Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psm1",
+      "sha256": "f9232f3de3c94dd03caf40f54b22876c9d810c657c41e54ab2d10469b45f26b5"
+    },
+    {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-helper-inputs-v6\\commands\\execution.json",
+      "sha256": "bf3fb41e16c11fecabd923749b4b43a76e085cd085f093ef786c860c14ea7d2c"
+    },
+    {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\original-source-restore-v2\\original3ebe-receiving.json",
+      "sha256": "c63d8b13331a752c85c5e62f4c4ce0a2ee19cc0c129c83b4dd6ed99fbd944b46"
+    }
+  ]
+}

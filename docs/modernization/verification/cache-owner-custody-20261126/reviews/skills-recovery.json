@@ -1,0 +1,32 @@
+{
+  "fully_read_and_applied_this_recovery": 3,
+  "unique_team_count_increment": 0,
+  "prior_total_recertified": false,
+  "entries": [
+    {
+      "name": "code-review-and-quality",
+      "package": "skill://plugins_6ab00825b73c8191b684c13fdd7a0280/code-review-and-quality",
+      "fully_read_this_recovery": true,
+      "applied": "Reviewed complete ten-file delta, assertions, repetition, negative cases and private/public namespace compatibility; separated code review from full-gate and external approval.",
+      "result": "No remaining defect found after removing two already-covered CLI hunks; full public-head execution remains NOT_RUN.",
+      "reused_from_prior_team_work": true
+    },
+    {
+      "name": "git-workflow-and-versioning",
+      "package": "skill://plugins_6ab00825b73c8191b684c13fdd7a0280/git-workflow-and-versioning",
+      "fully_read_this_recovery": true,
+      "applied": "Bound public preimages to exact heads/blob IDs; validated apply/reverse/whitespace and actual #664 overlapping files; excluded already-public GUI and two upstream-covered CLI changes; preserved concurrent #664 audit.",
+      "result": "Two reviewable patches (API8,CLI2), no commit/push by this reviewer.",
+      "reused_from_prior_team_work": true
+    },
+    {
+      "name": "documentation-and-adrs",
+      "package": "skill://plugins_6ab00825b73c8191b684c13fdd7a0280/documentation-and-adrs",
+      "fully_read_this_recovery": true,
+      "applied": "Kept source-specific qualification and failure evidence, recorded immutable SHA-256 controls and pending acceptance, preserved older audit/checkpoint text.",
+      "result": "Scoped checkpoint and evidence projection; no claim that lost transient packet was recovered unchanged.",
+      "reused_from_prior_team_work": true
+    }
+  ],
+  "excluded": "Unrelated visual, product-design, infrastructure replacement and paid reviewer roles were not applied for numerical coverage."
+}

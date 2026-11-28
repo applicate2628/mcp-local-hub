@@ -1,0 +1,289 @@
+{
+  "schema": "mcphub-audit-publication-v1",
+  "date": "2026-11-25",
+  "scope": "Seven existing owner PRs; exact native gate result and independent GitHub head readback. Coordination publication follows separately. No merge or new PR.",
+  "publication_method": "Installed sanctioned local push gate with exact literal source commit and existing destination branch; no force push or ref API",
+  "native_publication_status": "PASS",
+  "private_export_sha256": "d8ef541a8f80f6403d5a5210e8ced653309292d39f0048b56edb54f914776c7d",
+  "original_controller": {
+    "controller_exit_code": 0,
+    "original_controller_reaped": true,
+    "controller_capture_handles_closed": true,
+    "seconds": 107.99804239999503,
+    "receipt_sha256": "7391a1e2930a914281ac38ae38978fdfdfb7fe8d3b9bc8b36cef7509f9c5a359"
+  },
+  "commands": [
+    {
+      "pr": 624,
+      "exit_code": 0,
+      "seconds": 14.69394490000559,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_owner_retained": true,
+      "original_readers_joined": true,
+      "completion_lifecycle_state": "CLOSED",
+      "original_stdout_sha256": "edeeae333d70d8cc41f634d1ee25df0fb8b739e1efa765584ba32516be4b6e9d",
+      "original_stderr_sha256": "40357ec46193711a4896ee67bc1cadc8eaf6f92aa93ca3804eb157b6ba2ce4a2"
+    },
+    {
+      "pr": 629,
+      "exit_code": 0,
+      "seconds": 14.584838500013575,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_owner_retained": true,
+      "original_readers_joined": true,
+      "completion_lifecycle_state": "CLOSED",
+      "original_stdout_sha256": "58eaf94fdd604d4c93cabb4db9acbda7f0bd3c6589eaa61b2e5dcd03ebf28d3c",
+      "original_stderr_sha256": "3366d7f805291e6b67f9ae52875b7daa3751ee92d72a6f126cc063a0a95b323a"
+    },
+    {
+      "pr": 655,
+      "exit_code": 0,
+      "seconds": 14.230804099992383,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_owner_retained": true,
+      "original_readers_joined": true,
+      "completion_lifecycle_state": "CLOSED",
+      "original_stdout_sha256": "63fee29d01a4ddbfaf861130eab28b230e861f6e7a56d15929c5046327ff3864",
+      "original_stderr_sha256": "6537785a01de5c942181c2e567d0ee7f4ff62792b6ce3fcc71a844d1e3bb8785"
+    },
+    {
+      "pr": 660,
+      "exit_code": 0,
+      "seconds": 16.984782100014854,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_owner_retained": true,
+      "original_readers_joined": true,
+      "completion_lifecycle_state": "CLOSED",
+      "original_stdout_sha256": "68978b3c745b3237cf12def9d7fe01df045c7a6d295bb6a977af247dc2456645",
+      "original_stderr_sha256": "e298239516614acf3ff6348258e5fe7765442004714e35df3a96a58094995a2d"
+    },
+    {
+      "pr": 628,
+      "exit_code": 0,
+      "seconds": 13.95732530002715,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_owner_retained": true,
+      "original_readers_joined": true,
+      "completion_lifecycle_state": "CLOSED",
+      "original_stdout_sha256": "babbb15f78dcac39daaf92b3d81ee5d5b51f1f9183590d268470c55c2abf8c8b",
+      "original_stderr_sha256": "3a7826c5f1d655a4be494e2a00132b1f76c7a0307aa726c6e41fbb07ae44cd1d"
+    },
+    {
+      "pr": 671,
+      "exit_code": 0,
+      "seconds": 16.03165610000724,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_owner_retained": true,
+      "original_readers_joined": true,
+      "completion_lifecycle_state": "CLOSED",
+      "original_stdout_sha256": "1c70eb1293162665e0899275fa5b317d1f72e8992ae41ce22ed8f5e51bbe9c67",
+      "original_stderr_sha256": "5196c60dc2b303b340130ff778c512611f17cfd89825f1dc261172e48b7ed261"
+    },
+    {
+      "pr": 659,
+      "exit_code": 0,
+      "seconds": 17.05189500004053,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_owner_retained": true,
+      "original_readers_joined": true,
+      "completion_lifecycle_state": "CLOSED",
+      "original_stdout_sha256": "53189fa12c130b39bf43c6f19b6304a79cfd6c5e1f56fa5ab713e854d028cd02",
+      "original_stderr_sha256": "81ef604fb6c1b7b3de8eb8ff48df6330edff8cc01fd6eceebbc08384634cb84c"
+    }
+  ],
+  "github_readback": [
+    {
+      "pr": 624,
+      "branch": "perf/rx01-cmaketrace-benchmark-20261112",
+      "sha": "5c36f626467bc6c8446d621f3a2b3fc7fd507b4b",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 629,
+      "branch": "fix/relay-output-failure-contract-20261113",
+      "sha": "6808e99bacc0961fef2a511b1ae1a088f12a1e12",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 655,
+      "branch": "fix/serena-finalize-context-20261115",
+      "sha": "6743f3d552027395daf06bfd4fbc0123a374703b",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 660,
+      "branch": "fix/scheduler-hidden-task-lookup-20261119",
+      "sha": "8d4f2606c9af7e20181e4ad290b29be0e0a2dd0f",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 628,
+      "branch": "perf/rx16-native-observation-20261112",
+      "sha": "0b3a9e0edafc41e7e8567abfde878e8f169405ef",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 671,
+      "branch": "codex/windows-installer-review",
+      "sha": "891ef8bfd0764a969db2f800578fd45acd5623d6",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 659,
+      "branch": "fix/api-port-pid-observation-20261118",
+      "sha": "9043acae5a778b9b123b195d3c04cb213e5e568d",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    }
+  ],
+  "pr_body_updates": {
+    "624": {
+      "change": "Ошибка чтения CMake trace больше не превращается в частичный успех при совпадении с byte cap или too-long line. Сохранена исходная I/O-ошибка; добавлена регрессия обоих пределов.",
+      "validation": "Windows: оба причинных отрицательных контроля FAIL на исходной реализации; весь пакет cmaketrace PASS (1.339 s).",
+      "docs": [
+        "cmake-audit-remediation-20261125.md",
+        "cmake-audit-evidence-20261125.json"
+      ],
+      "limit": "Полный состав и Product acceptance отслеживаются отдельно в #664."
+    },
+    "628": {
+      "change": "Детерминированная проверка окна подтверждения завершения сохраняет реальное ожидание исходного Windows handle и моделирует только ход времени алгоритма. Устранено предположение о гарантированном native scheduling в 50 ms.",
+      "validation": "Windows на точной исходной базе этого PR: TestRunStrictlyContained_WindowsTimeoutProofWindowFastAndSlow PASS (0.409 s). Production-код и сроки не изменены.",
+      "docs": [
+        "process-audit-remediation-20261125.md",
+        "process-audit-evidence-20261125.json"
+      ],
+      "limit": "Результат не является 50-ms performance proof, полной console qualification или подтверждением native post-termination accounting."
+    },
+    "629": {
+      "change": "Завершение initialize отделено от необязательного SID. Ответы сервера и отмена проходят при насыщении 64 request slots; 65-й запрос отклоняется до dispatch. HTTP 404 закрывает POST/GET сессию, без повторения уже доставленных эффектов.",
+      "validation": "Windows: два причинных отрицательных контроля; Relay/HTTPToStdio и SDK consumer regression PASS (2.761 s).",
+      "docs": [
+        "relay-audit-remediation-20261125.md",
+        "relay-audit-evidence-20261125.json"
+      ],
+      "limit": "404 требует нового явно созданного Run; автоматический replay операций не добавлен. Реальные клиентские сценарии остаются отдельной приёмкой."
+    },
+    "655": {
+      "change": "Снимок registry связан с идентичностью файла, включая Windows file ID. Сохранённая metadata перепроверяется по содержимому не реже каждого 32-го чтения. Исправлен переход отсутствие→пустой файл и наблюдение ошибки Wake.",
+      "validation": "Windows focused API group PASS (28.106 s), включая замену файла с прежними size/mtime и Wake failure. Существующая Serena chain сохранена.",
+      "docs": [
+        "cache-audit-remediation-20261125.md",
+        "serena-audit-evidence-20261125.json"
+      ],
+      "limit": "32 чтения — предел числа обращений, не времени. Полная source-issued Serena/Product qualification не выводится из focused PASS."
+    },
+    "659": {
+      "change": "force_stop v1 связывает точное поколение target с authenticated IPC и сохранённым original creator/Job; force и natural waiter используют одну terminal completion cell. PID-only destructive leafs возвращают типизированный refusal. Из Wave адресно перенесено сохранение Known native exit code, включая259 и high DWORD.",
+      "validation": "Windows: focused API PASS14.479 s; окончательный CLI/native creator/terminal/exit-code group PASS0.862 s. Старая классификация exit code дала причинный FAIL. Исходные helper roles переиспользованы.",
+      "docs": [
+        "force-stop-audit-remediation-20261125.md",
+        "force-stop-audit-evidence-20261125.json"
+      ],
+      "limit": "Wire fixtures используют net.Pipe; полный authenticated named-pipe обмен не квалифицирован. Очистка удалённого descriptor по PID-only snapshot остаётся с refusal/warning. Desired=running и restart policy сохранены; отдельный CLI --force flag не добавлен."
+    },
+    "660": {
+      "change": "NextRun получает исходный локальный COM DATE с различением zero и недоступного поля. Deadline операции передаётся существующему Scheduler backend. Unknown mutation сохраняет причину и останавливает rollback до inverse; известная LSP-компенсация получает один отдельный срок.",
+      "validation": "Windows: весь Scheduler PASS (37.948 s); API transaction/context regressions PASS (8.228 s); CLI V3 rollback regressions PASS (0.597 s). Три замечания независимого caller-path review и происхождение no-dispatch marker исправлены.",
+      "docs": [
+        "scheduler-audit-remediation-20261125.md",
+        "scheduler-audit-evidence-20261125.json"
+      ],
+      "limit": "Capture budgets: stdout16 MiB, stderr64 KiB. Реальные task mutations и Product recovery требуют своей приёмки; backend без ContextBinder не обещает прерывание."
+    },
+    "671": {
+      "change": "Исправлен GUI restart по устаревшему sidecar; selective rollback очищает только выданные staged-originals. Существующий private stdio owner подключён к зарегистрированным front sessions с отдельными дочерними процессами и отзывом допуска. Добавлен полный flock notice; точный npm V4 payload expectation актуализирован.",
+      "validation": "Windows: GUI control PASS0.470 s; selective rollback с обычным compiled registry PASS4.190 s; registered route с двумя настоящими fixture children PASS14.323 s; isolated owner PASS5.407 s. Полный npm test19/19 PASS; первый18/19FAIL сохранён.",
+      "docs": [
+        "pr671-remediation-evidence-20261125.md",
+        "pr671-remediation-evidence-20261125.json",
+        "registered-stdio-isolation-20261125.md"
+      ],
+      "limit": "ARA-01 остаётся частично реализованной: shipped manifest, install/reconcile/restore, project enrollment/rebind, настоящий pinned provider и qualified Product ещё не приняты. Синтетический rollback fixture не выдаётся за полный Product upgrade."
+    }
+  },
+  "exact_new_head_codex_review": "NOT_CONFIRMED; no paid dispatch or CI/status query performed",
+  "full_gate_status": "FAIL on 14af01e; no full readiness inferred",
+  "coordination_attempt_history": [
+    {
+      "source_commit": "fcc8d2cda62cc9cddd744c28699d4bd09a43bf1e",
+      "status": "REFUSED_NOT_PUBLISHED",
+      "gate_exit_code": 1,
+      "stage": "range-coverage",
+      "finding_classes": [
+        "value-password",
+        "machine-path"
+      ],
+      "finding_scope": "One public JSON stdout field containing synthetic error-canary fixture values; original test source and private log hashes retained.",
+      "original_receipt_sha256": "f9c19218be4baa84e5d6213c517cc7dfcbe6b5cf2b07fdfc87f64ab32b92894a",
+      "diagnostic_receipt_sha256": "0cf45772a7f4c7d5a5f07a5254adb9ed206c98418b00a2010a89ebba9f22fbdf",
+      "private_export_sha256": "122a30b2e0385450df5b438121cb26079280b589f85a9f62aa91059b39937ddd",
+      "original_controller_reaped": true,
+      "original_capture_handles_closed": true,
+      "all_commands_quiescent": true,
+      "remediation": "Remove synthetic home prefixes and credential-shaped argument values from the publication copy only; preserve original stream/receipt hashes and failures. Rebuild unpublished coordination commit from its same public parent, then use unchanged installed native push gate."
+    }
+  ]
+}

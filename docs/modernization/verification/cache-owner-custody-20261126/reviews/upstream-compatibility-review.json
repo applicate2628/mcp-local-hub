@@ -1,0 +1,63 @@
+{
+  "schema": "public-port-delta-upstream-compatibility-v1",
+  "status": "PASS_STATIC_ONLY",
+  "covered_upstream_dependencies": [
+    {
+      "pr": 664,
+      "head": "62199b68b2fc59095edacfe47d6990d48accbb2f",
+      "test": "TestAdoptCmdDryRunByDefaultMutatesNothingAndRedactsSecrets",
+      "reason": "Already handled by current #664 real-planner auto-port change.",
+      "included_in_current_666_delta": false
+    },
+    {
+      "pr": 664,
+      "head": "62199b68b2fc59095edacfe47d6990d48accbb2f",
+      "test": "TestAdoptCmdDryRunRefusesStateRootBeforeOfferingPlan",
+      "reason": "Already handled by current #664 bounded valid-plan seam; retained9314 is a plan datum and does not allocate a socket.",
+      "included_in_current_666_delta": false
+    }
+  ],
+  "checks": [
+    {
+      "pr": 665,
+      "direction": "forward",
+      "status": "PASS"
+    },
+    {
+      "pr": 665,
+      "direction": "reverse",
+      "status": "PASS"
+    },
+    {
+      "pr": 666,
+      "direction": "forward",
+      "status": "PASS"
+    },
+    {
+      "pr": 666,
+      "direction": "reverse",
+      "status": "PASS"
+    },
+    {
+      "pr": 665,
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "base_head": "62199b68b2fc59095edacfe47d6990d48accbb2f",
+      "upstream_sha256": "a0fa50cc479fea4af11a265683c705d7fb08c9610d1f0a056dbd7d68d6bdd006",
+      "upstream_git_blob": "374e43cc05b880ef3d8a6d62ce27485361201269",
+      "forward_apply_to_actual_upstream": "PASS",
+      "base_file_mutated": false
+    },
+    {
+      "pr": 666,
+      "path": "internal/cli/adopt_test.go",
+      "base_head": "62199b68b2fc59095edacfe47d6990d48accbb2f",
+      "upstream_sha256": "eac83468591d6a55ffc0adf33cc2e1f97ad6cba3addaf6ee5d0663c3b1c56114",
+      "upstream_git_blob": "786c5ba7f1c3a8c7fefef5481cb108878bb68856",
+      "forward_apply_to_actual_upstream": "PASS",
+      "base_file_mutated": false
+    }
+  ],
+  "runtime_tests_executed": false,
+  "base_branch_merged": false,
+  "source_snapshot_changed": false
+}

@@ -1,0 +1,333 @@
+//go:build windows && amd64
+
+package main
+
+import (
+	"crypto/sha256"
+	"debug/pe"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"reflect"
+	"sort"
+	"strings"
+	"syscall"
+	"time"
+
+	"golang.org/x/sys/windows"
+	fixture "mcp-local-hub/internal/canonicalnativefixture"
+	"mcp-local-hub/internal/clients"
+)
+
+const allowedRoot = "D:\\dev\\ChatGPT"
+
+func hexValue(value string, count int) bool {
+	if len(value) != count || strings.ToLower(value) != value {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
+}
+
+func originalFileClose(file *os.File, primary error) error {
+	closeErr := file.Close()
+	cause := errors.Join(primary, closeErr)
+	if closeErr != nil {
+		return &fixture.FileCustodyError{File: file, Cause: cause}
+	}
+	return cause
+}
+
+func checkedOrdinaryInput(path string) error {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path || filepath.Ext(path) == "" {
+		return errors.New("absolute clean original input path required")
+	}
+	tail := strings.TrimPrefix(path, filepath.VolumeName(path))
+	if strings.Contains(tail, ":") {
+		return errors.New("alternate input stream refused")
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	attributes, ok := info.Sys().(*syscall.Win32FileAttributeData)
+	if !ok || attributes == nil || attributes.FileAttributes&syscall.FILE_ATTRIBUTE_REPARSE_POINT != 0 ||
+		info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return errors.New("ordinary original input file required")
+	}
+	return nil
+}
+
+func measureImage(input fixture.ImageInput, subsystem uint16) error {
+	if !hexValue(input.SHA256, 64) || !strings.EqualFold(filepath.Ext(input.Path), ".exe") {
+		return errors.New("exact pinned executable input required")
+	}
+	if err := checkedOrdinaryInput(input.Path); err != nil {
+		return err
+	}
+	file, err := os.Open(input.Path)
+	if err != nil {
+		return err
+	}
+	image, imageErr := pe.NewFile(file)
+	if imageErr != nil {
+		return originalFileClose(file, imageErr)
+	}
+	header, ok := image.OptionalHeader.(*pe.OptionalHeader64)
+	if !ok || image.Machine != pe.IMAGE_FILE_MACHINE_AMD64 || header.Subsystem != subsystem {
+		return originalFileClose(file, errors.New("original executable PE class differs"))
+	}
+	hash := sha256.New()
+	_, readErr := io.Copy(hash, file)
+	if err := originalFileClose(file, readErr); err != nil {
+		return err
+	}
+	if hex.EncodeToString(hash.Sum(nil)) != input.SHA256 {
+		return errors.New("original executable bytes differ from the pinned input")
+	}
+	return nil
+}
+
+func fileHash(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	hash := sha256.New()
+	_, readErr := io.Copy(hash, file)
+	if err := originalFileClose(file, readErr); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func fixedArgs(args []string, profile, focus string, timeout time.Duration) error {
+	if profile == "focused" {
+		if _, err := fixture.Slot(focus); err != nil {
+			return err
+		}
+		want := []string{"-test.paniconexit0", "-test.v=test2json", "-test.count=1",
+			"-test.timeout=2m0s", "-test.run=^" + focus + "$"}
+		if timeout != 120*time.Second || !reflect.DeepEqual(args, want) {
+			return errors.New("focused profile requires the exact fixed five arguments and 120s")
+		}
+		return nil
+	}
+	if profile != "full" || focus != "" || timeout != 5*time.Minute || len(args) != 4 {
+		return errors.New("full profile requires original four arguments and 5m")
+	}
+	seen := map[string]bool{}
+	for _, arg := range args {
+		key, value, equal := strings.Cut(arg, "=")
+		if seen[key] {
+			return errors.New("duplicate original full-suite argument")
+		}
+		seen[key] = true
+		switch key {
+		case "-test.paniconexit0":
+			if equal {
+				return errors.New("paniconexit0 differs")
+			}
+		case "-test.v":
+			if !equal || value != "test2json" {
+				return errors.New("original test2json framing required")
+			}
+		case "-test.count":
+			if !equal || value != "1" {
+				return errors.New("one original suite execution required")
+			}
+		case "-test.timeout":
+			parsed, err := time.ParseDuration(value)
+			if err != nil || parsed != timeout {
+				return errors.New("original whole-suite timeout differs")
+			}
+		default:
+			return errors.New("unsupported original whole-suite argument")
+		}
+	}
+	return nil
+}
+
+func readPlan(path, digest, profile, binary, expected, source string, args []string, timeout time.Duration) (fixture.Plan, error) {
+	var plan fixture.Plan
+	raw, err := fixture.ReadDocument(path, &plan)
+	if err != nil {
+		return plan, err
+	}
+	sum := sha256.Sum256(raw)
+	if !hexValue(digest, 64) || hex.EncodeToString(sum[:]) != digest {
+		return plan, errors.New("original canonical plan digest differs")
+	}
+	if plan.Schema != fixture.PlanSchema || !hexValue(plan.SourceCommit, 40) || plan.Profile != profile ||
+		plan.Binary.Path != binary || plan.Binary.SHA256 != expected || plan.SourceDir != source ||
+		!reflect.DeepEqual(plan.OriginalArgs, args) {
+		return plan, errors.New("original canonical plan invocation differs")
+	}
+	if err := fixedArgs(args, profile, plan.FocusedCase, timeout); err != nil {
+		return plan, err
+	}
+	wanted := []string{fixture.TestGUIReplay, fixture.TestSuccessor}
+	if profile == "focused" {
+		wanted = []string{plan.FocusedCase}
+	}
+	if !reflect.DeepEqual(plan.ExpectedRootNames, wanted) {
+		return plan, errors.New("fixed required canonical case set/order differs")
+	}
+	if err := fixture.CheckedPath(source, true); err != nil {
+		return plan, err
+	}
+	if err := fixture.CheckedPath(binary, false); err != nil {
+		return plan, err
+	}
+	if !hexValue(plan.Fixture.SHA256, 64) || plan.Fixture.Path != os.Getenv("MCPHUB_CANONICAL_NATIVE_ACTOR_FIXTURE") {
+		return plan, errors.New("original native fixture environment differs")
+	}
+	if err := fixture.CheckedPath(plan.Fixture.Path, false); err != nil {
+		return plan, err
+	}
+	measured, err := fileHash(plan.Fixture.Path)
+	if err != nil || measured != plan.Fixture.SHA256 {
+		return plan, errors.Join(err, errors.New("original native fixture bytes differ"))
+	}
+	if err := fixture.CheckedPath(plan.Product.Path, false); err != nil {
+		return plan, err
+	}
+	for _, input := range []fixture.ImageInput{plan.Binary, plan.Product} {
+		if err := measureImage(input, pe.IMAGE_SUBSYSTEM_WINDOWS_GUI); err != nil {
+			return plan, err
+		}
+	}
+	systemDirectory, systemDirectoryErr := windows.GetSystemDirectory()
+	if systemDirectoryErr != nil || !strings.EqualFold(plan.Tools.Netsh.Path, filepath.Join(systemDirectory, "netsh.exe")) {
+		return plan, errors.Join(systemDirectoryErr, errors.New("original fixed netsh path differs from the kernel system directory"))
+	}
+	if !strings.EqualFold(plan.Tools.Conhost.Path, filepath.Join(systemDirectory, "conhost.exe")) {
+		return plan, errors.New("original fixed conhost path differs from the kernel system directory")
+	}
+	if err := measureImage(plan.Tools.Conhost, pe.IMAGE_SUBSYSTEM_WINDOWS_GUI); err != nil {
+		return plan, err
+	}
+	for _, item := range []struct {
+		name  string
+		input fixture.ImageInput
+	}{
+		{"powershell", plan.Tools.PowerShell}, {"netstat", plan.Tools.Netstat},
+		{"netsh", plan.Tools.Netsh},
+	} {
+		if err := fixedTool(item.name, item.input); err != nil {
+			return plan, err
+		}
+	}
+	if plan.Tools.WMIC != nil {
+		if err := fixedTool("wmic", *plan.Tools.WMIC); err != nil {
+			return plan, err
+		}
+	} else if _, err := exec.LookPath("wmic"); !errors.Is(err, exec.ErrNotFound) {
+		return plan, errors.Join(err, errors.New("unplanned fixed WMIC tool is visible or lookup is ambiguous"))
+	}
+	cwd, err := os.Getwd()
+	if err != nil || !strings.EqualFold(filepath.Clean(cwd), source) {
+		return plan, errors.Join(err, errors.New("original controller source cwd differs"))
+	}
+	return plan, nil
+}
+
+func fixedTool(name string, input fixture.ImageInput) error {
+	found, err := exec.LookPath(name)
+	if err != nil || !filepath.IsAbs(found) || !strings.EqualFold(filepath.Ext(found), ".exe") ||
+		!strings.EqualFold(filepath.Clean(found), input.Path) {
+		return errors.Join(err, fmt.Errorf("original fixed %s lookup differs from the pinned input", name))
+	}
+	return measureImage(input, pe.IMAGE_SUBSYSTEM_WINDOWS_CUI)
+}
+
+func originalEnv(key string) (string, bool, error) {
+	value, found := "", false
+	for _, pair := range os.Environ() {
+		candidate, next, ok := strings.Cut(pair, "=")
+		if !ok || !strings.EqualFold(candidate, key) {
+			continue
+		}
+		if found && next != value {
+			return "", false, errors.New("ambiguous original environment key: " + key)
+		}
+		value, found = next, true
+	}
+	return value, found, nil
+}
+
+func actorEnvironment(plan fixture.Plan, root, slotRoot, temp string) ([]string, error) {
+	values := map[string]string{}
+	for _, key := range []string{"PATH", "SystemRoot", "WINDIR", "ComSpec", "PATHEXT"} {
+		value, present, err := originalEnv(key)
+		if err != nil || !present || value == "" {
+			return nil, errors.Join(err, errors.New("original fixed Windows bootstrap environment is absent: "+key))
+		}
+		values[key] = value
+	}
+	bootstrap := filepath.Join(slotRoot, "bootstrap")
+	if err := os.Mkdir(bootstrap, 0700); err != nil {
+		return nil, err
+	}
+	if err := clients.PrepareClientConfigSandboxDirectories(bootstrap); err != nil {
+		return nil, err
+	}
+	for _, entry := range clients.ClientConfigSandboxEnvironment(bootstrap) {
+		if !entry.Unset {
+			values[entry.Key] = entry.Value
+		}
+	}
+	values["TEMP"], values["TMP"], values["TMPDIR"] = temp, temp, temp
+	entry, present, err := originalEnv("MCPHUB_CANONICAL_ENTRY_FIXTURE")
+	if err != nil || !present || entry == "" {
+		return nil, errors.Join(err, errors.New("original incoming entry-set fixture is absent"))
+	}
+	if err := fixture.CheckedPath(entry, false); err != nil {
+		return nil, err
+	}
+	values["MCPHUB_CANONICAL_ENTRY_FIXTURE"] = entry
+	values["MCPHUB_CANONICAL_NATIVE_ACTOR_FIXTURE"] = plan.Fixture.Path
+	values["MCPHUB_CANONICAL_FIXTURE_TEST_PRODUCT"] = "1"
+	values["MCPHUB_CANONICAL_ENTRY_FIXTURE_REQUIRED"] = "1"
+	values["MCPHUB_CANONICAL_COMMAND_FIXTURE_REQUIRED"] = "1"
+	values["MCPHUB_E2E_SCHEDULER"] = "none"
+	values["MCPHUB_SUPPRESS_BROWSER_LAUNCH"] = "1"
+	values[fixture.ChannelEnv] = filepath.Join(root, "channel", "channel.json")
+	values[fixture.ActorEnv] = filepath.Join(slotRoot, "config.json")
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	result := make([]string, 0, len(keys))
+	for _, key := range keys {
+		result = append(result, key+"="+values[key])
+	}
+	return result, nil
+}
+
+func outerEnvironment(channel string) ([]string, error) {
+	result := make([]string, 0, len(os.Environ())+1)
+	for _, pair := range os.Environ() {
+		key, _, ok := strings.Cut(pair, "=")
+		if !ok {
+			continue
+		}
+		if strings.EqualFold(key, fixture.ChannelEnv) || strings.EqualFold(key, fixture.ActorEnv) {
+			return nil, errors.New("ambient canonical dispatch marker refused")
+		}
+		result = append(result, pair)
+	}
+	return append(result, fixture.ChannelEnv+"="+channel), nil
+}
+
+func errorDescription(err error) string {
+	if err == nil {
+		return ""
+	}
+	return fmt.Sprintf("%T: %v", err, err)
+}

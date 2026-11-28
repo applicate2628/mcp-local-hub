@@ -1,0 +1,341 @@
+{
+  "schema": "original-v6-source-preservation-bindings-v1",
+  "purpose": "Preserve exactly 22 frozen local source revisions as reviewable data; retain five exact public inputs by immutable links.",
+  "original_source_bytes": 422939,
+  "source_file_count": 22,
+  "exact_byte_files": 12,
+  "transparent_template_files": 10,
+  "total_role_substitutions": 18,
+  "required_roles": {
+    "approved_work_area": {
+      "description": "The original operator-approved work-area boundary used by the frozen sources. Supply it explicitly; no original/default value is embedded.",
+      "value_kind": "literal Windows directory path"
+    },
+    "windows_powershell_home": {
+      "description": "The original native Windows PowerShell installation directory used by the UTF-8 loader. Supply it explicitly; no original/default value is embedded.",
+      "value_kind": "literal Windows directory path"
+    }
+  },
+  "transformations": {
+    "literal": "Use the operator-supplied UTF-8 text unchanged.",
+    "double_backslashes": "Replace every backslash in the operator-supplied text with two backslashes, matching the original Python string-literal representation."
+  },
+  "source_qualification_inherited": false,
+  "existing_source_files_changed": false,
+  "operational_plans_and_runtime_bindings_included": false,
+  "public_exact_inputs_manifest": "existing-public-inputs.json",
+  "files": [
+    {
+      "original_role_path": "inputs-original-v6/build_private_inputs_v6.ps1",
+      "original_bytes": 15785,
+      "original_sha256": "ef594d10af88d5e32d9e95070208b17c49a6acc7c2a4669c9451ff6050b2f34e",
+      "original_git_blob": "62dad4ef89e690d51d6d70e0112f873faa1d27c1",
+      "published_path": "templates/inputs-original-v6/build_private_inputs_v6.ps1.template",
+      "published_bytes": 15821,
+      "published_sha256": "ef372660ea63ee1cf88d0c57e83014f8a6028504b19406e3b583fb7a5a91ae05",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_WORK_AREA_RAW@@",
+          "role": "approved_work_area",
+          "transform": "literal",
+          "occurrences": 3
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/build_private_inputs_v7.ps1",
+      "original_bytes": 15802,
+      "original_sha256": "f4abd18efc767ca6bcaba4e8b8363f0ddf08459052b135a543eec7662fa68ac3",
+      "original_git_blob": "1e2ccd89ea23f5d5d57668f6eaea7ffe32d1d52e",
+      "published_path": "templates/inputs-original-v6/build_private_inputs_v7.ps1.template",
+      "published_bytes": 15838,
+      "published_sha256": "a0bbcccaff2766077a01a0dbac6da6776a4db3a8e96dd72ad6345bb410cdf6a3",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_WORK_AREA_RAW@@",
+          "role": "approved_work_area",
+          "transform": "literal",
+          "occurrences": 3
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/probe_private_date_v7.ps1",
+      "original_bytes": 2145,
+      "original_sha256": "4a3ead5ca5a222a8a8a8b6cab00228c19b5503711a65b61bd80bd62d1c3f5a1f",
+      "original_git_blob": "8a00749b68f2b18c0fbf2d2eafe3bd2a8e1b6cfd",
+      "published_path": "sources/inputs-original-v6/probe_private_date_v7.ps1",
+      "published_bytes": 2145,
+      "published_sha256": "4a3ead5ca5a222a8a8a8b6cab00228c19b5503711a65b61bd80bd62d1c3f5a1f",
+      "kind": "exact_bytes",
+      "substitutions": []
+    },
+    {
+      "original_role_path": "inputs-original-v6/copy_closed_caches_v6.py",
+      "original_bytes": 9433,
+      "original_sha256": "2577deae637071dbc9eb2dae6e6f64946379a30b093b6bc3fa120f687b365a16",
+      "original_git_blob": "bf59419372f9e015f41b56566d7c291df4852a68",
+      "published_path": "templates/inputs-original-v6/copy_closed_caches_v6.py.template",
+      "published_bytes": 9445,
+      "published_sha256": "44db066fb8faf34cf2a22d5f2e5c730cab42c0b209a6e0b301b079bc8564f7c7",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_WORK_AREA_RAW@@",
+          "role": "approved_work_area",
+          "transform": "literal",
+          "occurrences": 1
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/copy_original_artifacts_v6.py",
+      "original_bytes": 6880,
+      "original_sha256": "fd95917c2dd4b156a458f72eb764a4d81fc5f63aada2ec07fddcb75a115f68a5",
+      "original_git_blob": "88b5944c986d06031cbb10d4d84254fda471620c",
+      "published_path": "templates/inputs-original-v6/copy_original_artifacts_v6.py.template",
+      "published_bytes": 6892,
+      "published_sha256": "662cddbff30b750c3eea9c2c31681c7713982f603d51606a696372d18c773e76",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_WORK_AREA_RAW@@",
+          "role": "approved_work_area",
+          "transform": "literal",
+          "occurrences": 1
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/invoke_fixed_build_utf8.ps1",
+      "original_bytes": 6294,
+      "original_sha256": "4cb35eb80e029269732eeaf0409de92ff00a58b59070abd3ebff2cb9281ad79b",
+      "original_git_blob": "d159750322e7c75144e59046cfbb79a0eb399a76",
+      "published_path": "templates/inputs-original-v6/invoke_fixed_build_utf8.ps1.template",
+      "published_bytes": 6288,
+      "published_sha256": "206a486d938526905141d3c280b049c431e95be0e8a0c693a57f5abd96e0e31e",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_WINDOWS_POWERSHELL_HOME@@",
+          "role": "windows_powershell_home",
+          "transform": "literal",
+          "occurrences": 1
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/launch_literal_v6.py.in",
+      "original_bytes": 7711,
+      "original_sha256": "adf9f26a647aa6e869bc3dc25a6c13b5b913b2295f2629e77d10f36058e7493f",
+      "original_git_blob": "a8a61b9ed4f32e3a1bccb001cf7956ab505d40f4",
+      "published_path": "sources/inputs-original-v6/launch_literal_v6.py.in",
+      "published_bytes": 7711,
+      "published_sha256": "adf9f26a647aa6e869bc3dc25a6c13b5b913b2295f2629e77d10f36058e7493f",
+      "kind": "exact_bytes",
+      "substitutions": []
+    },
+    {
+      "original_role_path": "inputs-original-v6/literal_go_exec_adapter_v6.py.in",
+      "original_bytes": 77605,
+      "original_sha256": "6ee83887864e3be983ccd31628926f4026007ba9df0f296e9cd5504faeefe886",
+      "original_git_blob": "cc474da687ef92ede213e7760dbba51f72a64923",
+      "published_path": "sources/inputs-original-v6/literal_go_exec_adapter_v6.py.in",
+      "published_bytes": 77605,
+      "published_sha256": "6ee83887864e3be983ccd31628926f4026007ba9df0f296e9cd5504faeefe886",
+      "kind": "exact_bytes",
+      "substitutions": []
+    },
+    {
+      "original_role_path": "inputs-original-v6/literal_migration_receiving_v6.py.in",
+      "original_bytes": 35572,
+      "original_sha256": "6a95ae02fe24245a293ffd0f0e6083baf0754df2a13ce2ee2daedf43cf6e4526",
+      "original_git_blob": "ffc48caa3d4068e285637d6230de4c0e4189aa8f",
+      "published_path": "sources/inputs-original-v6/literal_migration_receiving_v6.py.in",
+      "published_bytes": 35572,
+      "published_sha256": "6a95ae02fe24245a293ffd0f0e6083baf0754df2a13ce2ee2daedf43cf6e4526",
+      "kind": "exact_bytes",
+      "substitutions": []
+    },
+    {
+      "original_role_path": "inputs-original-v6/prepare_literal_v6.py",
+      "original_bytes": 12329,
+      "original_sha256": "9c3cd5b7aae8a5100978a0e68f5c1f8cb644f3e58c89d51f0eac4314bc238ae1",
+      "original_git_blob": "0f1652ee457771740daae2a5b21f4ea16370c7c8",
+      "published_path": "templates/inputs-original-v6/prepare_literal_v6.py.template",
+      "published_bytes": 12365,
+      "published_sha256": "4419bf696c0e553fd365e63d2d8bd2e7c1d90f48c8cfa82355722ce3a275e26a",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_WORK_AREA_RAW@@",
+          "role": "approved_work_area",
+          "transform": "literal",
+          "occurrences": 3
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/private_migration_scope_v6.py",
+      "original_bytes": 12532,
+      "original_sha256": "a56e6730bc39307374d811222ee164213f6a73a1513b360688d2e0b925ee36c0",
+      "original_git_blob": "c38002b744f91536f5063d309ec697970da3562b",
+      "published_path": "templates/inputs-original-v6/private_migration_scope_v6.py.template",
+      "published_bytes": 12556,
+      "published_sha256": "82e50d4625cc068c8209108b704e3b4a79f4dff64e76bd91483f3f5302cfe7be",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_WORK_AREA_RAW@@",
+          "role": "approved_work_area",
+          "transform": "literal",
+          "occurrences": 2
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/private_run_scope.py.in",
+      "original_bytes": 12458,
+      "original_sha256": "ce16701c0c8951d73a9e002c0447fe108ee2bcaa31437bde63bc184e509ec654",
+      "original_git_blob": "bf1208031b9f2fcf7a729787bbc3db72055eebcf",
+      "published_path": "sources/inputs-original-v6/private_run_scope.py.in",
+      "published_bytes": 12458,
+      "published_sha256": "ce16701c0c8951d73a9e002c0447fe108ee2bcaa31437bde63bc184e509ec654",
+      "kind": "exact_bytes",
+      "substitutions": []
+    },
+    {
+      "original_role_path": "inputs-original-v6/qualified_windows_products_consumer_v6.py.in",
+      "original_bytes": 36122,
+      "original_sha256": "716e2e0aeb7e94b5bd302149e7765c8d5708378bc94f2d2de959dfc063c2592d",
+      "original_git_blob": "086a1f4ec8cf41a90bbfbc396609731f9b75d4a6",
+      "published_path": "sources/inputs-original-v6/qualified_windows_products_consumer_v6.py.in",
+      "published_bytes": 36122,
+      "published_sha256": "716e2e0aeb7e94b5bd302149e7765c8d5708378bc94f2d2de959dfc063c2592d",
+      "kind": "exact_bytes",
+      "substitutions": []
+    },
+    {
+      "original_role_path": "inputs-original-v6/receive_private_graph_v6.py",
+      "original_bytes": 6899,
+      "original_sha256": "1d6895719d79d1b53edaab13d6aa8bd7d19e2efe2c87b0003e543f44cd64fe01",
+      "original_git_blob": "add3480bd9296ce364052da928710e63ee5d002a",
+      "published_path": "sources/inputs-original-v6/receive_private_graph_v6.py",
+      "published_bytes": 6899,
+      "published_sha256": "1d6895719d79d1b53edaab13d6aa8bd7d19e2efe2c87b0003e543f44cd64fe01",
+      "kind": "exact_bytes",
+      "substitutions": []
+    },
+    {
+      "original_role_path": "inputs-original-v6/run_literal_go_gate_v6.py.in",
+      "original_bytes": 43670,
+      "original_sha256": "a1aecc2d2db889f2aa4d6d58bc885bac6cfd545fd9f55e4c0055ea1eed83a422",
+      "original_git_blob": "01abb013971e68da946f61cce29d325b8293d072",
+      "published_path": "sources/inputs-original-v6/run_literal_go_gate_v6.py.in",
+      "published_bytes": 43670,
+      "published_sha256": "a1aecc2d2db889f2aa4d6d58bc885bac6cfd545fd9f55e4c0055ea1eed83a422",
+      "kind": "exact_bytes",
+      "substitutions": []
+    },
+    {
+      "original_role_path": "inputs-original-v6/run_partitioned_go_gate_v6.py.in",
+      "original_bytes": 9851,
+      "original_sha256": "9b81714df735fe5e5196be944312a717d8e1d75ca9195506dd9e609c23f330a9",
+      "original_git_blob": "1db9a65e9312ce4f6d8778ca49fb077f821f401e",
+      "published_path": "sources/inputs-original-v6/run_partitioned_go_gate_v6.py.in",
+      "published_bytes": 9851,
+      "published_sha256": "9b81714df735fe5e5196be944312a717d8e1d75ca9195506dd9e609c23f330a9",
+      "kind": "exact_bytes",
+      "substitutions": []
+    },
+    {
+      "original_role_path": "inputs-original-v6/external-prepare-candidate/prepare_external_controllers_v6.py",
+      "original_bytes": 11572,
+      "original_sha256": "867c1924449f6c2c38402267e71c251f2177e67afbb96b87f3149bf3d294256e",
+      "original_git_blob": "1f8c07009b54bf584465f05b907df650128b2726",
+      "published_path": "templates/inputs-original-v6/external-prepare-candidate/prepare_external_controllers_v6.py.template",
+      "published_bytes": 11584,
+      "published_sha256": "9acc9d5ea40ccf22c34275c4dbf8d402a046f066e9e6119eeaca50f807579a1b",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_WORK_AREA_RAW@@",
+          "role": "approved_work_area",
+          "transform": "literal",
+          "occurrences": 1
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/external-prepare-candidate/private_external_scope_v6.py",
+      "original_bytes": 12601,
+      "original_sha256": "0903fe1b053993ebcc5eb3bfdcf7959a726d4b481dbceae1511985003661f7be",
+      "original_git_blob": "2233f85d81b029d0c1540cfc805b869989463830",
+      "published_path": "templates/inputs-original-v6/external-prepare-candidate/private_external_scope_v6.py.template",
+      "published_bytes": 12629,
+      "published_sha256": "ffd10dcf65de888c17b76cc2aede67e87d306cab215f9c607935289ceb5c5d7f",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 2
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/external-source-original/literal_contained_test_receiver_v4.go",
+      "original_bytes": 17383,
+      "original_sha256": "59fa2cc432b887114497c3c6625731d4dcde207e38b412371eb5fa83b39ed8a9",
+      "original_git_blob": "b2c9f1d9cf4f488923ddba3c5ff86ff237cff65b",
+      "published_path": "templates/inputs-original-v6/external-source-original/literal_contained_test_receiver_v4.go.template",
+      "published_bytes": 17395,
+      "published_sha256": "817e93de849ace4485b08b9c242500bf3a5a12210c5ff0e5bd893cbe4bc6bab8",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_WORK_AREA_RAW@@",
+          "role": "approved_work_area",
+          "transform": "literal",
+          "occurrences": 1
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/external-source-original/controller/cases_windows.go",
+      "original_bytes": 19075,
+      "original_sha256": "9b1af23646315fc6b08c45a634ae5adebb05635c38fb21e4e56e0fb152184631",
+      "original_git_blob": "76f300b08e9239604071762512fcf2840701a520",
+      "published_path": "sources/inputs-original-v6/external-source-original/controller/cases_windows.go",
+      "published_bytes": 19075,
+      "published_sha256": "9b1af23646315fc6b08c45a634ae5adebb05635c38fb21e4e56e0fb152184631",
+      "kind": "exact_bytes",
+      "substitutions": []
+    },
+    {
+      "original_role_path": "inputs-original-v6/external-source-original/controller/main_windows.go",
+      "original_bytes": 23646,
+      "original_sha256": "c48b5b339d7ece5cd6ecdad4c870e0968a33867e1bc5f2ae0e2b5a58f3b591ef",
+      "original_git_blob": "9ca852e7df4431159afb64bf639a27029b5f5a1c",
+      "published_path": "sources/inputs-original-v6/external-source-original/controller/main_windows.go",
+      "published_bytes": 23646,
+      "published_sha256": "c48b5b339d7ece5cd6ecdad4c870e0968a33867e1bc5f2ae0e2b5a58f3b591ef",
+      "kind": "exact_bytes",
+      "substitutions": []
+    },
+    {
+      "original_role_path": "inputs-original-v6/external-source-original/owner/canonicalcaseowner/events_windows_amd64.go",
+      "original_bytes": 27574,
+      "original_sha256": "3b3137d2bdc6284a497fe2052d3e78e7bd426a0f7694b381043523e555c0a1fa",
+      "original_git_blob": "8e57b87f8d85ff68f3b45d1295fe6c31a7b6d4ba",
+      "published_path": "sources/inputs-original-v6/external-source-original/owner/canonicalcaseowner/events_windows_amd64.go",
+      "published_bytes": 27574,
+      "published_sha256": "3b3137d2bdc6284a497fe2052d3e78e7bd426a0f7694b381043523e555c0a1fa",
+      "kind": "exact_bytes",
+      "substitutions": []
+    }
+  ]
+}

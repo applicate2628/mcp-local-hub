@@ -1,0 +1,78 @@
+{
+  "schema": "closed-api-in-memory-data-proof-v1",
+  "status": "EXACT_DATA_RECONSTRUCTED",
+  "scope": "Four closed original API evidence files and their complete terminal ledger.",
+  "reconstruction_method": "Literal transparent marker replacement using explicit private role values; no encoding, JSON reserialization, native execution or source import.",
+  "files": [
+    {
+      "role_path": "closed-api/receipt.json",
+      "original_bytes": 2338457,
+      "original_sha256": "2282b4b297e5d78f90da965383880674dd3f5529cfcfd6b9243cb56145927de8",
+      "template_path": "templates/api-receipt.json.template",
+      "template_bytes": 2344352,
+      "template_sha256": "cc9410bfaa1246e0a144b27a57f668db03fb353f1df2f978f1aac3c683618b20",
+      "round_trip_equal": true,
+      "substitution_count": 289
+    },
+    {
+      "role_path": "closed-api/namespace-suite-receipt.json",
+      "original_bytes": 5732,
+      "original_sha256": "2fe7149ad8fb358eba3aabae1d7d0d4e11a535b19622b0057f52ff7e034dd98b",
+      "template_path": "templates/namespace-suite-receipt.json.template",
+      "template_bytes": 6006,
+      "template_sha256": "609c5384564e54f3a686cdc291017d3879c2d93dd12c910f89e2a2862fc7dfda",
+      "round_trip_equal": true,
+      "substitution_count": 13
+    },
+    {
+      "role_path": "closed-api/suite-owner.stdout.txt",
+      "original_bytes": 1207113,
+      "original_sha256": "664ff94ef54d97d0088b74b0b669edc292589f1911b49798c71192aa79b17541",
+      "template_path": "templates/suite-owner.stdout.txt.template",
+      "template_bytes": 1207607,
+      "template_sha256": "d3f96e54efc3c4687e41c02618bdcd4264a27e6ec79f9a28fcca2de652201036",
+      "round_trip_equal": true,
+      "substitution_count": 26
+    },
+    {
+      "role_path": "closed-api/suite-owner.stderr.txt",
+      "original_bytes": 341,
+      "original_sha256": "0c954a4a1713930d9b849eaa415d7f195a799745a14df141f7cf71b81d614107",
+      "template_path": "templates/suite-owner.stderr.txt.template",
+      "template_bytes": 358,
+      "template_sha256": "adbd5045855cf20786abdb60b2dfd1041b536fa5b4fbc1a30bb633649904db7f",
+      "round_trip_equal": true,
+      "substitution_count": 1
+    }
+  ],
+  "required_role_count": 10,
+  "substitution_count": 329,
+  "original_numeric_process_and_file_ids_preserved": true,
+  "native_64_bit_values_unchanged_as_raw_text": true,
+  "canonical_ledger": {
+    "row_count": 6275,
+    "top_level_count": 3523,
+    "canonical_format": "UTF-8 JSON, ensure_ascii=false, compact separators, array sorted by test, keys package/test/outcome, final LF",
+    "canonical_ledger": {
+      "bytes": 810017,
+      "sha256": "9c5e0262be78f623ec0f744c721b0b856592796c00e93208526f793513c40001"
+    },
+    "raw_matches_primary_coverage": true
+  },
+  "source_overlay_data_replay": {
+    "public_patch": "../original-source727d-recovery-20261128/3ebe-to-0145.patch",
+    "path": "internal/api/adopt_provider_working_directory_windows_test.go",
+    "hunks": 2,
+    "base_sha256": "5eb2fa9d2605388feb5735566a52fd4e820398e767c2c5bf2ba0963126c7a357",
+    "result_bytes": 44798,
+    "result_sha256": "1427099b98f5d851cb8bb2462bfa166ea7687d8ab34cc14142e9344fb39bb4f9"
+  },
+  "original_api_outcome": "FAIL",
+  "original_physical_state": "CLOSED",
+  "new_python_renderer_executed": false,
+  "new_python_verifier_executed": false,
+  "new_native_or_test_execution": false,
+  "parent_full_scope_read": false,
+  "active_source_or_cache_read": false,
+  "publication_performed": false
+}

@@ -1,0 +1,16 @@
+{
+  "schema": "closed-full-v6-excerpt-provenance-v1",
+  "file": "tagged-cli-build-failure.jsonl",
+  "bytes": 1015,
+  "sha256": "d91077e3b21f7e2785c87bd644dfc17ac1baffae2707fcc9c60d1630ad20bb94",
+  "source_role_path": "full/literal-state.stdout.txt",
+  "source_sha256": "cef4307a50dffe3686a9b9e21db1ab80a39f03012f975996679ceb1d8a4ba1d1",
+  "source_bytes": 5866860,
+  "source_line_count": 25401,
+  "line_numbers_1_based": [
+    25396,
+    25401
+  ],
+  "extraction": "Last six complete JSONL records from the closed original command stdout; original record text retained.",
+  "whole_source_stream_included": false
+}

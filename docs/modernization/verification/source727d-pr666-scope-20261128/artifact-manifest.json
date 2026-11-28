@@ -1,0 +1,30 @@
+{
+  "schema": "source727d-pr666-scope-artifact-manifest-v1",
+  "files": {
+    "README.md": {
+      "bytes": 13205,
+      "sha256": "e934fe0d7348dea6d2bae7505c645e982c1eea19753d1139c3d11a0029215cad"
+    },
+    "evidence.json": {
+      "bytes": 4470,
+      "sha256": "93b821e922eaff0b485cd14d87f7719e0bc95c663c3eaee346f9fae3fff5fab7"
+    },
+    "whole-tree-delta.json": {
+      "bytes": 180413,
+      "sha256": "786e426e2eb468e1b416bc79867ad5829700f4a9cbeba4c6043c525d6de4a034"
+    },
+    "seven-test-files.json": {
+      "bytes": 4871,
+      "sha256": "1970f2ab883099d8737309e6cbe353e58d3ddd529a89fc888468ea048f1c44a8"
+    },
+    "five-test-file-deltas.patch": {
+      "bytes": 7872,
+      "sha256": "63e801ef36b0713680279f981faeff13bfc01ed53eb729dfdf6704e228a2c485"
+    },
+    ".gitattributes": {
+      "bytes": 8,
+      "sha256": "705fd4d6451a31d36b3df7de96f83f30ac976c9b4a6d1e51671d8e2f33e2d0da"
+    }
+  },
+  "scope": "DATA_ONLY_NO_QUALIFICATION_TRANSFER"
+}

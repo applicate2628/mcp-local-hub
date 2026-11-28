@@ -1,0 +1,86 @@
+{
+    "schema":  "full-v6-root-independent-receiving-v1",
+    "main_sha256":  "6cd606a5ec4e6e1a3e74d4b8324786cc98dffe8cd587f4a41c89a751ea7f0c4a",
+    "parent_sha256":  "062ab6f5a124d5e3b2338355e53c8bb6e7a9f15e26c99e3d5765cac7044fc794",
+    "outer_sha256":  "53bf598d463b4ab04ffed5f91c7e3d9fabe03e43448346ef35edefcd8ccea006",
+    "classification":  "FAIL/CLOSED",
+    "qualification_passed":  false,
+    "original_failure_reclassified":  false,
+    "commands_checked":  283,
+    "package_commands_checked":  272,
+    "command_captures_hashed":  566,
+    "package_receipts_hashed":  65,
+    "original_owner_receipts_hashed":  130,
+    "source_files_hashed":  3509,
+    "input_files_hashed":  115,
+    "restored_absent_resource":  [
+                                     "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2\\internal\\api\\zz_qualified_api_versioninfo_windows_amd64.syso"
+                                 ],
+    "literal_phases":  [
+                           {
+                               "phase":  "default",
+                               "command_exit_code":  1,
+                               "passed":  false,
+                               "native_custody_settled":  true,
+                               "expected":  64,
+                               "started":  64,
+                               "completed":  64,
+                               "missing":  [
+
+                                           ],
+                               "private_migration_passed":  false
+                           },
+                           {
+                               "phase":  "state",
+                               "command_exit_code":  1,
+                               "passed":  false,
+                               "native_custody_settled":  true,
+                               "expected":  2,
+                               "started":  1,
+                               "completed":  1,
+                               "missing":  [
+                                               "mcp-local-hub/internal/cli"
+                                           ],
+                               "private_migration_passed":  false
+                           }
+                       ],
+    "nonzero_packages":  [
+                             {
+                                 "phase":  "default",
+                                 "package":  "mcp-local-hub/internal/api",
+                                 "exit":  1,
+                                 "receipt_sha256":  "2282b4b297e5d78f90da965383880674dd3f5529cfcfd6b9243cb56145927de8"
+                             },
+                             {
+                                 "phase":  "default",
+                                 "package":  "mcp-local-hub/internal/oneapi",
+                                 "exit":  1,
+                                 "receipt_sha256":  "07e74dde1e6bf1c44bf92b555177f1ce3bf42bd1f9102a2765c2d1acf614956d"
+                             },
+                             {
+                                 "phase":  "default",
+                                 "package":  "mcp-local-hub/internal/daemon",
+                                 "exit":  1,
+                                 "receipt_sha256":  "5a972718974b56fc28a4bbb23f43b4a47e9c88f796b2e388f8a775d4db772fbd"
+                             },
+                             {
+                                 "phase":  "default",
+                                 "package":  "mcp-local-hub/internal/cli",
+                                 "exit":  2,
+                                 "receipt_sha256":  "a5bd2bae2fd38c7c28ef516840f613852d211b4c407fa62b0944c10a2c92fc8b"
+                             },
+                             {
+                                 "phase":  "default",
+                                 "package":  "mcp-local-hub/internal/process",
+                                 "exit":  1,
+                                 "receipt_sha256":  "d599fa49174e490960b107daf53b83ef26f99a5302ad6e7773f947b85ace088f"
+                             },
+                             {
+                                 "phase":  "state",
+                                 "package":  "mcp-local-hub/internal/api",
+                                 "exit":  1,
+                                 "receipt_sha256":  "faaa83cc72a378a18470d0c25fb621e7a12fc4f951283175599e2587f597c546"
+                             }
+                         ],
+    "cache_qualification_inherited":  false
+}

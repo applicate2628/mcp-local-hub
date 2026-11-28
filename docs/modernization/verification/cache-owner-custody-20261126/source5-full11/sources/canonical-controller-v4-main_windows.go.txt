@@ -1,0 +1,649 @@
+//go:build windows && amd64
+
+// Fixed canonical controller: the existing strict whole-CLI owner and exactly
+// two external debug-owned case kinds. The protocol carries data, never owners.
+package main
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"time"
+
+	"golang.org/x/sys/windows"
+	fixture "mcp-local-hub/internal/canonicalnativefixture"
+	"mcp-local-hub/internal/process"
+)
+
+// Keep Go's startup thread reserved. The original debugger worker must use a
+// different real thread, whose eventual signal and close remain mandatory.
+var startupThreadID uint32
+
+func init() {
+	runtime.LockOSThread()
+	startupThreadID = windows.GetCurrentThreadId()
+}
+
+// This roots the actual commands, receipts, debug owners, errors and files even
+// when a run returns without complete native or writer receiving.
+var retainedController *session
+
+type sinkResult struct {
+	Path           string `json:"path"`
+	SyncAttempted  bool   `json:"sync_attempted"`
+	Synced         bool   `json:"synced"`
+	CloseAttempted bool   `json:"close_attempted"`
+	Closed         bool   `json:"closed"`
+	Error          string `json:"error"`
+}
+
+type outerResult struct {
+	Schema              string                          `json:"schema"`
+	Binary              string                          `json:"binary"`
+	BinarySHA256        string                          `json:"binary_sha256"`
+	SourceDir           string                          `json:"source_dir"`
+	Args                []string                        `json:"args"`
+	Started             string                          `json:"started_utc"`
+	Finished            string                          `json:"finished_utc"`
+	Root                process.ContainedRootIdentity   `json:"root"`
+	Native              process.ContainedNativeSnapshot `json:"native"`
+	IO                  process.ContainedIOSettlement   `json:"io"`
+	Stage               process.ContainedRunStage       `json:"stage"`
+	PrimaryError        string                          `json:"primary_error"`
+	CleanupError        string                          `json:"cleanup_error"`
+	RootExitError       string                          `json:"root_exit_error"`
+	NativeError         string                          `json:"native_error"`
+	RootWaitKnown       bool                            `json:"root_wait_known"`
+	RootExitCode        int                             `json:"root_exit_code"`
+	SettlementComplete  bool                            `json:"settlement_complete"`
+	CustodyRetained     bool                            `json:"custody_retained"`
+	Inventory           bool                            `json:"inventory"`
+	WorkDeadline        string                          `json:"work_deadline"`
+	CleanupDeadline     string                          `json:"cleanup_deadline"`
+	Timeout             string                          `json:"test_timeout"`
+	BootstrapBudget     string                          `json:"bootstrap_budget"`
+	StdoutSink          sinkResult                      `json:"stdout_sink"`
+	StderrSink          sinkResult                      `json:"stderr_sink"`
+	BinaryAfterMeasured bool                            `json:"binary_after_measured"`
+	BinaryUnchanged     bool                            `json:"binary_unchanged"`
+	Failure             string                          `json:"failure"`
+}
+
+type channelResult struct {
+	Version       uint32   `json:"version"`
+	Root          string   `json:"root"`
+	RunNonce      string   `json:"run_nonce"`
+	RequiredSlots []string `json:"required_slots"`
+	Joined        bool     `json:"joined"`
+	Stopped       bool     `json:"stopped"`
+	RequestCount  int      `json:"request_count"`
+	Errors        []string `json:"errors"`
+}
+
+type compositeResult struct {
+	Schema              string        `json:"schema"`
+	CanonicalPlan       string        `json:"canonical_plan"`
+	CanonicalPlanSHA256 string        `json:"canonical_plan_sha256"`
+	Profile             string        `json:"profile"`
+	FocusedCase         string        `json:"focused_case"`
+	RunRoot             string        `json:"run_root"`
+	Binary              string        `json:"binary"`
+	BinarySHA256        string        `json:"binary_sha256"`
+	SourceDir           string        `json:"source_dir"`
+	Args                []string      `json:"args"`
+	Fixture             string        `json:"fixture"`
+	FixtureSHA256       string        `json:"fixture_sha256"`
+	Started             string        `json:"started_utc"`
+	Finished            string        `json:"finished_utc"`
+	WorkDeadline        string        `json:"work_deadline"`
+	CleanupDeadline     string        `json:"cleanup_deadline"`
+	StartupThreadID     uint32        `json:"startup_thread_id"`
+	Outer               outerResult   `json:"outer"`
+	Channel             channelResult `json:"channel"`
+	Cases               []caseRecord  `json:"cases"`
+	CompositeComplete   bool          `json:"composite_complete"`
+	CustodyRetained     bool          `json:"custody_retained"`
+	CapturesFinalized   bool          `json:"captures_finalized"`
+	BinaryAfterMeasured bool          `json:"binary_after_measured"`
+	BinaryUnchanged     bool          `json:"binary_unchanged"`
+	QualificationPassed bool          `json:"qualification_passed"`
+	Failure             string        `json:"failure"`
+}
+
+type outerOutcome struct {
+	Observed process.ContainedStreamReceiptV1
+	Cause    error
+	Returned bool
+}
+
+type session struct {
+	plan                          fixture.Plan
+	channel                       fixture.Channel
+	record                        compositeResult
+	root                          string
+	cases                         []*caseCustody
+	ctx                           context.Context
+	cancel                        context.CancelFunc
+	workDeadline, cleanupDeadline time.Time
+	outerDone                     chan outerOutcome
+	outer                         *outerOutcome
+	outerCmd                      *exec.Cmd
+	outerStarted                  bool
+	stdout, stderr                *os.File
+	cause                         error
+	unknown                       bool
+	rootCreated                   bool
+	replayOut, replayErr          []byte
+}
+
+func main() {
+	binary := flag.String("test-binary", "", "original incoming CLI test image")
+	expected := flag.String("expected-sha256", "", "original incoming image digest")
+	source := flag.String("source-dir", "", "original CLI package cwd")
+	root := flag.String("run-root", "", "fresh directory under the original protected D parent")
+	timeout := flag.Duration("timeout", 5*time.Minute, "fixed full 5m or focused 120s")
+	plan := flag.String("canonical-plan", "", "fixed original canonical plan")
+	planSHA := flag.String("canonical-plan-sha256", "", "original plan bytes digest")
+	profile := flag.String("profile", "", "full or focused")
+	flag.Parse()
+	code, err := run(*binary, *expected, *source, *root, *plan, *planSHA, *profile,
+		append([]string(nil), flag.Args()...), *timeout)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		if code == 0 {
+			code = 1
+		}
+	}
+	os.Exit(code)
+}
+
+func run(binary, expected, source, root, planPath, planSHA, profile string, args []string, timeout time.Duration) (int, error) {
+	started := time.Now()
+	bootstrap := started.Add(5 * time.Second)
+	s := &session{root: root, outerDone: make(chan outerOutcome, 1)}
+	retainedController = s
+	s.workDeadline = bootstrap.Add(timeout)
+	s.cleanupDeadline = s.workDeadline.Add(10 * time.Second)
+	s.ctx, s.cancel = context.WithDeadline(context.Background(), s.workDeadline)
+	defer s.cancel()
+	s.record = compositeResult{
+		Schema: "canonical-external-controller-v1", CanonicalPlan: planPath, CanonicalPlanSHA256: planSHA,
+		Profile: profile, RunRoot: root, Binary: binary, BinarySHA256: expected, SourceDir: source,
+		Args: append([]string(nil), args...), Started: started.UTC().Format(time.RFC3339Nano),
+		WorkDeadline:    s.workDeadline.UTC().Format(time.RFC3339Nano),
+		CleanupDeadline: s.cleanupDeadline.UTC().Format(time.RFC3339Nano), StartupThreadID: startupThreadID,
+	}
+	plan, err := readPlan(planPath, planSHA, profile, binary, expected, source, args, timeout)
+	if err != nil {
+		s.cause = err
+		s.unknown = fixture.HasRetainedFile(err)
+		return 1, err
+	}
+	s.plan, s.record.FocusedCase = plan, plan.FocusedCase
+	s.record.Fixture, s.record.FixtureSHA256 = plan.Fixture.Path, plan.Fixture.SHA256
+	if err := s.prepare(); err != nil {
+		s.cause = errors.Join(s.cause, err)
+		s.unknown = s.unknown || fixture.HasRetainedFile(err)
+		return s.finish()
+	}
+	if !time.Now().Before(bootstrap) {
+		s.cause = errors.New("canonical receiver bootstrap expired before original creation")
+		s.closeUnstarted()
+		return s.finish()
+	}
+	s.outerStarted = true
+	go s.runOuter()
+	s.service()
+	s.awaitOuter()
+	s.receiveComposite()
+	return s.finish()
+}
+
+func nonce() (string, error) {
+	var value [32]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(value[:]), nil
+}
+
+func (s *session) prepare() error {
+	if !filepath.IsAbs(s.root) || filepath.Clean(s.root) != s.root {
+		return errors.New("absolute clean fresh controller root required")
+	}
+	if err := fixture.CheckedPath(filepath.Dir(s.root), true); err != nil {
+		return err
+	}
+	if err := os.Mkdir(s.root, 0700); err != nil {
+		return err
+	}
+	s.rootCreated = true
+	if err := fixture.CheckedPath(s.root, true); err != nil {
+		return err
+	}
+	channelRoot := filepath.Join(s.root, "channel")
+	if err := os.Mkdir(channelRoot, 0700); err != nil {
+		return err
+	}
+	runNonce, err := nonce()
+	if err != nil {
+		return err
+	}
+	s.channel = fixture.Channel{
+		Version: fixture.Version, Root: s.root, RunNonce: runNonce,
+		CanonicalPlanSHA256: s.record.CanonicalPlanSHA256, Profile: s.plan.Profile,
+		SourceDir: s.plan.SourceDir, Binary: s.plan.Binary, Fixture: s.plan.Fixture,
+		WorkDeadline: s.record.WorkDeadline, CleanupDeadline: s.record.CleanupDeadline,
+	}
+	s.record.Channel = channelResult{Version: fixture.Version, Root: channelRoot, RunNonce: runNonce,
+		RequiredSlots: append([]string(nil), s.plan.ExpectedRootNames...), Errors: []string{}}
+	for _, test := range []string{fixture.TestGUIReplay, fixture.TestSuccessor} {
+		slot, _ := fixture.Slot(test)
+		c := &caseCustody{Record: caseRecord{Test: test, Slot: slot}, Root: filepath.Join(channelRoot, slot)}
+		c.Temp = filepath.Join(c.Root, "actor-tmp")
+		s.cases = append(s.cases, c)
+		selected := false
+		for _, wanted := range s.plan.ExpectedRootNames {
+			selected = selected || wanted == test
+		}
+		if !selected {
+			continue
+		}
+		if err := os.Mkdir(c.Root, 0700); err != nil {
+			return err
+		}
+		if err := os.Mkdir(c.Temp, 0700); err != nil {
+			return err
+		}
+		slotNonce, err := nonce()
+		if err != nil {
+			return err
+		}
+		s.channel.Slots = append(s.channel.Slots, fixture.SlotBinding{Test: test, Slot: slot, Nonce: slotNonce})
+	}
+	if err := fixture.Publish(filepath.Join(channelRoot, "channel.json"), s.channel); err != nil {
+		return err
+	}
+	env, err := outerEnvironment(filepath.Join(channelRoot, "channel.json"))
+	if err != nil {
+		return err
+	}
+	s.record.Outer = outerResult{
+		Schema: "literal-contained-test-run-v1", Binary: s.plan.Binary.Path, BinarySHA256: s.plan.Binary.SHA256,
+		SourceDir: s.plan.SourceDir, Args: append([]string(nil), s.plan.OriginalArgs...),
+		Started: s.record.Started, WorkDeadline: s.record.WorkDeadline, CleanupDeadline: s.record.CleanupDeadline,
+		Timeout: time.Until(s.workDeadline).String(), BootstrapBudget: (5 * time.Second).String(),
+		StdoutSink: sinkResult{Path: filepath.Join(s.root, "stdout.raw")},
+		StderrSink: sinkResult{Path: filepath.Join(s.root, "stderr.txt")},
+	}
+	// The timeout field describes the unchanged original Go timeout, not the
+	// remaining native budget after this controller's preflight.
+	if s.plan.Profile == "full" {
+		s.record.Outer.Timeout = (5 * time.Minute).String()
+	} else {
+		s.record.Outer.Timeout = (120 * time.Second).String()
+	}
+	s.stdout, err = os.OpenFile(s.record.Outer.StdoutSink.Path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	s.stderr, err = os.OpenFile(s.record.Outer.StderrSink.Path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		s.cause = err
+		s.closeUnstarted()
+		return errors.Join(err, s.cause)
+	}
+	s.outerCmd = exec.Command(s.plan.Binary.Path, s.plan.OriginalArgs...)
+	s.outerCmd.Dir, s.outerCmd.Env = s.plan.SourceDir, env
+	process.NoConsole(s.outerCmd)
+	return nil
+}
+
+func (s *session) closeUnstarted() {
+	for _, item := range []struct {
+		file   *os.File
+		record *sinkResult
+	}{
+		{s.stdout, &s.record.Outer.StdoutSink}, {s.stderr, &s.record.Outer.StderrSink},
+	} {
+		if item.file == nil || item.record.CloseAttempted {
+			continue
+		}
+		item.record.CloseAttempted = true
+		closeErr := item.file.Close()
+		item.record.Closed = closeErr == nil
+		item.record.Error = errorDescription(closeErr)
+		if closeErr != nil {
+			s.unknown = true
+			s.cause = errors.Join(s.cause, &fixture.FileCustodyError{File: item.file, Cause: closeErr})
+		}
+	}
+}
+
+func (s *session) runOuter() {
+	normal := false
+	defer func() {
+		if !normal {
+			recovered := recover()
+			cause := fmt.Errorf("original whole-suite owner did not return: %v", recovered)
+			if originalError, ok := recovered.(error); ok {
+				cause = fmt.Errorf("original whole-suite owner did not return: %w", originalError)
+			}
+			s.outerDone <- outerOutcome{Cause: cause}
+		}
+	}()
+	observed, runErr := process.RunContainedStreamObserved(s.ctx, s.outerCmd, process.ContainedStreamOptions{
+		CleanupTimeout: 10 * time.Second, AbsoluteCleanupDeadline: s.cleanupDeadline,
+		StdoutByteLimit: 16 << 20, StderrByteLimit: 16 << 20, Stderr: s.stderr,
+	}, func(reader io.Reader) error { _, err := io.Copy(s.stdout, reader); return err })
+	normal = true
+	s.outerDone <- outerOutcome{Observed: observed, Cause: runErr, Returned: true}
+}
+
+func (s *session) collectOuter() bool {
+	if s.outer != nil {
+		return true
+	}
+	select {
+	case result := <-s.outerDone:
+		s.outer = &result
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *session) awaitOuter() {
+	s.cancel()
+	if s.collectOuter() {
+		return
+	}
+	remaining := time.Until(s.cleanupDeadline)
+	if remaining > 0 {
+		timer := time.NewTimer(remaining)
+		defer timer.Stop()
+		select {
+		case result := <-s.outerDone:
+			s.outer = &result
+			return
+		case <-timer.C:
+		}
+	}
+	s.unknown = true
+	s.cause = errors.Join(s.cause, context.DeadlineExceeded, errors.New("original whole-suite return unreceived at cleanup"))
+}
+
+func (s *session) caseByTest(test string) *caseCustody {
+	for _, c := range s.cases {
+		if c.Record.Test == test {
+			return c
+		}
+	}
+	panic("fixed canonical slot is not present in the original controller")
+}
+
+func (s *session) failControl(cause error) {
+	s.cause = errors.Join(s.cause, cause)
+	s.record.Channel.Errors = append(s.record.Channel.Errors, errorDescription(cause))
+	s.unknown = true
+	s.cancel()
+}
+
+func (s *session) receiveComposite() {
+	if s.outer == nil || !s.outer.Returned {
+		s.unknown = true
+		if s.outer != nil {
+			s.cause = errors.Join(s.cause, s.outer.Cause)
+		}
+		return
+	}
+	observed := s.outer.Observed
+	r := &s.record.Outer
+	r.Root, r.IO, r.Stage = observed.RootIdentity, observed.IOSettlement, observed.Stage
+	r.PrimaryError, r.CleanupError = errorDescription(observed.PrimaryError), errorDescription(observed.CleanupError)
+	r.RootExitError = errorDescription(observed.RootExitError)
+	r.RootWaitKnown, r.RootExitCode = observed.RootWaitKnown, observed.RootExitCode
+	r.Finished = time.Now().UTC().Format(time.RFC3339Nano)
+	if observed.NativeSettlement != nil {
+		r.Native = observed.NativeSettlement.Snapshot()
+		r.NativeError = errorDescription(r.Native.Error)
+	}
+	r.SettlementComplete = observed.NativeSettlement != nil && observed.NativeSettlement.Complete() &&
+		observed.IOSettlement.Complete()
+	s.cause = errors.Join(s.cause, s.outer.Cause)
+	physical := r.SettlementComplete && r.Root.Known && r.Root.PID > 0 &&
+		r.Root.NativeBirthFILETIME != 0 && r.RootWaitKnown && r.RootExitCode >= 0 &&
+		r.Native.RootIdentity == r.Root && r.Native.RootWaitKnown && r.Native.RootExitCode == r.RootExitCode &&
+		s.record.Channel.Joined && s.record.Channel.Stopped && !s.unknown
+	for _, c := range s.cases {
+		if c.Record.Request != nil {
+			request := c.Record.Request
+			c.Record.RequestParentMatchesOuter = request.ParentPID == uint32(r.Root.PID) &&
+				request.ParentBirth == strconv.FormatUint(r.Root.NativeBirthFILETIME, 10)
+			physical = physical && c.Record.RequestParentMatchesOuter
+		}
+		if c.Record.Attempted {
+			physical = physical && c.Record.PhysicalComplete && !c.Record.CustodyRetained
+		} else if c.Record.Request != nil {
+			physical = false
+		}
+	}
+	if !physical {
+		s.unknown = true
+		s.cause = errors.Join(s.cause, errors.New("composite original strict/debug/control receiving incomplete"))
+		return
+	}
+	// B: every attempted original owner and the service have finished. This is
+	// the first point where whole-suite borrowed sinks and input postreads are
+	// permitted. A missing required case still fails qualification below.
+	s.finishSinks()
+	if s.unknown {
+		return
+	}
+	s.record.CompositeComplete = true
+	s.record.CapturesFinalized = true
+	after, hashErr := fileHash(s.plan.Binary.Path)
+	s.record.BinaryAfterMeasured = hashErr == nil
+	s.record.BinaryUnchanged = hashErr == nil && after == s.plan.Binary.SHA256
+	r.BinaryAfterMeasured, r.BinaryUnchanged = s.record.BinaryAfterMeasured, s.record.BinaryUnchanged
+	s.cause = errors.Join(s.cause, hashErr)
+	if fixture.HasRetainedFile(hashErr) {
+		s.unknown = true
+		return
+	}
+	// Receive and close both original capture readers before any replay. An
+	// unreceived reader close is never hidden by a later successful print.
+	s.replayOut, hashErr = readRaw(r.StdoutSink.Path, 16<<20)
+	s.cause = errors.Join(s.cause, hashErr)
+	if hashErr != nil {
+		s.unknown = true
+		return
+	}
+	s.replayErr, hashErr = readRaw(r.StderrSink.Path, 16<<20)
+	s.cause = errors.Join(s.cause, hashErr)
+	if hashErr != nil {
+		s.unknown = true
+		return
+	}
+	passed := s.cause == nil && r.RootExitCode == 0 && s.record.BinaryUnchanged
+	for _, test := range s.plan.ExpectedRootNames {
+		c := s.caseByTest(test)
+		passed = passed && c.Record.Attempted && c.Record.PhysicalComplete &&
+			c.Record.InitialOwnerMatched && c.Record.NativeOwnerMatched &&
+			c.Record.Ledger.Passed && c.Record.Failure == ""
+	}
+	s.record.QualificationPassed = passed
+	if !passed {
+		s.cause = errors.Join(s.cause, errors.New("original whole-suite or mandatory canonical qualification did not pass"))
+	}
+}
+
+func (s *session) finishSinks() {
+	for _, item := range []struct {
+		file   *os.File
+		record *sinkResult
+	}{
+		{s.stdout, &s.record.Outer.StdoutSink}, {s.stderr, &s.record.Outer.StderrSink},
+	} {
+		if item.file == nil || item.record.CloseAttempted {
+			s.unknown = true
+			s.cause = errors.Join(s.cause, errors.New("original whole-suite sink is absent or already received"))
+			continue
+		}
+		item.record.SyncAttempted = true
+		syncErr := item.file.Sync()
+		item.record.Synced = syncErr == nil
+		item.record.CloseAttempted = true
+		closeErr := item.file.Close()
+		item.record.Closed = closeErr == nil
+		cause := errors.Join(syncErr, closeErr)
+		item.record.Error = errorDescription(cause)
+		if closeErr != nil {
+			cause = &fixture.FileCustodyError{File: item.file, Cause: cause}
+		}
+		if cause != nil {
+			s.unknown = true
+			s.cause = errors.Join(s.cause, cause)
+		}
+	}
+}
+
+func writeRaw(path string, body []byte, limit int) (fixture.Artifact, error) {
+	result := fixture.Artifact{Path: path}
+	if len(body) > limit {
+		return result, errors.New("original completed capture exceeds its retained byte limit")
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return result, err
+	}
+	n, writeErr := file.Write(body)
+	if n != len(body) {
+		writeErr = errors.Join(writeErr, io.ErrShortWrite)
+	}
+	cause := originalFileClose(file, errors.Join(writeErr, file.Sync()))
+	if cause != nil {
+		return result, cause
+	}
+	sum := sha256.Sum256(body)
+	result.Bytes, result.SHA256, result.Closed = int64(n), hex.EncodeToString(sum[:]), true
+	return result, nil
+}
+
+func readRaw(path string, limit int64) ([]byte, error) {
+	if err := fixture.CheckedPath(path, false); err != nil {
+		return nil, err
+	}
+	before, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	after, statErr := file.Stat()
+	if statErr != nil || !after.Mode().IsRegular() || !os.SameFile(before, after) {
+		return nil, originalFileClose(file, errors.Join(statErr, errors.New("original capture reader identity differs")))
+	}
+	body, readErr := io.ReadAll(io.LimitReader(file, limit+1))
+	if int64(len(body)) > limit {
+		readErr = errors.Join(readErr, errors.New("original capture reader exceeds bound"))
+	}
+	if err := originalFileClose(file, readErr); err != nil {
+		return nil, err
+	}
+	return body, nil
+}
+
+func (s *session) finish() (int, error) {
+	s.record.Finished = time.Now().UTC().Format(time.RFC3339Nano)
+	s.record.CustodyRetained, s.record.Outer.CustodyRetained = s.unknown, s.unknown
+	s.record.Failure = errorDescription(s.cause)
+	s.record.Outer.Failure = s.record.Failure
+	s.record.Cases = make([]caseRecord, 0, len(s.cases))
+	for _, c := range s.cases {
+		s.record.Cases = append(s.record.Cases, c.Record)
+	}
+	if s.unknown {
+		s.record.QualificationPassed = false
+	}
+	if s.rootCreated {
+		if err := publishResult(filepath.Join(s.root, "result.json"), s.record); err != nil {
+			s.cause = errors.Join(s.cause, err)
+			s.unknown = true
+			return 1, s.cause
+		}
+	}
+	code := 0
+	if s.record.Outer.RootWaitKnown && s.record.Outer.RootExitCode != 0 {
+		code = s.record.Outer.RootExitCode
+	} else if !s.record.QualificationPassed || s.cause != nil {
+		code = 1
+	}
+	if s.record.CompositeComplete && s.record.CapturesFinalized && !s.unknown {
+		for _, stream := range []struct {
+			body   []byte
+			output io.Writer
+		}{
+			{s.replayOut, os.Stdout}, {s.replayErr, os.Stderr},
+		} {
+			n, err := stream.output.Write(stream.body)
+			if n != len(stream.body) {
+				err = errors.Join(err, io.ErrShortWrite)
+			}
+			if err != nil {
+				s.cause = errors.Join(s.cause, err)
+				if code == 0 {
+					code = 1
+				}
+			}
+		}
+	}
+	return code, s.cause
+}
+
+// Metadata is published only after its original one-shot writer was synced and
+// closed. Failure leaves an unaccepted .pending file; no retry or replacement.
+func publishResult(path string, value compositeResult) error {
+	body, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	body = append(body, '\n')
+	if len(body) > 16<<20 {
+		return errors.New("fixed canonical metadata exceeds its bound")
+	}
+	pending := path + ".pending"
+	file, err := os.OpenFile(pending, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	n, writeErr := file.Write(body)
+	if n != len(body) {
+		writeErr = errors.Join(writeErr, io.ErrShortWrite)
+	}
+	if err := originalFileClose(file, errors.Join(writeErr, file.Sync())); err != nil {
+		return err
+	}
+	from, err := windows.UTF16PtrFromString(pending)
+	if err != nil {
+		return err
+	}
+	to, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return err
+	}
+	return windows.MoveFileEx(from, to, windows.MOVEFILE_WRITE_THROUGH)
+}

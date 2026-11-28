@@ -1,0 +1,239 @@
+{
+  "schema": "five-resource-retirement-publication-evidence-v1",
+  "status": "PASS_TRASH_MOVE_SCOPE_ONLY",
+  "publication_status": "LOCAL_DRAFT_NOT_PUBLISHED",
+  "native_completion": {
+    "basis": "Root received Remote Desktop Commander completion; this reviewer made no new native call.",
+    "tool_session": 430560,
+    "exit_code": 0,
+    "displayed_runtime_seconds": 42.07,
+    "original_directory_handles_closed": true
+  },
+  "scope": {
+    "TASK": "<TASK>",
+    "trash_bucket_relative": "trash/closed-source4-and-probe-caches-v1",
+    "evidence_root_relative": "closed-source4-and-probe-caches-retirement-v1",
+    "resources_moved": 5,
+    "moves_are_same_volume_original_handle_renames": true,
+    "trash_purge_or_delete": false,
+    "copy_or_replace": false,
+    "ACL_changes": false,
+    "automatic_retry_or_rollback": false,
+    "source_or_cache_contents_read_by_retirement": false
+  },
+  "identity_encoding": {
+    "projection": "Exact decimal strings for potentially uint64 identifiers; six received files retain exact JSON integer tokens.",
+    "common_volume_serial_decimal": "275429471",
+    "common_stat_device_decimal": "15424946169900087391",
+    "fields_compared": [
+      "native.volume_serial",
+      "native.file_index",
+      "stat.device",
+      "stat.inode"
+    ],
+    "source4_and_startup_creation_identity_claimed": false,
+    "provider_creation_matches": 2,
+    "startup_indices_exceed_JavaScript_exact_integer_range": true
+  },
+  "resources": [
+    {
+      "name": "source4-partial-tree",
+      "source_relative_to_TASK": "native-consumer-source-v4",
+      "destination_name_under_trash_bucket": "source4-partial-tree",
+      "identity_basis": "current-only",
+      "creation_identity_matched": false,
+      "file_index_decimal": "562949961648634",
+      "stat_inode_decimal": "562949961648634",
+      "native_and_stat_identity_equal_before_after": true,
+      "journal_phases": [
+        "PREPARED",
+        "MOVED"
+      ],
+      "source_absent_after_move": true,
+      "journal_sha256": "069159ec6dded6f22161a9beaa6e520bf238908c6bea3bfb1f841c4e778cd93c"
+    },
+    {
+      "name": "startup-build-cache",
+      "source_relative_to_TASK": "runs/native-start-probe-v1/build-cache",
+      "destination_name_under_trash_bucket": "startup-build-cache",
+      "identity_basis": "current-only",
+      "creation_identity_matched": false,
+      "file_index_decimal": "12947848931019505",
+      "stat_inode_decimal": "12947848931019505",
+      "native_and_stat_identity_equal_before_after": true,
+      "journal_phases": [
+        "PREPARED",
+        "MOVED"
+      ],
+      "source_absent_after_move": true,
+      "journal_sha256": "da080f19640213a526cdb1c91be2c3744372307855b0f175f612e3a3798fc2a4"
+    },
+    {
+      "name": "startup-module-cache",
+      "source_relative_to_TASK": "runs/native-start-probe-v1/module-cache",
+      "destination_name_under_trash_bucket": "startup-module-cache",
+      "identity_basis": "current-only",
+      "creation_identity_matched": false,
+      "file_index_decimal": "12947848931019506",
+      "stat_inode_decimal": "12947848931019506",
+      "native_and_stat_identity_equal_before_after": true,
+      "journal_phases": [
+        "PREPARED",
+        "MOVED"
+      ],
+      "source_absent_after_move": true,
+      "journal_sha256": "93f2bd62f0c843260fddfb9a0e1edd523a9d86782efd1377bed1e2951129f66c"
+    },
+    {
+      "name": "provider-build-cache",
+      "source_relative_to_TASK": "runs/provider-helper-qualification-v1/build-cache",
+      "destination_name_under_trash_bucket": "provider-build-cache",
+      "identity_basis": "creation-matched",
+      "creation_identity_matched": true,
+      "file_index_decimal": "844424938301922",
+      "stat_inode_decimal": "844424938301922",
+      "native_and_stat_identity_equal_before_after": true,
+      "journal_phases": [
+        "PREPARED",
+        "MOVED"
+      ],
+      "source_absent_after_move": true,
+      "journal_sha256": "15002d116396cef4dbd6329f07bbd428cc71fa266a25b8fa57e9907aed8e6b6f"
+    },
+    {
+      "name": "provider-module-cache",
+      "source_relative_to_TASK": "runs/provider-helper-qualification-v1/module-cache",
+      "destination_name_under_trash_bucket": "provider-module-cache",
+      "identity_basis": "creation-matched",
+      "creation_identity_matched": true,
+      "file_index_decimal": "844424938301923",
+      "stat_inode_decimal": "844424938301923",
+      "native_and_stat_identity_equal_before_after": true,
+      "journal_phases": [
+        "PREPARED",
+        "MOVED"
+      ],
+      "source_absent_after_move": true,
+      "journal_sha256": "8fb78a36cbbb95706be872c7588c9ccbed421b72c5eab782dc2fa4a1d5c64c6b"
+    }
+  ],
+  "preservation": {
+    "evidence_and_required_recovery_controls_outside_trash": true,
+    "three_required_images_outside_moved_roots": true,
+    "image_metadata_paths": [
+      "runs/native-start-probe-v1/literal-contained-observed.exe",
+      "runs/provider-helper-qualification-v1/bin/api-provider.test.exe",
+      "runs/provider-helper-qualification-v1/bin/test2json.exe"
+    ],
+    "binary_image_hashes_independently_reread_by_retirement_or_reviewer": false,
+    "image_hash_values_in_controls": "Inherited pinned metadata, not a new binary-content measurement.",
+    "active_source": "native-consumer-source-v5",
+    "active_full_run": "runs/literal-final-v11",
+    "active_caches": [
+      "runs/literal-final-v11/seed-modules",
+      "runs/literal-final-v11/isolated-build-cache"
+    ],
+    "active_paths_disjoint_from_all_five_moves": true,
+    "original_Source4_status": "CLOSED_FAIL_UNCHANGED",
+    "original_held_custody": "UNKNOWN_UNCHANGED",
+    "full_regression_PASS_inferred": false
+  },
+  "own_review": {
+    "exact_plan_preflight_receipt_bindings": true,
+    "all_five_expected_PREPARED_MOVED_pairs": true,
+    "all_five_complete_native_stat_identities_unchanged": true,
+    "same_volume_enforced": true,
+    "all_five_retained_source_handles_required_before_first_move": true,
+    "PASS_assigned_after_ExitStack_handles_close": true,
+    "eight_native_helper_definitions_byte_equal_to_qualified_source": [
+      "require",
+      "ordinary",
+      "pinned",
+      "open_locked_directory",
+      "identity",
+      "require_empty",
+      "rename_original",
+      "append_record"
+    ],
+    "no_delete_copy_replace_or_process_launch_calls_in_issuer": true,
+    "original_and_operative_files_modified": false,
+    "remote_actions_or_native_runs_by_reviewer": false,
+    "all_five_source_paths_absent_in_MOVED_records": true
+  },
+  "transport_boundary": {
+    "received_files": 6,
+    "raw_text_copies_match_local_compact_UTF8_LF_bytes": true,
+    "qualified_append_record_writer_reconstruction_exact": true,
+    "separate_native_hash_command": "NOT_RUN",
+    "all_originals_unmodified": true,
+    "JSON_integer_parser": "Python arbitrary-precision integers; no JavaScript number round-trip",
+    "native_tree_binary_or_cache_content_remeasurement_by_reviewer": false
+  },
+  "evidence": {
+    "receipt": {
+      "path": "recovery/closed-preparation-retirement-v1/actual/receipt.json",
+      "sha256": "674c290a6322e0bebabc7e90202d29df03a03a40e31f6a86ede4977cd3181bab",
+      "bytes": 4226
+    },
+    "active_plan": {
+      "path": "recovery/closed-preparation-retirement-v1/plan.json",
+      "sha256": "f9038834bc91229bd4f9496dd27525a780f031d5f8dfcf517b1e602803334c49",
+      "bytes": 6478
+    },
+    "active_issuer": {
+      "path": "recovery/closed-preparation-retirement-v1/retire_closed_preparation_resources.py",
+      "sha256": "4394614ae7c2a3b7da7e44fb06ff3a9c5504a1e6253ac1b86415cb6ab6f4e38e",
+      "bytes": 15677
+    },
+    "preflight": {
+      "path": "recovery/closed-preparation-preflight-v1/actual.json",
+      "sha256": "ec32933134bafffb85ec8bdf1114374352b163da5435e60a64fa736b79ebfa65",
+      "bytes": 8074
+    },
+    "root_actual_review": {
+      "path": "recovery/closed-preparation-retirement-v1/actual/root-review.json",
+      "sha256": "0f0acb057aedc7aa6971ef6d7a204e782eacf34ea8ee23014922cba23aae30d4",
+      "bytes": 1489
+    },
+    "qualified_rename_source": {
+      "path": "recovery/cleanup-v9/retire_closed_v9_resources_v2.py",
+      "sha256": "40ecbc3c44811ab92d167601d0716fd9ae9d49afb9062a17b19a1cf75cafce24",
+      "bytes": 18027
+    },
+    "live_manifest": {
+      "path": "recovery/runtime-v14-preparation-v1/bound-final-v1/actual-manifest.json",
+      "sha256": "15756f71977804cb683ac3cc27f15b7eae1c2b869d28db94c2f501816ee807c8",
+      "bytes": 8865
+    },
+    "root_scope_observation": {
+      "path": "recovery/closed-preparation-preflight-v1/root-observation.json",
+      "sha256": "f0b2fd9dbb76fa05de41893264fc94c3ba6e83145ddb3c60a91c6cb95d042516",
+      "bytes": 2047
+    },
+    "source4-partial-tree_journal": {
+      "path": "recovery/closed-preparation-retirement-v1/actual/source4-partial-tree.jsonl",
+      "sha256": "069159ec6dded6f22161a9beaa6e520bf238908c6bea3bfb1f841c4e778cd93c",
+      "bytes": 2069
+    },
+    "startup-build-cache_journal": {
+      "path": "recovery/closed-preparation-retirement-v1/actual/startup-build-cache.jsonl",
+      "sha256": "da080f19640213a526cdb1c91be2c3744372307855b0f175f612e3a3798fc2a4",
+      "bytes": 2115
+    },
+    "startup-module-cache_journal": {
+      "path": "recovery/closed-preparation-retirement-v1/actual/startup-module-cache.jsonl",
+      "sha256": "93f2bd62f0c843260fddfb9a0e1edd523a9d86782efd1377bed1e2951129f66c",
+      "bytes": 2121
+    },
+    "provider-build-cache_journal": {
+      "path": "recovery/closed-preparation-retirement-v1/actual/provider-build-cache.jsonl",
+      "sha256": "15002d116396cef4dbd6329f07bbd428cc71fa266a25b8fa57e9907aed8e6b6f",
+      "bytes": 2127
+    },
+    "provider-module-cache_journal": {
+      "path": "recovery/closed-preparation-retirement-v1/actual/provider-module-cache.jsonl",
+      "sha256": "8fb78a36cbbb95706be872c7588c9ccbed421b72c5eab782dc2fa4a1d5c64c6b",
+      "bytes": 2133
+    }
+  }
+}

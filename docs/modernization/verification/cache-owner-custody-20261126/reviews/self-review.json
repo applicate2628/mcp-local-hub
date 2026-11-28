@@ -1,0 +1,103 @@
+{
+  "schema": "public-fixture-and-checkpoint-self-review-v1",
+  "status": "REVIEWED_WITH_FULL_GATE_FAIL",
+  "files_changed": {
+    "pr665": 8,
+    "pr666": 2,
+    "pr664_plan": 1
+  },
+  "public_patch_scope": "Only incidental test-port selection and related expected values; no production or timeout changes.",
+  "compatibility": "Eight whole-file after-images exactly match private source; namespace eleven port expressions and CLI adopt two retained calls preserve public fixtures. Two CLI candidates covered upstream are omitted. Narrow overlap patches apply cleanly to actual #664 62199 files.",
+  "negative_cases_and_assertions_preserved": true,
+  "concurrent_plan_bytes_preserved": true,
+  "plan_checks": [
+    {
+      "argv": [
+        "git",
+        "apply",
+        "--check",
+        "<RECOVERY>/integration-recovery/pr-664-plan.patch"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "apply",
+        "--reverse",
+        "--check",
+        "<RECOVERY>/integration-recovery/pr-664-plan.patch"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "diff",
+        "--no-index",
+        "--check",
+        "<RECOVERY>/integration-recovery/baseline/pr-664/.plans/2026-11/open-pr-integration-20261117.md",
+        "<RECOVERY>/integration-recovery/candidate/pr-664/.plans/2026-11/open-pr-integration-20261117.md"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "publication_projection_private_absolute_paths_absent": true,
+  "runtime_tests_executed": false,
+  "full_public_head_gate": "NOT_RUN",
+  "native_private_full_gate": "FAIL",
+  "external_exact_head_review": "REVIEW_PENDING",
+  "skills_reused": 3,
+  "new_unique_skill_count": 0,
+  "artifacts": {
+    "pr-665.patch": "6d8e0b06f673ad028f12922f55a640b316f449e7c4dbfeaf822d0ca24ca72d38",
+    "pr-666.patch": "40ad504d3349d4559da0149b20df1b9f4ef32f4612ee5d5433c0159c336890b1",
+    "pr-664-plan.patch": "ea5152a867b7d2744fbedafe92ded1214a86f17a372c704b72dab37685555090",
+    "checkpoint-evidence.json": "b3215623d9dd418dc9162ed78c5f6d0f5a6918d3e241c0ab917b304b1cfed8c8",
+    "public-patch-map.json": "05483cfd8ca6649a32fb7b0df42d95efc5497e644ff840a3f8d5c98c2e31ba68",
+    "changed-test-names.json": "6b8c398bf6db5058a26a7d2bb05e50f553860ea27a8e37622bb1a27e5183e3cc",
+    "full-v10-outer-review.json": "eeabb763c16bfb9f710f97e966d5fb0a841a4707084c90d2ee85af8bbd8827a2",
+    "cleanup-v9-review.json": "3f283762ca44fc781813ca1f6586389bfee8ad6f09f5ece52a8e451cb584e169",
+    "skills-recovery.json": "1031048fee7e348c6fe00fe747e9bf76699d2f4aff42c43a6623d32b96e23819"
+  },
+  "candidate_test_roots": 36,
+  "historical_private_test_roots": 38,
+  "candidate_tagged_observation": {
+    "PASS": 33,
+    "NOT_RUN": 3
+  },
+  "historical_tagged_observation": {
+    "PASS": 35,
+    "NOT_RUN": 3
+  },
+  "followup_checks": [
+    {
+      "pr": 664,
+      "reverse": false,
+      "exit_code": 0
+    },
+    {
+      "pr": 664,
+      "reverse": true,
+      "exit_code": 0
+    },
+    {
+      "pr": 666,
+      "reverse": false,
+      "exit_code": 0
+    },
+    {
+      "pr": 666,
+      "reverse": true,
+      "exit_code": 0
+    }
+  ],
+  "upstream_compatibility_sha256": "1cbf5ec3d8e670a46571eefe2dd7a8d600a7cfad25b33b47c0e7101c3bc9f5d7",
+  "publication_readme_review_sha256": "85c150774bae2480d4c2f0446f166b910a2fa11dbc8e8db0c3e9a450cc21b123"
+}

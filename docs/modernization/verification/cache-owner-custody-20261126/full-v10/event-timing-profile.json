@@ -1,0 +1,738 @@
+{
+  "schema": "full-v10-event-profile-v1",
+  "basis": "Exact SHA-verified suite-events; no native reruns",
+  "timing_limitations": [
+    "test2json has no Time or Elapsed; durations are Go frame text rounded to 0.01 seconds.",
+    "Only completed top-level tests are summed; subtest durations would double count.",
+    "A stack at the global deadline identifies current work, not the cause of earlier elapsed time."
+  ],
+  "packages": [
+    {
+      "package": "mcp-local-hub/internal/api",
+      "run": "x46bc4c776039",
+      "source": {
+        "path": "<RECOVERY>/recovery/full-v10/captures/x46bc4c776039__suite-events.stdout.txt",
+        "sha256": "892ba82d2e61d2d93e527f426597112d2394357d9b4e7b3d65ad1b4bbf924dac"
+      },
+      "event_count": 2144,
+      "action_counts": {
+        "start": 1,
+        "run": 521,
+        "output": 1102,
+        "pass": 518,
+        "skip": 2
+      },
+      "completed_top_level": {
+        "PASS": 266,
+        "SKIP": 1
+      },
+      "started_without_terminal": [
+        {
+          "test": "TestBuildAdoptPlanWithExplicitPortIgnoresExhaustedLegacyDraftRange",
+          "state": "RUNNING_AT_DEADLINE"
+        }
+      ],
+      "completed_top_level_duration_sum_seconds": 299.76,
+      "completed_top_level_frame_count": 267,
+      "top_durations": [
+        {
+          "test": "TestAdoptReceiverRejectsIntentIdentityDrift",
+          "outcome": "PASS",
+          "seconds": 47.59,
+          "event_line": 250
+        },
+        {
+          "test": "TestAdoptRepeatRejectsLegacyEmptyIntentHash",
+          "outcome": "PASS",
+          "seconds": 40.3,
+          "event_line": 211
+        },
+        {
+          "test": "TestProbeProviderProcessWorkingDirectoryReadsOwnedWOW64Helper",
+          "outcome": "PASS",
+          "seconds": 26.7,
+          "event_line": 2024
+        },
+        {
+          "test": "TestProviderWorkingDirectoryIdentityOwnsOnlySelectedLiveInstance",
+          "outcome": "PASS",
+          "seconds": 15.64,
+          "event_line": 2032
+        },
+        {
+          "test": "TestAdoptSecretRoutingNamespacesVaultKeysByManifest",
+          "outcome": "PASS",
+          "seconds": 10.3,
+          "event_line": 2127
+        },
+        {
+          "test": "TestAdoptRepeatRejectsMalformedProvenance",
+          "outcome": "PASS",
+          "seconds": 9.04,
+          "event_line": 308
+        },
+        {
+          "test": "TestProviderManagedInstallStateAdvancesBeforeInstall",
+          "outcome": "PASS",
+          "seconds": 7.67,
+          "event_line": 1667
+        },
+        {
+          "test": "TestAdoptSecretPrefixedExistingVaultKeyRoutesAsForeignLiteral",
+          "outcome": "PASS",
+          "seconds": 6.76,
+          "event_line": 2121
+        },
+        {
+          "test": "TestAdoptNonCodexCompatibilityMatrixDoesNotEmitHSettlement",
+          "outcome": "PASS",
+          "seconds": 6.02,
+          "event_line": 568
+        },
+        {
+          "test": "TestCaptureAdoptProvenanceUpsertReapsOrphan",
+          "outcome": "PASS",
+          "seconds": 5.9,
+          "event_line": 1563
+        },
+        {
+          "test": "TestProviderWorkingDirectoryPEBDOSPathNamedPipeDoesNotConnect",
+          "outcome": "PASS",
+          "seconds": 5.01,
+          "event_line": 2028
+        },
+        {
+          "test": "TestExecuteProviderAdoptCommitsDisabledProviderAndRepeatIsNoop",
+          "outcome": "PASS",
+          "seconds": 4.64,
+          "event_line": 1776
+        },
+        {
+          "test": "TestExecuteAdopt_PreservedRowReclaimableAfterOperatorReversal",
+          "outcome": "PASS",
+          "seconds": 4.51,
+          "event_line": 397
+        },
+        {
+          "test": "TestAdoptCodexToolTimeoutRoundTripsBindingAndDeAdopt",
+          "outcome": "PASS",
+          "seconds": 4.08,
+          "event_line": 498
+        },
+        {
+          "test": "TestAdoptReceiverRejectsParseableManifestHashDrift",
+          "outcome": "PASS",
+          "seconds": 3.98,
+          "event_line": 201
+        },
+        {
+          "test": "TestAdoptCaptureRefusesMutatedPriorCrashRow",
+          "outcome": "PASS",
+          "seconds": 3.7,
+          "event_line": 485
+        },
+        {
+          "test": "TestExecuteProviderAdoptRestoresActivationOnPostCASMetadataDrift",
+          "outcome": "PASS",
+          "seconds": 3.38,
+          "event_line": 1695
+        },
+        {
+          "test": "TestExecuteAdoptPersistsProvenanceAcrossFreshAPI",
+          "outcome": "PASS",
+          "seconds": 3.37,
+          "event_line": 1516
+        },
+        {
+          "test": "TestAdoptFreshIntentHashMatchesManifestAndProvenance",
+          "outcome": "PASS",
+          "seconds": 3.28,
+          "event_line": 206
+        },
+        {
+          "test": "TestExecuteAdopt_ForwardCommittedPreservesPartialPrefixForRecovery",
+          "outcome": "PASS",
+          "seconds": 2.95,
+          "event_line": 401
+        },
+        {
+          "test": "TestAdoptNonCodexSourcePreservesMatchingCodexReceiverToolTimeout",
+          "outcome": "PASS",
+          "seconds": 2.95,
+          "event_line": 503
+        },
+        {
+          "test": "TestCaptureFanoutAbsentStillSucceeds",
+          "outcome": "PASS",
+          "seconds": 2.87,
+          "event_line": 1555
+        },
+        {
+          "test": "TestAdoptSecretPrefixedForeignLiteralRoutesWhenVaultKeyMissing",
+          "outcome": "PASS",
+          "seconds": 2.87,
+          "event_line": 2116
+        },
+        {
+          "test": "TestExecuteAdopt_PreInstallBranchesAbortUnconditionally",
+          "outcome": "PASS",
+          "seconds": 2.77,
+          "event_line": 393
+        },
+        {
+          "test": "TestAdoptCodexSettlementSurvivesOuterFailureWithoutAdoptSuccess",
+          "outcome": "PASS",
+          "seconds": 2.53,
+          "event_line": 548
+        },
+        {
+          "test": "TestExecuteAdoptMigratesEligibleLegacyLeaseNamespaceAndRepeats",
+          "outcome": "PASS",
+          "seconds": 2.4,
+          "event_line": 613
+        },
+        {
+          "test": "TestExecuteAdopt_Path1WholeFileGone_ConcurrentRecreateConflict_JSON",
+          "outcome": "PASS",
+          "seconds": 2.35,
+          "event_line": 353
+        },
+        {
+          "test": "TestAdoptCaptureReapsByteFrozenPriorCrashOrphan",
+          "outcome": "PASS",
+          "seconds": 2.34,
+          "event_line": 489
+        },
+        {
+          "test": "TestExecuteAdopt_PreservesProvenanceOnRollbackIncomplete",
+          "outcome": "PASS",
+          "seconds": 2.25,
+          "event_line": 377
+        },
+        {
+          "test": "TestAdoptRepeatExactStateIsByteStableAndReportsAlreadyAdopted",
+          "outcome": "PASS",
+          "seconds": 1.97,
+          "event_line": 313
+        },
+        {
+          "test": "TestAdoptGcCrashOrphanEntryFrozenReapsDespiteUnrelatedChurn",
+          "outcome": "PASS",
+          "seconds": 1.94,
+          "event_line": 421
+        },
+        {
+          "test": "TestExecuteAdopt_AbortsWhenFailingClientMutatedButRestorable",
+          "outcome": "PASS",
+          "seconds": 1.8,
+          "event_line": 321
+        },
+        {
+          "test": "TestCodexCollisionRelocationFailureEmitsNoCommittedSignal",
+          "outcome": "PASS",
+          "seconds": 1.68,
+          "event_line": 543
+        },
+        {
+          "test": "TestAdoptAPI_HSettlementEventFailureCarriesCommittedRow",
+          "outcome": "PASS",
+          "seconds": 1.64,
+          "event_line": 554
+        },
+        {
+          "test": "TestAdoptProfileUpdateExecuteIntentOnlyPreservesSibling",
+          "outcome": "PASS",
+          "seconds": 1.54,
+          "event_line": 987
+        },
+        {
+          "test": "TestPromoteAndAbortIdempotent",
+          "outcome": "PASS",
+          "seconds": 1.54,
+          "event_line": 1579
+        },
+        {
+          "test": "TestExecuteAdopt_Path1WholeFileGone_ConcurrentRecreate_CodexReadFailPreserves",
+          "outcome": "PASS",
+          "seconds": 1.45,
+          "event_line": 349
+        },
+        {
+          "test": "TestAdoptExecutedEventRequiresLeaseSettlement",
+          "outcome": "PASS",
+          "seconds": 1.39,
+          "event_line": 767
+        },
+        {
+          "test": "TestMarkAdoptProvenanceDeAdoptingT12B4ReclassifiesAdoptingRow",
+          "outcome": "PASS",
+          "seconds": 1.39,
+          "event_line": 1455
+        },
+        {
+          "test": "TestExecuteAdoptPromoteRecoverable",
+          "outcome": "PASS",
+          "seconds": 1.38,
+          "event_line": 1541
+        }
+      ],
+      "last_completed_tests": [
+        {
+          "test": "TestExecuteAdoptScopedConsentDoesNotAuthorizeConcurrentNonAdoptWrite",
+          "outcome": "PASS",
+          "seconds": 0.22,
+          "event_line": 2097
+        },
+        {
+          "test": "TestExecuteAdoptRollbackRestoresDirectStdioPriorFromBackupOnSecondClientFailure",
+          "outcome": "PASS",
+          "seconds": 0.13,
+          "event_line": 2101
+        },
+        {
+          "test": "TestAdoptSensitiveLiteralRoutesToVaultAndRedactsPlan",
+          "outcome": "PASS",
+          "seconds": 0.22,
+          "event_line": 2106
+        },
+        {
+          "test": "TestAdoptEnvPlaceholderSurvivesManifestWithoutVaultWrite",
+          "outcome": "PASS",
+          "seconds": 0.17,
+          "event_line": 2111
+        },
+        {
+          "test": "TestAdoptSecretPrefixedForeignLiteralRoutesWhenVaultKeyMissing",
+          "outcome": "PASS",
+          "seconds": 2.87,
+          "event_line": 2116
+        },
+        {
+          "test": "TestAdoptSecretPrefixedExistingVaultKeyRoutesAsForeignLiteral",
+          "outcome": "PASS",
+          "seconds": 6.76,
+          "event_line": 2121
+        },
+        {
+          "test": "TestAdoptSecretRoutingNamespacesVaultKeysByManifest",
+          "outcome": "PASS",
+          "seconds": 10.3,
+          "event_line": 2127
+        },
+        {
+          "test": "TestExecuteAdoptRefusesExistingNamespacedVaultKeyBeforeManifestWrite",
+          "outcome": "PASS",
+          "seconds": 0.86,
+          "event_line": 2131
+        },
+        {
+          "test": "TestBuildAdoptPlanRejectsExplicitPortOutsideAdoptRangeBeforeMutation",
+          "outcome": "PASS",
+          "seconds": 0.01,
+          "event_line": 2135
+        },
+        {
+          "test": "TestBuildAdoptPlanRejectsExplicitUsedPortBeforeMutation",
+          "outcome": "PASS",
+          "seconds": 0.01,
+          "event_line": 2139
+        }
+      ],
+      "top_20_sum_seconds": 214.82,
+      "top_20_fraction_of_300_seconds": 0.7160666666666666,
+      "rounding_error_max_completed_sum_seconds": 1.335
+    },
+    {
+      "package": "mcp-local-hub/internal/cli",
+      "run": "x06928e6b162c",
+      "source": {
+        "path": "<RECOVERY>/recovery/full-v10/captures/x06928e6b162c__suite-events.stdout.txt",
+        "sha256": "97fde272513f69f2cbc824e9edf9e133173dc06e0b1c069b460c73a8f5a23920"
+      },
+      "event_count": 7910,
+      "action_counts": {
+        "start": 1,
+        "run": 1784,
+        "output": 4342,
+        "pass": 1758,
+        "skip": 11,
+        "pause": 14
+      },
+      "completed_top_level": {
+        "PASS": 980,
+        "SKIP": 11
+      },
+      "started_without_terminal": [
+        {
+          "test": "TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_DrivesSupervisorRestart",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_NilSpecRowsHealedBeforeSpawn",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_LiveSupervisor_ReapClearsTheGateBeforeWrite",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_PostCommitReconcileReadyTimeout_ExitsZeroWithWarning",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_ConcurrentRegisterInWindow_AppearsInCommittedIntent",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_EmptyFirstSnapshot_WorkspaceRegisteredInWindow_RecomputesStart",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_EmptyFirstSnapshot_SupervisorRunning_LateReapClearsGate",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestRunSupervise_IPCShutdownJoinsAcceptExitOnTestExit",
+          "state": "RUNNING_AT_DEADLINE"
+        }
+      ],
+      "completed_top_level_duration_sum_seconds": 299.7,
+      "completed_top_level_frame_count": 991,
+      "top_durations": [
+        {
+          "test": "TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade",
+          "outcome": "PASS",
+          "seconds": 26.21,
+          "event_line": 3014
+        },
+        {
+          "test": "TestMCPFrontReview_ForwardRefusesToMergeIntoARetiredGeneration",
+          "outcome": "PASS",
+          "seconds": 25.56,
+          "event_line": 3422
+        },
+        {
+          "test": "TestGUIOwnerUnknownConfirmationMarkerWorker_HeldLockBoundsAllWriteSites",
+          "outcome": "PASS",
+          "seconds": 15.45,
+          "event_line": 7483
+        },
+        {
+          "test": "TestReliability_VersionCommandExitsZero",
+          "outcome": "PASS",
+          "seconds": 12.28,
+          "event_line": 927
+        },
+        {
+          "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable",
+          "outcome": "PASS",
+          "seconds": 8.86,
+          "event_line": 3638
+        },
+        {
+          "test": "TestMigrateSerena_RealWriterConsentReceivingWindows",
+          "outcome": "PASS",
+          "seconds": 7.73,
+          "event_line": 4870
+        },
+        {
+          "test": "TestRunReconcileMCPFront_Rollback_InvalidDurableTargetFailsClosed",
+          "outcome": "PASS",
+          "seconds": 6.77,
+          "event_line": 3442
+        },
+        {
+          "test": "TestRunReconcileMCPFront_ForwardThenRollback_RoundTrip",
+          "outcome": "PASS",
+          "seconds": 6.28,
+          "event_line": 3438
+        },
+        {
+          "test": "TestMCPFrontOwnership_ForwardAcceptsASupervisedRouteDaemon",
+          "outcome": "PASS",
+          "seconds": 6.17,
+          "event_line": 3382
+        },
+        {
+          "test": "TestForce_KillRaceLost",
+          "outcome": "PASS",
+          "seconds": 6.16,
+          "event_line": 1727
+        },
+        {
+          "test": "TestAcceptLoop_BudgetBreakerExitsOnFlood",
+          "outcome": "PASS",
+          "seconds": 5.74,
+          "event_line": 7295
+        },
+        {
+          "test": "TestForce_KillRewritesPidportWithCurrentPID",
+          "outcome": "PASS",
+          "seconds": 5.31,
+          "event_line": 1485
+        },
+        {
+          "test": "TestGUIOwnerUnknownConfirmationMarkerWorker_HeldLockTimesOutAndReaps",
+          "outcome": "PASS",
+          "seconds": 5.05,
+          "event_line": 7463
+        },
+        {
+          "test": "TestDaemonEnvWithOverlayPathCaseMatrix",
+          "outcome": "PASS",
+          "seconds": 4.93,
+          "event_line": 1092
+        },
+        {
+          "test": "TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID",
+          "outcome": "PASS",
+          "seconds": 4.69,
+          "event_line": 5618
+        },
+        {
+          "test": "TestPidMatchesMcphub_RejectsForeignPathSameBasename",
+          "outcome": "PASS",
+          "seconds": 4.68,
+          "event_line": 5614
+        },
+        {
+          "test": "TestMCPFrontR2_SecondInvocationRefusesWhileTheTransactionLockIsHeld",
+          "outcome": "PASS",
+          "seconds": 4.07,
+          "event_line": 3266
+        },
+        {
+          "test": "TestRestartV3_SamePortStandbyBindWaitsForParentClose",
+          "outcome": "PASS",
+          "seconds": 3.94,
+          "event_line": 2251
+        },
+        {
+          "test": "TestMCPFrontR2_RollbackRefusesAnOperatorEditedSerenaEntry",
+          "outcome": "PASS",
+          "seconds": 3.83,
+          "event_line": 3262
+        },
+        {
+          "test": "TestMCPFrontV3_ClassifierRejectsPinMutationAcrossAcceptedShapes",
+          "outcome": "PASS",
+          "seconds": 3.68,
+          "event_line": 3774
+        },
+        {
+          "test": "TestMCPFrontV3_PartialCrossPortRetryKeepsPerRowAppliedPorts",
+          "outcome": "PASS",
+          "seconds": 3.41,
+          "event_line": 3458
+        },
+        {
+          "test": "TestWindowsMappedImageRenameRequiresExactGenerationReceipt",
+          "outcome": "PASS",
+          "seconds": 3.16,
+          "event_line": 4710
+        },
+        {
+          "test": "TestCLISecretsEdit_EmitsPerKeyAuditEventsWithoutValues",
+          "outcome": "PASS",
+          "seconds": 2.97,
+          "event_line": 6224
+        },
+        {
+          "test": "TestQuitCommandAbsentOwnerPositiveReplayDoesNotStopAgain",
+          "outcome": "PASS",
+          "seconds": 2.54,
+          "event_line": 2594
+        },
+        {
+          "test": "TestForce_KillHappyPath_SeamMocked",
+          "outcome": "PASS",
+          "seconds": 2.39,
+          "event_line": 1457
+        },
+        {
+          "test": "TestMCPFrontPR588_RollbackRestoresPriorLSPRouterURL",
+          "outcome": "PASS",
+          "seconds": 2.18,
+          "event_line": 3286
+        },
+        {
+          "test": "TestMigrateSerena_Interlock_AcquiredImmediatelyAfterReap_ClosesPostReapGap",
+          "outcome": "PASS",
+          "seconds": 2.13,
+          "event_line": 5138
+        },
+        {
+          "test": "TestEnsureAlive_SupervisorDownTickResetsUnknownConfirmationMarker",
+          "outcome": "PASS",
+          "seconds": 2.06,
+          "event_line": 7763
+        },
+        {
+          "test": "TestMCPFrontOwnership_ForwardRefusesUnsupervisedRouteListener",
+          "outcome": "PASS",
+          "seconds": 1.99,
+          "event_line": 3378
+        },
+        {
+          "test": "TestEnsureAlive_HeadlessFleet_UnknownConfirmedDeadUnknownDoesNotReuseStaleTimestamp",
+          "outcome": "PASS",
+          "seconds": 1.99,
+          "event_line": 7759
+        },
+        {
+          "test": "TestRetainedGenerationPortPopulationAtomic",
+          "outcome": "PASS",
+          "seconds": 1.82,
+          "event_line": 5934
+        },
+        {
+          "test": "TestMCPFrontV3_RetainedPinnedNoReceiptConflictRoundTrip",
+          "outcome": "PASS",
+          "seconds": 1.8,
+          "event_line": 3822
+        },
+        {
+          "test": "TestForce_KillNonInteractiveWithoutYesExits6",
+          "outcome": "PASS",
+          "seconds": 1.64,
+          "event_line": 1540
+        },
+        {
+          "test": "TestAdoptCLIProfilePersistsAndBuildsLegacyHost",
+          "outcome": "PASS",
+          "seconds": 1.62,
+          "event_line": 4
+        },
+        {
+          "test": "TestMCPFrontR2_ForwardRefusesAReusedPIDImpostor",
+          "outcome": "PASS",
+          "seconds": 1.51,
+          "event_line": 3270
+        },
+        {
+          "test": "TestAggregateTrayState_LockContentionPreservesUserStopSuppression",
+          "outcome": "PASS",
+          "seconds": 1.5,
+          "event_line": 2802
+        },
+        {
+          "test": "TestForce_KillRefusesNonMcphubImage",
+          "outcome": "PASS",
+          "seconds": 1.34,
+          "event_line": 1521
+        },
+        {
+          "test": "TestCLISecretsSet_EmitsAuditEventWithoutValue",
+          "outcome": "PASS",
+          "seconds": 1.34,
+          "event_line": 6208
+        },
+        {
+          "test": "TestMCPFrontPR588_ForwardRerunPreservesFirstGenerationRecord",
+          "outcome": "PASS",
+          "seconds": 1.32,
+          "event_line": 3282
+        },
+        {
+          "test": "TestMCPFrontV3_UncertainRowDoesNotSuppressAnIndependentRollback",
+          "outcome": "PASS",
+          "seconds": 1.31,
+          "event_line": 4002
+        }
+      ],
+      "last_completed_tests": [
+        {
+          "test": "TestEnsureAliveGUIRecovery_FreeMessageReconcilesSupervisorLiveness",
+          "outcome": "PASS",
+          "seconds": 1.01,
+          "event_line": 7823
+        },
+        {
+          "test": "TestEnsureAliveGUIRecovery_FreeVsHeldSelectsExactOperatorCommand",
+          "outcome": "PASS",
+          "seconds": 0.88,
+          "event_line": 7843
+        },
+        {
+          "test": "TestEnsureAliveGUIRecovery_IneligibleOrUnreadableMarkersNeverProbeMutateOrChooseCommand",
+          "outcome": "PASS",
+          "seconds": 0.01,
+          "event_line": 7871
+        },
+        {
+          "test": "TestEnsureAliveGUIRecovery_ReservationWindowSuppressesAndSupervisorLiveStillNoOps",
+          "outcome": "PASS",
+          "seconds": 0.15,
+          "event_line": 7875
+        },
+        {
+          "test": "TestEnsureAliveGUIRecovery_LateStandbyRejectsInterruptedMarker",
+          "outcome": "PASS",
+          "seconds": 0.2,
+          "event_line": 7879
+        },
+        {
+          "test": "TestEnsureAliveGUIRecovery_TotalBudgetCannotStarveSupervisorLiveness",
+          "outcome": "PASS",
+          "seconds": 0.08,
+          "event_line": 7883
+        },
+        {
+          "test": "TestEnsureAliveGUIRecovery_ClassifierTimeoutRetainsLeaseUntilCASCompletes",
+          "outcome": "PASS",
+          "seconds": 0.04,
+          "event_line": 7887
+        },
+        {
+          "test": "TestEnsureAliveGUIRecovery_FreeProbeContractFailureReleasesBeforeDiagnostics",
+          "outcome": "PASS",
+          "seconds": 0.0,
+          "event_line": 7891
+        },
+        {
+          "test": "TestRestartV3_FeatureGateInertMatrix",
+          "outcome": "PASS",
+          "seconds": 0.64,
+          "event_line": 7895
+        },
+        {
+          "test": "TestEnsureAliveGUIRecovery_UnconfirmedLeaseReleaseDegradesToUnknown",
+          "outcome": "PASS",
+          "seconds": 0.37,
+          "event_line": 7907
+        }
+      ],
+      "top_20_sum_seconds": 167.39,
+      "top_20_fraction_of_300_seconds": 0.5579666666666666,
+      "rounding_error_max_completed_sum_seconds": 4.955
+    }
+  ]
+}

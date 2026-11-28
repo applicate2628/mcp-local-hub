@@ -1,0 +1,185 @@
+{
+  "schema": "b-archive-content-search-v2",
+  "targets": {
+    "receiver_current": "1f45b3ef0e9184cc66be002cb918eb38dad0560e86e0a4a2d5c31658f44c2891",
+    "receiver_preimage": "4cdb508e655527b0372a5726f2753f6163ee50ed25b52546ff86e85682a6185a",
+    "receiver_patch": "e724dc749ac82517d2af3553fa558388f59371a0a2c0330af4a0db60738a31d5",
+    "canonical_manifest": "e74ff2ed872591e32b5fdd948d90959b9a564843534f1c46621dc6a409bf47c3"
+  },
+  "selection": "Prior E archive report: b-native/failed-owner/current5e/fresh/canonical/lf363b/source52/ab664; selected D p0/source/candidate capsules. Broader content and JSON-base64 coverage than previous filename-only pass.",
+  "inputs": [
+    {
+      "name": "archives-v1.json",
+      "sha256": "2b0a4ebf145b561e83519648bde967273e391f455a5374a900f7b372c438dcd2"
+    }
+  ],
+  "selected": 23,
+  "limits": {
+    "archive": 67108864,
+    "member": 2097152,
+    "nested_decode": 16777216,
+    "seconds": 50,
+    "compressed_total": 268435456
+  },
+  "archives": [
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b\\docs\\modernization\\verification\\residual-next-closeout-20261122\\verification-evidence.zip",
+      "bytes": 34109,
+      "sha256": "51ef6e1423373613cf3904bea18a13528a32956a7b12e82a15d2b995329df52d",
+      "same_bytes_as": "{E_IMPORTED_TASK_ROOT}\\lf363b-next\\docs\\modernization\\verification\\residual-next-closeout-20261122\\verification-evidence.zip"
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b\\docs\\modernization\\verification\\scheduler-hidden-task-2026-11-19\\evidence-redacted.zip",
+      "bytes": 123047,
+      "sha256": "a092d2516200b5a2f39d85dedbbbd820b3ae2727e5a78be3007010a130060b4d",
+      "same_bytes_as": "{E_IMPORTED_TASK_ROOT}\\lf363b-next\\docs\\modernization\\verification\\scheduler-hidden-task-2026-11-19\\evidence-redacted.zip"
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b\\docs\\modernization\\verification\\scheduler-hold-composition-20261122\\qualification-evidence.zip",
+      "bytes": 416775,
+      "sha256": "52c1c863b1438c380d0c8c808a18a0f136c37765127bd48de6cc43f84a240728",
+      "same_bytes_as": "{E_IMPORTED_TASK_ROOT}\\lf363b-next\\docs\\modernization\\verification\\scheduler-hold-composition-20261122\\qualification-evidence.zip"
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b\\docs\\modernization\\verification\\scheduler-sid-predelete-20261122\\raw-evidence.tar.gz",
+      "bytes": 1146574,
+      "sha256": "3183efb75ffcd4b6786d131faccc233fc9b728939a27edfe198330a65cf3dacc",
+      "same_bytes_as": "{E_IMPORTED_TASK_ROOT}\\lf363b-next\\docs\\modernization\\verification\\scheduler-sid-predelete-20261122\\raw-evidence.tar.gz"
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b\\docs\\modernization\\verification\\scheduler-stop-errors-20261122\\raw-evidence.zip",
+      "bytes": 845603,
+      "sha256": "e83f6bf65a3610a5867d4f4995acedeca5af3c614b4ac519e1a5996e2c24c122",
+      "same_bytes_as": "{E_IMPORTED_TASK_ROOT}\\lf363b-next\\docs\\modernization\\verification\\scheduler-stop-errors-20261122\\raw-evidence.zip"
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b\\docs\\modernization\\verification\\scheduler-upgrade-recovery-20261122\\raw-evidence.zip",
+      "bytes": 1695231,
+      "sha256": "858912769a69d45fd6fdd8e422ed169fd7bbc69c9a125e7fab8c2a0fe584bd29",
+      "same_bytes_as": "{E_IMPORTED_TASK_ROOT}\\lf363b-next\\docs\\modernization\\verification\\scheduler-upgrade-recovery-20261122\\raw-evidence.zip"
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b\\docs\\modernization\\verification\\scheduler-upgrade-snapshot-20261122\\raw-evidence.zip",
+      "bytes": 721029,
+      "sha256": "37fa99c64880d4aef5bfa4ff1cf5c19ce0fef6a6c8022b590d1215c18b0db120",
+      "same_bytes_as": "{E_IMPORTED_TASK_ROOT}\\lf363b-next\\docs\\modernization\\verification\\scheduler-upgrade-snapshot-20261122\\raw-evidence.zip"
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b\\docs\\modernization\\verification\\serena-namespace-2026-11-18\\logs.zip",
+      "bytes": 173022,
+      "sha256": "89951300f1df94eb73f8a04c8f834af327106120f33b478bafb52f65f3824f3f",
+      "same_bytes_as": "{E_IMPORTED_TASK_ROOT}\\lf363b-next\\docs\\modernization\\verification\\serena-namespace-2026-11-18\\logs.zip"
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b\\docs\\modernization\\verification\\serena-owner-composition-2026-11-22\\serena-composition-evidence.zip",
+      "bytes": 2293451,
+      "sha256": "5fa49f768a4bd8856bea9775109989c896b437a77b3f88292d5e26322e0bb844",
+      "same_bytes_as": "{E_IMPORTED_TASK_ROOT}\\lf363b-next\\docs\\modernization\\verification\\serena-owner-composition-2026-11-22\\serena-composition-evidence.zip"
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b\\docs\\modernization\\verification\\serena-product-composition-20261122\\candidate-inputs.zip",
+      "bytes": 367262,
+      "sha256": "9da4b677c1ed02af71bb949005c4c06411400530079ede5938d6b6a3c67c35fe",
+      "same_bytes_as": "{E_IMPORTED_TASK_ROOT}\\lf363b-next\\docs\\modernization\\verification\\serena-product-composition-20261122\\candidate-inputs.zip"
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b\\docs\\modernization\\verification\\serena-publisher-2026-11-18\\logs.zip",
+      "bytes": 15879,
+      "sha256": "86fd4be6bf6fef814dc703f1ae02ccf3a558b528d61e5f825948cf501a35897a",
+      "same_bytes_as": "{E_IMPORTED_TASK_ROOT}\\lf363b-next\\docs\\modernization\\verification\\serena-publisher-2026-11-18\\logs.zip"
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b\\docs\\modernization\\verification\\serena-source-preparation-20261122\\bundle.zip",
+      "bytes": 2506234,
+      "sha256": "ff5bafb6681cf4e9dfc68dfcf17e4e5a995e321a918f6c14526be7dfc07c2213",
+      "same_bytes_as": "{E_IMPORTED_TASK_ROOT}\\lf363b-next\\docs\\modernization\\verification\\serena-source-preparation-20261122\\bundle.zip"
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b\\docs\\modernization\\verification\\serena-wrapper-receipt-20261122\\raw-evidence.zip",
+      "bytes": 646315,
+      "sha256": "90299ea0aff680c148c340213dd802adfb7c8c94996877b8eec702f0bd9a442c",
+      "same_bytes_as": "{E_IMPORTED_TASK_ROOT}\\lf363b-next\\docs\\modernization\\verification\\serena-wrapper-receipt-20261122\\raw-evidence.zip"
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b\\docs\\modernization\\verification\\status-observation-2026-11-19\\evidence-redacted.zip",
+      "bytes": 128774,
+      "sha256": "e56160d239212d200dc9c358bc1277e6148c5620580d6d63012e431ab554cc1b",
+      "same_bytes_as": "{E_IMPORTED_TASK_ROOT}\\lf363b-next\\docs\\modernization\\verification\\status-observation-2026-11-19\\evidence-redacted.zip"
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b\\docs\\modernization\\verification\\weekly-result-owner-20261122\\raw-evidence.zip",
+      "bytes": 2208961,
+      "sha256": "1e95d5b473a2da7dbddf174d2ac4fd5bf8f0ee62415dc05c55c4e00fc8938cfb",
+      "same_bytes_as": "{E_IMPORTED_TASK_ROOT}\\lf363b-next\\docs\\modernization\\verification\\weekly-result-owner-20261122\\raw-evidence.zip"
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b\\docs\\qualification\\install-scheduler-generation-20261123\\install-generation-20261123-57604a3a.zip",
+      "bytes": 1254756,
+      "sha256": "e7e8e190650319780d6adc7396238e8c1d0fef9f4c583a2b175faf8374fd8d77",
+      "same_bytes_as": "{E_IMPORTED_TASK_ROOT}\\lf363b-next\\docs\\qualification\\install-scheduler-generation-20261123\\install-generation-20261123-57604a3a.zip"
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b\\docs\\qualification\\known-folder-census-20261124\\census-qualification-20261124-57604a3a.zip",
+      "bytes": 786444,
+      "sha256": "a63f32c994b1f6e301a3e78e24cc4e1bbee9e21b6cb91710724d9911843041a3",
+      "same_bytes_as": "{E_IMPORTED_TASK_ROOT}\\lf363b-next\\docs\\qualification\\known-folder-census-20261124\\census-qualification-20261124-57604a3a.zip"
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b\\docs\\qualification\\relay-post-resumption-20261124\\relay-qualification-20261124-57604a3a.zip",
+      "bytes": 1186604,
+      "sha256": "7853ede2b4a9ec41ad6deed62f34344a85dc83600352c3f5be8e1079d2003107",
+      "same_bytes_as": "{E_IMPORTED_TASK_ROOT}\\lf363b-next\\docs\\qualification\\relay-post-resumption-20261124\\relay-qualification-20261124-57604a3a.zip"
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b\\docs\\qualification\\scheduler-generation-error-origins-20261123\\scheduler-error-origins-20261123-57604a3a.zip",
+      "bytes": 1315359,
+      "sha256": "26501be50a4ba36c136963fd4e68f42984d1df12af49233b079fdee6540b9102",
+      "same_bytes_as": "{E_IMPORTED_TASK_ROOT}\\lf363b-next\\docs\\qualification\\scheduler-generation-error-origins-20261123\\scheduler-error-origins-20261123-57604a3a.zip"
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b\\docs\\qualification\\scheduler-generation-error-origins-20261123\\scheduler-standalone-20261123-57604a3a.zip",
+      "bytes": 371249,
+      "sha256": "52c8ac806a5153927bd7f5c0f583cc7cb91b5ad1942a36097254b6bc398b2de3",
+      "same_bytes_as": "{E_IMPORTED_TASK_ROOT}\\lf363b-next\\docs\\qualification\\scheduler-generation-error-origins-20261123\\scheduler-standalone-20261123-57604a3a.zip"
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b\\docs\\qualification\\secrets-recovery-release-20261123\\b1-release-20261123-57604a3a.zip",
+      "bytes": 805866,
+      "sha256": "616c2e2e4920f32b23744349d2c9178e2adefc4ffa4230d509351090b04a9810",
+      "same_bytes_as": "{E_IMPORTED_TASK_ROOT}\\lf363b-next\\docs\\qualification\\secrets-recovery-release-20261123\\b1-release-20261123-57604a3a.zip"
+    },
+    {
+      "path": "{E_IMPORTED_TASK_ROOT}\\lf363b\\docs\\qualification\\settings-owner-20261124\\settings-qualification-20261124-57604a3a.zip",
+      "bytes": 980337,
+      "sha256": "f5090531bb172ed2d8626c2fed5ea9adc1bae7c1081236d060011add8dd63212",
+      "same_bytes_as": "{E_IMPORTED_TASK_ROOT}\\lf363b-next\\docs\\qualification\\settings-owner-20261124\\settings-qualification-20261124-57604a3a.zip"
+    },
+    {
+      "path": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-continuation-local-cleanup-20261122\\local-cleanup-inventory.jsonl.gz",
+      "bytes": 378180,
+      "sha256": "20d1e704ea17a1ab79f84d4828a9260e583cbcf08cd64c98acc4dc70a79ab4c1",
+      "format": "gzip_single_member",
+      "members": 1,
+      "prior_tar_parser_error_preserved": true
+    }
+  ],
+  "candidates": [
+    {
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-continuation-local-cleanup-20261122\\local-cleanup-inventory.jsonl.gz![gzip-decoded]",
+      "bytes": 1352577,
+      "sha256": "8d7cf869154057edc6a63b23b61bedcd9a791e4dcb29910134bd8c6880b8f518",
+      "targets": [],
+      "prefix9315_only": false
+    }
+  ],
+  "exact": [],
+  "skipped": [],
+  "errors": [],
+  "new_unique_archives": 1,
+  "remaining": [],
+  "complete_for_declared_scope": true,
+  "compressed_bytes_read": 20401061,
+  "nested_bytes_decoded": 0,
+  "elapsed_seconds": 0.8405488999560475,
+  "unique_archives": 58
+}
