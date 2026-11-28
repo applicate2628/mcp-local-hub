@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -17,7 +18,7 @@ import (
 // must distinguish "our own running daemon" (idempotent reinstall;
 // tolerate) from "a foreign process stole the port" (real collision;
 // fail). The helper is purely a function-pointer seam wired through
-// lookupProcess + processIdentityByPID + schedulerStatusForOwnPort,
+// lookupPortPID + processIdentityByPID + schedulerStatusForOwnPort,
 // so we exercise the full three-part identity gate (bot r1 P1 + r2 P1
 // closure on PR #180): port-to-PID lookup × image OR parent-image
 // matches mcphub.exe × scheduler task state.
@@ -25,12 +26,15 @@ func TestPortHeldByOurDaemon(t *testing.T) {
 	current := "root"
 	if u, err := user.Current(); err == nil && u != nil && u.Username != "" {
 		current = u.Username
+		if runtime.GOOS == "windows" {
+			current = u.Uid
+		}
 	}
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	origIdent := processIdentityByPID
 	origSched := schedulerStatusForOwnPort
 	t.Cleanup(func() {
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 		processIdentityByPID = origIdent
 		schedulerStatusForOwnPort = origSched
 	})
@@ -77,13 +81,13 @@ func TestPortHeldByOurDaemon(t *testing.T) {
 		{"mcphub.exe + task Running owned by other user → not ours", true, 12345, true, "mcphub.exe", "svchost.exe", "Running", "ATTACKER\\mallory", nil, false},
 
 		// Port lookup gate.
-		{"port-to-PID lookup fails → not ours", false, 0, true, "mcphub.exe", "svchost.exe", "Running", current, nil, false},
+		{"port-to-PID lookup finds no listener → not ours", false, 0, true, "mcphub.exe", "svchost.exe", "Running", current, nil, false},
 		{"port-to-PID returns 0 → not ours", true, 0, true, "mcphub.exe", "svchost.exe", "Running", current, nil, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			lookupProcess = func(port int) (int, uint64, int64, bool) {
-				return tc.lookupPID, 0, 0, tc.lookupOK
+			lookupPortPID = func(port int) (int, bool, error) {
+				return tc.lookupPID, tc.lookupOK, nil
 			}
 			processIdentityByPID = func(pid int) (string, string, bool) {
 				return tc.image, tc.parentImage, tc.identOK
@@ -103,28 +107,28 @@ func TestPortHeldByOurDaemon(t *testing.T) {
 // must fail-closed (return false → real collision path fires). One
 // case per nil seam confirms no seam grants implicit ownership.
 func TestPortHeldByOurDaemon_NilSeams(t *testing.T) {
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	origIdent := processIdentityByPID
 	origSched := schedulerStatusForOwnPort
 	t.Cleanup(func() {
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 		processIdentityByPID = origIdent
 		schedulerStatusForOwnPort = origSched
 	})
 
-	t.Run("nil lookupProcess → fail-closed", func(t *testing.T) {
-		lookupProcess = nil
+	t.Run("nil lookupPortPID → fail-closed", func(t *testing.T) {
+		lookupPortPID = nil
 		processIdentityByPID = func(pid int) (string, string, bool) { return "mcphub.exe", "svchost.exe", true }
 		schedulerStatusForOwnPort = func(string) (scheduler.TaskStatus, error) {
 			return scheduler.TaskStatus{State: "Running"}, nil
 		}
 		if got := portHeldByOurDaemon(9129, "gdb", "default"); got != false {
-			t.Errorf("nil lookupProcess = true, want false")
+			t.Errorf("nil lookupPortPID = true, want false")
 		}
 	})
 
 	t.Run("nil processIdentityByPID → fail-closed", func(t *testing.T) {
-		lookupProcess = func(port int) (int, uint64, int64, bool) { return 12345, 0, 0, true }
+		lookupPortPID = func(port int) (int, bool, error) { return 12345, true, nil }
 		processIdentityByPID = nil
 		schedulerStatusForOwnPort = func(string) (scheduler.TaskStatus, error) {
 			return scheduler.TaskStatus{State: "Running"}, nil
@@ -135,7 +139,7 @@ func TestPortHeldByOurDaemon_NilSeams(t *testing.T) {
 	})
 
 	t.Run("nil schedulerStatusForOwnPort → fail-closed", func(t *testing.T) {
-		lookupProcess = func(port int) (int, uint64, int64, bool) { return 12345, 0, 0, true }
+		lookupPortPID = func(port int) (int, bool, error) { return 12345, true, nil }
 		processIdentityByPID = func(pid int) (string, string, bool) { return "mcphub.exe", "svchost.exe", true }
 		schedulerStatusForOwnPort = nil
 		if got := portHeldByOurDaemon(9129, "gdb", "default"); got != false {
@@ -162,23 +166,23 @@ func TestPreflight_AllowsSameSupervisorOwnedPortAndRejectsForeignIntentRow(t *te
 	}
 
 	origPortInUse := preflightPortInUse
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	origIdent := processIdentityByPID
 	origSched := schedulerStatusForOwnPort
 	origStatus := supervisorIPCStatusFn
 	t.Cleanup(func() {
 		preflightPortInUse = origPortInUse
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 		processIdentityByPID = origIdent
 		schedulerStatusForOwnPort = origSched
 		supervisorIPCStatusFn = origStatus
 	})
 	preflightPortInUse = func(p int) bool { return p == port }
-	lookupProcess = func(p int) (int, uint64, int64, bool) {
+	lookupPortPID = func(p int) (int, bool, error) {
 		if p == port {
-			return portPID, 0, 0, true
+			return portPID, true, nil
 		}
-		return 0, 0, 0, false
+		return 0, false, nil
 	}
 	processIdentityByPID = func(pid int) (string, string, bool) {
 		if pid == portPID {
@@ -255,17 +259,17 @@ func TestPortHeldBySupervisorIntentDaemonExternalRequiresPIDProof(t *testing.T) 
 		t.Fatalf("seed supervisor intent: %v", err)
 	}
 
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	origStatus := supervisorIPCStatusFn
 	t.Cleanup(func() {
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 		supervisorIPCStatusFn = origStatus
 	})
 
 	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
 		return []DaemonStatus{{TaskName: taskName, PID: portPID, State: "Running"}}, nil
 	}
-	lookupProcess = nil
+	lookupPortPID = nil
 	if got := portHeldBySupervisorIntentDaemon(port, "demo", "alpha"); got {
 		t.Fatal("intent row with unavailable port-owner lookup and live supervisor PID = true, want false")
 	}
@@ -277,11 +281,11 @@ func TestPortHeldBySupervisorIntentDaemonExternalRequiresPIDProof(t *testing.T) 
 		t.Fatal("intent row with unavailable port-owner lookup and unreachable supervisor IPC = true, want false")
 	}
 
-	lookupProcess = func(p int) (int, uint64, int64, bool) {
+	lookupPortPID = func(p int) (int, bool, error) {
 		if p == port {
-			return portPID, 0, 0, true
+			return portPID, true, nil
 		}
-		return 0, 0, 0, false
+		return 0, false, nil
 	}
 	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
 		return nil, errors.New("supervisor IPC unavailable")
@@ -311,7 +315,7 @@ func TestPortHeldBySupervisorIntentDaemonExternalRequiresPIDProof(t *testing.T) 
 		t.Fatal("intent row without live supervisor PID = true, want false")
 	}
 
-	lookupProcess = nil
+	lookupPortPID = nil
 	supervisorIPCStatusFn = nil
 	if got := portHeldBySupervisorIntentDaemon(port+config.NativeHTTPInternalPortOffset, "demo", "alpha"); got {
 		t.Fatal("native-http internal port with unreachable supervisor IPC = true, want false")
@@ -356,11 +360,11 @@ func TestPortHeldBySupervisorIntentDaemonInternalPortRequiresWrapperAncestry(t *
 		t.Fatalf("seed supervisor intent: %v", err)
 	}
 
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	origStatus := supervisorIPCStatusFn
 	origNameParent := processNameAndParentByPID
 	t.Cleanup(func() {
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 		supervisorIPCStatusFn = origStatus
 		processNameAndParentByPID = origNameParent
 	})
@@ -368,11 +372,11 @@ func TestPortHeldBySupervisorIntentDaemonInternalPortRequiresWrapperAncestry(t *
 	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
 		return []DaemonStatus{{TaskName: taskName, PID: wrapperPID, State: "Running"}}, nil
 	}
-	lookupProcess = func(p int) (int, uint64, int64, bool) {
+	lookupPortPID = func(p int) (int, bool, error) {
 		if p == internalPort {
-			return listenerPID, 0, 0, true
+			return listenerPID, true, nil
 		}
-		return 0, 0, 0, false
+		return 0, false, nil
 	}
 
 	processNameAndParentByPID = fakeProcessNameAndParent(map[int]struct {
@@ -399,7 +403,7 @@ func TestPortHeldBySupervisorIntentDaemonInternalPortRequiresWrapperAncestry(t *
 		t.Fatal("native-http internal listener whose resolvable parent chain does not reach the wrapper PID = true, want false")
 	}
 
-	lookupProcess = nil
+	lookupPortPID = nil
 	processNameAndParentByPID = nil
 	if got := portHeldBySupervisorIntentDaemon(internalPort, "demo", "alpha"); !got {
 		t.Fatal("native-http internal port with no port-owner lookup should keep the live-wrapper-PID downgrade; got false")
@@ -438,14 +442,14 @@ func TestPreflight_ExternalPortDoesNotMatchSupervisorIntentInternalPort(t *testi
 	}
 
 	origPortInUse := preflightPortInUse
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	origIdent := processIdentityByPID
 	origSched := schedulerStatusForOwnPort
 	origStatus := supervisorIPCStatusFn
 	origNameParent := processNameAndParentByPID
 	t.Cleanup(func() {
 		preflightPortInUse = origPortInUse
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 		processIdentityByPID = origIdent
 		schedulerStatusForOwnPort = origSched
 		supervisorIPCStatusFn = origStatus
@@ -453,11 +457,11 @@ func TestPreflight_ExternalPortDoesNotMatchSupervisorIntentInternalPort(t *testi
 	})
 
 	preflightPortInUse = func(port int) bool { return port == internalPort }
-	lookupProcess = func(port int) (int, uint64, int64, bool) {
+	lookupPortPID = func(port int) (int, bool, error) {
 		if port == internalPort {
-			return listenerPID, 0, 0, true
+			return listenerPID, true, nil
 		}
-		return 0, 0, 0, false
+		return 0, false, nil
 	}
 	processIdentityByPID = func(pid int) (string, string, bool) {
 		if pid == listenerPID {
@@ -751,20 +755,20 @@ func TestPortHeldBySupervisorIntentDaemon_Port0StdioBridgeRecognized(t *testing.
 		t.Fatalf("seed port-0 stdio supervisor intent: %v", err)
 	}
 
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	origStatus := supervisorIPCStatusFn
 	t.Cleanup(func() {
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 		supervisorIPCStatusFn = origStatus
 	})
 	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
 		return []DaemonStatus{{TaskName: taskName, PID: daemonPID, State: "Running"}}, nil
 	}
-	lookupProcess = func(p int) (int, uint64, int64, bool) {
+	lookupPortPID = func(p int) (int, bool, error) {
 		if p == bridgePort {
-			return daemonPID, 0, 0, true
+			return daemonPID, true, nil
 		}
-		return 0, 0, 0, false
+		return 0, false, nil
 	}
 	if got := portHeldBySupervisorIntentDaemon(bridgePort, "memory", "default"); !got {
 		t.Fatal("running stdio-bridge daemon (Port==0 descriptor) not recognized as self-owned; its reinstall would spuriously fail port-in-use")
@@ -772,11 +776,11 @@ func TestPortHeldBySupervisorIntentDaemon_Port0StdioBridgeRecognized(t *testing.
 
 	// Over-claim guard: a DIFFERENT live PID owning the probed port must NOT be
 	// claimed as ours, even though the descriptor row matches the server.
-	lookupProcess = func(p int) (int, uint64, int64, bool) {
+	lookupPortPID = func(p int) (int, bool, error) {
 		if p == bridgePort {
-			return daemonPID + 1, 0, 0, true // a foreign process holds the port
+			return daemonPID + 1, true, nil // a foreign process holds the port
 		}
-		return 0, 0, 0, false
+		return 0, false, nil
 	}
 	if got := portHeldBySupervisorIntentDaemon(bridgePort, "memory", "default"); got {
 		t.Fatal("foreign PID holding the bridge port was claimed as ours; the live-PID proof must reject it")

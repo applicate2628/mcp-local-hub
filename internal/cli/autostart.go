@@ -45,7 +45,7 @@ persisted Windows owner mode is supervise.
 ` + "`status`" + ` prints one of: absent, enabled-running, enabled-stopped, drifted,
 stale-residue. Drifted means the on-disk shim's args or binary path
 disagree with what ` + "`mcphub autostart enable [--strict-mode]`" + ` would
-write today; re-run ` + "`mcphub autostart enable`" + ` to reconcile.
+write today.
 
 On Windows, enable/disable changes the logon preference without starting or
 stopping the current GUI. Quit remains effective until ` + "`mcphub gui --resume`" + `;
@@ -69,15 +69,19 @@ func newAutostartEnableCmd() *cobra.Command {
 	var ownerMode string
 	cmd := &cobra.Command{
 		Use:   "enable",
-		Short: "Install or replace the autostart shim",
-		Long: `Installs (or replaces) the autostart shim for the current OS. The
+		Short: "Install the autostart shim",
+		Long: `Installs the autostart shim for the current OS. The
 shim re-runs the persisted owner at each user logon: GUI by default, or
 supervise when ` + "`--owner-mode supervise`" + ` is selected.
 
-Idempotent — re-running with the same flags is safe and re-writes the
-intent plus canonical shim as one recoverable transaction. Without explicit
-flags, the persisted owner and strict policy are preserved.
-On Windows this records autorun ON without launching now or undoing Quit.`,
+On Windows this records autorun ON without launching now or undoing Quit.
+It creates the task when the name is absent. Repeating enable succeeds
+without changing an already enabled task whose complete definition matches.
+A disabled or different task is preserved and enable returns an error.
+To replace it, inspect the task and explicitly run mcphub autostart disable
+before running enable. Without explicit flags, enable uses the persisted
+owner and strict policy. On Linux and macOS, enable can rewrite
+the existing shim.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return enableAutostartForPlatform(
 				autostart.OwnerMode(ownerMode),
@@ -90,7 +94,7 @@ On Windows this records autorun ON without launching now or undoing Quit.`,
 	cmd.Flags().BoolVar(&strictMode, "strict-mode", false,
 		"pass --strict-mode through to the supervisor process the shim launches")
 	cmd.Flags().StringVar(&ownerMode, "owner-mode", "gui",
-		"Windows owner mode: gui or supervise (persists atomically with the canonical task)")
+		"Windows owner mode: gui or supervise")
 	return cmd
 }
 
@@ -141,7 +145,7 @@ func newAutostartStatusCmd() *cobra.Command {
   enabled-stopped  — shim installed but supervisor is not currently running
   drifted          — shim installed but on-disk args/path disagree with
                      what ` + "`mcphub autostart enable [--strict-mode]`" + ` would
-                     write today; re-run enable to reconcile
+                     write today
   stale-residue    — leftover entries from a prior install (reserved)
 
 Pass --strict-mode to check drift against the strict-mode shim shape.`,

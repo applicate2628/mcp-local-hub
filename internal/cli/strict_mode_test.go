@@ -655,6 +655,78 @@ func TestStrictModeEnable_RevertOnShimFailure(t *testing.T) {
 	}
 }
 
+func TestStrictModeWindowsExistingTaskRefusalPreservesRecovery(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("existing Scheduler registrations are refused only on Windows")
+	}
+	for _, tc := range []struct {
+		name     string
+		drifted  bool
+		recovery bool
+	}{
+		{name: "baseline_matches"},
+		{name: "definition_changed", drifted: true},
+		{name: "recovery", recovery: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := setupSupervisorFixture(t)
+			t.Cleanup(api.SetDaemonStateRootForTest(tmp.stateDir))
+			tmp.SeedInitialStrict(false)
+			tmp.MakeShimWriteFail()
+			prior := []byte("<Task>observed definition</Task>")
+			tmp.backend.shimErr = autostart.NewObservedTaskReplacementRefusal(autostart.WindowsTaskName, prior, nil)
+			if tc.drifted {
+				tmp.backend.statusSpecFn = tornShimSpecFn("before", "after")
+			}
+			deps := tmp.Deps()
+			var stderr strings.Builder
+			deps.Stderr = &stderr
+			var err error
+			if tc.recovery {
+				bc := strictModeBreadcrumb{
+					Intended: true, IntendedOwnerMode: api.OwnerModeSupervise, ActualIntentOwnerMode: api.OwnerModeGUI,
+				}
+				if err := writeStrictModeBreadcrumb(deps.BreadcrumbPath, &bc); err != nil {
+					t.Fatal(err)
+				}
+				err = RunStrictModeRecover(deps)
+			} else {
+				err = RunStrictMode([]string{"enable"}, deps)
+			}
+
+			var refusal *api.SchedulerReplacementRefusedError
+			if !errors.Is(err, api.ErrSchedulerReplacementUnowned) || !errors.As(err, &refusal) || refusal.SnapshotPath == "" {
+				t.Fatalf("strict-mode lost the typed refusal or its snapshot: %v", err)
+			}
+			keep := tc.drifted || tc.recovery
+			_, statErr := os.Stat(deps.BreadcrumbPath)
+			if keep && (statErr != nil || exitCodeFromError(err) != ExitStrictModeRevertFailed) {
+				t.Fatalf("unfinished settlement lost recovery: exit=%d stat=%v", exitCodeFromError(err), statErr)
+			}
+			if !keep && !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("matching baseline left a recovery marker: %v", statErr)
+			}
+			intent, readErr := api.ReadSupervisorIntent(deps.IntentPath)
+			if readErr != nil || intent.StrictMode != tc.recovery {
+				t.Fatalf("intent did not reflect the settled step: intent=%+v err=%v", intent, readErr)
+			}
+			if tc.recovery {
+				bc := tmp.ReadBreadcrumb()
+				if intent.EffectiveOwnerMode() != api.OwnerModeSupervise || !bc.ActualIntentState ||
+					bc.ActualIntentOwnerMode != api.OwnerModeSupervise || !strings.Contains(bc.RevertError, api.ErrSchedulerReplacementUnowned.Error()) {
+					t.Fatalf("recovery did not record applied intent and projection refusal: intent=%+v breadcrumb=%+v", intent, bc)
+				}
+				if !strings.Contains(stderr.String(), api.ErrSchedulerReplacementUnowned.Error()) {
+					t.Fatalf("recovery did not print the refusal: %q", stderr.String())
+				}
+			}
+			if tmp.backend.disableCalls != 0 {
+				t.Fatal("strict-mode tried to remove the refused task")
+			}
+		})
+	}
+}
+
 // ============================================================================
 // Plan §2584 — revert-of-revert failure writes the breadcrumb + exits 10.
 // ============================================================================
@@ -1870,6 +1942,7 @@ func TestStrictModeRecover_OrdinaryIntentFailureStopsBeforeShim(t *testing.T) {
 	tmp := setupSupervisorFixture(t)
 	bc := strictModeBreadcrumb{
 		Intended: true, ActualIntentState: false, ActualShimState: false,
+		IntendedOwnerMode: api.OwnerModeSupervise, ActualIntentOwnerMode: api.OwnerModeGUI,
 		Step2Error: "prior shim failure", RevertError: "prior revert failure",
 		TS: "2026-08-08T00:00:00Z", Phase: strictModeBreadcrumbPhaseTorn,
 	}
@@ -1892,6 +1965,11 @@ func TestStrictModeRecover_OrdinaryIntentFailureStopsBeforeShim(t *testing.T) {
 	}
 	if _, statErr := os.Stat(tmp.BreadcrumbPath()); statErr != nil {
 		t.Fatalf("ordinary recovery failure removed breadcrumb: %v", statErr)
+	}
+	refreshed := tmp.ReadBreadcrumb()
+	if refreshed.ActualIntentState || refreshed.ActualIntentOwnerMode != api.OwnerModeGUI ||
+		!strings.Contains(refreshed.RevertError, ordinaryCause.Error()) {
+		t.Fatalf("ordinary recovery failure claimed intent was applied: %+v", refreshed)
 	}
 }
 

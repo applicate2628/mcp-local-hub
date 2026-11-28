@@ -18,14 +18,10 @@
 //  6. Call autostart.Backend.Enable(Options{StrictMode: newValue}).
 //  7. On step 6 failure: revert step 5 (re-write intent with original).
 //  8. On step 7 failure (both writes failed): write breadcrumb + exit 10.
-//  9. On step 7 success: re-probe the shim. The per-OS backends are NOT
-//     all-or-nothing — they mutate the shim (delete-before-create on
-//     Windows, write-before-enable on Linux, bootout+write-before-bootstrap
-//     on macOS) before the OS step can error, so a failed Enable can leave
-//     the shim torn or out of sync with the reverted intent. Only when the
-//     re-probe PROVES the shim is unchanged from the step-4 snapshot is the
-//     breadcrumb deleted; otherwise a torn-shape breadcrumb is KEPT and the
-//     command exits 10 so `--recover` can drive both resources back in sync.
+//  9. On step 7 success: re-probe the shim. A failed operation can leave it
+//     out of sync with the reverted intent. Clear the breadcrumb when the
+//     observed definition matches the baseline. Keep it and exit 10 when
+//     observation fails or differs. Equality grants no generation ownership.
 //  10. LIFO release.
 //
 // Invariant: strict-mode never deletes the breadcrumb / returns clean while
@@ -217,27 +213,31 @@ func newStrictModeCmd() *cobra.Command {
 	var recover bool
 	cmd := &cobra.Command{
 		Use:   "strict-mode {enable|disable}",
-		Short: "Atomically toggle supervisor strict-mode (intent + autostart shim)",
+		Short: "Set supervisor strict-mode policy and project it to autostart",
 		// Hidden: advanced security-posture toggle. The one path that
 		// REQUIRES it — recovery from a STRICT_MODE_REVERT_FAILED (exit 10)
 		// breadcrumb — names `mcphub strict-mode --recover` verbatim in its
 		// own error text, so hiding it costs no discoverability.
 		Hidden: true,
-		Long: `mcphub strict-mode mutates the supervisor's strict-mode policy by
-writing supervisor-intent.json AND the autostart shim's argv in a
-single atomic operation. If either write fails, the other is reverted
-so the two resources never drift.
+		Long: `mcphub strict-mode updates supervisor-intent.json and projects the
+policy to the autostart shim. Enable and disable revert intent if projection
+fails and keep a recovery record when the shim observation is uncertain.
 
   enable     — set strict_mode=true; shim launches with --strict-mode.
   disable    — set strict_mode=false; shim launches without the flag.
-  --recover  — read the breadcrumb left by a torn previous run and
-               reconcile both resources interactively.
+  --recover  — choose an intent policy and retry autostart projection.
+               A recorded intent remains in effect if projection fails.
+
+On Windows an existing task blocks enablement of the projected shim. To
+change its policy, inspect the task, explicitly run mcphub autostart disable,
+then set or recover the strict-mode policy. Run mcphub autostart enable
+if you want to turn autorun back on.
 
 Exit codes:
   9   STRICT_MODE_BUSY          — migration.lock or --once.lock held by
                                   another holder; wait and retry.
-  10  STRICT_MODE_REVERT_FAILED — both shim write AND intent revert
-                                  failed; breadcrumb written to
+  10  STRICT_MODE_REVERT_FAILED — policy settlement is unconfirmed.
+                                  See the recovery record at
                                   <state-dir>/strict-mode-mutation-incomplete.json
                                   and operator must run --recover.`,
 		Args: cobra.MaximumNArgs(1),
@@ -440,13 +440,6 @@ func runAutostartPolicyUnderLocks(desired bool, desiredOwnerMode api.OwnerMode, 
 		return fmt.Errorf("invalid owner mode %q", desiredOwnerMode)
 	}
 
-	// If already in desired state on BOTH surfaces, this is a no-op,
-	// but spec says re-issuing autostart.Enable is idempotent — fall
-	// through and let it re-write the shim verbatim so any drift in
-	// the recorded args gets reconciled. Intent re-write is also
-	// idempotent (atomic rename of identical bytes is a no-op
-	// observed by readers).
-
 	// Snapshot the shim BEFORE mutating either owned resource. The Status
 	// value still carries liveness-only noise (enabled-running vs
 	// enabled-stopped), so the revert branch compares the drift fingerprint
@@ -502,7 +495,7 @@ func runAutostartPolicyUnderLocks(desired bool, desiredOwnerMode api.OwnerMode, 
 		return fmt.Errorf("strict-mode: step 1 (intent write): %w", err)
 	}
 
-	// Step 2: install/update shim with new strict_mode flag.
+	// Step 2: project the new strict-mode and owner policy.
 	if err := projectAutostartWithGUIControl(deps, deps.EnableAutorun, autostart.Options{StrictMode: desired, OwnerMode: desiredOwnerMode}); err != nil {
 		// Revert step 1.
 		if revertErr := writeAutostartPolicyIntent(deps, originalStrict, originalOwnerMode); revertErr != nil {
@@ -536,67 +529,43 @@ func runAutostartPolicyUnderLocks(desired bool, desiredOwnerMode api.OwnerMode, 
 				body, _ := json.MarshalIndent(bc, "", "  ")
 				fmt.Fprintln(stderrOrDefault(deps), string(body))
 				fmt.Fprintf(stderrOrDefault(deps), "strict-mode: revert failed AND breadcrumb write failed: %v\n", writeBCErr)
-				return &forceExitError{code: ExitStrictModeRevertFailed}
+				return errors.Join(&forceExitError{code: ExitStrictModeRevertFailed}, err, revertErr, writeBCErr)
 			}
 			// Emit breadcrumb body to stderr so an operator running the
 			// CLI in a terminal can see the state immediately without
 			// hunting through the state dir.
 			body, _ := json.MarshalIndent(bc, "", "  ")
 			fmt.Fprintln(stderrOrDefault(deps), string(body))
-			if strictModeAppliedIntentError(deps, revertErr) {
-				return errors.Join(&forceExitError{code: ExitStrictModeRevertFailed}, err, revertErr)
-			}
-			return &forceExitError{code: ExitStrictModeRevertFailed}
+			return errors.Join(&forceExitError{code: ExitStrictModeRevertFailed}, err, revertErr)
 		}
-		// Revert of step 1 (intent) succeeded — intent is back at
-		// originalStrict. But the autostart shim is NOT proven to be back
-		// at originalStrict: the per-OS backends mutate the shim before the
-		// OS step can error, so `Enable` failing means the shim may be torn
-		// (Windows: prior task deleted, new one never created; Linux/macOS:
-		// unit/plist already overwritten with the NEW flag, enable/bootstrap
-		// failed). Re-probe the shim and only delete the breadcrumb when the
-		// shim drift fingerprint is PROVABLY unchanged from the pre-mutation
-		// snapshot. Any uncertainty (snapshot unavailable, re-probe error, or
-		// a fingerprint that differs from the snapshot) must KEEP a torn-shape
-		// breadcrumb so `mcphub strict-mode --recover` can drive intent + shim
-		// back into sync. The invariant: strict-mode never reports clean while
-		// the shim might be out of sync with the (reverted) intent.
-		shimProvenUnchanged := false
+		// The intent revert succeeded. A matching observation lets us clear the
+		// breadcrumb. A failed or different observation needs recovery.
+		shimMatchesBaseline := false
 		var reprobe autostart.StatusSnapshot
 		var reprobeErr error
 		if snapshotErr == nil {
 			reprobe, reprobeErr = deps.AutostartBackend.StatusSnapshot(autostart.Options{StrictMode: originalStrict, OwnerMode: originalOwnerMode})
 			if reprobeErr == nil && strictModeShimDriftFingerprint(reprobe) == shimSnapshotFingerprint {
-				shimProvenUnchanged = true
+				shimMatchesBaseline = true
 			}
 		}
-		if shimProvenUnchanged {
-			// Shim is provably back at (== never left) originalStrict and
-			// intent was reverted to originalStrict: no torn state, no drift.
-			// Delete the in-progress breadcrumb (best-effort; a stale crumb
-			// would otherwise force the operator to --recover a non-existent
-			// drift). Surface the step 2 error so the operator can investigate
-			// the underlying shim failure.
+		if shimMatchesBaseline {
+			// Surface the projection error even with the intent reverted and
+			// the same shim definition observed.
 			if rmErr := os.Remove(deps.BreadcrumbPath); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
 				fmt.Fprintf(stderrOrDefault(deps), "strict-mode: cleanup in-progress breadcrumb after revert: %v\n", rmErr)
 			}
-			return fmt.Errorf("strict-mode: step 2 (autostart shim): %w (intent reverted to %v, shim unchanged)", err, originalStrict)
+			return fmt.Errorf("strict-mode: step 2 (autostart shim): %w (intent reverted to %v, observed shim matches baseline)", err, originalStrict)
 		}
 
-		// Shim state could NOT be proven unchanged after the failed Enable.
-		// Intent was reverted to originalStrict, but the shim may be torn or
-		// out of sync. Overwrite the in-progress breadcrumb with the torn
-		// shape so `--recover` reconciles both resources. ActualIntentState
-		// records where intent actually is now (originalStrict, since the
-		// revert succeeded); --recover branch A drives both to Intended,
-		// branch B drives both to ActualIntentState — either re-runs Enable
-		// and repairs the shim.
-		shimDetail := fmt.Sprintf("shim state could not be proven unchanged after failed Enable (snapshot=%v snapshotFingerprint=%v snapshotErr=%v reprobe=%v reprobeFingerprint=%v reprobeErr=%v)",
+		// The recovery record describes the reverted intent and preserves the
+		// projection and observation errors for the next recovery attempt.
+		shimDetail := fmt.Sprintf("shim observation did not confirm the baseline after failed projection (snapshot=%v snapshotFingerprint=%v snapshotErr=%v reprobe=%v reprobeFingerprint=%v reprobeErr=%v)",
 			shimSnapshot, shimSnapshotFingerprint, snapshotErr, reprobe, strictModeShimDriftFingerprint(reprobe), reprobeErr)
 		bc := strictModeBreadcrumb{
 			Intended:              desired,
 			ActualIntentState:     originalStrict, // revert succeeded, so intent IS back at original
-			ActualShimState:       originalStrict, // best-effort: target the shim should hold; recover re-Enables regardless
+			ActualShimState:       originalStrict, // recovery target, not an observed value
 			Step1Error:            "",
 			Step2Error:            err.Error() + "; " + shimDetail,
 			RevertError:           "",
@@ -615,11 +584,11 @@ func runAutostartPolicyUnderLocks(desired bool, desiredOwnerMode api.OwnerMode, 
 			body, _ := json.MarshalIndent(bc, "", "  ")
 			fmt.Fprintln(stderrOrDefault(deps), string(body))
 			fmt.Fprintf(stderrOrDefault(deps), "strict-mode: shim possibly torn AND torn-breadcrumb write failed: %v\n", writeBCErr)
-			return &forceExitError{code: ExitStrictModeRevertFailed}
+			return errors.Join(&forceExitError{code: ExitStrictModeRevertFailed}, err, snapshotErr, reprobeErr, writeBCErr)
 		}
 		body, _ := json.MarshalIndent(bc, "", "  ")
 		fmt.Fprintln(stderrOrDefault(deps), string(body))
-		return &forceExitError{code: ExitStrictModeRevertFailed}
+		return errors.Join(&forceExitError{code: ExitStrictModeRevertFailed}, err, snapshotErr, reprobeErr)
 	}
 	// Clean success: both resources reached `desired`. Delete the
 	// in-progress breadcrumb so the next strict-mode invocation does not
@@ -850,9 +819,8 @@ func (b strictModeBreadcrumb) actualShimOwnerMode() api.OwnerMode {
 }
 
 // RunStrictModeRecover is the testable entry point for `mcphub
-// strict-mode --recover`. Reads the breadcrumb, prompts the operator
-// with two exhaustive branches, atomically reconciles, and deletes
-// the breadcrumb on success.
+// strict-mode --recover`. Reads the breadcrumb, prompts for the target
+// policy, and deletes the breadcrumb after intent and projection converge.
 func RunStrictModeRecover(deps StrictModeDeps) error {
 	// Read breadcrumb.
 	raw, err := api.ReadStateFileInodeAnchoredEnvStrictOnly(deps.BreadcrumbPath)
@@ -930,22 +898,19 @@ func RunStrictModeRecover(deps StrictModeDeps) error {
 	return fmt.Errorf("strict-mode --recover: no valid branch chosen after 3 attempts")
 
 reconcile:
-	// Atomic two-resource reconcile, same pipeline as RunStrictMode but
-	// without the breadcrumb-refusal pre-check (we're recovering FROM a
-	// breadcrumb, so it MUST exist).
 	settlement := reconcileBothResources(target, targetOwnerMode, deps)
 	if !settlement.converged {
-		// Re-assert breadcrumb on failure with refreshed TS, so the
-		// operator can retry --recover.
 		newBC := bc
-		if strictModeAppliedIntentError(deps, settlement.err) {
-			// The target intent is durable even though release is poisoned.
+		if settlement.intentApplied {
 			newBC.ActualIntentState = target
 			newBC.ActualIntentOwnerMode = targetOwnerMode
 		}
 		newBC.TS = time.Now().UTC().Format(time.RFC3339Nano)
 		newBC.RevertError = fmt.Sprintf("recover failed: %v", settlement.err)
-		_ = writeStrictModeBreadcrumb(deps.BreadcrumbPath, &newBC)
+		if err := writeStrictModeBreadcrumb(deps.BreadcrumbPath, &newBC); err != nil {
+			settlement.err = errors.Join(settlement.err, fmt.Errorf("refresh breadcrumb: %w", err))
+		}
+		fmt.Fprintf(stderrOrDefault(deps), "strict-mode --recover: %v\n", settlement.err)
 		return errors.Join(&forceExitError{code: ExitStrictModeRevertFailed}, settlement.err)
 	}
 
@@ -962,14 +927,13 @@ reconcile:
 }
 
 type strictModeSettlement struct {
-	converged bool
-	err       error
+	intentApplied bool
+	converged     bool
+	err           error
 }
 
-// reconcileBothResources drives intent + shim to target in one
-// transactional unit. Used by --recover; mirrors the step 4 + step 5
-// sequence of runAutostartPolicyUnderLocks but without revert (recover is
-// the revert path, so a failure here is terminal).
+// reconcileBothResources records the selected intent before projecting it to
+// autostart. The recorded intent remains in effect if projection fails.
 func reconcileBothResources(target bool, targetOwnerMode api.OwnerMode, deps StrictModeDeps) strictModeSettlement {
 	var result strictModeSettlement
 	if !targetOwnerMode.Valid() {
@@ -982,6 +946,7 @@ func reconcileBothResources(target bool, targetOwnerMode api.OwnerMode, deps Str
 			return result
 		}
 	}
+	result.intentApplied = true
 	if err := projectAutostartWithGUIControl(deps, false, autostart.Options{StrictMode: target, OwnerMode: targetOwnerMode}); err != nil {
 		result.err = errors.Join(result.err, fmt.Errorf("shim enable: %w", err))
 		return result
@@ -998,7 +963,7 @@ func projectAutostartWithGUIControl(deps StrictModeDeps, enable bool, opts autos
 		if control != nil && control.AutorunEnabled != nil && !*control.AutorunEnabled {
 			return autostart.ProjectAutorunDisabled(control.AutorunEnabled, deps.AutostartBackend, opts)
 		}
-		return deps.AutostartBackend.Enable(opts)
+		return api.RetainAutostartTaskReplacementRefusal(deps.AutostartBackend.Enable(opts))
 	})
 }
 

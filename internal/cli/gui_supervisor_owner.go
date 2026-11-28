@@ -205,6 +205,11 @@ func ensureSupervisorRunningWithOperations(ctx context.Context, mcphubBin string
 	}
 	if operations.observeControl == nil {
 		operations.observeControl = observeGUISupervisorControl
+		if os.Getenv("MCPHUB_GUI_CONTROL_TIMING") == "1" {
+			timing := new(guiSupervisorControlTiming)
+			defer func() { timing.report(retErr == nil) }()
+			operations.observeControl = timing.observe
+		}
 	}
 	attempt := &supervisorCreationAttempt{receive: receive}
 	var owner *supervisorOwner
@@ -348,16 +353,65 @@ func ensureSupervisorRunningWithOperations(ctx context.Context, mcphubBin string
 // competitor only after the same native/IPC/current-owner proof. A different
 // sidecar alone is not evidence that the freshly created child lost the race.
 func observeGUISupervisorControl(ctx context.Context, expected SupervisorControlExpectation, original api.SupervisorLockOwner, peer api.SupervisorProcessIdentityV1) (api.SupervisorLockOwner, error) {
+	return (*guiSupervisorControlTiming)(nil).observe(ctx, expected, original, peer)
+}
+
+// One summary per startup, on the synchronous observe path only. Control time
+// includes the separately measured authenticated IPC and native checks.
+type guiSupervisorControlTiming struct {
+	attempts, controlCalls, reads, nativeChecks, ipcCalls int
+	control, ownerRead, nativeCheck, ipc                  time.Duration
+}
+
+func (t *guiSupervisorControlTiming) report(ok bool) {
+	if t.attempts == 0 {
+		return
+	}
+	fmt.Fprintf(supervisorMonitorStderr, "supervisor GUI admission timing: success=%t attempts=%d control_calls=%d control_elapsed=%s owner_reads=%d owner_read_elapsed=%s native_checks=%d native_elapsed=%s ipc_calls=%d ipc_elapsed=%s\n",
+		ok, t.attempts, t.controlCalls, t.control, t.reads, t.ownerRead, t.nativeChecks, t.nativeCheck, t.ipcCalls, t.ipc)
+}
+
+func (t *guiSupervisorControlTiming) observe(ctx context.Context, expected SupervisorControlExpectation, original api.SupervisorLockOwner, peer api.SupervisorProcessIdentityV1) (api.SupervisorLockOwner, error) {
+	readOwner := api.ReadSupervisorLockOwner
+	var recordIPC func(time.Duration)
+	if t != nil {
+		t.attempts++
+		recordIPC = func(elapsed time.Duration) {
+			t.ipcCalls++
+			t.ipc += elapsed
+		}
+		readOwner = func(path string) (api.SupervisorLockOwner, error) {
+			start := time.Now()
+			current, err := api.ReadSupervisorLockOwner(path)
+			t.reads++
+			t.ownerRead += time.Since(start)
+			return current, err
+		}
+	}
 	observe := func(candidate api.SupervisorLockOwner, candidatePeer api.SupervisorProcessIdentityV1) (api.SupervisorLockOwner, error) {
-		return observeCreatedSupervisorControl(ctx, expected, candidate, candidatePeer, func(owner api.SupervisorLockOwner) error {
+		if t != nil {
+			start := time.Now()
+			defer func() {
+				t.controlCalls++
+				t.control += time.Since(start)
+			}()
+		}
+		return observeCreatedSupervisorControlTimed(ctx, expected, candidate, candidatePeer, func(owner api.SupervisorLockOwner) error {
+			if t != nil {
+				start := time.Now()
+				defer func() {
+					t.nativeChecks++
+					t.nativeCheck += time.Since(start)
+				}()
+			}
 			return validateCreatedSupervisorNativeControl(ctx, expected, owner)
-		}, api.ReadSupervisorLockOwner)
+		}, readOwner, recordIPC)
 	}
 	current, bindErr := observe(original, peer)
 	if !errors.Is(bindErr, errSupervisorControlGenerationChanged) {
 		return current, bindErr
 	}
-	winner, err := api.ReadSupervisorLockOwner(filepath.Join(expected.StateDir, "supervisor.lock"))
+	winner, err := readOwner(filepath.Join(expected.StateDir, "supervisor.lock"))
 	if err != nil || winner == original {
 		return api.SupervisorLockOwner{}, errors.Join(bindErr, err)
 	}

@@ -207,7 +207,7 @@ func TestSupervisorRunningUnderStateDir_UnconfirmedReleaseStopsAutostartOwnerSta
 
 	var out strings.Builder
 	ipcErr := errors.New("supervisor IPC unreachable")
-	res := startAutostartOwnerAfterUnavailableSupervisor(&out, ipcErr)
+	res := startAutostartOwnerAfterUnavailableSupervisor(&out, ipcErr, installAutostartOwnerStartFn)
 
 	if starts != 0 {
 		t.Fatalf("CONSUMER CONSEQUENCE: an unconfirmed probe release left the supervisor lock held by THIS process, yet the autostart owner was started anyway (%d call) — that supervisor's AcquireSupervisorLock blocks on the lock the probe is still holding", starts)
@@ -226,7 +226,7 @@ func TestSupervisorRunningUnderStateDir_UnconfirmedReleaseStopsAutostartOwnerSta
 			return flock.New(p)
 		})
 	}
-	if res := startAutostartOwnerAfterUnavailableSupervisor(io.Discard, ipcErr); starts != 1 {
+	if res := startAutostartOwnerAfterUnavailableSupervisor(io.Discard, ipcErr, installAutostartOwnerStartFn); starts != 1 {
 		t.Fatalf("positive control: a CONFIRMED release on a free lock must still start the autostart owner; got starts=%d status=%v (stateDir=%s)", starts, res.status, stateDir)
 	}
 }

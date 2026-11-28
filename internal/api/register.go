@@ -2292,7 +2292,11 @@ func (a *API) registerOneLanguage(
 	capturedPriorXML := priorXML
 	capturedPort := port
 	startedNewTask := false
+	var schedulerOutcomeUnknown error
 	transaction.AddCompensation("restore scheduler task "+capturedTaskName, func() error {
+		if schedulerOutcomeUnknown != nil {
+			return fmt.Errorf("scheduler inverse refused after unconfirmed mutation: %w", schedulerOutcomeUnknown)
+		}
 		var joined error
 		// Kill the running proxy BEFORE deleting the task. On Windows,
 		// sch.Delete removes the task definition but does NOT terminate
@@ -2308,10 +2312,13 @@ func (a *API) registerOneLanguage(
 		}
 		if deleteErr := sch.Delete(capturedTaskName); deleteErr != nil && !errors.Is(deleteErr, scheduler.ErrTaskNotFound) {
 			joined = errors.Join(joined, fmt.Errorf("delete replacement task %s: %w", capturedTaskName, deleteErr))
+			if errors.Is(deleteErr, scheduler.ErrMutationOutcomeUnknown) {
+				return joined
+			}
 		}
 		if len(capturedPriorXML) > 0 {
 			if importErr := sch.ImportXML(capturedTaskName, capturedPriorXML); importErr != nil {
-				joined = errors.Join(joined, fmt.Errorf("restore prior task %s: %w", capturedTaskName, importErr))
+				return errors.Join(joined, fmt.Errorf("restore prior task %s: %w", capturedTaskName, importErr))
 			}
 			// Restart the prior proxy. Without this, re-register rollback
 			// would restore the old task definition but leave no process
@@ -2346,6 +2353,9 @@ func (a *API) registerOneLanguage(
 		}
 	}
 	if err := sch.Delete(taskName); err != nil && !errors.Is(err, scheduler.ErrTaskNotFound) {
+		if errors.Is(err, scheduler.ErrMutationOutcomeUnknown) {
+			schedulerOutcomeUnknown = err
+		}
 		return registeredLanguageResult{}, fmt.Errorf("delete prior task %s before replacement: %w", taskName, err)
 	}
 	taskSpec := scheduler.TaskSpec{
@@ -2375,6 +2385,9 @@ func (a *API) registerOneLanguage(
 		LogonTrigger:     true,
 	}
 	if err := sch.Create(taskSpec); err != nil {
+		if errors.Is(err, scheduler.ErrMutationOutcomeUnknown) {
+			schedulerOutcomeUnknown = err
+		}
 		return registeredLanguageResult{}, fmt.Errorf("create task %s: %w", taskName, err)
 	}
 	transaction.AddSuccessOutput(
@@ -2463,6 +2476,9 @@ func (a *API) registerOneLanguage(
 	// finds the entry. Logon-triggered tasks only fire at the next logon,
 	// so this sch.Run prevents the port from advertising dead until reboot.
 	if err := sch.Run(taskName); err != nil {
+		if errors.Is(err, scheduler.ErrMutationOutcomeUnknown) {
+			schedulerOutcomeUnknown = err
+		}
 		return registeredLanguageResult{}, fmt.Errorf("run task %s: %w", taskName, err)
 	}
 	startedNewTask = true
@@ -3210,7 +3226,7 @@ func schedulerNewForRegister() (testScheduler, error) {
 	if err != nil {
 		return nil, err
 	}
-	return realSchedulerAdapter{real}, nil
+	return real, nil
 }
 
 func clientsAllForRegister() map[string]registerClient {
@@ -3229,16 +3245,6 @@ func registryPathForRegister() (string, error) {
 		return testRegistryPathOverride, nil
 	}
 	return DefaultRegistryPath()
-}
-
-type realSchedulerAdapter struct{ s scheduler.Scheduler }
-
-func (a realSchedulerAdapter) Create(spec scheduler.TaskSpec) error  { return a.s.Create(spec) }
-func (a realSchedulerAdapter) Delete(name string) error              { return a.s.Delete(name) }
-func (a realSchedulerAdapter) Run(name string) error                 { return a.s.Run(name) }
-func (a realSchedulerAdapter) ExportXML(name string) ([]byte, error) { return a.s.ExportXML(name) }
-func (a realSchedulerAdapter) ImportXML(name string, xml []byte) error {
-	return a.s.ImportXML(name, xml)
 }
 
 type realClientAdapter struct{ c clients.Client }

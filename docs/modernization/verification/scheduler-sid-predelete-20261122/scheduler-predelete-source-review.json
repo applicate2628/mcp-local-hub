@@ -1,0 +1,93 @@
+{
+  "schema": 1,
+  "status": "SELF_SOURCE_REVIEWED_RUNTIME_NOT_RUN",
+  "base": "0bdb725ed261c532eba07d645c2a14880d12b9fd",
+  "master": "75dbc6406123e22468f168b861d5e0622c9d5769",
+  "manifest": {
+    "path": "evidence/scheduler-predelete-files.json",
+    "size": 17378,
+    "sha256": "ae328d44051b19a51876064404e23cb172649eae730ceba42ecb14cd5f04fe94",
+    "git_blob": "5ee856e88ffbfb787763024f1f05818d477447a7"
+  },
+  "patch": {
+    "path": "evidence/scheduler-predelete-candidate.patch",
+    "size": 14679,
+    "sha256": "3f1e595a097186566098126ed5a336975018c5bb28c279e9800118cc8501be71",
+    "git_blob": "56f2cbf2fe3f6176c779c9d8f82aea12a2af00b6"
+  },
+  "scope": "Exactly two production files and one existing test file in the separate mutation-guard worktree. Frozen SID sources and shared repository were read only.",
+  "confirmed_defect": {
+    "paths": [
+      "internal/api/install.go: executeInstallToWithSymlinkConsents prior-task replacement",
+      "internal/api/install.go: pruneObsoleteServerTasks"
+    ],
+    "condition": "Task XML A is exported and retained; another writer replaces/removes the task before the forward Delete. Old production performs no observation between durable retention and name-based deletion.",
+    "consequence": "Old production can delete or replace the now-observable external B, or act on an absent/unknown task. The durable A snapshot alone does not authorize that current mutation."
+  },
+  "implemented_boundary": [
+    "After the existing durable prior snapshot, one current ExportXML must return no error, nonempty bytes, and exact equality with the cloned prior bytes before forward Delete.",
+    "A read error, including nonempty matching bytes plus an error, takes priority and is retained with %w. An empty success, disappearance, or different XML refuses deletion.",
+    "Required replacement failure calls the existing failAfterRollback. The current task has not reached Delete/Create or new compensation construction. Previously acknowledged tasks still compensate in reverse order.",
+    "Optional prune emits the existing skip-style warning, including retained snapshot path and read cause, then continues without adding a current-task compensation.",
+    "No interfaces, dependency, global test hook, native mutation primitive, retry loop, recovery owner, or snapshot-retention policy were added or changed."
+  ],
+  "test_review": {
+    "new_roots": [
+      "TestExecuteInstallToPreDeleteRevalidation",
+      "TestExecuteInstallToPreDeleteRefusalRollsBackEarlierTask"
+    ],
+    "matrix": "Both forward deletion sites; same XML, changed XML, missing, empty, read error, and matching XML with error. Assertions cover exact state, zero forbidden mutation counts, durable snapshot content/hash and diagnostic path.",
+    "earlier_rollback": "An earlier acknowledged fresh creation is removed after current refusal. Injected earlier-delete failure retains only that earlier task in InstallSchedulerRollbackIncompleteError, with both original causes. Current B remains untouched and excluded from recovery ownership.",
+    "prune_compensation_oracle": "A forced later install error after each prune case proves that a refused prune did not arm compensation; matching prune restores its retained original bytes.",
+    "adapted_existing_roots": [
+      "TestExecuteInstallToEarlierTaskRollback",
+      "TestExecuteInstallToRollbackCaptureFailureRetainsCreatedTask"
+    ],
+    "adaptation": "Only two export fault selectors changed: rollback failures begin when the existing intermediate callback starts rollback; post-Create capture errors are selected by createCount > 0. Their original cases and assertions remain unchanged, preserving semantics under the extra forward read.",
+    "negative_control": "The same candidate test file against old production distinguishes 12 denied subcases; two new roots also fail, for 14 FAIL terminal test events, while two matching subcases pass. These are expected events, not execution results.",
+    "runtime_result": "NOT_RUN"
+  },
+  "call_graph_admission": {
+    "new_root_entry": "executeInstallTo -> executeInstallToWithSymlinkConsents -> memory rollbackFixtureScheduler / durable own-root snapshot operations; prune adds installedServerNameSet under the test MCPHUB_MANIFEST_DIR_OVERRIDE.",
+    "scheduler_factory": "installRecoveryPlan replaces schedulerFactoryFn with the supplied memory fake and restores it through t.Cleanup.",
+    "state_root": "installRecoveryPlan registers SetDaemonStateRootForTest(root) cleanup; roots are created with hardenedTempDir(t).",
+    "owned_windows_permissions": "hardenedTempDir creates a new private directory under t.TempDir and applies the existing protected access list to that new directory only. Snapshot files are written and read back through the existing owner-only state functions.",
+    "cleanup": "t.TempDir owns temporary fixture files; t.Cleanup restores state-root and factory globals; t.Setenv restores the new prune catalog override. No selected root uses t.Parallel.",
+    "not_reached": "startTasks=false, no client updates, only memory Scheduler methods, no native Scheduler backend, subprocess, network listener, installed Hub/Product, credentials change or system policy change.",
+    "package_startup": "Parent must retain separately qualified API TestMain admission fixtures and the exact offline D environment; this source-only review does not execute or independently qualify the whole package startup."
+  },
+  "limitations": [
+    "Read-to-Delete race remains. This change is an observational precondition, not atomic generation safety.",
+    "An external replacement with identical XML cannot be distinguished; XML equality is not process, security-descriptor, credential or generation authority.",
+    "Native Run, RunOwned, Stop, Delete, process-tree cancellation/lifetime, cross-domain SID resolution and external native concurrency are not qualified by these memory tests.",
+    "No Go/gofmt/build/vet/test or native action was executed. Formatting, compilation, runtime event counts and full suites remain unverified.",
+    "Prior BackendRunHold and prune qualification are not claimed as repeated. A new composed input requires parent-selected affected checks; the patch itself leaves the hold file unchanged."
+  ],
+  "own_review": {
+    "requirements": "No blocking findings in the reviewed source scope. Both sites deny observed drift and preserve prior recovery material.",
+    "correctness": "Error-before-bytes, absence refusal, no current compensation, earlier rollback and its incomplete error owner are directly asserted.",
+    "security": "On changed or unreadable current state, name-based forward mutation is refused. No stronger generation claim is made.",
+    "compatibility": "Existing optional-prune warning versus required-replacement error semantics retained; two existing fixture phase selectors adapted without assertion removal.",
+    "complexity": "One shared private observation helper, two direct call sites, existing exportHook and snapshot fixtures; no second recovery framework.",
+    "git_diff_check_exit_code": 0
+  },
+  "future_qualification": {
+    "candidate_selector": "^(TestExecuteInstallToPreDeleteRevalidation|TestExecuteInstallToPreDeleteRefusalRollsBackEarlierTask|TestExecuteInstallToEarlierTaskRollback|TestExecuteInstallToRollbackCaptureFailureRetainsCreatedTask)$",
+    "minimal_control_selector": "^(TestExecuteInstallToPreDeleteRevalidation|TestExecuteInstallToPreDeleteRefusalRollsBackEarlierTask)$",
+    "candidate_expected_test_pass": 39,
+    "minimal_control_expected_test_pass": 2,
+    "minimal_control_expected_test_fail": 14,
+    "all_expected_not_observed": true,
+    "composition": {
+      "only_sid_overlap": "internal/api/install.go",
+      "rule": "Apply the two pre-delete hunks to the SID-compatible install.go; do not replace that file with this worktree whole-file candidate. Other two changed files have no SID overlap.",
+      "sid_plus_predelete_install_go": {
+        "size": 218267,
+        "sha256": "9e6a81aa7a8936789698c3ddc4bd6304f719bbce20a62ec7b7ad47338abbccd7",
+        "git_blob": "8438f8bc54ccf84018741084ec440bb94af538f1"
+      },
+      "combined_identity_method": "In-memory exact replacement of the single frozen SID hunk in the pre-delete candidate; equality of that replacement against the frozen SID source from the same base was asserted. No combined file or worktree was written.",
+      "backend_run_hold": "This patch does not touch install_parsed_manifest.go. Preserve the existing master75/660 composition and its BackendRunHold behavior; do not replace it from the older #660 tree."
+    }
+  }
+}

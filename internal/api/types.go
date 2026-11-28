@@ -47,7 +47,7 @@ type DaemonStatus struct {
 	ReadinessFailure *ReadinessFailureV1 `json:"readiness_failure,omitempty"`
 	Port             int                 `json:"port"`
 	LastResult       int32               `json:"last_result"`
-	NextRun          string              `json:"next_run"` // backend-specific text (e.g. "Sunday, April 19, 2026 3:00:00 AM" on Windows; "N/A" when no trigger)
+	NextRun          string              `json:"next_run"` // Windows: observed local yyyy-MM-ddTHH:mm:ss.fffffff; empty means observed no calendar forecast; legacy backends may use N/A
 	PID              int                 `json:"pid,omitempty"`
 	RAMBytes         uint64              `json:"ram_bytes,omitempty"`
 	UptimeSec        int64               `json:"uptime_sec,omitempty"`

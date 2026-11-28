@@ -120,7 +120,7 @@ func InstallTestHooks(newScheduler func() (TestSchedulerIface, error),
 		if err != nil {
 			return nil, err
 		}
-		return testSchedulerShim{s}, nil
+		return s, nil
 	}
 	testClientFactory = func() map[string]registerClient {
 		out := map[string]registerClient{}
@@ -432,16 +432,6 @@ func SetPortOwnerIdentityProbesForTest(
 		guiImageForPIDFn = origImage
 	}
 }
-
-// testSchedulerShim adapts a caller-supplied TestSchedulerIface to the
-// package-private testScheduler interface.
-type testSchedulerShim struct{ s TestSchedulerIface }
-
-func (a testSchedulerShim) Create(spec scheduler.TaskSpec) error    { return a.s.Create(spec) }
-func (a testSchedulerShim) Delete(name string) error                { return a.s.Delete(name) }
-func (a testSchedulerShim) Run(name string) error                   { return a.s.Run(name) }
-func (a testSchedulerShim) ExportXML(name string) ([]byte, error)   { return a.s.ExportXML(name) }
-func (a testSchedulerShim) ImportXML(name string, xml []byte) error { return a.s.ImportXML(name, xml) }
 
 // testClientShim adapts a caller-supplied TestClientIface to the
 // package-private registerClient interface.

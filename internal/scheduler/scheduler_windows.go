@@ -10,39 +10,32 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 	"unicode/utf8"
-
-	"mcp-local-hub/internal/process"
 )
 
-// windowsScheduler shells out to `schtasks.exe` for all operations.
-// We build a Task Scheduler XML document per spec, pipe it to `schtasks /Create /XML`,
-// and parse the output of `/Query` for Status/List.
+// windowsScheduler uses the typed COM bridge for observations and guarded
+// operations, and schtasks for the existing Create/Import/Run contracts.
+// Both executors use the same contained-process owner and capture budget.
 type windowsScheduler struct {
-	username     string // e.g., "alice"
+	username     string // canonical SID of the current user, also used in task XML
 	schtasksPath string
+	ctx          context.Context // optional caller lifetime for legacy methods
 }
 
 func newPlatformScheduler() (Scheduler, error) {
-	u, err := user.Current()
+	ownerSID, err := currentWindowsTaskOwner()
 	if err != nil {
-		return nil, fmt.Errorf("user.Current: %w", err)
+		return nil, err
 	}
 	schtasksPath, err := resolveSchtasksPath()
 	if err != nil {
 		return nil, err
 	}
-	// u.Username is typically "MACHINE\\user" on Windows — strip the domain.
-	name := u.Username
-	if i := strings.LastIndex(name, "\\"); i >= 0 {
-		name = name[i+1:]
-	}
-	return &windowsScheduler{username: name, schtasksPath: schtasksPath}, nil
+	return &windowsScheduler{username: ownerSID, schtasksPath: schtasksPath}, nil
 }
 
 func resolveSchtasksPath() (string, error) {
@@ -203,6 +196,11 @@ func xmlEscape(s string) string {
 
 // Create writes the XML to a temp file and invokes `schtasks /Create /XML`.
 func (w *windowsScheduler) Create(spec TaskSpec) error {
+	ctx, cancel := context.WithTimeout(w.operationContext(), schedulerCOMDeadline)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
 	xmlDoc := buildCreateXML(spec, w.username)
 	tmp, err := os.CreateTemp("", "mcp-local-hub-task-*.xml")
 	if err != nil {
@@ -217,17 +215,15 @@ func (w *windowsScheduler) Create(spec TaskSpec) error {
 	}
 	tmp.Close()
 
-	cmd := exec.Command(w.schtasksPath, "/Create", "/TN", spec.Name, "/XML", tmp.Name(), "/F")
-	process.NoConsole(cmd)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("schtasks /Create: %w: %s", err, string(out))
-	}
-	return nil
+	// Create never opts into replacement. ImportXML owns the explicit /F path.
+	// Stdin remains nil, so the child receives EOF rather than interactive input.
+	cmd := exec.Command(w.schtasksPath, "/Create", "/TN", spec.Name, "/XML", tmp.Name())
+	result, err := runSchedulerCommand(ctx, cmd, nil)
+	return schedulerCommandMutationError("/Create", result, err)
 }
 
 func (w *windowsScheduler) Delete(name string) error {
-	_, err := schedulerCOM(context.Background(), schedulerCOMRequest{Operation: "delete", Name: name})
+	_, err := schedulerCOM(w.operationContext(), schedulerCOMRequest{Operation: "delete", Name: name})
 	if errors.Is(err, ErrTaskNotFound) {
 		return nil
 	}
@@ -239,7 +235,11 @@ func (w *windowsScheduler) Delete(name string) error {
 // ErrTaskNotFound so callers can distinguish a missing task from other
 // failures) when the task does not exist.
 func (w *windowsScheduler) ExportXML(name string) ([]byte, error) {
-	response, err := schedulerCOM(context.Background(), schedulerCOMRequest{Operation: "export", Name: name})
+	return w.ExportXMLContext(w.operationContext(), name)
+}
+
+func (w *windowsScheduler) ExportXMLContext(ctx context.Context, name string) ([]byte, error) {
+	response, err := schedulerCOM(ctx, schedulerCOMRequest{Operation: "export", Name: name})
 	if err != nil {
 		return nil, err
 	}
@@ -255,6 +255,18 @@ func (w *windowsScheduler) ExportXML(name string) ([]byte, error) {
 // failed mid-sequence. Idempotent: if the task already exists, /F
 // overwrites it.
 func (w *windowsScheduler) ImportXML(name string, xml []byte) error {
+	return w.ImportXMLContext(w.operationContext(), name, xml)
+}
+
+func (w *windowsScheduler) ImportXMLContext(ctx context.Context, name string, xml []byte) error {
+	if ctx == nil {
+		return fmt.Errorf("%w: nil import context", ErrUnavailable)
+	}
+	ctx, cancel := context.WithTimeout(ctx, schedulerCOMDeadline)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
 	prepared, err := prepareTaskXMLForImport(xml)
 	if err != nil {
 		return fmt.Errorf("prepare task XML: %w", err)
@@ -270,12 +282,8 @@ func (w *windowsScheduler) ImportXML(name string, xml []byte) error {
 	}
 	tmp.Close()
 	cmd := exec.Command(w.schtasksPath, "/Create", "/TN", name, "/XML", tmp.Name(), "/F")
-	process.NoConsole(cmd)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("schtasks /Create /XML: %w: %s", err, string(out))
-	}
-	return nil
+	result, err := runSchedulerCommand(ctx, cmd, nil)
+	return schedulerCommandMutationError("/Create /XML", result, err)
 }
 
 // prepareTaskXMLForImport preserves Task Scheduler's existing UTF-16LE+BOM
@@ -323,32 +331,26 @@ func validUTF16LEBOM(raw []byte) bool {
 }
 
 func (w *windowsScheduler) Run(name string) error {
-	cmd := exec.Command(w.schtasksPath, "/Run", "/TN", name)
-	process.NoConsole(cmd)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("schtasks /Run: %w: %s", err, string(out))
+	ctx, cancel := context.WithTimeout(w.operationContext(), schedulerCOMDeadline)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
-	return nil
+	cmd := exec.Command(w.schtasksPath, "/Run", "/TN", name)
+	result, err := runSchedulerCommand(ctx, cmd, nil)
+	return schedulerCommandMutationError("/Run", result, err)
 }
 
 func (w *windowsScheduler) Stop(name string) error {
-	_, err := schedulerCOM(context.Background(), schedulerCOMRequest{Operation: "stop", Name: name})
+	_, err := schedulerCOM(w.operationContext(), schedulerCOMRequest{Operation: "stop", Name: name})
 	if errors.Is(err, ErrTaskNotFound) || errors.Is(err, ErrTaskNotRunning) {
 		return nil
 	}
 	return err
 }
 
-// statusQueryTimeout bounds the per-task `schtasks /Query`. Measured at ~177ms
-// on a loaded reference host, so 15s never cuts a healthy answer; its job is to
-// stop a wedged schtasks child from blocking the caller forever. Status sits on
-// the GUI readiness path (via the port-ownership gate), where a bare
-// exec.Command + CombinedOutput() is an unbounded wait with no recovery.
-const statusQueryTimeout = 15 * time.Second
-
 func (w *windowsScheduler) Status(name string) (TaskStatus, error) {
-	response, err := schedulerCOM(context.Background(), schedulerCOMRequest{Operation: "status", Name: name})
+	response, err := schedulerCOM(w.operationContext(), schedulerCOMRequest{Operation: "status", Name: name})
 	if err != nil {
 		return TaskStatus{}, err
 	}
@@ -359,7 +361,7 @@ func (w *windowsScheduler) Status(name string) (TaskStatus, error) {
 }
 
 func (w *windowsScheduler) List(prefix string) ([]TaskStatus, error) {
-	return w.ListContext(context.Background(), prefix)
+	return w.ListContext(w.operationContext(), prefix)
 }
 
 func (w *windowsScheduler) ListContext(ctx context.Context, prefix string) ([]TaskStatus, error) {
@@ -383,8 +385,9 @@ func (w *windowsScheduler) ListContext(ctx context.Context, prefix string) ([]Ta
 	return results, nil
 }
 
-// sameWindowsUser compares a Task Scheduler "Run As User" value against the
-// current user's short username (no DOMAIN\ prefix), case-insensitively.
-func sameWindowsUser(owner, currentShortName string) bool {
-	return WindowsUsersEquivalent(owner, currentShortName)
+// sameWindowsUser compares identities already resolved by the native producer.
+// Production List and Status return SIDs; never discard an account's domain.
+func sameWindowsUser(owner, currentOwner string) bool {
+	owner, currentOwner = strings.TrimSpace(owner), strings.TrimSpace(currentOwner)
+	return owner != "" && currentOwner != "" && strings.EqualFold(owner, currentOwner)
 }

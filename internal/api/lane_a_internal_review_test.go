@@ -115,24 +115,24 @@ func TestPreflight_AllowsSupervisorIntentNativeHTTPInternalPortAndRejectsRowless
 	}
 
 	origPortInUse := preflightPortInUse
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	origIdent := processIdentityByPID
 	origSched := schedulerStatusForOwnPort
 	origStatus := supervisorIPCStatusFn
 	t.Cleanup(func() {
 		preflightPortInUse = origPortInUse
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 		processIdentityByPID = origIdent
 		schedulerStatusForOwnPort = origSched
 		supervisorIPCStatusFn = origStatus
 	})
 
 	preflightPortInUse = func(port int) bool { return port == internalPort }
-	lookupProcess = func(port int) (int, uint64, int64, bool) {
+	lookupPortPID = func(port int) (int, bool, error) {
 		if port == internalPort {
-			return internalPID, 0, 0, true
+			return internalPID, true, nil
 		}
-		return 0, 0, 0, false
+		return 0, false, nil
 	}
 	processIdentityByPID = func(pid int) (string, string, bool) {
 		if pid == internalPID {
@@ -183,12 +183,12 @@ func TestStopForceUsesSupervisorPIDThenWaitsOnDescriptorPort(t *testing.T) {
 	origIdent := processIdentityByPID
 	origForcePort := forceKillByPortFn
 	origPIDKill := stopForceKillPIDFn
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	t.Cleanup(func() {
 		processIdentityByPID = origIdent
 		forceKillByPortFn = origForcePort
 		stopForceKillPIDFn = origPIDKill
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 	})
 
 	processIdentityByPID = func(pid int) (string, string, bool) {
@@ -204,12 +204,12 @@ func TestStopForceUsesSupervisorPIDThenWaitsOnDescriptorPort(t *testing.T) {
 		return portKillNoListener, nil
 	}
 	var portLookups int
-	lookupProcess = func(port int) (int, uint64, int64, bool) {
+	lookupPortPID = func(port int) (int, bool, error) {
 		portLookups++
 		if port != 33002 {
-			t.Fatalf("lookupProcess port = %d, want 33002", port)
+			t.Fatalf("lookupPortPID port = %d, want 33002", port)
 		}
-		return 0, 0, 0, false
+		return 0, false, nil
 	}
 	var pidKills []int
 	stopForceKillPIDFn = func(pid int) error {
@@ -228,7 +228,7 @@ func TestStopForceUsesSupervisorPIDThenWaitsOnDescriptorPort(t *testing.T) {
 		t.Fatalf("PID kills = %v, want [62001]", pidKills)
 	}
 	if portLookups == 0 {
-		t.Fatal("lookupProcess was not consulted to wait for descriptor-port release after PID kill")
+		t.Fatal("lookupPortPID was not consulted to wait for descriptor-port release after PID kill")
 	}
 	if len(portKills) != 0 {
 		t.Fatalf("port kills = %v, want none after successful PID kill", portKills)
@@ -242,12 +242,12 @@ func TestStopForcePIDIdentityRefusalFallsThroughToPortClassifier(t *testing.T) {
 
 	t.Run("port unbound returns already-not-running success", func(t *testing.T) {
 		const port = 33005
-		origLookup := lookupProcess
+		origLookup := lookupPortPID
 		origIdent := processIdentityByPID
 		origForcePort := forceKillByPortFn
 		origPIDKill := stopForceKillPIDFn
 		t.Cleanup(func() {
-			lookupProcess = origLookup
+			lookupPortPID = origLookup
 			processIdentityByPID = origIdent
 			forceKillByPortFn = origForcePort
 			stopForceKillPIDFn = origPIDKill
@@ -261,12 +261,12 @@ func TestStopForcePIDIdentityRefusalFallsThroughToPortClassifier(t *testing.T) {
 			return "node.exe", "explorer.exe", true
 		}
 		var portLookups int
-		lookupProcess = func(gotPort int) (int, uint64, int64, bool) {
+		lookupPortPID = func(gotPort int) (int, bool, error) {
 			portLookups++
 			if gotPort != port {
-				t.Fatalf("lookupProcess port = %d, want %d", gotPort, port)
+				t.Fatalf("lookupPortPID port = %d, want %d", gotPort, port)
 			}
-			return 0, 0, 0, false
+			return 0, false, nil
 		}
 		stopForceKillPIDFn = func(pid int) error {
 			t.Fatalf("stopForceKillPIDFn called for refused foreign PID %d", pid)
@@ -288,13 +288,13 @@ func TestStopForcePIDIdentityRefusalFallsThroughToPortClassifier(t *testing.T) {
 	t.Run("port rebound by mcphub is killed by port path", func(t *testing.T) {
 		const port = 33006
 		const portOwnerPID = 62102
-		origLookup := lookupProcess
+		origLookup := lookupPortPID
 		origIdent := processIdentityByPID
 		origForcePort := forceKillByPortFn
 		origTaskkill := taskkillProcessTreeByPIDFn
 		origPIDKill := stopForceKillPIDFn
 		t.Cleanup(func() {
-			lookupProcess = origLookup
+			lookupPortPID = origLookup
 			processIdentityByPID = origIdent
 			forceKillByPortFn = origForcePort
 			taskkillProcessTreeByPIDFn = origTaskkill
@@ -311,14 +311,14 @@ func TestStopForcePIDIdentityRefusalFallsThroughToPortClassifier(t *testing.T) {
 
 		forceKillByPortFn = killDaemonByPortOutcome
 		killed := false
-		lookupProcess = func(gotPort int) (int, uint64, int64, bool) {
+		lookupPortPID = func(gotPort int) (int, bool, error) {
 			if gotPort != port {
-				t.Fatalf("lookupProcess port = %d, want %d", gotPort, port)
+				t.Fatalf("lookupPortPID port = %d, want %d", gotPort, port)
 			}
 			if killed {
-				return 0, 0, 0, false
+				return 0, false, nil
 			}
-			return portOwnerPID, 0, 0, true
+			return portOwnerPID, true, nil
 		}
 		processIdentityByPID = func(pid int) (string, string, bool) {
 			switch pid {
@@ -365,7 +365,7 @@ func TestStopForcePIDIdentityRefusalFallsThroughToPortClassifier(t *testing.T) {
 // TestStopForcePIDKillErrorFallsThroughToPortClassifier), which required the
 // already-gone case with d.Port != 0 to fall through to the port classifier
 // (portLookups > 0). That fall-through was exactly the POSIX bug: on non-Windows
-// lookupProcess is nil, so killDaemonByPortOutcome returns portKillLookupUnavailable
+// lookupPortPID is nil, so killDaemonByPortOutcome returns portKillLookupUnavailable
 // and the caller turned a confirmed-dead daemon into a "no usable port-release
 // proof" FAILED row. The identity-refusal fall-through (a PID that was NEVER
 // killed) is a DISTINCT, still-correct case covered by
@@ -377,12 +377,12 @@ func TestStopForceAlreadyGonePIDKillShortCircuitsToSuccess(t *testing.T) {
 	const port = 33007
 	pinOwnerSIDMatch(t) // SEC-F3: same-user owner; this test asserts the already-gone short-circuit.
 
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	origIdent := processIdentityByPID
 	origForcePort := forceKillByPortFn
 	origPIDKill := stopForceKillPIDFn
 	t.Cleanup(func() {
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 		processIdentityByPID = origIdent
 		forceKillByPortFn = origForcePort
 		stopForceKillPIDFn = origPIDKill
@@ -405,12 +405,12 @@ func TestStopForceAlreadyGonePIDKillShortCircuitsToSuccess(t *testing.T) {
 		return errors.New("synthetic stale PID already gone")
 	}
 	var portLookups int
-	lookupProcess = func(gotPort int) (int, uint64, int64, bool) {
+	lookupPortPID = func(gotPort int) (int, bool, error) {
 		portLookups++
 		if gotPort != port {
-			t.Fatalf("lookupProcess port = %d, want %d", gotPort, port)
+			t.Fatalf("lookupPortPID port = %d, want %d", gotPort, port)
 		}
-		return 0, 0, 0, false
+		return 0, false, nil
 	}
 
 	result := forceKillOneSupervisorTarget(
@@ -428,20 +428,20 @@ func TestStopForceAlreadyGonePIDKillShortCircuitsToSuccess(t *testing.T) {
 func TestStopForcePortKillRejectsForeignProcessOwner(t *testing.T) {
 	const port = 33003
 
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	origIdent := processIdentityByPID
 	origTaskkill := taskkillProcessTreeByPIDFn
 	t.Cleanup(func() {
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 		processIdentityByPID = origIdent
 		taskkillProcessTreeByPIDFn = origTaskkill
 	})
 
-	lookupProcess = func(gotPort int) (int, uint64, int64, bool) {
+	lookupPortPID = func(gotPort int) (int, bool, error) {
 		if gotPort != port {
-			t.Fatalf("lookupProcess port = %d, want %d", gotPort, port)
+			t.Fatalf("lookupPortPID port = %d, want %d", gotPort, port)
 		}
-		return 63001, 0, 0, true
+		return 63001, true, nil
 	}
 	processIdentityByPID = func(pid int) (string, string, bool) {
 		if pid != 63001 {
@@ -467,24 +467,24 @@ func TestStopForcePortKillAllowsMcphubProcessOwner(t *testing.T) {
 	const port = 33004
 	pinOwnerSIDMatch(t) // SEC-F3: same-user owner; this test asserts the mcphub-owner port-kill path.
 
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	origIdent := processIdentityByPID
 	origTaskkill := taskkillProcessTreeByPIDFn
 	t.Cleanup(func() {
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 		processIdentityByPID = origIdent
 		taskkillProcessTreeByPIDFn = origTaskkill
 	})
 
 	killed := false
-	lookupProcess = func(gotPort int) (int, uint64, int64, bool) {
+	lookupPortPID = func(gotPort int) (int, bool, error) {
 		if gotPort != port {
-			t.Fatalf("lookupProcess port = %d, want %d", gotPort, port)
+			t.Fatalf("lookupPortPID port = %d, want %d", gotPort, port)
 		}
 		if killed {
-			return 0, 0, 0, false
+			return 0, false, nil
 		}
-		return 64001, 0, 0, true
+		return 64001, true, nil
 	}
 	processIdentityByPID = func(pid int) (string, string, bool) {
 		if pid != 64001 {
@@ -512,20 +512,20 @@ func TestStopForcePortKillRejectsIdentityLookupFailure(t *testing.T) {
 	const port = 33008
 	const ownerPID = 65001
 
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	origIdent := processIdentityByPID
 	origTaskkill := taskkillProcessTreeByPIDFn
 	t.Cleanup(func() {
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 		processIdentityByPID = origIdent
 		taskkillProcessTreeByPIDFn = origTaskkill
 	})
 
-	lookupProcess = func(gotPort int) (int, uint64, int64, bool) {
+	lookupPortPID = func(gotPort int) (int, bool, error) {
 		if gotPort != port {
-			t.Fatalf("lookupProcess port = %d, want %d", gotPort, port)
+			t.Fatalf("lookupPortPID port = %d, want %d", gotPort, port)
 		}
-		return ownerPID, 0, 0, true
+		return ownerPID, true, nil
 	}
 	processIdentityByPID = func(pid int) (string, string, bool) {
 		if pid != ownerPID {

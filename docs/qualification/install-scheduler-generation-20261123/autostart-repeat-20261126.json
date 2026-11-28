@@ -1,0 +1,2464 @@
+{
+  "schema": "mcp-local-hub.autostart-repeat-qualification/v1",
+  "date": "2026-11-26",
+  "target_pull_request": 660,
+  "overall_status": "SCOPED_VERIFICATION_RECEIVED",
+  "campaign_v1_status": "FAIL",
+  "source": {
+    "repository": "applicate2628/mcp-local-hub",
+    "base_commit": "b14cdeba95b2a69815d1677ee3f0dc236e8f1c79",
+    "hash_algorithm": "SHA-256",
+    "input_receipt": "receipt-v1.json",
+    "input_step": "autostart-scheduler-default",
+    "hash_timing": "Before the positive command, after restoring the candidate and native gofmt.",
+    "reviewed_paths_count": 9,
+    "files_sha256": {
+      "internal/api/scheduler_replacement.go": "257f6840bc7bb6279ea9753dfaae494bc486f55e142578820eb6e7d8497eb731",
+      "internal/autostart/autostart.go": "4cbcda2e6fa67fa64e1a4f49f59706662b036c7607b8d9b6269d0480c8657649",
+      "internal/autostart/windows.go": "1332a7bceee2259f0db8c501f854431f5d7f9d8874076d13e15b3e6405ed9e3e",
+      "internal/autostart/windows_test.go": "ded4e1af9ac6b8fd11e36b0748b57e7048460144403422d8b1b5c2fd87093d18",
+      "internal/cli/autostart.go": "0bfb9347472de56e671b69d9df5fe03aba7d49ce7beaae092326958450d30cf0",
+      "internal/scheduler/task_xml_match.go": "1ae2bce75f354fb75c3c04021a31e8853da65507d83b6d42bb0496b4724a851d",
+      "internal/scheduler/task_xml_match_test.go": "30464d1dc9d53792a8f166a1acd26750ef7eb55e1acd61bba4d6df31933ce12d",
+      "internal/scheduler/task_xml_match_windows.go": "03e0a1329036795ee64d6bb179c85c28975d12e91ebdcbfb2b38ddddb01886b4",
+      "internal/scheduler/task_xml_match_windows_test.go": "7be3d01fecef08c2e196256c21a1c42b000722974449c1e5efd5c71824a06fac"
+    },
+    "identical_inputs_for": [
+      "autostart-scheduler-default",
+      "autostart-scheduler-tagged",
+      "autostart-boundary-default",
+      "remainder:cli-unreceived-default-trace",
+      "remainder:boundary-tagged",
+      "finalize:trace-syscall-top",
+      "finalize:source-diff-check",
+      "finalize:source-status"
+    ],
+    "current_checkout_matches_all_nine_hashes": true,
+    "code_commit": "c0b0cc224b12260aad1268c50305b7c8cc265b5e",
+    "code_tree": "81cbaa83e1f25e95051506f942bdf684b5cc6b9b",
+    "code_commit_parent": "b14cdeba95b2a69815d1677ee3f0dc236e8f1c79",
+    "code_commit_receiving": "The code commit contains the nine exact tested byte streams; the PR #660 description records publication and exact-head readback."
+  },
+  "contract": {
+    "matching_existing_task": "Return success without scheduler mutation only after full definition comparison and a typed Ready, Running, or Queued runtime observation.",
+    "other_existing_tasks": "Retain the observed XML and refuse replacement; Disabled, Unknown, missing/error runtime observations do not count as success.",
+    "creation": "Create only after typed absence with zero observed XML; preserve post-create-failure observation behavior.",
+    "saved_off": "Existing saved-OFF projection is retained.",
+    "ownership": "Definition equality authorizes no replacement, deletion, rollback, or ownership claim."
+  },
+  "caller_fix": {
+    "acknowledged": true,
+    "problem": "A joined error would bypass the API finalizer direct type assertion and omit retained XML.",
+    "resolution": "Return the direct ObservedTaskReplacementRefusal; generalize CreateErr to Cause and preserve Cause through Error, Unwrap, and the existing finalizer.",
+    "regressions": [
+      "TestWindowsBackend_EnableRequiresObservedEnabledRuntime",
+      "TestWindowsBackend_EnableRefusesExistingIncompleteTask",
+      "TestRetainAutostartTaskReplacementRefusal"
+    ]
+  },
+  "integrity": {
+    "method": "Hash received raw capture bytes before line splitting or JSON-event derivation.",
+    "raw_capture_checks": [
+      {
+        "file": "repeat-enable-negative-control.stdout.txt",
+        "stream": "stdout",
+        "sha256": "567a88677e1e4db2ac4dca381ae72542315c385c94c45339726312d8086bdc3f",
+        "matches_receipt": true,
+        "size_bytes": 5387,
+        "newlines": "LF",
+        "final_lf_present": true,
+        "checked_before_parsing": true
+      },
+      {
+        "file": "autostart-scheduler-default.stdout.txt",
+        "stream": "stdout",
+        "sha256": "1acfb246c337fa764f1e99eccf78ec0880dc0f39ae5cde519b48b9249047a1f2",
+        "matches_receipt": true,
+        "size_bytes": 75953,
+        "newlines": "LF",
+        "final_lf_present": true,
+        "checked_before_parsing": true
+      },
+      {
+        "file": "autostart-scheduler-tagged.stdout.txt",
+        "stream": "stdout",
+        "sha256": "9fdf38182edfcc5cdb454e8990705ca71fa7921be134640e3b5a05f71dbdc5c0",
+        "matches_receipt": true,
+        "size_bytes": 75981,
+        "newlines": "LF",
+        "final_lf_present": true,
+        "checked_before_parsing": true
+      },
+      {
+        "file": "autostart-boundary-default.stdout.txt",
+        "stream": "stdout",
+        "sha256": "6ac6b0f72f45183ee12d26cbb4bdd1a48c39bda8e9290c956dffb26fcfd21bba",
+        "matches_receipt": true,
+        "size_bytes": 36907,
+        "newlines": "LF",
+        "final_lf_present": true,
+        "checked_before_parsing": true
+      },
+      {
+        "file": "autostart-boundary-default.stderr.txt",
+        "stream": "stderr",
+        "sha256": "211927e23272e8531591dfe766236b5895475e04ba36b55958205f91d45e4eb0",
+        "matches_receipt": true,
+        "size_bytes": 1040,
+        "checked_before_parsing": true
+      },
+      {
+        "file": "remainder-cli-unreceived-default-trace.stdout.txt",
+        "stream": "stdout",
+        "sha256": "16118e4dd31e9638ae455b077dfbfa1de3188c795425b518ac5145231394990d",
+        "matches_receipt": true,
+        "size_bytes": 9587,
+        "newlines": "LF",
+        "final_lf_present": true,
+        "checked_before_parsing": true
+      },
+      {
+        "file": "remainder-boundary-tagged.stdout.txt",
+        "stream": "stdout",
+        "sha256": "05e24e913105beaf3a232f7b6fa4b7ff28597a0135819803616587067a7fd4c9",
+        "matches_receipt": true,
+        "size_bytes": 21804,
+        "newlines": "LF",
+        "final_lf_present": true,
+        "checked_before_parsing": true
+      },
+      {
+        "file": "finalize-trace-syscall-top.stdout.txt",
+        "stream": "stdout",
+        "sha256": "04e690cc00bd1fa04f4ba6892f3fb80d31ce39c67c16b9d30806d247e46357e8",
+        "matches_receipt": true,
+        "size_bytes": 10828,
+        "newlines": "LF",
+        "final_lf_present": true,
+        "checked_before_parsing": true
+      },
+      {
+        "file": "finalize-source-diff-check.stdout.txt",
+        "stream": "stdout",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "matches_receipt": true,
+        "size_bytes": 0,
+        "newlines": "EMPTY",
+        "final_lf_present": false,
+        "checked_before_parsing": true
+      },
+      {
+        "file": "finalize-source-status.stdout.txt",
+        "stream": "stdout",
+        "sha256": "faa63af0371c1acfeeb709c1b3730130a9de5ab7a084b3488e5527ed0180f85c",
+        "matches_receipt": true,
+        "size_bytes": 362,
+        "newlines": "LF",
+        "final_lf_present": true,
+        "checked_before_parsing": true
+      },
+      {
+        "file": "api-functional-default.stdout.txt",
+        "evidence_group": "api-functional-evidence",
+        "stream": "stdout",
+        "sha256": "c67e87b94eb2216d01480334279219822338680449618b279e2fe875fd28378e",
+        "matches_receipt": true,
+        "size_bytes": 20393,
+        "newlines": "LF",
+        "final_lf_present": true,
+        "checked_before_parsing": true
+      },
+      {
+        "file": "api-functional-tagged.stdout.txt",
+        "evidence_group": "api-functional-evidence",
+        "stream": "stdout",
+        "sha256": "4de6e8efc5035ad3fc9aa51d9d6cb7e96fee8d81decda9a8c3ab7996f5e9baaa",
+        "matches_receipt": true,
+        "size_bytes": 20386,
+        "newlines": "LF",
+        "final_lf_present": true,
+        "checked_before_parsing": true
+      }
+    ],
+    "receipt_transport": {
+      "file": "receipt-v1.json",
+      "original_native_newlines": "CRLF",
+      "received_newlines": "LF",
+      "original_native_sha256": "2007a76947c261e02c299cd9fddc977988fa9a90b6bbb0903e98c9ecf43e346d",
+      "received_lf_sha256": "4620b6b796cef162aae48122538f15b7f8f0783164c4ad1eebb6b9ccbab7a700",
+      "receiver_record": "root-receiving.json",
+      "receiver_record_sha256": "844b055a77e7f299a661c3262d915f8294bc8eeaf37d0df95459ca58017003d0",
+      "original_hash_matches_receiver": true,
+      "verification": "LF-to-CRLF conversion in memory reproduced the recorded original SHA-256; the received raw file was not rewritten.",
+      "transport_label": "CRLF_TO_LF_TEXT_TRANSPORT"
+    },
+    "remainder_receipt_transport": {
+      "file": "remainder-receipt.json",
+      "original_native_newlines": "CRLF",
+      "received_newlines": "LF",
+      "original_native_sha256": "268b31033a467fe8e2598eb28101e39b8992a6db8e577fc9a723355a6574ed2b",
+      "received_lf_sha256": "6e3bbd8361cd319558f670bbba82436fde9e454ea15c83e30fc5cd2914692662",
+      "receiver_record": "remainder-root-receiving.json",
+      "receiver_record_sha256": "8f404eb080b99b0d0f723a3322b13ed476bcce88e52ea0553689d41af451edd8",
+      "original_hash_matches_receiver": true,
+      "verification": "LF-to-CRLF conversion in memory reproduced the recorded original SHA-256; the received raw file was not rewritten.",
+      "transport_label": "CRLF_TO_LF_TEXT_TRANSPORT"
+    },
+    "finalize_receipt_transport": {
+      "file": "finalize-receipt.json",
+      "original_native_newlines": "CRLF",
+      "received_newlines": "LF",
+      "original_native_sha256": "d7599a0151ae24533898080ebf418ededbead785ffdb5d23a9ca7b2adebbcdb4",
+      "received_lf_sha256": "6dd0c9efe8b74c8f7ea61b2677a1baa2fef3bc0ee594a053988a20f330370f79",
+      "receiver_record": "finalize-root-receiving.json",
+      "receiver_record_sha256": "78994742f3591f322feff8c9497aeacae539979f0e491e0da76d65d8b7fe1d93",
+      "original_hash_matches_receiver": true,
+      "verification": "LF-to-CRLF conversion in memory reproduced the recorded original SHA-256; the received raw file was not rewritten.",
+      "transport_label": "CRLF_TO_LF_TEXT_TRANSPORT"
+    },
+    "local_materialization_corrections": [
+      {
+        "file": "finalize-source-diff-check.stdout.txt",
+        "native_size_bytes": 0,
+        "incorrect_local_size_bytes": 1,
+        "corrected_local_size_bytes": 0,
+        "native_capture_changed": false,
+        "correction": "Root rematerialized the native empty capture as an empty local file after text transport introduced one LF; the mistaken local copy was preserved separately.",
+        "corrected_raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "corrected_raw_matches_receipt": true
+      }
+    ],
+    "api_functional_receipt_transport": {
+      "evidence_group": "api-functional-evidence",
+      "file": "receipt.json",
+      "original_native_newlines": "CRLF",
+      "received_newlines": "LF",
+      "original_native_sha256": "d3810d9d307c2e64c56f7c8bd16402add1d2a83ba1e9c8cf3121f1fa7c3d8c70",
+      "received_lf_sha256": "d1ebce3a74fa3c9dbc04db30b8cd41501dff80679d8973054f402183014145d1",
+      "receiver_record": "root-receiving.json",
+      "receiver_record_sha256": "7e273a63deb03a4e9d4be41b0ce5316f24ced873531d175a3cce16791de58d5e",
+      "original_hash_matches_receiver": true,
+      "verification": "LF-to-CRLF conversion in memory reproduced the recorded original SHA-256; the received raw file was not rewritten.",
+      "transport_label": "CRLF_TO_LF_TEXT_TRANSPORT"
+    }
+  },
+  "campaigns": {
+    "v1": {
+      "status": "FAIL",
+      "error": "autostart-boundary-default exited 1; the CLI package hit its scoped 90-second Go test alarm.",
+      "commands_received": 8,
+      "command_receiving": [
+        {
+          "name": "head",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "quiescence_state": "complete",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "reader_count": 2,
+          "all_original_readers_joined": true,
+          "native_work_deadline_exceeded": false,
+          "native_cleanup_deadline_exceeded": false
+        },
+        {
+          "name": "apply-control-and-format",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "quiescence_state": "complete",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "reader_count": 2,
+          "all_original_readers_joined": true,
+          "native_work_deadline_exceeded": false,
+          "native_cleanup_deadline_exceeded": false
+        },
+        {
+          "name": "go-version",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "quiescence_state": "complete",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "reader_count": 2,
+          "all_original_readers_joined": true,
+          "native_work_deadline_exceeded": false,
+          "native_cleanup_deadline_exceeded": false
+        },
+        {
+          "name": "repeat-enable-negative-control",
+          "exit_code": 1,
+          "lifecycle_state": "CLOSED",
+          "quiescence_state": "complete",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "reader_count": 2,
+          "all_original_readers_joined": true,
+          "native_work_deadline_exceeded": false,
+          "native_cleanup_deadline_exceeded": false
+        },
+        {
+          "name": "restore-candidate-and-format",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "quiescence_state": "complete",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "reader_count": 2,
+          "all_original_readers_joined": true,
+          "native_work_deadline_exceeded": false,
+          "native_cleanup_deadline_exceeded": false
+        },
+        {
+          "name": "autostart-scheduler-default",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "quiescence_state": "complete",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "reader_count": 2,
+          "all_original_readers_joined": true,
+          "native_work_deadline_exceeded": false,
+          "native_cleanup_deadline_exceeded": false
+        },
+        {
+          "name": "autostart-scheduler-tagged",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "quiescence_state": "complete",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "reader_count": 2,
+          "all_original_readers_joined": true,
+          "native_work_deadline_exceeded": false,
+          "native_cleanup_deadline_exceeded": false
+        },
+        {
+          "name": "autostart-boundary-default",
+          "exit_code": 1,
+          "lifecycle_state": "CLOSED",
+          "quiescence_state": "complete",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "reader_count": 2,
+          "all_original_readers_joined": true,
+          "native_work_deadline_exceeded": false,
+          "native_cleanup_deadline_exceeded": false
+        }
+      ],
+      "reader_count": 16,
+      "all_commands_closed": true,
+      "all_original_readers_joined": true,
+      "outer_controller": {
+        "exit_code": 1,
+        "original_controller_reaped": true,
+        "capture_handles_closed": true
+      },
+      "results": [
+        {
+          "name": "repeat-enable-negative-control",
+          "receipt_exit_code": 1,
+          "command": [
+            "go",
+            "test",
+            "-json",
+            "-count=1",
+            "-timeout",
+            "90s",
+            "-run",
+            "^TestWindowsBackend_EnableExistingTaskIsReadOnly$",
+            "./internal/autostart"
+          ],
+          "status": "EXPECTED_FAIL",
+          "stdout_sha256": "567a88677e1e4db2ac4dca381ae72542315c385c94c45339726312d8086bdc3f",
+          "terminal_counts": {
+            "roots": {
+              "pass": 0,
+              "fail": 1,
+              "skip": 0
+            },
+            "subtests": {
+              "pass": 0,
+              "fail": 3,
+              "skip": 0
+            },
+            "packages": {
+              "pass": 0,
+              "fail": 1,
+              "skip": 0
+            }
+          },
+          "terminal_events": [
+            {
+              "Action": "fail",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableExistingTaskIsReadOnly/gui_ready",
+              "Elapsed": 0
+            },
+            {
+              "Action": "fail",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableExistingTaskIsReadOnly/supervise_running",
+              "Elapsed": 0
+            },
+            {
+              "Action": "fail",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableExistingTaskIsReadOnly/gui_queued",
+              "Elapsed": 0
+            },
+            {
+              "Action": "fail",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableExistingTaskIsReadOnly",
+              "Elapsed": 0
+            },
+            {
+              "Action": "fail",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Elapsed": 0.139
+            }
+          ],
+          "control": {
+            "description": "Restored previous occupied-task refusal in Enable; the positive repeat-enable regression must fail.",
+            "changed_paths_from_positive_inputs": [
+              "internal/autostart/windows.go"
+            ],
+            "windows_go_sha256": "f20594025ce346390fc9de23c80a03a7e65febe54b7b1d0e9428c478ea497231",
+            "expected_exit_code": 1
+          }
+        },
+        {
+          "name": "autostart-scheduler-default",
+          "receipt_exit_code": 0,
+          "command": [
+            "go",
+            "test",
+            "-json",
+            "-count=1",
+            "-timeout",
+            "90s",
+            "-run",
+            "^(TestTaskDefinitionsEquivalent|TestWindowsTaskSpecMatchesXML|TestBuildCreateXML|TestWindowsBackend_(Enable|ProjectAutorunDisabled))",
+            "./internal/scheduler",
+            "./internal/autostart"
+          ],
+          "status": "PASS",
+          "stdout_sha256": "1acfb246c337fa764f1e99eccf78ec0880dc0f39ae5cde519b48b9249047a1f2",
+          "terminal_counts": {
+            "roots": {
+              "pass": 20,
+              "fail": 0,
+              "skip": 0
+            },
+            "subtests": {
+              "pass": 57,
+              "fail": 0,
+              "skip": 0
+            },
+            "packages": {
+              "pass": 2,
+              "fail": 0,
+              "skip": 0
+            }
+          },
+          "terminal_events": [
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestBuildCreateXML_Logon",
+              "Elapsed": 0.01
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestBuildCreateXML_Weekly",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestBuildCreateXML_QuotesArgsWithSpaces",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestBuildCreateXML_HandlesInternalQuotes",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestBuildCreateXML_HandlesTrailingBackslash",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentAllowsNativeNormalization/identical",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentAllowsNativeNormalization/native_defaults",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentAllowsNativeNormalization/boolean_spelling",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentAllowsNativeNormalization/registration_metadata",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentAllowsNativeNormalization/unordered_settings_and_path_case",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentAllowsNativeNormalization",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/command",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/strict_mode",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/owner_mode",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/working_directory",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/extra_action",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/missing_trigger",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/disabled_trigger",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/extra_trigger",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/trigger_user",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/principal_user",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/principal_logon",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/principal_run_level",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/disabled_task",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/execution_limit",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/instance_policy",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/restart_policy",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/expiry_deletion",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/unknown_setting",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/unknown_attribute",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/unknown_registration_field",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/registration_permissions",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/duplicate_default",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences",
+              "Elapsed": 0.14
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentRejectsUnreadableXML",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestWindowsTaskSpecMatchesXMLUsesCurrentUserAndExistingWriter/writer_output",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestWindowsTaskSpecMatchesXMLUsesCurrentUserAndExistingWriter/native_metadata",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestWindowsTaskSpecMatchesXMLUsesCurrentUserAndExistingWriter/different_user",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestWindowsTaskSpecMatchesXMLUsesCurrentUserAndExistingWriter/disabled",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestWindowsTaskSpecMatchesXMLUsesCurrentUserAndExistingWriter",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Elapsed": 0.765
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableCreatesTask",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableStrictModeAddsFlag",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/gui_non-strict",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/gui_strict",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/supervise_non-strict",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/supervise_strict",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRejectsInvalidOwnerBeforeMutatingTask",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableExistingTaskIsReadOnly/gui_ready",
+              "Elapsed": 0.02
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableExistingTaskIsReadOnly/supervise_running",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableExistingTaskIsReadOnly/gui_queued",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableExistingTaskIsReadOnly",
+              "Elapsed": 0.02
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRetainsDifferentOrDisabledDefinition/strict_policy_changed",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRetainsDifferentOrDisabledDefinition/owner_mode_changed",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRetainsDifferentOrDisabledDefinition/disabled_definition",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRetainsDifferentOrDisabledDefinition",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRequiresObservedEnabledRuntime/disabled",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRequiresObservedEnabledRuntime/disabled_display",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRequiresObservedEnabledRuntime/unknown",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRequiresObservedEnabledRuntime/disappeared",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRequiresObservedEnabledRuntime/unavailable",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRequiresObservedEnabledRuntime",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRefusesExistingIncompleteTask/matching_visible_argv",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRefusesExistingIncompleteTask/different_definition",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRefusesExistingIncompleteTask",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRequiresConfirmedAbsence/conflicting_absence",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRequiresConfirmedAbsence/partial_read",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRequiresConfirmedAbsence/unavailable",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRequiresConfirmedAbsence/empty_success",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRequiresConfirmedAbsence",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableAfterCreateFailureOnlyObserves/conflict",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableAfterCreateFailureOnlyObserves/matching_conflict",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableAfterCreateFailureOnlyObserves/lost_acknowledgment",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableAfterCreateFailureOnlyObserves/absent",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableAfterCreateFailureOnlyObserves/read_unavailable",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableAfterCreateFailureOnlyObserves",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_ProjectAutorunDisabledRequiresTypedAbsence",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Elapsed": 0.856
+            }
+          ]
+        },
+        {
+          "name": "autostart-scheduler-tagged",
+          "receipt_exit_code": 0,
+          "command": [
+            "go",
+            "test",
+            "-tags=test_state_path_env",
+            "-json",
+            "-count=1",
+            "-timeout",
+            "90s",
+            "-run",
+            "^(TestTaskDefinitionsEquivalent|TestWindowsTaskSpecMatchesXML|TestBuildCreateXML|TestWindowsBackend_(Enable|ProjectAutorunDisabled))",
+            "./internal/scheduler",
+            "./internal/autostart"
+          ],
+          "status": "PASS",
+          "stdout_sha256": "9fdf38182edfcc5cdb454e8990705ca71fa7921be134640e3b5a05f71dbdc5c0",
+          "terminal_counts": {
+            "roots": {
+              "pass": 20,
+              "fail": 0,
+              "skip": 0
+            },
+            "subtests": {
+              "pass": 57,
+              "fail": 0,
+              "skip": 0
+            },
+            "packages": {
+              "pass": 2,
+              "fail": 0,
+              "skip": 0
+            }
+          },
+          "terminal_events": [
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableCreatesTask",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableStrictModeAddsFlag",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/gui_non-strict",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/gui_strict",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/supervise_non-strict",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/supervise_strict",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRejectsInvalidOwnerBeforeMutatingTask",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableExistingTaskIsReadOnly/gui_ready",
+              "Elapsed": 0.03
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableExistingTaskIsReadOnly/supervise_running",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableExistingTaskIsReadOnly/gui_queued",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableExistingTaskIsReadOnly",
+              "Elapsed": 0.03
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRetainsDifferentOrDisabledDefinition/strict_policy_changed",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRetainsDifferentOrDisabledDefinition/owner_mode_changed",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRetainsDifferentOrDisabledDefinition/disabled_definition",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRetainsDifferentOrDisabledDefinition",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRequiresObservedEnabledRuntime/disabled",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRequiresObservedEnabledRuntime/disabled_display",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRequiresObservedEnabledRuntime/unknown",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRequiresObservedEnabledRuntime/disappeared",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRequiresObservedEnabledRuntime/unavailable",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRequiresObservedEnabledRuntime",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRefusesExistingIncompleteTask/matching_visible_argv",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRefusesExistingIncompleteTask/different_definition",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRefusesExistingIncompleteTask",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRequiresConfirmedAbsence/conflicting_absence",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRequiresConfirmedAbsence/partial_read",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRequiresConfirmedAbsence/unavailable",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRequiresConfirmedAbsence/empty_success",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableRequiresConfirmedAbsence",
+              "Elapsed": 0.13
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableAfterCreateFailureOnlyObserves/conflict",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableAfterCreateFailureOnlyObserves/matching_conflict",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableAfterCreateFailureOnlyObserves/lost_acknowledgment",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableAfterCreateFailureOnlyObserves/absent",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableAfterCreateFailureOnlyObserves/read_unavailable",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_EnableAfterCreateFailureOnlyObserves",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Test": "TestWindowsBackend_ProjectAutorunDisabledRequiresTypedAbsence",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/autostart",
+              "Elapsed": 0.914
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestBuildCreateXML_Logon",
+              "Elapsed": 0.02
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestBuildCreateXML_Weekly",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestBuildCreateXML_QuotesArgsWithSpaces",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestBuildCreateXML_HandlesInternalQuotes",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestBuildCreateXML_HandlesTrailingBackslash",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentAllowsNativeNormalization/identical",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentAllowsNativeNormalization/native_defaults",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentAllowsNativeNormalization/boolean_spelling",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentAllowsNativeNormalization/registration_metadata",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentAllowsNativeNormalization/unordered_settings_and_path_case",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentAllowsNativeNormalization",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/command",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/strict_mode",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/owner_mode",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/working_directory",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/extra_action",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/missing_trigger",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/disabled_trigger",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/extra_trigger",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/trigger_user",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/principal_user",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/principal_logon",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/principal_run_level",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/disabled_task",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/execution_limit",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/instance_policy",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/restart_policy",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/expiry_deletion",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/unknown_setting",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/unknown_attribute",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/unknown_registration_field",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/registration_permissions",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences/duplicate_default",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentPreservesBehaviorDifferences",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestTaskDefinitionsEquivalentRejectsUnreadableXML",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestWindowsTaskSpecMatchesXMLUsesCurrentUserAndExistingWriter/writer_output",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestWindowsTaskSpecMatchesXMLUsesCurrentUserAndExistingWriter/native_metadata",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestWindowsTaskSpecMatchesXMLUsesCurrentUserAndExistingWriter/different_user",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestWindowsTaskSpecMatchesXMLUsesCurrentUserAndExistingWriter/disabled",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Test": "TestWindowsTaskSpecMatchesXMLUsesCurrentUserAndExistingWriter",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/scheduler",
+              "Elapsed": 1.023
+            }
+          ]
+        },
+        {
+          "name": "autostart-boundary-default",
+          "receipt_exit_code": 1,
+          "command": [
+            "go",
+            "test",
+            "-json",
+            "-count=1",
+            "-timeout",
+            "90s",
+            "-run",
+            "^(TestRetainAutostartTaskReplacementRefusal|TestStrictModeWindowsExplicitAutorunOffSurvivesMutationAndRecovery|TestAutostartWindowsExplicitEnablePreservesQuitAndAppliedProjectionFailure|TestStrictModeWindowsExistingTaskRefusalPreservesRecovery)$",
+            "./internal/api",
+            "./internal/cli"
+          ],
+          "status": "FAIL",
+          "stdout_sha256": "6ac6b0f72f45183ee12d26cbb4bdd1a48c39bda8e9290c956dffb26fcfd21bba",
+          "terminal_counts": {
+            "roots": {
+              "pass": 2,
+              "fail": 0,
+              "skip": 0
+            },
+            "subtests": {
+              "pass": 3,
+              "fail": 0,
+              "skip": 0
+            },
+            "packages": {
+              "pass": 1,
+              "fail": 1,
+              "skip": 0
+            }
+          },
+          "terminal_events": [
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestRetainAutostartTaskReplacementRefusal",
+              "Elapsed": 1.12
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Elapsed": 3.398
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/cli",
+              "Test": "TestStrictModeWindowsExplicitAutorunOffSurvivesMutationAndRecovery/mutation",
+              "Elapsed": 12.3
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/cli",
+              "Test": "TestStrictModeWindowsExplicitAutorunOffSurvivesMutationAndRecovery/recovery",
+              "Elapsed": 59.1
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/cli",
+              "Test": "TestStrictModeWindowsExplicitAutorunOffSurvivesMutationAndRecovery",
+              "Elapsed": 71.39
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/cli",
+              "Test": "TestAutostartWindowsExplicitEnablePreservesQuitAndAppliedProjectionFailure/projected",
+              "Elapsed": 12.65
+            },
+            {
+              "Action": "fail",
+              "Package": "mcp-local-hub/internal/cli",
+              "Elapsed": 92.246
+            }
+          ],
+          "interruption": {
+            "kind": "GO_TEST_TIMEOUT",
+            "test_deadline_seconds": 90,
+            "observed_alarm": "1m30s",
+            "alarm_observed": true,
+            "blocking_call_observed": "FlushFileBuffers",
+            "source_location": "internal/api/secure_write_windows.go:330",
+            "location_observed": true,
+            "unterminated_test_names": [
+              "TestAutostartWindowsExplicitEnablePreservesQuitAndAppliedProjectionFailure",
+              "TestAutostartWindowsExplicitEnablePreservesQuitAndAppliedProjectionFailure/projection-failed"
+            ],
+            "not_a_passing_campaign": true
+          }
+        }
+      ]
+    },
+    "remainder": {
+      "status": "FAIL",
+      "error": "UnicodeDecodeError: 'utf-8' codec can't decode byte 0x8b in position 1: invalid start byte",
+      "failure_stage": "Post-test binary profile receiving",
+      "commands_received": 4,
+      "command_receiving": [
+        {
+          "name": "head",
+          "exit_code": 0,
+          "command_success": true,
+          "captures_measured": true,
+          "lifecycle_state": "CLOSED",
+          "quiescence_state": "complete",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "reader_count": 2,
+          "all_original_readers_joined": true,
+          "native_work_deadline_exceeded": false,
+          "native_cleanup_deadline_exceeded": false
+        },
+        {
+          "name": "cli-unreceived-default-trace",
+          "exit_code": 0,
+          "command_success": true,
+          "captures_measured": true,
+          "lifecycle_state": "CLOSED",
+          "quiescence_state": "complete",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "reader_count": 2,
+          "all_original_readers_joined": true,
+          "native_work_deadline_exceeded": false,
+          "native_cleanup_deadline_exceeded": false
+        },
+        {
+          "name": "boundary-tagged",
+          "exit_code": 0,
+          "command_success": true,
+          "captures_measured": true,
+          "lifecycle_state": "CLOSED",
+          "quiescence_state": "complete",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "reader_count": 2,
+          "all_original_readers_joined": true,
+          "native_work_deadline_exceeded": false,
+          "native_cleanup_deadline_exceeded": false
+        },
+        {
+          "name": "trace-syscall-profile",
+          "exit_code": 0,
+          "command_success": false,
+          "captures_measured": true,
+          "lifecycle_state": "CLOSED",
+          "quiescence_state": "complete",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "reader_count": 2,
+          "all_original_readers_joined": true,
+          "native_work_deadline_exceeded": false,
+          "native_cleanup_deadline_exceeded": false
+        }
+      ],
+      "reader_count": 8,
+      "all_commands_closed": true,
+      "all_original_readers_joined": true,
+      "outer_controller": {
+        "exit_code": 1,
+        "original_controller_reaped": true,
+        "capture_handles_closed": true
+      },
+      "results": [
+        {
+          "name": "cli-unreceived-default-trace",
+          "receipt_exit_code": 0,
+          "command": [
+            "go",
+            "test",
+            "-json",
+            "-count=1",
+            "-timeout",
+            "5m",
+            "-trace",
+            "<retained-trace>",
+            "-run",
+            "^(TestAutostartWindowsExplicitEnablePreservesQuitAndAppliedProjectionFailure|TestStrictModeWindowsExistingTaskRefusalPreservesRecovery)$/^(projection-failed|baseline_matches|definition_changed|recovery)$",
+            "./internal/cli"
+          ],
+          "command_representation": "Host artifact paths replaced with explicit placeholders; flags and test filters retained.",
+          "status": "PASS",
+          "stdout_sha256": "16118e4dd31e9638ae455b077dfbfa1de3188c795425b518ac5145231394990d",
+          "terminal_counts": {
+            "roots": {
+              "pass": 2,
+              "fail": 0,
+              "skip": 0
+            },
+            "subtests": {
+              "pass": 4,
+              "fail": 0,
+              "skip": 0
+            },
+            "packages": {
+              "pass": 1,
+              "fail": 0,
+              "skip": 0
+            }
+          },
+          "terminal_events": [
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/cli",
+              "Test": "TestAutostartWindowsExplicitEnablePreservesQuitAndAppliedProjectionFailure/projection-failed",
+              "Elapsed": 0.07
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/cli",
+              "Test": "TestAutostartWindowsExplicitEnablePreservesQuitAndAppliedProjectionFailure",
+              "Elapsed": 0.07
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/cli",
+              "Test": "TestStrictModeWindowsExistingTaskRefusalPreservesRecovery/baseline_matches",
+              "Elapsed": 0.08
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/cli",
+              "Test": "TestStrictModeWindowsExistingTaskRefusalPreservesRecovery/definition_changed",
+              "Elapsed": 0.04
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/cli",
+              "Test": "TestStrictModeWindowsExistingTaskRefusalPreservesRecovery/recovery",
+              "Elapsed": 0.03
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/cli",
+              "Test": "TestStrictModeWindowsExistingTaskRefusalPreservesRecovery",
+              "Elapsed": 0.15
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/cli",
+              "Elapsed": 0.585
+            }
+          ]
+        },
+        {
+          "name": "boundary-tagged",
+          "receipt_exit_code": 0,
+          "command": [
+            "go",
+            "test",
+            "-tags=test_state_path_env",
+            "-json",
+            "-count=1",
+            "-timeout",
+            "5m",
+            "-run",
+            "^(TestRetainAutostartTaskReplacementRefusal|TestStrictModeWindowsExplicitAutorunOffSurvivesMutationAndRecovery|TestAutostartWindowsExplicitEnablePreservesQuitAndAppliedProjectionFailure|TestStrictModeWindowsExistingTaskRefusalPreservesRecovery)$",
+            "./internal/api",
+            "./internal/cli"
+          ],
+          "command_representation": "Host artifact paths replaced with explicit placeholders; flags and test filters retained.",
+          "status": "PASS",
+          "stdout_sha256": "05e24e913105beaf3a232f7b6fa4b7ff28597a0135819803616587067a7fd4c9",
+          "terminal_counts": {
+            "roots": {
+              "pass": 4,
+              "fail": 0,
+              "skip": 0
+            },
+            "subtests": {
+              "pass": 7,
+              "fail": 0,
+              "skip": 0
+            },
+            "packages": {
+              "pass": 2,
+              "fail": 0,
+              "skip": 0
+            }
+          },
+          "terminal_events": [
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestRetainAutostartTaskReplacementRefusal",
+              "Elapsed": 3.21
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Elapsed": 3.555
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/cli",
+              "Test": "TestStrictModeWindowsExplicitAutorunOffSurvivesMutationAndRecovery/mutation",
+              "Elapsed": 21.76
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/cli",
+              "Test": "TestStrictModeWindowsExplicitAutorunOffSurvivesMutationAndRecovery/recovery",
+              "Elapsed": 22.92
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/cli",
+              "Test": "TestStrictModeWindowsExplicitAutorunOffSurvivesMutationAndRecovery",
+              "Elapsed": 44.68
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/cli",
+              "Test": "TestAutostartWindowsExplicitEnablePreservesQuitAndAppliedProjectionFailure/projected",
+              "Elapsed": 1.21
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/cli",
+              "Test": "TestAutostartWindowsExplicitEnablePreservesQuitAndAppliedProjectionFailure/projection-failed",
+              "Elapsed": 0.05
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/cli",
+              "Test": "TestAutostartWindowsExplicitEnablePreservesQuitAndAppliedProjectionFailure",
+              "Elapsed": 1.26
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/cli",
+              "Test": "TestStrictModeWindowsExistingTaskRefusalPreservesRecovery/baseline_matches",
+              "Elapsed": 0.94
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/cli",
+              "Test": "TestStrictModeWindowsExistingTaskRefusalPreservesRecovery/definition_changed",
+              "Elapsed": 0.75
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/cli",
+              "Test": "TestStrictModeWindowsExistingTaskRefusalPreservesRecovery/recovery",
+              "Elapsed": 0.04
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/cli",
+              "Test": "TestStrictModeWindowsExistingTaskRefusalPreservesRecovery",
+              "Elapsed": 1.73
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/cli",
+              "Elapsed": 48.098
+            }
+          ]
+        }
+      ],
+      "profile_generation": {
+        "command": "go tool trace -pprof=syscall <retained-trace>",
+        "exit_code": 0,
+        "captures_measured": true,
+        "command_success": false,
+        "stdout_sha256_recorded_in_receipt": "5800b53ae5fb929e679cf8dfee3edf357936011ea4aebb2a2d5feaadc12ad4bf",
+        "raw_stdout_locally_received": false,
+        "post_command_error": "UnicodeDecodeError: 'utf-8' codec can't decode byte 0x8b in position 1: invalid start byte",
+        "failure_stage": "UTF-8 receiving after command exit and capture measurement",
+        "format_reported_by_controller": "binary gzip pprof",
+        "pprof_readback": "PASS_RECEIVED"
+      }
+    },
+    "finalize": {
+      "status": "PASS",
+      "commands_received": 4,
+      "command_receiving": [
+        {
+          "name": "head",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "quiescence_state": "complete",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "reader_count": 2,
+          "all_original_readers_joined": true,
+          "native_work_deadline_exceeded": false,
+          "native_cleanup_deadline_exceeded": false,
+          "captures_measured": true,
+          "command_success": true
+        },
+        {
+          "name": "trace-syscall-top",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "quiescence_state": "complete",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "reader_count": 2,
+          "all_original_readers_joined": true,
+          "native_work_deadline_exceeded": false,
+          "native_cleanup_deadline_exceeded": false,
+          "captures_measured": true,
+          "command_success": true
+        },
+        {
+          "name": "source-diff-check",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "quiescence_state": "complete",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "reader_count": 2,
+          "all_original_readers_joined": true,
+          "native_work_deadline_exceeded": false,
+          "native_cleanup_deadline_exceeded": false,
+          "captures_measured": true,
+          "command_success": true
+        },
+        {
+          "name": "source-status",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "quiescence_state": "complete",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "reader_count": 2,
+          "all_original_readers_joined": true,
+          "native_work_deadline_exceeded": false,
+          "native_cleanup_deadline_exceeded": false,
+          "captures_measured": true,
+          "command_success": true
+        }
+      ],
+      "reader_count": 8,
+      "all_commands_closed": true,
+      "all_original_readers_joined": true,
+      "outer_controller": {
+        "exit_code": 0,
+        "original_controller_reaped": true,
+        "capture_handles_closed": true,
+        "elapsed_seconds": 7.6356161999865435
+      },
+      "tests_run": 0,
+      "checks": {
+        "retained_profile_readback": {
+          "status": "PASS",
+          "command": [
+            "go",
+            "tool",
+            "pprof",
+            "-top",
+            "-unit=ms",
+            "<retained-profile>"
+          ],
+          "input_is_remainder_profile_capture": true,
+          "stdout_sha256": "04e690cc00bd1fa04f4ba6892f3fb80d31ce39c67c16b9d30806d247e46357e8"
+        },
+        "source_diff_check": {
+          "status": "PASS",
+          "command": [
+            "git",
+            "diff",
+            "--check"
+          ],
+          "exit_code": 0,
+          "stdout_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "source_status": {
+          "status": "PASS",
+          "command": [
+            "git",
+            "status",
+            "--porcelain=v1"
+          ],
+          "reviewed_paths_count": 9,
+          "matches_exact_reviewed_paths": true,
+          "stdout_sha256": "faa63af0371c1acfeeb709c1b3730130a9de5ab7a084b3488e5527ed0180f85c"
+        },
+        "source_inputs": {
+          "status": "PASS",
+          "all_steps_match_tested_nine_hashes": true
+        }
+      }
+    },
+    "api_functional_remainder": {
+      "status": "PASS",
+      "commands_received": 3,
+      "command_receiving": [
+        {
+          "name": "head",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "quiescence_state": "complete",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "reader_count": 2,
+          "all_original_readers_joined": true,
+          "native_work_deadline_exceeded": false,
+          "native_cleanup_deadline_exceeded": false,
+          "captures_measured": true,
+          "command_success": true
+        },
+        {
+          "name": "api-functional-default",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "quiescence_state": "complete",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "reader_count": 2,
+          "all_original_readers_joined": true,
+          "native_work_deadline_exceeded": false,
+          "native_cleanup_deadline_exceeded": false,
+          "captures_measured": true,
+          "command_success": true
+        },
+        {
+          "name": "api-functional-tagged",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "quiescence_state": "complete",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "reader_count": 2,
+          "all_original_readers_joined": true,
+          "native_work_deadline_exceeded": false,
+          "native_cleanup_deadline_exceeded": false,
+          "captures_measured": true,
+          "command_success": true
+        }
+      ],
+      "reader_count": 6,
+      "all_commands_closed": true,
+      "all_original_readers_joined": true,
+      "outer_controller": {
+        "exit_code": 0,
+        "original_controller_reaped": true,
+        "capture_handles_closed": true,
+        "elapsed_seconds": 20.312742200039793
+      },
+      "results": [
+        {
+          "name": "api-functional-default",
+          "receipt_exit_code": 0,
+          "command": [
+            "go",
+            "test",
+            "-json",
+            "-count=1",
+            "-timeout",
+            "5m",
+            "-run",
+            "^(TestInstallPlanCore_(GlobalFullReinstall_RemovesSupervisorDaemon|GlobalDryRunPrintsSupervisorMutationPlan|RemovedTargetForceStopAfterNudge|GlobalInstall_HeldSupervisorLockAfterIPCFailureSkipsRemovedTargetKill)|TestInstallParsedManifest_RemovedWorkspaceTargetForceStopAfterNudge|TestRemoveServerFromSupervisorIntentBestEffort_KillsRemovedDaemonsAfterNudge|TestStopForceSupervisor(PIDPathUsesTaskkillTreePrimitive|IPCUnavailableLiveOwnerReturnsRetryableErrorWithoutKill|IPCUnavailableNoOwnerKeepsDescriptorKillFallback)|TestInstallPlanCore_(WindowsFullReinstallRetainsLegacyGeneration|GlobalFreshInstall_NoSupervisor_AutostartDispatch|GlobalInstallRetainsObservedLegacyTasks))$",
+            "./internal/api"
+          ],
+          "status": "PASS",
+          "stdout_sha256": "c67e87b94eb2216d01480334279219822338680449618b279e2fe875fd28378e",
+          "terminal_counts": {
+            "roots": {
+              "pass": 12,
+              "fail": 0,
+              "skip": 0
+            },
+            "subtests": {
+              "pass": 8,
+              "fail": 0,
+              "skip": 0
+            },
+            "packages": {
+              "pass": 1,
+              "fail": 0,
+              "skip": 0
+            }
+          },
+          "terminal_events": [
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestRemoveServerFromSupervisorIntentBestEffort_KillsRemovedDaemonsAfterNudge",
+              "Elapsed": 0.01
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallParsedManifest_RemovedWorkspaceTargetForceStopAfterNudge",
+              "Elapsed": 0.27
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_RemovedTargetForceStopAfterNudge/reconcile_succeeded",
+              "Elapsed": 0.02
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_RemovedTargetForceStopAfterNudge/reconcile_failed",
+              "Elapsed": 0.02
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_RemovedTargetForceStopAfterNudge",
+              "Elapsed": 0.03
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_GlobalInstall_HeldSupervisorLockAfterIPCFailureSkipsRemovedTargetKill",
+              "Elapsed": 0.01
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_GlobalDryRunPrintsSupervisorMutationPlan",
+              "Elapsed": 0.01
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_GlobalFullReinstall_RemovesSupervisorDaemon",
+              "Elapsed": 0.03
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_WindowsFullReinstallRetainsLegacyGeneration/listed_with_port_fallback",
+              "Elapsed": 0.03
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_WindowsFullReinstallRetainsLegacyGeneration/listed_with_captured_PID",
+              "Elapsed": 0.03
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_WindowsFullReinstallRetainsLegacyGeneration/unlisted_with_port_fallback",
+              "Elapsed": 0.03
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_WindowsFullReinstallRetainsLegacyGeneration",
+              "Elapsed": 0.08
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_AutostartDispatch/enabled",
+              "Elapsed": 0.02
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_AutostartDispatch/refused",
+              "Elapsed": 0.03
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_AutostartDispatch/saved_off_projection_failed",
+              "Elapsed": 0.16
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_AutostartDispatch",
+              "Elapsed": 0.21
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_GlobalInstallRetainsObservedLegacyTasks",
+              "Elapsed": 0.04
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestStopForceSupervisorPIDPathUsesTaskkillTreePrimitive",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestStopForceSupervisorIPCUnavailableLiveOwnerReturnsRetryableErrorWithoutKill",
+              "Elapsed": 0.01
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestStopForceSupervisorIPCUnavailableNoOwnerKeepsDescriptorKillFallback",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Elapsed": 1.276
+            }
+          ]
+        },
+        {
+          "name": "api-functional-tagged",
+          "receipt_exit_code": 0,
+          "command": [
+            "go",
+            "test",
+            "-tags=test_state_path_env",
+            "-json",
+            "-count=1",
+            "-timeout",
+            "5m",
+            "-run",
+            "^(TestInstallPlanCore_(GlobalFullReinstall_RemovesSupervisorDaemon|GlobalDryRunPrintsSupervisorMutationPlan|RemovedTargetForceStopAfterNudge|GlobalInstall_HeldSupervisorLockAfterIPCFailureSkipsRemovedTargetKill)|TestInstallParsedManifest_RemovedWorkspaceTargetForceStopAfterNudge|TestRemoveServerFromSupervisorIntentBestEffort_KillsRemovedDaemonsAfterNudge|TestStopForceSupervisor(PIDPathUsesTaskkillTreePrimitive|IPCUnavailableLiveOwnerReturnsRetryableErrorWithoutKill|IPCUnavailableNoOwnerKeepsDescriptorKillFallback)|TestInstallPlanCore_(WindowsFullReinstallRetainsLegacyGeneration|GlobalFreshInstall_NoSupervisor_AutostartDispatch|GlobalInstallRetainsObservedLegacyTasks))$",
+            "./internal/api"
+          ],
+          "status": "PASS",
+          "stdout_sha256": "4de6e8efc5035ad3fc9aa51d9d6cb7e96fee8d81decda9a8c3ab7996f5e9baaa",
+          "terminal_counts": {
+            "roots": {
+              "pass": 12,
+              "fail": 0,
+              "skip": 0
+            },
+            "subtests": {
+              "pass": 8,
+              "fail": 0,
+              "skip": 0
+            },
+            "packages": {
+              "pass": 1,
+              "fail": 0,
+              "skip": 0
+            }
+          },
+          "terminal_events": [
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestRemoveServerFromSupervisorIntentBestEffort_KillsRemovedDaemonsAfterNudge",
+              "Elapsed": 0.53
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallParsedManifest_RemovedWorkspaceTargetForceStopAfterNudge",
+              "Elapsed": 0.02
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_RemovedTargetForceStopAfterNudge/reconcile_succeeded",
+              "Elapsed": 0.29
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_RemovedTargetForceStopAfterNudge/reconcile_failed",
+              "Elapsed": 0.02
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_RemovedTargetForceStopAfterNudge",
+              "Elapsed": 0.31
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_GlobalInstall_HeldSupervisorLockAfterIPCFailureSkipsRemovedTargetKill",
+              "Elapsed": 0.02
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_GlobalDryRunPrintsSupervisorMutationPlan",
+              "Elapsed": 0.01
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_GlobalFullReinstall_RemovesSupervisorDaemon",
+              "Elapsed": 0.32
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_WindowsFullReinstallRetainsLegacyGeneration/listed_with_port_fallback",
+              "Elapsed": 0.03
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_WindowsFullReinstallRetainsLegacyGeneration/listed_with_captured_PID",
+              "Elapsed": 0.03
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_WindowsFullReinstallRetainsLegacyGeneration/unlisted_with_port_fallback",
+              "Elapsed": 0.03
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_WindowsFullReinstallRetainsLegacyGeneration",
+              "Elapsed": 0.09
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_AutostartDispatch/enabled",
+              "Elapsed": 0.02
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_AutostartDispatch/refused",
+              "Elapsed": 0.03
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_AutostartDispatch/saved_off_projection_failed",
+              "Elapsed": 0.03
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_AutostartDispatch",
+              "Elapsed": 0.08
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestInstallPlanCore_GlobalInstallRetainsObservedLegacyTasks",
+              "Elapsed": 0.03
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestStopForceSupervisorPIDPathUsesTaskkillTreePrimitive",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestStopForceSupervisorIPCUnavailableLiveOwnerReturnsRetryableErrorWithoutKill",
+              "Elapsed": 0
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Test": "TestStopForceSupervisorIPCUnavailableNoOwnerKeepsDescriptorKillFallback",
+              "Elapsed": 0.4
+            },
+            {
+              "Action": "pass",
+              "Package": "mcp-local-hub/internal/api",
+              "Elapsed": 2.17
+            }
+          ]
+        }
+      ],
+      "source_inputs": {
+        "config": "qualification-run/api-functional-remainder-v1.json",
+        "config_sha256": "6ec9d98615cf755cb2ea5428defc01cfdf042c134e436995ae921fab9d1a48ff",
+        "expected_source_record": "qualification-run/api-functional-expected-source.json",
+        "expected_source_record_sha256": "51e4b55e39c5ddd2f2d81dc130c4a8a64a413dba883dd577d9dd1caaa46b4b7c",
+        "expected_head": "b14cdeba95b2a69815d1677ee3f0dc236e8f1c79",
+        "hash_timing": "Recorded before each of the default and tagged test commands.",
+        "pinned_paths_count": 26,
+        "files_sha256": {
+          "internal/api/install_legacy_scheduler_test.go": "77b058511a996340f4eb7932fd57e46bc793c0da5070f8fbd148805f0cb9a16e",
+          "internal/api/install_parsed_manifest.go": "f0803b04a28b2a60fac10acdbf5d74992734e5cb3590d4c6f9cc9d5ab5ce6e25",
+          "internal/api/install_parsed_manifest_lane_b_test.go": "ed320101eff30a55f324c86c544742a97fdf70771a1bf45c0e8788ed821931ab",
+          "internal/api/install_parsed_manifest_test.go": "31408b6d142551b5234b63bf4e0fb14a9e951307b058071400e3aae8a1c42513",
+          "internal/api/liveness_task.go": "f17872de8e8390c650f59c364ea43ad45653fc9a2bde0054a58b7589a28c36fe",
+          "internal/api/liveness_task_test.go": "748280d678dfd1d3f092e10bad91bec97ecf55d2f7c790d0e9a31bccd5d4d963",
+          "internal/api/phase_f_lifecycle_test.go": "1871ce2448237b2b0869cef4f88edfc5b719235e7f7d6aca23c7b84aa99d2774",
+          "internal/api/r36_lane_a2_fixes_test.go": "b44da4dfddcaee740270e00588d38105a12c546b95d8d6769b4a6b66ad1c00c6",
+          "internal/api/scheduler_mgmt.go": "858400e70dbc5c609aeebf99c5cd3d201e9088ce0309dee65151553185e67bcc",
+          "internal/api/scheduler_replacement.go": "257f6840bc7bb6279ea9753dfaae494bc486f55e142578820eb6e7d8497eb731",
+          "internal/api/scheduler_replacement_test.go": "2405ff31fe809cb6d49afbe63e9fc28eca497c3e8506f2f01965293eb6944880",
+          "internal/api/supervisor_lock_test.go": "e230f1a0716b72507af573bf3b916ffabc3c51cd5ff385a7664aa654b14ec90e",
+          "internal/autostart/autostart.go": "4cbcda2e6fa67fa64e1a4f49f59706662b036c7607b8d9b6269d0480c8657649",
+          "internal/autostart/windows.go": "1332a7bceee2259f0db8c501f854431f5d7f9d8874076d13e15b3e6405ed9e3e",
+          "internal/autostart/windows_test.go": "ded4e1af9ac6b8fd11e36b0748b57e7048460144403422d8b1b5c2fd87093d18",
+          "internal/cli/autostart.go": "0bfb9347472de56e671b69d9df5fe03aba7d49ce7beaae092326958450d30cf0",
+          "internal/cli/scheduler_cmd.go": "7e99119fef78bfba4d409f4602448a2be64159a96aaee346af507f14038d7c68",
+          "internal/cli/setup.go": "0b615d40cd1677abaf3ad87fbb13aecdeea2a9cf8f31c36b9e7b75b9808099a4",
+          "internal/cli/setup_watchdog_test.go": "0663f6a8773e336c1f2c5af8508439d30b01101deefca2468050284fbc45e8a4",
+          "internal/cli/strict_mode.go": "67045dd8f6bc7abba9dc94c98aa5287354de44777a560f33a372fd481c683557",
+          "internal/cli/strict_mode_test.go": "9784b49574f37465f132ec0aac5051a1cd57d21701ddf12aabaa63be4ff6c7ad",
+          "internal/scheduler/scheduler.go": "bb826adf8a627f90eb6fedd7fbef2854d97ac2320bfffff295641554934e075d",
+          "internal/scheduler/task_xml_match.go": "1ae2bce75f354fb75c3c04021a31e8853da65507d83b6d42bb0496b4724a851d",
+          "internal/scheduler/task_xml_match_test.go": "30464d1dc9d53792a8f166a1acd26750ef7eb55e1acd61bba4d6df31933ce12d",
+          "internal/scheduler/task_xml_match_windows.go": "03e0a1329036795ee64d6bb179c85c28975d12e91ebdcbfb2b38ddddb01886b4",
+          "internal/scheduler/task_xml_match_windows_test.go": "7be3d01fecef08c2e196256c21a1c42b000722974449c1e5efd5c71824a06fac"
+        },
+        "all_steps_match_expected_pins": true,
+        "current_checkout_matches_all_26_hashes": true,
+        "includes_all_nine_autostart_source_hashes": true
+      },
+      "scope": "Current late phase_f assertions and parsed-manifest diagnostic, plus the previously unrun fixed-workspace adjacent install and supervisor-stop tests.",
+      "code_changes_for_this_remainder": false,
+      "real_system_lifecycle": "NOT_RUN",
+      "historical_campaign": {
+        "name": "api-final-v2",
+        "reported_state": "FAIL / UNKNOWN",
+        "reclassified": false,
+        "provenance": "Parent campaign report; no historical failure was reclassified or recounted by this remainder."
+      }
+    }
+  },
+  "remaining": {
+    "status": "FULL_QUALIFICATION_AND_EXTERNAL_REVIEW_PENDING",
+    "functional_checks": "RECEIVED",
+    "final_metadata": "RECEIVED",
+    "tests_to_repeat": [],
+    "external_review": "PENDING"
+  },
+  "limits": {
+    "real_task_scheduler_create": "NOT_RUN",
+    "native_registration_export_roundtrip": "NOT_RUN",
+    "real_logon_smoke": "NOT_RUN",
+    "full_repository_suite": "NOT_RUN",
+    "external_review": "PENDING",
+    "meaning": "Native Windows execution of scoped tests using scheduler doubles is not a live Task Scheduler registration or logon qualification.",
+    "xml_comparison": "Idle Duration/WaitTimeout normalization is limited to the existing writer with RunOnlyIfIdle=false; unknown XML fields and attributes remain in comparison.",
+    "real_system_lifecycle": "NOT_RUN"
+  },
+  "functional_checks_status": "PASS_RECEIVED",
+  "remainder_campaign_status": "FAIL",
+  "boundary_coverage": {
+    "default": "RECEIVED_ACROSS_V1_AND_REMAINDER",
+    "tagged": "PASS_IN_REMAINDER",
+    "default_note": "The first default CLI package failed at its Go test deadline. Received passing roots/subtests from v1 are combined with the selected previously-unreceived tail; the failed first package/campaign is not relabelled.",
+    "traced_tail_package_elapsed_seconds": 0.585,
+    "prior_slow_behavior_reproduced": false,
+    "latency_cause": "UNKNOWN"
+  },
+  "publication": {
+    "code_commit": "c0b0cc224b12260aad1268c50305b7c8cc265b5e",
+    "documentation_commit_parent": "c0b0cc224b12260aad1268c50305b7c8cc265b5e",
+    "receiving_record": "Current PR #660 description; documentation head and completed readback are recorded after branch publication."
+  },
+  "finalization_controller_reported": {
+    "status": "PASS",
+    "exit_code": 0,
+    "elapsed_seconds": 7.6356161999865435,
+    "native_commands": 4,
+    "command_names": [
+      "head",
+      "trace-syscall-top",
+      "source-diff-check",
+      "source-status"
+    ],
+    "raw_receiving": "RECEIVED",
+    "tests_repeated": false
+  },
+  "finalization_status": "PASS_RECEIVED",
+  "profile_interpretation": {
+    "status": "RECEIVED",
+    "source_capture": "finalize-trace-syscall-top.stdout.txt",
+    "scope": "Successful traced previously-unreceived default CLI tail; the earlier 71.39-second saved-OFF root was not profiled.",
+    "measurement": "Cumulative syscall delay reported by pprof; not test wall-clock duration.",
+    "unit": "ms",
+    "total_syscall_delay_ms": 217.55,
+    "function": "golang.org/x/sys/windows.FlushFileBuffers",
+    "function_flat_delay_ms": 0,
+    "function_cumulative_delay_ms": 154.48,
+    "function_cumulative_percent": 71.01,
+    "prior_slow_behavior_reproduced": false,
+    "prior_latency_cause": "UNKNOWN",
+    "causal_claim": "The profile does not establish the cause of the earlier slow test run."
+  },
+  "receiving_totals": {
+    "native_commands": 19,
+    "original_readers": 38,
+    "all_native_commands_closed": true,
+    "all_original_readers_joined": true,
+    "outer_controller_exit_codes": [
+      1,
+      1,
+      0,
+      0
+    ],
+    "all_outer_controllers_reaped": true,
+    "all_outer_capture_handles_closed": true
+  },
+  "api_functional_remainder_status": "PASS_RECEIVED"
+}

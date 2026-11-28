@@ -20,6 +20,10 @@ import (
 const flockImportPath = "github.com/gofrs/flock"
 
 var reviewedRawFlockOwners = map[string]int{
+	// The Windows occupied-owner probe opens without creating, releases any transient lock, and grants no authority.
+	"internal/api/supervisor_lock.go:func:ReadOccupiedSupervisorLockOwner/func-lit#1": 1,
+	// Windows quiescence retains the original observation on an entered cancellation and joins its same-handle release.
+	"internal/api/supervisor_lock.go:func:AcquireSupervisorLockQuietObserved":                        1,
 	"internal/api/adopted_entries.go:func:withAdoptedEntriesLock":                                    1,
 	"internal/api/daemon_env_overlay/write.go:func:WriteOverlay":                                     1,
 	"internal/api/daemon_intent.go:func:readDaemonIntentPathWithTimeout":                             1,
@@ -28,7 +32,7 @@ var reviewedRawFlockOwners = map[string]int{
 	"internal/api/daemon_intent.go:method:*API.WriteDaemonIntent":                                    1,
 	"internal/api/default_workspace_marker.go:func:clearDefaultWorkspaceIfMatchesWithMarkerLockHook": 1,
 	"internal/api/gui_event_log.go:method:*API.AppendGUIEventLog":                                    1,
-	"internal/api/hub_mcp_log.go:func:appendHubMcpLogLine":                                           1,
+	"internal/api/hub_mcp_log.go:func:hubMcpLogProductionEffects/func-lit#2":                         1,
 	"internal/api/hub_mcp_state.go:func:acquireHubMcpLock":                                           1,
 	"internal/api/hub_mcp_state.go:func:acquireHubMcpLockContext":                                    1,
 	"internal/api/intent_audit.go:method:*API.AppendIntentAudit":                                     1,
@@ -40,6 +44,7 @@ var reviewedRawFlockOwners = map[string]int{
 	"internal/api/managed_entries.go:func:withManagedEntriesLockAt":                                  1,
 	"internal/api/mcp_front_routing_target.go:func:withMCPFrontRoutingFileLease":                     1,
 	"internal/api/state_file_helper.go:func:WriteStateFileBytesAtomic":                               1,
+	"internal/api/state_file_observed_lease.go:func:acquireStateFileObservedLease":                   1,
 	"internal/api/supervisor_events.go:func:OpenSupervisorEventLog":                                  1,
 	"internal/api/supervisor_lock.go:func:AcquireSupervisorLock":                                     1,
 	"internal/api/supervisor_lock.go:func:AcquireSupervisorLockQuiet":                                1,
@@ -49,7 +54,9 @@ var reviewedRawFlockOwners = map[string]int{
 }
 
 var reviewedAppliedReleaseClassifierOwners = map[string]int{
-	"internal/api/lock_release_ledger.go:func:releaseAndJoinApplied": 1,
+	"internal/api/lock_release_ledger.go:func:releaseAndJoinApplied":        1,
+	"internal/api/weekly_refresh.go:func:runWeeklyRefreshTaskTransaction":   1,
+	"internal/api/weekly_refresh.go:method:*API.ApplyWeeklyRefreshSchedule": 1,
 }
 
 func TestSupervisorIntentLockOwnershipProductionInventory(t *testing.T) {

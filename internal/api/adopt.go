@@ -1079,10 +1079,24 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 			// reverses the partial commit; do NOT abort, delete the manifest, or drop the
 			// keys. Do NOT promote to `adopted` — `adopting`+manifest-present is exactly
 			// the Signal-2b committed-keep state.
+			schedulerRecoveryTasks := installSchedulerRecoveryTasks(err)
+			if len(schedulerRecoveryTasks) > 0 {
+				// A failed current-step recovery or later scheduler compensation
+				// leaves effects unconfirmed even when client compensation succeeded.
+				commitState = "committed_unverified"
+				emitAdoptSchedulerRecoveryPreserved(plan.ManifestName, schedulerRecoveryTasks)
+			}
 			var rbErr *InstallClientRollbackIncompleteError
 			if errors.As(err, &rbErr) {
 				providerManagedInstalled = plan.providerSource != nil
 				emitAdoptProvenancePreserved(plan.ManifestName, rbErr.Clients) // NAMES/COUNTS only
+				if len(schedulerRecoveryTasks) > 0 {
+					return fmt.Errorf(
+						"adopt install failed and both client and scheduler recovery could not be confirmed (clients: %s; tasks: %s); "+
+							"the pre-adopt provenance snapshots, manifest %q, and routed vault keys were PRESERVED for recovery; "+
+							"reconcile both client configurations and scheduler tasks before removing those recovery records: %w",
+						strings.Join(sortedAdoptStrings(rbErr.Clients), ","), strings.Join(sortedAdoptStrings(schedulerRecoveryTasks), ","), plan.ManifestName, err)
+				}
 				return fmt.Errorf(
 					"adopt install failed and its client-config rollback could not be fully reversed "+
 						"(clients whose pre-adopt restoration could not be confirmed: %s); the pre-adopt provenance snapshot, "+
@@ -1090,6 +1104,14 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 						"restore those clients from the timestamped .bak-mcp-local-hub-* backup printed above, "+
 						"then remove manifest %q, or reverse it with de-adopt once available: %w",
 					strings.Join(sortedAdoptStrings(rbErr.Clients), ","), plan.ManifestName, plan.ManifestName, err)
+			}
+			if len(schedulerRecoveryTasks) > 0 {
+				providerManagedInstalled = plan.providerSource != nil
+				return fmt.Errorf(
+					"adopt install failed and scheduler recovery could not be confirmed (tasks: %s); "+
+						"the pre-adopt provenance snapshots, manifest %q, and routed vault keys were PRESERVED for recovery; "+
+						"reconcile the named scheduler tasks before removing those recovery records: %w",
+					strings.Join(sortedAdoptStrings(schedulerRecoveryTasks), ","), plan.ManifestName, err)
 			}
 			if plan.providerSource != nil {
 				// Do not let ordinary-error cleanup re-enable a direct provider

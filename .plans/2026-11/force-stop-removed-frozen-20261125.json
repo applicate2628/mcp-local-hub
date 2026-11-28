@@ -1,0 +1,186 @@
+{
+  "schema": "mcp-local-hub.wl04.removed-original.freeze.v1",
+  "base": "9043acae5a778b9b123b195d3c04cb213e5e568d",
+  "existing_pr": 659,
+  "source_manifest_sha256": "49040a6a0e8023d58f6fa879d22de41c4427ced62cfc9996d1e424c2f91622c5",
+  "frozen_at_utc": "2026-11-25T01:20:06.300790+00:00",
+  "source_files": [
+    {
+      "path": "internal/api/install.go",
+      "bytes": 213055,
+      "sha256": "d969d60244bf180fa3ddf92b65d1fe91be7c6aa7c6e64744054d9560edbfaa4f"
+    },
+    {
+      "path": "internal/api/install_parsed_manifest.go",
+      "bytes": 143775,
+      "sha256": "8e196a574cdc62cfc2d5e72160926914541d82953c77676bf1d388a4938b54f1"
+    },
+    {
+      "path": "internal/api/install_parsed_manifest_lane_b_test.go",
+      "bytes": 18049,
+      "sha256": "83756a0977d8ca848d00065904bb9ac799826c143a8d2fba4f53a96799a216a0"
+    },
+    {
+      "path": "internal/api/main_test.go",
+      "bytes": 16481,
+      "sha256": "2826cbbb479461e39be2d270cc6333fda37a4660d045bf090bf029cd7b04b7bc"
+    },
+    {
+      "path": "internal/api/supervisor_force_stop.go",
+      "bytes": 5963,
+      "sha256": "ce10496200b000fe5afa807e85eefa95f388689b544e7d85195f84f655b575c8"
+    },
+    {
+      "path": "internal/api/supervisor_ipc_force_stop_client.go",
+      "bytes": 11134,
+      "sha256": "83ac19abdc1ba87d5fef0af1c149f87cda154ba2fc0faba66c770ffd9facb4ec"
+    },
+    {
+      "path": "internal/api/supervisor_removed_cleanup.go",
+      "bytes": 4201,
+      "sha256": "6fe3f8b15897849ca4188e7e01696274d1816c647fd152a0dc37c543239c4c0f"
+    },
+    {
+      "path": "internal/api/supervisor_removed_cleanup_test.go",
+      "bytes": 9532,
+      "sha256": "c98a01c857a2866d24163be2579c684300886d70b7587b8d2859d586d224f861"
+    },
+    {
+      "path": "internal/api/supervisor_seal_guard_test.go",
+      "bytes": 8470,
+      "sha256": "2bc9aca73c1347cd5b206df022c8cce5a794f314becf2fc3c7afde731a842c74"
+    },
+    {
+      "path": "internal/cli/supervise.go",
+      "bytes": 210689,
+      "sha256": "1c029b5de2284c9d382966cdfc963d32529153835d77c3091bb45efbbacc2cb8"
+    },
+    {
+      "path": "internal/cli/supervise_force_stop.go",
+      "bytes": 16912,
+      "sha256": "d4569790a0c815d6c40d19b70a00afff16512a86ca8f14feb3bf651372864a95"
+    },
+    {
+      "path": "internal/cli/supervise_force_stop_pipe_windows_test.go",
+      "bytes": 9216,
+      "sha256": "3de5affb208d0df5a30972dc65fc4f366ff21b1053a3731d7d4c173cbd0b7e81"
+    },
+    {
+      "path": "internal/cli/supervise_force_stop_test.go",
+      "bytes": 8248,
+      "sha256": "407819412cc9d52c055f85bd1feee10afc76dc2d2772df9edb9f39f1972e1903"
+    },
+    {
+      "path": "internal/cli/supervise_force_stop_windows_test.go",
+      "bytes": 11322,
+      "sha256": "ef74f5cc936c9950a0b6fabf4c23ffa76844425e06a1246f005f17c4c7e795a2"
+    },
+    {
+      "path": "internal/cli/supervisor_controller.go",
+      "bytes": 245734,
+      "sha256": "4503ccab0a31655e8adfd5231a270e2e11f76e15bf057804b60104bb1642721d"
+    }
+  ],
+  "checks": {
+    "gofmt": {
+      "result": "PASS",
+      "tool": "gofmt from go1.27.4 linux/amd64",
+      "scope": "all 15 listed Go source files"
+    },
+    "diff_check": {
+      "result": "PASS",
+      "command": "git diff --check"
+    },
+    "windows_cross_compile": {
+      "result": "PASS",
+      "tool": "go1.27.4 linux/amd64",
+      "environment": {
+        "GOOS": "windows",
+        "GOARCH": "amd64",
+        "CGO_ENABLED": "0",
+        "GOTOOLCHAIN": "local",
+        "GOPROXY": "off",
+        "GOSUMDB": "off",
+        "GOMAXPROCS": "2",
+        "GOMODCACHE": "existing offline module cache",
+        "GOCACHE": "existing shared Go build cache"
+      },
+      "commands": [
+        "go test -mod=readonly -c -o .compile-20261125/api.windows.test ./internal/api",
+        "go test -mod=readonly -c -o .compile-20261125/cli.windows.test ./internal/cli"
+      ],
+      "exit_codes": [
+        0,
+        0
+      ],
+      "execution": "Cross-compilation only; Windows tests were not executed."
+    },
+    "native_functional_tests": {
+      "result": "NOT_RUN",
+      "owner": "Root; sequential Windows execution required"
+    },
+    "negative_controls": {
+      "result": "NOT_RUN",
+      "controls": [
+        {
+          "path": ".plans/2026-11/force-stop-removed-old-verb-negative-20261125.patch",
+          "sha256": "303849bce3b11f6a0f99d5bf5d5c11d01d79f36ad46d5fd4c25a1c3dec281862",
+          "command": "go test -count=1 -timeout 2m -run ^TestRemovedForceStopOlderServerRefusesPreparationBeforeEffect$ ./internal/api",
+          "expected_result": "FAIL",
+          "expected_failure": "Older-server model observes a destructive verb; preparation must fail before that effect.",
+          "execution": "NOT_RUN; apply separately to an isolated negative-control copy"
+        },
+        {
+          "path": ".plans/2026-11/force-stop-removed-reconcile-negative-20261125.patch",
+          "sha256": "62ec2b730d75328bb60fa04d169080782eb322227bc8a86e13a7237a7dcaf9ca",
+          "command": "go test -count=1 -timeout 2m -run ^TestForceStopRemovalReconcileJoinsOriginalFailure$ ./internal/cli",
+          "expected_result": "FAIL",
+          "expected_failure": "Retained-original reconcile path is bypassed; the original failure and no-PID-action assertions must fail.",
+          "execution": "NOT_RUN; apply separately to an isolated negative-control copy"
+        }
+      ]
+    }
+  },
+  "positive_commands": [
+    "go test -count=1 -timeout 3m -run 'Test(RemovedSupervisorCapture|RemovedForceStop|UninstallCapturesOriginal|RemoveServerFromSupervisorIntentBestEffort|InstallParsedManifest_(KillsDroppedWorkspace|PrunesStopsForDroppedWorkspace)|InstallPlanCore_RemovedTargetKill|InstallPlanCore_GlobalInstall_Held|TestMainSealsLiveFleetAndSlowSeams|NoUnsealedLiveSeam)' ./internal/api",
+    "go test -count=1 -timeout 3m -run 'Test(ForceStop|DaemonCreatorForce|ProductionForceStop|DaemonWaitExitCode)' ./internal/cli"
+  ],
+  "applied_skills": [
+    {
+      "name": "software-architect:architecture-review",
+      "application": "Original identity, staged intent removal, trust boundary and shared-owner contract; read for this task."
+    },
+    {
+      "name": "distributed-systems-skills-for-go:go-concurrency-lifecycle",
+      "application": "Connection owner, one terminal join, original waiter, bounded contexts; previously read and applied."
+    },
+    {
+      "name": "engineering-skills-for-go:go-security-hardening",
+      "application": "Original creator authority and native peer authentication; read with process-execution-boundary reference."
+    },
+    {
+      "name": "engineering-skills-for-go:go-testing-and-verification",
+      "application": "Real-pipe/Job evidence separated from models, causal barriers and negative controls; read with deterministic-concurrency reference."
+    },
+    {
+      "name": "engineering-suite-ponytail:ponytail",
+      "application": "Reuse creator records, terminal cell, FIFO, descriptor fingerprint, helpers and fixture; previously read and applied."
+    },
+    {
+      "name": "distributed-systems-skills-for-go:go-data-consistency",
+      "application": "Commit authoritative removed set under existing flock; IPC only after original release; previously read and applied."
+    },
+    {
+      "name": "distributed-systems-skills-for-go:go-service-resilience",
+      "application": "Ambiguous response consumes capture; no retries, peer reacquisition or repeated effects; previously read and applied."
+    }
+  ],
+  "limitations": [
+    "Native functional assertions and negative controls remain unexecuted by the implementation agent; compile PASS does not establish native correctness.",
+    "Real-pipe fixture uses server and client in one admitted test process plus an actual contained child; it is not installed-Product or different-SID adversary evidence.",
+    "Port enumeration and timing of reap confirmation are explicit fixture seams; native owner validation, creator, Job, terminal receipt and waiter are real.",
+    "Existing 60-second server idle timeout can expire a retained connection during a long install; cleanup then remains incomplete without redial.",
+    "Strict ARA-01 shared-to-private migration caller remains outside this delta and must validate capture before removal and require original Complete before publication.",
+    "No commit, push, new PR, merge, installed Hub/task mutation or native execution performed by this agent."
+  ]
+}
