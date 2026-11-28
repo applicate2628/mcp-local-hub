@@ -1,16 +1,16 @@
 schema_version: 1
 server_id: fetch
 upstream_repository: https://github.com/modelcontextprotocol/servers
-version: "2026.11.18"
-source_commit: c799c8552b0f27b7a33a7b9233773da144dddcf5
+version: "2026.11.27"
+source_commit: b502fd9fc711de7285977396db3b8a732d1c9f64
 readme_path: src/fetch/README.md
 runtime:
   command: uvx
   args:
     - --with
     - mcp==2.3.0
-    - mcp-server-fetch@2026.11.18
+    - mcp-server-fetch@2026.11.27
 artifacts:
-  fetch_wheel_sha256: 913152616a06562e1709f04cecabed07f168dd9a645d9b494ea10379a41314e4
+  fetch_wheel_sha256: 5e7aafb9077b5d3528a82d45292ef7d7453b65eb0995286ab5f2cb01582ba4ad
   mcp_version: "2.3.0"
   mcp_wheel_sha256: dd0c44c089d16453e8ae31a3877a0054d7a2314caaa81f5e0541b9b1734b2377

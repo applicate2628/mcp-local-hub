@@ -168,3 +168,31 @@ func TestSupervisorLivenessSweepSnapshotOwnerMismatchObserveOnly(t *testing.T) {
 		t.Fatalf("sweep posted %d events, want 0 (a foreign port owner is observe-only under P2a, not an unconditional restart): %+v", len(events), events)
 	}
 }
+
+func TestSupervisorLivenessSweepSkipsUnusedPortOwnerSnapshot(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		portless bool
+	}{
+		{name: "no-eligible-running-row"},
+		{name: "running-portless-row", portless: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			stateDir, tracker, meta := seedRunningDaemons(t, 1)
+			installProductionPortOwnerProbeForSweep(t)
+			calls := withFakePortOwnersSnapshot(t, func() (map[int]int, error) {
+				return nil, nil
+			})
+			intent := &api.SupervisorIntentFile{Version: 1}
+			if tt.portless {
+				for task := range meta {
+					intent.Daemons = append(intent.Daemons, api.SupervisorDaemon{TaskName: task})
+				}
+			}
+			sweepSupervisorLivenessOnce(stateDir, intent, tracker, api.NewEventLoop(4), nil, nil, nil, nil)
+			if *calls != 0 {
+				t.Fatalf("unused OS port-owner snapshot called %d times; want 0", *calls)
+			}
+		})
+	}
+}

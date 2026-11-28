@@ -238,3 +238,76 @@ func TestGUISupervisorControlOriginalExitBeforePublication(t *testing.T) {
 		t.Fatalf("received original exit was replaced: owner=%v err=%v settlements=%d", got, err, settlements)
 	}
 }
+
+func TestGUISupervisorControlCancellationPrecedesSuccessfulObservation(t *testing.T) {
+	for _, when := range []string{"before-success", "during-original-settlement", "during-original-settlement-error"} {
+		t.Run(when, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				owner := newSupervisorControlTestOwner()
+				originalProcess := owner.proc
+				incumbent := api.SupervisorLockOwner{PID: 125, StartedAt: "incumbent"}
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				entered := make(chan struct{})
+				reportSuccess := make(chan struct{})
+				settling := make(chan struct{})
+				completeOriginal := make(chan struct{})
+				done := make(chan supervisorControlTestResult, 1)
+				var observations, settlements atomic.Int32
+				cleanupFailure := errors.Join(errSupervisorLaunchSettlement, errors.New("original settlement failure"))
+				operations := supervisorCreatorOperations{
+					observeControl: func(_ context.Context, _ SupervisorControlExpectation, _ api.SupervisorLockOwner, _ api.SupervisorProcessIdentityV1) (api.SupervisorLockOwner, error) {
+						if observations.Add(1) == 1 {
+							close(entered)
+							<-reportSuccess
+						}
+						return incumbent, nil
+					},
+					settleUnbound: func(actual *supervisorOwner) error {
+						if settlements.Add(1) != 1 || actual != owner || actual.proc != originalProcess {
+							return errors.New("settlement did not address only the original creator")
+						}
+						close(settling)
+						<-completeOriginal
+						actual.receiveExitOutcome(nil)
+						if when == "during-original-settlement-error" {
+							return cleanupFailure
+						}
+						return nil
+					},
+				}
+				go func() {
+					got, err := owner.waitForControl(ctx, SupervisorControlExpectation{}, api.SupervisorProcessIdentityV1{}, time.Second, operations)
+					done <- supervisorControlTestResult{got, err}
+				}()
+				<-entered
+				if when == "before-success" {
+					cancel()
+				}
+				close(reportSuccess)
+				synctest.Wait()
+				select {
+				case <-settling:
+				default:
+					t.Error("cancellation did not settle the original")
+				}
+				select {
+				case <-done:
+					t.Fatal("returned before original completion")
+				default:
+				}
+				if when != "before-success" {
+					cancel()
+				}
+				close(completeOriginal)
+				result := <-done
+				if when == "during-original-settlement-error" && !errors.Is(result.err, cleanupFailure) {
+					t.Fatalf("actual settlement cause lost: %v", result.err)
+				}
+				if result.owner != nil || !errors.Is(result.err, context.Canceled) || settlements.Load() != 1 || observations.Load() != 1 || owner.spawned || owner.control.proof != nil || owner.proc != originalProcess {
+					t.Fatalf("cancellation lost original custody or rechecked/adopted the incumbent: result=%+v settlements=%d observations=%d", result, settlements.Load(), observations.Load())
+				}
+			})
+		})
+	}
+}

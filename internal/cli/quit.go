@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -83,14 +84,23 @@ func runGUIQuit(ctx context.Context, out io.Writer, stopDaemons bool) (err error
 	if err != nil {
 		return err
 	}
-	url := fmt.Sprintf("http://127.0.0.1:%d/api/gui/quit", record.Port)
+	address := fmt.Sprintf("127.0.0.1:%d", record.Port)
+	url := "http://" + address + "/api/gui/quit"
 	message, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(raw))
 	if err != nil {
 		return err
 	}
 	message.Header.Set("Content-Type", "application/json")
 	message.Header.Set("Origin", fmt.Sprintf("http://127.0.0.1:%d", record.Port))
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("GUI_QUIT_REDIRECT_REFUSED") }}
+	dialer := new(net.Dialer)
+	transport, closeConnection, err := newGUIQuitTransport(ctx, address, dialer.DialContext, func(dialCtx context.Context, conn net.Conn) error {
+		return gui.VerifyGUIQuitConnectedPeer(dialCtx, path, record, &identity, conn)
+	})
+	if err != nil {
+		return fmt.Errorf("GUI_QUIT_ACCEPTANCE_UNCONFIRMED: %w", err)
+	}
+	defer closeConnection()
+	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("GUI_QUIT_REDIRECT_REFUSED") }}
 	defer client.CloseIdleConnections()
 	response, err := client.Do(message)
 	if err != nil {

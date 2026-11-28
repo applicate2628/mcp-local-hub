@@ -314,7 +314,10 @@ What setup does:
      \mcp-local-hub-watchdog task from a pre-v0.6 host — the v0.4.x
      watchdog was deleted in v0.6 and is no longer installed.
      Refuses if the current process is elevated (plan §42) unless
-     --allow-elevated is passed; with --allow-elevated, a high-priority
+     --allow-elevated is passed; default Windows setup refuses before any
+     canonical, PATH, or client writes. The explicitly requested
+     --fix-ephemeral-range can still repair the range before that refusal.
+     With --allow-elevated, a high-priority
      audit entry is written first and audit-write failure is fail-
      closed at exit 11 (plan §61).
   7. Registers the Windows EventLog source 'mcp-local-hub' so the
@@ -416,6 +419,14 @@ See also: install, uninstall, autostart, supervise.`,
 			// canonicalized and the maintenance task installed.
 			if err := validateSetupServerArg(installServer); err != nil {
 				return err
+			}
+			// Refuse a default elevated Windows setup before canonical, PATH, or client writes.
+			if runtime.GOOS == "windows" && !allowElevated && setupElevation(cmd.OutOrStdout()) {
+				// Keep the explicit host-range repair available without unrelated setup writes.
+				if fixEphemeralRange {
+					runSetupEphemeralRangeStep(cmd, true)
+				}
+				return errSetupRequiresUnelevated
 			}
 			if err := runSetupBootstrapWithWindowsCanonicalEntryInput(cmd.Context(), cmd.OutOrStdout(), input); err != nil {
 				return err
@@ -676,16 +687,9 @@ func runSetupWatchdog(out io.Writer, allowElevated bool) error {
 	}
 
 	// 2. Elevation detection (§42).
-	elevated, elevErr := setupIsElevated()
-	if elevErr != nil {
-		// Per plan §42 production fail-closed: treat resolution
-		// failure as elevated → require --allow-elevated.
-		fmt.Fprintf(out, "⚠ elevation detector failed: %v (treating as elevated)\n", elevErr)
-		elevated = true
-	}
+	elevated := setupElevation(out)
 	if elevated && !allowElevated {
-		return fmt.Errorf(
-			"mcphub setup must run un-elevated (plan §42); use --allow-elevated to override (audit fail-closed per §61)")
+		return errSetupRequiresUnelevated
 	}
 	if elevated && allowElevated {
 		// §61: high-priority audit entry BEFORE any mutation. The elevation
@@ -938,6 +942,17 @@ func shouldRemoveGlobalWatchdog(out io.Writer, serverBeingUninstalled string) bo
 // ---------------------------------------------------------------------------
 // Seam routers.
 // ---------------------------------------------------------------------------
+
+var errSetupRequiresUnelevated = errors.New("mcphub setup must run un-elevated (plan §42); use --allow-elevated to override (audit fail-closed per §61)")
+
+func setupElevation(out io.Writer) bool {
+	elevated, err := setupIsElevated()
+	if err != nil {
+		fmt.Fprintf(out, "warning: elevation detector failed: %v (treating as elevated)\n", err)
+		return true
+	}
+	return elevated
+}
 
 // setupIsElevated routes through the setupIsElevatedFn seam if set,
 // otherwise the production OS-bound isElevatedReal helper.

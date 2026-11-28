@@ -309,8 +309,9 @@ func sweepSupervisorLivenessOnce(
 	// the per-daemon PortLive TCP fallback is preserved unchanged.
 	livenessProbe := supervisorLivenessProbeFns
 	if supervisorLivenessUsesProductionPortOwnerProbe(livenessProbe.PortOwnerPID) {
-		snapshot, snapErr := loopbackPortOwnersSnapshotFn()
+		readSnapshot := sync.OnceValues(loopbackPortOwnersSnapshotFn)
 		livenessProbe.PortOwnerPID = func(port int) (int, bool, error) {
+			snapshot, snapErr := readSnapshot()
 			if snapErr != nil {
 				return 0, false, snapErr
 			}

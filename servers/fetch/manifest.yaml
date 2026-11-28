@@ -13,7 +13,7 @@ command: uvx
 base_args:
   - --with
   - mcp==2.3.0
-  - mcp-server-fetch@2026.11.18
+  - mcp-server-fetch@2026.11.27
 transport: stdio-bridge
 daemons:
   - name: default

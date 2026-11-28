@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -203,10 +204,11 @@ func ensureSupervisorRunningWithOperations(ctx context.Context, mcphubBin string
 	if operations.settleUnbound == nil {
 		operations.settleUnbound = (*supervisorOwner).settleUnboundCreator
 	}
+	var timing *guiSupervisorControlTiming
 	if operations.observeControl == nil {
 		operations.observeControl = observeGUISupervisorControl
 		if os.Getenv("MCPHUB_GUI_CONTROL_TIMING") == "1" {
-			timing := new(guiSupervisorControlTiming)
+			timing = new(guiSupervisorControlTiming)
 			defer func() { timing.report(retErr == nil) }()
 			operations.observeControl = timing.observe
 		}
@@ -346,6 +348,7 @@ func ensureSupervisorRunningWithOperations(ctx context.Context, mcphubBin string
 	if captureErr != nil {
 		return nil, errors.Join(captureErr, operations.settleUnbound(owner))
 	}
+	timing.reportCreated(supervisorMonitorStderr, original)
 	return owner.waitForControl(ctx, expected, peer, waitFor, operations)
 }
 
@@ -354,6 +357,19 @@ func ensureSupervisorRunningWithOperations(ctx context.Context, mcphubBin string
 // sidecar alone is not evidence that the freshly created child lost the race.
 func observeGUISupervisorControl(ctx context.Context, expected SupervisorControlExpectation, original api.SupervisorLockOwner, peer api.SupervisorProcessIdentityV1) (api.SupervisorLockOwner, error) {
 	return (*guiSupervisorControlTiming)(nil).observe(ctx, expected, original, peer)
+}
+
+// reportCreated is diagnostic only. It neither admits a peer nor transfers
+// ownership of the original process to the reader of stderr.
+func (t *guiSupervisorControlTiming) reportCreated(w io.Writer, original api.SupervisorLockOwner) {
+	if t == nil || original.PID <= 0 || original.StartedAt == "" {
+		return
+	}
+	_ = json.NewEncoder(w).Encode(struct {
+		Event     string `json:"event"`
+		PID       int    `json:"pid"`
+		StartedAt string `json:"started_at"`
+	}{"gui_supervisor_created_before_readiness", original.PID, original.StartedAt})
 }
 
 // One summary per startup, on the synchronous observe path only. Control time
@@ -437,16 +453,29 @@ func (owner *supervisorOwner) waitForControl(ctx context.Context, expected Super
 	for {
 		current, bindErr := operations.observeControl(readyCtx, expected, original, peer)
 		owner.attempt.publish(func(s *supervisorCreationSnapshot) { s.Cause = errors.Join(s.Cause, bindErr) })
+		// A successful observation can arrive concurrently with GUI shutdown.
+		if cancelErr := ctx.Err(); cancelErr != nil {
+			return nil, errors.Join(cancelErr, bindErr, operations.settleUnbound(owner))
+		}
 		if bindErr == nil {
 			if current != original {
 				// Only an authenticated live competitor can make this child a
 				// singleton loser. Settle our retained creator, never winner.PID.
-				if settleErr := operations.settleUnbound(owner); settleErr != nil {
+				settleErr := operations.settleUnbound(owner)
+				// Do not consult or adopt the incumbent after cancellation.
+				// Retain the sole original settlement outcome alongside cancellation.
+				if cancelErr := ctx.Err(); cancelErr != nil {
+					return nil, errors.Join(cancelErr, settleErr)
+				}
+				if settleErr != nil {
 					return nil, settleErr
 				}
 				// Receiving the original Wait may take time. Do not adopt a
 				// generation which disappeared or changed during that receive.
 				confirmed, err := operations.observeControl(readyCtx, expected, original, peer)
+				if cancelErr := ctx.Err(); cancelErr != nil {
+					return nil, errors.Join(cancelErr, err)
+				}
 				if err != nil || confirmed != current {
 					return nil, errors.Join(errSupervisorControlGenerationChanged, err)
 				}
@@ -472,9 +501,6 @@ func (owner *supervisorOwner) waitForControl(ctx context.Context, expected Super
 			owner.control = SupervisorControlBinding{proof: proof}
 			owner.spawned = true
 			return owner, nil
-		}
-		if ctx.Err() != nil {
-			return nil, errors.Join(ctx.Err(), bindErr, operations.settleUnbound(owner))
 		}
 		select {
 		case <-owner.exitDone:
