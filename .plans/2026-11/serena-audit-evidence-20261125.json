@@ -1,0 +1,21 @@
+{
+  "date": "2026-11-25",
+  "base": "1a5a7dd04fe732df5c539860dde813c8c703586d",
+  "scope": "focused Windows regression; not full repository or installed Product",
+  "toolchain": "go1.27.4 windows/amd64",
+  "command": "go test -count=1 -timeout 5m ./internal/api -run Test(ReadSerenaUnifiedStopForTask|WakeIdleSerenaDaemon|WriteSerenaIdleStop|RegistrySnapshotObserver|RegistrySnapshotView)",
+  "exit_code": 0,
+  "package_seconds": 28.106,
+  "all_original_commands_settled": true,
+  "inputs": {
+    "internal/api/serena_idle_shutdown.go": "5f5c70049eb6131c2dcdc45f4a12afa81e9c3d68f5e1b105e630e3de955b6558",
+    "internal/api/serena_idle_shutdown_test.go": "a57cec724983993b4952432dc236abc60054f26823b3a473fdc0c12673109919",
+    "internal/api/testhooks.go": "d194aae066df6dfd9394ef7aecb3100f2f4d494a4a3412d94da152659d112ba7",
+    "internal/api/workspace_registry_snapshot.go": "190aced6b8ffdec922960bbe85d23458fcaf73650941e60be0522b0bd74101c0",
+    "internal/api/workspace_registry_snapshot_test.go": "09f548ca826f2df4455cd45c1157526783730342a80298ed4d4db57d655b7bc2"
+  },
+  "remaining": [
+    "full repository build/vet/default/tagged gates",
+    "combined-source qualification"
+  ]
+}

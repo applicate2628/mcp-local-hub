@@ -187,6 +187,11 @@ func (o *RegistrySnapshotObserver) ObserveView() (view RegistrySnapshotView, sta
 		if statErr != nil {
 			return o.statFailure(statErr)
 		}
+		// On Windows Stat can defer resolving the file ID until SameFile.
+		// Resolve it before the read, while the observed file is still current.
+		if !os.SameFile(before, before) {
+			return o.failure("registry_snapshot_read_failed", fmt.Errorf("cannot resolve registry file identity"))
+		}
 		read := ReadStateFileInodeAnchoredWithAuditSink
 		if o.readFnForTest != nil {
 			read = o.readFnForTest

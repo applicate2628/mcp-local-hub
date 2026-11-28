@@ -231,7 +231,7 @@ func SetDaemonStateRootForTest(root string) (restore func()) {
 	orig := daemonStateRootOverride
 	daemonStateRootOverride = root
 	// FIX-5: the serena stop-read cache is keyed by the supervisor-intent path
-	// (which changes with the state root) AND the file (mtime,size). Reset it on
+	// (which changes with the state root), identity and checked content. Reset it on
 	// every state-root switch so a test that reuses a previously-seen path (or a
 	// fast-mtime-tick filesystem) never reads a stale cached classification from
 	// a prior test. Cheap and test-only.
@@ -274,8 +274,10 @@ func resetSerenaStopReadCache() {
 	serenaStopReadCache.valid = false
 	serenaStopReadCache.stops = nil
 	serenaStopReadCache.path = ""
-	serenaStopReadCache.mtime = time.Time{}
-	serenaStopReadCache.size = 0
+	serenaStopReadCache.info = nil
+	serenaStopReadCache.bytes = nil
+	serenaStopReadCache.lookups = 0
+	serenaStopReadCache.readFnForTest = nil
 }
 
 // SetTestStatusFn overrides the StatusContext source so cross-package
