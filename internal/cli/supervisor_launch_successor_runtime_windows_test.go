@@ -147,6 +147,7 @@ func newNativeCanonicalSuccessorFixture(t *testing.T, ctx context.Context, built
 	}
 	var order []string
 	txn := &WindowsProductTxn{Opts: WindowsProductTxnOpts{
+		JournalAllowance: productJournalFixtureAllowance(),
 		Context: ctx, StateDir: stateDir, Mode: WindowsProductPairModeUpgrade,
 		EntrySet:           &stagedWindowsCanonicalEntrySetV1{original: stage},
 		CanonicalEntryPath: targets.CanonicalEntryPath, ProductPath: targets.ProductPath, IdentityPath: targets.IdentityPath,

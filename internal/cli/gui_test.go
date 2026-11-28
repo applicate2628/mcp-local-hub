@@ -17,6 +17,7 @@ import (
 	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/api/serena_routing"
 	"mcp-local-hub/internal/gui"
+	"mcp-local-hub/internal/mcproute"
 	"mcp-local-hub/internal/tray"
 )
 
@@ -693,7 +694,7 @@ func TestSerenaBackendLossReconcileTicker_NilTriggerWaitsForInterval(t *testing.
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		runSerenaBackendLossReconcileTicker(ctx, &gui.Server{}, time.Hour)
+		runSerenaBackendLossReconcileTicker(ctx, &mcproute.WorkspaceRoutes{}, time.Hour)
 	}()
 
 	select {

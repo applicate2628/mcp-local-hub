@@ -42,6 +42,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
 	"sync/atomic"
 )
 
@@ -57,11 +59,18 @@ type HubTokenTable struct {
 	Tokens map[string]string `json:"tokens"`
 }
 
+type hubTokenAuthorization struct {
+	tokens   HubTokenTable
+	projects hubProjectAuthorityRecord
+	verified bool
+}
+
 // liveTokenTable holds the published snapshot for the auth gate. The
 // atomic.Pointer swap makes per-request reads lock-free while
 // guaranteeing visibility of new tokens after every Ensure / Rotate /
 // Reload. The pointer is `nil` until the first publish.
-var liveTokenTable atomic.Pointer[HubTokenTable]
+var liveTokenTable atomic.Pointer[hubTokenAuthorization]
+var hubTokenPublicationMu sync.Mutex
 
 // EnsureHubTokens generates a fresh token for every named client that
 // doesn't yet have one, persists the updated table, and publishes the
@@ -118,6 +127,15 @@ func EnsureGroupTokens(groupKeys []string) (HubTokenTable, error) {
 // key not present in the table is a no-op. Only a genuine load/write failure
 // (corrupt file, DACL gate) surfaces.
 func pruneHubTokensLocked(scopeKeys []string) error {
+	projects, err := readHubProjectAuthority()
+	if err != nil {
+		return err
+	}
+	for _, scope := range scopeKeys {
+		if projects.guards(scope) {
+			return errHubProjectAuthority
+		}
+	}
 	tbl, err := loadHubTokensLocked()
 	if err != nil {
 		if isHubMcpStateMissingErr(err) {
@@ -195,10 +213,15 @@ func rotateReusedGroupTokensLocked(declaredKeys []string, activeKeys map[string]
 	if tbl.Tokens == nil {
 		return false, nil
 	}
+	projects, projectErr := readHubProjectAuthority()
+	if projectErr != nil {
+		publishTokenTable(tbl)
+		return false, projectErr
+	}
 	if !priorActiveSetKnownGood {
 		var preexisting []string
 		for _, k := range declaredKeys {
-			if _, present := tbl.Tokens[k]; present {
+			if _, present := tbl.Tokens[k]; present && !projects.guards(k) {
 				preexisting = append(preexisting, k)
 			}
 		}
@@ -209,6 +232,9 @@ func rotateReusedGroupTokensLocked(declaredKeys []string, activeKeys map[string]
 	}
 	rotated := false
 	for _, k := range declaredKeys {
+		if projects.guards(k) {
+			continue
+		}
 		if _, present := tbl.Tokens[k]; !present {
 			continue // no row yet — ensure mints a fresh one, nothing stale to rotate.
 		}
@@ -273,6 +299,7 @@ func ensureHubTokensLocked(clients []string) (HubTokenTable, error) {
 	if tbl.Tokens == nil {
 		tbl.Tokens = map[string]string{}
 	}
+	projects, projectErr := readHubProjectAuthority()
 	// (codex bot r4 P2 closure was originally implemented here as a
 	// per-call validation loop; r5 P2 closure moved the gate into
 	// loadHubTokensLocked so EVERY consumer of the load path —
@@ -282,6 +309,13 @@ func ensureHubTokensLocked(clients []string) (HubTokenTable, error) {
 	changed := false
 	for _, c := range clients {
 		if c == "" {
+			continue
+		}
+		if projectErr != nil && strings.HasPrefix(c, GroupScopeKeyPrefix) {
+			publishTokenTable(tbl)
+			return HubTokenTable{}, projectErr
+		}
+		if projects.guards(c) {
 			continue
 		}
 		if _, ok := tbl.Tokens[c]; ok {
@@ -299,8 +333,7 @@ func ensureHubTokensLocked(clients []string) (HubTokenTable, error) {
 			return HubTokenTable{}, werr
 		}
 	}
-	publishTokenTable(tbl)
-	return tbl, nil
+	return publishTokenTable(tbl), nil
 }
 
 // RotateHubToken regenerates one client's token + atomically rewrites
@@ -322,6 +355,12 @@ func RotateHubToken(client string) (HubTokenTable, error) {
 		return HubTokenTable{}, err
 	}
 	defer func() { _ = lk.Unlock() }()
+	if strings.HasPrefix(client, GroupScopeKeyPrefix) {
+		projects, err := readHubProjectAuthority()
+		if err != nil || projects.guards(client) {
+			return HubTokenTable{}, errHubProjectAuthority
+		}
+	}
 
 	tbl, err := loadHubTokensLocked()
 	if err != nil && !isHubMcpStateMissingErr(err) {
@@ -338,8 +377,7 @@ func RotateHubToken(client string) (HubTokenTable, error) {
 	if werr := writeHubTokensLocked(tbl); werr != nil {
 		return HubTokenTable{}, werr
 	}
-	publishTokenTable(tbl)
-	return tbl, nil
+	return publishTokenTable(tbl), nil
 }
 
 // ReloadHubTokens re-reads <state-dir>/hub-mcp-tokens.json and
@@ -355,13 +393,13 @@ func RotateHubToken(client string) (HubTokenTable, error) {
 func ReloadHubTokens() (HubTokenTable, error) {
 	tbl, err := loadHubTokensLocked()
 	if err != nil {
+		invalidateLiveProjectCredentials()
 		return HubTokenTable{}, err
 	}
 	if tbl.Tokens == nil {
 		tbl.Tokens = map[string]string{}
 	}
-	publishTokenTable(tbl)
-	return tbl, nil
+	return replaceHubTokenAuthorization(tbl)
 }
 
 // CurrentTokenTable returns a DEEP COPY of the live snapshot for the
@@ -385,11 +423,7 @@ func CurrentTokenTable() HubTokenTable {
 	if p == nil {
 		return HubTokenTable{}
 	}
-	cpy := HubTokenTable{Tokens: make(map[string]string, len(p.Tokens))}
-	for k, v := range p.Tokens {
-		cpy.Tokens[k] = v
-	}
-	return cpy
+	return p.ordinaryTokens()
 }
 
 // ConstantTimeCompareToken returns 1 iff `headerToken` matches the
@@ -409,11 +443,11 @@ func ConstantTimeCompareToken(client, headerToken string) int {
 	if len(headerToken) != 64 {
 		return 0
 	}
-	tbl := CurrentTokenTable()
-	stored, ok := tbl.Tokens[client]
-	if !ok {
+	p := liveTokenTable.Load()
+	if p == nil || p.guarded(client) {
 		return 0
 	}
+	stored := p.tokens.Tokens[client]
 	if len(stored) != 64 {
 		return 0
 	}
@@ -485,13 +519,87 @@ func writeHubTokensLocked(tbl HubTokenTable) error {
 	return writeHubMcpStateFile(hubMcpTokensFileLeaf, payload)
 }
 
-// publishTokenTable copies tbl + swaps the atomic.Pointer. The copy is
-// deliberate so the published snapshot is independent of any
-// subsequent mutation the writer makes to its local map.
-func publishTokenTable(tbl HubTokenTable) {
+func publishTokenTable(tbl HubTokenTable) HubTokenTable {
+	visible, _ := replaceHubTokenAuthorization(tbl)
+	return visible
+}
+
+// Publish one joined, immutable credential and authority view. A generic
+// reload can receive durable state without taking hub-mcp.lock, including
+// while the caller in the sibling process still owns that lock.
+func replaceHubTokenAuthorization(tbl HubTokenTable) (HubTokenTable, error) {
+	hubTokenPublicationMu.Lock()
+	defer hubTokenPublicationMu.Unlock()
+	projects, err := readHubProjectAuthority()
+	if projects.Groups == nil {
+		projects.Groups = map[string]hubProjectEnrollment{}
+	}
+	prior := liveTokenTable.Load()
+	if prior != nil {
+		for key, enrollment := range prior.projects.Groups {
+			if _, present := projects.Groups[key]; !present {
+				// Loss of durable authority cannot expose a previously
+				// protected credential through this serving generation.
+				enrollment.AttachmentReceipt = ""
+				projects.Groups[key] = enrollment
+			}
+		}
+	}
 	cpy := HubTokenTable{Tokens: make(map[string]string, len(tbl.Tokens))}
 	for k, v := range tbl.Tokens {
+		if err != nil && strings.HasPrefix(k, GroupScopeKeyPrefix) &&
+			(prior == nil || prior.guarded(k) || prior.tokens.Tokens[k] != v) {
+			continue // An unreadable settings file cannot establish new group authority.
+		}
 		cpy.Tokens[k] = v
 	}
-	liveTokenTable.Store(&cpy)
+	p := &hubTokenAuthorization{tokens: cpy, projects: projects, verified: err == nil}
+	liveTokenTable.Store(p)
+	return p.ordinaryTokens(), err
+}
+
+func invalidateLiveProjectCredentials() {
+	hubTokenPublicationMu.Lock()
+	defer hubTokenPublicationMu.Unlock()
+	if p := liveTokenTable.Load(); p != nil {
+		invalid := *p
+		invalid.verified = false
+		liveTokenTable.Store(&invalid)
+	}
+}
+
+func (p *hubTokenAuthorization) guarded(scope string) bool {
+	return p.projects.guards(scope)
+}
+
+func (p *hubTokenAuthorization) ordinaryTokens() HubTokenTable {
+	visible := HubTokenTable{Tokens: make(map[string]string, len(p.tokens.Tokens))}
+	for scope, token := range p.tokens.Tokens {
+		if !p.guarded(scope) {
+			visible.Tokens[scope] = token
+		}
+	}
+	return visible
+}
+
+// The qualified headless front uses this joined view. A generic bearer check
+// never authorizes a scope owned by the project enrollment transition.
+func currentHubProjectEnrollment(scope, token string, receiving hubProjectRebindReceiving) (hubProjectEnrollment, bool) {
+	p := liveTokenTable.Load()
+	if p == nil || !p.verified || p.projects.epoch != receiving.Epoch {
+		return hubProjectEnrollment{}, false
+	}
+	group, ok := strings.CutPrefix(scope, GroupScopeKeyPrefix)
+	if !ok {
+		return hubProjectEnrollment{}, false
+	}
+	e, ok := p.projects.Groups[hubProjectGroupKey(group)]
+	current := p.tokens.Tokens[scope]
+	if !ok || e.Group != group || !e.matchesEpoch(receiving.Epoch) || e.Project != receiving.Project ||
+		e.Revision != receiving.Revision || e.AttachmentPlan != receiving.AttachmentPlan ||
+		e.AttachmentReceipt == "" || e.AttachmentReceipt != receiving.AttachmentReceipt ||
+		!e.matchesCredential(current) || subtle.ConstantTimeCompare([]byte(current), []byte(token)) != 1 {
+		return hubProjectEnrollment{}, false
+	}
+	return e, true
 }
