@@ -1,0 +1,772 @@
+//go:build windows && amd64
+
+// Package canonicalcaseowner is a WORK-only owner for two fixed canonical test
+// actors and their admitted debug chain. It does not issue Product authority,
+// run arbitrary commands, or claim universal containment of new debug chains.
+package canonicalcaseowner
+
+import (
+	"context"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"golang.org/x/sys/windows"
+)
+
+type CaseKind string
+
+const (
+	CaseGUIReplay              CaseKind = "gui-replay"
+	CaseSuccessor              CaseKind = "successor"
+	canonicalClosureModel               = "fixed-canonical-case-observed-debug-chain-v1"
+	canonicalEventLedgerFormat          = "lifecycle-and-auxiliary-counts-v1"
+	canonicalClosureLimit               = "Completion covers the original observed debug chain under the fixed-source/no-new-debug-chain assumption; it is not universal process-tree containment."
+)
+
+type ImageRole string
+
+const (
+	ActorImage      ImageRole = "actor"
+	ProductImage    ImageRole = "product"
+	PowerShellImage ImageRole = "powershell"
+	NetstatImage    ImageRole = "netstat"
+	NetshImage      ImageRole = "netsh"
+	ConhostImage    ImageRole = "conhost"
+	WMICImage       ImageRole = "wmic"
+)
+
+type ImageAdmissionDisposition string
+
+const (
+	ImageAdmitted ImageAdmissionDisposition = "admitted"
+	ImageRejected ImageAdmissionDisposition = "rejected"
+)
+
+var ErrCreateImageAdmission = errors.New("original CREATE image admission refused")
+
+// Inputs are equality constraints received by the fixed controller from its
+// original build/tool operands. These values do not issue a Product capability.
+type ImageInput struct{ Path, SHA256 string }
+type CanonicalImages struct {
+	Actor, Product, PowerShell, Netstat, Netsh, Conhost ImageInput
+	WMIC                                                *ImageInput
+}
+
+// Command is the original caller-created command. A successful retain transfers
+// exclusive Start/Wait/stdio use to this owner. The only admitted arguments are
+// the original five test flags for Case and the once-captured ActorTimeout.
+type Spec struct {
+	Case                          CaseKind
+	Command                       *exec.Cmd `json:"-"`
+	Images                        CanonicalImages
+	CaseTempRoot                  string
+	ActorTimeout                  string
+	WorkDeadline, CleanupDeadline time.Time
+	StdoutLimit, StderrLimit      int64
+	// Only the standalone canonical qualification controller binds this gate.
+	// Nil preserves the original native path and deadlines.
+	TestOnlyLateGate *TestOnlyLateGate
+}
+
+type InitialRootAdmission struct {
+	Original                      *Owner `json:"-"`
+	PID                           uint32
+	NativeBirthFILETIME           string
+	Image                         ImageEvidence
+	InAnyJob                      bool
+	CreateContinued               bool
+	CreateReceivedAt, PublishedAt time.Time
+}
+
+type ImagePinResult struct {
+	Role                             ImageRole
+	Image                            ImageEvidence
+	Acquired, CloseAttempted, Closed bool
+	CloseError                       string
+}
+
+type pinnedImage struct {
+	role ImageRole
+	pin  *imagePin
+}
+
+type RootWaitResult struct {
+	Returned bool
+	Known    bool
+	ExitCode int
+	Error    string
+}
+
+type ProcessResult struct {
+	PID                           uint32
+	NativeBirthFILETIME           string
+	Image                         ImageEvidence
+	Role                          ImageRole
+	ImageDisposition              ImageAdmissionDisposition
+	ImageAdmissionError           string
+	ImageFileAbsent               bool
+	ImageRejectStopBeforeContinue bool
+	InAnyJob                      bool
+	InitialRoot                   bool
+	ExitEventReceived             bool
+	ImageFileCloseAttempted       bool
+	ImageFileClosed               bool
+	ExitContinued                 bool
+	ExitCode                      uint32
+	KernelSignaled                bool
+	DuplicateCloseAttempted       bool
+	DuplicateClosed               bool
+	TerminateAttempted            bool
+	TerminateAccepted             bool
+	TerminateError                string
+	TerminateExitStatusObserved   bool
+	TerminateObservedExitCode     uint32
+	TerminateWaitSignaled         bool
+	TerminateAlreadyExited        bool
+}
+
+type ThreadResult struct {
+	PID, TID                uint32
+	ExitContinued           bool
+	KernelSignaled          bool
+	DuplicateCloseAttempted bool
+	DuplicateClosed         bool
+}
+
+type EventResult struct {
+	Sequence                uint64
+	Code, PID, TID          uint32
+	ReceivedAt              time.Time
+	ImageFilePresent        bool
+	ImageFileCloseAttempted bool
+	ImageFileClosed         bool
+	Continued               bool
+	ContinueStatus          uint32
+}
+
+// AuxiliaryEventResult counts only original events whose file close, if any,
+// and ContinueDebugEvent have both succeeded. It is not a per-event transcript.
+// Five fixed bins per retained process bound memory independently of volume.
+type AuxiliaryEventResult struct {
+	PID, Code, ContinueStatus                                                 uint32
+	Count, FirstSequence, LastSequence                                        uint64
+	FirstReceivedAt, LastReceivedAt                                           time.Time
+	ImageFilePresentCount, ImageFileCloseAttemptedCount, ImageFileClosedCount uint64
+}
+
+type Result struct {
+	Original                      *Owner `json:"-"`
+	Case                          CaseKind
+	CaseTempRoot                  string
+	ClosureModel, ClosureLimit    string
+	CommandPath                   string
+	CommandArgs                   []string
+	WorkDeadline, CleanupDeadline time.Time
+	NoCreateAttempted             bool
+	HostNoJobChecked              bool
+	CreatingThreadID              uint32
+	CreatingThreadSignaled        bool
+	CreatingThreadCloseAttempted  bool
+	CreatingThreadClosed          bool
+	KillOnExitArmed               bool
+	RootPID                       uint32
+	RootWait                      RootWaitResult
+	Image                         ImageEvidence
+	ImagePinClosed                bool // actor source pin only, preserved baseline meaning
+	ImagePinsClosed               bool // actor + Product reference + every configured system input
+	ImagePins                     []ImagePinResult
+	Processes                     []ProcessResult
+	Threads                       []ThreadResult
+	EventLedgerFormat             string
+	ObservedEventCount            uint64
+	Events                        []EventResult // exact lifecycle codes 2/3/4/5, with original sparse ordinals
+	AuxiliaryEvents               []AuxiliaryEventResult
+	PendingEvent                  *EventResult // actual held event metadata; nil only says no event is held
+	Stdout, Stderr                CaptureResult
+	NativeComplete                bool
+	IOComplete                    bool
+	Complete                      bool
+	CompleteReceivedAt            time.Time
+	Unknown                       bool
+	Failure                       string
+	// Nil unless native completion AND both owned readers/EOF/closes are received.
+	// These are capture bytes, never owner authority.
+	StdoutBytes, StderrBytes []byte `json:"-"`
+}
+
+// Failure itself retains the original owner even if a caller stores only error.
+type Failure struct {
+	Original *Owner `json:"-"`
+	Cause    error
+}
+
+func (failure *Failure) Error() string { return failure.Cause.Error() }
+func (failure *Failure) Unwrap() error { return failure.Cause }
+
+type processOwner struct {
+	rawProcess, rawInitialThread windows.Handle // system-managed event handles
+	handle                       windows.Handle // owned explicit-rights duplicate
+	result                       ProcessResult
+	firstBreakpointHandled       bool
+	auxiliary                    [5]AuxiliaryEventResult
+	terminationRace              error // remains a secondary cause until event+kernel proof resolves it
+}
+
+type threadOwner struct {
+	raw    windows.Handle // system-managed original
+	handle windows.Handle
+	result ThreadResult
+}
+
+type waitReturn struct {
+	result RootWaitResult
+	err    error
+}
+
+// Owner stays strongly reachable from retain, Result and Failure. No retry,
+// reattach, process census, recovered PID owner or finalizer is provided.
+type Owner struct {
+	spec                                         Spec
+	command                                      *exec.Cmd
+	commandPath                                  string // immutable even while original Cmd.Start/Wait may be active
+	args                                         []string
+	image                                        *imagePin // actor pin; also retained in pins
+	pins                                         []pinnedImage
+	initialRoot                                  chan InitialRootAdmission
+	initialPublished                             bool
+	productCreations                             int
+	stdin                                        *os.File
+	stdinCloseAttempted                          bool
+	stdinCloseErr                                error
+	stdout, stderr                               *capture
+	nativeReturned                               chan struct{}
+	rootWaitReturned                             chan waitReturn
+	creatingThread                               windows.Handle
+	creatingThreadID                             uint32
+	creatingThreadSignaled, creatingThreadClosed bool
+	creatingThreadCloseAttempted                 bool
+	createAttempted, startSucceeded, waitStarted bool
+	hostNoJobChecked, killOnExitArmed            bool
+	rootPID                                      uint32
+	rootWait                                     RootWaitResult
+	processes                                    []*processOwner
+	byPID                                        map[uint32]*processOwner
+	threads                                      []*threadOwner
+	activeThreads                                map[[2]uint32]*threadOwner
+	events                                       []EventResult
+	observedEventCount                           uint64
+	pendingRecord                                EventResult
+	pending                                      *debugEvent
+	pendingFile                                  windows.Handle
+	drained                                      bool
+	aborting, unknown                            bool
+	primary                                      error
+	cleanupErrors                                []error
+}
+
+// Run never starts a replacement actor. retain must store this exact pointer
+// before returning nil. Every native allocation and creation follows that call.
+// An Unknown result prohibits capture access, cleanup of external artifacts,
+// or admission of another actor. The caller retains the same Owner.
+func Run(ctx context.Context, spec Spec, retain func(*Owner) error) (Result, error) {
+	if err := validateSpec(ctx, spec, retain); err != nil {
+		return Result{Case: spec.Case, CaseTempRoot: spec.CaseTempRoot, ClosureModel: canonicalClosureModel, ClosureLimit: canonicalClosureLimit, Failure: err.Error()}, err
+	}
+	// Freeze the sole optional pointer before the native worker starts.
+	if spec.Images.WMIC != nil {
+		copy := *spec.Images.WMIC
+		spec.Images.WMIC = &copy
+	}
+	o := &Owner{spec: spec, command: spec.Command, commandPath: spec.Command.Path, args: append([]string(nil), spec.Command.Args...),
+		initialRoot:    make(chan InitialRootAdmission, 1),
+		nativeReturned: make(chan struct{}), rootWaitReturned: make(chan waitReturn, 1),
+		byPID: make(map[uint32]*processOwner), activeThreads: make(map[[2]uint32]*threadOwner)}
+	if err := retain(o); err != nil {
+		return o.preStartResult(err), &Failure{o, err}
+	}
+	if err := spec.TestOnlyLateGate.bind(o); err != nil {
+		return o.preStartResult(err), &Failure{o, err}
+	}
+	if err := o.prepare(ctx); err != nil {
+		closeErr := o.closeBeforeStart()
+		result := o.preStartResult(errors.Join(err, closeErr))
+		result.Unknown = closeErr != nil
+		return result, &Failure{o, errors.Join(err, closeErr)}
+	}
+	o.stdout.start()
+	o.stderr.start()
+	go o.runNative(ctx)
+	if !await(o.nativeReturned, spec.CleanupDeadline) {
+		// No concurrent reads of mutable native state and no close of live sinks.
+		return o.unreceivedResult("native owner did not return by original cleanup deadline"),
+			&Failure{o, errors.New("native owner did not return by original cleanup deadline")}
+	}
+	if o.creatingThread == 0 && o.unknown {
+		result := o.snapshot()
+		result.Unknown, result.Failure = true, errorText(o.failureCause())
+		return result, &Failure{o, o.failureCause()}
+	}
+	if o.creatingThread == 0 {
+		// Thread-handle adoption failed before Start. Pipe writers have been
+		// closed by runNative; join the original readers before closing image.
+		return o.finishNoCreate()
+	}
+	if err := waitSignalUntil(o.creatingThread, spec.CleanupDeadline); err != nil {
+		return o.afterNativeWorkerFailure(fmt.Errorf("original creating thread exit unreceived: %w", err))
+	}
+	o.creatingThreadSignaled = true
+	if o.unknown {
+		// Actual thread exit is received, but a missing/failed adoption or
+		// Continue cannot turn the known handle set into all-descendant proof.
+		result := o.snapshot()
+		result.Unknown, result.Failure = true, errorText(o.failureCause())
+		return result, &Failure{o, o.failureCause()}
+	}
+	if !o.createAttempted {
+		return o.finishNoCreate()
+	}
+	if !o.startSucceeded || !o.killOnExitArmed {
+		return o.afterNativeWorkerFailure(errors.New("original creation/connection outcome incomplete"))
+	}
+	if !o.drained {
+		return o.afterNativeWorkerFailure(errors.New("debug loop returned without actual chain settlement"))
+	}
+	var original waitReturn
+	select {
+	case original = <-o.rootWaitReturned:
+	default:
+		timer := time.NewTimer(time.Until(spec.CleanupDeadline))
+		select {
+		case original = <-o.rootWaitReturned:
+			timer.Stop()
+		case <-timer.C:
+			return o.afterNativeWorkerFailure(errors.New("single original Cmd.Wait did not return"))
+		}
+	}
+	o.rootWait = original.result
+	if !time.Now().Before(spec.CleanupDeadline) {
+		return o.afterNativeWorkerFailure(errors.Join(original.err,
+			fmt.Errorf("single original Wait receiving exceeded cleanup deadline: %w", context.DeadlineExceeded)))
+	}
+	root := o.byPID[o.rootPID]
+	if !original.result.Known || root == nil || uint32(original.result.ExitCode) != root.result.ExitCode {
+		o.markUnknown(errors.New("single original Cmd.Wait did not match original event process exit"))
+		return o.snapshot(), &Failure{o, errors.Join(o.failureCause(), original.err)}
+	}
+	if !await(o.stdout.done, spec.CleanupDeadline) || !await(o.stderr.done, spec.CleanupDeadline) {
+		return o.afterNativeWorkerFailure(errors.Join(original.err,
+			errors.New("owned capture worker did not join by original cleanup deadline")))
+	}
+	if !o.stdout.complete() || !o.stderr.complete() || o.stdinCloseErr != nil {
+		o.markUnknown(errors.New("original stdio EOF/close receiving incomplete"))
+		return o.snapshotWithIO(), &Failure{o, o.failureCause()}
+	}
+	if !time.Now().Before(spec.CleanupDeadline) {
+		return o.afterNativeWorkerFailure(errors.Join(original.err,
+			fmt.Errorf("IO receiving exceeded cleanup deadline: %w", context.DeadlineExceeded)))
+	}
+	// All observed original creations and kernel exits are received, the single root
+	// Wait is received, and the owned readers are joined. Only now release the
+	// process duplicates that kept original PIDs stable across root-first.
+	for _, process := range o.processes {
+		if !time.Now().Before(spec.CleanupDeadline) {
+			return o.afterNativeWorkerFailure(errors.Join(original.err,
+				fmt.Errorf("process duplicate close exceeded cleanup deadline: %w", context.DeadlineExceeded)))
+		}
+		if err := closeProcessDuplicate(process); err != nil {
+			o.markUnknown(err)
+			return o.snapshotWithIO(), &Failure{o, o.failureCause()}
+		}
+	}
+	o.creatingThreadCloseAttempted = true
+	if err := windows.CloseHandle(o.creatingThread); err != nil {
+		o.markUnknown(fmt.Errorf("original creating-thread duplicate close: %w", err))
+		return o.snapshotWithIO(), &Failure{o, o.failureCause()}
+	}
+	o.creatingThreadClosed = true
+	if err := o.closeImages(); err != nil {
+		o.markUnknown(fmt.Errorf("original input image pin close: %w", err))
+		return o.snapshotWithIO(), &Failure{o, o.failureCause()}
+	}
+	receivedAt := time.Now().UTC()
+	if !receivedAt.Before(spec.CleanupDeadline) {
+		o.markUnknown(errors.New("original final close receiving exceeded cleanup deadline"))
+		return o.snapshotWithIO(), &Failure{o, o.failureCause()}
+	}
+	result := o.snapshotWithIO()
+	result.NativeComplete = o.nativeComplete()
+	result.IOComplete = o.stdout.complete() && o.stderr.complete() && o.stdinCloseAttempted && o.stdinCloseErr == nil
+	result.Complete = result.NativeComplete && result.IOComplete && !o.unknown
+	if !result.Complete {
+		result.Unknown, result.Failure = true, "combined original native/IO receiving incomplete"
+		return result, &Failure{o, errors.New(result.Failure)}
+	}
+	result.CompleteReceivedAt = receivedAt
+	result.StdoutBytes, result.StderrBytes = o.stdout.completedBytes(), o.stderr.completedBytes()
+	cause := errors.Join(o.failureCause(), original.err)
+	result.Failure = errorText(cause)
+	// The actual Run call remains on this stack until the original controller
+	// has published its failure. No result or production deadline is changed.
+	spec.TestOnlyLateGate.waitAt("run-return")
+	if cause != nil {
+		return result, &Failure{o, cause}
+	}
+	return result, nil
+}
+
+// InitialRoot publishes at most one immutable admission from the native thread.
+// A caller must select this channel together with Run completion/cancellation.
+// Missing publication is not evidence that no process was created.
+func (o *Owner) InitialRoot() <-chan InitialRootAdmission {
+	if o == nil {
+		return nil
+	}
+	return o.initialRoot
+}
+
+func canonicalImageInputs(images CanonicalImages) []struct {
+	role  ImageRole
+	input ImageInput
+} {
+	inputs := []struct {
+		role  ImageRole
+		input ImageInput
+	}{
+		{ActorImage, images.Actor}, {ProductImage, images.Product},
+		{PowerShellImage, images.PowerShell}, {NetstatImage, images.Netstat},
+		{NetshImage, images.Netsh},
+		{ConhostImage, images.Conhost},
+	}
+	if images.WMIC != nil {
+		inputs = append(inputs, struct {
+			role  ImageRole
+			input ImageInput
+		}{WMICImage, *images.WMIC})
+	}
+	return inputs
+}
+
+func validateSpec(ctx context.Context, spec Spec, retain func(*Owner) error) error {
+	if ctx == nil || retain == nil || spec.Command == nil {
+		return errors.New("original context, command and retainer are required")
+	}
+	if spec.Case != CaseGUIReplay && spec.Case != CaseSuccessor {
+		return errors.New("only the two fixed canonical test roots are admitted")
+	}
+	now := time.Now()
+	if !now.Before(spec.WorkDeadline) || !spec.CleanupDeadline.Equal(spec.WorkDeadline.Add(10*time.Second)) ||
+		spec.CleanupDeadline.After(now.Add(4*time.Minute)) {
+		return errors.New("original live case deadlines require exactly 10 seconds cleanup within four minutes")
+	}
+	if end, ok := ctx.Deadline(); !ok || spec.CleanupDeadline.After(end) {
+		return errors.New("case cleanup must remain within the original finite caller deadline")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	timeout, err := time.ParseDuration(spec.ActorTimeout)
+	if err != nil || timeout <= 0 || timeout > 4*time.Minute {
+		return errors.Join(errors.New("original once-captured actor Timeout is invalid"), err)
+	}
+	if spec.StdoutLimit <= 0 || spec.StdoutLimit > 4<<20 || spec.StderrLimit <= 0 || spec.StderrLimit > 4<<20 {
+		return errors.New("each original capture limit must be 1..4194304 bytes")
+	}
+	cmd := spec.Command
+	if cmd.Process != nil || cmd.ProcessState != nil || cmd.Err != nil || cmd.Cancel != nil ||
+		cmd.WaitDelay != 0 || cmd.SysProcAttr != nil || len(cmd.ExtraFiles) != 0 ||
+		cmd.Stdin != nil || cmd.Stdout != nil || cmd.Stderr != nil || cmd.Env == nil {
+		return errors.New("fresh original non-CommandContext Cmd with explicit environment and no existing stdio/attributes required")
+	}
+	testName := "TestCanonicalSuccessorNativeControlRetainsOriginalFiles"
+	if spec.Case == CaseGUIReplay {
+		testName = "TestCanonicalGUIRuntimeRecoveryNativeIndependentReplay"
+	}
+	expected := []string{spec.Images.Actor.Path, "-test.paniconexit0", "-test.v", "-test.count=1",
+		"-test.timeout=" + spec.ActorTimeout, "-test.run=^" + testName + "$"}
+	if cmd.Path != spec.Images.Actor.Path || len(cmd.Args) != len(expected) {
+		return errors.New("fixed canonical original image/argv required")
+	}
+	for i := range expected {
+		if cmd.Args[i] != expected[i] {
+			return errors.New("fixed canonical original argv mismatch")
+		}
+	}
+	if err := checkedLocalPath(cmd.Path); err != nil {
+		return err
+	}
+	if err := checkedLocalPath(cmd.Dir); err != nil {
+		return err
+	}
+	if err := checkedLocalPath(spec.CaseTempRoot); err != nil {
+		return err
+	}
+	encoded, err := windows.UTF16PtrFromString(spec.CaseTempRoot)
+	if err != nil {
+		return err
+	}
+	attributes, err := windows.GetFileAttributes(encoded)
+	if err != nil || attributes&windows.FILE_ATTRIBUTE_DIRECTORY == 0 {
+		return errors.Join(errors.New("original case TEMP must be an existing ordinary directory"), err)
+	}
+	seen := make(map[string]bool)
+	for _, row := range canonicalImageInputs(spec.Images) {
+		input := row.input
+		if len(input.SHA256) != 64 || strings.ToLower(input.SHA256) != input.SHA256 {
+			return errors.New("each fixed image requires exact lowercase SHA-256")
+		}
+		if _, err := hex.DecodeString(input.SHA256); err != nil {
+			return err
+		}
+		if err := checkedImagePath(input.Path); err != nil {
+			return err
+		}
+		key := strings.ToLower(input.Path)
+		if seen[key] || pathWithin(spec.CaseTempRoot, input.Path) {
+			return errors.New("reference images must be distinct and outside the fresh case TEMP")
+		}
+		seen[key] = true
+		switch row.role {
+		case ActorImage, ProductImage:
+			if err := checkedLocalPath(input.Path); err != nil {
+				return err
+			}
+		case PowerShellImage:
+			if !strings.EqualFold(filepath.Base(input.Path), "powershell.exe") {
+				return errors.New("fixed PowerShell image basename differs")
+			}
+		case NetstatImage:
+			if !strings.EqualFold(filepath.Base(input.Path), "netstat.exe") {
+				return errors.New("fixed netstat image basename differs")
+			}
+		case NetshImage:
+			if !strings.EqualFold(filepath.Base(input.Path), "netsh.exe") {
+				return errors.New("fixed netsh image basename differs")
+			}
+		case ConhostImage:
+			systemDirectory, err := windows.GetSystemDirectory()
+			if err != nil || !strings.EqualFold(input.Path, filepath.Join(systemDirectory, "conhost.exe")) {
+				return errors.Join(err, errors.New("fixed conhost image path differs from the kernel system directory"))
+			}
+		case WMICImage:
+			if !strings.EqualFold(filepath.Base(input.Path), "wmic.exe") {
+				return errors.New("fixed WMIC image basename differs")
+			}
+		}
+	}
+	return nil
+}
+
+func (o *Owner) prepare(ctx context.Context) error {
+	if err := resolveNativeAPI(); err != nil {
+		return err
+	}
+	for _, row := range canonicalImageInputs(o.spec.Images) {
+		pin, err := openImagePin(row.input.Path)
+		o.pins = append(o.pins, pinnedImage{row.role, pin}) // retain every partial acquisition
+		if row.role == ActorImage {
+			o.image = pin
+		}
+		if err != nil {
+			return err
+		}
+		pin.evidence, err = observeImage(ctx, o.spec.WorkDeadline, pin.handle)
+		if err != nil {
+			return err
+		}
+		if !strings.EqualFold(pin.evidence.Path, row.input.Path) || pin.evidence.SHA256 != row.input.SHA256 {
+			return errors.New("original reference image differs from fixed input")
+		}
+		subsystem := uint16(3)
+		if row.role == ActorImage || row.role == ProductImage || row.role == ConhostImage {
+			subsystem = 2
+		}
+		if pin.evidence.Subsystem != subsystem {
+			return errors.New("reference image subsystem differs from its fixed role")
+		}
+	}
+	var err error
+	o.stdin, err = os.Open(os.DevNull)
+	if err != nil {
+		return err
+	}
+	o.stdout, err = newCapture(o.spec.StdoutLimit)
+	if err != nil {
+		return err
+	}
+	o.stdout.testOnlyLateGate = o.spec.TestOnlyLateGate
+	o.stderr, err = newCapture(o.spec.StderrLimit)
+	return err
+}
+
+func (o *Owner) closeImages() error {
+	var joined error
+	for i := len(o.pins) - 1; i >= 0; i-- {
+		joined = errors.Join(joined, o.pins[i].pin.close())
+	}
+	return joined
+}
+
+func (o *Owner) imagePinsClosed() bool {
+	if len(o.pins) != len(canonicalImageInputs(o.spec.Images)) {
+		return false
+	}
+	for _, row := range o.pins {
+		if row.pin == nil || row.pin.handle == 0 || !row.pin.closeAttempted || row.pin.closeErr != nil {
+			return false
+		}
+	}
+	return true
+}
+
+func (o *Owner) pinResults() []ImagePinResult {
+	var result []ImagePinResult
+	for _, row := range o.pins {
+		r := ImagePinResult{Role: row.role}
+		if row.pin != nil {
+			r.Image, r.Acquired = row.pin.evidence, row.pin.handle != 0
+			r.CloseAttempted = row.pin.closeAttempted
+			r.Closed = r.Acquired && r.CloseAttempted && row.pin.closeErr == nil
+			r.CloseError = errorText(row.pin.closeErr)
+		}
+		result = append(result, r)
+	}
+	return result
+}
+
+func (o *Owner) closeStdin() error {
+	if o.stdin != nil && !o.stdinCloseAttempted {
+		o.stdinCloseAttempted = true
+		o.stdinCloseErr = o.stdin.Close()
+	}
+	return o.stdinCloseErr
+}
+
+func (o *Owner) closeBeforeStart() error {
+	return errors.Join(o.closeStdin(), o.stdout.closeBeforeWorker(), o.stderr.closeBeforeWorker(), o.closeImages())
+}
+
+func (o *Owner) finishNoCreate() (Result, error) {
+	if o.createAttempted {
+		return o.afterNativeWorkerFailure(errors.New("creation attempted without an original owner-thread handle"))
+	}
+	if !await(o.stdout.done, o.spec.CleanupDeadline) || !await(o.stderr.done, o.spec.CleanupDeadline) ||
+		!o.stdout.complete() || !o.stderr.complete() {
+		return o.afterNativeWorkerFailure(errors.New("no-create capture cleanup unreceived"))
+	}
+	closeErr := o.closeImages()
+	if o.creatingThread != 0 {
+		o.creatingThreadCloseAttempted = true
+		closeErr = errors.Join(closeErr, windows.CloseHandle(o.creatingThread))
+		o.creatingThreadClosed = closeErr == nil
+	}
+	closeErr = errors.Join(closeErr, o.closeStdin())
+	result := o.snapshotWithIO()
+	result.NoCreateAttempted, result.Unknown = true, o.unknown || closeErr != nil
+	cause := errors.Join(o.failureCause(), closeErr)
+	if cause == nil {
+		cause = errors.New("native creation was not attempted")
+	}
+	result.Failure = cause.Error()
+	return result, &Failure{o, cause}
+}
+
+func (o *Owner) preStartResult(err error) Result {
+	return Result{Original: o, Case: o.spec.Case, CaseTempRoot: o.spec.CaseTempRoot, ClosureModel: canonicalClosureModel, ClosureLimit: canonicalClosureLimit, CommandPath: o.commandPath, CommandArgs: append([]string(nil), o.args...),
+		WorkDeadline: o.spec.WorkDeadline, CleanupDeadline: o.spec.CleanupDeadline, NoCreateAttempted: true, Failure: errorText(err)}
+}
+
+func (o *Owner) unreceivedResult(reason string) Result {
+	// Safe even if the native worker still owns every mutable field.
+	return Result{Original: o, Case: o.spec.Case, CaseTempRoot: o.spec.CaseTempRoot, ClosureModel: canonicalClosureModel, ClosureLimit: canonicalClosureLimit, CommandPath: o.commandPath, CommandArgs: append([]string(nil), o.args...),
+		WorkDeadline: o.spec.WorkDeadline, CleanupDeadline: o.spec.CleanupDeadline, Unknown: true, Failure: reason}
+}
+
+// Called only after nativeReturned has been received. That publication makes
+// native-worker fields readable, but is not a native thread/process/IO join.
+// Do not read capture state, probe rootWaitReturned, close anything or upgrade
+// completion here. Preserve the same actual owner and every known prior cause.
+func (o *Owner) afterNativeWorkerFailure(err error) (Result, error) {
+	cause := errors.Join(o.failureCause(), err)
+	result := o.snapshot()
+	result.Unknown, result.Failure = true, errorText(cause)
+	return result, &Failure{o, cause}
+}
+
+func (o *Owner) snapshot() Result {
+	result := Result{Original: o, Case: o.spec.Case, CaseTempRoot: o.spec.CaseTempRoot, ClosureModel: canonicalClosureModel, ClosureLimit: canonicalClosureLimit, CommandPath: o.commandPath, CommandArgs: append([]string(nil), o.args...),
+		WorkDeadline: o.spec.WorkDeadline, CleanupDeadline: o.spec.CleanupDeadline,
+		NoCreateAttempted: !o.createAttempted, HostNoJobChecked: o.hostNoJobChecked, CreatingThreadID: o.creatingThreadID,
+		CreatingThreadSignaled: o.creatingThreadSignaled, CreatingThreadClosed: o.creatingThreadClosed,
+		CreatingThreadCloseAttempted: o.creatingThreadCloseAttempted,
+		KillOnExitArmed:              o.killOnExitArmed, RootPID: o.rootPID, RootWait: o.rootWait,
+		Unknown: o.unknown, Failure: errorText(o.failureCause()), ImagePins: o.pinResults(), ImagePinsClosed: o.imagePinsClosed(),
+		EventLedgerFormat: canonicalEventLedgerFormat, ObservedEventCount: o.observedEventCount,
+		Events: append([]EventResult(nil), o.events...), AuxiliaryEvents: make([]AuxiliaryEventResult, 0)}
+	if o.pending != nil {
+		pending := o.pendingRecord
+		result.PendingEvent = &pending
+	}
+	if o.image != nil {
+		result.Image = o.image.evidence
+		result.ImagePinClosed = o.image.closeAttempted && o.image.closeErr == nil
+	}
+	for _, p := range o.processes {
+		result.Processes = append(result.Processes, p.result)
+		for _, row := range p.auxiliary {
+			if row.Count != 0 {
+				result.AuxiliaryEvents = append(result.AuxiliaryEvents, row)
+			}
+		}
+	}
+	for _, thread := range o.threads {
+		result.Threads = append(result.Threads, thread.result)
+	}
+	return result
+}
+
+func (o *Owner) snapshotWithIO() Result {
+	result := o.snapshot()
+	result.Stdout, result.Stderr = o.stdout.closedResult(), o.stderr.closedResult()
+	return result
+}
+
+func (o *Owner) markUnknown(err error) {
+	o.unknown = true
+	o.cleanupErrors = append(o.cleanupErrors, err)
+}
+
+func (o *Owner) failureCause() error {
+	causes := append([]error{o.primary}, o.cleanupErrors...)
+	for _, process := range o.processes {
+		if process.terminationRace != nil && !process.result.TerminateAlreadyExited {
+			causes = append(causes, process.terminationRace)
+		}
+	}
+	return errors.Join(causes...)
+}
+
+func await(done <-chan struct{}, end time.Time) bool {
+	select {
+	case <-done:
+		return true
+	default:
+	}
+	remaining := time.Until(end)
+	if remaining <= 0 {
+		return false
+	}
+	timer := time.NewTimer(remaining)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
+		return false
+	}
+}
