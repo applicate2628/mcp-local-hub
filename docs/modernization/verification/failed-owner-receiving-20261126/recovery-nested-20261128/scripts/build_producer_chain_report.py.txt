@@ -1,0 +1,62 @@
+import ast,base64,hashlib,json,lzma,pathlib
+root=pathlib.Path("{CURRENT_WORKSPACE}/library-recovery-next")
+sha=lambda data:hashlib.sha256(data).hexdigest()
+raw=json.loads((root/"producer-chain-raw.json").read_text())
+stage_path=root/"producer-stage-captured.py.txt"
+tree=ast.parse(stage_path.read_text())
+constants=[n.value for n in ast.walk(tree) if isinstance(n,ast.Constant) and isinstance(n.value,str) and n.value.startswith("/Td6WFo")]
+assert len(constants)==1
+compressed=base64.b64decode(constants[0],validate=True)
+decoded=lzma.decompress(compressed)
+assert len(decoded)==10620 and sha(decoded)=="c2d458d191a16e2383032742c1e9519700b83e7beb489de2de64a459cc28da4a"
+rows=json.loads(decoded)
+assert len(rows)==11
+(root/"producer-stage-decoded-edits.json").write_bytes(decoded)
+manifest_bytes=(root/"producer-current5e-manifest-captured.json").read_bytes()
+runner_bytes=(root/"producer-current5e-runner-captured.py.txt").read_bytes()
+assert (len(manifest_bytes),sha(manifest_bytes))==(13691,"079e7c6f035c9708115d46b11e0f16de77a232c39df36c08823dfc531cb18a3b")
+assert (len(runner_bytes),sha(runner_bytes))==(21645,"a6ed2a68a4fa03ac44f355cd47f0ef696d7b8d108389b2787214bc0081b372df")
+manifest=json.loads(manifest_bytes)
+tokens=["1f45b3ef0e9184cc66be002cb918eb38dad0560e86e0a4a2d5c31658f44c2891","4cdb508e655527b0372a5726f2753f6163ee50ed25b52546ff86e85682a6185a","e724dc749ac82517d2af3553fa558388f59371a0a2c0330af4a0db60738a31d5","e74ff2ed872591e32b5fdd948d90959b9a564843534f1c46621dc6a409bf47c3","canonical-source-manifest-v5","GO_CONTROLLER_EXTENSION","9315"]
+pins=[{k:r[k] for k in ("relative","before_bytes","before_sha256","after_bytes","after_sha256")} | {"edit_count":len(r["edits"])} for r in rows]
+source_url=raw["records"]["transport_inventory_public"]["structuredContent"]["display_url"]
+report={
+"schema":"receiver-producer-chain-analysis-v1","date":"2026-11-28","read_only":True,"source_or_runtime_executed":False,
+"scope":"Retained original tool records from prior read-only producer analysis; no repeated native/Git calls.",
+"primary_sources":[
+{"kind":"native_rendered_text_capture","path":r"{E_IMPORTED_TASK_ROOT}\functional-route-20261126\b-go-main-hold-current5e-stage-v1.py","lines_reported":38,"remaining_lines":0,"saved_capture":str(stage_path),"capture_bytes":stage_path.stat().st_size,"capture_sha256":sha(stage_path.read_bytes()),"capture_rule":"Original tool text omitted final newline; local text copy adds one LF. Full native stage-file bytes were not independently byte-qualified. Raw tool record is preserved."},
+{"kind":"text_capture_matched_to_published_full_byte_pin","path":r"{E_IMPORTED_TASK_ROOT}\functional-route-20261126\b-go-main-hold-current5e-v1\inputs\go-fixtures\manifest.json","bytes":len(manifest_bytes),"sha256":sha(manifest_bytes),"saved_capture":str(root/"producer-current5e-manifest-captured.json"),"published_record":source_url,"container":"original-inputs-transfer-v1.json","member":"files[29] current5e/manifest.json","capture_rule":"One terminal LF restored; resulting complete bytes match published length and SHA-256."},
+{"kind":"text_capture_matched_to_published_full_byte_pin","path":r"{E_IMPORTED_TASK_ROOT}\functional-route-20261126\b-go-main-hold-current5e-v1\inputs\go-fixtures\issuer-local\run_go_branch_qualification.py","bytes":len(runner_bytes),"sha256":sha(runner_bytes),"saved_capture":str(root/"producer-current5e-runner-captured.py.txt"),"published_record":source_url,"container":"original-inputs-transfer-v1.json","member":"files[27] current5e/run_go_branch_qualification.py","capture_rule":"One terminal LF restored; resulting complete bytes match published length and SHA-256."}
+],
+"producer":{
+"name":"b-go-main-hold-current5e-stage-v1.py","input_root":r"{TASK_ROOT}\cache-continuation-20261126-named-custody-v1","output_root":r"{TASK_ROOT}\functional-route-20261126\b-go-main-hold-current5e-v1",
+"serialization":{"source_literal":"Python AST Constant str passed to base64.b64decode then lzma.decompress; inspected as data only","base64_characters":len(constants[0]),"compressed_format":"XZ","compressed_bytes":len(compressed),"compressed_sha256":sha(compressed),"decoded_format":"JSON array of byte-offset edit rows with UTF-8 replacement strings","decoded_bytes":len(decoded),"decoded_sha256":sha(decoded),"decoded_file":str(root/"producer-stage-decoded-edits.json"),"rows":len(rows),"target_tokens_present":[t for t in tokens if t.encode() in decoded]},
+"algorithm_observed":"Before bytes/lengths are pinned; edits are nonoverlapping [start,end,replacement string] rows; untouched byte spans and UTF-8 replacement text concatenate into outputs; after lengths and hashes are asserted. Code then creates new paths, writes, closes and reads back. Analysis executed none of those producer operations.",
+"row_pins":pins},
+"manifest_distinction":{
+"fixture_manifest_schema":manifest["schema"],"fixture_manifest_bytes":len(manifest_bytes),"fixture_manifest_sha256":sha(manifest_bytes),
+"canonical_manifest_target_sha256":"e74ff2ed872591e32b5fdd948d90959b9a564843534f1c46621dc6a409bf47c3","fixture_manifest_is_canonical_manifest":False,
+"production_physical_receiver_executed":manifest["production_physical_receiver_executed"],"production_run_executed":manifest["production_run_executed"],"synthetic_current_methods":manifest["synthetic_current_methods"],
+"canonical_candidate_source":manifest["packages"]["canonical"]["candidate_source"],"canonical_hold_source":manifest["packages"]["canonical"]["candidate_hold_source"],"contained_candidate_source":manifest["packages"]["contained"]["candidate_source"],
+"interpretation":"Embedded XZ JSON is a fixture-staging edit producer, not a producer of canonical-source-manifest-v5 or the full production receiver."},
+"negative_scope":{
+"retained_native_search_start":raw["records"]["content_search_initial"],
+"terminal_observation_retained_in_task_record":{"status":"incomplete after about 3 seconds","matches":0,"complete_coverage":False,"terminal_raw_snapshot_available":False},
+"meaning":"The content search timeout is not evidence that matching files are absent. No repeated remote search was made to produce this report.",
+"already_excluded_older_sources":[
+{"name":"canonical_receiving_v4.py.txt","bytes":48228,"sha256":"6ad13e7c57e604111552fd553f10a66a174c9ba9b96dc37484dfba071a9bf2a0","scope":"Older DATA receiver; not current125176."},
+{"name":"canonical-external-plan-v1 adapter","scope":"Produces external plan, not canonical-source-manifest-v5."},
+{"consumer":"run_literal_go_gate_ready_v1.py.txt prepare_canonical_owner","source_manifest_path":"<TASK>/final-gates-v8/canonical_external_receiving_v4/source-manifest.json","source_manifest_sha256":"7fd91728cb2186e46fb8c51c6f9c77ae9e58406c28891033e6f018713c0bb93f","schema":"canonical-external-source-inputs-v1","source_files":7,"owner_files":4,"controller_files":3,"scope":"Reads pinned existing manifest and stages sources. Does not establish current manifest-v5 producer, serialization, or12-file composition."}
+]},
+"new_library_checkpoint_scope":"See checkpoint-recovery-summary.json and selected-checkpoint-evidence for current receiver filename, preimage path,1348-byte manifest reference and connected pins.",
+"conclusion":"No exact receiver, template or canonical manifest bytes recovered by this producer analysis. B remains open."}
+(root/"producer-chain.json").write_text(json.dumps(report,ensure_ascii=False,indent=2)+"\n")
+md=["# Цепочка current5e producer → fixture artifacts","","## Оглавление","","1. [Вывод](#вывод)","2. [Первичные данные](#первичные-данные)","3. [Сериализация и строки edits](#сериализация-и-строки-edits)","4. [Граница результата](#граница-результата)","","## Вывод","","§b-go-main-hold-current5e-stage-v1.py§ содержит исходный XZ+base64 JSON из 11 строк byte edits. Это производитель current5e fixture; он не производит искомый canonical manifest e74ff и не заменяет production receiver.","","## Первичные данные",""]
+for p in report["primary_sources"]:
+ md.append("- §"+p["path"]+"§: "+str(p.get("bytes",p.get("capture_bytes")))+" B, SHA-256 §"+p.get("sha256",p.get("capture_sha256"))+"§. "+p["capture_rule"])
+md.extend(["","Опубликованная byte-опись: "+source_url,"","## Сериализация и строки edits","",f"Строка Python → standard base64 → XZ ({len(compressed)} B, SHA-256 §{sha(compressed)}§) → JSON ({len(decoded)} B, SHA-256 §{sha(decoded)}§). Producer не запускался. JSON изучен как данные; replacement strings кодируются UTF-8 и вставляются по явным смещениям.","","| № | Относительный путь | Before B / SHA-256 | After B / SHA-256 | Edits |","|---:|---|---|---|---:|"])
+for i,r in enumerate(pins,1):
+ md.append(f"| {i} | §{r['relative']}§ | {r['before_bytes']} / §{r['before_sha256']}§ | {r['after_bytes']} / §{r['after_sha256']}§ | {r['edit_count']} |")
+md.extend(["","## Граница результата","","Fixture manifest: schema §named-owner-go-branch-fixtures-v1§, 13691 B, SHA-256 §079e7c6f035c9708115d46b11e0f16de77a232c39df36c08823dfc531cb18a3b§. Его preimage: 13163 B, SHA-256 §77ab1fac563e733f86e5e9d4f80a399270d43aaafcf645e07e7a7f18c6bd9fc3§; строка manifest содержит 15 edits. Они не идентифицируют 1348-byte canonical-source-manifest-v5.","","Current5e manifest связывает main5e и physical2b с исходным контейнером §{DONOR_WORKSPACE}/b-full-route-successor-candidate-v1/candidate/canonical-source/controller/§. Поля §production_run_executed§ и §production_physical_receiver_executed§ остаются false; методы fixtures синтетические.","","Сохранённый native content search был ограничен временем и не завершил полный обход. Нулевой результат такого запроса не доказывает отсутствие. Raw JSON сохраняет исходный запуск; конечный raw snapshot в текущем store не сохранился. Новые remote чтения ради отчёта не проводились.","","Точный receiver/template/canonical manifest здесь не восстановлен; блокер B остаётся открытым."])
+(root/"producer-chain.md").write_text(("\n".join(md)+"\n").replace("§",chr(96)))
+print(json.dumps({"producer_payload":{"xz_bytes":len(compressed),"xz_sha256":sha(compressed),"decoded_bytes":len(decoded),"decoded_sha256":sha(decoded),"rows":len(rows)},"fixture_manifest_pin_verified":True,"runner_pin_verified":True,"paths":[str(root/"producer-chain.json"),str(root/"producer-chain.md"),str(root/"producer-chain-raw.json"),str(root/"producer-stage-decoded-edits.json")],"row_pins":pins},indent=2))

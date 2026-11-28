@@ -1,0 +1,644 @@
+{
+  "schema": "b-original-failed-physical-receiving-evidence-v1",
+  "observed_date_utc": "2026-11-26",
+  "scope": {
+    "purpose": "Two negative native probes of the existing original-owner physical receiving path.",
+    "focused_test": "TestCanonicalSuccessorNativeControlRetainsOriginalFiles",
+    "controller_profile": "focused",
+    "runtime_adapter_enabled": false,
+    "qualification_passed": false,
+    "full_standard_gate": "NOT_RUN",
+    "full_tagged_api_cli_gate": "NOT_RUN",
+    "historical_v1_fail_unknown_reclassified": false,
+    "raw_capture_content_read": false,
+    "raw_capture_rehash_performed": false,
+    "claim_limit": "Fixed-source observed debug process chain, original worker/handle settlement, and preserved negative verdicts; no universal descendant-containment claim."
+  },
+  "source": {
+    "commit": "e66f5c6fab7da2a2eff16ff1f0891991ca1a839c",
+    "tree": "4df69e99dca3f808b26e6a5bf7721bdd0ba3a91c",
+    "composition_pr": 664,
+    "product_source_matches_test_source": true
+  },
+  "products": [
+    {
+      "role": "P1 native test Product",
+      "build_id": "3dcc15812aa4462d88b0c054aaf7b65e",
+      "source_commit": "e66f5c6fab7da2a2eff16ff1f0891991ca1a839c",
+      "source_tree": "4df69e99dca3f808b26e6a5bf7721bdd0ba3a91c",
+      "builder_sha256": "36f1ed1da7e6a961b50356a156cf5fc29c532593f3f0dcfb9b1f5cb6dbf59ada",
+      "same_dot_sourced_build": true,
+      "test_only": true,
+      "build_tags": [
+        "test_state_path_env"
+      ],
+      "build_flags": [
+        "-TestStateIsolatedProduct"
+      ],
+      "artifacts": [
+        {
+          "role": "canonical_entry",
+          "bytes": 10361344,
+          "sha256": "2511a13a02b59117aa1b56764d3352b5759b2e847dce041f2a259851efabe412"
+        },
+        {
+          "role": "product",
+          "bytes": 49439232,
+          "sha256": "7f4ca997f14e10dbe2dc0280f23f18cc54bbe79aacf43e9e097fd48e7a83cc6c"
+        },
+        {
+          "role": "product_identity",
+          "bytes": 295,
+          "sha256": "e65b810cc914b3e93c34921a8d2389fbfe1cf005cf338fa2644ba45a7ee5d85c"
+        },
+        {
+          "role": "fixture",
+          "bytes": 550,
+          "sha256": "ac7ce5323b1a7eedbf74bf86c67758c8ac0b8b406f02aa8c8f961a6733c50523"
+        }
+      ]
+    },
+    {
+      "role": "P2 canonical command test Product",
+      "build_id": "8ee92280e70c41e287fbc7eb16c677d5",
+      "source_commit": "e66f5c6fab7da2a2eff16ff1f0891991ca1a839c",
+      "source_tree": "4df69e99dca3f808b26e6a5bf7721bdd0ba3a91c",
+      "builder_sha256": "36f1ed1da7e6a961b50356a156cf5fc29c532593f3f0dcfb9b1f5cb6dbf59ada",
+      "same_dot_sourced_build": true,
+      "test_only": true,
+      "build_tags": [
+        "test_state_path_env"
+      ],
+      "build_flags": [
+        "-TestStateIsolatedProduct",
+        "-CanonicalEntryCommandTestProduct"
+      ],
+      "artifacts": [
+        {
+          "role": "canonical_entry",
+          "bytes": 10361344,
+          "sha256": "3d2eaed0e8ce2740c082533ee13cf78b15ff0ce0388f3d6f4f32cc4085f64e8a"
+        },
+        {
+          "role": "product",
+          "bytes": 65693184,
+          "sha256": "808561f5adffc6778aeee3d8f8de1f784a125261188f7c6e93e856de4e09c951"
+        },
+        {
+          "role": "product_identity",
+          "bytes": 295,
+          "sha256": "6e68e01d56e597d41b8880528f8de4527372b313be367eef5612d614c432f9cb"
+        },
+        {
+          "role": "fixture",
+          "bytes": 509,
+          "sha256": "408a32eec789cd0221533b46a5df6297240bd789b89cb64b658cf0ac55f70f87"
+        }
+      ]
+    }
+  ],
+  "inputs": [
+    {
+      "role": "launcher",
+      "sha256": "16c7d70eb74ca6bc8601dbd14f84d7456d6f915e42e2a8e88f572681bf0a1fe0"
+    },
+    {
+      "role": "runner",
+      "sha256": "76a2da1abcf9dd4c921a2ffa6a15dffcaba3f3449f501be279209a56cee75350"
+    },
+    {
+      "role": "reused_named_receivers",
+      "sha256": "93ad150b9cd8db4afed532af7160369c419ad32e64cebf44de7c83828c441d30"
+    },
+    {
+      "role": "original_owner_guard",
+      "sha256": "b24d813efbc133cff650b46f94cb088b9343a686b3bb4f2870322addd4836d1a"
+    },
+    {
+      "role": "disabled_runtime_adapter",
+      "sha256": "2248b54f038c07df0780e399446b6ad1c309e6da290b091486c7bc0041aec284"
+    },
+    {
+      "role": "canonical_receiver",
+      "sha256": "6ad13e7c57e604111552fd553f10a66a174c9ba9b96dc37484dfba071a9bf2a0"
+    },
+    {
+      "role": "canonical_plan",
+      "sha256": "e69dfd9b601a0f4058ec8ceb22402248b3468bc20d77f35a067cde95aba7ef94"
+    },
+    {
+      "role": "controller",
+      "sha256": "8757fd26f1ae48d39fdb6b8f56f5714546e4cf78ce1d26bf997aac49519dbc0c"
+    },
+    {
+      "role": "isolated_python_interpreter",
+      "sha256": "d4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd"
+    },
+    {
+      "role": "run_return_binding",
+      "sha256": "016953f2cd06d9baeeb55d4a149d031aaa4095093548c8f919ab612f76408167"
+    },
+    {
+      "role": "stdout_reader_binding",
+      "sha256": "9cc30ca7cf37acfc3a3b65f410152007971bb2ead5bc66135d3d929684c9aa83"
+    }
+  ],
+  "ownership": {
+    "outer_original_process_retained": true,
+    "same_process_start_object_waited": true,
+    "no_new_job_or_tree_wait": true,
+    "same_original_controller_retained": true,
+    "gate_prebound_before_native_allocation": true,
+    "gate_released_by_original_controller_only_after_frozen_failure_published": true,
+    "parent_released_gate": false,
+    "new_process_or_pid_lookup_used_as_substitute_owner": false,
+    "metadata_reader_shared_once_between_normal_and_failed_receiving": true,
+    "metadata_read_or_close_failure_retry_allowed": false
+  },
+  "modes": [
+    {
+      "mode": "run-return-v1",
+      "invocation_count": 1,
+      "fixture_status": "PASS",
+      "launch": {
+        "seconds": 120.21119070000714,
+        "exit_code": 0,
+        "deadline_exceeded": false,
+        "terminal_exit_received": true,
+        "parent_capture_files_closed": true
+      },
+      "frozen_command": {
+        "status": "FAIL",
+        "quiescence_state": "unknown",
+        "exit_code": 1,
+        "captures_measured": false,
+        "completion_receiving": null,
+        "seconds": 119.892
+      },
+      "frozen_original_controller": {
+        "qualification_passed": false,
+        "composite_complete": false,
+        "custody_retained": true,
+        "captures_finalized": false,
+        "failure": "*errors.joinError: contained process context failed\ncomposite original strict/debug/control receiving incomplete",
+        "work_deadline": "2026-11-26T13:58:01.3869524Z",
+        "cleanup_deadline": "2026-11-26T13:58:11.3869524Z"
+      },
+      "separate_physical_receiving": {
+        "state": "CLOSED",
+        "seconds": 0.016587299993261695,
+        "deadline_exceeded": false,
+        "receiving_error": null,
+        "original_command_states_unchanged": true,
+        "physical_complete": true,
+        "outer_return_received": true,
+        "outer_resources_finalized": true,
+        "root_wait_known": true,
+        "root_exit_code": 1,
+        "control_joined": true,
+        "control_stopped": true,
+        "stdout_sink_closed": true,
+        "stderr_sink_closed": true,
+        "qualification_passed": false,
+        "capture_access_issued": false,
+        "new_commands_permitted": false,
+        "source_or_cache_access_issued": false,
+        "qualification_deadlines_extended": false,
+        "original_result_preserved": true,
+        "outer_native": {
+          "NoChildKnown": false,
+          "RootWaitKnown": true,
+          "RootExitCode": 1,
+          "TerminalAction": "request-succeeded",
+          "MembersExited": true,
+          "AccountingKnown": true,
+          "InitialTotal": 1,
+          "FinalActive": 0,
+          "HandlesClosed": true,
+          "Error": null
+        },
+        "outer_io": {
+          "Stdin": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "StdoutRead": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "StdoutWrite": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "StderrRead": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "StderrWrite": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "Stdout": {
+            "WorkerStarted": true,
+            "WorkerComplete": true,
+            "EOF": true,
+            "Bytes": 287,
+            "Limit": 16777216,
+            "LimitExceeded": false,
+            "Error": null
+          },
+          "Stderr": {
+            "WorkerStarted": true,
+            "WorkerComplete": true,
+            "EOF": true,
+            "Bytes": 0,
+            "Limit": 16777216,
+            "LimitExceeded": false,
+            "Error": null
+          }
+        },
+        "attempted_case_count": 1,
+        "unattempted_case_count": 1,
+        "cases": [
+          {
+            "test": "TestCanonicalSuccessorNativeControlRetainsOriginalFiles",
+            "attempted": true,
+            "original_return_received": true,
+            "original_owner_matched": true,
+            "physical_complete": true,
+            "stdin_closed": true,
+            "native": {
+              "NativeComplete": true,
+              "IOComplete": true,
+              "Complete": true,
+              "Unknown": false,
+              "Failure": "exit status 1",
+              "RootWait": {
+                "Returned": true,
+                "Known": true,
+                "ExitCode": 1,
+                "Error": "exit status 1"
+              },
+              "Stdout": {
+                "WorkerReturned": true,
+                "EOF": true,
+                "WriterCloseAttempted": true,
+                "WriterClosed": true,
+                "ReaderClosed": true,
+                "Bytes": 2286,
+                "Overflow": false,
+                "ReadError": "",
+                "ReaderCloseError": "",
+                "WriterCloseError": ""
+              },
+              "Stderr": {
+                "WorkerReturned": true,
+                "EOF": true,
+                "WriterCloseAttempted": true,
+                "WriterClosed": true,
+                "ReaderClosed": true,
+                "Bytes": 0,
+                "Overflow": false,
+                "ReadError": "",
+                "ReaderCloseError": "",
+                "WriterCloseError": ""
+              },
+              "CreatingThreadClosed": true,
+              "ImagePinsClosed": true,
+              "PendingEvent": null,
+              "ObservedEventCount": 23722
+            }
+          }
+        ]
+      },
+      "gate": {
+        "mode": "run-return",
+        "bound_before_native_allocation": true,
+        "original_owner_matched": true,
+        "reached_count": 1,
+        "released_count": 1,
+        "passed_count": 1,
+        "reached_utc": "2026-11-26T13:57:43.5581778Z",
+        "released_utc": "2026-11-26T13:57:55.7328728Z",
+        "passed_utc": "2026-11-26T13:57:55.733407Z",
+        "reached_elapsed_ns": 106875948700,
+        "released_elapsed_ns": 119050371000,
+        "passed_elapsed_ns": 119050905200,
+        "canonical_plan_sha256": "e69dfd9b601a0f4058ec8ceb22402248b3468bc20d77f35a067cde95aba7ef94",
+        "source_commit": "e66f5c6fab7da2a2eff16ff1f0891991ca1a839c",
+        "focused_case": "TestCanonicalSuccessorNativeControlRetainsOriginalFiles",
+        "original_result_published": true,
+        "original_result_preserved": true,
+        "original_failure": "*errors.joinError: contained process context failed\ncomposite original strict/debug/control receiving incomplete",
+        "original_exit_code": 1,
+        "qualification_deadlines_extended": false,
+        "qualification_passed": false
+      },
+      "original_metadata_hashes": [
+        {
+          "evidence_name": "run-return-v1/launch.json",
+          "bytes": 2200,
+          "sha256": "10763f3d9cbb79205de4bdb5ec10b5d7a1be991630fc3cc07ea2cf0dc006f9de"
+        },
+        {
+          "evidence_name": "run-return-v1/outer-launch-original.json",
+          "bytes": 190,
+          "sha256": "86f78ec05f5947cb601307a72cbd7a21bc1ef290c4a172fe42664e1d820890f6"
+        },
+        {
+          "evidence_name": "run-return-v1/run/receipt.json",
+          "bytes": 4512,
+          "sha256": "3ccf30e36c1bd216a13b4f01240bd600e750c9402fc84667db12aa31ad4e346a"
+        },
+        {
+          "evidence_name": "run-return-v1/run/command-receipt.json",
+          "bytes": 5609,
+          "sha256": "4da16a34b4b9b07a19f3b005566551a62d2c301bb07dd5cfda2d1c008d34e969"
+        },
+        {
+          "evidence_name": "run-return-v1/run/failed-original-physical-closure.json",
+          "bytes": 1694,
+          "sha256": "b9d3fed540ab13c22decf41a9f1145885715ae080f5764e13dc21082afa9b734"
+        },
+        {
+          "evidence_name": "run-return-v1/controller/result.json",
+          "bytes": 13543,
+          "sha256": "ccbaed600e80001657337f29f980a1f00c039f551b77d3f8aabd914df2de6e2f"
+        },
+        {
+          "evidence_name": "run-return-v1/controller/failed-physical-closure.json",
+          "bytes": 1612002,
+          "sha256": "b939d0fad2392444862c3050a447ceb33fe892917007afa6d8eec5afa23bcfe4"
+        },
+        {
+          "evidence_name": "run-return-v1/controller/fixture-gate.json",
+          "bytes": 1150,
+          "sha256": "e466c6dfb65eec6caf809e289f9d8368a08398505e6e9c5e06fec26c842cd2fa"
+        },
+        {
+          "evidence_name": "run-return-v1/controller/fixture-gate-release.json",
+          "bytes": 1112,
+          "sha256": "9d242a4bb42776ce508f7c4f582fc84e91329d451c1790ce01dad5a18693d869"
+        }
+      ]
+    },
+    {
+      "mode": "stdout-reader-v1",
+      "invocation_count": 1,
+      "fixture_status": "PASS",
+      "launch": {
+        "seconds": 124.98160389997065,
+        "exit_code": 0,
+        "deadline_exceeded": false,
+        "terminal_exit_received": true,
+        "parent_capture_files_closed": true
+      },
+      "frozen_command": {
+        "status": "FAIL",
+        "quiescence_state": "unknown",
+        "exit_code": 1,
+        "captures_measured": false,
+        "completion_receiving": null,
+        "seconds": 124.113
+      },
+      "frozen_original_controller": {
+        "qualification_passed": false,
+        "composite_complete": false,
+        "custody_retained": true,
+        "captures_finalized": false,
+        "failure": "*errors.joinError: contained process context failed\ncomposite original strict/debug/control receiving incomplete",
+        "work_deadline": "2026-11-26T14:01:26.9490908Z",
+        "cleanup_deadline": "2026-11-26T14:01:36.9490908Z"
+      },
+      "separate_physical_receiving": {
+        "state": "CLOSED",
+        "seconds": 0.019233200000599027,
+        "deadline_exceeded": false,
+        "receiving_error": null,
+        "original_command_states_unchanged": true,
+        "physical_complete": true,
+        "outer_return_received": true,
+        "outer_resources_finalized": true,
+        "root_wait_known": true,
+        "root_exit_code": 1,
+        "control_joined": true,
+        "control_stopped": true,
+        "stdout_sink_closed": true,
+        "stderr_sink_closed": true,
+        "qualification_passed": false,
+        "capture_access_issued": false,
+        "new_commands_permitted": false,
+        "source_or_cache_access_issued": false,
+        "qualification_deadlines_extended": false,
+        "original_result_preserved": true,
+        "outer_native": {
+          "NoChildKnown": false,
+          "RootWaitKnown": true,
+          "RootExitCode": 1,
+          "TerminalAction": "request-succeeded",
+          "MembersExited": true,
+          "AccountingKnown": true,
+          "InitialTotal": 1,
+          "FinalActive": 0,
+          "HandlesClosed": true,
+          "Error": null
+        },
+        "outer_io": {
+          "Stdin": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "StdoutRead": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "StdoutWrite": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "StderrRead": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "StderrWrite": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "Stdout": {
+            "WorkerStarted": true,
+            "WorkerComplete": true,
+            "EOF": true,
+            "Bytes": 213,
+            "Limit": 16777216,
+            "LimitExceeded": false,
+            "Error": null
+          },
+          "Stderr": {
+            "WorkerStarted": true,
+            "WorkerComplete": true,
+            "EOF": true,
+            "Bytes": 0,
+            "Limit": 16777216,
+            "LimitExceeded": false,
+            "Error": null
+          }
+        },
+        "attempted_case_count": 1,
+        "unattempted_case_count": 1,
+        "cases": [
+          {
+            "test": "TestCanonicalSuccessorNativeControlRetainsOriginalFiles",
+            "attempted": true,
+            "original_return_received": true,
+            "original_owner_matched": true,
+            "physical_complete": true,
+            "stdin_closed": true,
+            "native": {
+              "NativeComplete": false,
+              "IOComplete": false,
+              "Complete": false,
+              "Unknown": true,
+              "Failure": "context deadline exceeded\nexit status 87\nowned capture worker did not join by original cleanup deadline",
+              "RootWait": {
+                "Returned": true,
+                "Known": true,
+                "ExitCode": 87,
+                "Error": "exit status 87"
+              },
+              "Stdout": {
+                "WorkerReturned": true,
+                "EOF": true,
+                "WriterCloseAttempted": true,
+                "WriterClosed": true,
+                "ReaderClosed": true,
+                "Bytes": 1388,
+                "Overflow": false,
+                "ReadError": "",
+                "ReaderCloseError": "",
+                "WriterCloseError": ""
+              },
+              "Stderr": {
+                "WorkerReturned": true,
+                "EOF": true,
+                "WriterCloseAttempted": true,
+                "WriterClosed": true,
+                "ReaderClosed": true,
+                "Bytes": 0,
+                "Overflow": false,
+                "ReadError": "",
+                "ReaderCloseError": "",
+                "WriterCloseError": ""
+              },
+              "CreatingThreadClosed": true,
+              "ImagePinsClosed": true,
+              "PendingEvent": null,
+              "ObservedEventCount": 16002
+            }
+          }
+        ]
+      },
+      "gate": {
+        "mode": "stdout-reader",
+        "bound_before_native_allocation": true,
+        "original_owner_matched": true,
+        "reached_count": 1,
+        "released_count": 1,
+        "passed_count": 1,
+        "reached_utc": "2026-11-26T14:01:11.7005767Z",
+        "released_utc": "2026-11-26T14:01:22.2014478Z",
+        "passed_utc": "2026-11-26T14:01:22.2014478Z",
+        "reached_elapsed_ns": 109031640200,
+        "released_elapsed_ns": 119532276100,
+        "passed_elapsed_ns": 119532276100,
+        "canonical_plan_sha256": "e69dfd9b601a0f4058ec8ceb22402248b3468bc20d77f35a067cde95aba7ef94",
+        "source_commit": "e66f5c6fab7da2a2eff16ff1f0891991ca1a839c",
+        "focused_case": "TestCanonicalSuccessorNativeControlRetainsOriginalFiles",
+        "original_result_published": true,
+        "original_result_preserved": true,
+        "original_failure": "*errors.joinError: contained process context failed\ncomposite original strict/debug/control receiving incomplete",
+        "original_exit_code": 1,
+        "qualification_deadlines_extended": false,
+        "qualification_passed": false
+      },
+      "original_metadata_hashes": [
+        {
+          "evidence_name": "stdout-reader-v1/launch.json",
+          "bytes": 2209,
+          "sha256": "9c1d2ba0a54ebd2aa7ff0bb239f93ea07f73974fa1952be7dd1aeb3d5aaa40fc"
+        },
+        {
+          "evidence_name": "stdout-reader-v1/outer-launch-original.json",
+          "bytes": 193,
+          "sha256": "137c2e43d1c4969d2fe6d850d81bd584e3fc88d40978a6b9a40c865a22c26cc5"
+        },
+        {
+          "evidence_name": "stdout-reader-v1/run/receipt.json",
+          "bytes": 4525,
+          "sha256": "c8746ac6df7de3d0e4da92d000b71cd8da4440f923d81f6184ac3c6470fa5679"
+        },
+        {
+          "evidence_name": "stdout-reader-v1/run/command-receipt.json",
+          "bytes": 5625,
+          "sha256": "a0404e2c54098e665d0c8fc9ca8cb6cc330a5dfc1cb6be6311d00e0bed9ce99b"
+        },
+        {
+          "evidence_name": "stdout-reader-v1/run/failed-original-physical-closure.json",
+          "bytes": 1697,
+          "sha256": "3d2b4a2888cc40858c70d1c141d6aac58d964b563dfc7ec9337307101b7461a1"
+        },
+        {
+          "evidence_name": "stdout-reader-v1/controller/result.json",
+          "bytes": 1087143,
+          "sha256": "699d93864330025effe4c1afa9b42675aa324478c8c8d46e34e5a99f03e2126b"
+        },
+        {
+          "evidence_name": "stdout-reader-v1/controller/failed-physical-closure.json",
+          "bytes": 1079393,
+          "sha256": "f75160427112d7aff9f1c5dca7f57cbc39844439b9cf0ea4c74de6406c9eacaa"
+        },
+        {
+          "evidence_name": "stdout-reader-v1/controller/fixture-gate.json",
+          "bytes": 1157,
+          "sha256": "09807764a56c31a394338fe87636422db7b7b2f43a885bcb5ea39c72f429f571"
+        },
+        {
+          "evidence_name": "stdout-reader-v1/controller/fixture-gate-release.json",
+          "bytes": 1118,
+          "sha256": "405db37f4d66ea36a07ebfab69aca9e4bf139dbc4421b2e1d020f020eada78ef"
+        }
+      ]
+    }
+  ],
+  "remaining": {
+    "happy_native_qualification": "FAIL",
+    "happy_known_defect": "Abort repeats role observation in the fixed exit budget after accepted binding; separate candidate was prepared.",
+    "bind_control": "Read-status-response timeout remains independent; no deadline change or qualification claim.",
+    "other_native_negative_cases": "Metadata read failure after closure, frozen outer HOLD and first-close refusal were not exercised by these two probes.",
+    "full_runtime_composition": "Disabled; actual complete runtime composition still requires a fresh reviewed binding.",
+    "mandatory_full_gates": [
+      "go test -count=1 -timeout 5m ./...",
+      "go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/"
+    ]
+  }
+}
+

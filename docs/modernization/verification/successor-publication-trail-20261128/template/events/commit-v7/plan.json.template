@@ -1,0 +1,77 @@
+{
+  "run": "runs/cache-acceptance-commit-20261128-v7",
+  "source": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128",
+  "head": "33eaf8af8fc46cb231f48c70f4775922393245b1",
+  "environment": {
+    "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_NO_REPLACE_OBJECTS": "1",
+    "GIT_NO_LAZY_FETCH": "1"
+  },
+  "observed_files": [
+    "internal/cli/upgrade_gui_qualified_fixture_windows_test.go",
+    "internal/cli/windows_canonical_entry_gui_native_replay_windows_test.go",
+    "internal/cli/supervisor_launch_successor_runtime_windows_test.go",
+    "internal/cli/windows_product_preflight_original_windows_test.go",
+    "internal/cli/attach_client_real_supervisor_windows_test.go",
+    "internal/process/run_strictly_contained_windows_test.go",
+    "internal/process/jobobject_windows_test.go"
+  ],
+  "steps": [
+    {
+      "name": "reviewed-parent",
+      "argv": [
+        "git",
+        "show",
+        "-s",
+        "--format=%H%n%P"
+      ],
+      "timeout": 30,
+      "stdout_contains": [
+        "33eaf8af8fc46cb231f48c70f4775922393245b1",
+        "06f77b3856e43ec5e8e3736123aedb896ae58817"
+      ]
+    },
+    {
+      "name": "reviewed-staged-tree",
+      "argv": [
+        "git",
+        "write-tree"
+      ],
+      "timeout": 30,
+      "stdout_contains": [
+        "f68f7584dba7744e7607b07f615758f3ff633f54"
+      ]
+    },
+    {
+      "name": "commit-reviewed-successor-tests",
+      "argv": [
+        "git",
+        "commit",
+        "-m",
+        "test: repair full-suite fixture contracts and tagged CLI build"
+      ],
+      "timeout": 60
+    },
+    {
+      "name": "committed-identity",
+      "argv": [
+        "git",
+        "show",
+        "-s",
+        "--format=%H%n%T%n%P"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "committed-worktree-state",
+      "argv": [
+        "git",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all"
+      ],
+      "timeout": 30
+    }
+  ]
+}

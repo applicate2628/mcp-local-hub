@@ -1,0 +1,34 @@
+{
+    "schema":  "root-checkpoint-data-replay-v1",
+    "status":  "PASS",
+    "capsules_verified":  6,
+    "artifact_files_verified":  608,
+    "preparation_originals":  133,
+    "new_capture_originals":  333,
+    "prior_full_originals":  20,
+    "prior_api_originals":  4,
+    "historical_commands":  283,
+    "historical_captures":  566,
+    "historical_package_receipts":  65,
+    "historical_native_owner_receipts":  130,
+    "historical_qualification":  "FAIL/CLOSED",
+    "native_or_test_execution":  false,
+    "qualification_inherited":  false,
+    "receipt_files":  [
+                          {
+                              "file":  "root-artifact-verification.json",
+                              "bytes":  2651,
+                              "sha256":  "268eb39883be5c649c2a43f919ce8ebc6f59ddb07d16c6991043bb110ff9e275"
+                          },
+                          {
+                              "file":  "root-full130-owner-verification.json",
+                              "bytes":  42351,
+                              "sha256":  "dc3659fbbafea76b3df8cb672d33b5323e19a37a399774a9da87e82e2de48f9c"
+                          },
+                          {
+                              "file":  "root-full566-verification.json",
+                              "bytes":  778,
+                              "sha256":  "2297a5b987c60244bd1c2c82f7d4253c1301637ee7e4359c8e24a06e75c78a55"
+                          }
+                      ]
+}

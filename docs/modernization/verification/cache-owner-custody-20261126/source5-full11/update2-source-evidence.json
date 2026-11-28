@@ -1,0 +1,342 @@
+{
+  "schema": "source5-update2-publication-draft-v1",
+  "status": "PASS_SOURCE_UPDATE_ONLY",
+  "publication_status": "LOCAL_DRAFT_NOT_PUBLISHED",
+  "source": {
+    "repository": "<TASK>/native-consumer-source-v5",
+    "source_commit": "001648f44bf6ef0191f1e21d92f1aecf2a2a3022",
+    "parent_product_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+    "tracked_files": 3508,
+    "changed_test_files": 13,
+    "unchanged_files": 3495,
+    "unchanged_non_test_files": 2012,
+    "non_test_classification": "path does not end in _test.go",
+    "added_paths": 0,
+    "deleted_paths": 0,
+    "before_snapshot_sha256": "671d60c8f1e96de28eb616b9e7aeacccae50d00359ab27a59418bea61648ee16",
+    "after_snapshot_sha256": "08bfb69180f70b6f2cfd2c46429c0f4047e449f6bb4508501151d17578a12e16",
+    "changed_paths": [
+      "internal/api/adopt_codex_transport_test.go",
+      "internal/api/adopt_deadopt_lifecycle_test.go",
+      "internal/api/adopt_h4_summary_signal_test.go",
+      "internal/api/adopt_lease_namespace_windows_test.go",
+      "internal/api/adopt_lease_owner_test.go",
+      "internal/api/adopt_mcpcompat_test.go",
+      "internal/api/adopt_project_plan_test.go",
+      "internal/api/adopt_provider_working_directory_windows_test.go",
+      "internal/api/adopt_test.go",
+      "internal/api/main_test.go",
+      "internal/cli/adopt_mcpcompat_test.go",
+      "internal/cli/adopt_test.go",
+      "internal/cli/gui_force_test.go"
+    ],
+    "working_tree_clean_received": true,
+    "new_private_commit_issued": true,
+    "identity_is_public_pr_head": false
+  },
+  "execution": {
+    "parent_seconds": 19.04218089999631,
+    "original_parent_exit_code": 0,
+    "parent_original_and_two_captures_closed": true,
+    "native_commands_closed": 10,
+    "io_streams_eof_and_closed": 20,
+    "original_reader_objects_joined": 20,
+    "per_command_work_budget_seconds": 30,
+    "per_command_cleanup_budget_seconds": 10,
+    "parent_diagnostic_seconds": 600,
+    "native_data_root_rehashed_raw_captures": 20,
+    "native_data_root_rehashed_source_files": 3508,
+    "raw_files_reread_by_draft_author": 0,
+    "command_rows": [
+      {
+        "name": "head-before",
+        "argv_suffix_after_fixed_prefix": [
+          "rev-parse",
+          "--verify",
+          "HEAD"
+        ],
+        "seconds": 0.09251729998504743,
+        "exit_code": 0,
+        "native_closed": true,
+        "original_readers_joined": 2
+      },
+      {
+        "name": "files-before",
+        "argv_suffix_after_fixed_prefix": [
+          "ls-files",
+          "--cached",
+          "-z"
+        ],
+        "seconds": 0.22113610000815243,
+        "exit_code": 0,
+        "native_closed": true,
+        "original_readers_joined": 2
+      },
+      {
+        "name": "status-before",
+        "argv_suffix_after_fixed_prefix": [
+          "status",
+          "--porcelain=v1",
+          "--untracked-files=all",
+          "-z"
+        ],
+        "seconds": 0.8311935999663547,
+        "exit_code": 0,
+        "native_closed": true,
+        "original_readers_joined": 2
+      },
+      {
+        "name": "apply-check",
+        "argv_suffix_after_fixed_prefix": [
+          "apply",
+          "--check",
+          "--index",
+          "<PATCH>"
+        ],
+        "seconds": 0.14910599996801466,
+        "exit_code": 0,
+        "native_closed": true,
+        "original_readers_joined": 2
+      },
+      {
+        "name": "apply-test-delta",
+        "argv_suffix_after_fixed_prefix": [
+          "apply",
+          "--index",
+          "<PATCH>"
+        ],
+        "seconds": 0.4152624999987893,
+        "exit_code": 0,
+        "native_closed": true,
+        "original_readers_joined": 2
+      },
+      {
+        "name": "staged-paths",
+        "argv_suffix_after_fixed_prefix": [
+          "diff",
+          "--cached",
+          "--name-status",
+          "-z"
+        ],
+        "seconds": 0.3275281999958679,
+        "exit_code": 0,
+        "native_closed": true,
+        "original_readers_joined": 2
+      },
+      {
+        "name": "private-commit",
+        "argv_suffix_after_fixed_prefix": [
+          "-c",
+          "user.name=ChatGPT",
+          "-c",
+          "user.email=chatgpt@local.invalid",
+          "commit",
+          "--no-gpg-sign",
+          "-m",
+          "test: align native regression fixture boundaries"
+        ],
+        "seconds": 0.5599575999658555,
+        "exit_code": 0,
+        "native_closed": true,
+        "original_readers_joined": 2
+      },
+      {
+        "name": "candidate-parents",
+        "argv_suffix_after_fixed_prefix": [
+          "rev-list",
+          "--parents",
+          "--max-count=1",
+          "HEAD"
+        ],
+        "seconds": 0.12936429999535903,
+        "exit_code": 0,
+        "native_closed": true,
+        "original_readers_joined": 2
+      },
+      {
+        "name": "files-after",
+        "argv_suffix_after_fixed_prefix": [
+          "ls-files",
+          "--cached",
+          "-z"
+        ],
+        "seconds": 0.20524769998155534,
+        "exit_code": 0,
+        "native_closed": true,
+        "original_readers_joined": 2
+      },
+      {
+        "name": "status-after",
+        "argv_suffix_after_fixed_prefix": [
+          "status",
+          "--porcelain=v1",
+          "--untracked-files=all",
+          "-z"
+        ],
+        "seconds": 0.21940349997021258,
+        "exit_code": 0,
+        "native_closed": true,
+        "original_readers_joined": 2
+      }
+    ]
+  },
+  "argv_and_plan_review": {
+    "method": "AST interpretation of literal path/argument expressions; no issuer import or execution",
+    "exact_actual_command_argv_matches_active_issuer": 10,
+    "command_order_matches_plan": true,
+    "git_prefix": [
+      "C:\\Program Files\\Git\\cmd\\git.exe",
+      "--no-optional-locks",
+      "--no-replace-objects",
+      "-c",
+      "gc.auto=0",
+      "-c",
+      "maintenance.auto=false",
+      "-c",
+      "core.autocrlf=false",
+      "-c",
+      "core.fsmonitor=false",
+      "-c",
+      "core.untrackedCache=false",
+      "-c",
+      "core.longpaths=true",
+      "-c",
+      "credential.helper=",
+      "-c",
+      "core.hooksPath=<RUN>\\empty-hooks",
+      "-C",
+      "<SOURCE>"
+    ],
+    "patch_alias": "<TASK>/test-source-update-inputs-v2/test-source.patch",
+    "python_flags": [
+      "-I",
+      "-S",
+      "-B"
+    ],
+    "same_native_owner_and_guard_pins": true,
+    "active_plan_input_count": 21,
+    "receipt_input_count_including_plan": 22,
+    "receipt_input_inventory_equals_active_issuer_and_plan": true,
+    "all_native_inputs_independently_rehashed_by_local_author": false,
+    "git_apply_check_preceded_only_apply": true,
+    "no_go_or_test_command_in_inventory": true
+  },
+  "own_review": {
+    "raw_original_hashes_match_native_pins": true,
+    "parent_original_root_bindings_exact": true,
+    "source5_base_receiving_and_preimage_bound": true,
+    "patch_and_delta_map_raw_hashes_verified": true,
+    "all_13_before_after_hash_pairs_match_complete_maps": true,
+    "embedded_maps_equal_exact_snapshot_files": true,
+    "all_2012_non_test_hashes_unchanged": true,
+    "all_10_native_and_20_io_closure_predicates": true,
+    "peer_actual_source_slice_bound_to_same_originals": true,
+    "json_parser": "Python json with arbitrary-precision integers",
+    "original_json_reserialized": false,
+    "newline_conversion_performed": false,
+    "uint64_identity_values_exported_to_projection": false,
+    "source5_prior_publication_files_unchanged": true,
+    "remote_calls_or_native_execution": false,
+    "main_plan_or_operative_files_modified": false
+  },
+  "scope": {
+    "source_access": "immutable-tracked-source-only",
+    "full_regression_pass": false,
+    "test_execution_in_source_update": false,
+    "public_pr_head_pass": false,
+    "production_source_modified": false,
+    "serena_qualification_repeated": false,
+    "native14_owner_cases_repeated": false,
+    "cache_or_cleanup_authority_issued": false,
+    "previous_source4": "CLOSED_FAIL_UNCHANGED",
+    "previous_full_v10": "FAIL_UNCHANGED",
+    "old_held_custody": "UNKNOWN_UNCHANGED"
+  },
+  "pending_separate_receiving": {
+    "rebinding_v11_by_issuer_v12": {
+      "status": "PENDING_IN_THIS_DRAFT",
+      "actual_root_sha256": null
+    },
+    "runtime14_composition_two_cases": {
+      "status": "PENDING_IN_THIS_DRAFT",
+      "actual_root_sha256": null
+    },
+    "literal_final_v11": {
+      "status": "PENDING_IN_THIS_DRAFT",
+      "actual_parent_sha256": null,
+      "actual_receipt_sha256": null
+    }
+  },
+  "evidence": {
+    "parent.json": {
+      "path": "recovery/source-v5-update-v2-root/actual/parent.json",
+      "sha256": "deb49a9aec43da26b4b5903e8797d2c6646f9b6d4d45df072d9dbfebd76c239a",
+      "bytes": 3528
+    },
+    "receipt.json": {
+      "path": "recovery/source-v5-update-v2-root/actual/receipt.json",
+      "sha256": "0ee814004ae40631bfc24da8e1afd996094defeac036f8eaafcd785e44d00818",
+      "bytes": 947460
+    },
+    "root-receiving.json": {
+      "path": "recovery/source-v5-update-v2-root/actual/root-receiving.json",
+      "sha256": "6ab9ba365a968f27d5f30d85e6074df16158912ce8e22c9b215f9c397fce33c1",
+      "bytes": 3574
+    },
+    "source-before.json": {
+      "path": "recovery/source-v5-update-v2-root/actual/source-before.json",
+      "sha256": "671d60c8f1e96de28eb616b9e7aeacccae50d00359ab27a59418bea61648ee16",
+      "bytes": 423970
+    },
+    "source-after.json": {
+      "path": "recovery/source-v5-update-v2-root/actual/source-after.json",
+      "sha256": "08bfb69180f70b6f2cfd2c46429c0f4047e449f6bb4508501151d17578a12e16",
+      "bytes": 423970
+    },
+    "root-review.json": {
+      "path": "recovery/source-v5-update-v2-root/actual/root-review.json",
+      "sha256": "f76ba6ba20caf94ca5f6769250c8807b9982080bf4673530da774413291402b6",
+      "bytes": 974
+    },
+    "source-update-plan.json": {
+      "path": "recovery/source-v5-update-v2-root/source-update-plan.json",
+      "sha256": "ab0a7e5f886e85f9d95853f4b618d750d72f8c8e484be6704662e3e7c2084680",
+      "bytes": 4811
+    },
+    "active-manifest.json": {
+      "path": "recovery/source-v5-update-v2-root/active-manifest.json",
+      "sha256": "762269ba2c8a23ac44b5d4ab95e2b55ec9f5bff28243d85b66e428e9d14d367f",
+      "bytes": 679
+    },
+    "delta-map.json": {
+      "path": "recovery/source-v5-update-v2-root/delta-map.json",
+      "sha256": "747eb2b7d2632da92912b32bc3ed2128ab11ad44c05a8cc7ddecef654eef3d92",
+      "bytes": 4417
+    },
+    "issue_test_source_update_v2.py": {
+      "path": "recovery/source-v5-update-v2-root/issue_test_source_update_v2.py",
+      "sha256": "26764b122777ef21d6756c05d1cd3131e16fb92330762675c3b0a75b2e76f7ac",
+      "bytes": 45976
+    },
+    "launch_test_source_update_v2.py": {
+      "path": "recovery/source-v5-update-v2-root/launch_test_source_update_v2.py",
+      "sha256": "0ecfc68cc2ba444eb5bc5644a634d093d007d19982c980980af9db8a4bd5d88c",
+      "bytes": 10865
+    },
+    "test-source.patch": {
+      "path": "recovery/source-v5-update-v2-root/test-source.patch",
+      "sha256": "588eebd14517a0133ff3762f1db23b866a740d4fcb1e3a18a6c4d89debfd0113",
+      "bytes": 29007
+    },
+    "peer-actual-slice": {
+      "path": "recovery/rebinding-v12-preparation/independent-activation-review.json",
+      "sha256": "c20ccaae561ce041fa9282b706784b842afbab9d87be0f81c48ed339802c71b0",
+      "bytes": 4314
+    },
+    "base-root": {
+      "path": "recovery/source-v5-preparation-v1/actual/root-receiving.json",
+      "sha256": "374f4bb359fa81b35de0f3ace9ca73c9ed88d91298f2d7d74ce219022afcba50",
+      "bytes": 3750
+    }
+  }
+}

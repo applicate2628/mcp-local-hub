@@ -1,0 +1,348 @@
+{
+  "schema": "native-start-observation-publication-20261126-v1",
+  "artifact_kind": "Derived diagnostic observation; original controls remain authoritative",
+  "status": "DIAGNOSTIC_PASS_FULL_GATE_REMAINS_FAIL",
+  "observed_utc": "2026-11-25T22:18:57.4052904Z",
+  "test_source_commit": "aca81a1743ccfbf3e10902769a9b071eb911919e",
+  "product_source_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+  "source_files_received": 3508,
+  "source_unchanged": true,
+  "donor_unchanged": true,
+  "scope": {
+    "same_closed_default_api_image": true,
+    "fresh_image_copy": true,
+    "fresh_module_and_build_caches": true,
+    "controller_timing_overlay_only": true,
+    "physical_source_edits": false,
+    "suite_executed": false,
+    "benchmark_executed": false,
+    "full_regression_executed": false,
+    "serena_qualification_repeated": false,
+    "old_unknown_reclassified": false,
+    "inventory_tests": 3523,
+    "inventory_benchmarks": 1,
+    "inventory_timeout": "1m30s",
+    "bootstrap_budget": "5s"
+  },
+  "original_controls": {
+    "parent": {
+      "sha256": "41e27780d26d6ba260b67d7aac6cfb64a0df4d21e34ab9c85c95b44b7d5f72ef",
+      "bytes": 1872
+    },
+    "result": {
+      "sha256": "d2222174494caaac597322c565a653edc4d9d8753fba6ba43ca084e9c9a33c1e",
+      "bytes": 9550
+    },
+    "receipt": {
+      "sha256": "4706297b83be2063a37f0faf17a4ca73581548a1bb20a1d56aa0db550fc59425",
+      "bytes": 17647
+    },
+    "inventory-controller-receiving": {
+      "sha256": "96bccad391229463736d9b60d92338695885829702e525ec50b6581947779c33",
+      "bytes": 1724
+    },
+    "inventory-owner": {
+      "sha256": "2973e0150f46b04e5ca80baf7825226bb93b3794bacc93f8e05e037f7e3daf3b",
+      "bytes": 9005
+    }
+  },
+  "reviewed_input_pins": {
+    "launcher_sha256": "98655dad468948f4bc95a36f49fba21280d78b1ce2fd913f86ee3692a7a294db",
+    "runner_sha256": "e70c707715c0d310c6c3c407dc9e76d6e9a64886c9b701ab658130cc3e9277b2",
+    "plan_sha256": "084401c734e736d6d9d6a7e78e1304c1ac77b95dd581ce12d05fb676fca62ab9",
+    "expected_coverage_sha256": "68282b4c52ed8153b6da83bdd601ce5de4c952e0cc19284938cbaba89d2bac58",
+    "overlay_map_sha256": "735168ead89fc2a9038e68e1d37b4b5d366834606b05d8b98ff06ad7b1c06c2d",
+    "original_api_image_sha256": "09fc5e038032943baab2163f8e19fa8e1a8fbc337d3b55d875c7458e270d39b1",
+    "observed_controller_image_sha256": "e1807522955e763f542b5045488dbfdb8d76077cc53c3be310efe65e7824392f"
+  },
+  "timing": {
+    "parent_total_seconds": 65.07437230000505,
+    "compile_seconds": 50.44215560000157,
+    "metadata_seconds": 0.10718970000743866,
+    "inventory_controller_seconds": 1.7034864999586716,
+    "createprocess_enter_ns": 0,
+    "createprocess_return_ns": 966838900,
+    "createprocess_elapsed_ns": 966838900,
+    "createprocess_elapsed_seconds": "0.9668389",
+    "createprocess_timing_boundary": "createprocess_enter before Windows CreateProcess; successful createprocess_return after c.process, c.thread and c.original assignments retaining the original process/thread handles",
+    "createprocess_api_only_measured": false,
+    "child_start_elapsed_ns": 967196000,
+    "new_owner_start_to_native_birth_seconds": "0.9858517",
+    "old_default_api_owner_start_to_native_birth_seconds": "27.9665243",
+    "old_delay_reproduced": false,
+    "old_prebirth_and_createprocess_are_different_intervals": true,
+    "monotonic_field_units": "nanoseconds; 1 second = 1000000000 ns",
+    "effective_clock_resolution_measured": false,
+    "zero_interval_means_no_resolved_difference_between_marks_not_zero_work": true
+  },
+  "startup_observation": {
+    "schema": "contained-start-observation-v1",
+    "bootstrap_checked": true,
+    "bootstrap_check_elapsed_ns": 23038000,
+    "owner_entered": true,
+    "owner_enter_elapsed_ns": 23038000,
+    "owner_returned": true,
+    "owner_return_elapsed_ns": 1088353000,
+    "contained": {
+      "core": {
+        "source": "contained-stream-core",
+        "started_utc": "2026-11-25T22:18:57.4283289Z",
+        "marks": [
+          {
+            "name": "validation_return",
+            "seen": true,
+            "elapsed_ns": 0,
+            "utc": "2026-11-25T22:18:57.4283289Z"
+          },
+          {
+            "name": "owner_factory_enter",
+            "seen": true,
+            "elapsed_ns": 0,
+            "utc": "2026-11-25T22:18:57.4283289Z"
+          },
+          {
+            "name": "owner_factory_return",
+            "seen": true,
+            "elapsed_ns": 0,
+            "utc": "2026-11-25T22:18:57.4283289Z"
+          },
+          {
+            "name": "stdout_pipe_enter",
+            "seen": true,
+            "elapsed_ns": 0,
+            "utc": "2026-11-25T22:18:57.4283289Z"
+          },
+          {
+            "name": "stdout_pipe_return",
+            "seen": true,
+            "elapsed_ns": 0,
+            "utc": "2026-11-25T22:18:57.4283289Z"
+          },
+          {
+            "name": "stderr_pipe_enter",
+            "seen": true,
+            "elapsed_ns": 0,
+            "utc": "2026-11-25T22:18:57.4283289Z"
+          },
+          {
+            "name": "stderr_pipe_return",
+            "seen": true,
+            "elapsed_ns": 0,
+            "utc": "2026-11-25T22:18:57.4283289Z"
+          },
+          {
+            "name": "stdin_null_enter",
+            "seen": true,
+            "elapsed_ns": 0,
+            "utc": "2026-11-25T22:18:57.4283289Z"
+          },
+          {
+            "name": "stdin_null_return",
+            "seen": true,
+            "elapsed_ns": 519200,
+            "utc": "2026-11-25T22:18:57.4288481Z"
+          },
+          {
+            "name": "child_start_enter",
+            "seen": true,
+            "elapsed_ns": 519200,
+            "utc": "2026-11-25T22:18:57.4288481Z"
+          },
+          {
+            "name": "child_start_return",
+            "seen": true,
+            "elapsed_ns": 967715200,
+            "utc": "2026-11-25T22:18:58.3960656Z"
+          },
+          {
+            "name": "core_settlement_snapshot_enter",
+            "seen": true,
+            "elapsed_ns": 1065315000,
+            "utc": "2026-11-25T22:18:58.4936676Z"
+          }
+        ]
+      },
+      "child": {
+        "source": "go-windows-job-at-create",
+        "started_utc": "2026-11-25T22:18:57.4288481Z",
+        "marks": [
+          {
+            "name": "job_accounting_enter",
+            "seen": true,
+            "elapsed_ns": 0,
+            "utc": "2026-11-25T22:18:57.4288481Z"
+          },
+          {
+            "name": "job_accounting_return",
+            "seen": true,
+            "elapsed_ns": 0,
+            "utc": "2026-11-25T22:18:57.4288481Z"
+          },
+          {
+            "name": "stdio_inherit_enter",
+            "seen": true,
+            "elapsed_ns": 0,
+            "utc": "2026-11-25T22:18:57.4288481Z"
+          },
+          {
+            "name": "stdio_inherit_return",
+            "seen": true,
+            "elapsed_ns": 0,
+            "utc": "2026-11-25T22:18:57.4288481Z"
+          },
+          {
+            "name": "attribute_allocate_enter",
+            "seen": true,
+            "elapsed_ns": 0,
+            "utc": "2026-11-25T22:18:57.4288481Z"
+          },
+          {
+            "name": "attribute_allocate_return",
+            "seen": true,
+            "elapsed_ns": 0,
+            "utc": "2026-11-25T22:18:57.4288481Z"
+          },
+          {
+            "name": "job_attribute_enter",
+            "seen": true,
+            "elapsed_ns": 0,
+            "utc": "2026-11-25T22:18:57.4288481Z"
+          },
+          {
+            "name": "job_attribute_return",
+            "seen": true,
+            "elapsed_ns": 0,
+            "utc": "2026-11-25T22:18:57.4288481Z"
+          },
+          {
+            "name": "stdio_attribute_enter",
+            "seen": true,
+            "elapsed_ns": 0,
+            "utc": "2026-11-25T22:18:57.4288481Z"
+          },
+          {
+            "name": "stdio_attribute_return",
+            "seen": true,
+            "elapsed_ns": 0,
+            "utc": "2026-11-25T22:18:57.4288481Z"
+          },
+          {
+            "name": "command_prepare_enter",
+            "seen": true,
+            "elapsed_ns": 0,
+            "utc": "2026-11-25T22:18:57.4288481Z"
+          },
+          {
+            "name": "command_prepare_return",
+            "seen": true,
+            "elapsed_ns": 0,
+            "utc": "2026-11-25T22:18:57.4288481Z"
+          },
+          {
+            "name": "createprocess_enter",
+            "seen": true,
+            "elapsed_ns": 0,
+            "utc": "2026-11-25T22:18:57.4288481Z"
+          },
+          {
+            "name": "createprocess_return",
+            "seen": true,
+            "elapsed_ns": 966838900,
+            "utc": "2026-11-25T22:18:58.3957085Z"
+          },
+          {
+            "name": "birth_query_enter",
+            "seen": true,
+            "elapsed_ns": 966838900,
+            "utc": "2026-11-25T22:18:58.3957085Z"
+          },
+          {
+            "name": "birth_query_return",
+            "seen": true,
+            "elapsed_ns": 966838900,
+            "utc": "2026-11-25T22:18:58.3957085Z"
+          },
+          {
+            "name": "thread_close_enter",
+            "seen": true,
+            "elapsed_ns": 966838900,
+            "utc": "2026-11-25T22:18:58.3957085Z"
+          },
+          {
+            "name": "thread_close_return",
+            "seen": true,
+            "elapsed_ns": 966838900,
+            "utc": "2026-11-25T22:18:58.3957085Z"
+          },
+          {
+            "name": "attribute_close_enter",
+            "seen": true,
+            "elapsed_ns": 966838900,
+            "utc": "2026-11-25T22:18:58.3957085Z"
+          },
+          {
+            "name": "attribute_close_return",
+            "seen": true,
+            "elapsed_ns": 967196000,
+            "utc": "2026-11-25T22:18:58.3960656Z"
+          },
+          {
+            "name": "start_return",
+            "seen": true,
+            "elapsed_ns": 967196000,
+            "utc": "2026-11-25T22:18:58.3960656Z"
+          }
+        ]
+      }
+    }
+  },
+  "closure": {
+    "parent_original_exit_code": 0,
+    "parent_original_terminal_and_captures_received": true,
+    "child_plan_hash_matches_parent": true,
+    "ordinary_command_count": 2,
+    "ordinary_commands": [
+      {
+        "name": "build-controller",
+        "seconds": 50.44215560000157,
+        "exit_code": 0,
+        "quiescence_state": "complete",
+        "native_tree_and_io_closed": true,
+        "captures_measured_after_closure": true
+      },
+      {
+        "name": "controller-metadata",
+        "seconds": 0.10718970000743866,
+        "exit_code": 0,
+        "quiescence_state": "complete",
+        "native_tree_and_io_closed": true,
+        "captures_measured_after_closure": true
+      }
+    ],
+    "inventory_controller_exit_code": 0,
+    "inventory_original_native_tree_and_io_closed": true,
+    "inventory_final_active": 0,
+    "inventory_image_unchanged": true,
+    "actual_controllers_reaped": true,
+    "original_capture_files_closed": true
+  },
+  "command_log_status_interpretation": {
+    "raw_status": "RUNNING",
+    "raw_receipt_rewritten": false,
+    "role": "DiagnosticBase command journal, not final operation status",
+    "two_command_rows_and_quiescence_complete": true,
+    "authoritative_terminal_controls": [
+      "result",
+      "parent"
+    ],
+    "terminal_status": "PASS"
+  },
+  "conclusions": {
+    "old_preparation_failure_fixed": false,
+    "av_or_os_cause_identified": false,
+    "public_head_full_gate_pass": false,
+    "full_gate_status": "FAIL remains from literal-final-v10",
+    "external_review_status": "REVIEW_PENDING",
+    "next_step": "Use the measured boundaries for further targeted diagnosis or scoped qualification; then obtain both unchanged full-gate PASS results before final acceptance."
+  }
+}

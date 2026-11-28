@@ -1,0 +1,19 @@
+=== RUN   TestProjectionAdmissionDoesNotMarshalTailAfterSaturation
+--- PASS: TestProjectionAdmissionDoesNotMarshalTailAfterSaturation (0.00s)
+=== NAME  
+=== RUN   TestMarshalIndentProjectsBeforeFullMarshalWhenAdmissionRejects
+--- PASS: TestMarshalIndentProjectsBeforeFullMarshalWhenAdmissionRejects (0.00s)
+=== NAME  
+=== RUN   TestMarshalIndentExactEncodedBoundary
+=== RUN   TestMarshalIndentExactEncodedBoundary/N-1
+--- PASS: TestMarshalIndentExactEncodedBoundary/N-1 (0.00s)
+=== NAME  TestMarshalIndentExactEncodedBoundary
+=== RUN   TestMarshalIndentExactEncodedBoundary/N
+--- PASS: TestMarshalIndentExactEncodedBoundary/N (0.00s)
+=== NAME  TestMarshalIndentExactEncodedBoundary
+=== RUN   TestMarshalIndentExactEncodedBoundary/N+1
+--- PASS: TestMarshalIndentExactEncodedBoundary/N+1 (0.00s)
+=== NAME  TestMarshalIndentExactEncodedBoundary
+--- PASS: TestMarshalIndentExactEncodedBoundary (0.01s)
+=== NAME  
+PASS

@@ -1,0 +1,570 @@
+{
+  "schema": "successor59f-preparation-native-run-ledger-v1",
+  "scope": "TWO_CLOSED_PREPARATION_PHASES_ONLY",
+  "runs": [
+    {
+      "name": "helper-and-product-v1",
+      "source_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+      "status": "FAIL",
+      "closure": "CLOSED",
+      "original_exit_code": 1,
+      "seconds": 221.01265759998932,
+      "planned_commands": 12,
+      "actual_commands": 10,
+      "physical_complete": true,
+      "original_parent_pid": 122192,
+      "original_launcher_pid": 168396,
+      "original_wait_returned": true,
+      "original_process_object_disposed": true,
+      "parent_deadline_exceeded": false,
+      "parent_capture_files_closed": true,
+      "commands_quiescent": true,
+      "input_files_unchanged": true,
+      "input_files_verified": 3398,
+      "step_maps_verified": 20,
+      "command_captures_verified": 20,
+      "parent_captures": 2,
+      "input_issues": [],
+      "plan": {
+        "artifact": "templates/inputs/producer-v1/approved-plan.json.template",
+        "original_bytes": 662796,
+        "original_sha256": "99333ab4cb43f9a01720c70e567782475065b0f7077d70a3f157dca475c9c15a"
+      },
+      "parent": {
+        "artifact": "templates/receipts/producer-v1/parent.json.template",
+        "original_bytes": 1507,
+        "original_sha256": "e900a860923c9b122436d06feffc2a5e815214d98d56a6982d54af009f846735"
+      },
+      "outer": {
+        "artifact": "sources/receipts/producer-v1/outer-original.json",
+        "original_bytes": 444,
+        "original_sha256": "922224681071013b491ce263840f0c2e9f0d35ca38b03154ae6017589b20ecd8"
+      },
+      "execution": {
+        "artifact": "templates/receipts/producer-v1/execution.json.template",
+        "original_bytes": 11757824,
+        "original_sha256": "76d74ba0d51f044ff4601efece213eeb2d345ec63a1b31539b20231f0492a19b"
+      },
+      "root_receiving": {
+        "artifact": "templates/receipts/producer-v1/root-receiving.json.template",
+        "original_bytes": 9804,
+        "original_sha256": "6e8568fd054048a082fe48feea83069e5759289b733294e534169d2fd5b77743"
+      },
+      "commands": [
+        {
+          "ordinal": 1,
+          "name": "copy-closed-warm-caches",
+          "status": "PASS",
+          "closure": "CLOSED",
+          "exit_code": 0,
+          "seconds": 104.85613000008743,
+          "original_pid": 321924,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_readers_joined": true,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures": {
+            "stdout": {
+              "artifact": "templates/captures/producer-v1/copy-closed-warm-caches.stdout.txt.template",
+              "original_bytes": 702,
+              "original_sha256": "5dd023ba6a35304c786e1fbf9aa24e64d6ffd44ff9fd7ebf0565565c243dce90"
+            },
+            "stderr": {
+              "artifact": "sources/captures/empty.txt",
+              "original_bytes": 0,
+              "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          }
+        },
+        {
+          "ordinal": 2,
+          "name": "stage-exact-source-and-helpers",
+          "status": "PASS",
+          "closure": "CLOSED",
+          "exit_code": 0,
+          "seconds": 31.157155800028704,
+          "original_pid": 79116,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_readers_joined": true,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures": {
+            "stdout": {
+              "artifact": "sources/captures/producer-v1/stage-exact-source-and-helpers.stdout.txt",
+              "original_bytes": 77,
+              "original_sha256": "bb449620d35bf22f2777941d4cfd17e193951dceca5f384a39eccc3536a08786"
+            },
+            "stderr": {
+              "artifact": "sources/captures/empty.txt",
+              "original_bytes": 0,
+              "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          }
+        },
+        {
+          "ordinal": 3,
+          "name": "build-validator",
+          "status": "PASS",
+          "closure": "CLOSED",
+          "exit_code": 0,
+          "seconds": 11.155198100022972,
+          "original_pid": 310764,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_readers_joined": true,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures": {
+            "stdout": {
+              "artifact": "sources/captures/empty.txt",
+              "original_bytes": 0,
+              "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "stderr": {
+              "artifact": "sources/captures/empty.txt",
+              "original_bytes": 0,
+              "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          }
+        },
+        {
+          "ordinal": 4,
+          "name": "build-test2json",
+          "status": "PASS",
+          "closure": "CLOSED",
+          "exit_code": 0,
+          "seconds": 7.08453480002936,
+          "original_pid": 66284,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_readers_joined": true,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures": {
+            "stdout": {
+              "artifact": "sources/captures/empty.txt",
+              "original_bytes": 0,
+              "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "stderr": {
+              "artifact": "sources/captures/empty.txt",
+              "original_bytes": 0,
+              "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          }
+        },
+        {
+          "ordinal": 5,
+          "name": "build-job",
+          "status": "PASS",
+          "closure": "CLOSED",
+          "exit_code": 0,
+          "seconds": 3.4702446999726817,
+          "original_pid": 506532,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_readers_joined": true,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures": {
+            "stdout": {
+              "artifact": "sources/captures/empty.txt",
+              "original_bytes": 0,
+              "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "stderr": {
+              "artifact": "sources/captures/empty.txt",
+              "original_bytes": 0,
+              "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          }
+        },
+        {
+          "ordinal": 6,
+          "name": "build-contained",
+          "status": "PASS",
+          "closure": "CLOSED",
+          "exit_code": 0,
+          "seconds": 4.188819200033322,
+          "original_pid": 465992,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_readers_joined": true,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures": {
+            "stdout": {
+              "artifact": "sources/captures/empty.txt",
+              "original_bytes": 0,
+              "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "stderr": {
+              "artifact": "sources/captures/empty.txt",
+              "original_bytes": 0,
+              "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          }
+        },
+        {
+          "ordinal": 7,
+          "name": "build-namespace",
+          "status": "PASS",
+          "closure": "CLOSED",
+          "exit_code": 0,
+          "seconds": 4.491352599929087,
+          "original_pid": 451928,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_readers_joined": true,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures": {
+            "stdout": {
+              "artifact": "sources/captures/empty.txt",
+              "original_bytes": 0,
+              "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "stderr": {
+              "artifact": "sources/captures/empty.txt",
+              "original_bytes": 0,
+              "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          }
+        },
+        {
+          "ordinal": 8,
+          "name": "build-cli",
+          "status": "PASS",
+          "closure": "CLOSED",
+          "exit_code": 0,
+          "seconds": 5.035658199922182,
+          "original_pid": 371316,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_readers_joined": true,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures": {
+            "stdout": {
+              "artifact": "sources/captures/empty.txt",
+              "original_bytes": 0,
+              "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "stderr": {
+              "artifact": "sources/captures/empty.txt",
+              "original_bytes": 0,
+              "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          }
+        },
+        {
+          "ordinal": 9,
+          "name": "check-foreground-framed-parser",
+          "status": "PASS",
+          "closure": "CLOSED",
+          "exit_code": 0,
+          "seconds": 5.578471900080331,
+          "original_pid": 404832,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_readers_joined": true,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures": {
+            "stdout": {
+              "artifact": "sources/captures/producer-v1/check-foreground-framed-parser.stdout.txt",
+              "original_bytes": 59,
+              "original_sha256": "8d050ef0f0d591a48e34a5566f4633dfc83dca837ffeb9005f09b202f8b7cac9"
+            },
+            "stderr": {
+              "artifact": "sources/captures/empty.txt",
+              "original_bytes": 0,
+              "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          }
+        },
+        {
+          "ordinal": 10,
+          "name": "build-marked-product",
+          "status": "FAIL",
+          "closure": "CLOSED",
+          "exit_code": 1,
+          "seconds": 8.410647800075822,
+          "original_pid": 134448,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 1,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_readers_joined": true,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures": {
+            "stdout": {
+              "artifact": "sources/captures/empty.txt",
+              "original_bytes": 0,
+              "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "stderr": {
+              "artifact": "templates/captures/producer-v1/build-marked-product.stderr.txt.template",
+              "original_bytes": 488,
+              "original_sha256": "da908aec0f04384be3176b935840fcd98528bee091b66025f00059c993161ff1"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "product-only-v2",
+      "source_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+      "status": "PASS",
+      "closure": "CLOSED",
+      "original_exit_code": 0,
+      "seconds": 465.26724029995967,
+      "planned_commands": 4,
+      "actual_commands": 4,
+      "physical_complete": true,
+      "original_parent_pid": 477088,
+      "original_launcher_pid": 62980,
+      "original_wait_returned": true,
+      "original_process_object_disposed": true,
+      "parent_deadline_exceeded": false,
+      "parent_capture_files_closed": true,
+      "commands_quiescent": true,
+      "input_files_unchanged": true,
+      "input_files_verified": 3397,
+      "step_maps_verified": 8,
+      "command_captures_verified": 8,
+      "parent_captures": 2,
+      "input_issues": [],
+      "plan": {
+        "artifact": "templates/inputs/product-v2/approved-plan.json.template",
+        "original_bytes": 654163,
+        "original_sha256": "f6fd52b9a3d653b87bae7e51c1264ee27bb2a5b692219b36c9213a59a8b7fca5"
+      },
+      "parent": {
+        "artifact": "templates/receipts/product-v2/parent.json.template",
+        "original_bytes": 1507,
+        "original_sha256": "bbc353fe6ac620ddf190ba9712d0048a6a60bbc0e1d59bb4644fdcee4d521daf"
+      },
+      "outer": {
+        "artifact": "sources/receipts/product-v2/outer-original.json",
+        "original_bytes": 441,
+        "original_sha256": "922e93e5bd893aefbe56fa0ceeca346bb8ecd8337d7ae87eb4ca9322807dfc41"
+      },
+      "execution": {
+        "artifact": "templates/receipts/product-v2/execution.json.template",
+        "original_bytes": 4703112,
+        "original_sha256": "a5992a80253c4e3f14de1f1ccecf37d8c24b897652b78a5c56598027ba054c12"
+      },
+      "root_receiving": {
+        "artifact": "templates/receipts/product-v2/root-receiving.json.template",
+        "original_bytes": 11311,
+        "original_sha256": "14e9a11dd5d82507d9faf984ea2ba0cb82f795dee8c75630c4f8280fc8a0da98"
+      },
+      "commands": [
+        {
+          "ordinal": 1,
+          "name": "copy-original-warm-pass-caches",
+          "status": "PASS",
+          "closure": "CLOSED",
+          "exit_code": 0,
+          "seconds": 71.6729945000261,
+          "original_pid": 24748,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_readers_joined": true,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures": {
+            "stdout": {
+              "artifact": "templates/captures/product-v2/copy-original-warm-pass-caches.stdout.txt.template",
+              "original_bytes": 698,
+              "original_sha256": "39281ecd86e3c3c5a77da78cba0a8309c6dfe95d65b537ad417ca8485d9b1b80"
+            },
+            "stderr": {
+              "artifact": "sources/captures/empty.txt",
+              "original_bytes": 0,
+              "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          }
+        },
+        {
+          "ordinal": 2,
+          "name": "export-exact-product-source",
+          "status": "PASS",
+          "closure": "CLOSED",
+          "exit_code": 0,
+          "seconds": 72.67300119996071,
+          "original_pid": 176048,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_readers_joined": true,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures": {
+            "stdout": {
+              "artifact": "sources/captures/product-v2/export-exact-product-source.stdout.txt",
+              "original_bytes": 155,
+              "original_sha256": "bd0e612b2bd2e2fac61869ee24c20f4e846d7a4eaab7b51d9bdd2a75c53375e1"
+            },
+            "stderr": {
+              "artifact": "sources/captures/empty.txt",
+              "original_bytes": 0,
+              "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          }
+        },
+        {
+          "ordinal": 3,
+          "name": "build-marked-product",
+          "status": "PASS",
+          "closure": "CLOSED",
+          "exit_code": 0,
+          "seconds": 165.36129559995607,
+          "original_pid": 263592,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_readers_joined": true,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures": {
+            "stdout": {
+              "artifact": "templates/captures/product-v2/build-marked-product.stdout.txt.template",
+              "original_bytes": 1331,
+              "original_sha256": "ad596a6faa5049f3183870a8bf1a8dd7762c3abaa631f5f68ff61fdbb1954a79"
+            },
+            "stderr": {
+              "artifact": "sources/captures/empty.txt",
+              "original_bytes": 0,
+              "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          }
+        },
+        {
+          "ordinal": 4,
+          "name": "build-native-product",
+          "status": "PASS",
+          "closure": "CLOSED",
+          "exit_code": 0,
+          "seconds": 148.69072229997255,
+          "original_pid": 417668,
+          "quiescence_state": "complete",
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "original_readers_joined": true,
+          "work_deadline_exceeded": false,
+          "cleanup_deadline_exceeded": false,
+          "captures": {
+            "stdout": {
+              "artifact": "templates/captures/product-v2/build-native-product.stdout.txt.template",
+              "original_bytes": 1105,
+              "original_sha256": "e584b6fdba48f4a9e65ff3525e54bdd87c890656a780b22fd8a155f71e2362a8"
+            },
+            "stderr": {
+              "artifact": "sources/captures/empty.txt",
+              "original_bytes": 0,
+              "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

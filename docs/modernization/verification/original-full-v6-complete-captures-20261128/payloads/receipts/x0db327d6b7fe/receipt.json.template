@@ -1,0 +1,2294 @@
+{
+  "schema": "literal-go-exec-invocation-v1",
+  "run": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe",
+  "commands": [
+    {
+      "argv": [
+        "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe",
+        "version",
+        "-m",
+        "-json",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\d\\go-build3568661218\\b538\\vcpkgserver.test.exe"
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2",
+      "stdout": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\incoming-build-info.stdout.txt",
+      "stderr": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\incoming-build-info.stderr.txt",
+      "captures_measured": true,
+      "command_success": true,
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 2074,
+          "bytes_stored": 2074,
+          "limit_bytes": 1048576,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 581519.7427867
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "limit_bytes": 1048576,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 581519.7427424
+        }
+      },
+      "work_seconds": 5,
+      "cleanup_seconds": 10,
+      "native_owner": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-error-dword-v4\\windows_job.py",
+        "sha256": "d94583001a33ef34adb67feec34b4f4b0bf3626df9f63da3c7a7c85bf3e0b552"
+      },
+      "console": {
+        "attached": true,
+        "visible": false
+      },
+      "stdin_mode": "null",
+      "before_resume_entered": true,
+      "before_resume_returned": true,
+      "before_resume_deadline_exceeded": false,
+      "phases_elapsed_seconds": {
+        "initial_save_started": 2.880010288208723e-05,
+        "initial_save_finished": 0.003002000041306019,
+        "launch_entered": 0.003004100057296455,
+        "before_resume_entered": 0.00684370007365942,
+        "before_resume_returned": 0.006845100084319711,
+        "launch_returned": 0.006861400092020631,
+        "launch_exception": null,
+        "external_settle_end": 0.11308340006507933
+      },
+      "quiescence_state": "complete",
+      "original_pid": 286248,
+      "original_owner_binding": {
+        "schema": "ordinary-original-native-owner-binding-v1",
+        "object_id": 2820382089424,
+        "pid": 286248,
+        "process": 1280,
+        "job": 1256
+      },
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "work_elapsed_seconds": 0.11295380000956357,
+      "cleanup_interval_seconds": 10.0,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "exit_code": 0,
+      "worker_join_observations": [
+        {
+          "name": "incoming-build-info-stdout",
+          "ident": 369280,
+          "native_id": 369280,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.11310760001651943,
+          "remaining_seconds": 9.999846199993044,
+          "last_entered_seconds": 0.11310760001651943,
+          "last_remaining_seconds": 9.999846199993044,
+          "returned_seconds": 0.11311290005687624,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.11209030007012188
+        },
+        {
+          "name": "incoming-build-info-stderr",
+          "ident": 414792,
+          "native_id": 414792,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.11311630008276552,
+          "remaining_seconds": 9.999837499926798,
+          "last_entered_seconds": 0.11311630008276552,
+          "last_remaining_seconds": 9.999837499926798,
+          "returned_seconds": 0.11311730009038001,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.1120460000820458
+        }
+      ],
+      "seconds": 0.11312820005696267,
+      "cleanup_deadline_exceeded": false,
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "original_input_writers_retained": true,
+      "original_input_writer_joined": false,
+      "completion_receiving": {
+        "schema": "ordinary-original-native-io-completion-v1",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "io": {
+          "stdout": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 2074,
+            "bytes_stored": 2074,
+            "limit_bytes": 1048576,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 581519.7427867
+          },
+          "stderr": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 0,
+            "bytes_stored": 0,
+            "limit_bytes": 1048576,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 581519.7427424
+          }
+        },
+        "stdin_mode": "null",
+        "stdin": {},
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "original_input_writer_joined": false,
+        "lifecycle_state": "CLOSED"
+      },
+      "stdout_sha256": "5eea69d557835a4505ff86417300c5e6505a81a05908fc435fbaf3d79aebc00f",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-external-helper-inputs-v6\\literal-contained.exe",
+        "--test-binary",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\d\\go-build3568661218\\b538\\vcpkgserver.test.exe",
+        "--expected-sha256",
+        "71fa9a523baf8bd43ab0a2582d400d74298cb555ea953feea877d9e3265649db",
+        "--source-dir",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2\\internal\\vcpkgmcp\\vcpkgserver",
+        "--run-root",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\inventory",
+        "--inventory",
+        "--timeout",
+        "90s",
+        "--",
+        "-test.list=."
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2\\internal\\vcpkgmcp\\vcpkgserver",
+      "stdout": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\inventory-owner.stdout.txt",
+      "stderr": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\inventory-owner.stderr.txt",
+      "captures_measured": true,
+      "phases_elapsed_seconds": {
+        "launch_entered": 0.003789300099015236,
+        "launch_returned": 0.006823500036261976,
+        "wait_entered": 0.006825300049968064,
+        "wait_returned": 0.2553339001024142
+      },
+      "quiescence_state": "complete",
+      "original_pid": 529988,
+      "original_pid_is_authority": false,
+      "exit_code": 0,
+      "seconds": 0.255,
+      "completion_receiving": {
+        "custody_retained": false,
+        "binary_after_measured": true,
+        "schema": "literal-contained-test-run-v1",
+        "binary": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\d\\go-build3568661218\\b538\\vcpkgserver.test.exe",
+        "binary_sha256": "71fa9a523baf8bd43ab0a2582d400d74298cb555ea953feea877d9e3265649db",
+        "source_dir": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2\\internal\\vcpkgmcp\\vcpkgserver",
+        "args": [
+          "-test.list=."
+        ],
+        "started_utc": "2026-11-28T12:09:01.1805624Z",
+        "finished_utc": "2026-11-28T12:09:01.3084399Z",
+        "root": {
+          "Known": true,
+          "PID": 129564,
+          "StartedAt": "2026-11-28T12:09:01.1887436Z",
+          "NativeBirthFILETIME": 134403413411887436
+        },
+        "native": {
+          "RootIdentity": {
+            "Known": true,
+            "PID": 129564,
+            "StartedAt": "2026-11-28T12:09:01.1887436Z",
+            "NativeBirthFILETIME": 134403413411887436
+          },
+          "NoChildKnown": false,
+          "RootWaitKnown": true,
+          "RootExitCode": 0,
+          "TerminalAction": "not-requested",
+          "MembersExited": true,
+          "AccountingKnown": true,
+          "InitialTotal": 1,
+          "FinalActive": 0,
+          "CapturedMemberPIDs": null,
+          "HandlesClosed": true,
+          "Error": null
+        },
+        "io": {
+          "Stdin": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "StdoutRead": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "StdoutWrite": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "StderrRead": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "StderrWrite": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "Stdout": {
+            "WorkerStarted": true,
+            "WorkerComplete": true,
+            "EOF": true,
+            "Bytes": 1945,
+            "Limit": 16777216,
+            "LimitExceeded": false,
+            "Error": null
+          },
+          "Stderr": {
+            "WorkerStarted": true,
+            "WorkerComplete": true,
+            "EOF": true,
+            "Bytes": 0,
+            "Limit": 16777216,
+            "LimitExceeded": false,
+            "Error": null
+          }
+        },
+        "stage": "",
+        "root_wait_known": true,
+        "root_exit_code": 0,
+        "settlement_complete": true,
+        "inventory": true,
+        "work_deadline": "2026-11-28T12:10:36.1805624Z",
+        "cleanup_deadline": "2026-11-28T12:10:46.1805624Z",
+        "test_timeout": "1m30s",
+        "bootstrap_budget": "5s",
+        "binary_unchanged": true
+      },
+      "stdout_sha256": "865c0f121b0ba4f852d3a3ebc2f835e1247408cb02fb2b62203627d76789bffe",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-external-helper-inputs-v6\\literal-contained.exe",
+        "--test-binary",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\d\\go-build3568661218\\b538\\vcpkgserver.test.exe",
+        "--expected-sha256",
+        "71fa9a523baf8bd43ab0a2582d400d74298cb555ea953feea877d9e3265649db",
+        "--source-dir",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2\\internal\\vcpkgmcp\\vcpkgserver",
+        "--run-root",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\suite",
+        "--timeout",
+        "5m",
+        "--",
+        "-test.paniconexit0",
+        "-test.v=test2json",
+        "-test.count=1",
+        "-test.timeout=5m0s"
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2\\internal\\vcpkgmcp\\vcpkgserver",
+      "stdout": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\suite-owner.stdout.txt",
+      "stderr": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\suite-owner.stderr.txt",
+      "captures_measured": true,
+      "phases_elapsed_seconds": {
+        "launch_entered": 0.004306199960410595,
+        "launch_returned": 0.008706399938091636,
+        "wait_entered": 0.008710699970833957,
+        "wait_returned": 0.9388531999429688
+      },
+      "quiescence_state": "complete",
+      "original_pid": 123008,
+      "original_pid_is_authority": false,
+      "exit_code": 0,
+      "seconds": 0.939,
+      "completion_receiving": {
+        "custody_retained": false,
+        "binary_after_measured": true,
+        "schema": "literal-contained-test-run-v1",
+        "binary": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\d\\go-build3568661218\\b538\\vcpkgserver.test.exe",
+        "binary_sha256": "71fa9a523baf8bd43ab0a2582d400d74298cb555ea953feea877d9e3265649db",
+        "source_dir": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2\\internal\\vcpkgmcp\\vcpkgserver",
+        "args": [
+          "-test.paniconexit0",
+          "-test.v=test2json",
+          "-test.count=1",
+          "-test.timeout=5m0s"
+        ],
+        "started_utc": "2026-11-28T12:09:01.456185Z",
+        "finished_utc": "2026-11-28T12:09:02.2537921Z",
+        "root": {
+          "Known": true,
+          "PID": 493968,
+          "StartedAt": "2026-11-28T12:09:01.4639389Z",
+          "NativeBirthFILETIME": 134403413414639389
+        },
+        "native": {
+          "RootIdentity": {
+            "Known": true,
+            "PID": 493968,
+            "StartedAt": "2026-11-28T12:09:01.4639389Z",
+            "NativeBirthFILETIME": 134403413414639389
+          },
+          "NoChildKnown": false,
+          "RootWaitKnown": true,
+          "RootExitCode": 0,
+          "TerminalAction": "not-requested",
+          "MembersExited": true,
+          "AccountingKnown": true,
+          "InitialTotal": 19,
+          "FinalActive": 0,
+          "CapturedMemberPIDs": null,
+          "HandlesClosed": true,
+          "Error": null
+        },
+        "io": {
+          "Stdin": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "StdoutRead": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "StdoutWrite": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "StderrRead": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "StderrWrite": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "Stdout": {
+            "WorkerStarted": true,
+            "WorkerComplete": true,
+            "EOF": true,
+            "Bytes": 23002,
+            "Limit": 16777216,
+            "LimitExceeded": false,
+            "Error": null
+          },
+          "Stderr": {
+            "WorkerStarted": true,
+            "WorkerComplete": true,
+            "EOF": true,
+            "Bytes": 0,
+            "Limit": 16777216,
+            "LimitExceeded": false,
+            "Error": null
+          }
+        },
+        "stage": "",
+        "root_wait_known": true,
+        "root_exit_code": 0,
+        "settlement_complete": true,
+        "inventory": false,
+        "work_deadline": "2026-11-28T12:14:06.456185Z",
+        "cleanup_deadline": "2026-11-28T12:14:16.456185Z",
+        "test_timeout": "5m0s",
+        "bootstrap_budget": "5s",
+        "binary_unchanged": true
+      },
+      "stdout_sha256": "64d8da4fa7f84b41debb544e628f23d48d9219e107edeea438684fd7d871207e",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-helper-inputs-v6\\test2json.exe",
+        "-p",
+        "mcp-local-hub/internal/vcpkgmcp/vcpkgserver"
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2\\internal\\vcpkgmcp\\vcpkgserver",
+      "stdout": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\suite-events.stdout.txt",
+      "stderr": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\suite-events.stderr.txt",
+      "captures_measured": true,
+      "command_success": true,
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 93043,
+          "bytes_stored": 93043,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 581521.452184
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 581521.4521565
+        }
+      },
+      "work_seconds": 5,
+      "cleanup_seconds": 10,
+      "native_owner": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-error-dword-v4\\windows_job.py",
+        "sha256": "d94583001a33ef34adb67feec34b4f4b0bf3626df9f63da3c7a7c85bf3e0b552"
+      },
+      "console": {
+        "attached": true,
+        "visible": false
+      },
+      "stdin_mode": "pipe",
+      "before_resume_entered": true,
+      "before_resume_returned": true,
+      "before_resume_deadline_exceeded": false,
+      "phases_elapsed_seconds": {
+        "initial_save_started": 2.0200037397444248e-05,
+        "initial_save_finished": 0.004088100045919418,
+        "launch_entered": 0.004090500064194202,
+        "before_resume_entered": 0.007701199967414141,
+        "before_resume_returned": 0.007703099981881678,
+        "launch_returned": 0.007719399989582598,
+        "launch_exception": null,
+        "external_settle_end": 0.11809910007286817
+      },
+      "quiescence_state": "complete",
+      "original_pid": 466028,
+      "original_owner_binding": {
+        "schema": "ordinary-original-native-owner-binding-v1",
+        "object_id": 2820382084016,
+        "pid": 466028,
+        "process": 1208,
+        "job": 1240
+      },
+      "stdin": {
+        "acquired": true,
+        "worker_started": true,
+        "worker_complete": true,
+        "input_eof": true,
+        "pipe_close_returned": true,
+        "input_close_returned": true,
+        "error": null,
+        "bytes_read": 23002,
+        "bytes_written": 23002,
+        "worker_complete_monotonic": 581521.3474581
+      },
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "work_elapsed_seconds": 0.11792440002318472,
+      "cleanup_interval_seconds": 10.0,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "exit_code": 0,
+      "worker_join_observations": [
+        {
+          "name": "suite-events-stdout",
+          "ident": 518424,
+          "native_id": 518424,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.11812480003573,
+          "remaining_seconds": 9.999799599987455,
+          "last_entered_seconds": 0.11812480003573,
+          "last_remaining_seconds": 9.999799599987455,
+          "returned_seconds": 0.11813099996652454,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.11727330007124692
+        },
+        {
+          "name": "suite-events-stderr",
+          "ident": 461888,
+          "native_id": 461888,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.11813399998936802,
+          "remaining_seconds": 9.999790400033817,
+          "last_entered_seconds": 0.11813399998936802,
+          "last_remaining_seconds": 9.999790400033817,
+          "returned_seconds": 0.11813509999774396,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.11724579997826368
+        },
+        {
+          "name": "suite-events-stdin",
+          "ident": 429304,
+          "native_id": 429304,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "input_eof": true,
+            "pipe_close_returned": true,
+            "input_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.1181378000183031,
+          "remaining_seconds": 9.999786600004882,
+          "last_entered_seconds": 0.1181378000183031,
+          "last_remaining_seconds": 9.999786600004882,
+          "returned_seconds": 0.11813880002591759,
+          "stream_after": {
+            "worker_complete": true,
+            "input_eof": true,
+            "pipe_close_returned": true,
+            "input_close_returned": true
+          },
+          "worker_complete_seconds": 0.012547399965114892
+        }
+      ],
+      "seconds": 0.11815090000163764,
+      "cleanup_deadline_exceeded": false,
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "original_input_writers_retained": true,
+      "original_input_writer_joined": true,
+      "completion_receiving": {
+        "schema": "ordinary-original-native-io-completion-v1",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "io": {
+          "stdout": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 93043,
+            "bytes_stored": 93043,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 581521.452184
+          },
+          "stderr": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 0,
+            "bytes_stored": 0,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 581521.4521565
+          }
+        },
+        "stdin_mode": "pipe",
+        "stdin": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "input_eof": true,
+          "pipe_close_returned": true,
+          "input_close_returned": true,
+          "error": null,
+          "bytes_read": 23002,
+          "bytes_written": 23002,
+          "worker_complete_monotonic": 581521.3474581
+        },
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "original_input_writer_joined": true,
+        "lifecycle_state": "CLOSED"
+      },
+      "stdout_sha256": "7ff1b885c309ad23854086e3a128afc00fb3349a92470c5ee76c56eb85d61d9a",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "status": "PASS",
+  "started_utc": "2026-11-28T12:09:00Z",
+  "read_only_tool_aliases": {
+    "gcc": {
+      "path": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\bin\\gcc.exe",
+      "sha256": "f6ff9378c1edb591131304518eac6456708d28720284105930d0d687136bcdd3",
+      "configured": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\bin\\gcc.exe",
+      "resolved": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\bin\\gcc.exe"
+    },
+    "git": {
+      "path": "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+      "sha256": "177bc8a9af84fa3a400c694c975fda731d048279c074e1a93947ce8b067ebb48",
+      "configured": "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+      "resolved": "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe"
+    },
+    "go": {
+      "path": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe",
+      "sha256": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113",
+      "configured": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe",
+      "resolved": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe"
+    },
+    "pwsh": {
+      "path": "@@RECOVERY_NATIVE_POWERSHELL_WORK_AREA_JSON@@\\bns26\\pwsh7\\pwsh.exe",
+      "sha256": "f2833e07a5a7d59153ffc63db83bd6b62f6c63ffd8b5b5099a2feadf6b605336",
+      "configured": "@@RECOVERY_NATIVE_POWERSHELL_WORK_AREA_JSON@@\\bns26\\pwsh7\\pwsh.exe",
+      "resolved": "@@RECOVERY_NATIVE_POWERSHELL_WORK_AREA_JSON@@\\bns26\\pwsh7\\pwsh.exe"
+    },
+    "python": {
+      "path": "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+      "sha256": "d4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd",
+      "configured": "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+      "resolved": "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe"
+    }
+  },
+  "phase": "default",
+  "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+  "plan": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\plan-default.json",
+  "plan_sha256": "05a21b3be7cc6650db538b87c35ce238f271421857033bbebf4f06fd231273b3",
+  "incoming": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\d\\go-build3568661218\\b538\\vcpkgserver.test.exe",
+  "incoming_sha256": "71fa9a523baf8bd43ab0a2582d400d74298cb555ea953feea877d9e3265649db",
+  "original_argv": [
+    "-test.paniconexit0",
+    "-test.v=test2json",
+    "-test.count=1",
+    "-test.timeout=5m0s"
+  ],
+  "original_cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2\\internal\\vcpkgmcp\\vcpkgserver",
+  "input_files": {
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\runtime-original-v6\\runtime-inputs.json": "037d4ad93bc93dcf531669eaaa90be32154c1ba34af6f50528eaa03e9f9ef4a2",
+    "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\bin\\gcc.exe": "f6ff9378c1edb591131304518eac6456708d28720284105930d0d687136bcdd3",
+    "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe": "177bc8a9af84fa3a400c694c975fda731d048279c074e1a93947ce8b067ebb48",
+    "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113",
+    "@@RECOVERY_NATIVE_POWERSHELL_WORK_AREA_JSON@@\\bns26\\pwsh7\\pwsh.exe": "f2833e07a5a7d59153ffc63db83bd6b62f6c63ffd8b5b5099a2feadf6b605336",
+    "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe": "d4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-external-helper-inputs-v6\\literal-canonical.exe": "cc06ab8aeca193473acf341e1c201c69a02f1588f84325cdc245deccc73ea6b5",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-external-helper-inputs-v6\\literal-contained.exe": "5b26fefbda8c7925562431acfcf1b058c0f95ac24dca624640bfb6ad877ff100",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-helper-inputs-v6\\test-job-entry.exe": "dbf87e6acc38df0b6ebde89ce6b0db05290dbf2a5802cf5a8e22d620db1d33f7",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-helper-inputs-v6\\test-recovery-namespace.exe": "70c9b42edce01839b5afc3e302f85663fb48a543d40546bdeb766824c4622bf0",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-helper-inputs-v6\\test2json.exe": "ce7091b85741dd4b5ab1f2f278670e4f2ea0485faddaaed36967409a9ddf2c85",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-helper-inputs-v6\\windows-product-validate.exe": "fe21d04537c56fd3a7ad0a13189d339d38c9de9fcc83528aaa36d39ef5cf5a98",
+    "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\conhost.exe": "c699d1728b8e8839d35eea234a7205065893b23b89a6201b4faca6cd98a3ea33",
+    "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\netsh.exe": "0255ea10a7ea7ce0634874095fd1397f3114290c3809a6c0f36476b87a5b9112",
+    "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\netstat.exe": "3fae986d34175890bb576bfeec3145e0ee99ed51117444d179c144cc367e70e2",
+    "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\WindowsPowerShell\\v1.0\\powershell.exe": "75f490d70f821afbbbb28d8ae45fa712c0ef39f73832af5ff0df284beb22a9fc",
+    "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\wbem\\WMIC.exe": "9c439179991319d1c6be5ecd50c01738f9de6b5ee9e8702fee612e725c086f9f",
+    "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\AppData\\Roaming\\uv\\python\\cpython-3.14.9-windows-x86_64-none\\python.exe": "204d51f19707da17766bccecce2ceececadab350663a8190420d1377bac1150d",
+    "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\.local\\bin\\uv.exe": "81ea623608f8c17720c62efd0a380a8ead380c4d365ba6968e9d279a2319c674",
+    "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\.local\\bin\\uvx.exe": "836554a2ec223159df425d8c71292fef20ef7659469dd83bab840e80af81f5cc",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-source-restore-v2\\parent.json": "665099615fc911e5db3eef74de7c28e06ea35fcece33d290f5d0439fb3268f20",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-helper-inputs-v6\\parent.json": "a32ddbdea1de36963d3c9b333543e9c79629034c68a5717b051620ef2ae08377",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\passive-uv-seed-copy-v1\\parent.json": "c7c80e0e7577a1d1118d3e17ea98721e2a8f68f39d842bcacc02c532851bee59",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\parent.json": "584ff6d8f816fb07c63ae78e0d299d67fb90ba083c6b1678c8a24ab5ba1946c1",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-external-helper-inputs-v6\\parent.json": "2c04ece4441ec83193a98d6f0179f01dfab4679eeb7df1e765de703e98960ee7",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\serena-product-inputs-v2\\parent.json": "4a11f613e91c10121bacf9438eb7849962e880277a9e7f4c0809491bc453d440",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\runtime-readback-v2\\parent.json": "5ebe2877936e27f89a2e28c5a50518fcbd84c2780e7366482fc55fe1e95666a5",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-private-compile-v7\\parent.json": "0cb7e027c9ed6f5e17662e6adedebb4f3c669b93e81feff730a6153f50bce7e3",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\product-source-compatibility.json": "4b33af00603c81c290abe1e4871b4ad1b6009d9e0a56f97bd1c228e198882d50",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\product3ebe-source-snapshot.json": "5f59bbe051cbd6e160e3e84e67180d96940b13191988b7e41eb760d3eea1ac6f",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\original-selected-go-inputs.json": "77f1aa84d4bcea91e6a6c153095995dd165449e93d90edeffd19ba564f14b1c7",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\test727d-source-snapshot.json": "b37a149da3a88b7b87eec0f0ed0ace83178cf7a2add88e97a906989073f1a096",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\native3ebe-build-plan.json": "52ba50f7e5702bb94ff059aea8769bc82b01c2808a63ddcbdac7cbdeccfc75ce",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\native-actor-fixture-v6.json": "4d92e007d57c09b412eb4b6f04d810a7e0f49beb1350c73eccb1fbd1857f8a15",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\marked727d-inputs.json": "b716a16b9cbe69d67c3a2adc15b24576d1121e32ff6080c7eefc460fe64bafc0",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\marked727d-versioninfo.syso": "959b6ac719cf65a93e4fa63aa015e783b62497daaa0e0e72d288c43527e5a11b",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\marked727d-build-plan.json": "63ed22049a25de657157e4d3d49d4e2a615239e66f26bf2ffba7b8c8de8b98b3",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-source-restore-v2\\original727d-receiving.json": "a3483e469b606fa297a4b33698cd22db7bf25493023f3117feeafb52bb9db5f1",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-error-dword-v4\\guard-custody.py": "e7c663f4ba2fd558005bc110173609cb19465ff33d3f4678aeb53b5ba00e0924",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-error-dword-v4\\windows_job.py": "d94583001a33ef34adb67feec34b4f4b0bf3626df9f63da3c7a7c85bf3e0b552",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\copy_closed_caches_v6.py": "2577deae637071dbc9eb2dae6e6f64946379a30b093b6bc3fa120f687b365a16",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\migration-default-input.json": "bd0ad3fcf51941c7bf98e7a3c0e3d877ff298e6d17e24e50eb2e58aee4c5a47e",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\migration-state-input.json": "9455c97de4bcf709a392f2909ddba977e2a914bcf94465009a52038bd6d994a9",
+    "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\WindowsPowerShell\\v1.0\\Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1": "c09df190addc67f7c6c38e7ea1dca719fd87807107f688c3f60ed8816e1c48a6",
+    "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\WindowsPowerShell\\v1.0\\Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psm1": "f9232f3de3c94dd03caf40f54b22876c9d810c657c41e54ab2d10469b45f26b5",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-error-dword-v4\\serena-product-inputs-v2-plan.json": "e756d9109c96670a135224b47d0aed3b56379a43854b41738816832d06ef1254",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\build_private_inputs_v7.ps1": "f4abd18efc767ca6bcaba4e8b8363f0ddf08459052b135a543eec7662fa68ac3",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\invoke_fixed_build_utf8.ps1": "4cb35eb80e029269732eeaf0409de92ff00a58b59070abd3ebff2cb9281ad79b",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\original-artifact-copy-manifest.json": "180fedc50bb0a3de8790ba01fc83c88216f21f580274fbcd524bc7e47782a08e",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\original-private-compile-v7-plan.json": "6d6cb0233685566894d4e5ef426dedc07daa13948dfeeab2a446064af79382eb",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\original-product-build-bindings-v7.json": "1a4fa1f84632e73005919cbb0aa4dfda299fb96ec793b0ac2a74cce4fc052381",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\private_migration_scope_v6.py": "a56e6730bc39307374d811222ee164213f6a73a1513b360688d2e0b925ee36c0",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\receive_private_graph_v6.py": "1d6895719d79d1b53edaab13d6aa8bd7d19e2efe2c87b0003e543f44cd64fe01",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-external-helper-inputs-v6\\commands\\execution.json": "788e55531f52d64516664f65043c9130c0cd90cf89c96cdd13d0af362f21a255",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-external-helper-inputs-v6\\external-helper-inputs.json": "9c7c519e90d6c1ebc64020e11eba983f540c7204fdc6462a9747758ab21da1a5",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-external-helper-inputs-v6\\external-source-preparation.json": "72d6b8ba65a116ac5bf0d7f06c11def7d080db8bd66550d68811dbd1d22991c0",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-helper-inputs-v6\\commands\\execution.json": "bf3fb41e16c11fecabd923749b4b43a76e085cd085f093ef786c860c14ea7d2c",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-private-compile-v7\\commands\\execution.json": "b1c4a3d3f5e4ca1a65227f05bb648487cad8dfd43af49927e1cd3e6d1f0e780a",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-private-compile-v7\\date-parser-probe.json": "dc025c02802d36a48e9eb8c2a0413cbb3c5119856fc93d1c2787a2cd41d91241",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\commands\\execution.json": "0d62de08b4493ffc1a707f939f85355fffb1b08d03bf690439263d5022b04ca6",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\compiler-inputs-default\\cli-publisher-test-inputs.json": "8bcf922364b2e162e6c20425300344a483678461379f721ed352080da4eeaa98",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\compiler-inputs-test_state_path_env\\cli-publisher-test-inputs.json": "0a3b69f75cc547865e85adab30bdcf5402a080cf3534aefc2ebc95cf6fc9aada",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\default-closure-before.json": "c1f35cd70ac735ff8da8c23f90f8220909f1c44e121dabc7bbd75e908a4d7faa",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\default-closure-staged.json": "d537dc4d673bd86ddbb3c335fd1254f303319bd0a4de727482f964cbdc2e9f93",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\default-generated-testmain.go": "8e7be415bbeef2c11e0f3b0204a2dd3fb3afae46e12ca4bcb74cc336365af2b7",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\evidence-parent-default.json": "0ad0c9460d12e313e9e96d33693b07df8f0f39d0349685aa98031228484595e9",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\evidence-parent-state.json": "08cce646e929c26f546eaea3317e3f9265a214ec4f5dbad0261236bcc7ce5888",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\private-publisher-inputs.json": "92b40e7edfbf21fd74ffee6a35dee122a310192dfb2e818f3a00c872866409a9",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\publisher-default-go-build-info.json": "9612239b134bd245086bdbc2bd0f0d64edc18c37a380a8d58825aa13ec9dbc07",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\publisher-state-go-build-info.json": "69a5d8a56b9c0254587dc9bac664b4aaca68bd3bd934fae3052f5b7278b4c8d4",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\publisher-test-images\\cli-publisher-default.test.exe": "5c5cfc94af370194bb047a433912b4cda50bcd4827633aa4c5185d6736364e7c",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\publisher-test-images\\cli-publisher-state.test.exe": "0bd8fd3bc4deeadec72a6659056d23d4f47928214456ed6637a62731ee3d8911",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\copy-receipt.json": "13fa3cae6f68fbe9ece69af9265b779dec579cf2c96dda21c131a0cae6f50169",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\marked727d-bundle\\mcphub-product\\mcphub-owner-identity.json": "856c4ac90d29e0bbfd4b1174731c6c53a7e561dcd1c83af66e887e65a78ff8ba",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\marked727d-bundle\\mcphub-product\\mcphub-owner.dll": "dfa87a10a39e9110cda735ae6a987bfa64b03446529072710723e9b6ea0dca56",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\marked727d-bundle\\mcphub-product\\mcphub.exe": "33a0e0c21bd625f9b674621846f227f1a1785873ed3bb3aaddb52a445702c70a",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\marked727d-bundle\\mcphub.exe": "bc402317a2bb6f64dbc1b83086bf46b52ee31d3a49c98227a011c60e0f5f8e04",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\marked727d-bundle\\windows-product-identity.json": "67e1ac76746c196aa09baefac3c5a7a205716229ffc12cc86c961aab13d92162",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\native3ebe-bundle\\mcphub-product\\mcphub-owner-identity.json": "64d7fe1bb4b9bd9ae4e837ef2d7926a90304cd9ccf5a5f1a6a9f4942d9be6d3c",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\native3ebe-bundle\\mcphub-product\\mcphub-owner.dll": "dfa87a10a39e9110cda735ae6a987bfa64b03446529072710723e9b6ea0dca56",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\native3ebe-bundle\\mcphub-product\\mcphub.exe": "91b5ad8b1f402e3c96662adeadc81d9ca50046b4f2b1ee954ca43597e5508326",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\native3ebe-bundle\\mcphub.exe": "21d9716c5924bc10bd071d098bcb125f563a3667e3ce595f8f3a22b93eb32eb6",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\native3ebe-bundle\\windows-product-identity.json": "bd2c999f12ac316167ddbdfaf942a9d2690867903b0d53159df2704604011a7a",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\native3ebe-original-entry.json": "05232ad2749c24497d934dcdc7766bcd4790e0e1c5ccad6e7704456932bd05c7",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\source-snapshot.json": "5f59bbe051cbd6e160e3e84e67180d96940b13191988b7e41eb760d3eea1ac6f",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\source\\servers\\serena\\manifest.yaml": "3a6549e2edb169e6f2f88843f46a0de8fec426b86cb8c741420c3e110514ad17",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\state-closure-before.json": "fab7b537e6a5d05259d6b8c55c651e9bce7dad93a94d76b2be38485e7a2d21e4",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\state-closure-staged.json": "e401c612bea3bd49e544c6dff95634a04086ae8a1685b9dff45323ba7d72346e",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\state-generated-testmain.go": "c638ea7c9ab03a083ef404b022d7986959e6f1a9e4a93b6f55e720cc6dc71a91",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-source-restore-v2\\commands\\execution.json": "890fecd2b2a4e7a1acf36b0d5f3fb7135518d7eeb32498c8610bd7f0965ac4e5",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-source-restore-v2\\original3ebe-receiving.json": "c63d8b13331a752c85c5e62f4c4ce0a2ee19cc0c129c83b4dd6ed99fbd944b46",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\passive-uv-seed-copy-v1\\seed\\cache-manifest.json": "e84302720cc6edd0482983a00b7823d3bd7a1671f8de327152119748382ed42d",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\passive-uv-seed-copy-v1\\seed\\cache.tar": "8ff0f576ea9323db15c2659142eb612600ba37bb3abca09955493a5cae316f9b",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\passive-uv-seed-copy-v1\\seed\\seed-descriptor.json": "0285a1be7101fe62c3c60f4375772dc3b791488594c686a931f0d3e72eb007cd",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\runtime-readback-v2\\commands\\execution.json": "5ea18b28ca3f52f2d1ad13f0680320bb83ff938ec6369383bcc932e66cb4a43e",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\runtime-readback-v2\\runtime-current-inventory.json": "0518fd112ec8d386564a01ac74824624c5c5076159510bbc4aaa943247bdb00a",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\serena-product-inputs-v2\\commands\\execution.json": "f1ae3cd770c7a4cc6437735c97cc6e87c7cf6344a1d65f153aded23c9674a8c0",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\runtime-original-v6\\run_partitioned_go_gate_v6.py": "46c484aaaf55014af026a8fa3c4e96c88de441d8d9f9f2fe0f1a2fe738541587",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\runtime-original-v6\\qualified_windows_products_consumer_v6.py": "8c98ac9d1ab5cdd5126c6b21d5e9cd53f471b838745f45e493daff53111c8a12",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\runtime-original-v6\\private_run_scope.py": "1b4b5d4e796d11cf9dc596d783e0522c6ece175025bc323824599bd53f6fb89b",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\runtime-original-v6\\literal_go_exec_adapter_v6.py": "c59d9e2ddc4be51ddb05523079942117411d48ae1e248f86c16eb0eaec504bd2",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\runtime-original-v6\\literal_migration_receiving_v6.py": "6a95ae02fe24245a293ffd0f0e6083baf0754df2a13ce2ee2daedf43cf6e4526",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\runtime-original-v6\\canonical_receiving_v4.py": "6ad13e7c57e604111552fd553f10a66a174c9ba9b96dc37484dfba071a9bf2a0",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\runtime-original-v6\\run_literal_go_gate_v6.py": "cd8218b8a56768d3158b6389b7c30c8df437f1e25ebc373f7a10ab15cb3ecc52",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\source-before.json": "a0774eee7ebc1bdaf3e14e90b0f47065c47631702acd69d5139609ec8c9d2d19",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\product\\mcphub-product\\mcphub-owner-identity.json": "64d7fe1bb4b9bd9ae4e837ef2d7926a90304cd9ccf5a5f1a6a9f4942d9be6d3c",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\product\\mcphub-product\\mcphub-owner.dll": "dfa87a10a39e9110cda735ae6a987bfa64b03446529072710723e9b6ea0dca56",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\product\\mcphub-product\\mcphub.exe": "91b5ad8b1f402e3c96662adeadc81d9ca50046b4f2b1ee954ca43597e5508326",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\product\\mcphub.exe": "21d9716c5924bc10bd071d098bcb125f563a3667e3ce595f8f3a22b93eb32eb6",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\product\\windows-product-identity.json": "bd2c999f12ac316167ddbdfaf942a9d2690867903b0d53159df2704604011a7a",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\owned-product-fixture.json": "39a47c6ab3215a047f8cad781dd7452e386c47edfabd9464f68a3346d07c7529",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\native-actor-fixture.json": "dbf722d557cc033be99236b59256a53e919b4fa92ecd9ab2ceee57da13c0efd5",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\product-inputs.json": "286aa0cf9e76d639f75b108a97c188f0b642797443b64230af35720c5316dcc3",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2\\internal\\api\\zz_qualified_api_versioninfo_windows_amd64.syso": "959b6ac719cf65a93e4fa63aa015e783b62497daaa0e0e72d288c43527e5a11b",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\short-temp-security.json": "d18643811045158ca3c284a88f2c66292f2d8f582b541454978f11e28e55bdd8",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\short-temp-parent-security.json": "7d9eee83cdf0ce276b34f19d1945349696c48ad87b477b2f0176bdc54a6760d8"
+  },
+  "test_source_commit": "727d66753814dc218e26d699e57402db2d13190a",
+  "product_source_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+  "custody_owner": "original root issuer",
+  "request_sha256": "e221292058a2bf06c53d591479ef64ad32f0a8a18ceb3dfdf2a1eaad54e87c06",
+  "request_nonce": "173afd827e164c808262844d09b2ae13",
+  "client_started_monotonic_ns": 581518989202200,
+  "command_guard_helper": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-error-dword-v4\\guard-custody.py",
+    "sha256": "e7c663f4ba2fd558005bc110173609cb19465ff33d3f4678aeb53b5ba00e0924"
+  },
+  "native_custody_settled": true,
+  "replay": "owner output once; child bytes only after original native/IO settlement; no cross-stream ordering claim",
+  "budgets_seconds": {
+    "adapter_preparation": 30,
+    "owner_logical": 315,
+    "owner_host_watchdog": 320,
+    "final_measurement_conversion_replay": 10,
+    "adapter_total_checked": 355,
+    "cmd_go_hard_kill": 360
+  },
+  "receiver_environment_overrides": {
+    "GOFLAGS": "-mod=readonly -ldflags=-H=windowsgui",
+    "GOMODCACHE": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\private\\go-mod",
+    "PATH": "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\mingw64\\bin;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\usr\\bin;@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin;@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\bin;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\WindowsPowerShell\\v1.0;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\wbem"
+  },
+  "short_temp": {
+    "schema": "full-run-short-temp-v1",
+    "owner": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6",
+    "consumer": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe",
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\x0db327d6b7fe",
+    "environment_keys": [
+      "TEMP",
+      "TMP",
+      "TMPDIR",
+      "GOTMPDIR"
+    ],
+    "parent_creation": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\short-temp-parent-security.json",
+      "sha256": "7d9eee83cdf0ce276b34f19d1945349696c48ad87b477b2f0176bdc54a6760d8"
+    },
+    "creation": {
+      "token": {
+        "user_sid": "@@RECOVERY_ORIGINAL_OWNER_SID@@",
+        "default_owner_sid": "@@RECOVERY_ORIGINAL_OWNER_SID@@"
+      },
+      "scope": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\x0db327d6b7fe",
+      "directories": [
+        {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\x0db327d6b7fe",
+          "created_exclusively": true,
+          "volume_serial": 275429471,
+          "file_index": 2814749771865503,
+          "owner_sid": "@@RECOVERY_ORIGINAL_OWNER_SID@@",
+          "dacl_protected": true,
+          "rules": [
+            {
+              "sid": "@@RECOVERY_ORIGINAL_OWNER_SID@@",
+              "mask": 2032127,
+              "flags": 3
+            },
+            {
+              "sid": "S-1-5-18",
+              "mask": 2032127,
+              "flags": 3
+            },
+            {
+              "sid": "S-1-5-32-544",
+              "mask": 2032127,
+              "flags": 3
+            }
+          ],
+          "sddl": "O:@@RECOVERY_ORIGINAL_OWNER_SID@@D:P(A;OICI;FA;;;@@RECOVERY_ORIGINAL_OWNER_SID@@)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
+        }
+      ],
+      "existing_objects_mutated": false,
+      "recursive_acl_operations": false
+    },
+    "workspace_generation_cwd_max_characters": 247,
+    "path_bound_scope": "current Go TempDir name64, suffix<=10, child001, hardened-parent and generation ID; later executable/qualification paths not covered"
+  },
+  "command_quiescence": {
+    "complete": true,
+    "commands": [
+      {
+        "name": "incoming-build-info",
+        "state": "complete",
+        "reason": "",
+        "direct_exit_known": true
+      },
+      {
+        "name": "inventory-owner",
+        "state": "complete",
+        "reason": "",
+        "direct_exit_known": true
+      },
+      {
+        "name": "suite-owner",
+        "state": "complete",
+        "reason": "",
+        "direct_exit_known": true
+      },
+      {
+        "name": "suite-events",
+        "state": "complete",
+        "reason": "",
+        "direct_exit_known": true
+      }
+    ]
+  },
+  "marked_receiver_source": {
+    "publisher_inputs": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\marked727d-inputs.json",
+      "sha256": "b716a16b9cbe69d67c3a2adc15b24576d1121e32ff6080c7eefc460fe64bafc0"
+    },
+    "product_source_commit": "727d66753814dc218e26d699e57402db2d13190a",
+    "publisher_source": {
+      "source_epoch": "5c3f54e2359b33266afb0dd52488c01ab0114af1370376492b8186e6ae74cf89",
+      "source_snapshot_sha256": "b37a149da3a88b7b87eec0f0ed0ace83178cf7a2add88e97a906989073f1a096",
+      "file_count": 3509
+    },
+    "receiver_linker_flags": [
+      "-s",
+      "-w"
+    ],
+    "new_product_qualification": false
+  },
+  "executed_binary": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\d\\go-build3568661218\\b538\\vcpkgserver.test.exe",
+  "executed_sha256": "71fa9a523baf8bd43ab0a2582d400d74298cb555ea953feea877d9e3265649db",
+  "build_info": {
+    "GoVersion": "go1.27.4",
+    "Path": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver.test",
+    "Main": {
+      "Path": "mcp-local-hub",
+      "Version": "(devel)"
+    },
+    "Deps": [
+      {
+        "Path": "github.com/google/jsonschema-go",
+        "Version": "v0.4.3",
+        "Sum": "h1:/DBOLZTfDow7pe2GmaJNhltueGTtDKICi8V8p+DQPd0="
+      },
+      {
+        "Path": "github.com/modelcontextprotocol/go-sdk",
+        "Version": "v1.6.1",
+        "Sum": "h1:0zOSupjKUxPKSocPT1Wtago+mUHU2/uZ4xSOY0FGReU="
+      },
+      {
+        "Path": "github.com/segmentio/asm",
+        "Version": "v1.1.3",
+        "Sum": "h1:WM03sfUOENvvKexOLp+pCqgb/WDjsi7EK8gIsICtzhc="
+      },
+      {
+        "Path": "github.com/segmentio/encoding",
+        "Version": "v0.5.4",
+        "Sum": "h1:OW1VRern8Nw6ITAtwSZ7Idrl3MXCFwXHPgqESYfvNt0="
+      },
+      {
+        "Path": "github.com/yosida95/uritemplate/v3",
+        "Version": "v3.0.2",
+        "Sum": "h1:Ed3Oyj9yrmi9087+NczuL5BwkIc4wvTb5zIM+UJPGz4="
+      },
+      {
+        "Path": "golang.org/x/oauth2",
+        "Version": "v0.35.0",
+        "Sum": "h1:Mv2mzuHuZuY2+bkyWXIHMfhNdJAdwW3FuWeCPYN5GVQ="
+      },
+      {
+        "Path": "golang.org/x/sys",
+        "Version": "v0.47.0",
+        "Sum": "h1:o7XGOvZQCADBQQ4Y7VNq2dRWQR7JmOUW8Kxx4ZsNgWs="
+      }
+    ],
+    "Settings": [
+      {
+        "Key": "-buildmode",
+        "Value": "exe"
+      },
+      {
+        "Key": "-compiler",
+        "Value": "gc"
+      },
+      {
+        "Key": "-ldflags",
+        "Value": "mcp-local-hub/internal/cli=-H=windowsgui -s -w -X=mcp-local-hub/internal/buildinfo.version=0.4.60 -X=mcp-local-hub/internal/buildinfo.commit=727d66753814dc218e26d699e57402db2d13190a -X=mcp-local-hub/internal/buildinfo.date=2026-11-27T02:27:42Z -X=mcp-local-hub/internal/buildinfo.publisherSourceEpoch=5c3f54e2359b33266afb0dd52488c01ab0114af1370376492b8186e6ae74cf89"
+      },
+      {
+        "Key": "DefaultGODEBUG",
+        "Value": "tracebacklabels=0,x509sslcertoverrideplatform=0"
+      },
+      {
+        "Key": "CGO_ENABLED",
+        "Value": "1"
+      },
+      {
+        "Key": "CGO_CFLAGS"
+      },
+      {
+        "Key": "CGO_CPPFLAGS"
+      },
+      {
+        "Key": "CGO_CXXFLAGS"
+      },
+      {
+        "Key": "CGO_LDFLAGS"
+      },
+      {
+        "Key": "GOARCH",
+        "Value": "amd64"
+      },
+      {
+        "Key": "GOOS",
+        "Value": "windows"
+      },
+      {
+        "Key": "GOAMD64",
+        "Value": "v1"
+      }
+    ]
+  },
+  "qualified_bundle": null,
+  "receiver_environment": {
+    "GOPROXY": "https://proxy.golang.org,direct",
+    "GOSUMDB": "sum.golang.org",
+    "PATH": "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\mingw64\\bin;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\usr\\bin;@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin;@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\bin;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\WindowsPowerShell\\v1.0;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\wbem",
+    "TEMP": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\x0db327d6b7fe",
+    "TMP": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\x0db327d6b7fe",
+    "GOTMPDIR": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\x0db327d6b7fe",
+    "USERPROFILE": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\profile",
+    "APPDATA": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\appdata",
+    "LOCALAPPDATA": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\localappdata",
+    "GOPATH": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\go-path",
+    "GOCACHE": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\private\\go-build",
+    "GOMODCACHE": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\private\\go-mod",
+    "GOROOT": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go",
+    "GOENV": "off",
+    "GOWORK": "off",
+    "GOTOOLCHAIN": "local",
+    "GOFLAGS": "-mod=readonly -ldflags=-H=windowsgui",
+    "GOOS": "windows",
+    "GOARCH": "amd64",
+    "CGO_ENABLED": "1",
+    "GOTELEMETRY": "off",
+    "SERENA_HOME": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\profile"
+  },
+  "inventory_owner": {
+    "receipt": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\inventory\\result.json",
+    "proof": {
+      "custody_retained": false,
+      "binary_after_measured": true,
+      "schema": "literal-contained-test-run-v1",
+      "binary": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\d\\go-build3568661218\\b538\\vcpkgserver.test.exe",
+      "binary_sha256": "71fa9a523baf8bd43ab0a2582d400d74298cb555ea953feea877d9e3265649db",
+      "source_dir": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2\\internal\\vcpkgmcp\\vcpkgserver",
+      "args": [
+        "-test.list=."
+      ],
+      "started_utc": "2026-11-28T12:09:01.1805624Z",
+      "finished_utc": "2026-11-28T12:09:01.3084399Z",
+      "root": {
+        "Known": true,
+        "PID": 129564,
+        "StartedAt": "2026-11-28T12:09:01.1887436Z",
+        "NativeBirthFILETIME": 134403413411887436
+      },
+      "native": {
+        "RootIdentity": {
+          "Known": true,
+          "PID": 129564,
+          "StartedAt": "2026-11-28T12:09:01.1887436Z",
+          "NativeBirthFILETIME": 134403413411887436
+        },
+        "NoChildKnown": false,
+        "RootWaitKnown": true,
+        "RootExitCode": 0,
+        "TerminalAction": "not-requested",
+        "MembersExited": true,
+        "AccountingKnown": true,
+        "InitialTotal": 1,
+        "FinalActive": 0,
+        "CapturedMemberPIDs": null,
+        "HandlesClosed": true,
+        "Error": null
+      },
+      "io": {
+        "Stdin": {
+          "Acquired": true,
+          "CloseAttempted": true,
+          "Closed": true,
+          "CloseError": null
+        },
+        "StdoutRead": {
+          "Acquired": true,
+          "CloseAttempted": true,
+          "Closed": true,
+          "CloseError": null
+        },
+        "StdoutWrite": {
+          "Acquired": true,
+          "CloseAttempted": true,
+          "Closed": true,
+          "CloseError": null
+        },
+        "StderrRead": {
+          "Acquired": true,
+          "CloseAttempted": true,
+          "Closed": true,
+          "CloseError": null
+        },
+        "StderrWrite": {
+          "Acquired": true,
+          "CloseAttempted": true,
+          "Closed": true,
+          "CloseError": null
+        },
+        "Stdout": {
+          "WorkerStarted": true,
+          "WorkerComplete": true,
+          "EOF": true,
+          "Bytes": 1945,
+          "Limit": 16777216,
+          "LimitExceeded": false,
+          "Error": null
+        },
+        "Stderr": {
+          "WorkerStarted": true,
+          "WorkerComplete": true,
+          "EOF": true,
+          "Bytes": 0,
+          "Limit": 16777216,
+          "LimitExceeded": false,
+          "Error": null
+        }
+      },
+      "stage": "",
+      "root_wait_known": true,
+      "root_exit_code": 0,
+      "settlement_complete": true,
+      "inventory": true,
+      "work_deadline": "2026-11-28T12:10:36.1805624Z",
+      "cleanup_deadline": "2026-11-28T12:10:46.1805624Z",
+      "test_timeout": "1m30s",
+      "bootstrap_budget": "5s",
+      "binary_unchanged": true
+    },
+    "sha256": "4ec510eddb07bf86433dfb7a03cae76bf3aaddb13cee6347f7cc05e82fe64afe"
+  },
+  "inventory": {
+    "tests": {
+      "mcp-local-hub/internal/vcpkgmcp/vcpkgserver": [
+        "TestAllAdvertisedInputSchemasAreResolvedStrictObjects",
+        "TestAllRegisteredToolsAreProjectableWithoutChangingCompleteWireShape",
+        "TestAllRegisteredToolsRejectUnknownArgumentsBeforeHandler",
+        "TestConcurrentReverseDependencyRequestLimitOne",
+        "TestJSONResultExactContentBoundary",
+        "TestJSONResultOversizedLastFailureUsesSharedProjection",
+        "TestLastFailureHasNoPrivateWholeBodyBoundary",
+        "TestPR591_CMakeIncludeGraphDescriptorMatchesContracts",
+        "TestPR591_PatchesApplyDescriptorNamesDeferredInvocation",
+        "TestPR591_RootReasonVocabularyMatchesOwnersAndCanonicalREADME",
+        "TestPinStatusJSONResultRedactsIndependentEvidenceCommandAtActualSerializer",
+        "TestPinStatusJSONResultRedactsRemoteMetadataAtActualSerializer",
+        "TestPinStatusJSONResultRedactsRepoOnlyEvidenceAtActualSerializer",
+        "TestPinStatusJSONResultRedactsSolCredentialCarriersAtActualSerializer",
+        "TestPinStatusLiveDescriptionUsesExactTypedReasonVocabularies",
+        "TestPinStatusLiveDescriptionsHaveNoReasonLiteralShadowOwner",
+        "TestPortResolutionSchemaMaxItemsMatchesPackageLimit",
+        "TestProjectableAdapterBranches",
+        "TestPublicContractCompositionRootImportGuard",
+        "TestPublicContractProcessOwnershipGuard",
+        "TestPublicContractTypedStringVocabularyGuard",
+        "TestR31GraphLimitSchemasRejectNegativeValues",
+        "TestR33TraceSchemaRejectsNegativeMaxRecords",
+        "TestRegisterTools",
+        "TestRegisteredVcpkgToolGuardRejectsDefectClasses",
+        "TestRegisteredVcpkgToolsOverBudgetProjectionBijection",
+        "TestRegisteredVcpkgToolsUseOnlyProjectableAdapter",
+        "TestRegistrationFailureReturnsFromRunOwner",
+        "TestReverseDependenciesBindsCanonicalTrustedRootBeforeAnalysis",
+        "TestReverseDependenciesReceivingSideWire",
+        "TestReverseDependenciesRefusesMissingOrNonDirectoryTrustedRootsBeforeAnalysis",
+        "TestReverseDependenciesRegistrationAndStrictSchema",
+        "TestReverseDependenciesRejectsCallerSelectedExecutableRoot",
+        "TestVcpkgLastFailure_ConcurrentLimitIsContextAware",
+        "TestVcpkgLastFailure_MCPCallPreservesFailedCausalTuple",
+        "TestVcpkgLastFailure_MCPEnvelopeStaysBelowStdioHostLineLimit",
+        "TestVcpkgPublicContractDecisionReference"
+      ]
+    },
+    "benchmarks": {
+      "mcp-local-hub/internal/vcpkgmcp/vcpkgserver": []
+    }
+  },
+  "preparation_seconds": 1.0562133999774233,
+  "headless_configuration": {
+    "schema": "serena-private-headless-config-v1",
+    "seed": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\headless-config-input.yml",
+      "sha256": "96f52df38eddbfd3bef53d29ca5f445099a2c63e292b06be8c63616172ec1484",
+      "bytes": 92
+    },
+    "mutable_config": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\profile\\serena_config.yml",
+    "settings": {
+      "gui_log_window": false,
+      "web_dashboard": false,
+      "web_dashboard_open_on_launch": false
+    },
+    "initial_projects_empty": true,
+    "before": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\profile\\serena_config.yml",
+      "bytes": 92,
+      "sha256": "96f52df38eddbfd3bef53d29ca5f445099a2c63e292b06be8c63616172ec1484",
+      "settings": {
+        "gui_log_window": false,
+        "web_dashboard": false,
+        "web_dashboard_open_on_launch": false
+      },
+      "projects_are_mutable_output": true
+    },
+    "before_launch_verified": true,
+    "scope": "supported private headless configuration; default GUI behavior is not qualified",
+    "after": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\profile\\serena_config.yml",
+      "bytes": 92,
+      "sha256": "96f52df38eddbfd3bef53d29ca5f445099a2c63e292b06be8c63616172ec1484",
+      "settings": {
+        "gui_log_window": false,
+        "web_dashboard": false,
+        "web_dashboard_open_on_launch": false
+      },
+      "projects_are_mutable_output": true
+    }
+  },
+  "owner": {
+    "receipt": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\suite\\result.json",
+    "proof": {
+      "custody_retained": false,
+      "binary_after_measured": true,
+      "schema": "literal-contained-test-run-v1",
+      "binary": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\d\\go-build3568661218\\b538\\vcpkgserver.test.exe",
+      "binary_sha256": "71fa9a523baf8bd43ab0a2582d400d74298cb555ea953feea877d9e3265649db",
+      "source_dir": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2\\internal\\vcpkgmcp\\vcpkgserver",
+      "args": [
+        "-test.paniconexit0",
+        "-test.v=test2json",
+        "-test.count=1",
+        "-test.timeout=5m0s"
+      ],
+      "started_utc": "2026-11-28T12:09:01.456185Z",
+      "finished_utc": "2026-11-28T12:09:02.2537921Z",
+      "root": {
+        "Known": true,
+        "PID": 493968,
+        "StartedAt": "2026-11-28T12:09:01.4639389Z",
+        "NativeBirthFILETIME": 134403413414639389
+      },
+      "native": {
+        "RootIdentity": {
+          "Known": true,
+          "PID": 493968,
+          "StartedAt": "2026-11-28T12:09:01.4639389Z",
+          "NativeBirthFILETIME": 134403413414639389
+        },
+        "NoChildKnown": false,
+        "RootWaitKnown": true,
+        "RootExitCode": 0,
+        "TerminalAction": "not-requested",
+        "MembersExited": true,
+        "AccountingKnown": true,
+        "InitialTotal": 19,
+        "FinalActive": 0,
+        "CapturedMemberPIDs": null,
+        "HandlesClosed": true,
+        "Error": null
+      },
+      "io": {
+        "Stdin": {
+          "Acquired": true,
+          "CloseAttempted": true,
+          "Closed": true,
+          "CloseError": null
+        },
+        "StdoutRead": {
+          "Acquired": true,
+          "CloseAttempted": true,
+          "Closed": true,
+          "CloseError": null
+        },
+        "StdoutWrite": {
+          "Acquired": true,
+          "CloseAttempted": true,
+          "Closed": true,
+          "CloseError": null
+        },
+        "StderrRead": {
+          "Acquired": true,
+          "CloseAttempted": true,
+          "Closed": true,
+          "CloseError": null
+        },
+        "StderrWrite": {
+          "Acquired": true,
+          "CloseAttempted": true,
+          "Closed": true,
+          "CloseError": null
+        },
+        "Stdout": {
+          "WorkerStarted": true,
+          "WorkerComplete": true,
+          "EOF": true,
+          "Bytes": 23002,
+          "Limit": 16777216,
+          "LimitExceeded": false,
+          "Error": null
+        },
+        "Stderr": {
+          "WorkerStarted": true,
+          "WorkerComplete": true,
+          "EOF": true,
+          "Bytes": 0,
+          "Limit": 16777216,
+          "LimitExceeded": false,
+          "Error": null
+        }
+      },
+      "stage": "",
+      "root_wait_known": true,
+      "root_exit_code": 0,
+      "settlement_complete": true,
+      "inventory": false,
+      "work_deadline": "2026-11-28T12:14:06.456185Z",
+      "cleanup_deadline": "2026-11-28T12:14:16.456185Z",
+      "test_timeout": "5m0s",
+      "bootstrap_budget": "5s",
+      "binary_unchanged": true
+    },
+    "kind": "contained",
+    "sha256": "4162de81099dfcdd42e549fac094a01d555fd333e9057839ddec0e188567e6d4"
+  },
+  "raw_output_binding": {
+    "stdout": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\suite\\stdout.raw",
+    "stderr": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\suite\\stderr.txt",
+    "stdout_sha256": "64d8da4fa7f84b41debb544e628f23d48d9219e107edeea438684fd7d871207e",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stdout_forwarded_identical": true,
+    "stderr_forwarded_identical": true,
+    "stderr_forwarding_verified": true
+  },
+  "coverage": [
+    {
+      "lane": "literal-default",
+      "expected": {
+        "mcp-local-hub/internal/vcpkgmcp/vcpkgserver": [
+          "TestAllAdvertisedInputSchemasAreResolvedStrictObjects",
+          "TestAllRegisteredToolsAreProjectableWithoutChangingCompleteWireShape",
+          "TestAllRegisteredToolsRejectUnknownArgumentsBeforeHandler",
+          "TestConcurrentReverseDependencyRequestLimitOne",
+          "TestJSONResultExactContentBoundary",
+          "TestJSONResultOversizedLastFailureUsesSharedProjection",
+          "TestLastFailureHasNoPrivateWholeBodyBoundary",
+          "TestPR591_CMakeIncludeGraphDescriptorMatchesContracts",
+          "TestPR591_PatchesApplyDescriptorNamesDeferredInvocation",
+          "TestPR591_RootReasonVocabularyMatchesOwnersAndCanonicalREADME",
+          "TestPinStatusJSONResultRedactsIndependentEvidenceCommandAtActualSerializer",
+          "TestPinStatusJSONResultRedactsRemoteMetadataAtActualSerializer",
+          "TestPinStatusJSONResultRedactsRepoOnlyEvidenceAtActualSerializer",
+          "TestPinStatusJSONResultRedactsSolCredentialCarriersAtActualSerializer",
+          "TestPinStatusLiveDescriptionUsesExactTypedReasonVocabularies",
+          "TestPinStatusLiveDescriptionsHaveNoReasonLiteralShadowOwner",
+          "TestPortResolutionSchemaMaxItemsMatchesPackageLimit",
+          "TestProjectableAdapterBranches",
+          "TestPublicContractCompositionRootImportGuard",
+          "TestPublicContractProcessOwnershipGuard",
+          "TestPublicContractTypedStringVocabularyGuard",
+          "TestR31GraphLimitSchemasRejectNegativeValues",
+          "TestR33TraceSchemaRejectsNegativeMaxRecords",
+          "TestRegisterTools",
+          "TestRegisteredVcpkgToolGuardRejectsDefectClasses",
+          "TestRegisteredVcpkgToolsOverBudgetProjectionBijection",
+          "TestRegisteredVcpkgToolsUseOnlyProjectableAdapter",
+          "TestRegistrationFailureReturnsFromRunOwner",
+          "TestReverseDependenciesBindsCanonicalTrustedRootBeforeAnalysis",
+          "TestReverseDependenciesReceivingSideWire",
+          "TestReverseDependenciesRefusesMissingOrNonDirectoryTrustedRootsBeforeAnalysis",
+          "TestReverseDependenciesRegistrationAndStrictSchema",
+          "TestReverseDependenciesRejectsCallerSelectedExecutableRoot",
+          "TestVcpkgLastFailure_ConcurrentLimitIsContextAware",
+          "TestVcpkgLastFailure_MCPCallPreservesFailedCausalTuple",
+          "TestVcpkgLastFailure_MCPEnvelopeStaysBelowStdioHostLineLimit",
+          "TestVcpkgPublicContractDecisionReference"
+        ]
+      },
+      "exit_code": 0,
+      "passed": true,
+      "top_level": [
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllAdvertisedInputSchemasAreResolvedStrictObjects",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllRegisteredToolsAreProjectableWithoutChangingCompleteWireShape",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllRegisteredToolsRejectUnknownArgumentsBeforeHandler",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestConcurrentReverseDependencyRequestLimitOne",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestJSONResultExactContentBoundary",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestJSONResultOversizedLastFailureUsesSharedProjection",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestLastFailureHasNoPrivateWholeBodyBoundary",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPR591_CMakeIncludeGraphDescriptorMatchesContracts",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPR591_PatchesApplyDescriptorNamesDeferredInvocation",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPR591_RootReasonVocabularyMatchesOwnersAndCanonicalREADME",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPinStatusJSONResultRedactsIndependentEvidenceCommandAtActualSerializer",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPinStatusJSONResultRedactsRemoteMetadataAtActualSerializer",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPinStatusJSONResultRedactsRepoOnlyEvidenceAtActualSerializer",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPinStatusJSONResultRedactsSolCredentialCarriersAtActualSerializer",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPinStatusLiveDescriptionUsesExactTypedReasonVocabularies",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPinStatusLiveDescriptionsHaveNoReasonLiteralShadowOwner",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPortResolutionSchemaMaxItemsMatchesPackageLimit",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestProjectableAdapterBranches",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPublicContractCompositionRootImportGuard",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPublicContractProcessOwnershipGuard",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPublicContractTypedStringVocabularyGuard",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestR31GraphLimitSchemasRejectNegativeValues",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestR33TraceSchemaRejectsNegativeMaxRecords",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisterTools",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolGuardRejectsDefectClasses",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolsOverBudgetProjectionBijection",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolsUseOnlyProjectableAdapter",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegistrationFailureReturnsFromRunOwner",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestReverseDependenciesBindsCanonicalTrustedRootBeforeAnalysis",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestReverseDependenciesReceivingSideWire",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestReverseDependenciesRefusesMissingOrNonDirectoryTrustedRootsBeforeAnalysis",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestReverseDependenciesRegistrationAndStrictSchema",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestReverseDependenciesRejectsCallerSelectedExecutableRoot",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestVcpkgLastFailure_ConcurrentLimitIsContextAware",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestVcpkgLastFailure_MCPCallPreservesFailedCausalTuple",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestVcpkgLastFailure_MCPEnvelopeStaysBelowStdioHostLineLimit",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestVcpkgPublicContractDecisionReference",
+          "outcome": "pass"
+        }
+      ],
+      "all_terminal": [
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllAdvertisedInputSchemasAreResolvedStrictObjects",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllAdvertisedInputSchemasAreResolvedStrictObjects/cmake_include_graph",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllAdvertisedInputSchemasAreResolvedStrictObjects/vcpkg_cmake_trace",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllAdvertisedInputSchemasAreResolvedStrictObjects/vcpkg_discover_root",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllAdvertisedInputSchemasAreResolvedStrictObjects/vcpkg_last_failure",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllAdvertisedInputSchemasAreResolvedStrictObjects/vcpkg_patches_apply",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllAdvertisedInputSchemasAreResolvedStrictObjects/vcpkg_pin_status",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllAdvertisedInputSchemasAreResolvedStrictObjects/vcpkg_port_resolution",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllAdvertisedInputSchemasAreResolvedStrictObjects/vcpkg_reverse_dependencies",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllRegisteredToolsAreProjectableWithoutChangingCompleteWireShape",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllRegisteredToolsAreProjectableWithoutChangingCompleteWireShape/cmake_include_graph",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllRegisteredToolsAreProjectableWithoutChangingCompleteWireShape/vcpkg_cmake_trace",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllRegisteredToolsAreProjectableWithoutChangingCompleteWireShape/vcpkg_discover_root",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllRegisteredToolsAreProjectableWithoutChangingCompleteWireShape/vcpkg_last_failure",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllRegisteredToolsAreProjectableWithoutChangingCompleteWireShape/vcpkg_patches_apply",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllRegisteredToolsAreProjectableWithoutChangingCompleteWireShape/vcpkg_pin_status",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllRegisteredToolsAreProjectableWithoutChangingCompleteWireShape/vcpkg_port_resolution",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllRegisteredToolsAreProjectableWithoutChangingCompleteWireShape/vcpkg_reverse_dependencies",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllRegisteredToolsRejectUnknownArgumentsBeforeHandler",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllRegisteredToolsRejectUnknownArgumentsBeforeHandler/cmake_include_graph",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllRegisteredToolsRejectUnknownArgumentsBeforeHandler/vcpkg_cmake_trace",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllRegisteredToolsRejectUnknownArgumentsBeforeHandler/vcpkg_discover_root",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllRegisteredToolsRejectUnknownArgumentsBeforeHandler/vcpkg_last_failure",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllRegisteredToolsRejectUnknownArgumentsBeforeHandler/vcpkg_patches_apply",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllRegisteredToolsRejectUnknownArgumentsBeforeHandler/vcpkg_pin_status",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllRegisteredToolsRejectUnknownArgumentsBeforeHandler/vcpkg_port_resolution",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestAllRegisteredToolsRejectUnknownArgumentsBeforeHandler/vcpkg_reverse_dependencies",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestConcurrentReverseDependencyRequestLimitOne",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestJSONResultExactContentBoundary",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestJSONResultExactContentBoundary/N",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestJSONResultExactContentBoundary/N+1",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestJSONResultExactContentBoundary/N-1",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestJSONResultOversizedLastFailureUsesSharedProjection",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestLastFailureHasNoPrivateWholeBodyBoundary",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPR591_CMakeIncludeGraphDescriptorMatchesContracts",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPR591_PatchesApplyDescriptorNamesDeferredInvocation",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPR591_RootReasonVocabularyMatchesOwnersAndCanonicalREADME",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPinStatusJSONResultRedactsIndependentEvidenceCommandAtActualSerializer",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPinStatusJSONResultRedactsRemoteMetadataAtActualSerializer",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPinStatusJSONResultRedactsRepoOnlyEvidenceAtActualSerializer",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPinStatusJSONResultRedactsSolCredentialCarriersAtActualSerializer",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPinStatusJSONResultRedactsSolCredentialCarriersAtActualSerializer/fused_credential_key",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPinStatusJSONResultRedactsSolCredentialCarriersAtActualSerializer/malformed_encoded_delimiter",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPinStatusLiveDescriptionUsesExactTypedReasonVocabularies",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPinStatusLiveDescriptionsHaveNoReasonLiteralShadowOwner",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPortResolutionSchemaMaxItemsMatchesPackageLimit",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestProjectableAdapterBranches",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestProjectableAdapterBranches/invalid_argument",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestProjectableAdapterBranches/nil_result",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestProjectableAdapterBranches/ordinary_error",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestProjectableAdapterBranches/success",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPublicContractCompositionRootImportGuard",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPublicContractProcessOwnershipGuard",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPublicContractProcessOwnershipGuard/chained_run_bypass",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPublicContractProcessOwnershipGuard/command_construction_delegates_lifecycle",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPublicContractProcessOwnershipGuard/legacy_process_owner_bypass",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPublicContractProcessOwnershipGuard/platform_start_bypass",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPublicContractProcessOwnershipGuard/typed_command_parameter_start_bypass",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPublicContractProcessOwnershipGuard/typed_command_parameter_wait_bypass",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestPublicContractTypedStringVocabularyGuard",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestR31GraphLimitSchemasRejectNegativeValues",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestR33TraceSchemaRejectsNegativeMaxRecords",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisterTools",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisterTools/cmake_include_graph_invalid_input",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisterTools/pr591_pin_status_schema_batch_admission_is_wire_visible",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisterTools/pr591_relative_paths_are_wire_visible",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisterTools/pr591_unsupported_trace_major_is_wire_visible",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisterTools/vcpkg_cmake_trace_invalid_input",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisterTools/vcpkg_last_failure_invalid_input",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisterTools/vcpkg_patches_apply_invalid_input",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisterTools/vcpkg_pin_status_invalid_input",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisterTools/vcpkg_port_resolution_invalid_input",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisterTools/vcpkg_reverse_dependencies_invalid_input",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolGuardRejectsDefectClasses",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolGuardRejectsDefectClasses/cross_file_helper_addtool",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolGuardRejectsDefectClasses/cross_file_json_result",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolGuardRejectsDefectClasses/direct_addtool",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolGuardRejectsDefectClasses/duplicate_registration",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolGuardRejectsDefectClasses/eighth_registration",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolGuardRejectsDefectClasses/handler_wire_escape",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolGuardRejectsDefectClasses/json_result_bypass",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolGuardRejectsDefectClasses/missing_fixture",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolGuardRejectsDefectClasses/missing_projection",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolGuardRejectsDefectClasses/nil_fixture",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolGuardRejectsDefectClasses/nil_projectable",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolGuardRejectsDefectClasses/nonliteral_registration",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolGuardRejectsDefectClasses/not_oversized",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolGuardRejectsDefectClasses/projection_over_budget",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolsOverBudgetProjectionBijection",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolsOverBudgetProjectionBijection/cmake_include_graph",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolsOverBudgetProjectionBijection/vcpkg_cmake_trace",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolsOverBudgetProjectionBijection/vcpkg_discover_root",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolsOverBudgetProjectionBijection/vcpkg_last_failure",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolsOverBudgetProjectionBijection/vcpkg_patches_apply",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolsOverBudgetProjectionBijection/vcpkg_pin_status",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolsOverBudgetProjectionBijection/vcpkg_port_resolution",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolsOverBudgetProjectionBijection/vcpkg_reverse_dependencies",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegisteredVcpkgToolsUseOnlyProjectableAdapter",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestRegistrationFailureReturnsFromRunOwner",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestReverseDependenciesBindsCanonicalTrustedRootBeforeAnalysis",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestReverseDependenciesReceivingSideWire",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestReverseDependenciesRefusesMissingOrNonDirectoryTrustedRootsBeforeAnalysis",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestReverseDependenciesRefusesMissingOrNonDirectoryTrustedRootsBeforeAnalysis/missing",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestReverseDependenciesRefusesMissingOrNonDirectoryTrustedRootsBeforeAnalysis/not-a-directory",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestReverseDependenciesRegistrationAndStrictSchema",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestReverseDependenciesRejectsCallerSelectedExecutableRoot",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestVcpkgLastFailure_ConcurrentLimitIsContextAware",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestVcpkgLastFailure_MCPCallPreservesFailedCausalTuple",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestVcpkgLastFailure_MCPEnvelopeStaysBelowStdioHostLineLimit",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestVcpkgPublicContractDecisionReference",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestVcpkgPublicContractDecisionReference/2026-07-25-vcpkg-mcp-tool-contracts.md",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestVcpkgPublicContractDecisionReference/2026-07-29-vcpkg-pinstatus-remote-query-admission.md",
+          "outcome": "pass"
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "test": "TestVcpkgPublicContractDecisionReference/2026-07-30-vcpkg-mcp-bounded-public-result-contract.md",
+          "outcome": "pass"
+        }
+      ],
+      "started_without_terminal": [],
+      "missing_top_level": [],
+      "unexpected_top_level": [],
+      "duplicate_terminal": [],
+      "duplicate_start": [],
+      "terminal_without_start": [],
+      "missing_package_terminal": [],
+      "unexpected_package_terminal": [],
+      "unexpected_test_roots": [],
+      "package_terminal": {
+        "mcp-local-hub/internal/vcpkgmcp/vcpkgserver": "pass"
+      },
+      "package_terminal_counts": {
+        "mcp-local-hub/internal/vcpkgmcp/vcpkgserver": 1
+      },
+      "duplicate_package_terminal": [],
+      "mandatory_passes": [],
+      "mandatory_passes_satisfied": true
+    }
+  ],
+  "image_unchanged": true,
+  "bundle_unchanged": true,
+  "headless_configuration_received": true,
+  "original_inputs_unchanged": true,
+  "commands_quiescent": true,
+  "raw_replay": {
+    "stdout": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\suite-owner.stdout.txt",
+      "sha256": "64d8da4fa7f84b41debb544e628f23d48d9219e107edeea438684fd7d871207e"
+    },
+    "stderr": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x0db327d6b7fe\\suite-owner.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "replay_deadline_monotonic_ns": 581531006690200,
+  "seconds": 3.2017331999959424,
+  "adapter_exit_code": 0
+}

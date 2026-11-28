@@ -1,0 +1,19 @@
+diff --git a/internal/api/main_helper_dispatch_test.go b/internal/api/main_helper_dispatch_test.go
+index af06c4dda8b922120b2ac52e26589a3264e826de..efdcb3486618b3421d1e9b35f626a1695272eaf6 100644
+--- a/internal/api/main_helper_dispatch_test.go
++++ b/internal/api/main_helper_dispatch_test.go
+@@ -7,10 +7,10 @@ import (
+ )
+ 
+ type apiTestHelperDispatch struct {
+-	invalid                 bool
+-	runSelectedTest         bool
+-	mustExit                bool
+-	callerStartTimeOracle   bool
++	invalid               bool
++	runSelectedTest       bool
++	mustExit              bool
++	callerStartTimeOracle bool
+ }
+ 
+ // classifyAPITestHelperDispatch validates only the child invocations issued

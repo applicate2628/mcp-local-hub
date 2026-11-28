@@ -1,0 +1,79 @@
+{"Action":"start","Package":"mcp-local-hub/internal/vcpkgmcp/portname"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames","Output":"=== RUN   TestParseLegalAndIllegalNames\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/legal-zlib"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/legal-zlib","Output":"=== RUN   TestParseLegalAndIllegalNames/legal-zlib\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/legal-zlib","Output":"--- PASS: TestParseLegalAndIllegalNames/legal-zlib (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/legal-zlib"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/legal-mcp-language-server"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/legal-mcp-language-server","Output":"=== RUN   TestParseLegalAndIllegalNames/legal-mcp-language-server\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/legal-mcp-language-server","Output":"--- PASS: TestParseLegalAndIllegalNames/legal-mcp-language-server (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/legal-mcp-language-server"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/legal-abseil"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/legal-abseil","Output":"=== RUN   TestParseLegalAndIllegalNames/legal-abseil\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/legal-abseil","Output":"--- PASS: TestParseLegalAndIllegalNames/legal-abseil (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/legal-abseil"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/legal-libpng16"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/legal-libpng16","Output":"=== RUN   TestParseLegalAndIllegalNames/legal-libpng16\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/legal-libpng16","Output":"--- PASS: TestParseLegalAndIllegalNames/legal-libpng16 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/legal-libpng16"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/legal-a-b-c"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/legal-a-b-c","Output":"=== RUN   TestParseLegalAndIllegalNames/legal-a-b-c\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/legal-a-b-c","Output":"--- PASS: TestParseLegalAndIllegalNames/legal-a-b-c (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/legal-a-b-c"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/legal-x264"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/legal-x264","Output":"=== RUN   TestParseLegalAndIllegalNames/legal-x264\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/legal-x264","Output":"--- PASS: TestParseLegalAndIllegalNames/legal-x264 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/legal-x264"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-","Output":"=== RUN   TestParseLegalAndIllegalNames/illegal-\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-","Output":"--- PASS: TestParseLegalAndIllegalNames/illegal- (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-UPPERCASE"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-UPPERCASE","Output":"=== RUN   TestParseLegalAndIllegalNames/illegal-UPPERCASE\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-UPPERCASE","Output":"--- PASS: TestParseLegalAndIllegalNames/illegal-UPPERCASE (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-UPPERCASE"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal--leading"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal--leading","Output":"=== RUN   TestParseLegalAndIllegalNames/illegal--leading\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal--leading","Output":"--- PASS: TestParseLegalAndIllegalNames/illegal--leading (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal--leading"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-trailing-"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-trailing-","Output":"=== RUN   TestParseLegalAndIllegalNames/illegal-trailing-\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-trailing-","Output":"--- PASS: TestParseLegalAndIllegalNames/illegal-trailing- (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-trailing-"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-under_score"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-under_score","Output":"=== RUN   TestParseLegalAndIllegalNames/illegal-under_score\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-under_score","Output":"--- PASS: TestParseLegalAndIllegalNames/illegal-under_score (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-under_score"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-sub/nested"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-sub/nested","Output":"=== RUN   TestParseLegalAndIllegalNames/illegal-sub/nested\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-sub/nested","Output":"--- PASS: TestParseLegalAndIllegalNames/illegal-sub/nested (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-sub/nested"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-..\\windows-sibling"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-..\\windows-sibling","Output":"=== RUN   TestParseLegalAndIllegalNames/illegal-..\\windows-sibling\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-..\\windows-sibling","Output":"--- PASS: TestParseLegalAndIllegalNames/illegal-..\\windows-sibling (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-..\\windows-sibling"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-../escape"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-../escape","Output":"=== RUN   TestParseLegalAndIllegalNames/illegal-../escape\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-../escape","Output":"--- PASS: TestParseLegalAndIllegalNames/illegal-../escape (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-../escape"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-.."}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-..","Output":"=== RUN   TestParseLegalAndIllegalNames/illegal-..\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-..","Output":"--- PASS: TestParseLegalAndIllegalNames/illegal-.. (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames/illegal-.."}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames","Output":"--- PASS: TestParseLegalAndIllegalNames (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestParseLegalAndIllegalNames"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestJoinContainsOpaqueNameAndRejectsZeroOrEscape"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestJoinContainsOpaqueNameAndRejectsZeroOrEscape","Output":"=== RUN   TestJoinContainsOpaqueNameAndRejectsZeroOrEscape\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestJoinContainsOpaqueNameAndRejectsZeroOrEscape","Output":"--- PASS: TestJoinContainsOpaqueNameAndRejectsZeroOrEscape (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestJoinContainsOpaqueNameAndRejectsZeroOrEscape"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestPortNamePolicyHasOneProductionOwner"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestPortNamePolicyHasOneProductionOwner","Output":"=== RUN   TestPortNamePolicyHasOneProductionOwner\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestPortNamePolicyHasOneProductionOwner","Output":"--- PASS: TestPortNamePolicyHasOneProductionOwner (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestPortNamePolicyHasOneProductionOwner"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestR34ConsecutiveHyphensAreRejected"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestR34ConsecutiveHyphensAreRejected","Output":"=== RUN   TestR34ConsecutiveHyphensAreRejected\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestR34ConsecutiveHyphensAreRejected","Output":"--- PASS: TestR34ConsecutiveHyphensAreRejected (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Test":"TestR34ConsecutiveHyphensAreRejected"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/portname","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/portname"}

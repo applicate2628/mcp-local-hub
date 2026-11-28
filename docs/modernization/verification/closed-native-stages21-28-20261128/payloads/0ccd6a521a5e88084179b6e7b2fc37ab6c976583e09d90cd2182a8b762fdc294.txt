@@ -1,0 +1,44 @@
+# Prespawn attempt barrier candidate
+
+Status: DATA_ONLY_DRAFT_NOT_APPLIED_NOT_RUN.
+
+Base Source: 59f618ebfbf6d9f52c6994d68586e3c2ebc202a8, tree 03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1.
+Only tracked target: internal/cli/supervise_prespawn_binary_gate_test.go.
+This directory is a review candidate, not an applied Source change or a test result.
+
+## Change
+
+Replace only the trailing quarantine poll in driveRespawnAttempts with the existing controller FIFO acknowledgement. One context with the previous 2 s duration bounds both PostCtx enqueue and acknowledgement. Enqueue or acknowledgement failure fails the test.
+
+The n EvTimerDue posts, intervening 5 ms sleeps, early quarantine return, assertions, recovery/log deadlines, production timers, and original loop cancel-and-join cleanup remain byte-identical. The existing context import is reused. No production file or assertion changes.
+
+## Why the pre-fix failure cannot hide behind the barrier
+
+Anchors refer to the unchanged base Source above:
+
+- supervise_prespawn_binary_gate_test.go:43-63 installs a fake spawn which increments spawnCalls and synchronously returns errSpawnPreChild.
+- supervise_lostchild_f6_f2_test.go:252-279 constructs the controller without portOwnerFn or portGateCh. supervisor_controller.go:4300-4307 therefore returns from the port gate without starting its asynchronous worker.
+- supervisor_controller.go:3415 invokes executeSideEffect inline; :3679 invokes the fake spawn inline; :3739-3741 enqueues its synthetic EvChildExit with PostSelf before that invocation returns.
+- internal/api/supervisor_event_loop.go:139-154 dispatches handlers synchronously; :250-280 priority-drains PostSelf before taking the next external event.
+- supervisor_controller.go:2889-2893 acknowledges evControllerBarrier on that same event loop.
+- Consequently, without the missing-path gate, the barrier cannot overtake the fake spawn or its queued synthetic child-exit transition. The unchanged nonzero-spawn and quarantine assertions still reject the pre-fix behavior.
+- This is a processing-prefix acknowledgement, not proof that future timers or every background task have terminated. The original cleanup cancel and join in supervise_prespawn_binary_gate_test.go:82-91 is retained.
+
+The known paroleBarrierSync helper has a 5 s timeout and is intentionally not substituted for this original 2 s bound.
+
+## DATA verification
+
+The complete original UTF-8 LF bytes were received from the isolated safe Source and matched the already-frozen Source59f SHA-256 map (32,425 bytes). Applying this single unified hunk as DATA in memory reconstructs the full afterimage exactly. No Go parser, compiler, Git apply, test, process helper, or model was run by this preparation.
+
+Candidate file readback is checked against the lengths and SHA-256 values in candidate.json. The original tracked Source has not been written.
+
+## Future focused verification
+
+Keep the existing modes and Go timeout. Relevant roots are:
+
+- TestPreSpawnBinaryGate_MissingBinaryNeverBurnsBudget
+- TestPreSpawnBinaryGate_AutoRecoversWhenBinaryAppears
+- TestPreSpawnBinaryGate_EmitsActionableOperatorMessage
+- TestPreSpawnBinaryGate_MissingWorkspaceHolds
+
+The historical four roots totaled 8.18 printed seconds, including four unconditional 2 s trailing polls on the correct path. No speedup, pre-fix execution result, focused PASS, or full 5 m PASS is claimed by this candidate.

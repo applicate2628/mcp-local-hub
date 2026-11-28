@@ -1,0 +1,234 @@
+{
+  "schema": "cli-focused59f-baseline-v2-composition",
+  "state": "PREPARED_NOT_EXECUTED",
+  "reviewed": false,
+  "scope": "Independent DATA cache transfer and three selected CLI identity roots in default and test_state_path_env modes; no Product or full-suite qualification.",
+  "source": {
+    "root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-acceptance-20261128-v2",
+    "commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+    "tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+    "tracked_files": 3369,
+    "tracked_bytes": 69340536,
+    "sha256_map": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\source-binding\\source59f-input-sha256.json",
+      "sha256": "e8c3fc2f577a130f92ba4eee7f8eee7153afc032dee909557cf1156890917c06"
+    },
+    "isolated_root_receiving": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\source-binding\\source59f-isolated-root-freeze-v1.json",
+      "sha256": "e443f570fbeefbbe32ccb90ccd0a060c775ec3385c6c8626bf996dceefd524c1"
+    },
+    "source_pin_mapping": "For each of the exact 3369 files[relative_path] entries, bind source.root / relative_path to the unchanged SHA-256. The old source_root inside the immutable map is provenance only.",
+    "required_checks": [
+      "Exact Git commit/tree and clean tracked Source before native execution.",
+      "All 3369 source pins before and after every command using the existing native route.",
+      "No tracked Source modifications; default and tagged use this same isolated Source."
+    ]
+  },
+  "paths": {
+    "output": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\cli-focused59f-baseline-v2",
+    "private": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\cli-focused59f-baseline-v2\\private",
+    "temporary": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\c9"
+  },
+  "environment": {
+    "APPDATA": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\cli-focused59f-baseline-v2\\private\\home\\AppData\\Roaming",
+    "CC": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\bin\\gcc.exe",
+    "CGO_ENABLED": "1",
+    "COMSPEC": "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\cmd.exe",
+    "GCM_INTERACTIVE": "Never",
+    "GIT_CONFIG_GLOBAL": "NUL",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_NO_LAZY_FETCH": "1",
+    "GIT_NO_REPLACE_OBJECTS": "1",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GOCACHE": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\cli-focused59f-baseline-v2\\private\\go-build",
+    "GOFLAGS": "-mod=readonly -p=1",
+    "GOMODCACHE": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\cli-focused59f-baseline-v2\\private\\go-mod",
+    "GOPROXY": "off",
+    "GOROOT": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go",
+    "GOSUMDB": "sum.golang.org",
+    "GOTMPDIR": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\c9",
+    "GOTOOLCHAIN": "local",
+    "GOWORK": "off",
+    "HOME": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\cli-focused59f-baseline-v2\\private\\home",
+    "LOCALAPPDATA": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\cli-focused59f-baseline-v2\\private\\home\\AppData\\Local",
+    "PATH": "@@RECOVERY_NATIVE_POWERSHELL_WORK_AREA_JSON@@\\bns26\\pwsh7;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\mingw64\\bin;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\usr\\bin;@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin;@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\bin;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\WindowsPowerShell\\v1.0",
+    "PATHEXT": ".COM;.EXE;.BAT;.CMD",
+    "POWERSHELL_TELEMETRY_OPTOUT": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONUTF8": "1",
+    "SystemRoot": "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@",
+    "TEMP": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\c9",
+    "TMP": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\c9",
+    "TMPDIR": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\c9",
+    "USERPROFILE": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\cli-focused59f-baseline-v2\\private\\home",
+    "WINDIR": "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@",
+    "GOENV": "off",
+    "GOOS": "windows",
+    "GOARCH": "amd64",
+    "ProgramFiles": "@@RECOVERY_PROGRAM_FILES_64_JSON@@",
+    "ProgramFiles(x86)": "@@RECOVERY_PROGRAM_FILES_32_JSON@@",
+    "OS": "Windows_NT"
+  },
+  "environment_origin": {
+    "plan": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\product-continuation-v2\\successor-product-only-inputs-v2-plan.json",
+      "sha256": "f6fd52b9a3d653b87bae7e51c1264ee27bb2a5b692219b36c9213a59a8b7fca5"
+    },
+    "path_exact_producer_value": "@@RECOVERY_NATIVE_POWERSHELL_WORK_AREA_JSON@@\\bns26\\pwsh7;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\mingw64\\bin;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\usr\\bin;@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin;@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\bin;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\WindowsPowerShell\\v1.0",
+    "changes": [
+      "Rebase every producer-owned private environment path to the new baseline output.",
+      "TEMP, TMP, TMPDIR and GOTMPDIR use only the approved fresh @@RECOVERY_APPROVED_WORK_AREA_JSON@@\\c9.",
+      "GOPROXY=off is an explicit offline consumer override; the producer used https://proxy.golang.org,direct."
+    ],
+    "ambient_environment_inheritance": false
+  },
+  "tools": {
+    "python": {
+      "path": "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+      "sha256": "d4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd"
+    },
+    "go": {
+      "path": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe",
+      "sha256": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113"
+    },
+    "gcc": {
+      "path": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\bin\\gcc.exe",
+      "sha256": "f6ff9378c1edb591131304518eac6456708d28720284105930d0d687136bcdd3"
+    },
+    "git": {
+      "path": "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+      "sha256": "177bc8a9af84fa3a400c694c975fda731d048279c074e1a93947ce8b067ebb48"
+    }
+  },
+  "donor": {
+    "root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2",
+    "plan": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\product-continuation-v2\\successor-product-only-inputs-v2-plan.json",
+      "sha256": "f6fd52b9a3d653b87bae7e51c1264ee27bb2a5b692219b36c9213a59a8b7fca5"
+    },
+    "parent": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\parent.json",
+      "sha256": "bbc353fe6ac620ddf190ba9712d0048a6a60bbc0e1d59bb4644fdcee4d521daf"
+    },
+    "execution": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\commands\\execution.json",
+      "sha256": "a5992a80253c4e3f14de1f1ccecf37d8c24b897652b78a5c56598027ba054c12"
+    },
+    "root_receiving": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\product-continuation-v2\\successor-product-only-inputs-v2-root-receiving.json",
+      "sha256": "14e9a11dd5d82507d9faf984ea2ba0cb82f795dee8c75630c4f8280fc8a0da98"
+    },
+    "original_data_receiver": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-error-dword-v4\\run_owned_commands.py",
+      "sha256": "6d16652d4893273b7e9d584920892ce5f5917622e7e242a62eb78ec824bcfb93"
+    },
+    "cache_paths": {
+      "GOCACHE": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\private\\go-build",
+      "GOMODCACHE": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\private\\go-mod"
+    },
+    "required_status": "PASS/CLOSED, exact original parent and every command's native/IO completion received before cache access.",
+    "shared_live_cache": false,
+    "producer_qualification_inherited": false
+  },
+  "cache_transfer": {
+    "helper": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\cli-focused59f-baseline-v2-inputs\\copy_closed_product_caches.py",
+      "sha256": "e4c26cd01068b145cb6117136f443fe8d12cd79aad2c7cbbc811b54a5fac9bb1"
+    },
+    "original_helper": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\cli-focused59f-baseline-v2-inputs\\copy_closed_runtime_caches.original.py.txt",
+      "sha256": "1a0314874d6141f56d960c431ca27e6ddef518b7b5b83878793f8fb0fb443d79"
+    },
+    "original_helper_path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-candidate\\copy_closed_runtime_caches.py",
+    "delta": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\cli-focused59f-baseline-v2-inputs\\cache-transfer-vs-original.patch",
+      "sha256": "a3593b6e949d21acfbc7810ac792a6550a916bc56898c8bdfc4a8a054384b24e"
+    },
+    "literal_replacements": 17,
+    "argv": [
+      "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+      "-I",
+      "-S",
+      "-B",
+      "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\cli-focused59f-baseline-v2-inputs\\copy_closed_product_caches.py",
+      "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\cli-focused59f-baseline-v2",
+      "bbc353fe6ac620ddf190ba9712d0048a6a60bbc0e1d59bb4644fdcee4d521daf"
+    ],
+    "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1",
+    "seconds": 600,
+    "preconditions": [
+      "Root receives this candidate before execution.",
+      "Output and c9 must still be absent at preparation start, with ordinary non-reparse ancestors.",
+      "Root's original native route creates the fresh owned output and private directories; GOCACHE and GOMODCACHE must be empty.",
+      "The helper re-receives the exact donor parent/plan/execution/root proof before opening cache payloads."
+    ],
+    "expected_outputs": {
+      "receipt": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\cli-focused59f-baseline-v2\\cache-copy-receipt.json",
+      "inventory": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\cli-focused59f-baseline-v2\\cache-copy-inventory.json"
+    },
+    "required_receiving": "COPIED plus source_and_destination_byte_inventories_equal=true, prior_modified=false, cache_consumer_execution_performed=false; all native/capture closure required independently.",
+    "failure_behavior": "Preserve any partial fresh destination and failed original receipt. Do not retry into it, delete donor data, promote FAIL/UNKNOWN, or borrow current full-run cache."
+  },
+  "selected_roots": [
+    "TestPidMatchesMcphub_CurrentProcess",
+    "TestPidMatchesMcphub_RejectsForeignPathSameBasename",
+    "TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID"
+  ],
+  "commands": [
+    {
+      "name": "focused-cli-identity-default",
+      "argv": [
+        "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe",
+        "test",
+        "-v",
+        "-count=1",
+        "-timeout",
+        "5m",
+        "-run",
+        "^(TestPidMatchesMcphub_(CurrentProcess|RejectsForeignPathSameBasename)|TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID)$",
+        "./internal/cli/"
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-acceptance-20261128-v2",
+      "seconds": 360
+    },
+    {
+      "name": "focused-cli-identity-test-state-path-env",
+      "argv": [
+        "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe",
+        "test",
+        "-tags=test_state_path_env",
+        "-v",
+        "-count=1",
+        "-timeout",
+        "5m",
+        "-run",
+        "^(TestPidMatchesMcphub_(CurrentProcess|RejectsForeignPathSameBasename)|TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID)$",
+        "./internal/cli/"
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-acceptance-20261128-v2",
+      "seconds": 360
+    }
+  ],
+  "command_contract": {
+    "native_owner": "Existing ordinary Job route; no -exec or foreground auxiliary.",
+    "go_test_timeout": "5m",
+    "native_command_outer_seconds": 360,
+    "required_modes": [
+      "default",
+      "test_state_path_env"
+    ],
+    "require_each_selected_root_once": true,
+    "require_selected_roots_no_fail_or_skip": true,
+    "test_binaries_not_substituted": true,
+    "result_scope": "Only the three explicitly selected roots and their actual execution. No Product/full-suite/native2/migration qualification."
+  },
+  "authoring_observation": {
+    "candidate_directory_was_absent": true,
+    "output_was_absent": true,
+    "c9_was_absent": true,
+    "method": "RDC get_file_info ENOENT, metadata only; root must recheck immediately before launch.",
+    "output_or_c9_created": false,
+    "cache_payload_read": false,
+    "transfer_or_tests_executed": false
+  }
+}

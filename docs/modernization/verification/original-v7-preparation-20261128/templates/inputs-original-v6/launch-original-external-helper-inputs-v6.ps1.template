@@ -1,0 +1,64 @@
+param([Parameter(Mandatory=$true)][ValidatePattern('^[0-9a-f]{64}$')][string]$PlanSHA)
+$ErrorActionPreference = 'Stop'
+$TaskRoot = '@@RECOVERY_APPROVED_WORK_AREA_RAW@@\mcp-acceptance-rebuild-20261127-v1'
+$TaskPlanFile = $TaskRoot + '\inputs-original-v6\external-prepare-candidate\original-external-helper-inputs-v6-plan.json'
+$TaskRecord = $TaskRoot + '\inputs-original-v6\original-external-helper-inputs-v6-outer-original.json'
+$TaskRunner = $TaskRoot + '\inputs-error-dword-v4\run_owned_commands.py'
+function Get-TaskSHA([string]$TaskPath) {
+    $TaskHasher = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($TaskHasher.ComputeHash([IO.File]::ReadAllBytes($TaskPath))).Replace('-','').ToLowerInvariant() }
+    finally { $TaskHasher.Dispose() }
+}
+$TaskRequired = [ordered]@{
+    $TaskRunner = '6d16652d4893273b7e9d584920892ce5f5917622e7e242a62eb78ec824bcfb93'
+    ($TaskRoot + '\inputs-error-dword-v4\guard-custody.py') = 'e7c663f4ba2fd558005bc110173609cb19465ff33d3f4678aeb53b5ba00e0924'
+    ($TaskRoot + '\inputs-error-dword-v4\windows_job.py') = 'd94583001a33ef34adb67feec34b4f4b0bf3626df9f63da3c7a7c85bf3e0b552'
+    '@@RECOVERY_CONTROLLER_PYTHON_HOME_RAW@@\python.exe' = 'd4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd'
+    $TaskPlanFile = $PlanSHA
+}
+foreach ($TaskPath in $TaskRequired.Keys) {
+    if ((Get-TaskSHA $TaskPath) -cne $TaskRequired[$TaskPath]) { throw 'Pinned external helper build input changed' }
+}
+$TaskPlan = [IO.File]::ReadAllText($TaskPlanFile) | ConvertFrom-Json
+if ($TaskPlan.output -cne ($TaskRoot + '\original-external-helper-inputs-v6')) { throw 'Unexpected owned output' }
+if ([IO.File]::Exists($TaskRecord) -or [IO.Directory]::Exists($TaskPlan.output)) { throw 'Original external helper build scope already has state' }
+$TaskStart = New-Object System.Diagnostics.ProcessStartInfo
+$TaskStart.FileName = '@@RECOVERY_CONTROLLER_PYTHON_HOME_RAW@@\python.exe'
+$TaskStart.Arguments = '-I -S -B "' + $TaskRunner + '" "' + $TaskPlanFile + '" ' + $PlanSHA
+$TaskStart.WorkingDirectory = $TaskRoot
+$TaskStart.UseShellExecute = $false
+$TaskStart.CreateNoWindow = $true
+$TaskStart.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+$TaskStart.EnvironmentVariables['TEMP'] = $TaskRoot
+$TaskStart.EnvironmentVariables['TMP'] = $TaskRoot
+$TaskStart.EnvironmentVariables['PYTHONDONTWRITEBYTECODE'] = '1'
+$TaskOriginal = [System.Diagnostics.Process]::Start($TaskStart)
+if ($null -eq $TaskOriginal) { throw 'Original process object was not returned' }
+$TaskOriginalPID = $TaskOriginal.Id
+$TaskWaitReturned = $false
+$TaskWaitErrors = New-Object System.Collections.Generic.List[string]
+while (-not $TaskWaitReturned) {
+    try { $TaskOriginal.WaitForExit(); $TaskWaitReturned = $true }
+    catch { $TaskWaitErrors.Add($_.Exception.Message); Start-Sleep -Milliseconds 100 }
+}
+$TaskExitCode = $TaskOriginal.ExitCode
+$TaskOriginal.Dispose()
+$TaskFacts = [ordered]@{
+    schema = 'original-external-helper-build-original-parent-v1'
+    plan_sha256 = $PlanSHA
+    same_process_start_object = $true
+    original_pid = $TaskOriginalPID
+    exit_code = $TaskExitCode
+    wait_returned = $TaskWaitReturned
+    original_process_object_disposed = $true
+    new_job_or_tree_wait = $false
+    create_no_window = $true
+    wait_errors = @($TaskWaitErrors)
+}
+$TaskJSON = ($TaskFacts | ConvertTo-Json -Depth 6) + [char]10
+$TaskBytes = (New-Object Text.UTF8Encoding($false)).GetBytes($TaskJSON)
+$TaskStream = [IO.File]::Open($TaskRecord, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+try { $TaskStream.Write($TaskBytes,0,$TaskBytes.Length); $TaskStream.Flush($true) }
+finally { $TaskStream.Dispose() }
+[Console]::WriteLine($TaskJSON)
+exit $TaskExitCode

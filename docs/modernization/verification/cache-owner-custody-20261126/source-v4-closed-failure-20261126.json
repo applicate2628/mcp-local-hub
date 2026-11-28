@@ -1,0 +1,321 @@
+{
+  "schema": "source-v4-closed-failure-checkpoint-v1",
+  "status": "CLOSED_FAIL",
+  "date_label": "2026-11-26",
+  "scope": "Independent receiving of two exact original controls for the first physical Source-v4 materialization attempt; three Git commands only.",
+  "provenance": {
+    "projection_is_original_receipt": false,
+    "authoritative_originals": "Retained native artifacts on Wave; original hashes below refer to their full original bytes, not this derived projection.",
+    "source_paths_redacted": true,
+    "raw_capture_contents_reread": false,
+    "original_controls": [
+      {
+        "role": "parent",
+        "path": "<TASK>/native-consumer-source-v4-launch.json",
+        "sha256": "3763922b8a43fc33446a8501c97640c18667cb1b56d21d8b54d9998f5a2bab1a",
+        "bytes": 2489,
+        "schema": "native-consumer-source-parent-v2"
+      },
+      {
+        "role": "issuer",
+        "path": "<TASK>/runs/native-consumer-source-admission-v4/receipt.json",
+        "sha256": "d8eadddd92172870b2c1bc5ad97077640970e98fc7ea1eda50cd63472d65d3a8",
+        "bytes": 30284,
+        "schema": "native-consumer-source-materialization-v2"
+      }
+    ],
+    "issuer_sha256": "baecc823e86fdafb818d90d98421442a858d092c20d8c0671a2f44ac34ca7df9",
+    "plan_sha256": "1d855d80db30c7a4983c87a1496bc19ba4ee346df94af5537b65de5cf21a446a",
+    "parent_original_wait_helper_sha256": "e70c707715c0d310c6c3c407dc9e76d6e9a64886c9b701ab658130cc3e9277b2",
+    "guard_sha256": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2",
+    "native_owner_sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+  },
+  "parent": {
+    "state": "received",
+    "status": "FAIL",
+    "exit_code": 1,
+    "seconds": 200.81729149998864,
+    "outer_diagnostic_seconds": 1200,
+    "deadline_exceeded": false,
+    "terminal_exit_received": true,
+    "parent_capture_files_closed": true,
+    "child_status": "FAIL",
+    "child_plan_matches": true,
+    "command_count": 3,
+    "commands_quiescent": true,
+    "full_regression_executed": false,
+    "old_unknown_reclassified": false,
+    "child_receiving_error": "RuntimeError('source original did not finish the fixed closed issuance')"
+  },
+  "commands": [
+    {
+      "name": "git-init",
+      "argv_tail": [
+        "init",
+        "--quiet",
+        "--template",
+        "<RUN>/empty-template"
+      ],
+      "work_seconds": 30,
+      "cleanup_seconds": 10,
+      "seconds": 1.8183570000110194,
+      "work_elapsed_seconds": 1.3472360000014305,
+      "exit_code": 0,
+      "command_success": true,
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "cleanup_deadline_exceeded": false,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "quiescence_state": "complete",
+      "captures_measured": true,
+      "original_owner_retained": true,
+      "original_readers_joined": true,
+      "phases_elapsed_seconds": {
+        "initial_save_started": 4.429998807609081e-05,
+        "initial_save_finished": 0.6996719000162557,
+        "launch_entered": 0.6996770999976434,
+        "before_resume_entered": 0.7083063999889418,
+        "before_resume_returned": 0.7083118999726139,
+        "launch_returned": 0.7083493999671191,
+        "launch_exception": null,
+        "external_settle_end": 1.3474873999948613
+      },
+      "original_reader_objects_joined": 2,
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "capture_contents_independently_reread": false
+    },
+    {
+      "name": "git-fetch-c3",
+      "argv_tail": [
+        "fetch",
+        "--no-tags",
+        "--no-recurse-submodules",
+        "--depth=1",
+        "<ADMITTED_GIT_DONOR>",
+        "c3b8c802be190c335b84ff7323a14d9eb63518b6"
+      ],
+      "work_seconds": 300,
+      "cleanup_seconds": 10,
+      "seconds": 6.652152700000443,
+      "work_elapsed_seconds": 6.651985000004061,
+      "exit_code": 0,
+      "command_success": true,
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "cleanup_deadline_exceeded": false,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "quiescence_state": "complete",
+      "captures_measured": true,
+      "original_owner_retained": true,
+      "original_readers_joined": true,
+      "phases_elapsed_seconds": {
+        "initial_save_started": 5.299999611452222e-05,
+        "initial_save_finished": 1.5209273000364192,
+        "launch_entered": 1.5209339000284672,
+        "before_resume_entered": 1.7244484000257216,
+        "before_resume_returned": 1.724454200011678,
+        "launch_returned": 1.7244879000354558,
+        "launch_exception": null,
+        "external_settle_end": 6.652071300020907
+      },
+      "original_reader_objects_joined": 2,
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 150,
+          "bytes_stored": 150,
+          "sha256": "7397f85d81f6bdf2eadc14c101ed65fd71ca27b8b535495599bc17655821c518"
+        }
+      },
+      "capture_contents_independently_reread": false
+    },
+    {
+      "name": "checkout-c3",
+      "argv_tail": [
+        "checkout",
+        "--detach",
+        "c3b8c802be190c335b84ff7323a14d9eb63518b6"
+      ],
+      "work_seconds": 120,
+      "cleanup_seconds": 10,
+      "seconds": 120.03176969999913,
+      "work_elapsed_seconds": 120.00059110001894,
+      "exit_code": 1,
+      "command_success": false,
+      "timed_out": true,
+      "work_deadline_exceeded": true,
+      "cleanup_deadline_exceeded": false,
+      "native": {
+        "direct_exit_code": 1,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": true,
+        "handles_closed": true,
+        "issues": []
+      },
+      "quiescence_state": "complete",
+      "captures_measured": true,
+      "original_owner_retained": true,
+      "original_readers_joined": true,
+      "phases_elapsed_seconds": {
+        "initial_save_started": 7.240002742037177e-05,
+        "initial_save_finished": 0.004360700026154518,
+        "launch_entered": 0.004366900015156716,
+        "before_resume_entered": 0.012778000032994896,
+        "before_resume_returned": 0.0127834000159055,
+        "launch_returned": 0.012823500030208379,
+        "launch_exception": null,
+        "external_settle_end": 120.00511389999883
+      },
+      "original_reader_objects_joined": 2,
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "capture_contents_independently_reread": false
+    }
+  ],
+  "closure_summary": {
+    "original_native_commands_closed": 3,
+    "original_reader_objects_joined": 6,
+    "streams_eof_and_closed": 6,
+    "parent_capture_wrappers_closed": 2,
+    "native_or_io_closure_errors": 0,
+    "command_successes": 2,
+    "command_failures": 1,
+    "original_outcome_unchanged": true
+  },
+  "timing_boundary": {
+    "unit": "seconds",
+    "clock": "monotonic process clock as recorded by original guard",
+    "checkout_command_total_seconds": 120.03176969999913,
+    "checkout_work_elapsed_seconds": 120.00059110001894,
+    "launch_returned_since_command_start_seconds": 0.012823500030208379,
+    "launch_entered_since_command_start_seconds": 0.004366900015156716,
+    "launch_enter_to_return_seconds": 0.008456600015051663,
+    "launch_interval_meaning": "Guard launch wrapper and before-resume admission, not an isolated Windows API duration.",
+    "observed_failure": "The fixed 120-second work deadline was exceeded after launch returned; original owner terminated its job, reaped the direct child, closed native handles and joined the two original output readers.",
+    "unestablished_cause": "The controls do not attribute the duration inside Git checkout to an OS component, storage, antivirus, CPU or filesystem lock."
+  },
+  "source": {
+    "repository": "<TASK>/native-consumer-source-v4",
+    "parent_commit": "c3b8c802be190c335b84ff7323a14d9eb63518b6",
+    "target_product_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+    "candidate_commit": null,
+    "complete_source_snapshot_received": false,
+    "positive_source_admission_issued": false,
+    "planned_git_commands": 14,
+    "completed_git_commands": 3,
+    "reviewed_test_delta13_applied": false,
+    "scope_note": "git-init, fetch and interrupted checkout may already have created or changed this new private tree; source_edits_issued=false describes the later reviewed composition application, not absence of filesystem changes."
+  },
+  "original_flags": {
+    "prior_gate_rewritten": false,
+    "shared_cache_access_issued": false,
+    "source_edits_issued": false,
+    "commit_object_written": false,
+    "new_commit_identity_issued": false,
+    "forbidden_old_source_access_issued": false,
+    "tests_or_installation_issued": false,
+    "qualification_passed": false,
+    "ready_issued": false,
+    "cleanup_performed": false,
+    "prior_gate_status": "FAIL",
+    "prior_gate_custody": "UNKNOWN",
+    "publication": "NOT_RUN"
+  },
+  "integration_status": {
+    "new_test_source_update": "NOT_RUN",
+    "new_full_v11": "NOT_RUN",
+    "previous_full_v10": "FAIL_UNCHANGED",
+    "old_held_owner_custody": "UNKNOWN_UNCHANGED",
+    "runtime_v14": "DISABLED_PENDING_ACTUAL_SOURCE_ADMISSION",
+    "current_public_head_full_gate": "NO_NEW_PASS_CLAIM",
+    "external_review": "REVIEW_PENDING_UNCHANGED"
+  },
+  "next_steps": [
+    "Receive a bounded read-only postmortem for this closed checkout failure and review the specific source recovery route.",
+    "Receive a complete independent physical source and the exact thirteen-test update before binding any new test commit.",
+    "Bind actual source, scoped retained inputs, fresh DATA evidence parents and composition qualification before both mandatory full regression commands.",
+    "Integrate actual full results and exact-head external review without rewriting historical FAIL or UNKNOWN."
+  ]
+}

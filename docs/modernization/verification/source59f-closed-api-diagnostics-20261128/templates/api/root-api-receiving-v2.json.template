@@ -1,0 +1,150 @@
+{
+  "schema": "successor-closed-api-subtree-receiving-v1",
+  "source_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+  "source_tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+  "package": "mcp-local-hub/internal/api",
+  "phase": "default",
+  "case": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c",
+  "original_receipt_sha256": "e1cba7d99294f4e18816ebc91a8fd137c3533be5d9ed433071de4c89b66fc709",
+  "classification": "FAIL/CLOSED",
+  "physical_complete": true,
+  "diagnostic_payload_access": true,
+  "api_qualification_passed": false,
+  "data_verification": "FAIL",
+  "receiving_issues": [
+    "RuntimeError: original closed test2json conversion absent or differs"
+  ],
+  "full_run_qualification_claimed": false,
+  "full_run_physical_closure_claimed": false,
+  "cli_physical_closure_claimed": false,
+  "other_package_payload_access": false,
+  "source_payload_access": false,
+  "cache_payload_access": false,
+  "cache_handoff_eligible": false,
+  "new_native_or_test_execution": false,
+  "deadline_extension": false,
+  "exact_payload_roots": [
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c"
+  ],
+  "original_replay": {
+    "exit_code": 1,
+    "finished_monotonic_ns": 590663951295600,
+    "receipt_sha256": "e1cba7d99294f4e18816ebc91a8fd137c3533be5d9ed433071de4c89b66fc709",
+    "replayed_identical": true,
+    "request_nonce": "9b430e467cf04d64a33db3d9d4445b72",
+    "request_sha256": "95f2051d09ef350bf010d0b2f7c49db1ba0c73a4e12d230bb09c5c7c2ce01d8b",
+    "response_sha256": "e20a2c601c77ff2c3d95fb4905b95eb106dd303eedcfb1a4b7881f4c0e9d41f7",
+    "run": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c",
+    "schema": "literal-original-owner-replay-v1",
+    "streams": {
+      "stderr": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\suite-owner.stderr.txt",
+        "sha256": "55c50dd4e1b6e9544542902703a5c054d550c5dcbdcd0a8e295db15df1c1af38"
+      },
+      "stdout": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\suite-owner.stdout.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    }
+  },
+  "original_status": "FAIL",
+  "adapter_exit_code": 1,
+  "capture_measurements": {
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\incoming-build-info.stdout.txt": {
+      "bytes": 3110,
+      "sha256": "f01a3fc3cbcf6f720e6fd4ddb3ed80f9f014ec35ebfe737db51d90433ebef693"
+    },
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\incoming-build-info.stderr.txt": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\inventory-owner.stdout.txt": {
+      "bytes": 183767,
+      "sha256": "799ca05869d28e73dbadb96412959b81c0d9e1354b4b4230b6ce9fd2b7138388"
+    },
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\inventory-owner.stderr.txt": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\suite-owner.stdout.txt": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\suite-owner.stderr.txt": {
+      "bytes": 113,
+      "sha256": "55c50dd4e1b6e9544542902703a5c054d550c5dcbdcd0a8e295db15df1c1af38"
+    }
+  },
+  "capture_files_checked": 6,
+  "command_count": 3,
+  "original_error": "RuntimeError: original namespace admission refused before a contained stage: context deadline exceeded",
+  "original_replay_error": null,
+  "owner_failure": "context deadline exceeded",
+  "owner_root_exit_code": null,
+  "original_owner_receipts": {
+    "inventory_owner": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\inventory\\result.json",
+      "sha256": "4b76e7d232fceef47178400e02beec4af898a61496a319661aaf5f8302261db6"
+    },
+    "owner": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\nf635b4256b7c\\n\\namespace-suite-receipt.json",
+      "sha256": "b54431c56d881ad42164980032de493bd2ab42d79ee6b6003b9771d92508e6e2"
+    }
+  },
+  "recorded_receiver_environment": {
+    "GOPROXY": "https://proxy.golang.org,direct",
+    "GOSUMDB": "sum.golang.org",
+    "PATH": "@@RECOVERY_NATIVE_POWERSHELL_WORK_AREA_JSON@@\\bns26\\pwsh7;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\mingw64\\bin;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\usr\\bin;@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin;@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\bin;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\WindowsPowerShell\\v1.0;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\wbem",
+    "TEMP": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o7\\x149e4a76727c",
+    "TMP": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o7\\x149e4a76727c",
+    "GOTMPDIR": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o7\\x149e4a76727c",
+    "USERPROFILE": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\profile",
+    "APPDATA": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\appdata",
+    "LOCALAPPDATA": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\localappdata",
+    "GOPATH": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\go-path",
+    "GOCACHE": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\full59f\\private\\go-build",
+    "GOMODCACHE": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\full59f\\private\\go-mod",
+    "GOROOT": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go",
+    "GOENV": "off",
+    "GOWORK": "off",
+    "GOTOOLCHAIN": "local",
+    "GOFLAGS": "-mod=readonly -ldflags=-H=windowsgui",
+    "GOOS": "windows",
+    "GOARCH": "amd64",
+    "CGO_ENABLED": "1",
+    "GOTELEMETRY": "off",
+    "SERENA_HOME": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\profile",
+    "MCPHUB_E2E_SCHEDULER": "none"
+  },
+  "original_qualification_flags": {
+    "image_unchanged": null,
+    "bundle_unchanged": null,
+    "original_inputs_unchanged": null,
+    "headless_configuration_received": null
+  },
+  "preserved_incoming": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\incoming-original.exe",
+    "sha256": "d237704913484fe2931860793badbfdaadb3bb216f5c436b8d01bdf2301d3e60"
+  },
+  "control_pins": {
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-prepared-v1\\runtime-manifest.json": "bb532e4fec38ea60cad8a105ed2fad7495ee76440f9546a5100802f604fd0f7d",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-prepared-v1\\runtime-inputs.json": "53c5e8d351c70a184a851b7da4170e0bafdccfdedc262fe931030ffaf83f65d2",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\receipt.json": "e1cba7d99294f4e18816ebc91a8fd137c3533be5d9ed433071de4c89b66fc709",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\full59f\\plan-default.json": "abd4f3a4f7a3301d7db5d3be8db21b049c5ecca35256cdb9d7f96d374a547ff9",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\full59f\\invocations-default\\20de3352b54d310a0063823babc07f6d961a1e915d68b24be476bfdf404cb70e.started.json": "1d311477c8f756ceebf1ccf00c90ba370f8311ffd0fbef075851e1204b073a9a",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\full59f\\invocations-default\\20de3352b54d310a0063823babc07f6d961a1e915d68b24be476bfdf404cb70e.completed.json": "64302ee8517c8760380809f98086efcd84716505ab26557981991a835610e841",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\full59f\\invocations-default\\requests\\20de3352b54d310a0063823babc07f6d961a1e915d68b24be476bfdf404cb70e.request.json": "95f2051d09ef350bf010d0b2f7c49db1ba0c73a4e12d230bb09c5c7c2ce01d8b",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\full59f\\invocations-default\\requests\\20de3352b54d310a0063823babc07f6d961a1e915d68b24be476bfdf404cb70e.response.json": "e20a2c601c77ff2c3d95fb4905b95eb106dd303eedcfb1a4b7881f4c0e9d41f7",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\full59f\\invocations-default\\requests\\20de3352b54d310a0063823babc07f6d961a1e915d68b24be476bfdf404cb70e.replayed.json": "7d14eacc06e2fc241bf40bafdc3a052a6941381f81282e4c8b2fa2a3ef5571e5",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\inventory\\result.json": "4b76e7d232fceef47178400e02beec4af898a61496a319661aaf5f8302261db6",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\nf635b4256b7c\\n\\namespace-suite-receipt.json": "b54431c56d881ad42164980032de493bd2ab42d79ee6b6003b9771d92508e6e2"
+  },
+  "allowed_capture_pins": {
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\incoming-build-info.stdout.txt": "f01a3fc3cbcf6f720e6fd4ddb3ed80f9f014ec35ebfe737db51d90433ebef693",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\incoming-build-info.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\inventory-owner.stdout.txt": "799ca05869d28e73dbadb96412959b81c0d9e1354b4b4230b6ce9fd2b7138388",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\inventory-owner.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\suite-owner.stdout.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\suite-owner.stderr.txt": "55c50dd4e1b6e9544542902703a5c054d550c5dcbdcd0a8e295db15df1c1af38"
+  }
+}

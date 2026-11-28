@@ -1,0 +1,184 @@
+--- driver-v1/run_namespace_diagnostic.py
++++ driver-v2/run_namespace_diagnostic.py
+@@ -65,13 +65,14 @@
+ def receiving_functions(cfg):
+     namespace = dict(Path=Path, json=json, re=re, hashlib=hashlib, sha=sha)
+     source = pinned(cfg["references"]["adapter"]).decode("utf-8")
+-    nodes = [node for node in ast.parse(source).body
+-             if isinstance(node, ast.FunctionDef) and node.name == "flags_are_literal"]
+-    need(len(nodes) == 1, "one original literal-argument predicate required")
+-    segment = "".join(source.splitlines(keepends=True)[nodes[0].lineno-1:nodes[0].end_lineno])
++    segment = "".join(source.splitlines(keepends=True)[99:111])
+     need(hashlib.sha256(segment.encode("utf-8")).hexdigest() == cfg["flags_function_sha256"],
+          "original literal-argument predicate differs")
+-    exec(compile(ast.Module(body=nodes, type_ignores=[]), cfg["references"]["adapter"]["path"], "exec"), namespace)
++    selected = ast.parse(segment, filename=cfg["references"]["adapter"]["path"])
++    need(len(selected.body) == 1 and isinstance(selected.body[0], ast.FunctionDef)
++         and selected.body[0].name == "flags_are_literal",
++         "one original literal-argument predicate required")
++    exec(compile(selected, cfg["references"]["adapter"]["path"], "exec"), namespace)
+     for key in ("namespace_receiving", "namespace_qualification", "owner_receiving"):
+         row = cfg["references"][key]
+         exec(compile(pinned(row), row["path"], "exec"), namespace)
+@@ -153,6 +154,7 @@
+          and origin["preserved_incoming"] == cfg["origin_image"],
+          "exact closed incoming API DATA origin required")
+     pinned(cfg["origin_receipt"])
++    receive = receiving_functions(cfg)
+     source_before = receive_source(cfg)
+     output, image, parent = (Path(cfg[key]) for key in ("output", "image", "namespace_parent"))
+     scope = Path(cfg["namespace_scope"])
+@@ -179,7 +181,6 @@
+          "fresh image copy differs")
+     runner = load_module("namespace_diagnostic_metadata_core", cfg["references"]["runner"])
+     guard = load_module("namespace_diagnostic_original_guard", cfg["references"]["guard"])
+-    receive = receiving_functions(cfg)
+     run_class = guard.make_guarded_run_class(SimpleNamespace(
+         Run=runner.CoreRun, REPO=Path(cfg["source_dir"]), sha=sha, subprocess=subprocess))
+     run = run_class(output, environment)
+@@ -254,4 +255,28 @@
+     return code
+ 
+ if __name__ == "__main__":
+-    raise SystemExit(main())
++    try:
++        result = main()
++    except BaseException as error:
++        if not RETAINED_INVOCATION:
++            frames, trace = [], error.__traceback__
++            while trace is not None:
++                frames.append({"file": trace.tb_frame.f_code.co_filename,
++                    "function": trace.tb_frame.f_code.co_name, "line": trace.tb_lineno})
++                trace = trace.tb_next
++            try:
++                new_json(Path(__file__).with_name("preflight-failure.json"), {
++                    "schema": "namespace-diagnostic-preflight-failure-v1",
++                    "status": "FAIL", "phase": "before-retained-invocation",
++                    "exception_type": type(error).__name__, "error": str(error), "frames": frames,
++                    "native_or_test_commands_started": False, "outer_closure_asserted": False,
++                    "failure_handler_reads_source_or_cache": False,
++                    "failure_handler_reads_captures": False, "cleanup_performed": False})
++            except BaseException as record_error:
++                try:
++                    print("Preflight failure control write failed: "
++                          + type(record_error).__name__ + ": " + str(record_error), file=sys.stderr)
++                except BaseException:
++                    pass
++        raise
++    raise SystemExit(result)
+
+--- driver-v1/runtime-inputs.json
++++ driver-v2/runtime-inputs.json
+@@ -21,7 +21,7 @@
+     "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\incoming-original.exe",
+     "sha256": "d237704913484fe2931860793badbfdaadb3bb216f5c436b8d01bdf2301d3e60"
+   },
+-  "image": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\namespace-admission-diagnostic-inputs-v1\\incoming-original.exe",
++  "image": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\namespace-admission-diagnostic-inputs-v2\\incoming-original.exe",
+   "image_bytes": 38868992,
+   "helper": {
+     "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\namespace-admission-diagnostic-build-v1\\namespace-timing-owner.exe",
+@@ -46,9 +46,9 @@
+       "sha256": "60556af6afce055f7ab3aaea3819d919abeafc6d11b5a88e0fb06a94eedc83a6"
+     }
+   ],
+-  "output": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\namespace-admission-diagnostic-run-v1",
+-  "namespace_scope": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api",
+-  "namespace_parent": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api\\n",
++  "output": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\namespace-admission-diagnostic-run-v2",
++  "namespace_scope": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api2",
++  "namespace_parent": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api2\\n",
+   "private_runs_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9",
+   "args": [
+     "-test.paniconexit0",
+@@ -110,7 +110,7 @@
+     "old_nonce_reused": false
+   },
+   "environment": {
+-    "APPDATA": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api\\appdata",
++    "APPDATA": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api2\\appdata",
+     "CC": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\bin\\gcc.exe",
+     "CGO_ENABLED": "1",
+     "COMSPEC": "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\cmd.exe",
+@@ -126,21 +126,21 @@
+     "GOPROXY": "off",
+     "GOROOT": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go",
+     "GOSUMDB": "sum.golang.org",
+-    "GOTMPDIR": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api\\tmp",
++    "GOTMPDIR": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api2\\tmp",
+     "GOTOOLCHAIN": "local",
+     "GOWORK": "off",
+-    "HOME": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api\\profile",
+-    "LOCALAPPDATA": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api\\localappdata",
++    "HOME": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api2\\profile",
++    "LOCALAPPDATA": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api2\\localappdata",
+     "PATH": "@@RECOVERY_NATIVE_POWERSHELL_WORK_AREA_JSON@@\\bns26\\pwsh7;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\mingw64\\bin;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\usr\\bin;@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin;@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\bin;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\WindowsPowerShell\\v1.0;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\wbem",
+     "PATHEXT": ".COM;.EXE;.BAT;.CMD",
+     "POWERSHELL_TELEMETRY_OPTOUT": "1",
+     "PYTHONDONTWRITEBYTECODE": "1",
+     "PYTHONUTF8": "1",
+     "SystemRoot": "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@",
+-    "TEMP": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api\\tmp",
+-    "TMP": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api\\tmp",
+-    "TMPDIR": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api\\tmp",
+-    "USERPROFILE": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api\\profile",
++    "TEMP": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api2\\tmp",
++    "TMP": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api2\\tmp",
++    "TMPDIR": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api2\\tmp",
++    "USERPROFILE": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api2\\profile",
+     "WINDIR": "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@",
+     "GOENV": "off",
+     "GOOS": "windows",
+@@ -149,8 +149,8 @@
+     "ProgramFiles(x86)": "@@RECOVERY_PROGRAM_FILES_32_JSON@@",
+     "OS": "Windows_NT",
+     "GIT_OPTIONAL_LOCKS": "0",
+-    "GOPATH": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api\\go-path",
+-    "SERENA_HOME": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api\\profile"
++    "GOPATH": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api2\\go-path",
++    "SERENA_HOME": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api2\\profile"
+   },
+   "preserved_deadlines": {
+     "admission_seconds": 5,
+
+--- driver-v1/launch_namespace_diagnostic_original.ps1
++++ driver-v2/launch_namespace_diagnostic_original.ps1
+@@ -1,16 +1,16 @@
+ param([Parameter(Mandatory=$true)][ValidatePattern('^[0-9a-f]{64}$')][string]$PlanSHA)
+ $ErrorActionPreference = 'Stop'
+ $TaskRoot = '@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1'
+-$TaskPlanFile = $TaskRoot + '\inputs-successor33-v1\namespace-admission-diagnostic-driver-v1\runtime-inputs.json'
+-$TaskRecord = $TaskRoot + '\inputs-successor33-v1\namespace-admission-diagnostic-driver-v1\namespace-diagnostic-outer-original.json'
+-$TaskRunner = $TaskRoot + '\inputs-successor33-v1\namespace-admission-diagnostic-driver-v1\run_namespace_diagnostic.py'
++$TaskPlanFile = $TaskRoot + '\inputs-successor33-v1\namespace-admission-diagnostic-driver-v2\runtime-inputs.json'
++$TaskRecord = $TaskRoot + '\inputs-successor33-v1\namespace-admission-diagnostic-driver-v2\namespace-diagnostic-outer-original.json'
++$TaskRunner = $TaskRoot + '\inputs-successor33-v1\namespace-admission-diagnostic-driver-v2\run_namespace_diagnostic.py'
+ function Get-TaskSHA([string]$TaskPath) {
+     $TaskHasher = [Security.Cryptography.SHA256]::Create()
+     try { return [BitConverter]::ToString($TaskHasher.ComputeHash([IO.File]::ReadAllBytes($TaskPath))).Replace('-','').ToLowerInvariant() }
+     finally { $TaskHasher.Dispose() }
+ }
+ $TaskRequired = [ordered]@{
+-    $TaskRunner = 'bc21860fc9258de002a5e038b805f71e05ba7df1cb3dff6bcb899c88f14e20ac'
++    $TaskRunner = '06ef67bdb08fde5630d2f6c4be0e130ec60e87bb688c7aca148e07797dcf6189'
+     ($TaskRoot + '\inputs-error-dword-v4\guard-custody.py') = 'e7c663f4ba2fd558005bc110173609cb19465ff33d3f4678aeb53b5ba00e0924'
+     ($TaskRoot + '\inputs-error-dword-v4\windows_job.py') = 'd94583001a33ef34adb67feec34b4f4b0bf3626df9f63da3c7a7c85bf3e0b552'
+     '@@RECOVERY_NATIVE_USER_PROFILE@@\AppData\Local\Python\pythoncore-3.15-64\python.exe' = 'd4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd'
+@@ -20,7 +20,7 @@
+     if ((Get-TaskSHA $TaskPath) -cne $TaskRequired[$TaskPath]) { throw 'Pinned namespace diagnostic input changed' }
+ }
+ $TaskPlan = [IO.File]::ReadAllText($TaskPlanFile) | ConvertFrom-Json
+-if ($TaskPlan.output -cne ($TaskRoot + '\namespace-admission-diagnostic-run-v1')) { throw 'Unexpected owned output' }
++if ($TaskPlan.output -cne ($TaskRoot + '\namespace-admission-diagnostic-run-v2')) { throw 'Unexpected owned output' }
+ if ([IO.File]::Exists($TaskRecord) -or [IO.Directory]::Exists($TaskPlan.output)) { throw 'Original namespace diagnostic scope already has state' }
+ $TaskStart = New-Object System.Diagnostics.ProcessStartInfo
+ $TaskStart.FileName = '@@RECOVERY_NATIVE_USER_PROFILE@@\AppData\Local\Python\pythoncore-3.15-64\python.exe'
+@@ -44,7 +44,7 @@
+ $TaskExitCode = $TaskOriginal.ExitCode
+ $TaskOriginal.Dispose()
+ $TaskFacts = [ordered]@{
+-    schema = 'namespace-diagnostic-original-parent-v1'
++    schema = 'namespace-diagnostic-original-parent-v2'
+     plan_sha256 = $PlanSHA
+     same_process_start_object = $true
+     original_pid = $TaskOriginalPID

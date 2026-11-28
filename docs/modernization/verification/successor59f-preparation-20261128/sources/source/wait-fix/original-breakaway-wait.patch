@@ -1,0 +1,17 @@
+diff --git a/internal/cli/supervisor_spawn_breakaway_windows_test.go b/internal/cli/supervisor_spawn_breakaway_windows_test.go
+index 584bd776c2726cfc377baaed8b2aa51c25f3e4e8..d951778032431863298f43b6018374b040f358da 100644
+--- a/internal/cli/supervisor_spawn_breakaway_windows_test.go
++++ b/internal/cli/supervisor_spawn_breakaway_windows_test.go
+@@ -28,7 +28,11 @@
+ 	if started == nil || started.Process == nil {
+ 		t.Fatal("no process started")
+ 	}
+-	defer func() { _, _ = started.Process.Wait() }()
++	defer func() {
++		if _, err := started.Process.Wait(); err != nil {
++			t.Errorf("wait original breakaway process: %v", err)
++		}
++	}()
+ 	if !degraded {
+ 		// Common dev-host case: the parent job permits breakaway (or the
+ 		// process is in no job), so the started cmd carries the flag.

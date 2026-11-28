@@ -1,0 +1,75 @@
+{
+  "schema": "literal-original-runtime-v6",
+  "reviewed": true,
+  "source_commit": "727d66753814dc218e26d699e57402db2d13190a",
+  "configuration": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\runtime-original-v6\\runtime-inputs.json",
+    "sha256": "037d4ad93bc93dcf531669eaaa90be32154c1ba34af6f50528eaa03e9f9ef4a2"
+  },
+  "files": {
+    "runtime-inputs.json": "037d4ad93bc93dcf531669eaaa90be32154c1ba34af6f50528eaa03e9f9ef4a2",
+    "private_run_scope.py": "1b4b5d4e796d11cf9dc596d783e0522c6ece175025bc323824599bd53f6fb89b",
+    "qualified_windows_products_consumer_v6.py": "8c98ac9d1ab5cdd5126c6b21d5e9cd53f471b838745f45e493daff53111c8a12",
+    "run_partitioned_go_gate_v6.py": "46c484aaaf55014af026a8fa3c4e96c88de441d8d9f9f2fe0f1a2fe738541587",
+    "literal_migration_receiving_v6.py": "6a95ae02fe24245a293ffd0f0e6083baf0754df2a13ce2ee2daedf43cf6e4526",
+    "canonical_receiving_v4.py": "6ad13e7c57e604111552fd553f10a66a174c9ba9b96dc37484dfba071a9bf2a0",
+    "literal_go_exec_adapter_v6.py": "c59d9e2ddc4be51ddb05523079942117411d48ae1e248f86c16eb0eaec504bd2",
+    "run_literal_go_gate_v6.py": "cd8218b8a56768d3158b6389b7c30c8df437f1e25ebc373f7a10ab15cb3ecc52",
+    "launch_literal_v6.py": "adf9f26a647aa6e869bc3dc25a6c13b5b913b2295f2629e77d10f36058e7493f"
+  },
+  "source_provenance": {
+    "test_source": {
+      "commit": "727d66753814dc218e26d699e57402db2d13190a",
+      "tree": "d959ed0a4f8ab02947aec7569f3c0535a3cff533",
+      "file_count": 3509,
+      "receiving_sha256": "a3483e469b606fa297a4b33698cd22db7bf25493023f3117feeafb52bb9db5f1"
+    },
+    "separate_private_publisher_source": {
+      "commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+      "tree": "67c13b8fc1317b4fd60e3135a3eb8a376fe01817",
+      "file_count": 3508,
+      "receiving_sha256": "c63d8b13331a752c85c5e62f4c4ce0a2ee19cc0c129c83b4dd6ed99fbd944b46"
+    },
+    "retained_literal_route": "Original ns1 full-v9 contracts plus reviewed full-v13/failed-owner receiving machinery; fresh input composition only, with explicit namespace and phase callbacks for the current guard.",
+    "ns1_adapter_sha256": "45c4a897f3c2f392972ca293eec56d1c8ff90956f413dd1cca6fd982d639ad8c",
+    "published_failed_owner_candidate": {
+      "commit": "2b5c583b",
+      "adapter_blob": "7656aa9c8627cccd35a756a1f63a15afee0133a7",
+      "receiver_blob": "193486e52b0c504484ec7dcf1663a8ca4513b2f6"
+    },
+    "canonical_normal_receiver_prefix": {
+      "sha256": "f6445f4060310d0d545853fdc0233ff4576359eabf6c61dd9e31bb91bc4bf91e",
+      "bytes": 32713,
+      "lines": 501,
+      "unchanged": true
+    },
+    "original_external_controller": {
+      "source_manifest_sha256": "bd18d56efb2c600b2330029297754246342dc0f23d07367cae3a9ef9029e960a",
+      "contained_source_sha256": "59fa2cc432b887114497c3c6625731d4dcde207e38b412371eb5fa83b39ed8a9",
+      "capability": "Original ext17 normal receiving and retained UNKNOWN; later failed-physical-closure capability is not implemented by this producer."
+    },
+    "current_guard_sha256": "e7c663f4ba2fd558005bc110173609cb19465ff33d3f4678aeb53b5ba00e0924",
+    "acceptance_inventory": {
+      "migration_roots": 14,
+      "migration_preparations_per_mode": 15,
+      "canonical_roots": 2,
+      "original_api_stderr_roots": 3,
+      "additional_cli_stderr_roots": 3,
+      "modes": [
+        "default",
+        "test_state_path_env"
+      ]
+    },
+    "literal_commands": [
+      "go build ./... && go vet ./... && go test -count=1 -timeout 5m ./...",
+      "go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/"
+    ],
+    "actual_incoming_go_test_image_preserved": true,
+    "independent_current_closed_cache_copy_required": true,
+    "old_relocated_cache_authority_inherited": false,
+    "historical_or_public_head_qualification_inherited": false,
+    "runtime_binding_state": "Requires real CLOSED private publisher and external helper outputs before composition and launch."
+  },
+  "qualification": "NOT_RUN",
+  "native_or_test_commands_started": false
+}

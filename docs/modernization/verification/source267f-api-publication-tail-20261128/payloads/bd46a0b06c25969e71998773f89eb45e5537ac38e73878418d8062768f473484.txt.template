@@ -1,0 +1,34 @@
+$ErrorActionPreference='Stop'
+$Top='@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\inputs-successor33-v1'
+$Source='@@RECOVERY_APPROVED_WORK_AREA@@\pub666-cli-fixtures-20261128'
+$Run='@@RECOVERY_APPROVED_WORK_AREA@@\functional-route-20261126\runs\cache-acceptance-commit-20261128-v13'
+$Output=$Top+'\source267f-binding'
+function SHA([string]$p){$h=[Security.Cryptography.SHA256]::Create();try{[BitConverter]::ToString($h.ComputeHash([IO.File]::ReadAllBytes($p))).Replace('-','').ToLowerInvariant()}finally{$h.Dispose()}}
+function Blob([byte[]]$raw){$header=[Text.Encoding]::ASCII.GetBytes('blob '+$raw.Length+[char]0);$stream=New-Object IO.MemoryStream;$h=[Security.Cryptography.SHA1]::Create();try{$stream.Write($header,0,$header.Length);$stream.Write($raw,0,$raw.Length);[BitConverter]::ToString($h.ComputeHash($stream.ToArray())).Replace('-','').ToLowerInvariant()}finally{$h.Dispose();$stream.Dispose()}}
+function Need($ok,[string]$why){if(-not$ok){throw $why}}
+function WriteNew([string]$p,$value){$Bytes=[Text.UTF8Encoding]::new($false).GetBytes(($value|ConvertTo-Json -Depth 12)+[char]10);$S=[IO.File]::Open($p,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None);try{$S.Write($Bytes,0,$Bytes.Length);$S.Flush($true)}finally{$S.Dispose()}}
+Need (-not(Test-Path -LiteralPath $Output)) 'fresh Source binding output'
+$Audit=$Run+'\independent-root-data-audit.json'
+Need ((SHA $Audit)-ceq'47b426367142434f9f7d983c9bd8ac3beedcd9b3ed9c7ca4fde06eb37f793f07') 'commit closure pin'
+$A=[IO.File]::ReadAllText($Audit)|ConvertFrom-Json
+Need ($A.status-ceq'PASS' -and $A.physical_complete-eq$true -and $A.commands_verified-eq10 -and $A.captures_verified-eq20) 'commit closure scope'
+$Identity=[IO.File]::ReadAllText($Run+'\final-source-identity.stdout.txt')
+Need ($Identity.Contains('commit 267f076500b982475b57be45e8a7d8a03edcc2a6') -and $Identity.Contains('tree d9636aa81dbcb995934a5ee1e51331b0a10af55f') -and $Identity.Contains('parent 3c412291593ca962127b36338d464351d2052862')) 'committed Source identity'
+Need ([IO.File]::ReadAllText($Run+'\final-source-status.stdout.txt').Length-eq0) 'closed native clean status'
+$OldFile=$Top+'\source-binding\source59f-input-sha256.json'
+Need ((SHA $OldFile)-ceq'e8c3fc2f577a130f92ba4eee7f8eee7153afc032dee909557cf1156890917c06') 'baseline Source map'
+$Old=[IO.File]::ReadAllText($OldFile)|ConvertFrom-Json
+$Changed=[ordered]@{'internal/cli/process_identity_match_windows_test.go'='e97fd7cc9cc9d9dfe09643c8e03334bd6f7f3e663b07a7f0fe711f0ef974708f';'internal/cli/settings_registry_test.go'='40de5fd188c8c94ec67e4fd852d89b0122aee602c3dde91fd8f8ceb2e4c7854a';'internal/cli/supervise_prespawn_binary_gate_test.go'='5e3a6517a9fed3a329cea60d12915965720b37c2bb6a865880d3c0c05ed48feb'}
+$IndexFile=$Run+'\final-source-index.stdout.txt'
+$Index=@([IO.File]::ReadAllLines($IndexFile))
+Need ($Index.Count-eq3369) 'exact tracked index count'
+$Files=[ordered]@{};$GitFiles=[ordered]@{};$BytesTotal=[long]0
+foreach($Line in $Index){Need ($Line-match'^([0-9]{6}) ([0-9a-f]{40}) 0\t(.+)$') 'ordinary staged index row';$Mode=$Matches[1];$GitSHA=$Matches[2];$Relative=$Matches[3];Need ($Mode-in@('100644','100755') -and $null-ne$Old.files.PSObject.Properties[$Relative]) 'expected regular tracked path';$Path=$Source+'\'+$Relative;$Raw=[IO.File]::ReadAllBytes($Path);$Expected=$Old.files.PSObject.Properties[$Relative].Value;if($Changed.Contains($Relative)){$Expected=$Changed[$Relative]};$Actual=SHA $Path;Need ($Actual-ceq$Expected -and (Blob $Raw)-ceq$GitSHA) ('actual Source/index mismatch: '+$Relative);$Files[$Relative]=$Actual;$GitFiles[$Relative]=[ordered]@{mode=$Mode;blob_sha1=$GitSHA;sha256=$Actual;bytes=$Raw.Length};$BytesTotal+=$Raw.Length}
+[void][IO.Directory]::CreateDirectory($Output)
+$SourceMap=[ordered]@{schema='source-input-sha256-v1';source_root=$Source;commit='267f076500b982475b57be45e8a7d8a03edcc2a6';tree='d9636aa81dbcb995934a5ee1e51331b0a10af55f';tracked_files=$Files.Count;files=$Files}
+WriteNew ($Output+'\source267f-input-sha256.json') $SourceMap
+WriteNew ($Output+'\source267f-git-map.json') ([ordered]@{schema='source-git-blob-sha256-map-v1';commit=$SourceMap.commit;tree=$SourceMap.tree;tracked_files=$GitFiles.Count;files=$GitFiles})
+[IO.File]::Copy($IndexFile,($Output+'\source267f-index.txt'),$false)
+$Receipt=[ordered]@{schema='root-committed-source-freeze-v1';status='PASS';scope='DATA Source identity and exact file bytes';source=$SourceMap.commit;tree=$SourceMap.tree;source_root=$Source;tracked_files=3369;total_bytes=$BytesTotal;baseline='59f618ebfbf6d9f52c6994d68586e3c2ebc202a8';changed_files=$Changed;unchanged_files=3366;production_files_changed=0;native_commits_receiving=[ordered]@{path=$Audit;sha256=(SHA $Audit)};source_map_sha256=(SHA ($Output+'\source267f-input-sha256.json'));git_map_sha256=(SHA ($Output+'\source267f-git-map.json'));index_sha256=(SHA ($Output+'\source267f-index.txt'));full_commands='NOT_RUN_ON_267f';reviewed_utc=[DateTime]::UtcNow.ToString('o')}
+WriteNew ($Output+'\root-source267f-freeze.json') $Receipt
+[ordered]@{status='PASS';source=$SourceMap.commit;tree=$SourceMap.tree;tracked_files=3369;total_bytes=$BytesTotal;source_map_sha256=$Receipt.source_map_sha256;git_map_sha256=$Receipt.git_map_sha256;index_sha256=$Receipt.index_sha256;receipt_sha256=(SHA ($Output+'\root-source267f-freeze.json'))}|ConvertTo-Json

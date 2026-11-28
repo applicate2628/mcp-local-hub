@@ -1,0 +1,191 @@
+{"Action":"start","Package":"mcp-local-hub/tools/test-job-entry"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixturePEAdmissionRequiresGUISubsystem"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixturePEAdmissionRequiresGUISubsystem","Output":"=== RUN   TestFixturePEAdmissionRequiresGUISubsystem\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixturePEAdmissionRequiresGUISubsystem/gui"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixturePEAdmissionRequiresGUISubsystem/gui","Output":"=== RUN   TestFixturePEAdmissionRequiresGUISubsystem/gui\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixturePEAdmissionRequiresGUISubsystem/gui","Output":"--- PASS: TestFixturePEAdmissionRequiresGUISubsystem/gui (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixturePEAdmissionRequiresGUISubsystem/gui"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixturePEAdmissionRequiresGUISubsystem/console"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixturePEAdmissionRequiresGUISubsystem/console","Output":"=== RUN   TestFixturePEAdmissionRequiresGUISubsystem/console\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixturePEAdmissionRequiresGUISubsystem/console","Output":"--- PASS: TestFixturePEAdmissionRequiresGUISubsystem/console (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixturePEAdmissionRequiresGUISubsystem/console"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixturePEAdmissionRequiresGUISubsystem/native"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixturePEAdmissionRequiresGUISubsystem/native","Output":"=== RUN   TestFixturePEAdmissionRequiresGUISubsystem/native\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixturePEAdmissionRequiresGUISubsystem/native","Output":"--- PASS: TestFixturePEAdmissionRequiresGUISubsystem/native (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixturePEAdmissionRequiresGUISubsystem/native"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixturePEAdmissionRequiresGUISubsystem/missing-optional-header"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixturePEAdmissionRequiresGUISubsystem/missing-optional-header","Output":"=== RUN   TestFixturePEAdmissionRequiresGUISubsystem/missing-optional-header\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixturePEAdmissionRequiresGUISubsystem/missing-optional-header","Output":"--- PASS: TestFixturePEAdmissionRequiresGUISubsystem/missing-optional-header (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixturePEAdmissionRequiresGUISubsystem/missing-optional-header"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixturePEAdmissionRequiresGUISubsystem/malformed"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixturePEAdmissionRequiresGUISubsystem/malformed","Output":"=== RUN   TestFixturePEAdmissionRequiresGUISubsystem/malformed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixturePEAdmissionRequiresGUISubsystem/malformed","Output":"--- PASS: TestFixturePEAdmissionRequiresGUISubsystem/malformed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixturePEAdmissionRequiresGUISubsystem/malformed"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixturePEAdmissionRequiresGUISubsystem","Output":"--- PASS: TestFixturePEAdmissionRequiresGUISubsystem (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixturePEAdmissionRequiresGUISubsystem"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity","Output":"=== RUN   TestCanonicalReceiverFramesRejectAmbiguity\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/nonascii"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/nonascii","Output":"=== RUN   TestCanonicalReceiverFramesRejectAmbiguity/nonascii\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/nonascii","Output":"--- PASS: TestCanonicalReceiverFramesRejectAmbiguity/nonascii (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/nonascii"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/case"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/case","Output":"=== RUN   TestCanonicalReceiverFramesRejectAmbiguity/case\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/case","Output":"--- PASS: TestCanonicalReceiverFramesRejectAmbiguity/case (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/case"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/float"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/float","Output":"=== RUN   TestCanonicalReceiverFramesRejectAmbiguity/float\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/float","Output":"--- PASS: TestCanonicalReceiverFramesRejectAmbiguity/float (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/float"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/overflow"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/overflow","Output":"=== RUN   TestCanonicalReceiverFramesRejectAmbiguity/overflow\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/overflow","Output":"--- PASS: TestCanonicalReceiverFramesRejectAmbiguity/overflow (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/overflow"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/extra"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/extra","Output":"=== RUN   TestCanonicalReceiverFramesRejectAmbiguity/extra\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/extra","Output":"--- PASS: TestCanonicalReceiverFramesRejectAmbiguity/extra (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/extra"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/whitespace"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/whitespace","Output":"=== RUN   TestCanonicalReceiverFramesRejectAmbiguity/whitespace\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/whitespace","Output":"--- PASS: TestCanonicalReceiverFramesRejectAmbiguity/whitespace (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/whitespace"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/duplicate"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/duplicate","Output":"=== RUN   TestCanonicalReceiverFramesRejectAmbiguity/duplicate\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/duplicate","Output":"--- PASS: TestCanonicalReceiverFramesRejectAmbiguity/duplicate (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/duplicate"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/duplicate-nested"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/duplicate-nested","Output":"=== RUN   TestCanonicalReceiverFramesRejectAmbiguity/duplicate-nested\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/duplicate-nested","Output":"--- PASS: TestCanonicalReceiverFramesRejectAmbiguity/duplicate-nested (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/duplicate-nested"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/missing"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/missing","Output":"=== RUN   TestCanonicalReceiverFramesRejectAmbiguity/missing\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/missing","Output":"--- PASS: TestCanonicalReceiverFramesRejectAmbiguity/missing (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/missing"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/null"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/null","Output":"=== RUN   TestCanonicalReceiverFramesRejectAmbiguity/null\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/null","Output":"--- PASS: TestCanonicalReceiverFramesRejectAmbiguity/null (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/null"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/trailing"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/trailing","Output":"=== RUN   TestCanonicalReceiverFramesRejectAmbiguity/trailing\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/trailing","Output":"--- PASS: TestCanonicalReceiverFramesRejectAmbiguity/trailing (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity/trailing"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity","Output":"--- PASS: TestCanonicalReceiverFramesRejectAmbiguity (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCanonicalReceiverFramesRejectAmbiguity"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant","Output":"=== RUN   TestReadyAndAckRequireExactRunAndGrant\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/run"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/run","Output":"=== RUN   TestReadyAndAckRequireExactRunAndGrant/run\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/run","Output":"--- PASS: TestReadyAndAckRequireExactRunAndGrant/run (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/run"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/pid"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/pid","Output":"=== RUN   TestReadyAndAckRequireExactRunAndGrant/pid\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/pid","Output":"--- PASS: TestReadyAndAckRequireExactRunAndGrant/pid (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/pid"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/generation-leading-zero"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/generation-leading-zero","Output":"=== RUN   TestReadyAndAckRequireExactRunAndGrant/generation-leading-zero\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/generation-leading-zero","Output":"--- PASS: TestReadyAndAckRequireExactRunAndGrant/generation-leading-zero (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/generation-leading-zero"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/generation-zero"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/generation-zero","Output":"=== RUN   TestReadyAndAckRequireExactRunAndGrant/generation-zero\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/generation-zero","Output":"--- PASS: TestReadyAndAckRequireExactRunAndGrant/generation-zero (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/generation-zero"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/challenge"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/challenge","Output":"=== RUN   TestReadyAndAckRequireExactRunAndGrant/challenge\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/challenge","Output":"--- PASS: TestReadyAndAckRequireExactRunAndGrant/challenge (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/challenge"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/nonce"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/nonce","Output":"=== RUN   TestReadyAndAckRequireExactRunAndGrant/nonce\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/nonce","Output":"--- PASS: TestReadyAndAckRequireExactRunAndGrant/nonce (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/nonce"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/challenge#01"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/challenge#01","Output":"=== RUN   TestReadyAndAckRequireExactRunAndGrant/challenge#01\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/challenge#01","Output":"--- PASS: TestReadyAndAckRequireExactRunAndGrant/challenge#01 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/challenge#01"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/owner"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/owner","Output":"=== RUN   TestReadyAndAckRequireExactRunAndGrant/owner\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/owner","Output":"--- PASS: TestReadyAndAckRequireExactRunAndGrant/owner (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/owner"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/payload"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/payload","Output":"=== RUN   TestReadyAndAckRequireExactRunAndGrant/payload\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/payload","Output":"--- PASS: TestReadyAndAckRequireExactRunAndGrant/payload (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/payload"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/confirmation"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/confirmation","Output":"=== RUN   TestReadyAndAckRequireExactRunAndGrant/confirmation\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/confirmation","Output":"--- PASS: TestReadyAndAckRequireExactRunAndGrant/confirmation (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant/confirmation"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant","Output":"--- PASS: TestReadyAndAckRequireExactRunAndGrant (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestReadyAndAckRequireExactRunAndGrant"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames","Output":"=== RUN   TestCaptureRequiresBoundedCompleteControlFrames\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames/complete"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames/complete","Output":"=== RUN   TestCaptureRequiresBoundedCompleteControlFrames/complete\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames/complete","Output":"--- PASS: TestCaptureRequiresBoundedCompleteControlFrames/complete (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames/complete"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames/truncated"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames/truncated","Output":"=== RUN   TestCaptureRequiresBoundedCompleteControlFrames/truncated\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames/truncated","Output":"--- PASS: TestCaptureRequiresBoundedCompleteControlFrames/truncated (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames/truncated"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames/extra"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames/extra","Output":"=== RUN   TestCaptureRequiresBoundedCompleteControlFrames/extra\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames/extra","Output":"--- PASS: TestCaptureRequiresBoundedCompleteControlFrames/extra (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames/extra"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames/oversized-frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames/oversized-frame","Output":"=== RUN   TestCaptureRequiresBoundedCompleteControlFrames/oversized-frame\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames/oversized-frame","Output":"--- PASS: TestCaptureRequiresBoundedCompleteControlFrames/oversized-frame (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames/oversized-frame"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames/oversized-line"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames/oversized-line","Output":"=== RUN   TestCaptureRequiresBoundedCompleteControlFrames/oversized-line\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames/oversized-line","Output":"--- PASS: TestCaptureRequiresBoundedCompleteControlFrames/oversized-line (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames/oversized-line"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames/oversized-stream"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames/oversized-stream","Output":"=== RUN   TestCaptureRequiresBoundedCompleteControlFrames/oversized-stream\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames/oversized-stream","Output":"--- PASS: TestCaptureRequiresBoundedCompleteControlFrames/oversized-stream (0.05s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames/oversized-stream"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames","Output":"--- PASS: TestCaptureRequiresBoundedCompleteControlFrames (0.05s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureRequiresBoundedCompleteControlFrames"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixtureEnvironmentExcludesInheritedHelperModes"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixtureEnvironmentExcludesInheritedHelperModes","Output":"=== RUN   TestFixtureEnvironmentExcludesInheritedHelperModes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixtureEnvironmentExcludesInheritedHelperModes","Output":"--- PASS: TestFixtureEnvironmentExcludesInheritedHelperModes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFixtureEnvironmentExcludesInheritedHelperModes"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract","Output":"=== RUN   TestFullSuiteArgumentsPreserveExactDriverContract\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/unbounded"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/unbounded","Output":"=== RUN   TestFullSuiteArgumentsPreserveExactDriverContract/unbounded\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/unbounded","Output":"--- PASS: TestFullSuiteArgumentsPreserveExactDriverContract/unbounded (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/unbounded"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/plain-verbose"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/plain-verbose","Output":"=== RUN   TestFullSuiteArgumentsPreserveExactDriverContract/plain-verbose\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/plain-verbose","Output":"--- PASS: TestFullSuiteArgumentsPreserveExactDriverContract/plain-verbose (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/plain-verbose"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/missing"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/missing","Output":"=== RUN   TestFullSuiteArgumentsPreserveExactDriverContract/missing\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/missing","Output":"--- PASS: TestFullSuiteArgumentsPreserveExactDriverContract/missing (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/missing"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/duplicate"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/duplicate","Output":"=== RUN   TestFullSuiteArgumentsPreserveExactDriverContract/duplicate\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/duplicate","Output":"--- PASS: TestFullSuiteArgumentsPreserveExactDriverContract/duplicate (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/duplicate"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/selector"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/selector","Output":"=== RUN   TestFullSuiteArgumentsPreserveExactDriverContract/selector\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/selector","Output":"--- PASS: TestFullSuiteArgumentsPreserveExactDriverContract/selector (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/selector"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/skip"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/skip","Output":"=== RUN   TestFullSuiteArgumentsPreserveExactDriverContract/skip\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/skip","Output":"--- PASS: TestFullSuiteArgumentsPreserveExactDriverContract/skip (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/skip"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/list"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/list","Output":"=== RUN   TestFullSuiteArgumentsPreserveExactDriverContract/list\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/list","Output":"--- PASS: TestFullSuiteArgumentsPreserveExactDriverContract/list (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/list"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/repeat"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/repeat","Output":"=== RUN   TestFullSuiteArgumentsPreserveExactDriverContract/repeat\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/repeat","Output":"--- PASS: TestFullSuiteArgumentsPreserveExactDriverContract/repeat (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract/repeat"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract","Output":"--- PASS: TestFullSuiteArgumentsPreserveExactDriverContract (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestFullSuiteArgumentsPreserveExactDriverContract"}
+{"Action":"run","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureTest2JSONFramingPreservesOriginalBytes"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureTest2JSONFramingPreservesOriginalBytes","Output":"=== RUN   TestCaptureTest2JSONFramingPreservesOriginalBytes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureTest2JSONFramingPreservesOriginalBytes","Output":"--- PASS: TestCaptureTest2JSONFramingPreservesOriginalBytes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry","Test":"TestCaptureTest2JSONFramingPreservesOriginalBytes"}
+{"Action":"output","Package":"mcp-local-hub/tools/test-job-entry","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/tools/test-job-entry"}

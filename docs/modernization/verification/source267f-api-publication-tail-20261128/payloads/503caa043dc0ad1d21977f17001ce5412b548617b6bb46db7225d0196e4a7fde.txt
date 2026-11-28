@@ -1,0 +1,3 @@
+To https://github.com/applicate2628/mcp-local-hub.git
+ ! [remote rejected]   e2c0785baad9620dcc3f8232dff452191b6cae4c -> fix/p0-test-entry-preserve-20261121 (cannot lock ref 'refs/heads/fix/p0-test-entry-preserve-20261121': is at 5a15e4f4bbf64442677e3443054a1bdb277505bd but expected 27d90e626465dc9a3a012e50785d62785d4c5e7e)
+error: failed to push some refs to 'https://github.com/applicate2628/mcp-local-hub.git'

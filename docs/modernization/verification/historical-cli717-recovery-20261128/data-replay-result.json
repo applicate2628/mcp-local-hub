@@ -1,0 +1,12 @@
+{
+  "schema": "historical-cli717-data-verification-v1",
+  "historical_aggregate_verified": true,
+  "roots": 717,
+  "PASS": 712,
+  "SKIP": 5,
+  "ledger_sha256": "bd67d058b2fcbed6796a04411c31d0b44ce90b62fa73d1778d59bbbded537baf",
+  "single_full_run_pass": false,
+  "mandatory_gate_qualification": false,
+  "source_or_cache_reuse_authorized": false,
+  "processes_started": false
+}

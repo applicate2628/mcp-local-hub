@@ -1,0 +1,230 @@
+{
+  "schema": "successor59f-preparation-evidence-v1",
+  "scope": "CLOSED_PREPARATION_AND_FROZEN_RUNTIME_INPUTS",
+  "source": {
+    "commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+    "tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+    "parent": "74e7563db244ede5984834233ce8d59072e92c0a",
+    "tracked_files": 3369,
+    "tracked_bytes": 69340536,
+    "actual_byte_map": {
+      "artifact": "templates/source/source59f-input-sha256.json.template",
+      "original_bytes": 459779,
+      "original_sha256": "e8c3fc2f577a130f92ba4eee7f8eee7153afc032dee909557cf1156890917c06"
+    },
+    "git_map": {
+      "artifact": "sources/source/source59f-git-map.json",
+      "original_bytes": 1217703,
+      "original_sha256": "2f85b5e27243da8c853f20600df576b51fd60fea2fa420509a331b538dc8c547"
+    },
+    "last_test_only_patch": {
+      "artifact": "sources/source/wait-fix/original-breakaway-wait.patch",
+      "original_bytes": 792,
+      "original_sha256": "8e38f2cfd816c86be0d440d56aeaf27b6ee42d0a61b9ab6c20e0386fcca53a6c"
+    },
+    "last_afterimage": {
+      "artifact": "sources/source/wait-fix/afterimages/internal/cli/supervisor_spawn_breakaway_windows_test.go.txt",
+      "original_bytes": 7527,
+      "original_sha256": "d42abb3c6fef077397949e80fa74eebc264fa2e3e112a9830236fc196e02e95b"
+    },
+    "raw_git_commit_object_included": false,
+    "commit_identity_provenance": "Separate closed native commit-v10 publication-trail evidence; this capsule preserves exact file maps and the final test delta, not a newly exported commit object."
+  },
+  "phases": [
+    {
+      "name": "helper-and-product-v1",
+      "status": "FAIL",
+      "closure": "CLOSED",
+      "commands": 10,
+      "planned_commands": 12,
+      "seconds": 221.01265759998932,
+      "parent": {
+        "artifact": "templates/receipts/producer-v1/parent.json.template",
+        "original_bytes": 1507,
+        "original_sha256": "e900a860923c9b122436d06feffc2a5e815214d98d56a6982d54af009f846735"
+      },
+      "execution": {
+        "artifact": "templates/receipts/producer-v1/execution.json.template",
+        "original_bytes": 11757824,
+        "original_sha256": "76d74ba0d51f044ff4601efece213eeb2d345ec63a1b31539b20231f0492a19b"
+      },
+      "root_receiving": {
+        "artifact": "templates/receipts/producer-v1/root-receiving.json.template",
+        "original_bytes": 9804,
+        "original_sha256": "6e8568fd054048a082fe48feea83069e5759289b733294e534169d2fd5b77743"
+      }
+    },
+    {
+      "name": "product-only-v2",
+      "status": "PASS",
+      "closure": "CLOSED",
+      "commands": 4,
+      "planned_commands": 4,
+      "seconds": 465.26724029995967,
+      "parent": {
+        "artifact": "templates/receipts/product-v2/parent.json.template",
+        "original_bytes": 1507,
+        "original_sha256": "bbc353fe6ac620ddf190ba9712d0048a6a60bbc0e1d59bb4644fdcee4d521daf"
+      },
+      "execution": {
+        "artifact": "templates/receipts/product-v2/execution.json.template",
+        "original_bytes": 4703112,
+        "original_sha256": "a5992a80253c4e3f14de1f1ccecf37d8c24b897652b78a5c56598027ba054c12"
+      },
+      "root_receiving": {
+        "artifact": "templates/receipts/product-v2/root-receiving.json.template",
+        "original_bytes": 11311,
+        "original_sha256": "14e9a11dd5d82507d9faf984ea2ba0cb82f795dee8c75630c4f8280fc8a0da98"
+      }
+    }
+  ],
+  "v1_failure": {
+    "actual_command": 10,
+    "name": "build-marked-product",
+    "exit_code": 1,
+    "prior_commands_passed": 9,
+    "first_product_builder_reached": false,
+    "native_product_command_started": false,
+    "original_status_preserved": true,
+    "cause": "Typed Get-Command -CommandType Application returned two Go applications; string conversion joined both Source paths and falsely failed the exact pinned path comparison.",
+    "stderr": {
+      "artifact": "templates/captures/producer-v1/build-marked-product.stderr.txt.template",
+      "original_bytes": 488,
+      "original_sha256": "da908aec0f04384be3176b935840fcd98528bee091b66025f00059c993161ff1"
+    },
+    "diagnosis": {
+      "artifact": "templates/diagnosis/command-resolution.json.template",
+      "original_bytes": 3910,
+      "original_sha256": "b834eef1988139f251db5eec5c5ced9c10132cb6ea8950d7c8b9bf24b16c68fc"
+    },
+    "diagnosis_script": {
+      "artifact": "templates/diagnosis/probe_command_resolution.ps1.template",
+      "original_bytes": 3926,
+      "original_sha256": "81f7e0fcb4bcbe5a261baf7c6ad133e675c455bd625839cfc6726c679f3d273f"
+    },
+    "diagnosis_executed_scope": "PowerShell command metadata only; Go, Git and Product were not invoked.",
+    "fix": "Use the default invocation resolver; require exactly one Application, then keep the exact pinned path comparison.",
+    "old_wrapper": {
+      "artifact": "sources/inputs/producer-v1/build_successor_products.ps1",
+      "original_bytes": 16503,
+      "original_sha256": "b96fda0fe7b407181100076a4a277fb36df808247f98c78587c1b5eb445c6297"
+    },
+    "new_wrapper": {
+      "artifact": "sources/inputs/product-v2/build_successor_products_v2.ps1",
+      "original_bytes": 16832,
+      "original_sha256": "6230aaa4474526e9d8ccf864e35d363669605e0560c784f7df36753cc5e35b06"
+    },
+    "helper_rebuilds_in_v2": 0,
+    "failed_cache_reuse": false
+  },
+  "auxiliary_parser": {
+    "command": "check-foreground-framed-parser",
+    "status": "PASS",
+    "seconds": 5.578471900080331,
+    "source": {
+      "artifact": "sources/inputs/foreground/main_windows_test.go.txt",
+      "original_bytes": 2772,
+      "original_sha256": "9712a445ce383ce89ec3a6051d7eb11dee5cf29a08ba93854d0c85fa8c142a0b"
+    },
+    "cases": [
+      "TestForegroundCleanupParserRejectsUnframedText",
+      "TestForegroundCleanupParserAcceptsPromptAndOneByteChunks",
+      "TestForegroundCleanupParserIgnoresLongOrdinaryLineAndOversizedFrame",
+      "TestForegroundCleanupParserRejectsDuplicatePass",
+      "TestForegroundCleanupParserRejectsFailedOrSkippedRequiredRoot"
+    ],
+    "stdout": {
+      "artifact": "sources/captures/producer-v1/check-foreground-framed-parser.stdout.txt",
+      "original_bytes": 59,
+      "original_sha256": "8d050ef0f0d591a48e34a5566f4633dfc83dca837ffeb9005f09b202f8b7cac9"
+    },
+    "scope": "Only the five auxiliary parser tests; not a full CLI, API or application acceptance run."
+  },
+  "runtime": {
+    "reviewed_templates": {
+      "artifact": "templates/inputs/runtime-review/templates-manifest.reviewed.json.template",
+      "original_bytes": 3071,
+      "original_sha256": "03800ce5a383c993372dd40dc84079d5af5add24163978f9fbab7bd513e6d8b6"
+    },
+    "candidate_manifest": {
+      "artifact": "templates/inputs/runtime/candidate-manifest.json.template",
+      "original_bytes": 3216,
+      "original_sha256": "88ae2fa8e94191babf660c94665819ca2c4939b60566c49bb9098cdd3c0b16bc"
+    },
+    "actual_manifest": {
+      "artifact": "templates/runtime-prepared/runtime-manifest.json.template",
+      "original_bytes": 3481,
+      "original_sha256": "bb532e4fec38ea60cad8a105ed2fad7495ee76440f9546a5100802f604fd0f7d"
+    },
+    "configuration": {
+      "artifact": "templates/inputs/final-bindings/literal-successor-bindings.json.template",
+      "original_bytes": 18844,
+      "original_sha256": "53c5e8d351c70a184a851b7da4170e0bafdccfdedc262fe931030ffaf83f65d2"
+    },
+    "composition_receipt": {
+      "artifact": "templates/runtime-prepared/preparation.json.template",
+      "original_bytes": 927,
+      "original_sha256": "53cebbfbf013f1b202c5438d59a56fad836c09e1fab87c8d044f4f627992ee55"
+    },
+    "composition_status": "PREPARED_NOT_EXECUTED",
+    "composition_method": "DATA-only template substitution; no separate native test parent/execution receipt exists or is fabricated.",
+    "full_test_results_included": false,
+    "full_acceptance_pass_claimed": false,
+    "literal_commands": [
+      "go build ./... && go vet ./... && go test -count=1 -timeout 5m ./...",
+      "go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/"
+    ],
+    "required_roots": {
+      "api_stderr_roots": [
+        "TestRotateSupervisorStderrSinkIfOversize_AtBoundary",
+        "TestRotateSupervisorStderrSinkIfOversize_ReplacesExistingBackup",
+        "TestSupervisorStderrSinkOversize_MatchesRotationThreshold"
+      ],
+      "canonical_roots": [
+        "TestCanonicalGUIRuntimeRecoveryNativeIndependentReplay",
+        "TestCanonicalSuccessorNativeControlRetainsOriginalFiles"
+      ],
+      "cli_stderr_extra": [
+        "TestSupervisorStderrSink_CapturesRuntimePanic",
+        "TestSupervisorStderrSink_CapturesMainGoroutinePanic",
+        "TestSupervisorStderrSink_RecordsErrorExit"
+      ],
+      "migration_fixture": null,
+      "migration_roots": [
+        "TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds",
+        "TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite",
+        "TestMigrateSerena_DrivesSupervisorRestart",
+        "TestMigrateSerena_NilSpecRowsHealedBeforeSpawn",
+        "TestMigrateSerena_LiveSupervisor_ReapClearsTheGateBeforeWrite",
+        "TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry",
+        "TestMigrateSerena_PostCommitReconcileReadyTimeout_ExitsZeroWithWarning",
+        "TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud",
+        "TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts",
+        "TestMigrateSerena_ConcurrentRegisterInWindow_AppearsInCommittedIntent",
+        "TestMigrateSerena_EmptyFirstSnapshot_WorkspaceRegisteredInWindow_RecomputesStart",
+        "TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut",
+        "TestMigrateSerena_EmptyFirstSnapshot_SupervisorRunning_LateReapClearsGate",
+        "TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow"
+      ]
+    },
+    "normal_full_inventory_preserved": true,
+    "timeout_increased": false,
+    "private_source727_schema_imported": false,
+    "expected_refusal_result_included": false
+  },
+  "publication": {
+    "originals": 133,
+    "original_bytes": 21400213,
+    "capture_originals": 32,
+    "unique_capture_payloads": 9,
+    "templates": 74,
+    "exact": 59,
+    "source_bindings_sha256": "10d3bf78697f030801188f08600ecb9c076e5053ca6788c09c5316a63ff70849",
+    "transparent_role_substitution_only": true,
+    "original_role_values_included": false,
+    "original_file_size_and_sha256_checked": true,
+    "native_pids_and_closure_facts_preserved": true,
+    "policy_changed": false,
+    "source_or_public_checkout_mutated_by_packaging": false
+  }
+}

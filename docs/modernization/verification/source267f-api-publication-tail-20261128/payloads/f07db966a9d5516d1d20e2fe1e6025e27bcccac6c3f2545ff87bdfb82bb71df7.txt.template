@@ -1,0 +1,38 @@
+{
+  "schema": "namespace-diagnostic-slice-data-check-v1",
+  "status": "PASS",
+  "scope": "syntax and source structure only; no diagnostic runtime or API test execution",
+  "v1": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-admission-diagnostic-driver-v1\\run_namespace_diagnostic.py",
+    "sha256": "bc21860fc9258de002a5e038b805f71e05ba7df1cb3dff6bcb899c88f14e20ac",
+    "original_parse_refusal": {
+      "exception_type": "SyntaxError",
+      "message": "invalid syntax",
+      "filename": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-candidate\\adapter_successor.py.in",
+      "line": 12,
+      "offset": 13,
+      "source_line": "WORK = Path(@@TASK_PATH_REPR@@)"
+    }
+  },
+  "adapter": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-candidate\\adapter_successor.py.in",
+    "sha256": "48c5d6af30d62c1e63c1455689a19c1ce0b67ab761fc9b1683e5a522494b98bd"
+  },
+  "v2": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-admission-diagnostic-driver-v2\\run_namespace_diagnostic.py",
+    "sha256": "06ef67bdb08fde5630d2f6c4be0e130ec60e87bb688c7aca148e07797dcf6189",
+    "ast_parsed": true,
+    "slice_lines": [
+      100,
+      111
+    ],
+    "slice_sha256": "96bd52faae2a107b929170b7884b3211f0d7df1fbd66a4fdc1375e8eba60b601",
+    "one_function": "flags_are_literal",
+    "composition_precedes_source_and_scope": true
+  },
+  "caller_modules_imported": false,
+  "caller_main_calls": 0,
+  "popen_calls": 0,
+  "scope_or_image_created": false,
+  "runtime_or_test_commands_started": false
+}

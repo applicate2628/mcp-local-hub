@@ -1,0 +1,390 @@
+--- source727/tools/test-recovery-namespace/main_windows.go
++++ auxiliary-successor33/main_windows.go
+@@ -1,7 +1,8 @@
+ //go:build windows
+ 
+-// test-recovery-namespace runs the fixed native namespace tests or one supplied
+-// complete API suite. Execution uses the original production contained owner.
++// Auxiliary successor33 namespace owner. The whole-suite mode runs an exact
++// copy of the incoming Go API image under the unchanged Source33 helper contract.
++// It is built against the selected successor's original production contained owner.
+ package main
+ 
+ import (
+@@ -31,7 +32,17 @@
+ const selectedTests = "^TestSecretsInit_RecoveryNamespace(Boundary|RetainedDirectory|FailurePaths)$"
+ 
+ func main() {
+-	if err := run(); err != nil {
++	err := run()
++	if retainedNamespaceStage != nil {
++		// UNKNOWN remains in this original process. Neither its owner nor its
++		// borrowed sinks/path pins are closed, replayed, or replaced by PID lookup.
++		retainedNamespaceStage.returned = err
++		fmt.Fprintln(os.Stderr, "recovery namespace fixture: UNKNOWN; original custody retained:", err)
++		for {
++			time.Sleep(time.Minute)
++		}
++	}
++	if err != nil {
+ 		fmt.Fprintln(os.Stderr, "recovery namespace fixture:", err)
+ 		var suiteFailure *namespaceSuiteFailure
+ 		if errors.As(err, &suiteFailure) {
+@@ -50,7 +61,7 @@
+ 	buildTimeout := flag.Duration("build-timeout", 5*time.Minute, "finite API test compilation deadline")
+ 	testTimeout := flag.Duration("test-timeout", 3*time.Minute, "finite Go test deadline")
+ 	testStatePathEnv := flag.Bool("test-state-path-env", false, "compile fixed tests, or require supplied tests, with test_state_path_env")
+-	testBinary := flag.String("test-binary", "", "prebuilt admitted API Product; enables one full suite without compilation")
++	testBinary := flag.String("test-binary", "", "exact incoming Go API image; enables one full suite without compilation")
+ 	expectedSHA256 := flag.String("expected-sha256", "", "exact incoming API executable SHA-256")
+ 	sourceDir := flag.String("source-dir", "", "original Go API package working directory")
+ 	requestSHA256 := flag.String("request-sha256", "", "original full-suite issuer request SHA-256")
+@@ -94,6 +105,11 @@
+ 	}
+ 	var pins []windows.Handle
+ 	defer func() {
++		if retainedNamespaceStage != nil {
++			retainedNamespaceStage.pathPins = pins
++			retainedNamespaceStage.returned = returned
++			return
++		}
+ 		for i := len(pins) - 1; i >= 0; i-- {
+ 			returned = errors.Join(returned, windows.CloseHandle(pins[i]))
+ 		}
+@@ -179,9 +195,9 @@
+ 	runtime.KeepAlive(sd)
+ 	fmt.Fprintln(diagnostics, "Private evidence root:", root)
+ 
+-	sourceLeaves := []string{"go.mod", "go.sum", "internal/api/secrets_init_recovery_test.go", "internal/api/secrets_init_recovery_directory_windows.go", "internal/api/secrets_init_recovery_directory_probe_windows_test.go", "tools/test-recovery-namespace/main_windows.go", "tools/test-recovery-namespace/prebuilt_windows.go", "scripts/test-recovery-namespace/helper.ps1"}
+-	if wholeSuite {
+-		sourceLeaves = append(sourceLeaves, "internal/api/main_test.go", "internal/api/supervisor_ipc_peer_transport_windows_test.go")
++	sourceLeaves := []string{"go.mod", "go.sum", "internal/api/secrets_init_recovery_test.go", "internal/api/secrets_init_recovery_directory_windows.go", "tools/test-recovery-namespace/main_windows.go", "scripts/test-recovery-namespace/helper.ps1"}
++	if wholeSuite {
++		sourceLeaves = append(sourceLeaves, "internal/api/main_test.go", "internal/api/supervisor_ipc_peer_transport_windows_test.go", "internal/api/attach_client_public_cli_receiving_windows_test.go", "internal/api/supervisor_stderr_sink_test.go")
+ 	}
+ 	sourceHashes := make(map[string]string)
+ 	var helper []byte
+@@ -224,7 +240,10 @@
+ 	tests := selectedTests
+ 	buildArgv := append([]string{goPath}, buildArgs...)
+ 	if wholeSuite {
+-		binary, buildArgs, buildArgv, tests = suite.Binary, nil, nil, ""
++		buildArgs, buildArgv, tests = nil, nil, ""
++		if err := copyNamespaceSuiteImage(suite, binary); err != nil {
++			return err
++		}
+ 	}
+ 	if err := writeJSON(filepath.Join(root, "proof", "inputs.json"), struct {
+ 		Repository           string            `json:"repository"`
+@@ -294,9 +313,8 @@
+ 		if hex.EncodeToString(binaryDigest.Sum(nil)) != suite.ExpectedSHA256 {
+ 			return errors.New("API receiver changed after admission")
+ 		}
+-		if err := writeNamespaceActorBinding(root, suite, held[len(held)-1], &pins); err != nil {
+-			return err
+-		}
++		suite.ExecutionBinary = binary
++		suite.ExecutionSHA256 = hex.EncodeToString(binaryDigest.Sum(nil))
+ 		if err := admission.Err(); err != nil {
+ 			return err
+ 		}
+--- source727/tools/test-recovery-namespace/prebuilt_windows.go
++++ auxiliary-successor33/prebuilt_windows.go
+@@ -9,7 +9,6 @@
+ 	"debug/buildinfo"
+ 	"debug/pe"
+ 	"encoding/hex"
+-	"encoding/json"
+ 	"errors"
+ 	"fmt"
+ 	"io"
+@@ -30,19 +29,24 @@
+ 	"TestSecretsInit_RecoveryNamespaceRetainedDirectory",
+ 	"TestSecretsInit_RecoveryNamespaceFailurePaths",
+ 	"TestSupervisorPeerStrictControlConnections",
++	"TestRotateSupervisorStderrSinkIfOversize_AtBoundary",
++	"TestRotateSupervisorStderrSinkIfOversize_ReplacesExistingBackup",
++	"TestSupervisorStderrSinkOversize_MatchesRotationThreshold",
+ }
+ 
+ type namespaceSuiteInput struct {
+ 	Binary, ExpectedSHA256, BinarySHA256, SourceDir, GoVersion string
+ 	Args, CompiledTags                                         []string
+ 	Environment                                                map[string]string
+-	FixtureSHA256                                              string
++	ExecutionBinary, ExecutionSHA256                           string
+ }
+ 
+ type namespaceStageCustody struct {
+ 	receipt        process.ContainedStreamReceiptV1
+ 	runErr         error
+ 	stdout, stderr *os.File
++	pathPins       []windows.Handle
++	returned       error
+ }
+ 
+ // At most one sequential stage can retain unresolved original native/IO custody. No new
+@@ -65,7 +69,9 @@
+ 	GoVersion            string                           `json:"go_version"`
+ 	CompiledTags         []string                         `json:"compiled_tags"`
+ 	Environment          map[string]string                `json:"fixture_environment"`
+-	FixtureSHA256        string                           `json:"canonical_fixture_sha256"`
++	ExecutionBinary      string                           `json:"execution_binary"`
++	ExecutionSHA256      string                           `json:"execution_sha256"`
++	ExecutionUnchanged   bool                             `json:"execution_binary_unchanged"`
+ 	Started              string                           `json:"started_utc"`
+ 	Finished             string                           `json:"finished_utc"`
+ 	WorkDeadline         time.Time                        `json:"work_deadline"`
+@@ -106,33 +112,28 @@
+ func (e *namespaceSuiteFailure) Error() string { return e.cause.Error() }
+ func (e *namespaceSuiteFailure) Unwrap() error { return e.cause }
+ 
+-// The helper's full-mode image binding comes only from the admitted input and
+-// this original retained file handle. Keep the new record pinned through the
+-// actor lifetime; neither a hash-equivalent alias nor an ambient path is proof.
+-func writeNamespaceActorBinding(root string, input *namespaceSuiteInput, image windows.Handle, pins *[]windows.Handle) error {
+-	var identity [24]byte // FILE_ID_INFO: volume serial plus 128-bit file ID.
+-	if err := windows.GetFileInformationByHandleEx(image, windows.FileIdInfo, &identity[0], uint32(len(identity))); err != nil {
++// The exact Source33 helper measures root/bin/api.test.exe. The incoming Go
++// image stays separately pinned; a fresh ordinary copy changes no image bytes,
++// Go arguments, working directory, or five-minute test deadline.
++func copyNamespaceSuiteImage(input *namespaceSuiteInput, destination string) (returned error) {
++	source, err := os.Open(input.Binary)
++	if err != nil {
+ 		return err
+ 	}
+-	record := struct {
+-		Schema string `json:"schema"`
+-		Path   string `json:"path"`
+-		SHA256 string `json:"sha256"`
+-		FileID string `json:"file_id"`
+-	}{
+-		Schema: "recovery-namespace-prebuilt-actor-v1",
+-		Path:   input.Binary, SHA256: input.BinarySHA256, FileID: hex.EncodeToString(identity[:]),
+-	}
+-	path := filepath.Join(root, "proof", "prebuilt-actor.json")
+-	if err := writeJSON(path, record); err != nil {
++	defer func() { returned = errors.Join(returned, source.Close()) }()
++	target, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
++	if err != nil {
+ 		return err
+ 	}
+-	held, err := pinOrdinaryPath(path, false)
+-	if err != nil {
++	defer func() { returned = errors.Join(returned, target.Close()) }()
++	digest := sha256.New()
++	if _, err := io.Copy(io.MultiWriter(target, digest), source); err != nil {
+ 		return err
+ 	}
+-	*pins = append(*pins, held...)
+-	return nil
++	if hex.EncodeToString(digest.Sum(nil)) != input.ExpectedSHA256 {
++		return errors.New("incoming API bytes changed during exclusive namespace copy")
++	}
++	return target.Sync()
+ }
+ 
+ func namespaceSuiteExitCode(known bool, code int, failure error) int {
+@@ -188,8 +189,8 @@
+ 	tags := []string{}
+ 	found := false
+ 	for _, setting := range info.Settings {
+-		// Global Go flag metadata may include another package's publisher flags.
+-		// Receive the source epoch through this image's canonical fixture below.
++		// This ordinary API image is the actual incoming Go test executable.
++		// Its source and compiler invocation are received by the original issuer.
+ 		if setting.Key == "-ldflags" && strings.Contains(setting.Value, "internal/buildinfo.rustOwnerSHA256") {
+ 			return nil, errors.New("whole-suite image must not acquire a Rust mark")
+ 		}
+@@ -279,11 +280,23 @@
+ 	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > 128<<20 {
+ 		return nil, errors.Join(err, errors.New("bounded ordinary API executable required"))
+ 	}
+-	actual, err := binaryadmission.AdmitWindowsRole(binaryadmission.WindowsArtifact{
+-		Path: binary, Role: binaryadmission.WindowsArtifactRoleProduct, SHA256: expected,
+-	})
+-	if err != nil || actual.Machine != pe.IMAGE_FILE_MACHINE_AMD64 {
+-		return nil, errors.Join(err, errors.New("full API receiver must be the pinned Windows AMD64 Product image"))
++	if err := binaryadmission.ValidateWindowsNativeImage(binary); err != nil {
++		return nil, err
++	}
++	image, err := pe.Open(binary)
++	if err != nil {
++		return nil, err
++	}
++	machine := image.Machine
++	if err := image.Close(); err != nil {
++		return nil, err
++	}
++	if machine != pe.IMAGE_FILE_MACHINE_AMD64 {
++		return nil, errors.New("full API receiver must be the incoming Windows AMD64 Go test image")
++	}
++	actual, err := namespaceFileHash(binary)
++	if err != nil || actual != expected {
++		return nil, errors.Join(err, errors.New("incoming API executable SHA-256 differs from its original request"))
+ 	}
+ 	compiled, err := buildinfo.ReadFile(binary)
+ 	if err != nil {
+@@ -294,33 +307,10 @@
+ 		return nil, err
+ 	}
+ 	input := &namespaceSuiteInput{
+-		Binary: binary, ExpectedSHA256: expected, BinarySHA256: actual.SHA256, SourceDir: source, GoVersion: compiled.GoVersion,
++		Binary: binary, ExpectedSHA256: expected, BinarySHA256: actual, SourceDir: source, GoVersion: compiled.GoVersion,
+ 		Args: append([]string(nil), args...), CompiledTags: tags,
+ 		Environment: map[string]string{"MCPHUB_E2E_SCHEDULER": "none"},
+ 	}
+-	for _, key := range []string{"MCPHUB_CANONICAL_FIXTURE_TEST_PRODUCT", "MCPHUB_CANONICAL_ENTRY_FIXTURE_REQUIRED", "MCPHUB_CANONICAL_COMMAND_FIXTURE_REQUIRED"} {
+-		if os.Getenv(key) != "1" {
+-			return nil, fmt.Errorf("%s must be explicitly set to 1", key)
+-		}
+-		input.Environment[key] = "1"
+-	}
+-	fixture := os.Getenv("MCPHUB_CANONICAL_ENTRY_FIXTURE")
+-	if err := namespaceDPath(fixture); err != nil {
+-		return nil, err
+-	}
+-	held, err := pinOrdinaryPath(fixture, false)
+-	if err != nil {
+-		return nil, err
+-	}
+-	*pins = append(*pins, held...)
+-	if err := verifyNamespaceCanonicalFixture(ctx, fixture, binary, expected); err != nil {
+-		return nil, err
+-	}
+-	input.FixtureSHA256, err = namespaceFileHash(fixture)
+-	if err != nil {
+-		return nil, err
+-	}
+-	input.Environment["MCPHUB_CANONICAL_ENTRY_FIXTURE"] = fixture
+ 	attach, attachSHA := os.Getenv("MCPHUB_ATTACH_TEST_BIN"), os.Getenv("MCPHUB_ATTACH_TEST_BIN_SHA256")
+ 	if !state {
+ 		if attach != "" || attachSHA != "" {
+@@ -331,7 +321,7 @@
+ 	if err := namespaceDPath(attach); err != nil || !namespaceSHA256(attachSHA) {
+ 		return nil, errors.Join(err, errors.New("tagged suite requires the actual isolated Product and exact digest"))
+ 	}
+-	held, err = pinOrdinaryPath(attach, false)
++	held, err := pinOrdinaryPath(attach, false)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -368,70 +358,6 @@
+ 	input.Environment["MCPHUB_ATTACH_TEST_BIN"] = attach
+ 	input.Environment["MCPHUB_ATTACH_TEST_BIN_SHA256"] = attachSHA
+ 	return input, ctx.Err()
+-}
+-
+-func verifyNamespaceCanonicalFixture(ctx context.Context, path, binary, expected string) error {
+-	if err := ctx.Err(); err != nil {
+-		return err
+-	}
+-	file, err := os.Open(path)
+-	if err != nil {
+-		return err
+-	}
+-	raw, readErr := io.ReadAll(io.LimitReader(file, (1<<20)+1))
+-	if err := errors.Join(readErr, file.Close()); err != nil {
+-		return err
+-	}
+-	if len(raw) > 1<<20 {
+-		return errors.New("canonical fixture input exceeds its byte limit")
+-	}
+-	var input struct {
+-		ProductRoot          string `json:"product_root"`
+-		SourceEpoch          string `json:"source_epoch"`
+-		ProductVersion       string `json:"product_version"`
+-		BuildID              string `json:"build_id"`
+-		ReverseProjection    string `json:"reverse_projection"`
+-		CanonicalEntrySHA256 string `json:"canonical_entry_sha256"`
+-		ProductSHA256        string `json:"product_sha256"`
+-		IdentitySHA256       string `json:"identity_sha256"`
+-	}
+-	decoder := json.NewDecoder(bytes.NewReader(raw))
+-	decoder.DisallowUnknownFields()
+-	if err := decoder.Decode(&input); err != nil {
+-		return err
+-	}
+-	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+-		return errors.New("canonical fixture must contain one JSON object")
+-	}
+-	if err := namespaceDPath(input.ProductRoot); err != nil {
+-		return err
+-	}
+-	if (input.SourceEpoch != "" && !namespaceSHA256(input.SourceEpoch)) || input.ProductVersion == "" ||
+-		input.ProductSHA256 != expected || !namespaceSHA256(input.IdentitySHA256) {
+-		return errors.New("canonical fixture does not describe this API receiver")
+-	}
+-	binding, err := binaryadmission.NewWindowsCanonicalEntryBuildBindingV1(input.BuildID, input.CanonicalEntrySHA256, input.ReverseProjection)
+-	if err != nil {
+-		return err
+-	}
+-	targets, err := binaryadmission.CanonicalEntryTargetsV1(filepath.Join(input.ProductRoot, binaryadmission.WindowsCanonicalEntryRelativePathV1))
+-	if err != nil {
+-		return err
+-	}
+-	if !strings.EqualFold(targets.ProductPath, binary) {
+-		return errors.New("canonical fixture Product path differs from the actual API receiver")
+-	}
+-	observed, err := binaryadmission.CheckWindowsCanonicalEntryBuildV1(ctx, targets.CanonicalEntryPath, binding)
+-	if err != nil {
+-		return err
+-	}
+-	if observed.SourceEpoch != input.SourceEpoch || observed.EntrySet.Product.SHA256 != expected ||
+-		observed.EntrySet.Identity.SHA256 != input.IdentitySHA256 ||
+-		observed.EntrySet.ProductArtifact.Version != input.ProductVersion ||
+-		observed.EntrySet.CanonicalEntry.SHA256 != input.CanonicalEntrySHA256 {
+-		return errors.New("original entry-set observer refused the supplied API bundle data")
+-	}
+-	return nil
+ }
+ 
+ func namespaceMandatoryPasses(raw []byte) (map[string]namespaceSuiteOutcome, error) {
+@@ -474,10 +400,10 @@
+ 
+ func finishNamespaceSuite(parent, root string, input *namespaceSuiteInput, receipt process.ContainedStreamReceiptV1, runErr error, started, workDeadline time.Time) error {
+ 	record := namespaceSuiteReceipt{
+-		Schema: "api-namespace-full-suite-v1", Mode: "prebuilt-full-suite", EvidenceRoot: root,
++		Schema: "api-namespace-full-suite-v2", Mode: "incoming-go-image-copy", EvidenceRoot: root,
+ 		Binary: input.Binary, ExpectedSHA256: input.ExpectedSHA256, BinarySHA256: input.BinarySHA256, SourceDir: input.SourceDir,
+ 		Args: append([]string(nil), input.Args...), GoVersion: input.GoVersion, CompiledTags: input.CompiledTags,
+-		Environment: input.Environment, FixtureSHA256: input.FixtureSHA256,
++		Environment: input.Environment, ExecutionBinary: input.ExecutionBinary, ExecutionSHA256: input.ExecutionSHA256,
+ 		Started: started.UTC().Format(time.RFC3339Nano), WorkDeadline: workDeadline, CleanupDeadline: workDeadline.Add(10 * time.Second), Root: receipt.RootIdentity, IO: receipt.IOSettlement,
+ 		Stage: receipt.Stage, PrimaryError: errorText(receipt.PrimaryError), CleanupError: errorText(receipt.CleanupError),
+ 		RootExitError: errorText(receipt.RootExitError), RootWaitKnown: receipt.RootWaitKnown, RootExitCode: receipt.RootExitCode,
+@@ -495,13 +421,15 @@
+ 	if record.SettlementComplete {
+ 		var observationErr error
+ 		if record.SettlementComplete && record.RootWaitKnown {
+-			observationErr = verifyObservations(root, input.Binary, receipt.RootIdentity, os.Stderr)
++			observationErr = verifyObservations(root, input.ExecutionBinary, receipt.RootIdentity, os.Stderr)
+ 		} else {
+ 			observationErr = errors.New("original actor is not settled; namespace observations were not accepted")
+ 		}
+ 		record.ObservationsVerified = observationErr == nil
+ 		after, hashErr := namespaceFileHash(input.Binary)
+ 		record.BinaryUnchanged = hashErr == nil && after == input.ExpectedSHA256
++		executionAfter, executionHashErr := namespaceFileHash(input.ExecutionBinary)
++		record.ExecutionUnchanged = executionHashErr == nil && executionAfter == input.ExpectedSHA256
+ 		stdout, stdoutErr := os.ReadFile(record.StdoutPath)
+ 		stderr, stderrErr := os.ReadFile(record.StderrPath)
+ 		if stdoutErr == nil {
+@@ -515,7 +443,7 @@
+ 		var mandatoryErr error
+ 		record.Mandatory, mandatoryErr = namespaceMandatoryPasses(stdout)
+ 		record.MandatoryPassed = mandatoryErr == nil
+-		cause = errors.Join(cause, observationErr, hashErr, stdoutErr, stderrErr, mandatoryErr)
++		cause = errors.Join(cause, observationErr, hashErr, executionHashErr, stdoutErr, stderrErr, mandatoryErr)
+ 		// runStage joined the original IO before closing these sinks. Forward
+ 		// captured bytes once even for an honest nonzero receiver exit.
+ 		_, stdoutForwardErr := os.Stdout.Write(stdout)
+@@ -526,7 +454,7 @@
+ 		record.Forwarding = "not forwarded: original native or IO settlement incomplete; original owner, error and borrowed sinks retained"
+ 		cause = errors.Join(cause, errors.New("whole API suite did not settle original native and IO owners; no raw replay or observation acceptance"))
+ 	}
+-	if !record.Root.Known || !record.RootWaitKnown || record.RootExitCode != 0 || !record.SettlementComplete || !record.BinaryUnchanged {
++	if !record.Root.Known || !record.RootWaitKnown || record.RootExitCode != 0 || !record.SettlementComplete || !record.BinaryUnchanged || !record.ExecutionUnchanged {
+ 		cause = errors.Join(cause, errors.New("full API receiver identity, wait, image or settlement is incomplete"))
+ 	}
+ 	record.Finished = time.Now().UTC().Format(time.RFC3339Nano)

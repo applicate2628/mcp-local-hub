@@ -1,0 +1,180 @@
+{
+  "schema": "source5-full11-documentation-projections-v1",
+  "artifact_kind": "documentation-not-execution-inputs",
+  "previous_public_PR_head": "b0719bcc4c95d1af0a6f509a54607200a7f55b7e",
+  "previous_PR_body_reused_from_existing_archive": "docs/modernization/verification/cache-owner-custody-20261126/previous-pr-description-before-b-20261126.md",
+  "previous_PR_body_sha256": "9b67eaab08943cf0b89ff00117bf9b720fe244f4f6e6dc9c9e2ee4c907ec4f09",
+  "original_native_receipts_remain_authoritative": true,
+  "full_regression_status": "FAIL_WITH_UNKNOWN_EXTERNAL_OWNER",
+  "parent_terminal_completion_received": false,
+  "publication_commit_is_recorded_separately": true,
+  "rule": "Exact UTF-8 text replacements of previously reviewed machine-root and SID tokens only; no JSON reserialization of source evidence.",
+  "files": [
+    {
+      "path": "source5-materialization-evidence.md",
+      "kind": "frozen-evidence-slice",
+      "local_source": "recovery/source5-publication-draft/source5-materialization-evidence.md",
+      "original_sha256": "8edebd68211817e584e99f489ec06e9452e9baba6ac462f57111bcf4fa45f294",
+      "original_bytes": 12383,
+      "published_sha256": "8edebd68211817e584e99f489ec06e9452e9baba6ac462f57111bcf4fa45f294",
+      "published_bytes": 12383,
+      "redactions": {},
+      "exact_original_byte_copy": true
+    },
+    {
+      "path": "source5-materialization-evidence.json",
+      "kind": "frozen-evidence-slice",
+      "local_source": "recovery/source5-publication-draft/source5-materialization-evidence.json",
+      "original_sha256": "6d3797fcc210494c4576a5dfdde14577d882aa73cbbebd2406fd1541b33cfbe4",
+      "original_bytes": 11437,
+      "published_sha256": "6d3797fcc210494c4576a5dfdde14577d882aa73cbbebd2406fd1541b33cfbe4",
+      "published_bytes": 11437,
+      "redactions": {},
+      "exact_original_byte_copy": true
+    },
+    {
+      "path": "update2-source-evidence.md",
+      "kind": "frozen-evidence-slice",
+      "local_source": "recovery/source5-publication-draft/update2-source-evidence.md",
+      "original_sha256": "91af6dff58237e465cf42ad065c462bfc361c33b1bd29f69d28fab301c05b71c",
+      "original_bytes": 11613,
+      "published_sha256": "91af6dff58237e465cf42ad065c462bfc361c33b1bd29f69d28fab301c05b71c",
+      "published_bytes": 11613,
+      "redactions": {},
+      "exact_original_byte_copy": true
+    },
+    {
+      "path": "update2-source-evidence.json",
+      "kind": "frozen-evidence-slice",
+      "local_source": "recovery/source5-publication-draft/update2-source-evidence.json",
+      "original_sha256": "c0a04cfd2dbe8cb4f517bf148469053aab55debf028ac169ef39ac4afea986b2",
+      "original_bytes": 11491,
+      "published_sha256": "c0a04cfd2dbe8cb4f517bf148469053aab55debf028ac169ef39ac4afea986b2",
+      "published_bytes": 11491,
+      "redactions": {},
+      "exact_original_byte_copy": true
+    },
+    {
+      "path": "data-composition-evidence.md",
+      "kind": "frozen-evidence-slice",
+      "local_source": "recovery/source5-publication-draft/data-composition-evidence.md",
+      "original_sha256": "efcd9b5630ceb57226a62767586d0916bc3e138fe42ba264fc4c8dcb14098ef1",
+      "original_bytes": 12517,
+      "published_sha256": "efcd9b5630ceb57226a62767586d0916bc3e138fe42ba264fc4c8dcb14098ef1",
+      "published_bytes": 12517,
+      "redactions": {},
+      "exact_original_byte_copy": true
+    },
+    {
+      "path": "data-composition-evidence.json",
+      "kind": "frozen-evidence-slice",
+      "local_source": "recovery/source5-publication-draft/data-composition-evidence.json",
+      "original_sha256": "c6c8e7dd0d6283f6591f3df838b5e4539ff68eba4672adeee52a34a0d28632bc",
+      "original_bytes": 9654,
+      "published_sha256": "84ac660ee716b04b18f674390ee50376197cc44971305245b9d9f8680f57c3e2",
+      "published_bytes": 9654,
+      "redactions": {
+        "<TASK_WORKSPACE>": 2
+      },
+      "exact_original_byte_copy": false
+    },
+    {
+      "path": "resource-retirement-evidence.md",
+      "kind": "frozen-evidence-slice",
+      "local_source": "recovery/source5-publication-draft/resource-retirement-evidence.md",
+      "original_sha256": "24e31fcd04347b54020370af883ff912ecf21996cacadd901acb0f0b39c2700f",
+      "original_bytes": 9041,
+      "published_sha256": "14a683cea5c996c7ae6fd23e42cfcd21070cadbfbf3b56e0a53c887450d03c1d",
+      "published_bytes": 8996,
+      "redactions": {
+        "<TASK>": 1
+      },
+      "exact_original_byte_copy": false
+    },
+    {
+      "path": "resource-retirement-evidence.json",
+      "kind": "frozen-evidence-slice",
+      "local_source": "recovery/source5-publication-draft/resource-retirement-evidence.json",
+      "original_sha256": "a314120c169116c805e28b50ac34503b8a7f2bc590976f1d557fd284a44a3fee",
+      "original_bytes": 9954,
+      "published_sha256": "50629f0b3e2f9de29403e9ad6d3afd8eb70675720fc24182abfce6ed0bd9e69c",
+      "published_bytes": 9906,
+      "redactions": {
+        "<TASK>": 1
+      },
+      "exact_original_byte_copy": false
+    },
+    {
+      "path": "full11-unknown-evidence.md",
+      "kind": "frozen-evidence-slice",
+      "local_source": "recovery/source5-publication-draft/full11-unknown-evidence.md",
+      "original_sha256": "a795f8f1788847f64284800a32bfe930cf0ed8defb4930b703d2bc85c700858c",
+      "original_bytes": 14020,
+      "published_sha256": "9579436c4a02be005f76679dd5631c6595d56cc6c9a5955a6856f1862464687b",
+      "published_bytes": 13977,
+      "redactions": {
+        "<TASK>": 1,
+        "<TASK_WORKSPACE>": 1
+      },
+      "exact_original_byte_copy": false
+    },
+    {
+      "path": "full11-unknown-evidence.json",
+      "kind": "frozen-evidence-slice",
+      "local_source": "recovery/source5-publication-draft/full11-unknown-evidence.json",
+      "original_sha256": "8bdeda861b58a75d3bdcb54327f55a6059ecc5a74fe9625e9a95cc4cbe626fbd",
+      "original_bytes": 14945,
+      "published_sha256": "91b1f320daf3fdc6e471f87e152b2a7c3c9be2d673dac65d703efea5b27fbcb2",
+      "published_bytes": 14321,
+      "redactions": {
+        "<TASK>": 13,
+        "<TASK_WORKSPACE>": 2
+      },
+      "exact_original_byte_copy": false
+    },
+    {
+      "path": "update2-main-plan-excerpt.md",
+      "kind": "historical-stage-excerpt",
+      "local_source": "recovery/source5-publication-draft/update2-main-plan-excerpt.md",
+      "original_sha256": "1db11651dbcf0c3b94838450a586face12a8b5482b0de094a5255d9cdbda0df6",
+      "original_bytes": 2868,
+      "published_sha256": "1db11651dbcf0c3b94838450a586face12a8b5482b0de094a5255d9cdbda0df6",
+      "published_bytes": 2868,
+      "redactions": {},
+      "exact_original_byte_copy": true
+    },
+    {
+      "path": "evidence-slice-manifest.json",
+      "kind": "frozen-authoring-manifest",
+      "local_source": "recovery/source5-publication-draft/publication-manifest-v2.json",
+      "original_sha256": "a0372a239044dff659b8f23f419f30251d8d49c2ad67c7eae4298d6441c2d202",
+      "original_bytes": 5849,
+      "published_sha256": "a0372a239044dff659b8f23f419f30251d8d49c2ad67c7eae4298d6441c2d202",
+      "published_bytes": 5849,
+      "redactions": {},
+      "exact_original_byte_copy": true
+    },
+    {
+      "path": "README.md",
+      "kind": "current-root-summary",
+      "local_source": "integration-recovery/source5-full11-publication/README.md",
+      "original_sha256": "1211169bda5188d364fab054a96b49eb3b17b59576d0ebbf2bc2bd9796f6dcb0",
+      "original_bytes": 13177,
+      "published_sha256": "1211169bda5188d364fab054a96b49eb3b17b59576d0ebbf2bc2bd9796f6dcb0",
+      "published_bytes": 13177,
+      "redactions": {},
+      "exact_original_byte_copy": true
+    },
+    {
+      "path": "sources/canonical-controller-v4-main_windows.go.txt",
+      "kind": "original-immutable-controller-source-projection",
+      "local_source": "recovery/canonical-owner-v4-inputs/main_windows.go",
+      "original_sha256": "02cee72a8e127dcd15e3e2a0433b11b9c28c97b430050090f656deae652d2e38",
+      "original_bytes": 23222,
+      "published_sha256": "02cee72a8e127dcd15e3e2a0433b11b9c28c97b430050090f656deae652d2e38",
+      "published_bytes": 23222,
+      "redactions": {},
+      "exact_original_byte_copy": true
+    }
+  ]
+}

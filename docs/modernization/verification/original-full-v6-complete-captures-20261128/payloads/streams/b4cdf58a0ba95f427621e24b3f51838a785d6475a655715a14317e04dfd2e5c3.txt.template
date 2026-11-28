@@ -1,0 +1,895 @@
+=== RUN   TestServerManifestEnvForwardLocalRejectsInvalidOrAmbiguousNames
+=== RUN   TestServerManifestEnvForwardLocalRejectsInvalidOrAmbiguousNames/empty
+--- PASS: TestServerManifestEnvForwardLocalRejectsInvalidOrAmbiguousNames/empty (0.00s)
+=== NAME  TestServerManifestEnvForwardLocalRejectsInvalidOrAmbiguousNames
+=== RUN   TestServerManifestEnvForwardLocalRejectsInvalidOrAmbiguousNames/nul
+--- PASS: TestServerManifestEnvForwardLocalRejectsInvalidOrAmbiguousNames/nul (0.00s)
+=== NAME  TestServerManifestEnvForwardLocalRejectsInvalidOrAmbiguousNames
+=== RUN   TestServerManifestEnvForwardLocalRejectsInvalidOrAmbiguousNames/equals
+--- PASS: TestServerManifestEnvForwardLocalRejectsInvalidOrAmbiguousNames/equals (0.00s)
+=== NAME  TestServerManifestEnvForwardLocalRejectsInvalidOrAmbiguousNames
+=== RUN   TestServerManifestEnvForwardLocalRejectsInvalidOrAmbiguousNames/duplicate
+--- PASS: TestServerManifestEnvForwardLocalRejectsInvalidOrAmbiguousNames/duplicate (0.00s)
+=== NAME  TestServerManifestEnvForwardLocalRejectsInvalidOrAmbiguousNames
+=== RUN   TestServerManifestEnvForwardLocalRejectsInvalidOrAmbiguousNames/static_env_collision
+--- PASS: TestServerManifestEnvForwardLocalRejectsInvalidOrAmbiguousNames/static_env_collision (0.00s)
+=== NAME  TestServerManifestEnvForwardLocalRejectsInvalidOrAmbiguousNames
+--- PASS: TestServerManifestEnvForwardLocalRejectsInvalidOrAmbiguousNames (0.00s)
+=== NAME  
+=== RUN   TestParseManifestEnvForwardLocalPreservesNamesAndOrdinaryStaticEnvSemantics
+--- PASS: TestParseManifestEnvForwardLocalPreservesNamesAndOrdinaryStaticEnvSemantics (0.00s)
+=== NAME  
+=== RUN   TestRemoteHTTPManifestRejectsEnvForwardLocal
+=== RUN   TestRemoteHTTPManifestRejectsEnvForwardLocal/env_forward_local:_[]
+--- PASS: TestRemoteHTTPManifestRejectsEnvForwardLocal/env_forward_local:_[] (0.00s)
+=== NAME  TestRemoteHTTPManifestRejectsEnvForwardLocal
+=== RUN   TestRemoteHTTPManifestRejectsEnvForwardLocal/env_forward_local:_null
+--- PASS: TestRemoteHTTPManifestRejectsEnvForwardLocal/env_forward_local:_null (0.00s)
+=== NAME  TestRemoteHTTPManifestRejectsEnvForwardLocal
+=== RUN   TestRemoteHTTPManifestRejectsEnvForwardLocal/env_forward_local:_[OPTIONAL_TOKEN]
+--- PASS: TestRemoteHTTPManifestRejectsEnvForwardLocal/env_forward_local:_[OPTIONAL_TOKEN] (0.00s)
+=== NAME  TestRemoteHTTPManifestRejectsEnvForwardLocal
+--- PASS: TestRemoteHTTPManifestRejectsEnvForwardLocal (0.00s)
+=== NAME  
+=== RUN   TestParseManifestWithEnvironmentUsesCapturedLookup
+--- PASS: TestParseManifestWithEnvironmentUsesCapturedLookup (0.00s)
+=== NAME  
+=== RUN   TestParseGdbManifestNativeBridge
+--- PASS: TestParseGdbManifestNativeBridge (0.00s)
+=== NAME  
+=== RUN   TestDaemonProtocolCompatibilityProfileValidation
+=== RUN   TestDaemonProtocolCompatibilityProfileValidation/absent_remains_valid
+--- PASS: TestDaemonProtocolCompatibilityProfileValidation/absent_remains_valid (0.00s)
+=== NAME  TestDaemonProtocolCompatibilityProfileValidation
+=== RUN   TestDaemonProtocolCompatibilityProfileValidation/legacy_profile_is_stdio_only
+--- PASS: TestDaemonProtocolCompatibilityProfileValidation/legacy_profile_is_stdio_only (0.00s)
+=== NAME  TestDaemonProtocolCompatibilityProfileValidation
+=== RUN   TestDaemonProtocolCompatibilityProfileValidation/unknown_profile
+--- PASS: TestDaemonProtocolCompatibilityProfileValidation/unknown_profile (0.00s)
+=== NAME  TestDaemonProtocolCompatibilityProfileValidation
+=== RUN   TestDaemonProtocolCompatibilityProfileValidation/native_http_rejects_profile
+--- PASS: TestDaemonProtocolCompatibilityProfileValidation/native_http_rejects_profile (0.00s)
+=== NAME  TestDaemonProtocolCompatibilityProfileValidation
+=== RUN   TestDaemonProtocolCompatibilityProfileValidation/remote_http_rejects_profile
+--- PASS: TestDaemonProtocolCompatibilityProfileValidation/remote_http_rejects_profile (0.00s)
+=== NAME  TestDaemonProtocolCompatibilityProfileValidation
+--- PASS: TestDaemonProtocolCompatibilityProfileValidation (0.00s)
+=== NAME  
+=== RUN   TestCodeGraphDiskManifestFixtureUsesLegacyStdioProfile
+--- PASS: TestCodeGraphDiskManifestFixtureUsesLegacyStdioProfile (0.00s)
+=== NAME  
+=== RUN   TestLLDBManifestDefaultUsesLegacyStdioProfile
+--- PASS: TestLLDBManifestDefaultUsesLegacyStdioProfile (0.00s)
+=== NAME  
+=== RUN   TestPlatformMatches
+=== RUN   TestPlatformMatches/empty-list-no-gate
+--- PASS: TestPlatformMatches/empty-list-no-gate (0.00s)
+=== NAME  TestPlatformMatches
+=== RUN   TestPlatformMatches/empty-slice-no-gate
+--- PASS: TestPlatformMatches/empty-slice-no-gate (0.00s)
+=== NAME  TestPlatformMatches
+=== RUN   TestPlatformMatches/match-win-amd64
+--- PASS: TestPlatformMatches/match-win-amd64 (0.00s)
+=== NAME  TestPlatformMatches
+=== RUN   TestPlatformMatches/match-linux-arm64
+--- PASS: TestPlatformMatches/match-linux-arm64 (0.00s)
+=== NAME  TestPlatformMatches
+=== RUN   TestPlatformMatches/match-darwin-arm64
+--- PASS: TestPlatformMatches/match-darwin-arm64 (0.00s)
+=== NAME  TestPlatformMatches
+=== RUN   TestPlatformMatches/mismatch-win-arm64-onshape
+--- PASS: TestPlatformMatches/mismatch-win-arm64-onshape (0.00s)
+=== NAME  TestPlatformMatches
+=== RUN   TestPlatformMatches/mismatch-os
+--- PASS: TestPlatformMatches/mismatch-os (0.00s)
+=== NAME  TestPlatformMatches
+=== RUN   TestPlatformMatches/mismatch-arch
+--- PASS: TestPlatformMatches/mismatch-arch (0.00s)
+=== NAME  TestPlatformMatches
+=== RUN   TestPlatformMatches/whitespace-tolerated
+--- PASS: TestPlatformMatches/whitespace-tolerated (0.00s)
+=== NAME  TestPlatformMatches
+--- PASS: TestPlatformMatches (0.00s)
+=== NAME  
+=== RUN   TestValidateProbeValuesNonEmpty_Platforms
+=== RUN   TestValidateProbeValuesNonEmpty_Platforms/reject/empty
+--- PASS: TestValidateProbeValuesNonEmpty_Platforms/reject/empty (0.00s)
+=== NAME  TestValidateProbeValuesNonEmpty_Platforms
+=== RUN   TestValidateProbeValuesNonEmpty_Platforms/reject/leading-space
+--- PASS: TestValidateProbeValuesNonEmpty_Platforms/reject/leading-space (0.00s)
+=== NAME  TestValidateProbeValuesNonEmpty_Platforms
+=== RUN   TestValidateProbeValuesNonEmpty_Platforms/reject/trailing-space
+--- PASS: TestValidateProbeValuesNonEmpty_Platforms/reject/trailing-space (0.00s)
+=== NAME  TestValidateProbeValuesNonEmpty_Platforms
+=== RUN   TestValidateProbeValuesNonEmpty_Platforms/reject/space-after-slash
+--- PASS: TestValidateProbeValuesNonEmpty_Platforms/reject/space-after-slash (0.00s)
+=== NAME  TestValidateProbeValuesNonEmpty_Platforms
+=== RUN   TestValidateProbeValuesNonEmpty_Platforms/reject/space-in-os
+--- PASS: TestValidateProbeValuesNonEmpty_Platforms/reject/space-in-os (0.00s)
+=== NAME  TestValidateProbeValuesNonEmpty_Platforms
+=== RUN   TestValidateProbeValuesNonEmpty_Platforms/reject/space-in-arch
+--- PASS: TestValidateProbeValuesNonEmpty_Platforms/reject/space-in-arch (0.00s)
+=== NAME  TestValidateProbeValuesNonEmpty_Platforms
+=== RUN   TestValidateProbeValuesNonEmpty_Platforms/reject/tab-internal
+--- PASS: TestValidateProbeValuesNonEmpty_Platforms/reject/tab-internal (0.00s)
+=== NAME  TestValidateProbeValuesNonEmpty_Platforms
+=== RUN   TestValidateProbeValuesNonEmpty_Platforms/reject/no-slash
+--- PASS: TestValidateProbeValuesNonEmpty_Platforms/reject/no-slash (0.00s)
+=== NAME  TestValidateProbeValuesNonEmpty_Platforms
+=== RUN   TestValidateProbeValuesNonEmpty_Platforms/reject/triple
+--- PASS: TestValidateProbeValuesNonEmpty_Platforms/reject/triple (0.00s)
+=== NAME  TestValidateProbeValuesNonEmpty_Platforms
+=== RUN   TestValidateProbeValuesNonEmpty_Platforms/reject/empty-os
+--- PASS: TestValidateProbeValuesNonEmpty_Platforms/reject/empty-os (0.00s)
+=== NAME  TestValidateProbeValuesNonEmpty_Platforms
+=== RUN   TestValidateProbeValuesNonEmpty_Platforms/reject/empty-arch
+--- PASS: TestValidateProbeValuesNonEmpty_Platforms/reject/empty-arch (0.00s)
+=== NAME  TestValidateProbeValuesNonEmpty_Platforms
+--- PASS: TestValidateProbeValuesNonEmpty_Platforms (0.00s)
+=== NAME  
+=== RUN   TestManifest_PlatformProbeRoundTripsAndValidates
+--- PASS: TestManifest_PlatformProbeRoundTripsAndValidates (0.00s)
+=== NAME  
+=== RUN   TestValidateRejectsDaemonOnGUIPort
+--- PASS: TestValidateRejectsDaemonOnGUIPort (0.00s)
+=== NAME  
+=== RUN   TestServerManifestEnvForwardLocalMatchesRuntimeEnvironmentKeyContract
+=== RUN   TestServerManifestEnvForwardLocalMatchesRuntimeEnvironmentKeyContract/static_env_collision
+--- PASS: TestServerManifestEnvForwardLocalMatchesRuntimeEnvironmentKeyContract/static_env_collision (0.00s)
+=== NAME  TestServerManifestEnvForwardLocalMatchesRuntimeEnvironmentKeyContract
+=== RUN   TestServerManifestEnvForwardLocalMatchesRuntimeEnvironmentKeyContract/forwarded_duplicate
+--- PASS: TestServerManifestEnvForwardLocalMatchesRuntimeEnvironmentKeyContract/forwarded_duplicate (0.00s)
+=== NAME  TestServerManifestEnvForwardLocalMatchesRuntimeEnvironmentKeyContract
+--- PASS: TestServerManifestEnvForwardLocalMatchesRuntimeEnvironmentKeyContract (0.00s)
+=== NAME  
+=== RUN   TestValidate_RequiredSecrets_BackedKeyAccepted
+--- PASS: TestValidate_RequiredSecrets_BackedKeyAccepted (0.00s)
+=== NAME  
+=== RUN   TestValidate_RequiredSecrets_UnbackedKeyRejected
+--- PASS: TestValidate_RequiredSecrets_UnbackedKeyRejected (0.00s)
+=== NAME  
+=== RUN   TestValidate_RequiredSecrets_EmptyKeyRejected
+--- PASS: TestValidate_RequiredSecrets_EmptyKeyRejected (0.00s)
+=== NAME  
+=== RUN   TestValidate_RequiredSecrets_UnsettableKeyNameRejected
+--- PASS: TestValidate_RequiredSecrets_UnsettableKeyNameRejected (0.00s)
+=== NAME  
+=== RUN   TestValidate_RequiredSecrets_SettableKeyNameAccepted
+--- PASS: TestValidate_RequiredSecrets_SettableKeyNameAccepted (0.00s)
+=== NAME  
+=== RUN   TestValidate_RequiredSecrets_OptionalSecretEnvRefNotForced
+--- PASS: TestValidate_RequiredSecrets_OptionalSecretEnvRefNotForced (0.00s)
+=== NAME  
+=== RUN   TestValidate_RequiredSecrets_AbsentIsNoOp
+--- PASS: TestValidate_RequiredSecrets_AbsentIsNoOp (0.00s)
+=== NAME  
+=== RUN   TestValidate_RequiredSecrets_ParseManifestRejectsUnbacked
+--- PASS: TestValidate_RequiredSecrets_ParseManifestRejectsUnbacked (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_ExpandsEnvInBaseArgsAndEnv
+--- PASS: TestParseManifest_ExpandsEnvInBaseArgsAndEnv (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_EnvColonPlaceholderOnlyPreservedForEnvValues
+--- PASS: TestParseManifest_EnvColonPlaceholderOnlyPreservedForEnvValues (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_ToolTimeoutRequiresCanonicalCodexClient
+=== RUN   TestParseManifest_ToolTimeoutRequiresCanonicalCodexClient/canonical_codex_propagates
+--- PASS: TestParseManifest_ToolTimeoutRequiresCanonicalCodexClient/canonical_codex_propagates (0.00s)
+=== NAME  TestParseManifest_ToolTimeoutRequiresCanonicalCodexClient
+=== RUN   TestParseManifest_ToolTimeoutRequiresCanonicalCodexClient/unsupported_claude_rejects
+--- PASS: TestParseManifest_ToolTimeoutRequiresCanonicalCodexClient/unsupported_claude_rejects (0.00s)
+=== NAME  TestParseManifest_ToolTimeoutRequiresCanonicalCodexClient
+=== RUN   TestParseManifest_ToolTimeoutRequiresCanonicalCodexClient/codex_alias_rejects
+--- PASS: TestParseManifest_ToolTimeoutRequiresCanonicalCodexClient/codex_alias_rejects (0.00s)
+=== NAME  TestParseManifest_ToolTimeoutRequiresCanonicalCodexClient
+=== RUN   TestParseManifest_ToolTimeoutRequiresCanonicalCodexClient/zero_remains_portable
+--- PASS: TestParseManifest_ToolTimeoutRequiresCanonicalCodexClient/zero_remains_portable (0.00s)
+=== NAME  TestParseManifest_ToolTimeoutRequiresCanonicalCodexClient
+--- PASS: TestParseManifest_ToolTimeoutRequiresCanonicalCodexClient (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_MissingEnvIsErrorNotSilentEmpty
+--- PASS: TestParseManifest_MissingEnvIsErrorNotSilentEmpty (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_DaemonCwd
+--- PASS: TestParseManifest_DaemonCwd (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_DaemonCwdEmptyOmitted
+--- PASS: TestParseManifest_DaemonCwdEmptyOmitted (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_DaemonCwdRelativeRejected
+--- PASS: TestParseManifest_DaemonCwdRelativeRejected (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_StartupBindDeadlineSeconds_Accepted
+--- PASS: TestParseManifest_StartupBindDeadlineSeconds_Accepted (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_StartupBindDeadlineSeconds_OutOfRangeRejected
+--- PASS: TestParseManifest_StartupBindDeadlineSeconds_OutOfRangeRejected (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_HOMEFallsBackToUserProfile
+--- PASS: TestParseManifest_HOMEFallsBackToUserProfile (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_SerenaMinimal
+--- PASS: TestParseManifest_SerenaMinimal (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_MissingName
+--- PASS: TestParseManifest_MissingName (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_InvalidKind
+--- PASS: TestParseManifest_InvalidKind (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_WorkspaceScopedSchema
+--- PASS: TestParseManifest_WorkspaceScopedSchema (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_LanguageTransportDefault
+--- PASS: TestParseManifest_LanguageTransportDefault (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_LanguageProjectMarkers
+--- PASS: TestParseManifest_LanguageProjectMarkers (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_LanguageTransportEnum
+--- PASS: TestParseManifest_LanguageTransportEnum (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_WorkspaceScopedRejectsMissingPortPool
+--- PASS: TestParseManifest_WorkspaceScopedRejectsMissingPortPool (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_RemoteHTTPHappyPath
+--- PASS: TestParseManifest_RemoteHTTPHappyPath (0.00s)
+=== NAME  
+=== RUN   TestValidateRemoteHTTP_RejectsPlaintextURL
+--- PASS: TestValidateRemoteHTTP_RejectsPlaintextURL (0.00s)
+=== NAME  
+=== RUN   TestValidateRemoteHTTP_AllowsUppercaseHTTPSScheme
+--- PASS: TestValidateRemoteHTTP_AllowsUppercaseHTTPSScheme (0.00s)
+=== NAME  
+=== RUN   TestValidateRemoteHTTP_RejectsMalformedHTTPSURL
+=== RUN   TestValidateRemoteHTTP_RejectsMalformedHTTPSURL/empty_host
+--- PASS: TestValidateRemoteHTTP_RejectsMalformedHTTPSURL/empty_host (0.00s)
+=== NAME  TestValidateRemoteHTTP_RejectsMalformedHTTPSURL
+=== RUN   TestValidateRemoteHTTP_RejectsMalformedHTTPSURL/hostless_with_port
+--- PASS: TestValidateRemoteHTTP_RejectsMalformedHTTPSURL/hostless_with_port (0.00s)
+=== NAME  TestValidateRemoteHTTP_RejectsMalformedHTTPSURL
+=== RUN   TestValidateRemoteHTTP_RejectsMalformedHTTPSURL/mixed_literal_and_secret-placeholder_host
+--- PASS: TestValidateRemoteHTTP_RejectsMalformedHTTPSURL/mixed_literal_and_secret-placeholder_host (0.00s)
+=== NAME  TestValidateRemoteHTTP_RejectsMalformedHTTPSURL
+=== RUN   TestValidateRemoteHTTP_RejectsMalformedHTTPSURL/embedded_credentials
+--- PASS: TestValidateRemoteHTTP_RejectsMalformedHTTPSURL/embedded_credentials (0.00s)
+=== NAME  TestValidateRemoteHTTP_RejectsMalformedHTTPSURL
+=== RUN   TestValidateRemoteHTTP_RejectsMalformedHTTPSURL/control_byte
+--- PASS: TestValidateRemoteHTTP_RejectsMalformedHTTPSURL/control_byte (0.00s)
+=== NAME  TestValidateRemoteHTTP_RejectsMalformedHTTPSURL
+--- PASS: TestValidateRemoteHTTP_RejectsMalformedHTTPSURL (0.00s)
+=== NAME  
+=== RUN   TestValidateRemoteHTTP_RedactsEmbeddedCredentialsInURLError
+--- PASS: TestValidateRemoteHTTP_RedactsEmbeddedCredentialsInURLError (0.00s)
+=== NAME  
+=== RUN   TestValidateRemoteHTTP_RedactsCredentialsInMalformedParseError
+--- PASS: TestValidateRemoteHTTP_RedactsCredentialsInMalformedParseError (0.00s)
+=== NAME  
+=== RUN   TestValidateRemoteHTTP_RejectsOutOfRangePlaceholderHostPort
+=== RUN   TestValidateRemoteHTTP_RejectsOutOfRangePlaceholderHostPort/port_above_65535
+--- PASS: TestValidateRemoteHTTP_RejectsOutOfRangePlaceholderHostPort/port_above_65535 (0.00s)
+=== NAME  TestValidateRemoteHTTP_RejectsOutOfRangePlaceholderHostPort
+=== RUN   TestValidateRemoteHTTP_RejectsOutOfRangePlaceholderHostPort/port_zero
+--- PASS: TestValidateRemoteHTTP_RejectsOutOfRangePlaceholderHostPort/port_zero (0.00s)
+=== NAME  TestValidateRemoteHTTP_RejectsOutOfRangePlaceholderHostPort
+=== RUN   TestValidateRemoteHTTP_RejectsOutOfRangePlaceholderHostPort/leading-zero_non-canonical_port
+--- PASS: TestValidateRemoteHTTP_RejectsOutOfRangePlaceholderHostPort/leading-zero_non-canonical_port (0.00s)
+=== NAME  TestValidateRemoteHTTP_RejectsOutOfRangePlaceholderHostPort
+--- PASS: TestValidateRemoteHTTP_RejectsOutOfRangePlaceholderHostPort (0.00s)
+=== NAME  
+=== RUN   TestValidateRemoteHTTP_AllowsInRangePlaceholderHostPort
+--- PASS: TestValidateRemoteHTTP_AllowsInRangePlaceholderHostPort (0.00s)
+=== NAME  
+=== RUN   TestValidateRemoteHTTP_AllowsSecretPlaceholderHost
+--- PASS: TestValidateRemoteHTTP_AllowsSecretPlaceholderHost (0.00s)
+=== NAME  
+=== RUN   TestValidateRemoteHTTP_SecretPlaceholderHostStillValidatesURLShape
+=== RUN   TestValidateRemoteHTTP_SecretPlaceholderHostStillValidatesURLShape/non-https_scheme
+--- PASS: TestValidateRemoteHTTP_SecretPlaceholderHostStillValidatesURLShape/non-https_scheme (0.00s)
+=== NAME  TestValidateRemoteHTTP_SecretPlaceholderHostStillValidatesURLShape
+=== RUN   TestValidateRemoteHTTP_SecretPlaceholderHostStillValidatesURLShape/unsafe_path_byte
+--- PASS: TestValidateRemoteHTTP_SecretPlaceholderHostStillValidatesURLShape/unsafe_path_byte (0.00s)
+=== NAME  TestValidateRemoteHTTP_SecretPlaceholderHostStillValidatesURLShape
+--- PASS: TestValidateRemoteHTTP_SecretPlaceholderHostStillValidatesURLShape (0.00s)
+=== NAME  
+=== RUN   TestValidateRemoteHTTP_AllowsLocalhostForHandwrittenManifest
+=== RUN   TestValidateRemoteHTTP_AllowsLocalhostForHandwrittenManifest/https://localhost/mcp
+--- PASS: TestValidateRemoteHTTP_AllowsLocalhostForHandwrittenManifest/https://localhost/mcp (0.00s)
+=== NAME  TestValidateRemoteHTTP_AllowsLocalhostForHandwrittenManifest
+=== RUN   TestValidateRemoteHTTP_AllowsLocalhostForHandwrittenManifest/https://127.0.0.1/mcp
+--- PASS: TestValidateRemoteHTTP_AllowsLocalhostForHandwrittenManifest/https://127.0.0.1/mcp (0.00s)
+=== NAME  TestValidateRemoteHTTP_AllowsLocalhostForHandwrittenManifest
+=== RUN   TestValidateRemoteHTTP_AllowsLocalhostForHandwrittenManifest/https://[::1]/mcp
+--- PASS: TestValidateRemoteHTTP_AllowsLocalhostForHandwrittenManifest/https://[::1]/mcp (0.00s)
+=== NAME  TestValidateRemoteHTTP_AllowsLocalhostForHandwrittenManifest
+--- PASS: TestValidateRemoteHTTP_AllowsLocalhostForHandwrittenManifest (0.00s)
+=== NAME  
+=== RUN   TestValidateRemoteHTTP_RejectsWorkspaceScoped
+--- PASS: TestValidateRemoteHTTP_RejectsWorkspaceScoped (0.00s)
+=== NAME  
+=== RUN   TestValidateRemoteHTTP_RequiresURL
+--- PASS: TestValidateRemoteHTTP_RequiresURL (0.00s)
+=== NAME  
+=== RUN   TestValidateRemoteHTTP_RejectsConflictingFields
+=== RUN   TestValidateRemoteHTTP_RejectsConflictingFields/command
+--- PASS: TestValidateRemoteHTTP_RejectsConflictingFields/command (0.00s)
+=== NAME  TestValidateRemoteHTTP_RejectsConflictingFields
+=== RUN   TestValidateRemoteHTTP_RejectsConflictingFields/base_args
+--- PASS: TestValidateRemoteHTTP_RejectsConflictingFields/base_args (0.00s)
+=== NAME  TestValidateRemoteHTTP_RejectsConflictingFields
+=== RUN   TestValidateRemoteHTTP_RejectsConflictingFields/env
+--- PASS: TestValidateRemoteHTTP_RejectsConflictingFields/env (0.00s)
+=== NAME  TestValidateRemoteHTTP_RejectsConflictingFields
+=== RUN   TestValidateRemoteHTTP_RejectsConflictingFields/daemons
+--- PASS: TestValidateRemoteHTTP_RejectsConflictingFields/daemons (0.00s)
+=== NAME  TestValidateRemoteHTTP_RejectsConflictingFields
+=== RUN   TestValidateRemoteHTTP_RejectsConflictingFields/languages
+--- PASS: TestValidateRemoteHTTP_RejectsConflictingFields/languages (0.00s)
+=== NAME  TestValidateRemoteHTTP_RejectsConflictingFields
+=== RUN   TestValidateRemoteHTTP_RejectsConflictingFields/port_pool
+--- PASS: TestValidateRemoteHTTP_RejectsConflictingFields/port_pool (0.00s)
+=== NAME  TestValidateRemoteHTTP_RejectsConflictingFields
+=== RUN   TestValidateRemoteHTTP_RejectsConflictingFields/idle_timeout_min
+--- PASS: TestValidateRemoteHTTP_RejectsConflictingFields/idle_timeout_min (0.00s)
+=== NAME  TestValidateRemoteHTTP_RejectsConflictingFields
+--- PASS: TestValidateRemoteHTTP_RejectsConflictingFields (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_RejectsURLKeyOnNonRemoteHTTP
+=== RUN   TestParseManifest_RejectsURLKeyOnNonRemoteHTTP/url:_empty_string
+--- PASS: TestParseManifest_RejectsURLKeyOnNonRemoteHTTP/url:_empty_string (0.00s)
+=== NAME  TestParseManifest_RejectsURLKeyOnNonRemoteHTTP
+=== RUN   TestParseManifest_RejectsURLKeyOnNonRemoteHTTP/url:_null
+--- PASS: TestParseManifest_RejectsURLKeyOnNonRemoteHTTP/url:_null (0.00s)
+=== NAME  TestParseManifest_RejectsURLKeyOnNonRemoteHTTP
+=== RUN   TestParseManifest_RejectsURLKeyOnNonRemoteHTTP/url:_bare_key
+--- PASS: TestParseManifest_RejectsURLKeyOnNonRemoteHTTP/url:_bare_key (0.00s)
+=== NAME  TestParseManifest_RejectsURLKeyOnNonRemoteHTTP
+--- PASS: TestParseManifest_RejectsURLKeyOnNonRemoteHTTP (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_RejectsHeadersKeyOnNonRemoteHTTP
+=== RUN   TestParseManifest_RejectsHeadersKeyOnNonRemoteHTTP/headers:_empty_map
+--- PASS: TestParseManifest_RejectsHeadersKeyOnNonRemoteHTTP/headers:_empty_map (0.00s)
+=== NAME  TestParseManifest_RejectsHeadersKeyOnNonRemoteHTTP
+=== RUN   TestParseManifest_RejectsHeadersKeyOnNonRemoteHTTP/headers:_null
+--- PASS: TestParseManifest_RejectsHeadersKeyOnNonRemoteHTTP/headers:_null (0.00s)
+=== NAME  TestParseManifest_RejectsHeadersKeyOnNonRemoteHTTP
+=== RUN   TestParseManifest_RejectsHeadersKeyOnNonRemoteHTTP/headers:_bare_key
+--- PASS: TestParseManifest_RejectsHeadersKeyOnNonRemoteHTTP/headers:_bare_key (0.00s)
+=== NAME  TestParseManifest_RejectsHeadersKeyOnNonRemoteHTTP
+--- PASS: TestParseManifest_RejectsHeadersKeyOnNonRemoteHTTP (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP
+=== RUN   TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP/command_empty
+--- PASS: TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP/command_empty (0.00s)
+=== NAME  TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP
+=== RUN   TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP/command_null
+--- PASS: TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP/command_null (0.00s)
+=== NAME  TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP
+=== RUN   TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP/command_bare_key
+--- PASS: TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP/command_bare_key (0.00s)
+=== NAME  TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP
+=== RUN   TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP/base_args_empty_list
+--- PASS: TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP/base_args_empty_list (0.00s)
+=== NAME  TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP
+=== RUN   TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP/base_args_bare
+--- PASS: TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP/base_args_bare (0.00s)
+=== NAME  TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP
+=== RUN   TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP/env_empty_map
+--- PASS: TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP/env_empty_map (0.00s)
+=== NAME  TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP
+=== RUN   TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP/env_bare
+--- PASS: TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP/env_bare (0.00s)
+=== NAME  TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP
+=== RUN   TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP/daemons_empty_list
+--- PASS: TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP/daemons_empty_list (0.00s)
+=== NAME  TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP
+=== RUN   TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP/daemons_bare
+--- PASS: TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP/daemons_bare (0.00s)
+=== NAME  TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP
+=== RUN   TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP/languages_bare
+--- PASS: TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP/languages_bare (0.00s)
+=== NAME  TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP
+=== RUN   TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP/port_pool_bare
+--- PASS: TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP/port_pool_bare (0.00s)
+=== NAME  TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP
+=== RUN   TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP/idle_timeout_min_zero
+--- PASS: TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP/idle_timeout_min_zero (0.00s)
+=== NAME  TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP
+--- PASS: TestParseManifest_RejectsLocalSubprocessKeysOnRemoteHTTP (0.00s)
+=== NAME  
+=== RUN   TestValidate_RejectsExplicitEmptyHeadersOnNonRemoteHTTP
+=== RUN   TestValidate_RejectsExplicitEmptyHeadersOnNonRemoteHTTP/stdio-bridge
+--- PASS: TestValidate_RejectsExplicitEmptyHeadersOnNonRemoteHTTP/stdio-bridge (0.00s)
+=== NAME  TestValidate_RejectsExplicitEmptyHeadersOnNonRemoteHTTP
+=== RUN   TestValidate_RejectsExplicitEmptyHeadersOnNonRemoteHTTP/native-http
+--- PASS: TestValidate_RejectsExplicitEmptyHeadersOnNonRemoteHTTP/native-http (0.00s)
+=== NAME  TestValidate_RejectsExplicitEmptyHeadersOnNonRemoteHTTP
+--- PASS: TestValidate_RejectsExplicitEmptyHeadersOnNonRemoteHTTP (0.00s)
+=== NAME  
+=== RUN   TestValidate_RejectsURLOnNonRemoteHTTP
+=== RUN   TestValidate_RejectsURLOnNonRemoteHTTP/stdio-bridge
+--- PASS: TestValidate_RejectsURLOnNonRemoteHTTP/stdio-bridge (0.00s)
+=== NAME  TestValidate_RejectsURLOnNonRemoteHTTP
+=== RUN   TestValidate_RejectsURLOnNonRemoteHTTP/native-http
+--- PASS: TestValidate_RejectsURLOnNonRemoteHTTP/native-http (0.00s)
+=== NAME  TestValidate_RejectsURLOnNonRemoteHTTP
+--- PASS: TestValidate_RejectsURLOnNonRemoteHTTP (0.00s)
+=== NAME  
+=== RUN   TestParseManifestRequiredBinariesServerLevel
+--- PASS: TestParseManifestRequiredBinariesServerLevel (0.00s)
+=== NAME  
+=== RUN   TestParseManifestRequiredBinariesLanguageLevel
+--- PASS: TestParseManifestRequiredBinariesLanguageLevel (0.00s)
+=== NAME  
+=== RUN   TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_Valid
+--- PASS: TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_Valid (0.00s)
+=== NAME  
+=== RUN   TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_RejectsContextInTemplate
+--- PASS: TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_RejectsContextInTemplate (0.00s)
+=== NAME  
+=== RUN   TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_RejectsTopLevelPortPool
+--- PASS: TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_RejectsTopLevelPortPool (0.00s)
+=== NAME  
+=== RUN   TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_RejectsTopLevelLanguages
+--- PASS: TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_RejectsTopLevelLanguages (0.00s)
+=== NAME  
+=== RUN   TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_RejectsDaemonsListBoth
+--- PASS: TestServerManifestValidate_WorkspaceScopedWithDaemonTemplate_RejectsDaemonsListBoth (0.00s)
+=== NAME  
+=== RUN   TestServerManifestValidate_DaemonTemplateMissingWorkspacePathToken
+--- PASS: TestServerManifestValidate_DaemonTemplateMissingWorkspacePathToken (0.00s)
+=== NAME  
+=== RUN   TestServerManifestValidate_DaemonTemplateInvalidPortPoolRange
+=== RUN   TestServerManifestValidate_DaemonTemplateInvalidPortPoolRange/missing_pool
+--- PASS: TestServerManifestValidate_DaemonTemplateInvalidPortPoolRange/missing_pool (0.00s)
+=== NAME  TestServerManifestValidate_DaemonTemplateInvalidPortPoolRange
+=== RUN   TestServerManifestValidate_DaemonTemplateInvalidPortPoolRange/zero_start
+--- PASS: TestServerManifestValidate_DaemonTemplateInvalidPortPoolRange/zero_start (0.00s)
+=== NAME  TestServerManifestValidate_DaemonTemplateInvalidPortPoolRange
+=== RUN   TestServerManifestValidate_DaemonTemplateInvalidPortPoolRange/negative_start
+--- PASS: TestServerManifestValidate_DaemonTemplateInvalidPortPoolRange/negative_start (0.00s)
+=== NAME  TestServerManifestValidate_DaemonTemplateInvalidPortPoolRange
+=== RUN   TestServerManifestValidate_DaemonTemplateInvalidPortPoolRange/end_below_start
+--- PASS: TestServerManifestValidate_DaemonTemplateInvalidPortPoolRange/end_below_start (0.00s)
+=== NAME  TestServerManifestValidate_DaemonTemplateInvalidPortPoolRange
+=== RUN   TestServerManifestValidate_DaemonTemplateInvalidPortPoolRange/end_above_tcp_max
+--- PASS: TestServerManifestValidate_DaemonTemplateInvalidPortPoolRange/end_above_tcp_max (0.00s)
+=== NAME  TestServerManifestValidate_DaemonTemplateInvalidPortPoolRange
+--- PASS: TestServerManifestValidate_DaemonTemplateInvalidPortPoolRange (0.00s)
+=== NAME  
+=== RUN   TestServerManifestValidate_DaemonTemplateEmptyExtraArgsTemplate
+--- PASS: TestServerManifestValidate_DaemonTemplateEmptyExtraArgsTemplate (0.00s)
+=== NAME  
+=== RUN   TestServerManifestValidate_RejectsDaemonTemplateForKindGlobal
+--- PASS: TestServerManifestValidate_RejectsDaemonTemplateForKindGlobal (0.00s)
+=== NAME  
+=== RUN   TestServerManifestValidate_RejectsDaemonTemplateForRemoteHTTP
+--- PASS: TestServerManifestValidate_RejectsDaemonTemplateForRemoteHTTP (0.00s)
+=== NAME  
+=== RUN   TestServerManifestValidate_RejectsAtPrefixLanguageName
+--- PASS: TestServerManifestValidate_RejectsAtPrefixLanguageName (0.00s)
+=== NAME  
+=== RUN   TestServerManifestValidate_LegacyWorkspacePortPoolRejectsEndAboveTCPMax
+--- PASS: TestServerManifestValidate_LegacyWorkspacePortPoolRejectsEndAboveTCPMax (0.00s)
+=== NAME  
+=== RUN   TestServerManifestValidate_LegacyLSPManifest_StillValidates
+--- PASS: TestServerManifestValidate_LegacyLSPManifest_StillValidates (0.00s)
+=== NAME  
+=== RUN   TestServerManifestValidate_Companion
+=== RUN   TestServerManifestValidate_Companion/missing_command
+--- PASS: TestServerManifestValidate_Companion/missing_command (0.00s)
+=== NAME  TestServerManifestValidate_Companion
+=== RUN   TestServerManifestValidate_Companion/client_bindings_rejected
+--- PASS: TestServerManifestValidate_Companion/client_bindings_rejected (0.00s)
+=== NAME  TestServerManifestValidate_Companion
+=== RUN   TestServerManifestValidate_Companion/no_daemons
+--- PASS: TestServerManifestValidate_Companion/no_daemons (0.00s)
+=== NAME  TestServerManifestValidate_Companion
+=== RUN   TestServerManifestValidate_Companion/two_daemons
+--- PASS: TestServerManifestValidate_Companion/two_daemons (0.00s)
+=== NAME  TestServerManifestValidate_Companion
+=== RUN   TestServerManifestValidate_Companion/daemon_missing_cwd
+--- PASS: TestServerManifestValidate_Companion/daemon_missing_cwd (0.00s)
+=== NAME  TestServerManifestValidate_Companion
+=== RUN   TestServerManifestValidate_Companion/relative_cwd
+--- PASS: TestServerManifestValidate_Companion/relative_cwd (0.00s)
+=== NAME  TestServerManifestValidate_Companion
+=== RUN   TestServerManifestValidate_Companion/transport_not_process
+--- PASS: TestServerManifestValidate_Companion/transport_not_process (0.00s)
+=== NAME  TestServerManifestValidate_Companion
+=== RUN   TestServerManifestValidate_Companion/port_pool_rejected
+--- PASS: TestServerManifestValidate_Companion/port_pool_rejected (0.00s)
+=== NAME  TestServerManifestValidate_Companion
+=== RUN   TestServerManifestValidate_Companion/languages_rejected
+--- PASS: TestServerManifestValidate_Companion/languages_rejected (0.00s)
+=== NAME  TestServerManifestValidate_Companion
+=== RUN   TestServerManifestValidate_Companion/process_transport_requires_companion_kind
+--- PASS: TestServerManifestValidate_Companion/process_transport_requires_companion_kind (0.00s)
+=== NAME  TestServerManifestValidate_Companion
+--- PASS: TestServerManifestValidate_Companion (0.00s)
+=== NAME  
+=== RUN   TestContainsWorkspacePathTokenInArgs_SubstringMatch
+=== RUN   TestContainsWorkspacePathTokenInArgs_SubstringMatch/standalone_token
+--- PASS: TestContainsWorkspacePathTokenInArgs_SubstringMatch/standalone_token (0.00s)
+=== NAME  TestContainsWorkspacePathTokenInArgs_SubstringMatch
+=== RUN   TestContainsWorkspacePathTokenInArgs_SubstringMatch/composite_arg
+--- PASS: TestContainsWorkspacePathTokenInArgs_SubstringMatch/composite_arg (0.00s)
+=== NAME  TestContainsWorkspacePathTokenInArgs_SubstringMatch
+=== RUN   TestContainsWorkspacePathTokenInArgs_SubstringMatch/prefix_composite
+--- PASS: TestContainsWorkspacePathTokenInArgs_SubstringMatch/prefix_composite (0.00s)
+=== NAME  TestContainsWorkspacePathTokenInArgs_SubstringMatch
+=== RUN   TestContainsWorkspacePathTokenInArgs_SubstringMatch/middle_of_long_arg
+--- PASS: TestContainsWorkspacePathTokenInArgs_SubstringMatch/middle_of_long_arg (0.00s)
+=== NAME  TestContainsWorkspacePathTokenInArgs_SubstringMatch
+=== RUN   TestContainsWorkspacePathTokenInArgs_SubstringMatch/no_token
+--- PASS: TestContainsWorkspacePathTokenInArgs_SubstringMatch/no_token (0.00s)
+=== NAME  TestContainsWorkspacePathTokenInArgs_SubstringMatch
+=== RUN   TestContainsWorkspacePathTokenInArgs_SubstringMatch/empty_list
+--- PASS: TestContainsWorkspacePathTokenInArgs_SubstringMatch/empty_list (0.00s)
+=== NAME  TestContainsWorkspacePathTokenInArgs_SubstringMatch
+=== RUN   TestContainsWorkspacePathTokenInArgs_SubstringMatch/empty_list_explicit
+--- PASS: TestContainsWorkspacePathTokenInArgs_SubstringMatch/empty_list_explicit (0.00s)
+=== NAME  TestContainsWorkspacePathTokenInArgs_SubstringMatch
+=== RUN   TestContainsWorkspacePathTokenInArgs_SubstringMatch/empty_strings
+--- PASS: TestContainsWorkspacePathTokenInArgs_SubstringMatch/empty_strings (0.00s)
+=== NAME  TestContainsWorkspacePathTokenInArgs_SubstringMatch
+=== RUN   TestContainsWorkspacePathTokenInArgs_SubstringMatch/similar_but_not_match
+--- PASS: TestContainsWorkspacePathTokenInArgs_SubstringMatch/similar_but_not_match (0.00s)
+=== NAME  TestContainsWorkspacePathTokenInArgs_SubstringMatch
+--- PASS: TestContainsWorkspacePathTokenInArgs_SubstringMatch (0.00s)
+=== NAME  
+=== RUN   TestServerManifestParse_DaemonTemplate_StrictKnownFields
+=== RUN   TestServerManifestParse_DaemonTemplate_StrictKnownFields/round-trip_preserves_template
+--- PASS: TestServerManifestParse_DaemonTemplate_StrictKnownFields/round-trip_preserves_template (0.00s)
+=== NAME  TestServerManifestParse_DaemonTemplate_StrictKnownFields
+=== RUN   TestServerManifestParse_DaemonTemplate_StrictKnownFields/unknown_field_under_daemon_template_fails_strict_parse
+--- PASS: TestServerManifestParse_DaemonTemplate_StrictKnownFields/unknown_field_under_daemon_template_fails_strict_parse (0.00s)
+=== NAME  TestServerManifestParse_DaemonTemplate_StrictKnownFields
+--- PASS: TestServerManifestParse_DaemonTemplate_StrictKnownFields (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_DescriptionIsAdditiveOptional
+=== RUN   TestParseManifest_DescriptionIsAdditiveOptional/present:_parses_onto_Description
+--- PASS: TestParseManifest_DescriptionIsAdditiveOptional/present:_parses_onto_Description (0.00s)
+=== NAME  TestParseManifest_DescriptionIsAdditiveOptional
+=== RUN   TestParseManifest_DescriptionIsAdditiveOptional/absent:_parses_+_validates_unchanged_(empty_Description)
+--- PASS: TestParseManifest_DescriptionIsAdditiveOptional/absent:_parses_+_validates_unchanged_(empty_Description) (0.00s)
+=== NAME  TestParseManifest_DescriptionIsAdditiveOptional
+--- PASS: TestParseManifest_DescriptionIsAdditiveOptional (0.00s)
+=== NAME  
+=== RUN   TestParseCatalogFields
+=== RUN   TestParseCatalogFields/projects_name/description/kind
+--- PASS: TestParseCatalogFields/projects_name/description/kind (0.00s)
+=== NAME  TestParseCatalogFields
+=== RUN   TestParseCatalogFields/tolerates_unset_env/secret_refs_without_expansion
+--- PASS: TestParseCatalogFields/tolerates_unset_env/secret_refs_without_expansion (0.00s)
+=== NAME  TestParseCatalogFields
+=== RUN   TestParseCatalogFields/rejects_manifest_with_no_name
+--- PASS: TestParseCatalogFields/rejects_manifest_with_no_name (0.00s)
+=== NAME  TestParseCatalogFields
+--- PASS: TestParseCatalogFields (0.00s)
+=== NAME  
+=== RUN   TestValidate_VendoredSource_PinnedRefAccepted
+=== RUN   TestValidate_VendoredSource_PinnedRefAccepted/full-40-hex-sha
+--- PASS: TestValidate_VendoredSource_PinnedRefAccepted/full-40-hex-sha (0.00s)
+=== NAME  TestValidate_VendoredSource_PinnedRefAccepted
+=== RUN   TestValidate_VendoredSource_PinnedRefAccepted/short-sha
+--- PASS: TestValidate_VendoredSource_PinnedRefAccepted/short-sha (0.00s)
+=== NAME  TestValidate_VendoredSource_PinnedRefAccepted
+=== RUN   TestValidate_VendoredSource_PinnedRefAccepted/semver-tag
+--- PASS: TestValidate_VendoredSource_PinnedRefAccepted/semver-tag (0.00s)
+=== NAME  TestValidate_VendoredSource_PinnedRefAccepted
+=== RUN   TestValidate_VendoredSource_PinnedRefAccepted/annotated-tag
+--- PASS: TestValidate_VendoredSource_PinnedRefAccepted/annotated-tag (0.00s)
+=== NAME  TestValidate_VendoredSource_PinnedRefAccepted
+--- PASS: TestValidate_VendoredSource_PinnedRefAccepted (0.00s)
+=== NAME  
+=== RUN   TestValidate_VendoredSource_EmptyPinnedRefRejected
+--- PASS: TestValidate_VendoredSource_EmptyPinnedRefRejected (0.00s)
+=== NAME  
+=== RUN   TestValidate_VendoredSource_MovingBranchRejected
+--- PASS: TestValidate_VendoredSource_MovingBranchRejected (0.00s)
+=== NAME  
+=== RUN   TestValidate_VendoredSource_LicenseStatusEnum
+--- PASS: TestValidate_VendoredSource_LicenseStatusEnum (0.00s)
+=== NAME  
+=== RUN   TestValidate_Availability_Enum
+--- PASS: TestValidate_Availability_Enum (0.00s)
+=== NAME  
+=== RUN   TestValidate_InstallProbeOnReadyRowRejected
+--- PASS: TestValidate_InstallProbeOnReadyRowRejected (0.00s)
+=== NAME  
+=== RUN   TestValidate_WatchRowNeedsNonEmptyProbe
+--- PASS: TestValidate_WatchRowNeedsNonEmptyProbe (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_VendoredAvailabilityRoundTrips
+--- PASS: TestParseManifest_VendoredAvailabilityRoundTrips (0.00s)
+=== NAME  
+=== RUN   TestServerManifest_OmitemptyByteIdentical
+--- PASS: TestServerManifest_OmitemptyByteIdentical (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_UnknownFieldStillRejected
+--- PASS: TestParseManifest_UnknownFieldStillRejected (0.00s)
+=== NAME  
+=== RUN   TestValidate_VendoredSource_BranchQualifiedMovingRefRejected
+=== RUN   TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/refs/heads/main
+--- PASS: TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/refs/heads/main (0.00s)
+=== NAME  TestValidate_VendoredSource_BranchQualifiedMovingRefRejected
+=== RUN   TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/refs/heads/master
+--- PASS: TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/refs/heads/master (0.00s)
+=== NAME  TestValidate_VendoredSource_BranchQualifiedMovingRefRejected
+=== RUN   TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/refs/heads/HEAD
+--- PASS: TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/refs/heads/HEAD (0.00s)
+=== NAME  TestValidate_VendoredSource_BranchQualifiedMovingRefRejected
+=== RUN   TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/refs/remotes/origin/main
+--- PASS: TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/refs/remotes/origin/main (0.00s)
+=== NAME  TestValidate_VendoredSource_BranchQualifiedMovingRefRejected
+=== RUN   TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/refs/remotes/upstream/develop
+--- PASS: TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/refs/remotes/upstream/develop (0.00s)
+=== NAME  TestValidate_VendoredSource_BranchQualifiedMovingRefRejected
+=== RUN   TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/refs/heads/release-2026
+--- PASS: TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/refs/heads/release-2026 (0.00s)
+=== NAME  TestValidate_VendoredSource_BranchQualifiedMovingRefRejected
+=== RUN   TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/refs/heads/feature-x
+--- PASS: TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/refs/heads/feature-x (0.00s)
+=== NAME  TestValidate_VendoredSource_BranchQualifiedMovingRefRejected
+=== RUN   TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/refs/remotes/origin/feature/foo
+--- PASS: TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/refs/remotes/origin/feature/foo (0.00s)
+=== NAME  TestValidate_VendoredSource_BranchQualifiedMovingRefRejected
+=== RUN   TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/refs/remotes/origin/feature-y
+--- PASS: TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/refs/remotes/origin/feature-y (0.00s)
+=== NAME  TestValidate_VendoredSource_BranchQualifiedMovingRefRejected
+=== RUN   TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/refs/heads/
+--- PASS: TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/refs/heads/ (0.00s)
+=== NAME  TestValidate_VendoredSource_BranchQualifiedMovingRefRejected
+=== RUN   TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/refs/remotes/origin/
+--- PASS: TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/refs/remotes/origin/ (0.00s)
+=== NAME  TestValidate_VendoredSource_BranchQualifiedMovingRefRejected
+=== RUN   TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/origin/main
+--- PASS: TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/origin/main (0.00s)
+=== NAME  TestValidate_VendoredSource_BranchQualifiedMovingRefRejected
+=== RUN   TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/upstream/develop
+--- PASS: TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/upstream/develop (0.00s)
+=== NAME  TestValidate_VendoredSource_BranchQualifiedMovingRefRejected
+=== RUN   TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/feature/x
+--- PASS: TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/reject/feature/x (0.00s)
+=== NAME  TestValidate_VendoredSource_BranchQualifiedMovingRefRejected
+=== RUN   TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/accept/refs/tags/v1
+--- PASS: TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/accept/refs/tags/v1 (0.00s)
+=== NAME  TestValidate_VendoredSource_BranchQualifiedMovingRefRejected
+=== RUN   TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/accept/refs/tags/release-2026-06
+--- PASS: TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/accept/refs/tags/release-2026-06 (0.00s)
+=== NAME  TestValidate_VendoredSource_BranchQualifiedMovingRefRejected
+=== RUN   TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/accept/refs/tags/release/2026
+--- PASS: TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/accept/refs/tags/release/2026 (0.00s)
+=== NAME  TestValidate_VendoredSource_BranchQualifiedMovingRefRejected
+=== RUN   TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/accept/v1.2.3
+--- PASS: TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/accept/v1.2.3 (0.00s)
+=== NAME  TestValidate_VendoredSource_BranchQualifiedMovingRefRejected
+=== RUN   TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/accept/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2
+--- PASS: TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/accept/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2 (0.00s)
+=== NAME  TestValidate_VendoredSource_BranchQualifiedMovingRefRejected
+=== RUN   TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/accept/a1b2c3d
+--- PASS: TestValidate_VendoredSource_BranchQualifiedMovingRefRejected/accept/a1b2c3d (0.00s)
+=== NAME  TestValidate_VendoredSource_BranchQualifiedMovingRefRejected
+--- PASS: TestValidate_VendoredSource_BranchQualifiedMovingRefRejected (0.00s)
+=== NAME  
+=== RUN   TestIsMovingGitRef
+--- PASS: TestIsMovingGitRef (0.00s)
+=== NAME  
+=== RUN   TestIsPathShaped
+--- PASS: TestIsPathShaped (0.00s)
+=== NAME  
+=== RUN   TestIsAbsolutePathShape
+--- PASS: TestIsAbsolutePathShape (0.00s)
+=== NAME  
+=== RUN   TestValidate_InstallProbe_PathShapedBinaryRejected
+=== RUN   TestValidate_InstallProbe_PathShapedBinaryRejected/posix-abs
+--- PASS: TestValidate_InstallProbe_PathShapedBinaryRejected/posix-abs (0.00s)
+=== NAME  TestValidate_InstallProbe_PathShapedBinaryRejected
+=== RUN   TestValidate_InstallProbe_PathShapedBinaryRejected/windows-drive
+--- PASS: TestValidate_InstallProbe_PathShapedBinaryRejected/windows-drive (0.00s)
+=== NAME  TestValidate_InstallProbe_PathShapedBinaryRejected
+=== RUN   TestValidate_InstallProbe_PathShapedBinaryRejected/unc
+--- PASS: TestValidate_InstallProbe_PathShapedBinaryRejected/unc (0.00s)
+=== NAME  TestValidate_InstallProbe_PathShapedBinaryRejected
+=== RUN   TestValidate_InstallProbe_PathShapedBinaryRejected/dot-relative
+--- PASS: TestValidate_InstallProbe_PathShapedBinaryRejected/dot-relative (0.00s)
+=== NAME  TestValidate_InstallProbe_PathShapedBinaryRejected
+=== RUN   TestValidate_InstallProbe_PathShapedBinaryRejected/relative-slash
+--- PASS: TestValidate_InstallProbe_PathShapedBinaryRejected/relative-slash (0.00s)
+=== NAME  TestValidate_InstallProbe_PathShapedBinaryRejected
+=== RUN   TestValidate_InstallProbe_PathShapedBinaryRejected/home-ref
+--- PASS: TestValidate_InstallProbe_PathShapedBinaryRejected/home-ref (0.00s)
+=== NAME  TestValidate_InstallProbe_PathShapedBinaryRejected
+--- PASS: TestValidate_InstallProbe_PathShapedBinaryRejected (0.00s)
+=== NAME  
+=== RUN   TestValidate_InstallProbe_CrossPlatformFilePathAccepted
+=== RUN   TestValidate_InstallProbe_CrossPlatformFilePathAccepted/accept-files-/opt/marker
+--- PASS: TestValidate_InstallProbe_CrossPlatformFilePathAccepted/accept-files-/opt/marker (0.00s)
+=== NAME  TestValidate_InstallProbe_CrossPlatformFilePathAccepted
+=== RUN   TestValidate_InstallProbe_CrossPlatformFilePathAccepted/accept-files-@@RECOVERY_SYNTHETIC_MARKER_FIXTURE_PATH@@
+--- PASS: TestValidate_InstallProbe_CrossPlatformFilePathAccepted/accept-files-@@RECOVERY_SYNTHETIC_MARKER_FIXTURE_PATH@@ (0.00s)
+=== NAME  TestValidate_InstallProbe_CrossPlatformFilePathAccepted
+=== RUN   TestValidate_InstallProbe_CrossPlatformFilePathAccepted/accept-files-\\host\share\marker
+--- PASS: TestValidate_InstallProbe_CrossPlatformFilePathAccepted/accept-files-\\host\share\marker (0.00s)
+=== NAME  TestValidate_InstallProbe_CrossPlatformFilePathAccepted
+=== RUN   TestValidate_InstallProbe_CrossPlatformFilePathAccepted/accept-files-/opt/..
+--- PASS: TestValidate_InstallProbe_CrossPlatformFilePathAccepted/accept-files-/opt/.. (0.00s)
+=== NAME  TestValidate_InstallProbe_CrossPlatformFilePathAccepted
+=== RUN   TestValidate_InstallProbe_CrossPlatformFilePathAccepted/accept-files-/Applications/Foo_[Beta]/bin/server
+--- PASS: TestValidate_InstallProbe_CrossPlatformFilePathAccepted/accept-files-/Applications/Foo_[Beta]/bin/server (0.00s)
+=== NAME  TestValidate_InstallProbe_CrossPlatformFilePathAccepted
+=== RUN   TestValidate_InstallProbe_CrossPlatformFilePathAccepted/accept-file_globs-@@RECOVERY_SYNTHETIC_ABLETON_GLOB_FIXTURE_ROOT@@\Live_1[0-9]*\Program\Ableton_Live_1[0-9]*.exe
+--- PASS: TestValidate_InstallProbe_CrossPlatformFilePathAccepted/accept-file_globs-@@RECOVERY_SYNTHETIC_ABLETON_GLOB_FIXTURE_ROOT@@\Live_1[0-9]*\Program\Ableton_Live_1[0-9]*.exe (0.00s)
+=== NAME  TestValidate_InstallProbe_CrossPlatformFilePathAccepted
+=== RUN   TestValidate_InstallProbe_CrossPlatformFilePathAccepted/accept-file_globs-@@RECOVERY_SYNTHETIC_OFFICE_GLOB_FIXTURE_ROOT@@\Microsoft_Office\root\Office1?\EXCEL.EXE
+--- PASS: TestValidate_InstallProbe_CrossPlatformFilePathAccepted/accept-file_globs-@@RECOVERY_SYNTHETIC_OFFICE_GLOB_FIXTURE_ROOT@@\Microsoft_Office\root\Office1?\EXCEL.EXE (0.00s)
+=== NAME  TestValidate_InstallProbe_CrossPlatformFilePathAccepted
+=== RUN   TestValidate_InstallProbe_CrossPlatformFilePathAccepted/accept-file_globs-/opt/app-*/bin/server
+--- PASS: TestValidate_InstallProbe_CrossPlatformFilePathAccepted/accept-file_globs-/opt/app-*/bin/server (0.00s)
+=== NAME  TestValidate_InstallProbe_CrossPlatformFilePathAccepted
+=== RUN   TestValidate_InstallProbe_CrossPlatformFilePathAccepted/accept-file_globs-@@RECOVERY_SYNTHETIC_ANSYS_GLOB_FIXTURE_ROOT@@\v*\ansys\bin\winx64\ansys*.exe
+--- PASS: TestValidate_InstallProbe_CrossPlatformFilePathAccepted/accept-file_globs-@@RECOVERY_SYNTHETIC_ANSYS_GLOB_FIXTURE_ROOT@@\v*\ansys\bin\winx64\ansys*.exe (0.00s)
+=== NAME  TestValidate_InstallProbe_CrossPlatformFilePathAccepted
+=== RUN   TestValidate_InstallProbe_CrossPlatformFilePathAccepted/reject-files-dot-relative
+--- PASS: TestValidate_InstallProbe_CrossPlatformFilePathAccepted/reject-files-dot-relative (0.00s)
+=== NAME  TestValidate_InstallProbe_CrossPlatformFilePathAccepted
+=== RUN   TestValidate_InstallProbe_CrossPlatformFilePathAccepted/reject-file_globs-dot-relative
+--- PASS: TestValidate_InstallProbe_CrossPlatformFilePathAccepted/reject-file_globs-dot-relative (0.00s)
+=== NAME  TestValidate_InstallProbe_CrossPlatformFilePathAccepted
+=== RUN   TestValidate_InstallProbe_CrossPlatformFilePathAccepted/reject-files-bare-relative
+--- PASS: TestValidate_InstallProbe_CrossPlatformFilePathAccepted/reject-files-bare-relative (0.00s)
+=== NAME  TestValidate_InstallProbe_CrossPlatformFilePathAccepted
+=== RUN   TestValidate_InstallProbe_CrossPlatformFilePathAccepted/reject-file_globs-bare-relative
+--- PASS: TestValidate_InstallProbe_CrossPlatformFilePathAccepted/reject-file_globs-bare-relative (0.00s)
+=== NAME  TestValidate_InstallProbe_CrossPlatformFilePathAccepted
+=== RUN   TestValidate_InstallProbe_CrossPlatformFilePathAccepted/reject-files-home-ref
+--- PASS: TestValidate_InstallProbe_CrossPlatformFilePathAccepted/reject-files-home-ref (0.00s)
+=== NAME  TestValidate_InstallProbe_CrossPlatformFilePathAccepted
+=== RUN   TestValidate_InstallProbe_CrossPlatformFilePathAccepted/reject-file_globs-home-ref
+--- PASS: TestValidate_InstallProbe_CrossPlatformFilePathAccepted/reject-file_globs-home-ref (0.00s)
+=== NAME  TestValidate_InstallProbe_CrossPlatformFilePathAccepted
+=== RUN   TestValidate_InstallProbe_CrossPlatformFilePathAccepted/reject-files-nested-relative
+--- PASS: TestValidate_InstallProbe_CrossPlatformFilePathAccepted/reject-files-nested-relative (0.00s)
+=== NAME  TestValidate_InstallProbe_CrossPlatformFilePathAccepted
+=== RUN   TestValidate_InstallProbe_CrossPlatformFilePathAccepted/reject-file_globs-nested-relative
+--- PASS: TestValidate_InstallProbe_CrossPlatformFilePathAccepted/reject-file_globs-nested-relative (0.00s)
+=== NAME  TestValidate_InstallProbe_CrossPlatformFilePathAccepted
+=== RUN   TestValidate_InstallProbe_CrossPlatformFilePathAccepted/reject-files-drive-relative
+--- PASS: TestValidate_InstallProbe_CrossPlatformFilePathAccepted/reject-files-drive-relative (0.00s)
+=== NAME  TestValidate_InstallProbe_CrossPlatformFilePathAccepted
+=== RUN   TestValidate_InstallProbe_CrossPlatformFilePathAccepted/reject-file_globs-drive-relative
+--- PASS: TestValidate_InstallProbe_CrossPlatformFilePathAccepted/reject-file_globs-drive-relative (0.00s)
+=== NAME  TestValidate_InstallProbe_CrossPlatformFilePathAccepted
+=== RUN   TestValidate_InstallProbe_CrossPlatformFilePathAccepted/reject-files-drive-relative-lower
+--- PASS: TestValidate_InstallProbe_CrossPlatformFilePathAccepted/reject-files-drive-relative-lower (0.00s)
+=== NAME  TestValidate_InstallProbe_CrossPlatformFilePathAccepted
+=== RUN   TestValidate_InstallProbe_CrossPlatformFilePathAccepted/reject-file_globs-drive-relative-lower
+--- PASS: TestValidate_InstallProbe_CrossPlatformFilePathAccepted/reject-file_globs-drive-relative-lower (0.00s)
+=== NAME  TestValidate_InstallProbe_CrossPlatformFilePathAccepted
+--- PASS: TestValidate_InstallProbe_CrossPlatformFilePathAccepted (0.00s)
+=== NAME  
+=== RUN   TestValidate_InstallProbe_EmptyProbeValueRejected
+=== RUN   TestValidate_InstallProbe_EmptyProbeValueRejected/empty-binary
+--- PASS: TestValidate_InstallProbe_EmptyProbeValueRejected/empty-binary (0.00s)
+=== NAME  TestValidate_InstallProbe_EmptyProbeValueRejected
+=== RUN   TestValidate_InstallProbe_EmptyProbeValueRejected/whitespace-binary
+--- PASS: TestValidate_InstallProbe_EmptyProbeValueRejected/whitespace-binary (0.00s)
+=== NAME  TestValidate_InstallProbe_EmptyProbeValueRejected
+=== RUN   TestValidate_InstallProbe_EmptyProbeValueRejected/empty-file
+--- PASS: TestValidate_InstallProbe_EmptyProbeValueRejected/empty-file (0.00s)
+=== NAME  TestValidate_InstallProbe_EmptyProbeValueRejected
+=== RUN   TestValidate_InstallProbe_EmptyProbeValueRejected/empty-file-glob
+--- PASS: TestValidate_InstallProbe_EmptyProbeValueRejected/empty-file-glob (0.00s)
+=== NAME  TestValidate_InstallProbe_EmptyProbeValueRejected
+=== RUN   TestValidate_InstallProbe_EmptyProbeValueRejected/whitespace-file-glob
+--- PASS: TestValidate_InstallProbe_EmptyProbeValueRejected/whitespace-file-glob (0.00s)
+=== NAME  TestValidate_InstallProbe_EmptyProbeValueRejected
+=== RUN   TestValidate_InstallProbe_EmptyProbeValueRejected/second-binary-blank
+--- PASS: TestValidate_InstallProbe_EmptyProbeValueRejected/second-binary-blank (0.00s)
+=== NAME  TestValidate_InstallProbe_EmptyProbeValueRejected
+=== RUN   TestValidate_InstallProbe_EmptyProbeValueRejected/good-bin-empty-file
+--- PASS: TestValidate_InstallProbe_EmptyProbeValueRejected/good-bin-empty-file (0.00s)
+=== NAME  TestValidate_InstallProbe_EmptyProbeValueRejected
+=== RUN   TestValidate_InstallProbe_EmptyProbeValueRejected/good-glob-empty-second
+--- PASS: TestValidate_InstallProbe_EmptyProbeValueRejected/good-glob-empty-second (0.00s)
+=== NAME  TestValidate_InstallProbe_EmptyProbeValueRejected
+--- PASS: TestValidate_InstallProbe_EmptyProbeValueRejected (0.00s)
+=== NAME  
+=== RUN   TestValidate_InstallProbe_WhitespacePaddedValueRejected
+=== RUN   TestValidate_InstallProbe_WhitespacePaddedValueRejected/trailing-space-binary
+--- PASS: TestValidate_InstallProbe_WhitespacePaddedValueRejected/trailing-space-binary (0.00s)
+=== NAME  TestValidate_InstallProbe_WhitespacePaddedValueRejected
+=== RUN   TestValidate_InstallProbe_WhitespacePaddedValueRejected/leading-space-binary
+--- PASS: TestValidate_InstallProbe_WhitespacePaddedValueRejected/leading-space-binary (0.00s)
+=== NAME  TestValidate_InstallProbe_WhitespacePaddedValueRejected
+=== RUN   TestValidate_InstallProbe_WhitespacePaddedValueRejected/trailing-tab-file
+--- PASS: TestValidate_InstallProbe_WhitespacePaddedValueRejected/trailing-tab-file (0.00s)
+=== NAME  TestValidate_InstallProbe_WhitespacePaddedValueRejected
+=== RUN   TestValidate_InstallProbe_WhitespacePaddedValueRejected/good-bin-padded-file
+--- PASS: TestValidate_InstallProbe_WhitespacePaddedValueRejected/good-bin-padded-file (0.00s)
+=== NAME  TestValidate_InstallProbe_WhitespacePaddedValueRejected
+=== RUN   TestValidate_InstallProbe_WhitespacePaddedValueRejected/trailing-space-file-glob
+--- PASS: TestValidate_InstallProbe_WhitespacePaddedValueRejected/trailing-space-file-glob (0.00s)
+=== NAME  TestValidate_InstallProbe_WhitespacePaddedValueRejected
+=== RUN   TestValidate_InstallProbe_WhitespacePaddedValueRejected/leading-space-file-glob
+--- PASS: TestValidate_InstallProbe_WhitespacePaddedValueRejected/leading-space-file-glob (0.00s)
+=== NAME  TestValidate_InstallProbe_WhitespacePaddedValueRejected
+--- PASS: TestValidate_InstallProbe_WhitespacePaddedValueRejected (0.00s)
+=== NAME  
+=== RUN   TestValidate_InstallProbe_RelativeFilePathRejected
+=== RUN   TestValidate_InstallProbe_RelativeFilePathRejected/bare-relative-file
+--- PASS: TestValidate_InstallProbe_RelativeFilePathRejected/bare-relative-file (0.00s)
+=== NAME  TestValidate_InstallProbe_RelativeFilePathRejected
+=== RUN   TestValidate_InstallProbe_RelativeFilePathRejected/dot-relative-file
+--- PASS: TestValidate_InstallProbe_RelativeFilePathRejected/dot-relative-file (0.00s)
+=== NAME  TestValidate_InstallProbe_RelativeFilePathRejected
+=== RUN   TestValidate_InstallProbe_RelativeFilePathRejected/nested-relative-file
+--- PASS: TestValidate_InstallProbe_RelativeFilePathRejected/nested-relative-file (0.00s)
+=== NAME  TestValidate_InstallProbe_RelativeFilePathRejected
+=== RUN   TestValidate_InstallProbe_RelativeFilePathRejected/good-bin-relative-file
+--- PASS: TestValidate_InstallProbe_RelativeFilePathRejected/good-bin-relative-file (0.00s)
+=== NAME  TestValidate_InstallProbe_RelativeFilePathRejected
+=== RUN   TestValidate_InstallProbe_RelativeFilePathRejected/bare-relative-file-glob
+--- PASS: TestValidate_InstallProbe_RelativeFilePathRejected/bare-relative-file-glob (0.00s)
+=== NAME  TestValidate_InstallProbe_RelativeFilePathRejected
+=== RUN   TestValidate_InstallProbe_RelativeFilePathRejected/dot-relative-file-glob
+--- PASS: TestValidate_InstallProbe_RelativeFilePathRejected/dot-relative-file-glob (0.00s)
+=== NAME  TestValidate_InstallProbe_RelativeFilePathRejected
+--- PASS: TestValidate_InstallProbe_RelativeFilePathRejected (0.00s)
+=== NAME  
+=== RUN   TestExpandWorkspacePathTokens_SubstringMatch
+--- PASS: TestExpandWorkspacePathTokens_SubstringMatch (0.00s)
+=== NAME  
+=== RUN   TestExpandWorkspacePathTokens_NoTokenNoOp
+--- PASS: TestExpandWorkspacePathTokens_NoTokenNoOp (0.00s)
+=== NAME  
+=== RUN   TestExpandWorkspacePathTokens_MultipleOccurrencesPerArg
+--- PASS: TestExpandWorkspacePathTokens_MultipleOccurrencesPerArg (0.00s)
+=== NAME  
+=== RUN   TestExpandWorkspacePathTokens_NilIn
+--- PASS: TestExpandWorkspacePathTokens_NilIn (0.00s)
+=== NAME  
+=== RUN   TestExpandWorkspacePathTokens_EmptySliceIn
+--- PASS: TestExpandWorkspacePathTokens_EmptySliceIn (0.00s)
+=== NAME  
+=== RUN   TestExpandWorkspacePathTokens_DoesNotMutateInput
+--- PASS: TestExpandWorkspacePathTokens_DoesNotMutateInput (0.00s)
+=== NAME  
+=== RUN   TestCBuildManifestUsesMcphubSubcommandAndCMakeOnly
+--- PASS: TestCBuildManifestUsesMcphubSubcommandAndCMakeOnly (0.00s)
+=== NAME  
+=== RUN   TestParseManifest_McpLanguageServerShipped
+--- PASS: TestParseManifest_McpLanguageServerShipped (0.00s)
+=== NAME  
+=== RUN   TestPaperSearchManifestConstrainsMCPToV1
+--- PASS: TestPaperSearchManifestConstrainsMCPToV1 (0.00s)
+=== NAME  
+=== RUN   TestParsePortRegistry
+--- PASS: TestParsePortRegistry (0.00s)
+=== NAME  
+=== RUN   TestPortRegistry_DetectConflictGlobal
+--- PASS: TestPortRegistry_DetectConflictGlobal (0.00s)
+=== NAME  
+=== RUN   TestPortRegistry_DetectPoolOverlap
+--- PASS: TestPortRegistry_DetectPoolOverlap (0.00s)
+=== NAME  
+=== RUN   TestPortRegistry_DetectWorkspacePoolOverlap
+--- PASS: TestPortRegistry_DetectWorkspacePoolOverlap (0.00s)
+=== NAME  
+=== RUN   TestSerenaManifestParses
+--- PASS: TestSerenaManifestParses (0.00s)
+=== NAME  
+=== RUN   TestPortsRegistryValid
+--- PASS: TestPortsRegistryValid (0.00s)
+=== NAME  
+=== RUN   TestPortsRegistryCoversAllShippedManifests
+--- PASS: TestPortsRegistryCoversAllShippedManifests (0.00s)
+=== NAME  
+=== RUN   TestVcpkgManifestParses
+--- PASS: TestVcpkgManifestParses (0.00s)
+=== NAME  
+=== RUN   TestVcpkgManifestPortDoesNotCollide
+--- PASS: TestVcpkgManifestPortDoesNotCollide (0.00s)
+=== NAME  
+PASS

@@ -1,0 +1,661 @@
+{
+  "schema": "checkpoint-external-reference-boundary-v1",
+  "references": [
+    {
+      "from_manifest": "b-functional-product-worktree-create-execution-v1/PACKAGE.json",
+      "field": "crosslinks",
+      "reference": "b-functional-product-worktree-create-v1/MANIFEST.json",
+      "expected_sha256": "b81cd4c4bd8ef9e35887e8c25af311fe0a1fb26e4132c2beff91d3033bc7f5cb",
+      "expected_bytes": 1004,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-functional-product-worktree-create-v1/MANIFEST.json",
+      "included_payload": false
+    },
+    {
+      "from_manifest": "b-functional-product-worktree-create-execution-v1/PACKAGE.json",
+      "field": "crosslinks",
+      "reference": "b-functional-product-worktree-create-receiving-proposal-v1/MANIFEST.json",
+      "expected_sha256": "2bfe7acdf7d2bbbf32ecc08398f3e78c2fe97d72132de081cb5a1917ee08fc6b",
+      "expected_bytes": 1300,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-functional-product-worktree-create-receiving-proposal-v1/MANIFEST.json",
+      "included_payload": false
+    },
+    {
+      "from_manifest": "b-functional-product-worktree-create-execution-v1/PACKAGE.json",
+      "field": "crosslinks",
+      "reference": "b-focused-diagnostic-child-plan-v1/source52-file-pins.json",
+      "expected_sha256": "d468f61a82670739013d7c44577a8bd173bd409658019c5e6dbae1df79477a27",
+      "expected_bytes": 465558,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-focused-diagnostic-child-plan-v1/source52-file-pins.json",
+      "included_payload": false
+    },
+    {
+      "from_manifest": "b-functional-product-child-controls-execution-v1/PACKAGE.json",
+      "field": "crosslinks",
+      "reference": "b-functional-product-worktree-create-execution-v1/PACKAGE.json",
+      "expected_sha256": "9b8efd08f041422690b4c9153569aa333e7800fe6f8d1cd06b5ac439d6753818",
+      "expected_bytes": 7401,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-functional-product-worktree-create-execution-v1/PACKAGE.json",
+      "included_payload": true
+    },
+    {
+      "from_manifest": "b-functional-product-child-controls-execution-v1/PACKAGE.json",
+      "field": "crosslinks",
+      "reference": "b-functional-product-child-controls-proposal-v1/MANIFEST.json",
+      "expected_sha256": "d531bf4d8dddd23979fd40386b44c836dd708419a8ee018c8ee95fcf7e3f9912",
+      "expected_bytes": 892,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-functional-product-child-controls-proposal-v1/MANIFEST.json",
+      "included_payload": false
+    },
+    {
+      "from_manifest": "b-functional-product-materialization-execution-v1/PACKAGE.json",
+      "field": "dependencies",
+      "reference": "b-functional-product-materialization-v1/CORE-PINS.json",
+      "expected_sha256": "ad972b39272ffb4116a8e73630679ddd804a62cadbb2cb148da59a8d1e5f81eb",
+      "expected_bytes": 2838,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-functional-product-materialization-v1/CORE-PINS.json",
+      "included_payload": false
+    },
+    {
+      "from_manifest": "b-functional-product-materialization-execution-v1/PACKAGE.json",
+      "field": "dependencies",
+      "reference": "b-functional-product-materialization-v1/config-pins.json",
+      "expected_sha256": "448a3347bb32f1479611d3c7d202a5a4750853bd29b5d69e6a92c76db9cdc26a",
+      "expected_bytes": 11022,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-functional-product-materialization-v1/config-pins.json",
+      "included_payload": false
+    },
+    {
+      "from_manifest": "b-functional-product-materialization-execution-v1/PACKAGE.json",
+      "field": "dependencies",
+      "reference": "b-functional-product-materialization-v1/verify-functional-product-source52.py",
+      "expected_sha256": "8eafa94cdc7c395466c03535e81ed78e025cb05f0ab813d464905b81ac938865",
+      "expected_bytes": 5158,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-functional-product-materialization-v1/verify-functional-product-source52.py",
+      "included_payload": false
+    },
+    {
+      "from_manifest": "b-functional-product-materialization-execution-v1/PACKAGE.json",
+      "field": "dependencies",
+      "reference": "b-functional-product-materialization-receiving-template-v1/MANIFEST.json",
+      "expected_sha256": "4d298aab208262aeb346497238c98fa10b8965340c6243893ae07ef577d0b57d",
+      "expected_bytes": 1283,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-functional-product-materialization-receiving-template-v1/MANIFEST.json",
+      "included_payload": false
+    },
+    {
+      "from_manifest": "b-functional-product-materialization-execution-v1/PACKAGE.json",
+      "field": "dependencies",
+      "reference": "b-functional-product-materialization-receiving-template-v1/phase-bindings.json",
+      "expected_sha256": "18ef0e1889f01d7214e355bfd2fd070ab3e7ecb0890da88cccf45ea58d3727a7",
+      "expected_bytes": 14837,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-functional-product-materialization-receiving-template-v1/phase-bindings.json",
+      "included_payload": false
+    },
+    {
+      "from_manifest": "b-functional-product-materialization-execution-v1/PACKAGE.json",
+      "field": "dependencies",
+      "reference": "b-focused-diagnostic-child-plan-v1/source52-file-pins.json",
+      "expected_sha256": "d468f61a82670739013d7c44577a8bd173bd409658019c5e6dbae1df79477a27",
+      "expected_bytes": 465558,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-focused-diagnostic-child-plan-v1/source52-file-pins.json",
+      "included_payload": false
+    },
+    {
+      "from_manifest": "b-functional-product-materialization-execution-v1/PACKAGE.json",
+      "field": "dependencies",
+      "reference": "b-functional-product-worktree-create-execution-v1/PACKAGE.json",
+      "expected_sha256": "9b8efd08f041422690b4c9153569aa333e7800fe6f8d1cd06b5ac439d6753818",
+      "expected_bytes": 7401,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-functional-product-worktree-create-execution-v1/PACKAGE.json",
+      "included_payload": true
+    },
+    {
+      "from_manifest": "b-functional-product-materialization-execution-v1/PACKAGE.json",
+      "field": "dependencies",
+      "reference": "b-functional-product-child-controls-execution-v1/PACKAGE.json",
+      "expected_sha256": "bc77c808fe6ddde2134819a247970ad087506498e03733e5e4e34a4e199544c7",
+      "expected_bytes": 1811,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-functional-product-child-controls-execution-v1/PACKAGE.json",
+      "included_payload": true
+    },
+    {
+      "from_manifest": "b-functional-product-materialization-execution-v1/PACKAGE.json",
+      "field": "dependencies",
+      "reference": "b-scalar-identity-single-powershell-candidate-v1/MANIFEST.json",
+      "expected_sha256": "9e6c1ede9c3405e1b24e38e00d175f1be8ab0bbdbf4299578f7bdf7577f4d0ce",
+      "expected_bytes": 2570,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-scalar-identity-single-powershell-candidate-v1/MANIFEST.json",
+      "included_payload": false
+    },
+    {
+      "from_manifest": "b-functional-product-scalar-commit-execution-v1/PACKAGE.json",
+      "field": "crosslinks",
+      "reference": "b-functional-product-materialization-execution-v1/PACKAGE.json",
+      "expected_sha256": "6d37092925cd94b9c33b728ba24a2a149b625b6ff4fabbb09e3a8fc9679cd8d9",
+      "expected_bytes": 56858,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-functional-product-materialization-execution-v1/PACKAGE.json",
+      "included_payload": true
+    },
+    {
+      "from_manifest": "b-functional-product-scalar-commit-execution-v1/PACKAGE.json",
+      "field": "crosslinks",
+      "reference": "b-functional-product-scalar-source-plan-v1/MANIFEST.json",
+      "expected_sha256": "493e8ba8bc315556f8c52e833b4d3c3f871eb6f4356229cbd0c40d7731f3055a",
+      "expected_bytes": 8547,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-functional-product-scalar-source-plan-v1/MANIFEST.json",
+      "included_payload": false
+    },
+    {
+      "from_manifest": "b-functional-product-scalar-commit-execution-v1/PACKAGE.json",
+      "field": "crosslinks",
+      "reference": "b-functional-product-scalar-data-v1/MANIFEST.json",
+      "expected_sha256": "2db1e6fcbae978a8e7d5a2e5dc92a9e5841bc8345f5cafbd1b7306faf22a772d",
+      "expected_bytes": 4026,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-functional-product-scalar-data-v1/MANIFEST.json",
+      "included_payload": false
+    },
+    {
+      "from_manifest": "b-functional-product-scalar-commit-execution-v1/PACKAGE.json",
+      "field": "crosslinks",
+      "reference": "b-functional-product-scalar-receiving-template-v1/MANIFEST.json",
+      "expected_sha256": "45cd95d9400cbab1dffbb75690ca75ef27ff4adf4258c629befad31e6aa17326",
+      "expected_bytes": 6228,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-functional-product-scalar-receiving-template-v1/MANIFEST.json",
+      "included_payload": false
+    },
+    {
+      "from_manifest": "b-functional-product-scalar-commit-execution-v1/PACKAGE.json",
+      "field": "crosslinks",
+      "reference": "b-scalar-identity-single-powershell-candidate-v1/MANIFEST.json",
+      "expected_sha256": "9e6c1ede9c3405e1b24e38e00d175f1be8ab0bbdbf4299578f7bdf7577f4d0ce",
+      "expected_bytes": 2570,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-scalar-identity-single-powershell-candidate-v1/MANIFEST.json",
+      "included_payload": false
+    },
+    {
+      "from_manifest": "b-functional-product-scalar-commit-execution-v1/PACKAGE.json",
+      "field": "crosslinks",
+      "reference": "b-scalar-identity-source-commit-execution-v2/PACKAGE.json",
+      "expected_sha256": "6207e4211c96b4d423ec1981ebbc40e5331d61115abfcb0d0a75993141e8c964",
+      "expected_bytes": 10882,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-scalar-identity-source-commit-execution-v2/PACKAGE.json",
+      "included_payload": false
+    },
+    {
+      "from_manifest": "b-functional-product-scalar-commit-execution-v1/PACKAGE.json",
+      "field": "crosslinks",
+      "reference": "b-scalar-identity-source-commit-execution-v1/PACKAGE.json",
+      "expected_sha256": "e756fe44d197ad6f6c85a4facbfa0d1c9e6f03a3b7ef725a8630b3f673dcf091",
+      "expected_bytes": 5759,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-scalar-identity-source-commit-execution-v1/PACKAGE.json",
+      "included_payload": false
+    },
+    {
+      "from_manifest": "b-functional-product-scalar-commit-execution-v1/PACKAGE.json",
+      "field": "crosslinks",
+      "reference": "b-scalar-identity-focused-562-execution-v1/PACKAGE.json",
+      "expected_sha256": "07e0e7e69d21af5ec6113e37de0078d3443684d504a0a110cb3f93b10c376ecd",
+      "expected_bytes": 10900,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-scalar-identity-focused-562-execution-v1/PACKAGE.json",
+      "included_payload": false
+    },
+    {
+      "from_manifest": "b-functional-product-p1-build-execution-v1/PACKAGE.json",
+      "field": "external_inputs",
+      "reference": "b-functional-product-p1-build-candidate-v1/MANIFEST.json",
+      "expected_sha256": "718b6dd486cbc2d1c55db5545ce91be16b3643e00cdea2874e453e66ab0974d4",
+      "expected_bytes": 8689,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-functional-product-p1-build-candidate-v1/MANIFEST.json",
+      "included_payload": false
+    },
+    {
+      "from_manifest": "b-functional-product-p1-build-execution-v1/PACKAGE.json",
+      "field": "external_inputs",
+      "reference": "b-functional-product-p1-build-receiving-template-v1/PACKAGE.json",
+      "expected_sha256": "4d960246c0522c529f5c8d76516c54d8bfaa13975f1c8c5f9c7b05cf5c10e63d",
+      "expected_bytes": 4839,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-functional-product-p1-build-receiving-template-v1/PACKAGE.json",
+      "included_payload": false
+    },
+    {
+      "from_manifest": "b-functional-product-p1-build-execution-v1/PACKAGE.json",
+      "field": "external_inputs",
+      "reference": "b-functional-product-p1-receiver-v3-independent-review-v1/PACKAGE.json",
+      "expected_sha256": "2737de837e1d1b9eaf2fe5215f59065ecc149bef6675f4ba9543133cd2a66be4",
+      "expected_bytes": 313,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-functional-product-p1-receiver-v3-independent-review-v1/PACKAGE.json",
+      "included_payload": false
+    },
+    {
+      "from_manifest": "b-functional-product-p1-build-execution-v1/PACKAGE.json",
+      "field": "external_inputs",
+      "reference": "b-full-route-successor-candidate-v1/preparation-inputs/run_wave_commands_v2.py",
+      "expected_sha256": "74ddf8a3610dc6c8f1bfcda4dbc349833bf334baf0f695999196fe5bd340b5fe",
+      "expected_bytes": 8463,
+      "local_exact_pin_verified": true,
+      "resolved_local": "b-full-route-successor-candidate-v1/preparation-inputs/run_wave_commands_v2.py",
+      "included_payload": false
+    }
+  ],
+  "external_refs_are_not_missing_internal_package_members": true,
+  "map_v3_summary_evidence_references": [
+    {
+      "evidence_id": "previous_map",
+      "path": "d-current-applicability-map-363b-v2/README.md",
+      "bytes": 42144,
+      "sha256": "97149d4ff6d22d53ac3cf9bc7c30c71c1e6dc5624544e4a8a4aa1502c7542361",
+      "local_exact_pin_verified": true,
+      "included_payload": false
+    },
+    {
+      "evidence_id": "product_materialization",
+      "path": "b-functional-product-materialization-execution-v1/root-materialization-admission.json",
+      "bytes": 5008,
+      "sha256": "1713176b9c3836a32665e9641771af475963b7bfa6c76d37eb08d4c4ab95bb52",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "product_commit_package",
+      "path": "b-functional-product-scalar-commit-execution-v1/PACKAGE.json",
+      "bytes": 11234,
+      "sha256": "ac70dce699cf7f961d821d1843fc522139f63b34c14e750f661897aa2d930c13",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "product_root_admission",
+      "path": "b-functional-product-scalar-commit-execution-v1/root-source-admission.json",
+      "bytes": 3125,
+      "sha256": "bec1bbef8af4e870659e6389b6523abc0359fdd127567fac1ae3819ad2539ec1",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "product_canonical_package",
+      "path": "b-functional-product-source-admission-b8d-execution-v1/PACKAGE.json",
+      "bytes": 6935,
+      "sha256": "0e880408dd0d900cee9893b61223f55119c43ed8c31247be08c1771994bad575",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "product_canonical_binding",
+      "path": "b-functional-product-source-admission-b8d-execution-v1/product-source-admission-binding.json",
+      "bytes": 911,
+      "sha256": "46f12cc3a88044b322835b4dabee63447b77c89274334d43fbceb43e661efa57",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "p1_package",
+      "path": "b-functional-product-p1-build-execution-v1/PACKAGE.json",
+      "bytes": 11597,
+      "sha256": "6361933b5735efadded5d2ad8d120351feaff8b37efb1ce0eb5c9fbe765454d6",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "p1_root_receiving",
+      "path": "b-functional-product-p1-build-execution-v1/root-build-receiving-verification.json",
+      "bytes": 4312,
+      "sha256": "87137b57ef0a27b1971558a7285a006a5c43cc05b403727ff5fa246a6491a327",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "p1_independent_receiving",
+      "path": "b-functional-product-p1-build-execution-v1/measurement-receiving-verification.json",
+      "bytes": 10073,
+      "sha256": "5811a237d402ecb7ffa39bb64f17a8cceac3a738e3dbfe4971d19dca41a41f19",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "test_registration",
+      "path": "b-functional-test-worktree-create-execution-v1/root-create-admission.json",
+      "bytes": 928,
+      "sha256": "3c90c93379e8416bad5e7d3b243385f3f15d1faf0e6493523c5c9f1dfc9d781b",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "test_registration_controls",
+      "path": "b-functional-test-child-controls-execution-v1/root-registration-admission.json",
+      "bytes": 672,
+      "sha256": "444d973ad20e0a31b6a8a1d920dcfde23879114910aa884a1ea866aa727d33db",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "m1_metadata_receiving",
+      "path": "b-functional-test-materialization-execution-v1/m1/exact-metadata-received/receiving-verification.json",
+      "bytes": 3030,
+      "sha256": "5603c2d09988fa8990ef250361bc516ad4a92c39a3d777004c58c728a054a12a",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "m1_receipt",
+      "path": "b-functional-test-materialization-execution-v1/m1/exact-metadata-received/originals/receipt.json",
+      "bytes": 3716,
+      "sha256": "4864c92fb4de30baf0d37ca8ac9d6c6030078602f520c20d3a47ab78086debf1",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "m1_parent",
+      "path": "b-functional-test-materialization-execution-v1/m1/exact-metadata-received/originals/root-receiving.json",
+      "bytes": 242,
+      "sha256": "436c16e01923a4aa11da35bf3741ed5ae8182a5d5481482b95f88bcdde1dfb8a",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "m1_outer",
+      "path": "b-functional-test-materialization-execution-v1/m1/exact-metadata-received/originals/outer-original.json",
+      "bytes": 477,
+      "sha256": "077d7261efb3ff6bc77d7b37567f3e2108fde1ef072789d5345cb7e88429edd9",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "fixture5_plan",
+      "path": "b-functional-test-fixture5-source-plan-v1/MANIFEST.json",
+      "bytes": 1963,
+      "sha256": "bae8a51cc2471b8e2724f071b81451df3c184224a00fe8a6b4e2b1a129132620",
+      "local_exact_pin_verified": true,
+      "included_payload": false
+    },
+    {
+      "evidence_id": "fixture5_independent_review",
+      "path": "b-functional-test-fixture5-independent-review-v1/PACKAGE.json",
+      "bytes": 641,
+      "sha256": "678a99c9a429c6db538e5ac5da056a579156f34986c8de7dc5063ddb93e27c14",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "p2_pending",
+      "path": "b-functional-test-p2-build-pending-v1/MANIFEST.json",
+      "bytes": 3597,
+      "sha256": "e5dd2d5285d1b1382e85427bc888d1b790c7d099758f3ef0809f994b8d8c9978",
+      "local_exact_pin_verified": true,
+      "included_payload": false
+    },
+    {
+      "evidence_id": "ordinary_candidate",
+      "path": "b-five-test-source-ordinary-type-candidate-v1/PACKAGE.json",
+      "bytes": 3121,
+      "sha256": "ddcba8dddee43bfc2a0d0f410142a954c2780c2bab2dac07e97f1c0df020ec11",
+      "local_exact_pin_verified": true,
+      "included_payload": false
+    },
+    {
+      "evidence_id": "ordinary_independent_review",
+      "path": "b-five-test-source-ordinary-type-independent-review-v1/review.json",
+      "bytes": 2191,
+      "sha256": "e081745ec6b9bf322878569d5c831504f241489d7ce763411a591aceaa11c791",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "role_root_review",
+      "path": "b-current-role-split-root-review-v1/root-review.json",
+      "bytes": 1762,
+      "sha256": "4b7e0597395b2cacccf58d20d1423ed5123ad52ab7efad9dd3c241f09f54b9ec",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "role_independent_review",
+      "path": "b-current-role-split-source-integration-independent-review-v1/PACKAGE.json",
+      "bytes": 1060,
+      "sha256": "d90f559f18bd1a105b97bbc547f3e814ad1763b54084a76a6786cdfe45a2cdcf",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "head_applicability",
+      "path": "d-current-heads-posix-inventory-v1/heads-applicability.json",
+      "bytes": 111322,
+      "sha256": "2012d18318dc93e83feee156d81cf9587a8212b37b275c0ed17108c46e1c9aba",
+      "local_exact_pin_verified": true,
+      "included_payload": false
+    },
+    {
+      "evidence_id": "head_comparison_followup",
+      "path": "d-current-heads-followup-v1/composed-comparison-followup-result.json",
+      "bytes": 1010,
+      "sha256": "0e00bfcad345eb380d2c01b068d92849b0a23878048f977687fa9fef8fff2681",
+      "local_exact_pin_verified": true,
+      "included_payload": false
+    },
+    {
+      "evidence_id": "a_receiving",
+      "path": "a-focused-fake-acceptance-evidence-v1/root-receiving-verification.json",
+      "bytes": 4603,
+      "sha256": "1f022fce186214aa5c7b2fa455a9f17a163a6bcbfad2641d973943ec4f4c6f82",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "b_focused_history",
+      "path": "b-scalar-identity-focused-562-execution-v1/PACKAGE.json",
+      "bytes": 10900,
+      "sha256": "07e0e7e69d21af5ec6113e37de0078d3443684d504a0a110cb3f93b10c376ecd",
+      "local_exact_pin_verified": true,
+      "included_payload": false
+    },
+    {
+      "evidence_id": "b_f6_history",
+      "path": "b-focused-phase-diagnostic-f6de-execution-v1/PACKAGE.json",
+      "bytes": 6188,
+      "sha256": "9843d41af7e3322b9962b21873d61a1cfed55cdca35c0104af0038606cf267ac",
+      "local_exact_pin_verified": true,
+      "included_payload": false
+    },
+    {
+      "evidence_id": "b_pre_resume_history",
+      "path": "b-scalar-identity-source-commit-execution-v1/PACKAGE.json",
+      "bytes": 5759,
+      "sha256": "e756fe44d197ad6f6c85a4facbfa0d1c9e6f03a3b7ef725a8630b3f673dcf091",
+      "local_exact_pin_verified": true,
+      "included_payload": false
+    },
+    {
+      "evidence_id": "c_consumer",
+      "path": "c631-final/candidate/experiments/rust-process-owner/ffi/verification/stdio-consumer-2026-11-26/continuation-363b/README.md",
+      "bytes": 14678,
+      "sha256": "60e38b51687b65321d0d90194c9ef3dd2a789f6458285d0bcbe3f5f96a6fb90c",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "c_consolidation",
+      "path": "c631-final/candidate/experiments/rust-process-owner/ffi/verification/stdio-consumer-2026-11-26/continuation-363b/experiment-consolidation.json",
+      "bytes": 5185,
+      "sha256": "23675ecea4db2a2cc58ec4a4d7b2093840c5935df9af9a3c2f435bef31b7aed6",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "c_zero_correction",
+      "path": "d-current-heads-followup-v1/pr-631-zero-wording-readback.json",
+      "bytes": 16851,
+      "sha256": "687f1a0d5c9951edc81387c71347bc5f4a5ad68b4c3d47dbb33bca28f451a082",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "c_reader_status",
+      "path": "d-current-heads-followup-v1/pr-627-body-after-residual-update.md",
+      "bytes": 10291,
+      "sha256": "787b371c00cda61b1dae79663215f6187798fb19ed409b0c9a24102e96ccae87",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "c_preview",
+      "path": "c631-source-capsule/publication/received-preview-execution/root-receiving-verification.json",
+      "bytes": 1010,
+      "sha256": "0c7e6d46d175223d8ff831cbb60f2c137c4541b0ef41b2ee29bfe8b666aa974c",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "d_local_commit",
+      "path": "ab664-text-stage-commit-execution-363b-v1/root-receiving-verification.json",
+      "bytes": 1244,
+      "sha256": "eaa39e96a7fd30168c669ec4eefb2d38f7eb171235397c68c0f947c14f566433",
+      "local_exact_pin_verified": true,
+      "included_payload": false
+    },
+    {
+      "evidence_id": "d_push_fail",
+      "path": "ab664-text-push-execution-363b-v1/root-push-receiving.json",
+      "bytes": 1143,
+      "sha256": "7c645aebcc86e0bc7c5092a1b05f1f04cb4924f07c886c2ff3db37f5bf198bf7",
+      "local_exact_pin_verified": true,
+      "included_payload": false
+    },
+    {
+      "evidence_id": "d_diagnostic",
+      "path": "ab664-text2b5-findings-execution-363b-v1/root-receiving-verification.json",
+      "bytes": 1683,
+      "sha256": "17bd006be05463e235dc1bdec2362db27ee7c8a24241037e7d666d3e2760f4fb",
+      "local_exact_pin_verified": true,
+      "included_payload": false
+    },
+    {
+      "evidence_id": "d_independent_review_received",
+      "path": "ab664-text2b5-root-review-receiving-v1/root-receiving.json",
+      "bytes": 2720,
+      "sha256": "5b8e18bfeb7aab1436444bfdcfe60e4042b5d71ad43c02b79a5b6166a25697ee",
+      "local_exact_pin_verified": true,
+      "included_payload": false
+    },
+    {
+      "evidence_id": "d_preview_package",
+      "path": "ab664-text2b5-policy-preview-execution-v1/PACKAGE.json",
+      "bytes": 8373,
+      "sha256": "f5f1e1f6ea2bf149aa2f03ccedeba50c05f0bf733dd21a4ea9c2a2bf5684cd96",
+      "local_exact_pin_verified": true,
+      "included_payload": false
+    },
+    {
+      "evidence_id": "posix_history",
+      "path": "d-current-heads-posix-inventory-v1/posix-remaining.json",
+      "bytes": 11410,
+      "sha256": "3756390e896566c5f98b075e82af1623fd8e8345170cd33f777eb049d36d11d6",
+      "local_exact_pin_verified": true,
+      "included_payload": false
+    },
+    {
+      "evidence_id": "posix_remaining_plan",
+      "path": "b-posix-remaining-plan-v1/PACKAGE.json",
+      "bytes": 6610,
+      "sha256": "19211c77e95ccf3a0ae574c87425e1caf461b41abb352fec95b0cb44df5848ac",
+      "local_exact_pin_verified": true,
+      "included_payload": false
+    },
+    {
+      "evidence_id": "posix_outer_storage",
+      "path": "b-posix-outer-storage-review-v1/README.md",
+      "bytes": 8411,
+      "sha256": "b95460b68df5bc7d0fb5756d495b38228347f705c0737591b7555e0d8769876c",
+      "local_exact_pin_verified": true,
+      "included_payload": false
+    },
+    {
+      "evidence_id": "v9_664",
+      "path": "d-current-heads-followup-v1/pr-664-body-publication-readback-v9.json",
+      "bytes": 152410,
+      "sha256": "b6e8149f2faf3075c584c9f55e0ddfbdc1315be34a1f862c7053b391dc0cad92",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "v9_671",
+      "path": "d-current-heads-followup-v1/pr-671-body-publication-readback-v9.json",
+      "bytes": 105479,
+      "sha256": "a6ec568515beb38a387032b4d18560c6dbff5a60f628418a0a1194c8ffe35dd1",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "m1_root_admission",
+      "path": "b-functional-test-materialization-execution-v1/m1/root-pre-resume-failure-admission.json",
+      "bytes": 1795,
+      "sha256": "59ca5a89609570d86043d397a44c07552597fc99c3e1c71157f6bf316724ef68",
+      "local_exact_pin_verified": true,
+      "included_payload": true
+    },
+    {
+      "evidence_id": "m1_v2_pending",
+      "path": "b-functional-test-materialization-m1-retry-v2/MANIFEST.json",
+      "bytes": 2800,
+      "sha256": "d1fd2ac6f4634c2367d14f5cd322a61f49b5c65c273b0ac9a609f6c4f104bd36",
+      "local_exact_pin_verified": true,
+      "included_payload": false
+    },
+    {
+      "evidence_id": "go_controller_original_metadata_transfer",
+      "path": "b-go-controller-existing-originals-received-v1/transfer-verification.json",
+      "bytes": 2247,
+      "sha256": "3b31130d2f38a0c5a84ca2379c7a4d20ad7a1ba121025efa1dcf6bc125e97a9a",
+      "local_exact_pin_verified": true,
+      "included_payload": false
+    },
+    {
+      "evidence_id": "go_controller_original_manifest",
+      "path": "b-go-controller-existing-originals-received-v1/originals/manifest.json",
+      "bytes": 13163,
+      "sha256": "77ab1fac563e733f86e5e9d4f80a399270d43aaafcf645e07e7a7f18c6bd9fc3",
+      "local_exact_pin_verified": true,
+      "included_payload": false
+    },
+    {
+      "evidence_id": "go_controller_metadata_review",
+      "path": "b-go-controller-existing-originals-received-v1/independent-metadata-receiving.json",
+      "bytes": 860,
+      "sha256": "6c49a3e80bda42fc8ee3817faca9da47d0718911baf409ecbe4dc8a7dfcc8189",
+      "local_exact_pin_verified": true,
+      "included_payload": false
+    },
+    {
+      "evidence_id": "current_canonical_source_manifest",
+      "path": "b-full-route-successor-candidate-v1/candidate/canonical-source-manifest-v5.json",
+      "bytes": 1348,
+      "sha256": "e74ff2ed872591e32b5fdd948d90959b9a564843534f1c46621dc6a409bf47c3",
+      "local_exact_pin_verified": true,
+      "included_payload": false
+    }
+  ],
+  "scope_note": "The 26 external manifest input/dependency/crosslink rows and 49 map summary evidence references are explicit here. These are not selected internal package members. Full repository/source/tool inventories and every Markdown citation are not expanded into archive membership."
+}

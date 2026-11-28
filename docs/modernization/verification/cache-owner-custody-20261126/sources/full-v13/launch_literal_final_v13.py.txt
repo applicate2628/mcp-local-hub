@@ -1,0 +1,369 @@
+"""Launch the two fixed literal gates after the original Product and both Serena inputs close."""
+import sys
+sys.dont_write_bytecode = True
+
+import hashlib
+import importlib.util
+from types import SimpleNamespace
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import subprocess
+import time
+
+REVIEW_COMPLETE = True
+ISSUER_SHA256 = '43822b4ac69464505819f1c5719b844b1b1c0f0a2a702ad3accff5137aa6a450'
+TASK = Path(r"<TASK>")
+PYTHON = Path(r"<USERPROFILE>\AppData\Local\Python\pythoncore-3.15-64\python.exe")
+SCRIPT = TASK / 'final-gates-v13-root/run_literal_go_gate_ready_v1.py'
+PARENT_RECEIPT = TASK / 'literal-final-v10-launch.json'
+PENDING_RECEIPT = TASK / 'literal-final-v10-launch.pending.json'
+STDOUT = TASK / 'literal-final-v10-launch.stdout'
+STDERR = TASK / 'literal-final-v10-launch.stderr'
+ISSUER_ROOT = TASK / 'runs/literal-final-v10'
+OUTER_DIAGNOSTIC_SECONDS = 4800
+INPUT_MANIFEST = TASK / 'final-gates-v13-root/actual-manifest.json'
+INPUT_MANIFEST_SHA256 = 'efd14d898b2e6032dfb77c914b49a9114083c7eb29235ca8f6f893daacd4ee02'
+EXPECTED_HELPER_FILES = ['literal_go_exec_adapter_ready_v1.py', 'literal_migration_receiving_seed_v1.py', 'private_run_scope.py', 'qualified_windows_products_consumer_v1.py', 'receive_fresh_full_inputs_v1.py', 'run_literal_go_gate_ready_v1.py', 'run_partitioned_go_gate_full_v1.py', 'test-staging-supplement-v13.json']
+RETAINED_MANIFEST = TASK / "final-gates-v8/actual-manifest.json"
+RETAINED_MANIFEST_SHA256 = '622d9d26fb0c20e49bd7ca23c03d5df3f056fdb592504b432748c159e96dccba'
+SOURCE_COMMIT = 'aca81a1743ccfbf3e10902769a9b071eb911919e'
+PRODUCT_SOURCE_COMMIT = '3ebe335a2f666a5279d7fafc31a6f4dc3feedff4'
+PYTHON_SHA256 = 'd4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd'
+EXPECTED_LITERAL_COMMANDS = ['go build ./... && go vet ./... && go test -count=1 -timeout 5m ./...',
+ 'go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/']
+MIGRATION_INPUTS = {'default': {'path': '<TASK>\\runs\\serena-evidence-rebinding-v10\\migration-default-input.json', 'sha256': 'd98da468cdcf5b7f1b0a8e245a906d50a50b8ff7e221330e784ef993e33aa7ed'}, 'state': {'path': '<TASK>\\runs\\serena-evidence-rebinding-v10\\migration-state-input.json', 'sha256': '328e666d1f6bb22c344857749449b40d3003a4dc59336744888e2b78f6989580'}}
+REBINDING = {'path': '<TASK>\\runs\\serena-evidence-rebinding-v10\\rebinding.json', 'sha256': '5d80f7d0fb66925dbc5166d21baf288c59d8256aaabddc93279ddd5233dbcb09'}
+REBINDING_PARENT = {'path': '<TASK>\\serena-evidence-rebinding-v11-launch.json', 'sha256': '4c13140b07773caa3e521665437b3761fe8659c0f2f3ea4e870f35045311e7d8'}
+EVIDENCE_ROOTS = {'default': '<TASK_WORKSPACE>\\d10', 'state': '<TASK_WORKSPACE>\\s10'}
+
+PRIOR_CONTROL_PINS = {
+    str(TASK / 'serena-default-final-v7-launch.json'): '13926e54eaaff95ff9e9eef468b071155f62974becb573a13ecc171a85d568c3',
+    str(TASK / 'serena-state-final-v7-launch.json'): 'cef889a5fb952302e5e822d5311c07ea18b2b2c8ebfd6b64ab942c20edc49861',
+    str(TASK / 'serena-default-receiving-v7-launch.json'): '55fef2b2bbbe74df7ec00079037f584c15062823da3afcb8f5b5dc0d00352d37',
+    str(TASK / 'serena-state-receiving-v10-launch.json'): '5caee81e31b26f10fd981c865463375a36665691612c5d718133f7970881d340',
+    str(TASK / 'runs/serena-default-final-v7/receipt.json'): '52db335b6386f335911f21afc1aa5c84c0daf9b7daa6fdd5eb16a52e00af1cfd',
+    str(TASK / 'runs/serena-state-final-v7/receipt.json'): '958fa516ff54e797a7237838ef1fb5466cb1a4abcab6a63171860a3d56839b74',
+    str(TASK / 'runs/serena-default-final-v7/root-receiving.json'): '60f196da9fc01340e27aa4e4efa95b531d337bc0ed24ba98a4f0982cf81ca98f',
+    str(TASK / 'runs/serena-state-final-v7/root-receiving.json'): 'd9028965d82599de2b87c0d46d6dcb984f98a481cafa1cfcdbdb7d853951d21d',
+    REBINDING['path']: REBINDING['sha256'], REBINDING_PARENT['path']: REBINDING_PARENT['sha256'],
+}
+
+SOURCE_ADMISSION = {'base': {'root_path': '<TASK>\\runs\\native-consumer-source-admission-v3\\root-receiving.json',
+          'root_sha256': '0215f8f67a4dcca2f44f4832e3c3012c8192786f9508f027eccaa2e703cfac11',
+          'original_path': '<TASK>\\runs\\native-consumer-source-admission-v3\\receipt.json',
+          'original_sha256': 'eb014bc75f5cebec1c5f8fc1acb0faae319430690468ae7fe59b8385bbd7c526',
+          'parent_path': '<TASK>\\native-consumer-source-v3-launch.json',
+          'parent_sha256': '524f95d8a5c2e8ee3cf1ca651e5ba674eb641679fb79d6582a71693499b85661',
+          'snapshot_path': '<TASK>\\runs\\native-consumer-source-admission-v3\\source-after.json',
+          'snapshot_sha256': '671d60c8f1e96de28eb616b9e7aeacccae50d00359ab27a59418bea61648ee16',
+          'issuer_path': '<TASK>\\native-consumer-source-inputs-v3\\issue_native_consumer_source_v3.py',
+          'issuer_sha256': 'e0a970255ad947c829ab67c5e3cb3c48ec7d857cc18363fe73bc8d83710776d2'},
+ 'update': {'root_path': '<TASK>\\runs\\test-source-update-v1\\root-receiving.json',
+            'root_sha256': '8b04a4902ca7d08e6d6acd27ec0a765a0ea859ea2d3ffb3a90545f0fa8bc5998',
+            'original_path': '<TASK>\\runs\\test-source-update-v1\\receipt.json',
+            'original_sha256': 'f73b8435d423cae532cc4d0d38a7b83be2bbda1464a30efa47c62e49164a3b08',
+            'parent_path': '<TASK>\\test-source-update-v1-launch.json',
+            'parent_sha256': '0b3cdb2d90f19f7972ad3f40af0cd54a34c2ab257ddccae9aa22b1f76829520e',
+            'before_path': '<TASK>\\runs\\test-source-update-v1\\source-before.json',
+            'before_sha256': '671d60c8f1e96de28eb616b9e7aeacccae50d00359ab27a59418bea61648ee16',
+            'snapshot_path': '<TASK>\\runs\\test-source-update-v1\\source-after.json',
+            'snapshot_sha256': 'afe857956e9596133a6e4a1dfbea31f81112c8277c41bf3a1524157bee9e0dc1',
+            'issuer_path': '<TASK>\\test-source-update-inputs-v1\\issue_test_source_update_v1.py',
+            'issuer_sha256': '8adf48ae2b5672bc194859b43c0d52dde5cb798e127701283d63df00a028bee9',
+            'delta_map_path': '<TASK>\\test-source-update-inputs-v1\\delta-map.json',
+            'delta_map_sha256': 'b0fb77499a3e2f5dd20a543047d65b6e0f96afc40101ec7c0ccbe143a8312234',
+            'patch_path': '<TASK>\\test-source-update-inputs-v1\\test-source.patch',
+            'patch_sha256': 'f361229184be36c3d7b7e1be106036c2a03216d4bf8506f45795d188be4a98cf'}}
+GUARD = {'path': '<OWNER_V3>\\guard-custody.py', 'sha256': '56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2'}
+GUARD_ADMISSION = {'path': '<OWNER_V3>\\native-owner-qualification\\root-receiving.json', 'sha256': '87fe6b959cc726b6116080ef0eca863d8d6f415f362123d8dbe65c9765da3747'}
+RETAINED_ADMISSION = {'path': '<TASK>\\final-gates-v13-root\\retained-input-access.json', 'sha256': '6a28ce3b3f245044a4dcc0e6e518139773eae59e1001e99298b84c7e9d231b18'}
+BOOTSTRAP_CONTRACT = {'consumer_run': '<TASK>\\runs\\literal-final-v10', 'module_cache': '<TASK>\\runs\\literal-final-v10\\seed-modules', 'build_cache': '<TASK>\\runs\\literal-final-v10\\isolated-build-cache', 'module_proxy': '<TASK>\\imports\\go-proxy', 'created_exclusively': True, 'empty_at_creation': True, 'predecessor_cache_authority': False}
+
+def pinned_bytes(path, expected, limit=16 << 20):
+    if not isinstance(expected, str) or re.fullmatch(r"[0-9a-f]{64}", expected) is None:
+        raise RuntimeError("actual input pin required: " + str(path))
+    path = Path(path)
+    for part in (*reversed(path.parents), path):
+        info = part.lstat()
+        if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise RuntimeError("ordinary input path required: " + str(part))
+    if not path.is_file():
+        raise RuntimeError("ordinary input file required: " + str(path))
+    with path.open("rb") as stream:
+        raw = stream.read(limit + 1)
+    if len(raw) > limit or hashlib.sha256(raw).hexdigest() != expected:
+        raise RuntimeError("bounded pinned input differs: " + str(path))
+    return raw
+
+
+def receive_composition_qualification(manifest, deployed):
+    binding = manifest.get("composition_qualification", {})
+    root = TASK / "composition-qualification-v2"
+    expected = {"root": root / "native-composition-probe/root-receiving.json",
+                "cases": root / "native-composition-probe/cases/receipt.json",
+                "runner": root / "qualify_runtime_custody.py"}
+    if set(binding) != set(expected):
+        raise RuntimeError("the actual complete runtime qualification is required")
+    raw = {}
+    for name, path in expected.items():
+        pair = binding[name]
+        if set(pair) != {"path", "sha256"} or pair["path"] != str(path):
+            raise RuntimeError("fixed composition qualification path differs")
+        raw[name] = pinned_bytes(path, pair["sha256"], 1 << 20)
+    received, cases = json.loads(raw["root"]), json.loads(raw["cases"])
+    names = ("run_literal_go_gate_ready_v1.py", "literal_go_exec_adapter_ready_v1.py",
+             "run_partitioned_go_gate_full_v1.py", "qualified_windows_products_consumer_v1.py",
+             "receive_fresh_full_inputs_v1.py", "private_run_scope.py")
+    pins = {name: deployed[name] for name in names}
+    loading = cases.get("loading", {})
+    if (received.get("schema") != "root-runtime-custody-composition-probe-v1"
+            or received.get("status") != "PASS" or type(received.get("controller_exit_code")) is not int
+            or received["controller_exit_code"] != 0 or received.get("diagnostic") is not None
+            or received.get("original_controller_reaped") is not True
+            or received.get("original_capture_handles_closed") is not True
+            or received.get("inputs") != pins or received.get("runner_sha256") != binding["runner"]["sha256"]
+            or received.get("receipt_sha256") != binding["cases"]["sha256"]
+            or cases.get("schema") != "runtime-custody-composition-probe-v1" or cases.get("status") != "PASS"
+            or cases.get("native_windows_owner") is not True or cases.get("full_regression_executed") is not False
+            or cases.get("all_original_probe_workers_joined") is not True or loading.get("inputs") != pins
+            or loading.get("ast_extraction") is not False or loading.get("guard_sha256") != GUARD["sha256"]
+            or loading.get("source_commit") != SOURCE_COMMIT or loading.get("source_file_count") != 3508
+            or loading.get("retained_grant_sha256") != RETAINED_ADMISSION["sha256"]
+            or loading.get("actual_scope_paths") != {"runs": str(TASK / "runs"),
+                "artifacts": str(TASK / "native-consumer-source-v3/.scratch")}
+            or not all(loading.get(key) is True for key in ("full_driver_imported", "full_load_owner_runtime_called",
+                "actual_source_data_received", "actual_retained_grant_received", "one_command_wrapper_per_run",
+                "root_issuer_import_idempotent", "actual_scope_binding_received"))
+            or len(cases.get("cases", [])) != 2 or any(row.get("status") != "PASS" for row in cases["cases"])):
+        raise RuntimeError("actual original-custody qualification does not bind this runtime")
+    return binding
+
+
+def main():
+    if (REVIEW_COMPLETE is not True or any(not isinstance(pin, str)
+            or re.fullmatch(r"[0-9a-f]{64}", pin) is None
+            for pin in (ISSUER_SHA256, INPUT_MANIFEST_SHA256, RETAINED_MANIFEST_SHA256,
+                        PYTHON_SHA256, GUARD["sha256"], GUARD_ADMISSION["sha256"], RETAINED_ADMISSION["sha256"],
+                        *(value for group in SOURCE_ADMISSION.values() for key, value in group.items() if key.endswith("_sha256")),
+                        *PRIOR_CONTROL_PINS.values(), *(item['sha256'] for item in MIGRATION_INPUTS.values())))):
+        raise RuntimeError("disabled literal launcher: actual migration inputs, predecessor controls and root review are pending")
+    if (os.name != "nt" or sys.argv[1:] or not sys.flags.isolated or not sys.flags.no_site
+            or not sys.flags.dont_write_bytecode or Path(sys.executable).resolve(strict=True) != PYTHON
+            or Path(__file__).absolute() != TASK / "launch_literal_final_v13.py"):
+        raise RuntimeError("fixed Windows launcher requires its exact path and Python -I -S -B")
+    pinned_bytes(PYTHON, PYTHON_SHA256, 64 << 20)
+    manifest_raw = pinned_bytes(INPUT_MANIFEST, INPUT_MANIFEST_SHA256, 1 << 20)
+    manifest = json.loads(manifest_raw)
+    if (manifest.get("schema") != "fresh-full-runtime-v13-candidate-v1"
+            or manifest.get("status") != "ROOT_REVIEWED_READY"
+            or manifest.get("remote_helper_root") != str(TASK / "final-gates-v13-root")
+            or manifest.get("source_commit") != SOURCE_COMMIT
+            or manifest.get("product_source_commit") != PRODUCT_SOURCE_COMMIT
+            or manifest.get("repository") != str(TASK / "native-consumer-source-v3")
+            or manifest.get("full_run") != str(ISSUER_ROOT)
+            or manifest.get("source_admission") != SOURCE_ADMISSION
+            or manifest.get("guard") != GUARD or manifest.get("guard_admission") != GUARD_ADMISSION
+            or manifest.get("retained_admission") != RETAINED_ADMISSION
+            or manifest.get("bootstrap_contract") != BOOTSTRAP_CONTRACT
+            or manifest.get("prior_source_or_cache_read_authority") is not False
+            or manifest.get("retained_helper_manifest") != {"path": str(RETAINED_MANIFEST), "sha256": RETAINED_MANIFEST_SHA256}
+            or set(manifest.get("files", {})) != set(EXPECTED_HELPER_FILES)):
+        raise RuntimeError("fixed isolated helper/source inventory differs")
+    deployed = {name: row["sha256"] for name, row in manifest["files"].items()}
+    for name, digest in deployed.items():
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise RuntimeError("active helper digest is invalid: " + name)
+        source = TASK / "final-gates-v13-root" / name
+        pinned_bytes(source, digest, 64 << 20)
+    composition_qualification = receive_composition_qualification(manifest, deployed)
+    retained_raw = pinned_bytes(RETAINED_MANIFEST, RETAINED_MANIFEST_SHA256, 1 << 20)
+    retained = json.loads(retained_raw)
+    if (retained.get("schema") != "isolated-private-bootstrap-harness-active-v8-short-path"
+            or retained.get("helper_root") != str(TASK / "final-gates-v8")
+            or retained.get("source_commit") != PRODUCT_SOURCE_COMMIT
+            or retained.get("original_manifest_sha256") != manifest.get("original_manifest_sha256")
+            or retained.get("original_manifest_unchanged") is not True):
+        raise RuntimeError("retained helper8 original Product source binding differs")
+    for name, row in retained["files"].items():
+        source = TASK / "final-gates-v8" / name
+        raw = pinned_bytes(source, row["sha256"], 64 << 20)
+        if len(raw) != row["bytes"]:
+            raise RuntimeError("retained native/Go helper input differs: " + name)
+    pinned_bytes(SCRIPT, ISSUER_SHA256, 64 << 20)
+    # The verified DATA receiver grants only the exact new source, guard and
+    # resource-specific retained inputs. No former cache handoff is authority.
+    support_path = TASK / "final-gates-v13-root/receive_fresh_full_inputs_v1.py"
+    support_raw = pinned_bytes(support_path, deployed["receive_fresh_full_inputs_v1.py"], 64 << 20)
+    support_spec = importlib.util.spec_from_file_location("fresh_literal_parent_inputs", support_path)
+    support = importlib.util.module_from_spec(support_spec)
+    exec(compile(support_raw, str(support_path), "exec"), support.__dict__)
+    if (support.SOURCE_ADMISSION != SOURCE_ADMISSION or support.COMMIT != SOURCE_COMMIT
+            or support.PRODUCT_SOURCE_COMMIT != PRODUCT_SOURCE_COMMIT
+            or support.GUARD != GUARD or support.GUARD_ADMISSION != GUARD_ADMISSION
+            or support.RETAINED_ADMISSION != RETAINED_ADMISSION):
+        raise RuntimeError("parent and DATA receiver identity bindings differ")
+    guard_receiving = support.receive_guard_admission()
+    _, _, source_receiving = support.receive_source(SOURCE_ADMISSION, TASK / "native-consumer-source-v3", SOURCE_COMMIT)
+    retained_receiving = support.receive_retained_artifacts(SimpleNamespace(name=ISSUER_ROOT.name, commit=SOURCE_COMMIT))
+    # Pins come only from separately received original parents and DATA receivers.
+    if any(not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+           for digest in PRIOR_CONTROL_PINS.values()):
+        raise RuntimeError("actual default/state parent, receipt or root pin is pending")
+    if any(not isinstance(MIGRATION_INPUTS[phase]["sha256"], str)
+           or re.fullmatch(r"[0-9a-f]{64}", MIGRATION_INPUTS[phase]["sha256"]) is None
+           for phase in ("default", "state")):
+        raise RuntimeError("actual original-issued default/state migration input pins are pending")
+    controls = {}
+    for path, digest in PRIOR_CONTROL_PINS.items():
+        controls[path] = json.loads(pinned_bytes(path, digest))
+    rebound, rebound_parent = controls[REBINDING["path"]], controls[REBINDING_PARENT["path"]]
+    if (rebound_parent.get("schema") != "serena-evidence-rebinding-parent-v2"
+            or rebound_parent.get("state") != "received" or type(rebound_parent.get("exit_code")) is not int
+            or rebound_parent["exit_code"] != 0 or rebound_parent.get("terminal_exit_received") is not True
+            or rebound_parent.get("parent_capture_files_closed") is not True or rebound_parent.get("deadline_exceeded") is not False
+            or "launcher_error" in rebound_parent or rebound_parent.get("child_status") != "PASS"
+            or rebound_parent.get("output_controls_received") is not True
+            or rebound_parent.get("original_receipt_sha256") != REBINDING["sha256"]
+            or rebound.get("schema") != "private-serena-evidence-rebinding-v2" or rebound.get("status") != "PASS"
+            or rebound.get("run") != str(TASK / "runs/serena-evidence-rebinding-v10")
+            or rebound.get("source_commit") != PRODUCT_SOURCE_COMMIT or rebound.get("test_source_commit") != SOURCE_COMMIT
+            or rebound.get("retained_input_access") != RETAINED_ADMISSION
+            or rebound.get("source_update_admission") != {"path": SOURCE_ADMISSION["update"]["root_path"],
+                                                        "sha256": SOURCE_ADMISSION["update"]["root_sha256"]}
+            or rebound_parent.get("outputs") != rebound.get("outputs")
+            or set(rebound.get("outputs", {})) != set(MIGRATION_INPUTS)):
+        raise RuntimeError("both rebound inputs require their exact original closed DATA parent")
+    for phase in ("default", "state"):
+        item = MIGRATION_INPUTS[phase]
+        expected = TASK / "runs/serena-evidence-rebinding-v10" / ("migration-" + phase + "-input.json")
+        if (item["path"] != str(expected)
+                or rebound["outputs"][phase] != {**item, "evidence_parent": EVIDENCE_ROOTS[phase]}):
+            raise RuntimeError("accepted original migration input changed: " + phase)
+        pinned_bytes(expected, item["sha256"])
+    for path in (PARENT_RECEIPT, PENDING_RECEIPT, STDOUT, STDERR, ISSUER_ROOT):
+        if os.path.lexists(path):
+            raise RuntimeError("new literal launcher refuses an existing output: " + str(path))
+    argv = [str(PYTHON), "-I", "-S", "-B", str(SCRIPT), "--name", "literal-final-v10",
+            "--commit", SOURCE_COMMIT, "--build-run", str(TASK / "runs/product-final-v7")]
+    for phase in ("default", "state"):
+        argv += ["--migration-" + phase + "-input", MIGRATION_INPUTS[phase]["path"],
+                 "--migration-" + phase + "-sha256", MIGRATION_INPUTS[phase]["sha256"]]
+    receipt = {"schema": "native-final-literal-parent-v1", "state": "before-launch",
+               "prior_controls": PRIOR_CONTROL_PINS, "migration_inputs": MIGRATION_INPUTS,
+               "source_admission": SOURCE_ADMISSION, "guard_admission": guard_receiving,
+               "test_source_commit": SOURCE_COMMIT, "product_source_commit": PRODUCT_SOURCE_COMMIT,
+               "migration_rebinding": REBINDING, "migration_rebinding_parent": REBINDING_PARENT,
+               "retained_input_access": {key: retained_receiving[key] for key in ("path", "sha256")},
+               "fresh_input_files": dict(source_receiving["input_files"], **retained_receiving["input_files"]),
+               "cache_bootstrap_contract": BOOTSTRAP_CONTRACT,
+               "prior_source_or_cache_access_issued": False,
+               "expected_literal_commands": EXPECTED_LITERAL_COMMANDS,
+               "root_independent_review": "ROOT_AND_INDEPENDENT_STATIC_REVIEW",
+               "composition_qualification": composition_qualification,
+               "runner_sha256": ISSUER_SHA256, "cwd": str(TASK), "argv": argv,
+               "helper_manifest": {"path": str(INPUT_MANIFEST), "sha256": INPUT_MANIFEST_SHA256},
+               "retained_helper_manifest": {"path": str(RETAINED_MANIFEST), "sha256": RETAINED_MANIFEST_SHA256},
+               "launcher_cwd_observed": str(Path.cwd()),
+               "outer_diagnostic_seconds": OUTER_DIAGNOSTIC_SECONDS,
+               "deadline_exceeded": False, "terminal_exit_received": False,
+               "parent_capture_files_closed": False,
+               "stdout": str(STDOUT), "stderr": str(STDERR),
+               "encoding": "UTF-8", "newlines": "LF"}
+
+    def save():
+        # Native bytes are explicitly UTF-8/LF, independent of Windows newline
+        # translation and of any later text transport's normalization.
+        with PENDING_RECEIPT.open("x", encoding="utf-8", newline="\n") as stream:
+            json.dump(receipt, stream, ensure_ascii=True, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        PENDING_RECEIPT.replace(PARENT_RECEIPT)
+
+    startup = subprocess.STARTUPINFO()
+    startup.dwFlags = subprocess.STARTF_USESHOWWINDOW
+    startup.wShowWindow = subprocess.SW_HIDE
+    save()
+    started = time.monotonic()
+    original = out = err = None
+    code = None
+    try:
+        with STDOUT.open("xb") as out, STDERR.open("xb") as err:
+            original = subprocess.Popen(argv, cwd=str(TASK), env=dict(os.environ), stdin=subprocess.DEVNULL,
+                stdout=out, stderr=err, startupinfo=startup, creationflags=subprocess.CREATE_NEW_CONSOLE)
+            try:
+                receipt.update(state="running", original_pid=original.pid)
+                save()
+                try:
+                    code = original.wait(timeout=max(0, started + OUTER_DIAGNOSTIC_SECONDS - time.monotonic()))
+                except subprocess.TimeoutExpired:
+                    receipt.update(state="deadline-exceeded-original-retained", deadline_exceeded=True)
+                    save()
+                    print(json.dumps(receipt), flush=True)
+            except BaseException as error:
+                receipt["launcher_error"] = type(error).__name__ + ": " + str(error)
+            finally:
+                # Keep the original Popen object and both original capture
+                # handles until direct exit; no PID reconstruction or kill.
+                while code is None:
+                    try:
+                        code = original.wait()
+                    except BaseException as error:
+                        # An interrupted wait does not release our original
+                        # process or its captures and is never an exit receipt.
+                        receipt["launcher_error"] = type(error).__name__ + ": " + str(error)
+                elapsed = time.monotonic() - started
+                receipt.update(state="direct-reaped", exit_code=code, seconds=elapsed,
+                               terminal_exit_received=True,
+                               deadline_exceeded=receipt["deadline_exceeded"] or elapsed > OUTER_DIAGNOSTIC_SECONDS)
+    except BaseException as error:
+        receipt["launcher_error"] = type(error).__name__ + ": " + str(error)
+    receipt["parent_capture_files_closed"] = bool(out is not None and err is not None and out.closed and err.closed)
+    if receipt["terminal_exit_received"] is not True:
+        receipt["state"] = "direct-completion-unreceived"
+        save()
+        print(json.dumps(receipt), flush=True)
+        return 1
+    save()
+    report_path = ISSUER_ROOT / "receipt.json"
+    if report_path.is_file():
+        try:
+            with report_path.open("rb") as stream:
+                raw = stream.read((16 << 20) + 1)
+            if len(raw) > 16 << 20:
+                raise RuntimeError("literal driver control exceeds its declared bound")
+            report = json.loads(raw)
+            receipt.update(child_status=report.get("status"), commands_quiescent=report.get("commands_quiescent"),
+                           command_count=len(report.get("commands", [])), failure=report.get("failure"),
+                           candidate_commit=report.get("source_before", {}).get("head"), child_schema=report.get("schema"),
+                           literal_commands=report.get("literal_commands"),
+                           product_test_source_compatibility=report.get("product_test_source_compatibility"),
+                           literal_pre_push_commands_passed=report.get("literal_pre_push_commands_passed"),
+                           original_receipt_sha256=hashlib.sha256(raw).hexdigest())
+        except BaseException as error:
+            receipt.update(child_status="UNREADABLE_REPORT", launcher_error=type(error).__name__ + ": " + str(error))
+    else:
+        receipt.update(child_status="NO_REPORT", failure="issuer exited before writing its fixed receipt")
+    receipt["state"] = "received"
+    save()
+    passed = (code == 0 and receipt["deadline_exceeded"] is False and "launcher_error" not in receipt
+              and receipt["parent_capture_files_closed"] is True and receipt.get("child_status") == "PASS"
+              and receipt.get("commands_quiescent") is True and receipt.get("candidate_commit") == SOURCE_COMMIT
+              and receipt.get("child_schema") == "literal-go-prepush-gate-v1"
+              and receipt.get("literal_commands") == EXPECTED_LITERAL_COMMANDS
+              and receipt.get("literal_pre_push_commands_passed") is True
+              and isinstance(receipt.get("product_test_source_compatibility"), dict)
+              and receipt["product_test_source_compatibility"].get("product_source_commit") == PRODUCT_SOURCE_COMMIT
+              and receipt["product_test_source_compatibility"].get("test_source_commit") == SOURCE_COMMIT
+              and receipt["product_test_source_compatibility"].get("changed_file_count") == 11
+              and receipt["product_test_source_compatibility"].get("unchanged_non_test_paths") is True)
+    print(json.dumps({"parent": receipt, "parent_receipt": str(PARENT_RECEIPT),
+                      "parent_receipt_sha256": hashlib.sha256(PARENT_RECEIPT.read_bytes()).hexdigest()}), flush=True)
+    return 0 if passed else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,256 @@
+=== RUN   TestErrVTuneNotFound_MessageNamesSearchLocations
+--- PASS: TestErrVTuneNotFound_MessageNamesSearchLocations (0.00s)
+=== NAME  
+=== RUN   TestFindVTune_ProfilerDirHit
+--- PASS: TestFindVTune_ProfilerDirHit (0.00s)
+=== NAME  
+=== RUN   TestFindVTune_ProfilerDirMiss
+--- PASS: TestFindVTune_ProfilerDirMiss (0.00s)
+=== NAME  
+=== RUN   TestVersionedSubdirs
+--- PASS: TestVersionedSubdirs (0.00s)
+=== NAME  
+=== RUN   TestIsExecutableFile
+--- PASS: TestIsExecutableFile (0.00s)
+=== NAME  
+=== RUN   TestProfileTool_ParsesInjectedReport
+--- PASS: TestProfileTool_ParsesInjectedReport (0.00s)
+=== NAME  
+=== RUN   TestProfileTool_DefaultsAnalysisHotspots
+--- PASS: TestProfileTool_DefaultsAnalysisHotspots (0.00s)
+=== NAME  
+=== RUN   TestProfileTool_SynchronousNegativeTimeoutKeepsDefaultCompatibility
+--- PASS: TestProfileTool_SynchronousNegativeTimeoutKeepsDefaultCompatibility (0.00s)
+=== NAME  
+=== RUN   TestProfileTool_StartReturnsDurableRunAndStatusDoesNotNeedCallerContext
+--- PASS: TestProfileTool_StartReturnsDurableRunAndStatusDoesNotNeedCallerContext (0.03s)
+=== NAME  
+=== RUN   TestProfileTool_RejectsUnknownAnalysisType
+--- PASS: TestProfileTool_RejectsUnknownAnalysisType (0.00s)
+=== NAME  
+=== RUN   TestProfileTool_VTuneNotFound
+--- PASS: TestProfileTool_VTuneNotFound (0.00s)
+=== NAME  
+=== RUN   TestProfileTool_MissingExe
+--- PASS: TestProfileTool_MissingExe (0.00s)
+=== NAME  
+=== RUN   TestProfileTool_RunnerFailureSurfaces
+--- PASS: TestProfileTool_RunnerFailureSurfaces (0.00s)
+=== NAME  
+=== RUN   TestProfileTool_TimeoutSurfaces
+--- PASS: TestProfileTool_TimeoutSurfaces (0.00s)
+=== NAME  
+=== RUN   TestProfileTool_PanicRecoveredToStructuredError
+--- PASS: TestProfileTool_PanicRecoveredToStructuredError (0.00s)
+=== NAME  
+=== RUN   TestProfileTool_NoReportSurfacesError
+--- PASS: TestProfileTool_NoReportSurfacesError (0.00s)
+=== NAME  
+=== RUN   TestProfileTool_KeepResultForwardedAndSurfaced
+--- PASS: TestProfileTool_KeepResultForwardedAndSurfaced (0.00s)
+=== NAME  
+=== RUN   TestStatusTool_Available
+--- PASS: TestStatusTool_Available (0.00s)
+=== NAME  
+=== RUN   TestStatusTool_Unavailable
+--- PASS: TestStatusTool_Unavailable (0.00s)
+=== NAME  
+=== RUN   TestStatusTool_PanicRecovered
+--- PASS: TestStatusTool_PanicRecovered (0.00s)
+=== NAME  
+=== RUN   TestListAnalysesTool
+--- PASS: TestListAnalysesTool (0.00s)
+=== NAME  
+=== RUN   TestListAnalysesTool_UnavailableNormalizesNilList
+--- PASS: TestListAnalysesTool_UnavailableNormalizesNilList (0.00s)
+=== NAME  
+=== RUN   TestReportTool_ReReportsExistingDir
+--- PASS: TestReportTool_ReReportsExistingDir (0.00s)
+=== NAME  
+=== RUN   TestReportTool_DefaultsAnalysisHotspots
+--- PASS: TestReportTool_DefaultsAnalysisHotspots (0.00s)
+=== NAME  
+=== RUN   TestReportTool_MissingResultDir
+--- PASS: TestReportTool_MissingResultDir (0.00s)
+=== NAME  
+=== RUN   TestReportTool_RejectsUnknownAnalysisType
+--- PASS: TestReportTool_RejectsUnknownAnalysisType (0.00s)
+=== NAME  
+=== RUN   TestReportTool_FailureSurfaces
+--- PASS: TestReportTool_FailureSurfaces (0.00s)
+=== NAME  
+=== RUN   TestReportTool_PanicRecovered
+--- PASS: TestReportTool_PanicRecovered (0.00s)
+=== NAME  
+=== RUN   TestParseReport_HotspotsTabDelimited
+--- PASS: TestParseReport_HotspotsTabDelimited (0.00s)
+=== NAME  
+=== RUN   TestParseReport_ColumnOrderIndependent
+--- PASS: TestParseReport_ColumnOrderIndependent (0.00s)
+=== NAME  
+=== RUN   TestParseReport_Empty
+--- PASS: TestParseReport_Empty (0.00s)
+=== NAME  
+=== RUN   TestParseFloat
+--- PASS: TestParseFloat (0.00s)
+=== NAME  
+=== RUN   TestParseCollectList
+--- PASS: TestParseCollectList (0.00s)
+=== NAME  
+=== RUN   TestParseCollectList_TolerantOnGarbage
+--- PASS: TestParseCollectList_TolerantOnGarbage (0.00s)
+=== NAME  
+=== RUN   TestLooksLikeAnalysisID
+--- PASS: TestLooksLikeAnalysisID (0.00s)
+=== NAME  
+=== RUN   TestSepDriverNote
+--- PASS: TestSepDriverNote (0.00s)
+=== NAME  
+=== RUN   TestFirstNonEmptyLine
+--- PASS: TestFirstNonEmptyLine (0.00s)
+=== NAME  
+=== RUN   TestProfileTool_StartRejectsNegativeDurableTimeout
+--- PASS: TestProfileTool_StartRejectsNegativeDurableTimeout (0.00s)
+=== NAME  
+=== RUN   TestProfileTool_StartRejectsFreshTooLongDurableTimeout
+--- PASS: TestProfileTool_StartRejectsFreshTooLongDurableTimeout (0.00s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_RejectsThirdUnsettledDurableRun
+--- PASS: TestVTuneRunOwner_RejectsThirdUnsettledDurableRun (0.12s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_ReplaysPreviouslyAcceptedLongRun
+--- PASS: TestVTuneRunOwner_ReplaysPreviouslyAcceptedLongRun (0.00s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_TimeoutIsPersistedAndSurfaced
+--- PASS: TestVTuneRunOwner_TimeoutIsPersistedAndSurfaced (0.01s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_ContainedTimeoutWithExitCodeIsNotNormalNonzero
+--- PASS: TestVTuneRunOwner_ContainedTimeoutWithExitCodeIsNotNormalNonzero (0.01s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_CollectDeadlineLeavesVTuneDurationGrace
+--- PASS: TestVTuneRunOwner_CollectDeadlineLeavesVTuneDurationGrace (0.02s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_WorkerExitCancelsCollectDeadline
+--- PASS: TestVTuneRunOwner_WorkerExitCancelsCollectDeadline (0.03s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_StartStopFinalizesAndPublishesReceipt
+--- PASS: TestVTuneRunOwner_StartStopFinalizesAndPublishesReceipt (0.03s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_StopReplayReturnsSameSettledReceipt
+--- PASS: TestVTuneRunOwner_StopReplayReturnsSameSettledReceipt (0.03s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_StopFallbackReceiptReplaysBeforeAndAfterTerminalSettlement
+--- PASS: TestVTuneRunOwner_StopFallbackReceiptReplaysBeforeAndAfterTerminalSettlement (0.02s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure
+=== RUN   TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure/finalize
+--- PASS: TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure/finalize (0.03s)
+=== NAME  TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure
+=== RUN   TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure/report
+--- PASS: TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure/report (0.03s)
+=== NAME  TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure
+--- PASS: TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure (0.05s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_StopPreparedPreventsCollectLaunch
+--- PASS: TestVTuneRunOwner_StopPreparedPreventsCollectLaunch (0.00s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_ContainedCollectNonzeroSettlesAsCompletedNonzero
+--- PASS: TestVTuneRunOwner_ContainedCollectNonzeroSettlesAsCompletedNonzero (0.03s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_ContainedCollectCleanupFailureIsNotReportable
+--- PASS: TestVTuneRunOwner_ContainedCollectCleanupFailureIsNotReportable (0.01s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_TerminalRecordCannotClaimLaterPhase
+--- PASS: TestVTuneRunOwner_TerminalRecordCannotClaimLaterPhase (0.00s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_InvalidReceiptPersistenceFailureIsFailClosedForCurrentStatus
+--- PASS: TestVTuneRunOwner_InvalidReceiptPersistenceFailureIsFailClosedForCurrentStatus (0.03s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_CloseDeadlineRetainsLeaseUntilWorkerSettlement
+--- PASS: TestVTuneRunOwner_CloseDeadlineRetainsLeaseUntilWorkerSettlement (0.15s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_CloseSharesCancelledBudgetAcrossRunsAndRetainsLease
+--- PASS: TestVTuneRunOwner_CloseSharesCancelledBudgetAcrossRunsAndRetainsLease (0.02s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_UnlockFailureBlocksHandoffUntilRecoveryRetry
+--- PASS: TestVTuneRunOwner_UnlockFailureBlocksHandoffUntilRecoveryRetry (0.03s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_RetainedReceiptRequiresLiveArtifacts
+--- PASS: TestVTuneRunOwner_RetainedReceiptRequiresLiveArtifacts (0.01s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_LoadIgnoresReceiptAsSnapshot
+--- PASS: TestVTuneRunOwner_LoadIgnoresReceiptAsSnapshot (0.00s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_FailureRemovesUnretainedRawDirectory
+--- PASS: TestVTuneRunOwner_FailureRemovesUnretainedRawDirectory (0.02s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_NativeStopWaitsThenFallsBackWhenCollectDoesNotSettle
+--- PASS: TestVTuneRunOwner_NativeStopWaitsThenFallsBackWhenCollectDoesNotSettle (0.03s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_IdempotencyConflictDoesNotStartSecondWorker
+--- PASS: TestVTuneRunOwner_IdempotencyConflictDoesNotStartSecondWorker (0.03s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_ReceiptRemovalMakesTerminalResultNonreportable
+--- PASS: TestVTuneRunOwner_ReceiptRemovalMakesTerminalResultNonreportable (0.03s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_RejectsSecondStoreOwner
+--- PASS: TestVTuneRunOwner_RejectsSecondStoreOwner (0.00s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_TerminalPersistenceFailureNeverPublishesResult
+--- PASS: TestVTuneRunOwner_TerminalPersistenceFailureNeverPublishesResult (0.01s)
+=== NAME  
+=== RUN   TestVTuneRunOwner_ReportFailureIsNonReportableAndNonzero
+--- PASS: TestVTuneRunOwner_ReportFailureIsNonReportableAndNonzero (0.03s)
+=== NAME  
+=== RUN   TestRunVTunePhase_ContainedCommandStarts
+--- PASS: TestRunVTunePhase_ContainedCommandStarts (0.12s)
+=== NAME  
+=== RUN   TestBuildCollectArgs
+=== RUN   TestBuildCollectArgs/hotspots-no-args
+--- PASS: TestBuildCollectArgs/hotspots-no-args (0.00s)
+=== NAME  TestBuildCollectArgs
+=== RUN   TestBuildCollectArgs/threading-with-args
+--- PASS: TestBuildCollectArgs/threading-with-args (0.00s)
+=== NAME  TestBuildCollectArgs
+=== RUN   TestBuildCollectArgs/memory-access
+--- PASS: TestBuildCollectArgs/memory-access (0.00s)
+=== NAME  TestBuildCollectArgs
+--- PASS: TestBuildCollectArgs (0.00s)
+=== NAME  
+=== RUN   TestBuildDurableCollectArgs_DelegatesDurationAndFinalization
+--- PASS: TestBuildDurableCollectArgs_DelegatesDurationAndFinalization (0.00s)
+=== NAME  
+=== RUN   TestBuildReportArgs
+--- PASS: TestBuildReportArgs (0.00s)
+=== NAME  
+=== RUN   TestKnownAnalysisTypes
+--- PASS: TestKnownAnalysisTypes (0.00s)
+=== NAME  
+=== RUN   TestVTuneEnv_FallsBackToOSEnvWhenNoOneAPI
+--- PASS: TestVTuneEnv_FallsBackToOSEnvWhenNoOneAPI (0.00s)
+=== NAME  
+=== RUN   TestReadReportFile
+--- PASS: TestReadReportFile (0.00s)
+=== NAME  
+=== RUN   TestReportPathIfPresent
+--- PASS: TestReportPathIfPresent (0.00s)
+=== NAME  
+=== RUN   TestFormatCommandLine
+--- PASS: TestFormatCommandLine (0.00s)
+=== NAME  
+=== RUN   TestTruncate
+--- PASS: TestTruncate (0.00s)
+=== NAME  
+=== RUN   TestDefaultReport_RejectsMissingResultDir
+--- PASS: TestDefaultReport_RejectsMissingResultDir (0.00s)
+=== NAME  
+=== RUN   TestDefaultReport_RejectsFileAsResultDir
+--- PASS: TestDefaultReport_RejectsFileAsResultDir (0.00s)
+=== NAME  
+=== RUN   TestVtuneEnabledRequiresExplicitOptIn
+--- PASS: TestVtuneEnabledRequiresExplicitOptIn (0.00s)
+=== NAME  
+=== RUN   TestCappedBufferBoundsInFlightStderr
+--- PASS: TestCappedBufferBoundsInFlightStderr (0.00s)
+=== NAME  
+PASS

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/process"
 )
 
 func setupCodexConfig(t *testing.T, initial string) string {
@@ -44,6 +46,7 @@ func createCodexJunctionForTest(t *testing.T, link, target string) {
 		t.Skip("Windows junction coverage")
 	}
 	cmd := exec.Command("cmd", "/c", "mklink", "/J", link, target)
+	process.NoConsole(cmd)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("create junction: %v: %s", err, strings.TrimSpace(string(output)))
 	}

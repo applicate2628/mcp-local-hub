@@ -1,0 +1,389 @@
+{
+  "schema": "source267f-closed-api-and-publication-tail-evidence-v1",
+  "scope": "Fixed stages29–31, commit12–13, push9, API diagnostic v1/v2, historical unexecuted producer267f, Source267f DATA and completed replay-duplicate disposition.",
+  "original_files": 185,
+  "original_bytes": 18541690,
+  "native_events": {
+    "count": 6,
+    "PASS_CLOSED": 5,
+    "FAIL_CLOSED": 1,
+    "original_commands": 37,
+    "command_capture_paths": 74,
+    "controller_capture_paths": 12
+  },
+  "push9": {
+    "status": "FAIL/CLOSED",
+    "native_exit": 1,
+    "scanner_result": "Clean in the preserved original stdout; native push still failed after remote ref advanced.",
+    "unpublished_commit": "e2c0785baad9620dcc3f8232dff452191b6cae4c",
+    "primary_receipt": {
+      "role": "events/push-20261128-v9/receipt.json",
+      "bytes": 171558,
+      "sha256": "1b29db56ba8ad6f7ed83209fd690ad5cf7c434a7aa4c0850f1640cdc1b5e1628"
+    },
+    "independent_root_audit_file": "Absent from the exact run directory; original root/outer/native/IO controls verified directly."
+  },
+  "publication_history": {
+    "stage29": "Retained rejected264a and rebuilt only the unpublished evidence commit from27d90e; staged corrected715 capsule files plus report.",
+    "commit12": "Created local e2c0785b; its later push9 failed.",
+    "stage31": "Rebased only the unpublished checkpoint onto public5a15; local resultfc62057b. Original foreign report suffix preserved exactly.",
+    "post_rebase": {
+      "role": "publication/checkpoint-post-rebase31-data-v1.json",
+      "bytes": 255162,
+      "sha256": "07d973e4f1d135a76c0389460c219a259e586d97804076d99d8a8b1c148ecb1a"
+    },
+    "rebased_local_commit": "fc62057bdede92452478a9c1a0496ec14e2290d4",
+    "rebased_tree": "5e2e9d5af6ba05bc01788ab28df4b9c814d74065",
+    "captured_public_parent": "5a15e4f4bbf64442677e3443054a1bdb277505bd",
+    "protected_suffix_bytes": 250602,
+    "protected_suffix_sha256": "96a17686d3a493ffdb3908d9bebecc87284d272feafb8d9dd92f312903a35dbe",
+    "protected_suffix_exact": true,
+    "captured_public_push_completed": false,
+    "later_stage32_or_push10_evidence_included": false
+  },
+  "diagnostic_v1": {
+    "outer": {
+      "role": "driver-v1/namespace-diagnostic-outer-original.json",
+      "bytes": 440,
+      "sha256": "d29fa66e89ff7e766ae9332b96c43a430d217dc586e6fd59866f4410c6642ec1"
+    },
+    "exit": 1,
+    "original_wait_and_dispose": true,
+    "run_directory_absence": "Reported by root; no runtime output directory was supplied.",
+    "pre_CoreRun_failure": "Recorded in the preserved v2 candidate manifest; original traceback capture unavailable.",
+    "primary_traceback_preserved": false,
+    "API_test_result_claimed": false,
+    "authoring_NOT_RUN_records_preserved": true
+  },
+  "diagnostic_v2": {
+    "classification": "FAIL/CLOSED",
+    "original_exit": 2,
+    "physical_original_controls": {
+      "checks": {
+        "all_primary_pins_match": true,
+        "original_failure_retained": true,
+        "explicit_access": true,
+        "outer_original_wait": true,
+        "single_original_command": true,
+        "same_exact_proof": true,
+        "original_native_root": true,
+        "same_root": true,
+        "native_no_termination": true,
+        "closure_flags": true,
+        "io_handles_closed": true,
+        "io_readers_joined": true,
+        "capture_count": true
+      },
+      "accepted": true,
+      "classification": "FAIL/CLOSED",
+      "admission_seconds": 3.3395298,
+      "mandatory": 7,
+      "mandatory_NOT_RUN": true
+    },
+    "root_receiving": {
+      "role": "api-diagnostic-v2/root-data.json",
+      "bytes": 17425,
+      "sha256": "a57f37f1f9c831c34eb3679d15856e9bee3b06f7b02ebc736bad1bf78494a341"
+    },
+    "execution": {
+      "role": "api-diagnostic-v2/execution.json",
+      "bytes": 32384,
+      "sha256": "b467e2448d0f5e165492562551d575355fd3281412ffd6f088a40a7ddf2c2043"
+    },
+    "owner_proof": {
+      "role": "api-diagnostic-v2/namespace-suite-receipt.json",
+      "bytes": 10293,
+      "sha256": "096931575c367a1d388911f233ab560047172347a65c00f460305dcf215a792a"
+    },
+    "outer": {
+      "role": "driver-v2/namespace-diagnostic-outer-original.json",
+      "bytes": 440,
+      "sha256": "01c613ae536916f947c8b0e9119ad85e67e8511731f9b625fa990e16960a77cc"
+    },
+    "source_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+    "source_tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+    "source_file_count_received": 3369,
+    "input_image_sha256": "d237704913484fe2931860793badbfdaadb3bb216f5c436b8d01bdf2301d3e60",
+    "admission_seconds": 3.3395298,
+    "native_owner_seconds": 304.177,
+    "test_deadline": "5m unchanged",
+    "native_root_exit": 2,
+    "original_native_termination": "not-requested",
+    "capture_paths": 4,
+    "mandatory_tests": {
+      "TestRotateSupervisorStderrSinkIfOversize_AtBoundary": {
+        "Runs": 0,
+        "Passes": 0,
+        "Fails": 0,
+        "Skips": 0
+      },
+      "TestRotateSupervisorStderrSinkIfOversize_ReplacesExistingBackup": {
+        "Runs": 0,
+        "Passes": 0,
+        "Fails": 0,
+        "Skips": 0
+      },
+      "TestSecretsInit_RecoveryNamespaceBoundary": {
+        "Runs": 0,
+        "Passes": 0,
+        "Fails": 0,
+        "Skips": 0
+      },
+      "TestSecretsInit_RecoveryNamespaceFailurePaths": {
+        "Runs": 0,
+        "Passes": 0,
+        "Fails": 0,
+        "Skips": 0
+      },
+      "TestSecretsInit_RecoveryNamespaceRetainedDirectory": {
+        "Runs": 0,
+        "Passes": 0,
+        "Fails": 0,
+        "Skips": 0
+      },
+      "TestSupervisorPeerStrictControlConnections": {
+        "Runs": 0,
+        "Passes": 0,
+        "Fails": 0,
+        "Skips": 0
+      },
+      "TestSupervisorStderrSinkOversize_MatchesRotationThreshold": {
+        "Runs": 0,
+        "Passes": 0,
+        "Fails": 0,
+        "Skips": 0
+      }
+    },
+    "mandatory_all_NOT_RUN": true,
+    "full_API_inventory_qualified": false,
+    "literal_repository_gate_passed": false,
+    "closed_cache_scope_as_original_root_recorded": {
+      "eligible": true,
+      "scope": "closed diagnostic consumer only, not final CLI acceptance"
+    },
+    "captured_result_remains_FAIL": true
+  },
+  "partial_API_results": {
+    "root_analysis": {
+      "role": "api-diagnostic-analysis/closed-api-diagnostic-duration-analysis-v1.json",
+      "bytes": 1062914,
+      "sha256": "6b343afd3ea229d4ca1606cb0e8716d610f709b9362ca8ad02073896e8a6a23f"
+    },
+    "failure_context": {
+      "role": "api-diagnostic-analysis/closed-api-diagnostic-failure-context-v1.json",
+      "bytes": 28441,
+      "sha256": "6f96650e67a93674ee5da6291c678820c699efa99a9364ea5c075c339b50bf38"
+    },
+    "started": 1481,
+    "terminal": 1480,
+    "PASS": 1434,
+    "FAIL": 20,
+    "SKIP": 26,
+    "terminal_including_subtests": 2319,
+    "started_without_terminal": [
+      "TestRunDaemonIntentCollapse_MintsSupervisorIntentForLegacyOnlyActiveStop"
+    ],
+    "failures": [
+      {
+        "test": "TestAttachExisting_ForegroundAdmissionExpiresAtFiveSeconds",
+        "outcome": "FAIL",
+        "seconds": 12.76
+      },
+      {
+        "test": "TestCheckServerReadinessWithScope_ValidatesExplicitlySelectedClients",
+        "outcome": "FAIL",
+        "seconds": 0
+      },
+      {
+        "test": "TestPerServerInstallSkipsHubEntryRemoval",
+        "outcome": "FAIL",
+        "seconds": 0
+      },
+      {
+        "test": "TestInstallParsedManifest_KillsDroppedWorkspaceRowAfterNudgeOnly",
+        "outcome": "FAIL",
+        "seconds": 0.02
+      },
+      {
+        "test": "TestInstallParsedManifest_PrunesStopsForDroppedWorkspaceRows",
+        "outcome": "FAIL",
+        "seconds": 0.01
+      },
+      {
+        "test": "TestInstallParsedManifest_NoSchedulerOnNoWork",
+        "outcome": "FAIL",
+        "seconds": 0.01
+      },
+      {
+        "test": "TestInstallParsedManifest_DefersDaemonSpawn",
+        "outcome": "FAIL",
+        "seconds": 0
+      },
+      {
+        "test": "TestInstallParsedManifest_FansOutPerWorkspaceDaemons",
+        "outcome": "FAIL",
+        "seconds": 0.02
+      },
+      {
+        "test": "TestInstallParsedManifest_FanOut_AuditsWorkspaceTasks",
+        "outcome": "FAIL",
+        "seconds": 0.01
+      },
+      {
+        "test": "TestInstallParsedManifest_PreservesPriorMaintenanceTimers",
+        "outcome": "FAIL",
+        "seconds": 0.01
+      },
+      {
+        "test": "TestInstallParsedManifest_WorkspaceScoped_SkipsPrune",
+        "outcome": "FAIL",
+        "seconds": 0.01
+      },
+      {
+        "test": "TestInstallParsedManifest_FiltersStaleWorkspaceRows",
+        "outcome": "FAIL",
+        "seconds": 0
+      },
+      {
+        "test": "TestInstallParsedManifest_RefusesSpecBearingWriteWhileSupervisorRunning",
+        "outcome": "FAIL",
+        "seconds": 0.01
+      },
+      {
+        "test": "TestInstallParsedManifest_SpecBearingWrite_BypassedWhenCallerHoldsMatchingLock",
+        "outcome": "FAIL",
+        "seconds": 0.01
+      },
+      {
+        "test": "TestInstallParsedManifest_SpecBearingWrite_StillRefusesWithoutToken",
+        "outcome": "FAIL",
+        "seconds": 0.01
+      },
+      {
+        "test": "TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockPathMismatches",
+        "outcome": "FAIL",
+        "seconds": 0.02
+      },
+      {
+        "test": "TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockAlreadyReleased",
+        "outcome": "FAIL",
+        "seconds": 0.01
+      },
+      {
+        "test": "TestBuildMergedSupervisorIntent_FullInstall_BlankServerRowNotDuplicated",
+        "outcome": "FAIL",
+        "seconds": 0.01
+      },
+      {
+        "test": "TestBuildPlanWithOpts_CodexCrossLayerCollisionFreezesAlias",
+        "outcome": "FAIL",
+        "seconds": 0.01
+      },
+      {
+        "test": "TestPrintPlanTo_SerenaDryRunShowsRouterURLAndDeferredNotice",
+        "outcome": "FAIL",
+        "seconds": 0
+      }
+    ],
+    "top_level_ledger_and_all_terminal_ledger_independently_match": true,
+    "limits": "Printed test durations include concurrent child work and must not be summed as wall time except for confirmed serial roots. The test active at deadline is not by itself the cause."
+  },
+  "source267f": {
+    "commit": "267f076500b982475b57be45e8a7d8a03edcc2a6",
+    "tree": "d9636aa81dbcb995934a5ee1e51331b0a10af55f",
+    "baseline": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+    "tracked_files": 3369,
+    "total_bytes": 69342009,
+    "changed_test_files": {
+      "internal/cli/process_identity_match_windows_test.go": "e97fd7cc9cc9d9dfe09643c8e03334bd6f7f3e663b07a7f0fe711f0ef974708f",
+      "internal/cli/settings_registry_test.go": "40de5fd188c8c94ec67e4fd852d89b0122aee602c3dde91fd8f8ceb2e4c7854a",
+      "internal/cli/supervise_prespawn_binary_gate_test.go": "5e3a6517a9fed3a329cea60d12915965720b37c2bb6a865880d3c0c05ed48feb"
+    },
+    "unchanged_files": 3366,
+    "production_files_changed": 0,
+    "original_freeze": {
+      "role": "source267f/root-source267f-freeze.json",
+      "bytes": 1742,
+      "sha256": "ec56fbd6526b3f7f36d2818fca0ab4d7c000d493ce065d02044bdc7fa7d22bdd"
+    },
+    "full_commands_at_freeze": "NOT_RUN_ON_267f",
+    "raw_Git_objects": [
+      {
+        "path": "git/source-3c412291.commit",
+        "git_object": "3c412291593ca962127b36338d464351d2052862",
+        "bytes": 265,
+        "sha256": "aea57838e82cd1d6bb914487e0981ea68a6553c255e10d45d51b1f8dff5ecf6d",
+        "derived_from_role": "events/commit-20261128-v13/captures/shared-commit-identity.stdout.txt",
+        "capture_sha256": "dc47cd7de0e076f88645ce9694f0e9b0157a1c2804ad4278489936706b4d385e",
+        "method": "Remove git-show commit label and exactly four display-indent spaces per message line; accept only the unique candidate whose Git commit SHA-1 equals the original committed identity.",
+        "runtime_or_git_executed": false
+      },
+      {
+        "path": "git/source-267f0765.commit",
+        "git_object": "267f076500b982475b57be45e8a7d8a03edcc2a6",
+        "bytes": 260,
+        "sha256": "f3af88769eaaf968e7aa74beb340357baeb73793aa23b2e58345c0919405b046",
+        "derived_from_role": "events/commit-20261128-v13/captures/final-source-identity.stdout.txt",
+        "capture_sha256": "5ed903cb121f72f412488ef36e4a9b1624ef61f2ed9e9537ee4a4844baf851ae",
+        "method": "Remove git-show commit label and exactly four display-indent spaces per message line; accept only the unique candidate whose Git commit SHA-1 equals the original committed identity.",
+        "runtime_or_git_executed": false
+      }
+    ],
+    "independent_tree_and_index_SHA256_map_check": "source-identity-data-check.json",
+    "source_worktree_read_by_preservation_author": false
+  },
+  "producer267f": {
+    "artifact_manifest": {
+      "role": "producer267f/artifact-manifest.json",
+      "bytes": 4174,
+      "sha256": "ebb606e6ecd24d38fe54ffd577147afc21c1953e298b10a9013a5c01f9b0c832"
+    },
+    "original_file_count": 14,
+    "status": "PREPARED_NOT_EXECUTED_CACHE_NOT_BOUND",
+    "source_commit": "267f076500b982475b57be45e8a7d8a03edcc2a6",
+    "actual_Products_or_helpers_claimed": false,
+    "new_cache_handoff_claimed": false,
+    "source_epoch_invented": false,
+    "authoring_status_is_historical": true
+  },
+  "disposition": {
+    "preflight": {
+      "role": "cleanup/replay-duplicates-preflight-v1.json",
+      "bytes": 403075,
+      "sha256": "7d7df92a5cd7e5898c3eca400199884528f017a940e6b7efb2aedc610d15beaf"
+    },
+    "actual_move_receipt": {
+      "role": "cleanup/replay-duplicates-trash-receipt-v1.json",
+      "bytes": 6819,
+      "sha256": "7bca05c735661f95856c9ed155f5db9d8e280be2fdf4f0d9f8321b214e0b5232"
+    },
+    "moves": 3,
+    "files": 972,
+    "bytes": 141722570,
+    "exact_destination_hashes_checked_by_root": true,
+    "source_directories_absent_checked_by_root": true,
+    "unique_reconstruction_receipts_kept_and_preserved_here": 6,
+    "permanent_deletion_performed": false,
+    "trash_emptied": false,
+    "UNKNOWN_source_or_cache_touched": false,
+    "remote_publication_proven_in_original_move_record": false,
+    "local_capsule_counterparts_verified_by_preflight": true,
+    "primary_evidence_and_capsules_remained_outside_trash": true
+  },
+  "historical_limits": {
+    "old_full_v6": "FAIL/CLOSED unchanged",
+    "old_full_v8": "UNKNOWN unchanged",
+    "full59f_CLI": "No UNKNOWN payload read or new closure; retained UNKNOWN unchanged.",
+    "both_required_literal_commands": "No PASS claimed by this tail",
+    "migration14_and_canonical2": "No final acceptance claimed",
+    "original_remaining_expected_refusal": "UNKNOWN; no substitution by later admission or refusal observations"
+  },
+  "author_work": {
+    "native_tests_or_Git_executed": false,
+    "Source_or_cache_read": false,
+    "UNKNOWN_payload_read": false,
+    "moves_or_deletions": false,
+    "policy_hook_or_gate_changed": false,
+    "new_source_files_modified": false
+  }
+}

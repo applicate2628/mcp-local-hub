@@ -1,0 +1,26 @@
+{
+  "schema": "exact-raw-Git-commit-DATA-derivation-v1",
+  "objects": [
+    {
+      "path": "git/source-3c412291.commit",
+      "git_object": "3c412291593ca962127b36338d464351d2052862",
+      "bytes": 265,
+      "sha256": "aea57838e82cd1d6bb914487e0981ea68a6553c255e10d45d51b1f8dff5ecf6d",
+      "derived_from_role": "events/commit-20261128-v13/captures/shared-commit-identity.stdout.txt",
+      "capture_sha256": "dc47cd7de0e076f88645ce9694f0e9b0157a1c2804ad4278489936706b4d385e",
+      "method": "Remove git-show commit label and exactly four display-indent spaces per message line; accept only the unique candidate whose Git commit SHA-1 equals the original committed identity.",
+      "runtime_or_git_executed": false
+    },
+    {
+      "path": "git/source-267f0765.commit",
+      "git_object": "267f076500b982475b57be45e8a7d8a03edcc2a6",
+      "bytes": 260,
+      "sha256": "f3af88769eaaf968e7aa74beb340357baeb73793aa23b2e58345c0919405b046",
+      "derived_from_role": "events/commit-20261128-v13/captures/final-source-identity.stdout.txt",
+      "capture_sha256": "5ed903cb121f72f412488ef36e4a9b1624ef61f2ed9e9537ee4a4844baf851ae",
+      "method": "Remove git-show commit label and exactly four display-indent spaces per message line; accept only the unique candidate whose Git commit SHA-1 equals the original committed identity.",
+      "runtime_or_git_executed": false
+    }
+  ],
+  "note": "The raw commit payloads are derived from the admitted original git-show captures, not represented as separately read raw-object files. A single candidate per object matched the exact historical Git SHA-1."
+}

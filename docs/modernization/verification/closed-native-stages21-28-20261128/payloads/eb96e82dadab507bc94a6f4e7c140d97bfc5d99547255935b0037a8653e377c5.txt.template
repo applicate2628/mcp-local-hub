@@ -1,0 +1,30 @@
+{
+  "run": "runs/cache-acceptance-stage-20261128-v23",
+  "source": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-acceptance-20261128-v2",
+  "head": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+  "environment": {
+    "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_NO_REPLACE_OBJECTS": "1",
+    "GIT_NO_LAZY_FETCH": "1"
+  },
+  "observed_files": [
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\prepare-cli59f-baseline-v2-directory-fix.ps1",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\cli-focused59f-baseline-v2-inputs\\baseline-composition.json",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\source-binding\\source59f-input-sha256.json"
+  ],
+  "steps": [
+    {
+      "name": "prepare-isolated-baseline-control",
+      "argv": [
+        "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\prepare-cli59f-baseline-v2-directory-fix.ps1"
+      ],
+      "timeout": 180
+    }
+  ]
+}

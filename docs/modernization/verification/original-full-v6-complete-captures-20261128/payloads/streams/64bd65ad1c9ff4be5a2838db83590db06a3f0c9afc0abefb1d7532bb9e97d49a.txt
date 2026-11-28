@@ -1,0 +1,115 @@
+=== RUN   TestNamespaceSuitePreservesOriginalGoArguments
+--- PASS: TestNamespaceSuitePreservesOriginalGoArguments (0.00s)
+=== NAME  
+=== RUN   TestNamespaceSuiteRefusesFilteredOrRepeatedExecution
+=== RUN   TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/short-deadline
+--- PASS: TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/short-deadline (0.00s)
+=== NAME  TestNamespaceSuiteRefusesFilteredOrRepeatedExecution
+=== RUN   TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/bench
+--- PASS: TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/bench (0.00s)
+=== NAME  TestNamespaceSuiteRefusesFilteredOrRepeatedExecution
+=== RUN   TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/fuzz
+--- PASS: TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/fuzz (0.00s)
+=== NAME  TestNamespaceSuiteRefusesFilteredOrRepeatedExecution
+=== RUN   TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/missing
+--- PASS: TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/missing (0.00s)
+=== NAME  TestNamespaceSuiteRefusesFilteredOrRepeatedExecution
+=== RUN   TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/unframed
+--- PASS: TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/unframed (0.00s)
+=== NAME  TestNamespaceSuiteRefusesFilteredOrRepeatedExecution
+=== RUN   TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/selector
+--- PASS: TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/selector (0.00s)
+=== NAME  TestNamespaceSuiteRefusesFilteredOrRepeatedExecution
+=== RUN   TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/empty-filter
+--- PASS: TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/empty-filter (0.00s)
+=== NAME  TestNamespaceSuiteRefusesFilteredOrRepeatedExecution
+=== RUN   TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/skip
+--- PASS: TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/skip (0.00s)
+=== NAME  TestNamespaceSuiteRefusesFilteredOrRepeatedExecution
+=== RUN   TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/repeat
+--- PASS: TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/repeat (0.00s)
+=== NAME  TestNamespaceSuiteRefusesFilteredOrRepeatedExecution
+=== RUN   TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/duplicate
+--- PASS: TestNamespaceSuiteRefusesFilteredOrRepeatedExecution/duplicate (0.00s)
+=== NAME  TestNamespaceSuiteRefusesFilteredOrRepeatedExecution
+--- PASS: TestNamespaceSuiteRefusesFilteredOrRepeatedExecution (0.00s)
+=== NAME  
+=== RUN   TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses
+=== RUN   TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/failed
+--- PASS: TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/failed (0.00s)
+=== NAME  TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses
+=== RUN   TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/missing
+--- PASS: TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/missing (0.00s)
+=== NAME  TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses
+=== RUN   TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/plain-PASS-is-not-evidence
+--- PASS: TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/plain-PASS-is-not-evidence (0.00s)
+=== NAME  TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses
+=== RUN   TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/duplicate-run
+--- PASS: TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/duplicate-run (0.00s)
+=== NAME  TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses
+=== RUN   TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/duplicate-pass
+--- PASS: TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/duplicate-pass (0.00s)
+=== NAME  TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses
+=== RUN   TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/skipped
+--- PASS: TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses/skipped (0.00s)
+=== NAME  TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses
+--- PASS: TestNamespaceSuiteReceivesOnlyActualFramedMandatoryPasses (0.00s)
+=== NAME  
+=== RUN   TestNamespaceSuiteUsesActualCompiledTags
+=== RUN   TestNamespaceSuiteUsesActualCompiledTags/tag-declaration-without-compiled-tag
+--- PASS: TestNamespaceSuiteUsesActualCompiledTags/tag-declaration-without-compiled-tag (0.00s)
+=== NAME  TestNamespaceSuiteUsesActualCompiledTags
+=== RUN   TestNamespaceSuiteUsesActualCompiledTags/wrong-lane
+--- PASS: TestNamespaceSuiteUsesActualCompiledTags/wrong-lane (0.00s)
+=== NAME  TestNamespaceSuiteUsesActualCompiledTags
+=== RUN   TestNamespaceSuiteUsesActualCompiledTags/wrong-entry-point
+--- PASS: TestNamespaceSuiteUsesActualCompiledTags/wrong-entry-point (0.00s)
+=== NAME  TestNamespaceSuiteUsesActualCompiledTags
+=== RUN   TestNamespaceSuiteUsesActualCompiledTags/extra-tag
+--- PASS: TestNamespaceSuiteUsesActualCompiledTags/extra-tag (0.00s)
+=== NAME  TestNamespaceSuiteUsesActualCompiledTags
+=== RUN   TestNamespaceSuiteUsesActualCompiledTags/duplicate-setting
+--- PASS: TestNamespaceSuiteUsesActualCompiledTags/duplicate-setting (0.00s)
+=== NAME  TestNamespaceSuiteUsesActualCompiledTags
+=== RUN   TestNamespaceSuiteUsesActualCompiledTags/rust-mark
+--- PASS: TestNamespaceSuiteUsesActualCompiledTags/rust-mark (0.00s)
+=== NAME  TestNamespaceSuiteUsesActualCompiledTags
+--- PASS: TestNamespaceSuiteUsesActualCompiledTags (0.00s)
+=== NAME  
+=== RUN   TestNamespaceSuiteAcceptsRecordedCLIScopedPublisherFlags
+--- PASS: TestNamespaceSuiteAcceptsRecordedCLIScopedPublisherFlags (0.00s)
+=== NAME  
+=== RUN   TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch
+=== RUN   TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/non-hex
+--- PASS: TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/non-hex (0.00s)
+=== NAME  TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch
+=== RUN   TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/not-a-digest
+--- PASS: TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/not-a-digest (0.00s)
+=== NAME  TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch
+=== RUN   TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/uppercase
+--- PASS: TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/uppercase (0.00s)
+=== NAME  TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch
+=== RUN   TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/short
+--- PASS: TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch/short (0.00s)
+=== NAME  TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch
+--- PASS: TestNamespaceSuiteRefusesMalformedFixtureSourceEpoch (0.00s)
+=== NAME  
+=== RUN   TestNamespaceSuiteRetainsOriginalFailedRootExit
+--- PASS: TestNamespaceSuiteRetainsOriginalFailedRootExit (0.00s)
+=== NAME  
+=== RUN   TestNamespaceSuiteEnvironmentDoesNotRestoreChildSentinels
+--- PASS: TestNamespaceSuiteEnvironmentDoesNotRestoreChildSentinels (0.00s)
+=== NAME  
+=== RUN   TestNamespacePrechildRefusalRequiresOriginalUnstartedScope
+=== RUN   TestNamespacePrechildRefusalRequiresOriginalUnstartedScope/unadmitted_parent
+--- PASS: TestNamespacePrechildRefusalRequiresOriginalUnstartedScope/unadmitted_parent (0.00s)
+=== NAME  TestNamespacePrechildRefusalRequiresOriginalUnstartedScope
+=== RUN   TestNamespacePrechildRefusalRequiresOriginalUnstartedScope/stage_already_entered
+--- PASS: TestNamespacePrechildRefusalRequiresOriginalUnstartedScope/stage_already_entered (0.00s)
+=== NAME  TestNamespacePrechildRefusalRequiresOriginalUnstartedScope
+=== RUN   TestNamespacePrechildRefusalRequiresOriginalUnstartedScope/no_refusal
+--- PASS: TestNamespacePrechildRefusalRequiresOriginalUnstartedScope/no_refusal (0.00s)
+=== NAME  TestNamespacePrechildRefusalRequiresOriginalUnstartedScope
+--- PASS: TestNamespacePrechildRefusalRequiresOriginalUnstartedScope (0.00s)
+=== NAME  
+PASS

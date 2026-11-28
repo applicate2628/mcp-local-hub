@@ -1,0 +1,10 @@
+=== RUN   TestAllowedHost_Loopback
+--- PASS: TestAllowedHost_Loopback (0.00s)
+=== NAME  
+=== RUN   TestAllowedOrigin_Loopback
+--- PASS: TestAllowedOrigin_Loopback (0.00s)
+=== NAME  
+=== RUN   TestAllowedHost_PortIndependence
+--- PASS: TestAllowedHost_PortIndependence (0.00s)
+=== NAME  
+PASS

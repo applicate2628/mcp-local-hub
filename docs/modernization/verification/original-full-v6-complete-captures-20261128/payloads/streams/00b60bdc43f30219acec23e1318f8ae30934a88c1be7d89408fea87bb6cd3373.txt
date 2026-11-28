@@ -1,0 +1,97 @@
+=== RUN   TestSerenaReleaseProjectionParity
+--- PASS: TestSerenaReleaseProjectionParity (0.00s)
+=== NAME  
+=== RUN   TestReleaseCatalogsPassProductionSchema
+--- PASS: TestReleaseCatalogsPassProductionSchema (0.00s)
+=== NAME  
+=== RUN   TestSerenaDescriptorAcceptsChangedValidPinWithoutGoConstant
+--- PASS: TestSerenaDescriptorAcceptsChangedValidPinWithoutGoConstant (0.00s)
+=== NAME  
+=== RUN   TestCheckRequiresEveryDeclaredManifest
+=== RUN   TestCheckRequiresEveryDeclaredManifest/serena
+--- PASS: TestCheckRequiresEveryDeclaredManifest/serena (0.01s)
+=== NAME  TestCheckRequiresEveryDeclaredManifest
+=== RUN   TestCheckRequiresEveryDeclaredManifest/fetch
+--- PASS: TestCheckRequiresEveryDeclaredManifest/fetch (0.00s)
+=== NAME  TestCheckRequiresEveryDeclaredManifest
+=== RUN   TestCheckRequiresEveryDeclaredManifest/sequential-thinking
+--- PASS: TestCheckRequiresEveryDeclaredManifest/sequential-thinking (0.00s)
+=== NAME  TestCheckRequiresEveryDeclaredManifest
+--- PASS: TestCheckRequiresEveryDeclaredManifest (0.01s)
+=== NAME  
+=== RUN   TestGenerateRequiresEveryDeclaredManifestWithoutMutation
+=== RUN   TestGenerateRequiresEveryDeclaredManifestWithoutMutation/serena
+--- PASS: TestGenerateRequiresEveryDeclaredManifestWithoutMutation/serena (0.00s)
+=== NAME  TestGenerateRequiresEveryDeclaredManifestWithoutMutation
+=== RUN   TestGenerateRequiresEveryDeclaredManifestWithoutMutation/fetch
+--- PASS: TestGenerateRequiresEveryDeclaredManifestWithoutMutation/fetch (0.00s)
+=== NAME  TestGenerateRequiresEveryDeclaredManifestWithoutMutation
+=== RUN   TestGenerateRequiresEveryDeclaredManifestWithoutMutation/sequential-thinking
+--- PASS: TestGenerateRequiresEveryDeclaredManifestWithoutMutation/sequential-thinking (0.00s)
+=== NAME  TestGenerateRequiresEveryDeclaredManifestWithoutMutation
+--- PASS: TestGenerateRequiresEveryDeclaredManifestWithoutMutation (0.01s)
+=== NAME  
+=== RUN   TestDeclaredReleaseProjectionRegistryIsUniqueAndComplete
+--- PASS: TestDeclaredReleaseProjectionRegistryIsUniqueAndComplete (0.00s)
+=== NAME  
+=== RUN   TestCheckRejectsFetchProjectionDrift
+--- PASS: TestCheckRejectsFetchProjectionDrift (0.00s)
+=== NAME  
+=== RUN   TestFetchDescriptorRejectsMCP2
+--- PASS: TestFetchDescriptorRejectsMCP2 (0.00s)
+=== NAME  
+=== RUN   TestGenerateDerivesFetchProjections
+--- PASS: TestGenerateDerivesFetchProjections (0.02s)
+=== NAME  
+=== RUN   TestCheckRejectsSequentialProjectionDrift
+--- PASS: TestCheckRejectsSequentialProjectionDrift (0.00s)
+=== NAME  
+=== RUN   TestGenerateDerivesSequentialProjections
+=== RUN   TestGenerateDerivesSequentialProjections/legacy-calendar
+--- PASS: TestGenerateDerivesSequentialProjections/legacy-calendar (0.02s)
+=== NAME  TestGenerateDerivesSequentialProjections
+=== RUN   TestGenerateDerivesSequentialProjections/numeric-triple
+--- PASS: TestGenerateDerivesSequentialProjections/numeric-triple (0.02s)
+=== NAME  TestGenerateDerivesSequentialProjections
+=== RUN   TestGenerateDerivesSequentialProjections/another-numeric-triple
+--- PASS: TestGenerateDerivesSequentialProjections/another-numeric-triple (0.02s)
+=== NAME  TestGenerateDerivesSequentialProjections
+=== RUN   TestGenerateDerivesSequentialProjections/rejects-version-range
+--- PASS: TestGenerateDerivesSequentialProjections/rejects-version-range (0.01s)
+=== NAME  TestGenerateDerivesSequentialProjections
+--- PASS: TestGenerateDerivesSequentialProjections (0.06s)
+=== NAME  
+=== RUN   TestGeneratePreservesManifestWhitespaceOutsideSerenaFields
+--- PASS: TestGeneratePreservesManifestWhitespaceOutsideSerenaFields (0.01s)
+=== NAME  
+=== RUN   TestGenerateRepairsOnlyTheDriftedProjection
+--- PASS: TestGenerateRepairsOnlyTheDriftedProjection (0.01s)
+=== NAME  
+=== RUN   TestGenerateNormalizesV2CatalogLineEndings
+--- PASS: TestGenerateNormalizesV2CatalogLineEndings (0.01s)
+=== NAME  
+=== RUN   TestPublishTargetsRollsBackAndCleansTempsOnLateRenameFailure
+--- PASS: TestPublishTargetsRollsBackAndCleansTempsOnLateRenameFailure (0.02s)
+=== NAME  
+=== RUN   TestPublishTargetsCleansTempsWhenLaterPreimageReadFails
+--- PASS: TestPublishTargetsCleansTempsWhenLaterPreimageReadFails (0.01s)
+=== NAME  
+=== RUN   TestPublishTargetsRollsBackNewFileOnLateFailure
+--- PASS: TestPublishTargetsRollsBackNewFileOnLateFailure (0.01s)
+=== NAME  
+=== RUN   TestPublishTargetsJoinsCreateAndPriorCleanupFailures
+--- PASS: TestPublishTargetsJoinsCreateAndPriorCleanupFailures (0.00s)
+=== NAME  
+=== RUN   TestPublishTargetsJoinsWriteAndCleanupFailures
+--- PASS: TestPublishTargetsJoinsWriteAndCleanupFailures (0.00s)
+=== NAME  
+=== RUN   TestRestorePublishedJoinsRestoreAndTempCleanupFailures
+=== RUN   TestRestorePublishedJoinsRestoreAndTempCleanupFailures/write
+--- PASS: TestRestorePublishedJoinsRestoreAndTempCleanupFailures/write (0.00s)
+=== NAME  TestRestorePublishedJoinsRestoreAndTempCleanupFailures
+=== RUN   TestRestorePublishedJoinsRestoreAndTempCleanupFailures/rename
+--- PASS: TestRestorePublishedJoinsRestoreAndTempCleanupFailures/rename (0.00s)
+=== NAME  TestRestorePublishedJoinsRestoreAndTempCleanupFailures
+--- PASS: TestRestorePublishedJoinsRestoreAndTempCleanupFailures (0.00s)
+=== NAME  
+PASS

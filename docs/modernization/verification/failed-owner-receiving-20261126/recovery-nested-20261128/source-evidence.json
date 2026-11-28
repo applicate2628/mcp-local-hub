@@ -1,0 +1,596 @@
+{
+  "schema": "recovery-reviewed-source-provenance-v1",
+  "base_commit": "5a15e4f4bbf64442677e3443054a1bdb277505bd",
+  "native_recovery_base_commit": "27d90e626465dc9a3a012e50785d62785d4c5e7e",
+  "checkpoint": {
+    "name": "mcp-residual-ad-checkpoint-363b-v1.zip",
+    "bytes": 37455817,
+    "sha256": "912e9cff2f5105364aa664c11e5ba20c88048b78111eab99f6e3334f820642d0",
+    "public_payload": false,
+    "original_retained": true
+  },
+  "sources": [
+    {
+      "published": {
+        "path": "primary/local-validation.json",
+        "bytes": 3872,
+        "sha256": "c82094188f8169971afaba97e4c627c2550bc4a8ccf2d9d0ef680c7f6872c5a3"
+      },
+      "source": {
+        "path": "{CURRENT_WORKSPACE}/library-recovery-next/selected-checkpoint-evidence/b-current-role-split-source-integration-independent-review-v1/local-validation.json",
+        "bytes": 3872,
+        "sha256": "c82094188f8169971afaba97e4c627c2550bc4a8ccf2d9d0ef680c7f6872c5a3"
+      },
+      "transformation": "Exact bytes, no transformation",
+      "archive_member": "b-current-role-split-source-integration-independent-review-v1/local-validation.json"
+    },
+    {
+      "published": {
+        "path": "primary/ordinary-review.json",
+        "bytes": 2191,
+        "sha256": "e081745ec6b9bf322878569d5c831504f241489d7ce763411a591aceaa11c791"
+      },
+      "source": {
+        "path": "{CURRENT_WORKSPACE}/library-recovery-next/selected-checkpoint-evidence/b-five-test-source-ordinary-type-independent-review-v1/review.json",
+        "bytes": 2191,
+        "sha256": "e081745ec6b9bf322878569d5c831504f241489d7ce763411a591aceaa11c791"
+      },
+      "transformation": "Exact bytes, no transformation",
+      "archive_member": "b-five-test-source-ordinary-type-independent-review-v1/review.json"
+    },
+    {
+      "published": {
+        "path": "primary/ordinary-review-README.md",
+        "bytes": 2253,
+        "sha256": "ae006ad44e8554b60c5755b41c77bcaf4f9d60c35939081eb2e0f0639d390805"
+      },
+      "source": {
+        "path": "{CURRENT_WORKSPACE}/library-recovery-next/selected-checkpoint-evidence/b-five-test-source-ordinary-type-independent-review-v1/README.md",
+        "bytes": 2253,
+        "sha256": "ae006ad44e8554b60c5755b41c77bcaf4f9d60c35939081eb2e0f0639d390805"
+      },
+      "transformation": "Exact bytes, no transformation",
+      "archive_member": "b-five-test-source-ordinary-type-independent-review-v1/README.md"
+    },
+    {
+      "published": {
+        "path": "primary/product-source-admission-review.json",
+        "bytes": 4511,
+        "sha256": "bca77f438b8d6e959e6d8dba1b2c1cb976a3628dead7246f751dfe8312a6f19c"
+      },
+      "source": {
+        "path": "{CURRENT_WORKSPACE}/library-recovery-next/selected-checkpoint-evidence/b-functional-product-source-admission-b8d-independent-review-v1/review.json",
+        "bytes": 4516,
+        "sha256": "14746c02391ccf9f44940227f2b0ea9822c1675ac2d5e963daa4392988cd765d"
+      },
+      "transformation": "Deep literal path-prefix substitution, then UTF-8 indented JSON serialization. Historical byte offsets, subject sizes and hashes still describe the exact original. This public DATA projection is not directly executable or applicable as source edits.",
+      "archive_member": "b-functional-product-source-admission-b8d-independent-review-v1/review.json",
+      "path_substitutions": [
+        {
+          "role": "{TASK_ROOT}",
+          "original_prefix_sha256": "0d00d6e3361faa70341f30c831fd9392da3de54ba54c6d7177be768d6cdab4c7",
+          "occurrences": 1
+        }
+      ]
+    },
+    {
+      "published": {
+        "path": "primary/external-references.json",
+        "bytes": 29292,
+        "sha256": "3de64e04a97ddda68a5289590ce57e6535cb85b7b8e19ce0068e776f046df81d"
+      },
+      "source": {
+        "path": "{CURRENT_WORKSPACE}/library-recovery-next/selected-checkpoint-evidence/checkpoint-plan-363b-v1/external-references.json",
+        "bytes": 29292,
+        "sha256": "3de64e04a97ddda68a5289590ce57e6535cb85b7b8e19ce0068e776f046df81d"
+      },
+      "transformation": "Exact bytes, no transformation",
+      "archive_member": "checkpoint-plan-363b-v1/external-references.json"
+    },
+    {
+      "published": {
+        "path": "primary/CHECKPOINT-MANIFEST.json",
+        "bytes": 152029,
+        "sha256": "d30fde83e1473f795296b5dec613c7b7cd8f3956938a936ded5f4911818000c5"
+      },
+      "source": {
+        "path": "{CURRENT_WORKSPACE}/library-recovery-next/selected-checkpoint-evidence/CHECKPOINT-MANIFEST.json",
+        "bytes": 152029,
+        "sha256": "d30fde83e1473f795296b5dec613c7b7cd8f3956938a936ded5f4911818000c5"
+      },
+      "transformation": "Exact bytes, no transformation",
+      "archive_member": "CHECKPOINT-MANIFEST.json"
+    },
+    {
+      "published": {
+        "path": "primary/CHECKPOINT.md",
+        "bytes": 2237,
+        "sha256": "ecd76a5654dfda7d6095e6e4cba9d25e06d3007ba06ca2f0defebd89aabad4e3"
+      },
+      "source": {
+        "path": "{CURRENT_WORKSPACE}/library-recovery-next/selected-checkpoint-evidence/CHECKPOINT.md",
+        "bytes": 2237,
+        "sha256": "ecd76a5654dfda7d6095e6e4cba9d25e06d3007ba06ca2f0defebd89aabad4e3"
+      },
+      "transformation": "Exact bytes, no transformation",
+      "archive_member": "CHECKPOINT.md"
+    },
+    {
+      "published": {
+        "path": "checkpoint-summary.json",
+        "bytes": 12718,
+        "sha256": "1760f05599d0b7b8cec63a5828c50b2eb44287b523251290a40edeca82602d71"
+      },
+      "source": {
+        "path": "{CURRENT_WORKSPACE}/library-recovery-next/checkpoint-recovery-summary.json",
+        "bytes": 13061,
+        "sha256": "30e1393675e0b75d68065cad95a09f2388a533f5ada832d2dbe3be5947d5d868"
+      },
+      "transformation": "Remove private storage locators; clarify prior seen-set boolean; role-tokenize local paths; retain all target/coverage/limit outcomes"
+    },
+    {
+      "source": {
+        "path": "{CURRENT_WORKSPACE}/library-recovery-next/checkpoint-targeted-envelope-results.json",
+        "bytes": 544,
+        "sha256": "207280b7ae4cf2c7510fe4289cfe07f5292a19964ca3c9915e0b5a4741e911d2"
+      },
+      "published_container": "checkpoint-envelopes.json",
+      "transformation": "Aggregate two stages; role-tokenize saved_path; no decoded payload bytes included"
+    },
+    {
+      "source": {
+        "path": "{CURRENT_WORKSPACE}/library-recovery-next/checkpoint-targeted-envelope-wrapped-results.json",
+        "bytes": 2417,
+        "sha256": "53a48e8ef3ea57c839be71f310957cf73a1f0a071651a2d2b4067198c3d50937"
+      },
+      "published_container": "checkpoint-envelopes.json",
+      "transformation": "Aggregate two stages; role-tokenize saved_path; no decoded payload bytes included"
+    },
+    {
+      "published": {
+        "path": "producer-chain.json",
+        "bytes": 14253,
+        "sha256": "7b5275959b9926f51487041afd61472b2444b0af3aa02e6996091b5db99fc9dc"
+      },
+      "source": {
+        "path": "{CURRENT_WORKSPACE}/library-recovery-next/producer-chain.json",
+        "bytes": 14630,
+        "sha256": "ffe7bb719b1952705934fd6f5239403d16d2a0cf9d107cedc342b5c19e4962fc"
+      },
+      "transformation": "Remove raw tool response/device identifier and private raw-record filename; role-tokenize path prefixes; preserve limits and all byte pins; explicitly distinguish original decoded edit bytes from role-tokenized public projection"
+    },
+    {
+      "published": {
+        "path": "producer-stage-decoded-edits.json",
+        "bytes": 12540,
+        "sha256": "3431205cb1cd70a7dd79248bda3f5482b836662b1b610b5c0da876390e4e77d7"
+      },
+      "source": {
+        "path": "{CURRENT_WORKSPACE}/library-recovery-next/producer-stage-decoded-edits.json",
+        "bytes": 10620,
+        "sha256": "c2d458d191a16e2383032742c1e9519700b83e7beb489de2de64a459cc28da4a"
+      },
+      "transformation": "Deep literal path-prefix substitution, then UTF-8 indented JSON serialization. Historical byte offsets, subject sizes and hashes still describe the exact original. This public DATA projection is not directly executable or applicable as source edits.",
+      "path_substitutions": [
+        {
+          "role": "{TASK_ROOT}",
+          "original_prefix_sha256": "37b6a964ec9732f132ff115ca0de3ba60ab5b4aea002442e0b0931de6295dcce",
+          "occurrences": 11
+        },
+        {
+          "role": "{TASK_ROOT}",
+          "original_prefix_sha256": "0d00d6e3361faa70341f30c831fd9392da3de54ba54c6d7177be768d6cdab4c7",
+          "occurrences": 2
+        },
+        {
+          "role": "{DONOR_WORKSPACE}",
+          "original_prefix_sha256": "30851bbb7ed6a307b958dbc8a37fb3fea8226e10c9ae3933251afff621f86d68",
+          "occurrences": 2
+        }
+      ]
+    },
+    {
+      "published": {
+        "path": "execution-receipt.json",
+        "bytes": 212353,
+        "sha256": "4d5865b3278c88edbf89f2942b04b540e43930e4667d529c7ee2069ff6f83cc3"
+      },
+      "source": {
+        "path": "{CURRENT_WORKSPACE}/nested-recovery-next/native-records-private.json",
+        "bytes": 213298,
+        "sha256": "e63fd375ef40dac65543a9ad3ba911451e2dc75ec13a3b77d6317021bf2d6d1e"
+      },
+      "transformation": "Deep exact string-prefix substitution only; all operation FAIL and closure fields retained; native originals compared before publication"
+    },
+    {
+      "published": {
+        "path": "scripts/inspect_nested.py",
+        "bytes": 31155,
+        "sha256": "6d0d1a68da00c3567beda01b53506e551e7346f6879a2b517f56d34cdc886da3"
+      },
+      "source": {
+        "path": "{CURRENT_WORKSPACE}/nested-recovery-next/inspect_nested.py",
+        "bytes": 31155,
+        "sha256": "6d0d1a68da00c3567beda01b53506e551e7346f6879a2b517f56d34cdc886da3"
+      },
+      "transformation": "Exact bytes, no transformation"
+    },
+    {
+      "published": {
+        "path": "scripts/smoke_inspector.py",
+        "bytes": 3861,
+        "sha256": "494f0e3670e6ab157f146dbcc7b1ba1d5b6c0d5d7a15f0acf4f87b824f469ce5"
+      },
+      "source": {
+        "path": "{CURRENT_WORKSPACE}/nested-recovery-next/smoke_inspector.py",
+        "bytes": 3861,
+        "sha256": "494f0e3670e6ab157f146dbcc7b1ba1d5b6c0d5d7a15f0acf4f87b824f469ce5"
+      },
+      "transformation": "Exact bytes, no transformation"
+    },
+    {
+      "published": {
+        "path": "scripts/regression_stat_ctime.py",
+        "bytes": 2604,
+        "sha256": "16746f764ffdc5ca1ecdf8fc7d01f54e0c5498053424f7f118136dc2bd62c109"
+      },
+      "source": {
+        "path": "{CURRENT_WORKSPACE}/nested-recovery-next/regression_stat_ctime.py",
+        "bytes": 2604,
+        "sha256": "16746f764ffdc5ca1ecdf8fc7d01f54e0c5498053424f7f118136dc2bd62c109"
+      },
+      "transformation": "Exact bytes, no transformation"
+    },
+    {
+      "published": {
+        "path": "scripts/inputs.json",
+        "bytes": 11532,
+        "sha256": "c8cdfb43d23e466df81d573d8224eb6bc00d7924f1df792011b22b5ae5bf29cf"
+      },
+      "source": {
+        "path": "{CURRENT_WORKSPACE}/nested-recovery-next/inputs.json",
+        "bytes": 11524,
+        "sha256": "84301391384853cd9e21bb6d9e9d18dc15204b365de87afe1e032d7e90a0b1f4"
+      },
+      "transformation": "Replace root values with identical role labels; native execution requires explicit original root bindings; source spec SHA retained"
+    },
+    {
+      "published": {
+        "path": "scripts/inputs-v3.json",
+        "bytes": 9204,
+        "sha256": "709d7c7c690e1223b573c2eb5d45ff08aca0b83e9bf38eed792c9df5ae2a31b5"
+      },
+      "source": {
+        "path": "{CURRENT_WORKSPACE}/nested-recovery-next/inputs-v3.json",
+        "bytes": 9196,
+        "sha256": "fc0421afec8eb279f2b7f07bd4bd57b4383cccf1495a3e472660d3d61f3f8497"
+      },
+      "transformation": "Replace root values with identical role labels; native execution requires explicit original root bindings; source spec SHA retained"
+    },
+    {
+      "published": {
+        "path": "scripts/scan_checkpoint_data.py.txt",
+        "bytes": 15190,
+        "sha256": "243033caeb24e5c73d6efb5361789294a20d1e59b8d7d3a71515128a02ead098"
+      },
+      "source": {
+        "path": "{CURRENT_WORKSPACE}/library-recovery-next/scan_checkpoint_data.py",
+        "bytes": 15214,
+        "sha256": "535d446634675e914b5f797fcebad31434ae7ee239aee264c84aecfb71006a35"
+      },
+      "transformation": "Role-tokenized source capture, DATA .txt; not an executable admitted product source"
+    },
+    {
+      "published": {
+        "path": "scripts/extract_checkpoint_evidence.py.txt",
+        "bytes": 2840,
+        "sha256": "d0cbd065ee2d20dfaed91a768927be9792924c5972e602f75ca25bf12307f5ec"
+      },
+      "source": {
+        "path": "{CURRENT_WORKSPACE}/library-recovery-next/extract_checkpoint_evidence.py",
+        "bytes": 2852,
+        "sha256": "cca743a3f3470255092c86d3b7e52e638aa315468a04977a25a6911c7c9fa033"
+      },
+      "transformation": "Role-tokenized source capture, DATA .txt; not an executable admitted product source"
+    },
+    {
+      "published": {
+        "path": "scripts/build_checkpoint_summary.py.txt",
+        "bytes": 11336,
+        "sha256": "b1539b56743372bb05b69512df6172783f782b95c69534312484b0e4a59316e7"
+      },
+      "source": {
+        "path": "{CURRENT_WORKSPACE}/library-recovery-next/build_checkpoint_summary.py",
+        "bytes": 11348,
+        "sha256": "9fa7f62b789582d3b79584e18955910ddcab228c3316514ce291d570e5f7783f"
+      },
+      "transformation": "Role-tokenized source capture, DATA .txt; not an executable admitted product source"
+    },
+    {
+      "published": {
+        "path": "scripts/build_producer_chain_report.py.txt",
+        "bytes": 11067,
+        "sha256": "7dc8a80f46ae70f8f9b82a21a523b0cc7dae8279743c95aea0e39cafa2ecb305"
+      },
+      "source": {
+        "path": "{CURRENT_WORKSPACE}/library-recovery-next/build_producer_chain_report.py",
+        "bytes": 11063,
+        "sha256": "ddbd46222492499afc230c5200dc6f67b74cc1721379ebad1ac4adba04c39ba1"
+      },
+      "transformation": "Role-tokenized source capture, DATA .txt; not an executable admitted product source"
+    }
+  ],
+  "checkpoint_selected_members": [
+    {
+      "archive_member": "CHECKPOINT-MANIFEST.json",
+      "bytes": 152029,
+      "sha256": "d30fde83e1473f795296b5dec613c7b7cd8f3956938a936ded5f4911818000c5"
+    },
+    {
+      "archive_member": "CHECKPOINT.md",
+      "bytes": 2237,
+      "sha256": "ecd76a5654dfda7d6095e6e4cba9d25e06d3007ba06ca2f0defebd89aabad4e3"
+    },
+    {
+      "archive_member": "b-current-role-split-root-review-v1/root-review.json",
+      "bytes": 1762,
+      "sha256": "4b7e0597395b2cacccf58d20d1423ed5123ad52ab7efad9dd3c241f09f54b9ec"
+    },
+    {
+      "archive_member": "b-current-role-split-source-integration-independent-review-v1/README.md",
+      "bytes": 10269,
+      "sha256": "7685672bc0e368b056440074284f868878ee846530a987c6091d125bd76a2929"
+    },
+    {
+      "archive_member": "b-current-role-split-source-integration-independent-review-v1/local-validation.json",
+      "bytes": 3872,
+      "sha256": "c82094188f8169971afaba97e4c627c2550bc4a8ccf2d9d0ef680c7f6872c5a3"
+    },
+    {
+      "archive_member": "b-current-role-split-source-integration-independent-review-v1/review.json",
+      "bytes": 12885,
+      "sha256": "10b3d74d4d7e32ddd974f2e26e94d6e9ae5a881af9645d5284a3b3e8765e818b"
+    },
+    {
+      "archive_member": "b-five-test-source-ordinary-type-independent-review-v1/PACKAGE.json",
+      "bytes": 382,
+      "sha256": "25717488a20e370a294a5789eda3c3ac001a9f2d8714d35ea56d3d31e0b1574d"
+    },
+    {
+      "archive_member": "b-five-test-source-ordinary-type-independent-review-v1/README.md",
+      "bytes": 2253,
+      "sha256": "ae006ad44e8554b60c5755b41c77bcaf4f9d60c35939081eb2e0f0639d390805"
+    },
+    {
+      "archive_member": "b-five-test-source-ordinary-type-independent-review-v1/review.json",
+      "bytes": 2191,
+      "sha256": "e081745ec6b9bf322878569d5c831504f241489d7ce763411a591aceaa11c791"
+    },
+    {
+      "archive_member": "b-functional-product-materialization-execution-v1/bind_receiver.py",
+      "bytes": 3112,
+      "sha256": "fca1cd5b9957fda9f07d21fe7751cd006d9016fb202cbc3523da506554e31dab"
+    },
+    {
+      "archive_member": "b-functional-product-materialization-execution-v1/local-control-preimages/bind_receiver_zlib_v1.py",
+      "bytes": 2274,
+      "sha256": "9cd933dc37a0ce426846b4847198ff8fbcfd941456fb9f482b14b9d91546ef9c"
+    },
+    {
+      "archive_member": "b-functional-product-materialization-execution-v1/local-control-preimages/receive_transfer_zlib_v1.py",
+      "bytes": 1589,
+      "sha256": "93fdaa9507740c2116a8d4e0ebe3dde5d714f5e51dc5dada1366698374b95544"
+    },
+    {
+      "archive_member": "b-functional-product-p1-build-execution-v1/PACKAGE.json",
+      "bytes": 11597,
+      "sha256": "6361933b5735efadded5d2ad8d120351feaff8b37efb1ce0eb5c9fbe765454d6"
+    },
+    {
+      "archive_member": "b-functional-product-p1-build-execution-v1/measurement_verify_p1.py",
+      "bytes": 20106,
+      "sha256": "2b49616fe28d437f5ea917ff6a5c7977d26bbe2f2afbf4c697b9796007ae4fe7"
+    },
+    {
+      "archive_member": "b-functional-product-source-admission-b8d-independent-review-v1/review.json",
+      "bytes": 4516,
+      "sha256": "14746c02391ccf9f44940227f2b0ea9822c1675ac2d5e963daa4392988cd765d"
+    },
+    {
+      "archive_member": "b-functional-test-fixture5-independent-review-v1/review.json",
+      "bytes": 13075,
+      "sha256": "182eb29c974f27b267554baea3abf31f5d8670169b619004455e1ffc3094c51d"
+    },
+    {
+      "archive_member": "checkpoint-plan-363b-v1/README.md",
+      "bytes": 11018,
+      "sha256": "b5d44fdb0096b8a25eac97fa1565c94efa6fd8e84dbcfbec505b0ea7eda4f542"
+    },
+    {
+      "archive_member": "checkpoint-plan-363b-v1/external-references.json",
+      "bytes": 29292,
+      "sha256": "3de64e04a97ddda68a5289590ce57e6535cb85b7b8e19ce0068e776f046df81d"
+    },
+    {
+      "archive_member": "d-current-applicability-map-363b-v3/README.md",
+      "bytes": 26941,
+      "sha256": "c16b0657b5df63c484f8ed6677d5a1af468bce424b8457ea9c5ddb4b4f38850e"
+    },
+    {
+      "archive_member": "d-current-applicability-map-363b-v3/review-correction-v1/correction.patch",
+      "bytes": 10013,
+      "sha256": "39b12c3902d9652325bcd6ed2a674fedead7775c9c4d125823c927541d58659b"
+    },
+    {
+      "archive_member": "d-current-applicability-map-363b-v3/review-correction-v1/preimage/state.json",
+      "bytes": 28140,
+      "sha256": "4b288cd749418854574e49664928ea3599ffeccfba0035c9c462df41d30bc0f9"
+    },
+    {
+      "archive_member": "d-current-applicability-map-363b-v3/root-review-preimage/README.md",
+      "bytes": 26651,
+      "sha256": "10d81d667ee85e1b4827fe39b1948cd6ed0b523cb0dd73c9209ec40676f53ae1"
+    },
+    {
+      "archive_member": "d-current-applicability-map-363b-v3/root-review-preimage/state.json",
+      "bytes": 30393,
+      "sha256": "587b4406d206bb2debe3922784ff84388a8a905ffe4a6dea30a835456f540279"
+    },
+    {
+      "archive_member": "d-current-applicability-map-363b-v3/state.json",
+      "bytes": 30555,
+      "sha256": "f8ee9cb3699628710890411d500441d8cb42d09c50d31980c566bea7528c651a"
+    }
+  ],
+  "checkpoint_manifest_validation": {
+    "manifest_entries": 681,
+    "archive_entries": 682,
+    "mismatches": [],
+    "archive_members_not_in_manifest": [
+      "CHECKPOINT-MANIFEST.json"
+    ]
+  },
+  "path_role_rules": [
+    {
+      "role": "{USER_PROFILE}",
+      "original_prefix_sha256": "e80b30c77c41f4fd767a910ba6d01ee567b9ea07c7eb26601b17c1fbb129c417"
+    },
+    {
+      "role": "{ORCHE_INSTALL_ROOT}",
+      "original_prefix_sha256": "8ec7c829d45b79df671ea4f3307967bb5a98a61b5bb4c23c339aad9601c6f03d"
+    },
+    {
+      "role": "{GIT_EXE}",
+      "original_prefix_sha256": "eb3997f69796ba5808a1d2aab2727fe650fbcab46f828054f113066b58d2dd17"
+    },
+    {
+      "role": "{RG_EXE}",
+      "original_prefix_sha256": "27660a6563be75a5be3ad50f3c017f29e447e599922c2efc186ee4f956447529"
+    },
+    {
+      "role": "{D_REPOSITORY_ROOT}",
+      "original_prefix_sha256": "54abc596fce32fa8248ed3ef788e054b478e9a4725f3bb4599ad9fca47769e7d"
+    },
+    {
+      "role": "{TASK_ROOT}",
+      "original_prefix_sha256": "37b6a964ec9732f132ff115ca0de3ba60ab5b4aea002442e0b0931de6295dcce"
+    },
+    {
+      "role": "{E_IMPORTED_TASK_ROOT}",
+      "original_prefix_sha256": "f35705e7606a20498b4aa4fc3c0b284959d90bd4c9003feccc2b0331978477d4"
+    },
+    {
+      "role": "{USER_PROFILE}",
+      "original_prefix_sha256": "c7807bfac4194ed86bb7b3ed699152e19df32fa39113c185a51ed48d6d681587"
+    },
+    {
+      "role": "{ORCHE_INSTALL_ROOT}",
+      "original_prefix_sha256": "c3aeec448aaff5d0d0242d1aab6e0ed464504dc158794e12acd73cbce46b31c2"
+    },
+    {
+      "role": "{GIT_EXE}",
+      "original_prefix_sha256": "6150ff2962014c83de3d991e1d5571eb9e6471ee59d10d34819056e8875c0c03"
+    },
+    {
+      "role": "{RG_EXE}",
+      "original_prefix_sha256": "fa119a728dcc2ba7dbe662eee118153fd4917af0e75a7897a438089417c2056a"
+    },
+    {
+      "role": "{D_REPOSITORY_ROOT}",
+      "original_prefix_sha256": "1bd1fd86a9215dd4f46d8e262d907259ee21736c3aec0c3a689467d6b45d0aa1"
+    },
+    {
+      "role": "{TASK_ROOT}",
+      "original_prefix_sha256": "0d00d6e3361faa70341f30c831fd9392da3de54ba54c6d7177be768d6cdab4c7"
+    },
+    {
+      "role": "{E_IMPORTED_TASK_ROOT}",
+      "original_prefix_sha256": "e50c92758e5e3317e2575476e44a2d32bc0d06bbb371f43b7a5a198b9332d204"
+    },
+    {
+      "role": "{CURRENT_WORKSPACE}",
+      "original_prefix_sha256": "cd16d0258046035bb566863377fcd6167d4c0e3e648dc6cbd61be36a4307c75d"
+    },
+    {
+      "role": "{DONOR_WORKSPACE}",
+      "original_prefix_sha256": "30851bbb7ed6a307b958dbc8a37fb3fea8226e10c9ae3933251afff621f86d68"
+    },
+    {
+      "role": "{RECOVERY_WORKSPACE}",
+      "original_prefix_sha256": "ee0cd6c9cf6e4b04381eeca09f1cdc948ad4053bba4d0cf9ca27bcf558616c97"
+    }
+  ],
+  "review": {
+    "root_read_primary_target_records": true,
+    "independent_metadata_and_producer_review": true,
+    "full_checkpoint_manifest_verified": true,
+    "recovered_code_imported_or_executed": false,
+    "target_bytes_recovered": false,
+    "canonical_manifest_schema_recovered": false,
+    "prior_seen_set_ambiguity_resolved": "false refers to 57 supplied prior-search archive hashes, not historical S16 pin"
+  },
+  "reader_scope": "Originals and captures closed for the eight named native recovery routes only; not production native acceptance",
+  "publication": "Native guarded staging, exact Git index verification and normal native push gate required before publication; no API commit bypass",
+  "publication_metadata_correction": {
+    "rejected_unpublished_commit": "b1bb971cf02c7a990426916741e05546367f3fa2",
+    "native_gate_failure": "PGG-SCAN-FINDING",
+    "stage": "range-coverage",
+    "canonical_read_only_diagnostic": {
+      "findings": 2,
+      "class": "machine-path",
+      "commit_message_findings": 0,
+      "report_complete": true,
+      "publicationAuthority": false
+    },
+    "changed_original_metadata_projections": [
+      {
+        "path": "primary/product-source-admission-review.json",
+        "original": {
+          "bytes": 4516,
+          "sha256": "14746c02391ccf9f44940227f2b0ea9822c1675ac2d5e963daa4392988cd765d"
+        },
+        "published": {
+          "bytes": 4511,
+          "sha256": "bca77f438b8d6e959e6d8dba1b2c1cb976a3628dead7246f751dfe8312a6f19c"
+        },
+        "path_substitutions": [
+          {
+            "role": "{TASK_ROOT}",
+            "original_prefix_sha256": "0d00d6e3361faa70341f30c831fd9392da3de54ba54c6d7177be768d6cdab4c7",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "path": "producer-stage-decoded-edits.json",
+        "original": {
+          "bytes": 10620,
+          "sha256": "c2d458d191a16e2383032742c1e9519700b83e7beb489de2de64a459cc28da4a"
+        },
+        "published": {
+          "bytes": 12540,
+          "sha256": "3431205cb1cd70a7dd79248bda3f5482b836662b1b610b5c0da876390e4e77d7"
+        },
+        "path_substitutions": [
+          {
+            "role": "{TASK_ROOT}",
+            "original_prefix_sha256": "37b6a964ec9732f132ff115ca0de3ba60ab5b4aea002442e0b0931de6295dcce",
+            "occurrences": 11
+          },
+          {
+            "role": "{TASK_ROOT}",
+            "original_prefix_sha256": "0d00d6e3361faa70341f30c831fd9392da3de54ba54c6d7177be768d6cdab4c7",
+            "occurrences": 2
+          },
+          {
+            "role": "{DONOR_WORKSPACE}",
+            "original_prefix_sha256": "30851bbb7ed6a307b958dbc8a37fb3fea8226e10c9ae3933251afff621f86d68",
+            "occurrences": 2
+          }
+        ]
+      }
+    ],
+    "originals_preserved": true,
+    "gate_or_policy_changed": false
+  }
+}

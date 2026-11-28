@@ -1,0 +1,2110 @@
+{
+  "schema": "historical-cli717-recovery-v1",
+  "recovered_utc_date": "2026-11-28",
+  "scope": "Historical aggregate of selected root observations across four original runs and three source revisions; not a single full test run or a mandatory gate PASS.",
+  "qualification_at_initial_authoring": {
+    "historical_aggregate_reconstructed": true,
+    "single_full_run_pass": false,
+    "mandatory_default_command_pass": false,
+    "mandatory_tagged_command_pass": false,
+    "current_source4_qualified": false,
+    "current_public_pr_heads_qualified": false,
+    "source_cache_reuse_authorized": false,
+    "original_failures_reclassified": false,
+    "new_tests_or_native_processes_run": false
+  },
+  "expected_inventory": {
+    "file": "cli717-roots.txt",
+    "bytes": 40832,
+    "sha256": "e5b4c2c96999995960e28931f4632a6a29b195933f13e1038aa0559885716cc6",
+    "roots": 717,
+    "unique_roots": 717,
+    "first_two_runs_started_union": 717,
+    "first_two_runs_overlap": 0,
+    "union_equals_original_expected_inventory": true
+  },
+  "selection_rule": {
+    "run_order": [
+      "cli717-fixed-v3",
+      "remaining261-v1",
+      "compact-profile-v1",
+      "marked-workspace-replay-v2"
+    ],
+    "rule": "For each exact expected root name, retain every observation in run order and select the final available observation. No observation is deleted or changed. The third run repeats one already passing root; the aggregate counts each expected root once.",
+    "final_outcomes": {
+      "roots": 717,
+      "PASS": 712,
+      "SKIP": 5
+    },
+    "original_root_observation_count": 720
+  },
+  "runs": [
+    {
+      "id": "cli717-fixed-v3",
+      "source_commit": "31d973e16a2249e1cb2db1f1c95a0eb594f72685",
+      "original_status": "FAIL",
+      "execution_status": "FAIL",
+      "parent": {
+        "bytes": 1128,
+        "sha256": "6a4e88b4519873c38381b2e734f6df2b95247f52ea94c0d21c4f256223f7dd03",
+        "original_line_endings": "CRLF",
+        "exit_code": 1,
+        "terminal_exit_received": true,
+        "parent_capture_files_closed": true,
+        "capture_closure": [
+          {
+            "name": "controller.stdout",
+            "close_returned": true,
+            "wrapper_closed": true
+          },
+          {
+            "name": "controller.stderr",
+            "close_returned": true,
+            "wrapper_closed": true
+          }
+        ],
+        "commands_quiescent": true,
+        "deadline_exceeded": false,
+        "seconds": 334.3262730000424,
+        "child_sha256": "a0fdd4c92f16f1ce154bea7a5162900509bb8c202d19443aa651a00b9e88f293",
+        "plan_sha256_as_recorded": "e437eb4d6747142ed54ee88a08815f7596c16084c529b1bd141aeac46c217eab",
+        "runner_sha256_as_recorded": "7b214d4e13fadfeed4f07c3e0f9298d3d4a38a01379a77bee36be955991f7808"
+      },
+      "execution": {
+        "bytes": 146455,
+        "sha256": "a0fdd4c92f16f1ce154bea7a5162900509bb8c202d19443aa651a00b9e88f293",
+        "original_line_endings": "CRLF",
+        "commands_quiescent": true,
+        "command_count": 11,
+        "original_reader_count": 22,
+        "commands": [
+          {
+            "role": "compile-source-head",
+            "exit_code": 0,
+            "seconds": 0.844801900035236,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 41,
+                "bytes_stored": 41
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "11b70a770b13c69b1023be5208baa67f8498ba5d8db038af9ab29967f538e9c1",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "compile-cli",
+            "exit_code": 0,
+            "seconds": 25.447842000052333,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "cli-product-identity",
+            "exit_code": 0,
+            "seconds": 0.2625073000090197,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 295,
+                "bytes_stored": 295
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "93b6d20c997e360f8da337267a33333f44c66ab9e568fc693473233400e0fe96",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "cli-validate-entry-set-build",
+            "exit_code": 0,
+            "seconds": 0.181443500041496,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 479,
+                "bytes_stored": 479
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "aed0b98b25209e9765eb34ca931f216f2b2d8f10c2c568e36cb1b04ce804fc2b",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "cli-validate-entry-set",
+            "exit_code": 0,
+            "seconds": 0.17383559996960685,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 447,
+                "bytes_stored": 447
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "4607a4d4a17a6f10a717ddd16e7d22aa8b44619265b9d2d2fdaac39df61d8fe9",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "cli-native",
+            "exit_code": 0,
+            "seconds": 0.11115500004962087,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 547,
+                "bytes_stored": 547
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "64d7fe1bb4b9bd9ae4e837ef2d7926a90304cd9ccf5a5f1a6a9f4942d9be6d3c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "head-before",
+            "exit_code": 0,
+            "seconds": 0.0852005000342615,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 41,
+                "bytes_stored": 41
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "11b70a770b13c69b1023be5208baa67f8498ba5d8db038af9ab29967f538e9c1",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "status-before",
+            "exit_code": 0,
+            "seconds": 0.10629470000276342,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "cli717-fixed",
+            "exit_code": 1,
+            "seconds": 305.5697791999555,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 1,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 773102,
+                "bytes_stored": 773102
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "bffc231463052828939e1750fb29aee81f0425e856db09566b077567ec1720d2",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "head-after",
+            "exit_code": 0,
+            "seconds": 0.0783596999826841,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 41,
+                "bytes_stored": 41
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "11b70a770b13c69b1023be5208baa67f8498ba5d8db038af9ab29967f538e9c1",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "status-after",
+            "exit_code": 0,
+            "seconds": 0.13344920001691207,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        ]
+      },
+      "selected_command_role": "cli717-fixed",
+      "root_capture": {
+        "file": "cli717-fixed.stdout.txt",
+        "bytes": 773102,
+        "sha256": "bffc231463052828939e1750fb29aee81f0425e856db09566b077567ec1720d2",
+        "original_reader_stored_bytes": 773102,
+        "sha_matches_original_execution": true
+      },
+      "root_stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "physical_file_size_independently_observed": 0
+      },
+      "root_outcomes": {
+        "PASS": 451,
+        "FAIL": 0,
+        "SKIP": 4,
+        "UNTERMINATED": 1
+      },
+      "package_terminal_events": []
+    },
+    {
+      "id": "remaining261-v1",
+      "source_commit": "31d973e16a2249e1cb2db1f1c95a0eb594f72685",
+      "original_status": "FAIL",
+      "execution_status": "FAIL",
+      "parent": {
+        "bytes": 1129,
+        "sha256": "eb0d66b489056f6c32d516b4819bcdcf16ed35b565a1f4192cbdf2a88427df0c",
+        "original_line_endings": "CRLF",
+        "exit_code": 1,
+        "terminal_exit_received": true,
+        "parent_capture_files_closed": true,
+        "capture_closure": [
+          {
+            "name": "controller.stdout",
+            "close_returned": true,
+            "wrapper_closed": true
+          },
+          {
+            "name": "controller.stderr",
+            "close_returned": true,
+            "wrapper_closed": true
+          }
+        ],
+        "commands_quiescent": true,
+        "deadline_exceeded": false,
+        "seconds": 266.48926659999415,
+        "child_sha256": "f02088c40473b288d655469011f67e329f9c2e61a9ed07cc8dfe74e46fd5e459",
+        "plan_sha256_as_recorded": "dc44c2de395d42f4a39b06f36673523d8a1bc2b3387a24e4110fb04182ac8cd0",
+        "runner_sha256_as_recorded": "7b214d4e13fadfeed4f07c3e0f9298d3d4a38a01379a77bee36be955991f7808"
+      },
+      "execution": {
+        "bytes": 91367,
+        "sha256": "f02088c40473b288d655469011f67e329f9c2e61a9ed07cc8dfe74e46fd5e459",
+        "original_line_endings": "CRLF",
+        "commands_quiescent": true,
+        "command_count": 5,
+        "original_reader_count": 10,
+        "commands": [
+          {
+            "role": "head-before",
+            "exit_code": 0,
+            "seconds": 0.13958409999031574,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 41,
+                "bytes_stored": 41
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "11b70a770b13c69b1023be5208baa67f8498ba5d8db038af9ab29967f538e9c1",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "status-before",
+            "exit_code": 0,
+            "seconds": 0.20536079996963963,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "remaining261",
+            "exit_code": 1,
+            "seconds": 264.97220799996285,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 1,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 576306,
+                "bytes_stored": 576306
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "f38352882f3e357180a8727db0fd3f215a37d60657081f7b3aff4d86261a24a8",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "head-after",
+            "exit_code": 0,
+            "seconds": 0.08106419997056946,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 41,
+                "bytes_stored": 41
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "11b70a770b13c69b1023be5208baa67f8498ba5d8db038af9ab29967f538e9c1",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "status-after",
+            "exit_code": 0,
+            "seconds": 0.11717119999229908,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        ]
+      },
+      "selected_command_role": "remaining261",
+      "root_capture": {
+        "file": "remaining261.stdout.txt",
+        "bytes": 576306,
+        "sha256": "f38352882f3e357180a8727db0fd3f215a37d60657081f7b3aff4d86261a24a8",
+        "original_reader_stored_bytes": 576306,
+        "sha_matches_original_execution": true
+      },
+      "root_stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "physical_file_size_independently_observed": 0
+      },
+      "root_outcomes": {
+        "PASS": 259,
+        "FAIL": 1,
+        "SKIP": 1,
+        "UNTERMINATED": 0
+      },
+      "package_terminal_events": [
+        {
+          "action": "fail",
+          "package": "mcp-local-hub/internal/cli",
+          "duration_seconds": 264.789
+        }
+      ]
+    },
+    {
+      "id": "compact-profile-v1",
+      "source_commit": "53feceeeaf85533042d40ddb2935fa3b9824ba04",
+      "original_status": "PASS",
+      "execution_status": "PASS",
+      "parent": {
+        "bytes": 1154,
+        "sha256": "484de58f9c0ff9b832db0853cd61719b00f71f1c201a679a97272b61433362e0",
+        "original_line_endings": "CRLF",
+        "exit_code": 0,
+        "terminal_exit_received": true,
+        "parent_capture_files_closed": true,
+        "capture_closure": [
+          {
+            "name": "controller.stdout",
+            "close_returned": true,
+            "wrapper_closed": true
+          },
+          {
+            "name": "controller.stderr",
+            "close_returned": true,
+            "wrapper_closed": true
+          }
+        ],
+        "commands_quiescent": true,
+        "deadline_exceeded": false,
+        "seconds": 144.6424313999596,
+        "child_sha256": "ed7c02f369cc68612098b2296ad168da97564c208e64738ff0e037665c64938e",
+        "plan_sha256_as_recorded": "859b9e76863493c21a92d381afa3c543e539face9081f9fd10e5b3252b047921",
+        "runner_sha256_as_recorded": "eba082ba06b0280c0df10c81e31845df67239c2428d5632b94424024ff317334"
+      },
+      "execution": {
+        "bytes": 94984,
+        "sha256": "ed7c02f369cc68612098b2296ad168da97564c208e64738ff0e037665c64938e",
+        "original_line_endings": "CRLF",
+        "commands_quiescent": true,
+        "command_count": 11,
+        "original_reader_count": 22,
+        "commands": [
+          {
+            "role": "compile-source-head",
+            "exit_code": 0,
+            "seconds": 0.080290200014133,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 41,
+                "bytes_stored": 41
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "dd458ec5b169faac495ac4c6182d19de13eeb38604799d5e92d54cc7fe8295c6",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "compile-cli",
+            "exit_code": 0,
+            "seconds": 13.704064099991228,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "cli-product-identity",
+            "exit_code": 0,
+            "seconds": 0.16839170001912862,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 295,
+                "bytes_stored": 295
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "e9def27f4dc47eb160efa701567ce3af9c161bf1c33d8920e5f79c59124cc602",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "cli-validate-entry-set-build",
+            "exit_code": 0,
+            "seconds": 0.1517067999811843,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 479,
+                "bytes_stored": 479
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "830c350acbbb551ec2c6661e7a9fa1245b2e815d7f765852c6962e92bb111a00",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "cli-validate-entry-set",
+            "exit_code": 0,
+            "seconds": 0.22284380003111437,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 447,
+                "bytes_stored": 447
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "134006fc76ceab27bb055e136f276c7ac891f8d353e5a225ea172a836872f347",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "cli-native",
+            "exit_code": 0,
+            "seconds": 0.12052789999870583,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 547,
+                "bytes_stored": 547
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "64d7fe1bb4b9bd9ae4e837ef2d7926a90304cd9ccf5a5f1a6a9f4942d9be6d3c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "head-before",
+            "exit_code": 0,
+            "seconds": 0.08411190001061186,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 41,
+                "bytes_stored": 41
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "dd458ec5b169faac495ac4c6182d19de13eeb38604799d5e92d54cc7fe8295c6",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "status-before",
+            "exit_code": 0,
+            "seconds": 0.10631740000098944,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "upgrade-preflight-compact",
+            "exit_code": 0,
+            "seconds": 128.70715630002087,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 17230,
+                "bytes_stored": 17230
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "4d01e651ce82876bafceaf4f5a1a8cd0a79e5ec5e5b493ed20f88bf81a345738",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "head-after",
+            "exit_code": 0,
+            "seconds": 0.12776199996005744,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 41,
+                "bytes_stored": 41
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "dd458ec5b169faac495ac4c6182d19de13eeb38604799d5e92d54cc7fe8295c6",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "status-after",
+            "exit_code": 0,
+            "seconds": 0.3223198000341654,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        ]
+      },
+      "selected_command_role": "upgrade-preflight-compact",
+      "root_capture": {
+        "file": "upgrade-preflight-compact.stdout.txt",
+        "bytes": 17230,
+        "sha256": "4d01e651ce82876bafceaf4f5a1a8cd0a79e5ec5e5b493ed20f88bf81a345738",
+        "original_reader_stored_bytes": 17230,
+        "sha_matches_original_execution": true
+      },
+      "root_stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "physical_file_size_independently_observed": 0
+      },
+      "root_outcomes": {
+        "PASS": 2,
+        "FAIL": 0,
+        "SKIP": 0,
+        "UNTERMINATED": 0
+      },
+      "package_terminal_events": [
+        {
+          "action": "pass",
+          "package": "mcp-local-hub/internal/cli",
+          "duration_seconds": 128.594
+        }
+      ]
+    },
+    {
+      "id": "marked-workspace-replay-v2",
+      "source_commit": "25f9a79851dc7e3e409cfb823b54d590fb1ac550",
+      "source_parent": "823f2cf21b9cd8f1f2c4e784031e350c1c8b7734",
+      "original_status": "PASS",
+      "execution_status": "PASS",
+      "parent": {
+        "bytes": 1153,
+        "sha256": "b8e3b56ea82184e27fd16007064ad21a5c988afde689dc54222e6070e646d7b4",
+        "original_line_endings": "CRLF",
+        "exit_code": 0,
+        "terminal_exit_received": true,
+        "parent_capture_files_closed": true,
+        "capture_closure": [
+          {
+            "name": "controller.stdout",
+            "close_returned": true,
+            "wrapper_closed": true
+          },
+          {
+            "name": "controller.stderr",
+            "close_returned": true,
+            "wrapper_closed": true
+          }
+        ],
+        "commands_quiescent": true,
+        "deadline_exceeded": false,
+        "seconds": 151.19298569997773,
+        "child_sha256": "f9a2b2fd10c4bcf3bce9c0e912b5070c313cd3204bf78c343635a52cb49fc532",
+        "plan_sha256_as_recorded": "7b97b56fc7658405565624e2fe227e243aeaaebbe08dc076e3efca7eae28ca00",
+        "runner_sha256_as_recorded": "856b0b085a49c552a8bcae76ee3754f0db63ea65ac6ad5e7b1327853fe806b6d"
+      },
+      "execution": {
+        "bytes": 92910,
+        "sha256": "f9a2b2fd10c4bcf3bce9c0e912b5070c313cd3204bf78c343635a52cb49fc532",
+        "original_line_endings": "CRLF",
+        "commands_quiescent": true,
+        "command_count": 10,
+        "original_reader_count": 20,
+        "commands": [
+          {
+            "role": "same-image-setup",
+            "exit_code": 0,
+            "seconds": 0.16053590003866702,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 297,
+                "bytes_stored": 297
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "dc79141baba76bb4ab355097a603b6d957d1d59944ded19c83ad4e6e7d6b0ad6",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "source-head-before",
+            "exit_code": 0,
+            "seconds": 0.0631897000130266,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 82,
+                "bytes_stored": 82
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "46c4917be49a1a5ae429bb1656bad7ceaccd2b472b822fec90626c54e6eba5f8",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "source-files-before",
+            "exit_code": 0,
+            "seconds": 0.06822169997030869,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 160796,
+                "bytes_stored": 160796
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "769d0a752d868936b995d121e697f6453d27dc7627eb10fdc970f49efc341b1d",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "source-clean-before",
+            "exit_code": 0,
+            "seconds": 0.39094830001704395,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "same-image-before",
+            "exit_code": 0,
+            "seconds": 3.0179122999543324,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 299,
+                "bytes_stored": 299
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "1e2724f5460a89b9a1a9bb66b8790268ec73e0596beab035b19164be190883a9",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "workspace-producer",
+            "exit_code": 0,
+            "seconds": 142.99332469998626,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 1328,
+                "bytes_stored": 1328
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "38215bebaa5608bfab24afd684c320a4103bb777e7eb84ae3b1e7f6fe0374ea0",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "source-head-after",
+            "exit_code": 0,
+            "seconds": 0.034396400034893304,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 82,
+                "bytes_stored": 82
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "46c4917be49a1a5ae429bb1656bad7ceaccd2b472b822fec90626c54e6eba5f8",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "source-files-after",
+            "exit_code": 0,
+            "seconds": 0.08445590001065284,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 160796,
+                "bytes_stored": 160796
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "769d0a752d868936b995d121e697f6453d27dc7627eb10fdc970f49efc341b1d",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "source-clean-after",
+            "exit_code": 0,
+            "seconds": 0.06157829996664077,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "role": "same-image-after",
+            "exit_code": 0,
+            "seconds": 3.7045532999909483,
+            "quiescence_state": "complete",
+            "work_deadline_exceeded": false,
+            "cleanup_deadline_exceeded": false,
+            "native": {
+              "direct_exit_code": 0,
+              "direct_reaped": true,
+              "active_zero": true,
+              "job_terminated": false,
+              "handles_closed": true,
+              "issues": []
+            },
+            "original_owner_retained": true,
+            "original_readers_retained": true,
+            "original_readers_joined": true,
+            "captures_measured": true,
+            "completion_lifecycle": "CLOSED",
+            "io": {
+              "stdout": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 297,
+                "bytes_stored": 297
+              },
+              "stderr": {
+                "worker_started": true,
+                "worker_complete": true,
+                "eof": true,
+                "pipe_close_returned": true,
+                "capture_close_returned": true,
+                "error": null,
+                "bytes_seen": 0,
+                "bytes_stored": 0
+              }
+            },
+            "stdout_sha256": "3a7fe7910a1bddb11ca5387cbc1e769518e6a015f409c0388913464cb206cf66",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        ]
+      },
+      "selected_command_role": "workspace-producer",
+      "root_capture": {
+        "file": "workspace-producer.stdout.txt",
+        "bytes": 1328,
+        "sha256": "38215bebaa5608bfab24afd684c320a4103bb777e7eb84ae3b1e7f6fe0374ea0",
+        "original_reader_stored_bytes": 1328,
+        "sha_matches_original_execution": true
+      },
+      "root_stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "physical_file_size_independently_observed": 0
+      },
+      "root_outcomes": {
+        "PASS": 1,
+        "FAIL": 0,
+        "SKIP": 0,
+        "UNTERMINATED": 0
+      },
+      "package_terminal_events": [
+        {
+          "action": "pass",
+          "package": "mcp-local-hub/internal/cli",
+          "duration_seconds": 142.816
+        }
+      ]
+    }
+  ],
+  "original_failure_observations": [
+    {
+      "test": "TestUpgradeCurrentAutorunOffSettlesBeforeOuterFenceRelease",
+      "run": "cli717-fixed-v3",
+      "source_commit": "31d973e16a2249e1cb2db1f1c95a0eb594f72685",
+      "outcome": "UNTERMINATED",
+      "duration_seconds": null,
+      "terminal_received": false
+    },
+    {
+      "test": "TestWorkspaceRegisterSerena_NativePreparationProducerToTerminalFrame",
+      "run": "remaining261-v1",
+      "source_commit": "31d973e16a2249e1cb2db1f1c95a0eb594f72685",
+      "outcome": "FAIL",
+      "duration_seconds": 0.25,
+      "terminal_received": true
+    }
+  ],
+  "repeated_observations": [
+    {
+      "test": "TestUpgradeCurrentAutorunOffSettlesBeforeOuterFenceRelease",
+      "observations": [
+        {
+          "run": "cli717-fixed-v3",
+          "source_commit": "31d973e16a2249e1cb2db1f1c95a0eb594f72685",
+          "outcome": "UNTERMINATED",
+          "duration_seconds": null,
+          "terminal_received": false
+        },
+        {
+          "run": "compact-profile-v1",
+          "source_commit": "53feceeeaf85533042d40ddb2935fa3b9824ba04",
+          "outcome": "PASS",
+          "duration_seconds": 73.87,
+          "terminal_received": true
+        }
+      ],
+      "selected_outcome": "PASS",
+      "selected_run": "compact-profile-v1"
+    },
+    {
+      "test": "TestWindowsProductPreflightOriginalEntrySet",
+      "observations": [
+        {
+          "run": "remaining261-v1",
+          "source_commit": "31d973e16a2249e1cb2db1f1c95a0eb594f72685",
+          "outcome": "PASS",
+          "duration_seconds": 54.57,
+          "terminal_received": true
+        },
+        {
+          "run": "compact-profile-v1",
+          "source_commit": "53feceeeaf85533042d40ddb2935fa3b9824ba04",
+          "outcome": "PASS",
+          "duration_seconds": 51.73,
+          "terminal_received": true
+        }
+      ],
+      "selected_outcome": "PASS",
+      "selected_run": "compact-profile-v1"
+    },
+    {
+      "test": "TestWorkspaceRegisterSerena_NativePreparationProducerToTerminalFrame",
+      "observations": [
+        {
+          "run": "remaining261-v1",
+          "source_commit": "31d973e16a2249e1cb2db1f1c95a0eb594f72685",
+          "outcome": "FAIL",
+          "duration_seconds": 0.25,
+          "terminal_received": true
+        },
+        {
+          "run": "marked-workspace-replay-v2",
+          "source_commit": "25f9a79851dc7e3e409cfb823b54d590fb1ac550",
+          "outcome": "PASS",
+          "duration_seconds": 142.69,
+          "terminal_received": true
+        }
+      ],
+      "selected_outcome": "PASS",
+      "selected_run": "marked-workspace-replay-v2"
+    }
+  ],
+  "unchanged_boundaries": {
+    "cli717_fixed_v1": "Frozen original UNKNOWN command has a separate physical-closure record; no capture from this run was read or included in this aggregate.",
+    "literal_full_v1_full_v8": "Outer deadline metadata has terminal_exit_received=false; isolated. Its captures and caches were not read or reused.",
+    "full_v9": "Separate continuation metadata reports physical CLOSED with frozen FAIL/UNKNOWN and Source/cache postclosure finalization NOT_RUN. No access or qualification grant is inferred here."
+  },
+  "method": {
+    "original_parent_and_execution_metadata_read_before_capture_access": true,
+    "all_four_execution_digests_match_original_parent_child_hashes": true,
+    "all_selected_stdout_bytes_match_original_command_hashes_and_reader_byte_counts": true,
+    "parent_file_sizes_checked_with_read_only_file_metadata": true,
+    "empty_selected_stderr_sizes_checked_with_read_only_file_metadata": true,
+    "exact_full_expected_list_received": true,
+    "raw_private_captures_published": false,
+    "host_paths_or_process_ids_published": false,
+    "parser_execution_by_reviewer": false,
+    "review_computation": "Data-only byte hashing, JSON parsing, root reconciliation and Git blob hashing; no process execution.",
+    "metadata_transport": "Text transport returned normalized LF; CRLF was reconstructed before hashing original parent/execution metadata. Reconstructed lengths match physical file sizes, and all four execution digests match original parent child_sha256."
+  },
+  "qualification": {
+    "historical_aggregate_reconstructed": true,
+    "single_full_run_pass": false,
+    "mandatory_default_command_pass": false,
+    "mandatory_tagged_command_pass": false,
+    "current_source4_qualified": false,
+    "current_public_pr_heads_qualified": false,
+    "source_cache_reuse_authorized": false,
+    "original_failures_reclassified": false,
+    "parser_executed": true,
+    "new_product_or_test_commands": false,
+    "data_parser_process_executed": true
+  },
+  "data_replay": {
+    "file": "data-replay-evidence.json",
+    "sha256": "1e9e75dc875a5f06e6f582fc1c849219d2ebc325ec44924427acc33bb39246e3",
+    "result_file": "data-replay-result.json",
+    "result_sha256": "617c5890b678691227125d34811425884865720e1b334d1b89fa277a72e1e1eb",
+    "initial_authoring_scope_preserved": true,
+    "current_scope": {
+      "parser_executed": true,
+      "parser_execution_role": "PR owner after initial authoring",
+      "new_product_or_test_commands": false,
+      "parser_started_child_processes": false,
+      "historical_aggregate_verified": true,
+      "roots": 717,
+      "PASS": 712,
+      "SKIP": 5,
+      "single_full_run_pass": false,
+      "mandatory_gate_qualification": false,
+      "source_or_cache_reuse_authorized": false,
+      "original_failures_reclassified": false
+    }
+  }
+}

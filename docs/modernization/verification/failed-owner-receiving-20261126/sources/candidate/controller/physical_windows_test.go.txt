@@ -1,0 +1,99 @@
+//go:build windows && amd64
+
+package main
+
+import (
+	"encoding/json"
+	"errors"
+	"os"
+	"strings"
+	"testing"
+
+	"mcp-local-hub/internal/process"
+)
+
+// Deterministic regression for the future native harness: release the exact
+// original return channel explicitly. No subprocess, sleeps or native owner
+// simulation is used. This checks the controller's receive/sink boundary only.
+func TestFailedPhysicalOuterOriginalReturnAndFrozenIO(t *testing.T) {
+	for _, workerReturned := range []bool{true, false} {
+		name := "failed_but_returned_io"
+		if !workerReturned {
+			name = "frozen_incomplete_io_holds"
+		}
+		t.Run(name, func(t *testing.T) {
+			s := &session{outerDone: make(chan outerOutcome, 1), unknown: true}
+			s.record.Failure = "original cleanup deadline expired"
+			s.record.WorkDeadline = "2026-11-26T00:00:00Z"
+			s.record.CleanupDeadline = "2026-11-26T00:00:10Z"
+			r := &failedPhysicalResult{ControlJoined: true, ControlStopped: true}
+			for _, sink := range []struct {
+				file   **os.File
+				closed *bool
+			}{{&s.stdout, &r.StdoutSinkClosed}, {&s.stderr, &r.StderrSinkClosed}} {
+				read, write, err := os.Pipe()
+				if err != nil {
+					t.Fatal(err)
+				}
+				*sink.file = write
+				closed := sink.closed
+				t.Cleanup(func() {
+					read.Close()
+					if !*closed {
+						write.Close()
+					}
+				})
+			}
+			before, err := json.Marshal(s.record)
+			if err != nil {
+				t.Fatal(err)
+			}
+			originalDone := s.outerDone
+			if pending, err := s.pollFailedPhysical(r); !pending || err != nil || r.OuterReturnReceived || r.StdoutSinkClosed || r.StderrSinkClosed {
+				t.Fatalf("unreceived original was treated as terminal: pending=%v error=%v result=%+v", pending, err, r)
+			}
+			consumerFailure := errors.New("original consumer failed without EOF")
+			observed := process.ContainedStreamReceiptV1{IOSettlement: process.ContainedIOSettlement{
+				Stdout: process.ContainedIOStream{WorkerStarted: true, WorkerComplete: workerReturned, Error: consumerFailure},
+			}}
+			if observed.IOSettlement.Complete() {
+				t.Fatal("fixture must distinguish qualification from physical completion")
+			}
+			originalDone <- outerOutcome{Observed: observed, Cause: consumerFailure, Returned: true}
+			pending, receiveErr := s.pollFailedPhysical(r)
+			if pending || !r.OuterReturnReceived || s.outerDone != originalDone || !errors.Is(s.outer.Cause, consumerFailure) {
+				t.Fatalf("original return was not retained exactly: pending=%v error=%v", pending, receiveErr)
+			}
+			if workerReturned {
+				if receiveErr != nil || !r.OuterResourcesFinalized || !r.StdoutSinkClosed || !r.StderrSinkClosed {
+					t.Fatalf("closed failed IO was not physically received: %v, %+v", receiveErr, r)
+				}
+				if _, err := s.stdout.Write([]byte{1}); !errors.Is(err, os.ErrClosed) {
+					t.Fatalf("original borrowed sink is not closed: %v", err)
+				}
+				if pending, err := s.pollFailedPhysical(r); pending || err != nil {
+					t.Fatalf("received original was waited or closed again: pending=%v error=%v", pending, err)
+				}
+			} else {
+				if receiveErr == nil || !strings.Contains(receiveErr.Error(), "frozen original outer") || r.OuterResourcesFinalized || r.StdoutSinkClosed || r.StderrSinkClosed {
+					t.Fatalf("incomplete frozen IO was upgraded: %v, %+v", receiveErr, r)
+				}
+				// A later fact in another value cannot refresh the original receipt.
+				observed.IOSettlement.Stdout.WorkerComplete = true
+				if pending, err := s.pollFailedPhysical(r); pending || err == nil || r.OuterResourcesFinalized {
+					t.Fatalf("frozen incomplete original escaped HOLD: pending=%v error=%v", pending, err)
+				}
+				if _, err := s.stdout.Write([]byte{1}); err != nil {
+					t.Fatalf("HOLD closed an unsettled original sink: %v", err)
+				}
+			}
+			after, err := json.Marshal(s.record)
+			if err != nil || string(after) != string(before) {
+				t.Fatalf("original failure/deadline record changed: %v", err)
+			}
+			if r.QualificationPassed || r.CaptureAccessIssued || r.NewCommandsPermitted || r.SourceOrCacheAccessIssued || r.QualificationDeadlinesExtended {
+				t.Fatal("physical receiving granted new work or qualification")
+			}
+		})
+	}
+}

@@ -1,0 +1,2 @@
+TestEnabled_ExactOneOnly
+TestRegisterAllowed_LogsWhenDisabled

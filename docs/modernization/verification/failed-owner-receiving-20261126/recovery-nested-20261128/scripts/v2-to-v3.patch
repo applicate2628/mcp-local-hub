@@ -1,0 +1,11 @@
+--- inspect_nested.py
++++ inspect_nested.py
+@@ -493,7 +493,7 @@
+             else:
+                 detail["short_metadata_strings_hash_checked"] += 1
+             compact = b"".join(candidate.split())
+-            if (explicit or len(compact) >= 32) and len(compact) % 4 == 0 and re.fullmatch(rb"[A-Za-z0-9+/_-]*={0,2}", compact):
++            if (explicit or len(compact) >= 256 or compact.startswith((b"/Td6WFo", b"H4sI", b"UEsDB", b"UEsFB"))) and len(compact) % 4 == 0 and re.fullmatch(rb"[A-Za-z0-9+/_-]*={0,2}", compact):
+                 size = len(compact) // 4 * 3 - (len(compact) - len(compact.rstrip(b"=")))
+                 if size > self.limits["member_bytes"] or self.expanded + size > self.limits["expanded_total_bytes"]:
+                     raise Limit("base64 decoded byte budget")

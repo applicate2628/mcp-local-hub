@@ -111,7 +111,15 @@ func ErrMacOSProbeUnsupportedForTest() error { return errMacOSProbeUnsupported }
 // inside KillRecordedHolder. Used only by the wait-for-exit unit
 // test (Codex iter-9 P2 #2) so the test can drive the wait loop
 // without actually SIGKILLing/TerminateProcessing any real process.
-// Kept package-private — same-package tests can assign to it
-// directly, and there is no production caller that should ever
-// install it.
+// Storage stays package-private. Cross-package tests use the setter below;
+// production callers must never install an override.
 var killProcessOverride func(pid int) error
+
+// SetKillProcessForTest binds a test-owned termination operation and returns
+// the previous binding's restore function. Callers must not run in parallel
+// and must join their command before restoring the binding.
+func SetKillProcessForTest(fn func(pid int) error) func() {
+	previous := killProcessOverride
+	killProcessOverride = fn
+	return func() { killProcessOverride = previous }
+}

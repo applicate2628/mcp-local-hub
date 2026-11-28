@@ -1,0 +1,19 @@
+{
+    "schema":  "verified-disposable-reconstruction-trash-v1",
+    "status":  "MOVED_AND_VERIFIED",
+    "source_role":  "root-data-reconstruction-of-closed-full-failure",
+    "destination_role":  "R-trash/mcp-acceptance-20261128-full-failure-root-reconstruction-v1",
+    "source_absent":  true,
+    "destination_files":  21,
+    "exact_original_data_copies":  20,
+    "original_bytes":  14916637,
+    "source_bindings_sha256":  "4cdec1bc4436a72f7e75df04ee78c78082c3dc9f07fc24d6911267bc83cb6af9",
+    "reconstruction_receipt_sha256":  "febdf001692bbe4b815f2544ca39f622a7bfbda3014126457a40d72f2aabe36d",
+    "public_commit":  "05fbffa30f99914c8174966525a70bc9984e7038",
+    "public_path":  "docs/modernization/verification/original-full-v6-failure-20261128",
+    "primary_run_moved":  false,
+    "source_or_cache_moved":  false,
+    "unknown_owner_scope_touched":  false,
+    "permanent_deletion_performed":  false,
+    "verified_utc":  "2026-11-28T13:39:18.9501840Z"
+}

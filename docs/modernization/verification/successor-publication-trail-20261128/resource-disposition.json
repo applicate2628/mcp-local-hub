@@ -1,0 +1,84 @@
+{
+  "schema": "successor-trail-resource-disposition-v1",
+  "scope": "Metadata-only record; no additional move is authorized.",
+  "verified_moves": [
+    {
+      "receipt": "exact/preservation/root-reconstruction-trash-receiving.json",
+      "status": "MOVED_AND_VERIFIED",
+      "duplicate_files": 21,
+      "original_copy_files": 20,
+      "original_copy_bytes": 14916637,
+      "primary_run_moved": false,
+      "source_or_cache_moved": false,
+      "unknown_owner_scope_touched": false,
+      "permanent_deletion_performed": false
+    },
+    {
+      "receipt": "exact/preservation/report-backup-trash-receiving.json",
+      "status": "MOVED_AND_VERIFIED",
+      "duplicate_files": 1,
+      "bytes": 258462,
+      "sha256": "f89be2a59335e294ef957dabdb2cdb4702cc0a7645b4cc398e776c678a6e01a8",
+      "already_published_commit": "01b4e915af6439e4c5e7c5c880a6d4885a2dbd3a",
+      "unique_data_removed": false,
+      "permanent_deletion_performed": false
+    }
+  ],
+  "verified_moved_duplicate_files": 22,
+  "keep": [
+    {
+      "role": "complete-original-full-v6-run",
+      "reason": "566 captures still need exact uniqueness/preservation accounting. Selected full raw streams and complete result metadata are public; distinct remaining raw bytes are not yet classified."
+    },
+    {
+      "role": "final-Source59f-and-Git-objects",
+      "reason": "Required for final acceptance and existing-PR code publication."
+    },
+    {
+      "role": "current-Product-helper-producers-and-continuations",
+      "reason": "Keep original aggregate FAIL and closed first-command successes, exact helpers, active continuations, probe, wrappers and fresh Product inputs until preserved and no longer referenced."
+    },
+    {
+      "role": "warm-cache-v7-and-original-closed-PASS-donor",
+      "reason": "Still bound by current preparation plans; no move while referenced."
+    },
+    {
+      "role": "older-private-compile-and-Product-helper-outputs",
+      "reason": "Reproducibility does not establish that no active input binding references them."
+    },
+    {
+      "role": "source-recovery-exports-raw-commits-patches-receipts",
+      "reason": "Keep unique exact reconstruction/identity evidence until public readback and dependency resolution."
+    },
+    {
+      "role": "operator-role-values-and-publication-candidates",
+      "reason": "Keep until independent reconstruction, publication and exact public readback."
+    },
+    {
+      "role": "UNKNOWN-HOLD-controller-and-restore-scopes",
+      "reason": "Earlier unresolved controller-build, PowerShell probe, first Serena Product and bootstrap restore scopes remain KEEP."
+    },
+    {
+      "role": "shared-toolchains-and-preserved-PowerShell-runtime",
+      "reason": "Shared environment dependencies are not disposable task outputs."
+    }
+  ],
+  "not_yet_proven_disposable": [
+    "Other private Go cache copies",
+    "Apparently redundant source exports",
+    "Candidate capsule copies before exact public readback",
+    "Any remaining unique full-run capture"
+  ],
+  "old_full_566_capture_accounting": {
+    "status": "PENDING_BOUNDED_DATA_AUDIT",
+    "primary_run_keep": true,
+    "scope_only_closed_originals": true,
+    "preferred_preservation": "Lossless deduplicated transparent templates for distinct valuable bytes; exact hash mapping for duplicates.",
+    "hash_only_is_not_raw_preservation": true
+  },
+  "author_actions": {
+    "live_source_or_cache_payload_read_for_inventory": false,
+    "moves_performed": false,
+    "native_test_or_build_execution_performed": false
+  }
+}

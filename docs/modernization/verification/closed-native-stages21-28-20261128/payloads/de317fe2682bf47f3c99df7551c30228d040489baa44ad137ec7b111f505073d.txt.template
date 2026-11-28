@@ -1,0 +1,58 @@
+{
+    "schema":  "publication-original-root-data-audit-v1",
+    "status":  "PASS",
+    "physical_complete":  true,
+    "scope":  "cache-acceptance-stage-20261128-v25",
+    "config_sha256":  "26e05b9a48f98dc25d47e41bf074af773180ad930ab4cea642e1eb4f8d486216",
+    "receipt_sha256":  "569eaf2f20858422e9d5a05e9631301259b9cb293ada3f0703878cfd9741edf9",
+    "root_sha256":  "e2f5df396e5691e2a4e9e382c8713824ba89f6db08bc8bd08f8dd20a1f9b2509",
+    "outer_sha256":  "6e380badbfd3568cc88f1fa87e7a87bd204ea7c012fb9e671444c9e1dc33ed66",
+    "commands_verified":  3,
+    "captures_verified":  6,
+    "results":  [
+                    {
+                        "name":  "head.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rev-parse",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.20953280001413077,
+                        "exit_code":  0,
+                        "stdout_sha256":  "f665546f0d1211b43018ecd17c352657643c26cfea06b729ca0ac3bfac68a795",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "264a0601b7d027652c12ec88ae4debd6c3bfb69f\n"
+                    },
+                    {
+                        "name":  "canonical-readonly-publication-locations.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+                                     "-I",
+                                     "-S",
+                                     "-B",
+                                     "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\capture-publication-locations-v1.py"
+                                 ],
+                        "seconds":  153.65984700003173,
+                        "exit_code":  0,
+                        "stdout_sha256":  "0b35231c8baadffd57190ed60bf83d7e09d449328e59cd3a6c3ef9e975d685cb",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "{\"status\": \"reviewable\", \"occurrences\": 9, \"rule_counts\": {\"machine-path-prefix-v1\": 4, \"value-password-v1\": 5}, \"unsupported\": [], \"receipt_sha256\": \"89ee95d6088435f1c21174fb1319c8d38eefc9b6104a0539693a9307612995da\", \"publication_authority\": false, \"raw_content_saved\": false}\r\n"
+                    },
+                    {
+                        "name":  "publication-source-unchanged.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "status",
+                                     "--porcelain=v1",
+                                     "--untracked-files=all"
+                                 ],
+                        "seconds":  0.0840185999404639,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    }
+                ],
+    "tests_executed":  false,
+    "reviewed_utc":  "2026-11-28T16:29:26.4602671Z"
+}

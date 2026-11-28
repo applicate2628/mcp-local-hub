@@ -1,0 +1,3 @@
+55	24	internal/cli/process_identity_match_windows_test.go
+5	0	internal/cli/settings_registry_test.go
+13	6	internal/cli/supervise_prespawn_binary_gate_test.go

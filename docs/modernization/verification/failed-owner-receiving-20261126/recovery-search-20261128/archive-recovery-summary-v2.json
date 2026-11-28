@@ -1,0 +1,219 @@
+{
+  "schema": "b-archive-recovery-summary-v2",
+  "data_only": true,
+  "no_payload_execution": true,
+  "git_head_observed": "01b4e915af6439e4c5e7c5c880a6d4885a2dbd3a",
+  "targets": {
+    "receiver_current": "1f45b3ef0e9184cc66be002cb918eb38dad0560e86e0a4a2d5c31658f44c2891",
+    "receiver_preimage": "4cdb508e655527b0372a5726f2753f6163ee50ed25b52546ff86e85682a6185a",
+    "receiver_patch": "e724dc749ac82517d2af3553fa558388f59371a0a2c0330af4a0db60738a31d5",
+    "canonical_manifest": "e74ff2ed872591e32b5fdd948d90959b9a564843534f1c46621dc6a409bf47c3"
+  },
+  "template_identity": "only SHA256 prefix9315 is available; prefix match would not establish full identity",
+  "transport_file_objects": 312,
+  "transport_reports": [
+    "transports-v1.json",
+    "transports-v2.json"
+  ],
+  "archive_selected_paths": 266,
+  "archive_unique_sha256": 58,
+  "archive_member_and_nested_byte_candidates": 13636,
+  "exact_target_matches": 0,
+  "prefix9315_matches": 0,
+  "remaining_queue": 0,
+  "scope_complete_with_exceptions": true,
+  "limits": {
+    "archive": 67108864,
+    "member": 2097152,
+    "nested_decode": 16777216,
+    "seconds": 50,
+    "compressed_total": 268435456
+  },
+  "exceptions": [
+    {
+      "kind": "preserved_first_attempt_error",
+      "detail": "A single .jsonl.gz was initially passed to a tar parser. The original error remains in archives-v1; archives-v2 read it as gzip and hashed the decoded bytes."
+    },
+    {
+      "kind": "unreadable_zip",
+      "detail": "One candidate .zip was not a ZIP stream and remains unqualified."
+    },
+    {
+      "kind": "member_size",
+      "members": [
+        "windows-preserved-workspace.zip",
+        "docs/assets/hero-gui.gif",
+        "qualification/inputs/cmake-input/trace.jsonl"
+      ]
+    }
+  ],
+  "negative_result_scope": "Only selected stored capsules, exact decoded transport file objects, and bounded archive members/JSON-base64 values. No proof of global absence; omitted larger members, arbitrary nested archives and unknown encodings are outside this pass.",
+  "runs": [
+    {
+      "scope": "b-archive-selection-20261128-v1",
+      "receipt_sha256": "d058eed88673b42e19ccf5d80584a3e74dc9ee18be12ee2c913f6916e7dacd94",
+      "root_receiving_sha256": "a5215d542778d029f312928ef5f81fc1fc207b8ea57151d16badd5dd76339b89",
+      "status": "PASS",
+      "commands_closed": 2,
+      "readers_closed": 4,
+      "original_controller_reaped": true,
+      "controller_capture_handles_closed": true
+    },
+    {
+      "scope": "b-archive-transports-20261128-v1",
+      "receipt_sha256": "38d5a9ac207d6fbc745fe7d832954f3be1b3e0a192f7f07977e72aa02fabd9ee",
+      "root_receiving_sha256": "a06eee5e05f76dabb8714d6265d48db31a257ff08ad1f7019c6fe41b42d4a6ff",
+      "status": "PASS",
+      "commands_closed": 2,
+      "readers_closed": 4,
+      "original_controller_reaped": true,
+      "controller_capture_handles_closed": true
+    },
+    {
+      "scope": "b-archive-transports-20261128-v2",
+      "receipt_sha256": "8a2bec2939bdcf2f86abdca5dc93652e9171abed6f0198d9ee45a8e85a1d0c22",
+      "root_receiving_sha256": "8118072f685566f554c043ced641ef799cfbfc504e9ca00dd10d41bdea92e0d9",
+      "status": "PASS",
+      "commands_closed": 2,
+      "readers_closed": 4,
+      "original_controller_reaped": true,
+      "controller_capture_handles_closed": true
+    },
+    {
+      "scope": "b-archive-content-20261128-v1",
+      "receipt_sha256": "a06b3815102ab81c60d89457c3108beca25d3354631971e1598181e6a551d3f3",
+      "root_receiving_sha256": "4f9f7d2dd0ec84ec629af37d9b66d9a9e988d6113fbff24cf483e06b5486fd59",
+      "status": "PASS",
+      "commands_closed": 2,
+      "readers_closed": 4,
+      "original_controller_reaped": true,
+      "controller_capture_handles_closed": true
+    },
+    {
+      "scope": "b-archive-content-20261128-v2",
+      "receipt_sha256": "6670d8f9c2d98a792b172068b37ec40301ef1b5610780a63880176b280654416",
+      "root_receiving_sha256": "2ed60bd11afd33a8a4e6d90be781e4c9cc6c1f7faa533b1ba3ee3dff268778f5",
+      "status": "PASS",
+      "commands_closed": 2,
+      "readers_closed": 4,
+      "original_controller_reaped": true,
+      "controller_capture_handles_closed": true
+    },
+    {
+      "scope": "b-archive-summary-20261128-v1",
+      "receipt_sha256": "91b669d6191097580ed739dfe8402e06c9bca344324021ff70b9e6ce625e51e5",
+      "root_receiving_sha256": "bf0ba1fe2c0f48f4ddae0517788c300c6d7f17627325223b28fd6c6a2b99c8ba",
+      "status": "PASS",
+      "commands_closed": 2,
+      "readers_closed": 4,
+      "original_controller_reaped": true,
+      "controller_capture_handles_closed": true
+    }
+  ],
+  "artifacts": [
+    {
+      "name": "selection-v1.json",
+      "bytes": 910753,
+      "sha256": "224bf701e5bba9c64f0d125fa5d2268dc80d7800d68521c2232a051897aeac49"
+    },
+    {
+      "name": "transports-v1.json",
+      "bytes": 64929,
+      "sha256": "513dc809de55908f25466e9398863d9d0c2069c6348a5ee48456a3f67720c957"
+    },
+    {
+      "name": "transports-v2.json",
+      "bytes": 24311,
+      "sha256": "4a67dd6310df6e705a40dcdeb2ae7e4c896e06ccf39c77a71b5f22bba3b4b3c4"
+    },
+    {
+      "name": "archives-v1.json",
+      "bytes": 4911966,
+      "sha256": "2b0a4ebf145b561e83519648bde967273e391f455a5374a900f7b372c438dcd2"
+    },
+    {
+      "name": "archives-v2.json",
+      "bytes": 10661,
+      "sha256": "182742b0c3821fb0d93de5a65f85dc03abc47ce9f44cd1839d11b4431eaadb2e"
+    },
+    {
+      "name": "select_archives_v1.py",
+      "bytes": 1878,
+      "sha256": "2f50b182932ec340e6d449cc4ca48e47b173f4c121bc02e456e85180fe671f42"
+    },
+    {
+      "name": "inspect_transports_v1.py",
+      "bytes": 3899,
+      "sha256": "6e1eb7880f70bc98ecb68c24e9ec01bf60a78fd6ecfdd701e8eb93fc11e291b9"
+    },
+    {
+      "name": "inspect_transports_v2.py",
+      "bytes": 4704,
+      "sha256": "ab7def4238f649f7ea9423537029e7a1f34dcaa1b7ba4935426eec4e0e790cad"
+    },
+    {
+      "name": "inspect_archives_v1.py",
+      "bytes": 6053,
+      "sha256": "31a9b86aeda58138ca1a2b07e9161db7d5f4ff863dddcd5aa467eca1eba4997a"
+    },
+    {
+      "name": "inspect_archives_v2.py",
+      "bytes": 6312,
+      "sha256": "cb2fcad91c0d5e3b85e01a69ace930b5a4837ea034dc2977ebf83d6c784a8199"
+    }
+  ],
+  "initial_tool_failure": {
+    "write_tool_call_id": "df0842eb-7520-4e22-b4ca-8406876ef782",
+    "write_outcome": "Path validation operation timed out after 10 seconds; terminal tool error received before retry.",
+    "premature_dependent_launcher": {
+      "reported_shell_pid": 375836,
+      "identity_kind": "tool-reported PID only; not native retained identity",
+      "terminal_status": "UNKNOWN",
+      "native_closure_status": "UNKNOWN",
+      "durable_native_completion_receipt": null,
+      "included_in_recorded_run_closure_totals": false
+    },
+    "observations": [
+      "Dependent launcher was started before the pending write had completed.",
+      "Before the retry, no run directory was observed.",
+      "RDC read_process_output returned No session.",
+      "These observations do not prove process exit or closure."
+    ],
+    "disposition": "Preserve historical UNKNOWN; no PID-based termination; no fabricated completion."
+  },
+  "closure_totals": {
+    "recorded_runs": 6,
+    "commands": 12,
+    "readers": 24,
+    "excludes_premature_dependent_launcher": true,
+    "excludes_current_public_preparation": "Current preparation receipt is finalized after these files are written and must be read separately."
+  },
+  "published_reports": [
+    {
+      "name": "archive-selection-v1.json",
+      "bytes": 73209,
+      "sha256": "f7527ee0011e2871d41ae703dd23a421000e027fe6970370e6cedd337dc1cd41"
+    },
+    {
+      "name": "transport-inputs-v1.json",
+      "bytes": 64929,
+      "sha256": "513dc809de55908f25466e9398863d9d0c2069c6348a5ee48456a3f67720c957"
+    },
+    {
+      "name": "transport-inputs-v2.json",
+      "bytes": 24311,
+      "sha256": "4a67dd6310df6e705a40dcdeb2ae7e4c896e06ccf39c77a71b5f22bba3b4b3c4"
+    },
+    {
+      "name": "archive-content-v1.json",
+      "bytes": 5017726,
+      "sha256": "ed47cf3832e0231f03a5598653ae1a7b1680165998c87c2415b4a138b58d2aca"
+    },
+    {
+      "name": "archive-content-v2.json",
+      "bytes": 11139,
+      "sha256": "3ff56663b5cd01b7f91b5623958d9cbc266ecde58c25f47fe7255bbd715106c5"
+    }
+  ],
+  "public_transform_manifest": "archive-transformation-manifest-v1.json"
+}

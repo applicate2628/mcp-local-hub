@@ -1,0 +1,27 @@
+{"Action":"start","Package":"mcp-local-hub/internal/toolchain"}
+{"Action":"run","Package":"mcp-local-hub/internal/toolchain","Test":"TestDebuggerDirs_OverrideDetectsAndSkips"}
+{"Action":"output","Package":"mcp-local-hub/internal/toolchain","Test":"TestDebuggerDirs_OverrideDetectsAndSkips","Output":"=== RUN   TestDebuggerDirs_OverrideDetectsAndSkips\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/toolchain","Test":"TestDebuggerDirs_OverrideDetectsAndSkips","Output":"--- PASS: TestDebuggerDirs_OverrideDetectsAndSkips (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/toolchain","Test":"TestDebuggerDirs_OverrideDetectsAndSkips"}
+{"Action":"run","Package":"mcp-local-hub/internal/toolchain","Test":"TestDebuggerDirs_Dedup"}
+{"Action":"output","Package":"mcp-local-hub/internal/toolchain","Test":"TestDebuggerDirs_Dedup","Output":"=== RUN   TestDebuggerDirs_Dedup\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/toolchain","Test":"TestDebuggerDirs_Dedup","Output":"--- PASS: TestDebuggerDirs_Dedup (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/toolchain","Test":"TestDebuggerDirs_Dedup"}
+{"Action":"run","Package":"mcp-local-hub/internal/toolchain","Test":"TestDefaultLldbPath_AbsoluteWhenDetected"}
+{"Action":"output","Package":"mcp-local-hub/internal/toolchain","Test":"TestDefaultLldbPath_AbsoluteWhenDetected","Output":"=== RUN   TestDefaultLldbPath_AbsoluteWhenDetected\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/toolchain","Test":"TestDefaultLldbPath_AbsoluteWhenDetected","Output":"--- PASS: TestDefaultLldbPath_AbsoluteWhenDetected (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/toolchain","Test":"TestDefaultLldbPath_AbsoluteWhenDetected"}
+{"Action":"run","Package":"mcp-local-hub/internal/toolchain","Test":"TestDefaultLldbPath_BareFallback"}
+{"Action":"output","Package":"mcp-local-hub/internal/toolchain","Test":"TestDefaultLldbPath_BareFallback","Output":"=== RUN   TestDefaultLldbPath_BareFallback\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/toolchain","Test":"TestDefaultLldbPath_BareFallback","Output":"--- PASS: TestDefaultLldbPath_BareFallback (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/toolchain","Test":"TestDefaultLldbPath_BareFallback"}
+{"Action":"run","Package":"mcp-local-hub/internal/toolchain","Test":"TestDefaultGdbPath_AbsoluteWhenDetected"}
+{"Action":"output","Package":"mcp-local-hub/internal/toolchain","Test":"TestDefaultGdbPath_AbsoluteWhenDetected","Output":"=== RUN   TestDefaultGdbPath_AbsoluteWhenDetected\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/toolchain","Test":"TestDefaultGdbPath_AbsoluteWhenDetected","Output":"--- PASS: TestDefaultGdbPath_AbsoluteWhenDetected (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/toolchain","Test":"TestDefaultGdbPath_AbsoluteWhenDetected"}
+{"Action":"run","Package":"mcp-local-hub/internal/toolchain","Test":"TestDefaultGdbPath_BareFallback"}
+{"Action":"output","Package":"mcp-local-hub/internal/toolchain","Test":"TestDefaultGdbPath_BareFallback","Output":"=== RUN   TestDefaultGdbPath_BareFallback\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/toolchain","Test":"TestDefaultGdbPath_BareFallback","Output":"--- PASS: TestDefaultGdbPath_BareFallback (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/toolchain","Test":"TestDefaultGdbPath_BareFallback"}
+{"Action":"output","Package":"mcp-local-hub/internal/toolchain","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/toolchain"}

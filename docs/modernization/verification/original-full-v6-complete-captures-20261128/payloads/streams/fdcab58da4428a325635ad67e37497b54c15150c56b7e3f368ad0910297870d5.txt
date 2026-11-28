@@ -1,0 +1,163 @@
+{"Action":"start","Package":"mcp-local-hub/internal/secrets"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestScanCodexConfig_FindsApiKey"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestScanCodexConfig_FindsApiKey","Output":"=== RUN   TestScanCodexConfig_FindsApiKey\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestScanCodexConfig_FindsApiKey","Output":"--- PASS: TestScanCodexConfig_FindsApiKey (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestScanCodexConfig_FindsApiKey"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestScanConfigText_SkipsPlaceholders"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestScanConfigText_SkipsPlaceholders","Output":"=== RUN   TestScanConfigText_SkipsPlaceholders\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestScanConfigText_SkipsPlaceholders","Output":"--- PASS: TestScanConfigText_SkipsPlaceholders (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestScanConfigText_SkipsPlaceholders"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestVaultAtCanonicalLocation_TrueWhenCanonicalExists"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestVaultAtCanonicalLocation_TrueWhenCanonicalExists","Output":"=== RUN   TestVaultAtCanonicalLocation_TrueWhenCanonicalExists\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestVaultAtCanonicalLocation_TrueWhenCanonicalExists","Output":"--- PASS: TestVaultAtCanonicalLocation_TrueWhenCanonicalExists (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestVaultAtCanonicalLocation_TrueWhenCanonicalExists"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestVaultAtCanonicalLocation_FalseForLegacyCwdVault"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestVaultAtCanonicalLocation_FalseForLegacyCwdVault","Output":"=== RUN   TestVaultAtCanonicalLocation_FalseForLegacyCwdVault\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestVaultAtCanonicalLocation_FalseForLegacyCwdVault","Output":"--- PASS: TestVaultAtCanonicalLocation_FalseForLegacyCwdVault (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestVaultAtCanonicalLocation_FalseForLegacyCwdVault"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestResolverWithEnvironmentLookupPreservesReferenceAndOmission"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolverWithEnvironmentLookupPreservesReferenceAndOmission","Output":"=== RUN   TestResolverWithEnvironmentLookupPreservesReferenceAndOmission\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolverWithEnvironmentLookupPreservesReferenceAndOmission","Output":"--- PASS: TestResolverWithEnvironmentLookupPreservesReferenceAndOmission (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestResolverWithEnvironmentLookupPreservesReferenceAndOmission"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_Secret"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_Secret","Output":"=== RUN   TestResolver_Secret\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_Secret","Output":"--- PASS: TestResolver_Secret (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_Secret"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_File"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_File","Output":"=== RUN   TestResolver_File\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_File","Output":"--- PASS: TestResolver_File (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_File"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_Env"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_Env","Output":"=== RUN   TestResolver_Env\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_Env","Output":"--- PASS: TestResolver_Env (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_Env"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholder"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholder","Output":"=== RUN   TestResolver_EnvBracePlaceholder\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholder","Output":"--- PASS: TestResolver_EnvBracePlaceholder (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholder"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderComposite"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderComposite","Output":"=== RUN   TestResolver_EnvBracePlaceholderComposite\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderComposite","Output":"--- PASS: TestResolver_EnvBracePlaceholderComposite (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderComposite"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderCompositeMultipleTokens"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderCompositeMultipleTokens","Output":"=== RUN   TestResolver_EnvBracePlaceholderCompositeMultipleTokens\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderCompositeMultipleTokens","Output":"--- PASS: TestResolver_EnvBracePlaceholderCompositeMultipleTokens (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderCompositeMultipleTokens"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens","Output":"=== RUN   TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens/path-like_separator"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens/path-like_separator","Output":"=== RUN   TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens/path-like_separator\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens/path-like_separator","Output":"--- PASS: TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens/path-like_separator (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens/path-like_separator"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens/hyphen_separator"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens/hyphen_separator","Output":"=== RUN   TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens/hyphen_separator\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens/hyphen_separator","Output":"--- PASS: TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens/hyphen_separator (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens/hyphen_separator"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens","Output":"--- PASS: TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderCompositeMissingIsError"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderCompositeMissingIsError","Output":"=== RUN   TestResolver_EnvBracePlaceholderCompositeMissingIsError\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderCompositeMissingIsError","Output":"--- PASS: TestResolver_EnvBracePlaceholderCompositeMissingIsError (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderCompositeMissingIsError"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderMalformedTokenIsError"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderMalformedTokenIsError","Output":"=== RUN   TestResolver_EnvBracePlaceholderMalformedTokenIsError\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderMalformedTokenIsError","Output":"--- PASS: TestResolver_EnvBracePlaceholderMalformedTokenIsError (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderMalformedTokenIsError"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderMissingErrorsNameToken"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderMissingErrorsNameToken","Output":"=== RUN   TestResolver_EnvBracePlaceholderMissingErrorsNameToken\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderMissingErrorsNameToken/single_token"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderMissingErrorsNameToken/single_token","Output":"=== RUN   TestResolver_EnvBracePlaceholderMissingErrorsNameToken/single_token\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderMissingErrorsNameToken/single_token","Output":"--- PASS: TestResolver_EnvBracePlaceholderMissingErrorsNameToken/single_token (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderMissingErrorsNameToken/single_token"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderMissingErrorsNameToken/composite_token"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderMissingErrorsNameToken/composite_token","Output":"=== RUN   TestResolver_EnvBracePlaceholderMissingErrorsNameToken/composite_token\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderMissingErrorsNameToken/composite_token","Output":"--- PASS: TestResolver_EnvBracePlaceholderMissingErrorsNameToken/composite_token (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderMissingErrorsNameToken/composite_token"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderMissingErrorsNameToken","Output":"--- PASS: TestResolver_EnvBracePlaceholderMissingErrorsNameToken (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvBracePlaceholderMissingErrorsNameToken"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_Literal"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_Literal","Output":"=== RUN   TestResolver_Literal\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_Literal","Output":"--- PASS: TestResolver_Literal (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_Literal"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_SecretMissing"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_SecretMissing","Output":"=== RUN   TestResolver_SecretMissing\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_SecretMissing","Output":"--- PASS: TestResolver_SecretMissing (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_SecretMissing"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvMissing"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvMissing","Output":"=== RUN   TestResolver_EnvMissing\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvMissing","Output":"--- PASS: TestResolver_EnvMissing (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestResolver_EnvMissing"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestResolveMapBestEffort_OmitsMissingSecret"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolveMapBestEffort_OmitsMissingSecret","Output":"=== RUN   TestResolveMapBestEffort_OmitsMissingSecret\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolveMapBestEffort_OmitsMissingSecret","Output":"--- PASS: TestResolveMapBestEffort_OmitsMissingSecret (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestResolveMapBestEffort_OmitsMissingSecret"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestResolveMapBestEffort_NeverErrorsAllResolvable"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolveMapBestEffort_NeverErrorsAllResolvable","Output":"=== RUN   TestResolveMapBestEffort_NeverErrorsAllResolvable\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolveMapBestEffort_NeverErrorsAllResolvable","Output":"--- PASS: TestResolveMapBestEffort_NeverErrorsAllResolvable (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestResolveMapBestEffort_NeverErrorsAllResolvable"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestResolveMapBestEffort_NonSecretRefStaysFatal"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolveMapBestEffort_NonSecretRefStaysFatal","Output":"=== RUN   TestResolveMapBestEffort_NonSecretRefStaysFatal\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestResolveMapBestEffort_NonSecretRefStaysFatal","Output":"--- PASS: TestResolveMapBestEffort_NonSecretRefStaysFatal (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestResolveMapBestEffort_NonSecretRefStaysFatal"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestHasSecretRef"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestHasSecretRef","Output":"=== RUN   TestHasSecretRef\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestHasSecretRef","Output":"--- PASS: TestHasSecretRef (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestHasSecretRef"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestOpenVaultOptional_AbsentIsNilNil"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestOpenVaultOptional_AbsentIsNilNil","Output":"=== RUN   TestOpenVaultOptional_AbsentIsNilNil\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestOpenVaultOptional_AbsentIsNilNil","Output":"--- PASS: TestOpenVaultOptional_AbsentIsNilNil (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestOpenVaultOptional_AbsentIsNilNil"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestOpenVaultOptional_UnreadableIsError"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestOpenVaultOptional_UnreadableIsError","Output":"=== RUN   TestOpenVaultOptional_UnreadableIsError\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestOpenVaultOptional_UnreadableIsError","Output":"--- PASS: TestOpenVaultOptional_UnreadableIsError (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestOpenVaultOptional_UnreadableIsError"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestVault_ExportYAML_ImportYAML_Roundtrip"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestVault_ExportYAML_ImportYAML_Roundtrip","Output":"=== RUN   TestVault_ExportYAML_ImportYAML_Roundtrip\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestVault_ExportYAML_ImportYAML_Roundtrip","Output":"--- PASS: TestVault_ExportYAML_ImportYAML_Roundtrip (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestVault_ExportYAML_ImportYAML_Roundtrip"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestWithVaultLock_ConcurrentSetNoLostOrCorruptEntries"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestWithVaultLock_ConcurrentSetNoLostOrCorruptEntries","Output":"=== RUN   TestWithVaultLock_ConcurrentSetNoLostOrCorruptEntries\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestWithVaultLock_ConcurrentSetNoLostOrCorruptEntries","Output":"--- PASS: TestWithVaultLock_ConcurrentSetNoLostOrCorruptEntries (0.47s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestWithVaultLock_ConcurrentSetNoLostOrCorruptEntries"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestTryWithVaultLock_ContentionErrorAndRelease"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestTryWithVaultLock_ContentionErrorAndRelease","Output":"=== RUN   TestTryWithVaultLock_ContentionErrorAndRelease\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestTryWithVaultLock_ContentionErrorAndRelease","Output":"--- PASS: TestTryWithVaultLock_ContentionErrorAndRelease (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestTryWithVaultLock_ContentionErrorAndRelease"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestVaultSaveAtomicUnsupportedParentSyncIsNonFatal"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestVaultSaveAtomicUnsupportedParentSyncIsNonFatal","Output":"=== RUN   TestVaultSaveAtomicUnsupportedParentSyncIsNonFatal\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestVaultSaveAtomicUnsupportedParentSyncIsNonFatal","Output":"--- PASS: TestVaultSaveAtomicUnsupportedParentSyncIsNonFatal (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestVaultSaveAtomicUnsupportedParentSyncIsNonFatal"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestVault_InitSetGet"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestVault_InitSetGet","Output":"=== RUN   TestVault_InitSetGet\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestVault_InitSetGet","Output":"--- PASS: TestVault_InitSetGet (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestVault_InitSetGet"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestVaultSaveAtomicRenameFailurePreservesExistingVault"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestVaultSaveAtomicRenameFailurePreservesExistingVault","Output":"=== RUN   TestVaultSaveAtomicRenameFailurePreservesExistingVault\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestVaultSaveAtomicRenameFailurePreservesExistingVault","Output":"--- PASS: TestVaultSaveAtomicRenameFailurePreservesExistingVault (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestVaultSaveAtomicRenameFailurePreservesExistingVault"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestVaultSaveAtomicParentSyncFailureIsReturned"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestVaultSaveAtomicParentSyncFailureIsReturned","Output":"=== RUN   TestVaultSaveAtomicParentSyncFailureIsReturned\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestVaultSaveAtomicParentSyncFailureIsReturned","Output":"--- PASS: TestVaultSaveAtomicParentSyncFailureIsReturned (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestVaultSaveAtomicParentSyncFailureIsReturned"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestInitVaultIdentityWriteUsesAtomicSiblingTemp"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestInitVaultIdentityWriteUsesAtomicSiblingTemp","Output":"=== RUN   TestInitVaultIdentityWriteUsesAtomicSiblingTemp\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestInitVaultIdentityWriteUsesAtomicSiblingTemp","Output":"--- PASS: TestInitVaultIdentityWriteUsesAtomicSiblingTemp (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestInitVaultIdentityWriteUsesAtomicSiblingTemp"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestInitVaultIdentityWriteParentSyncFailureIsReturned"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestInitVaultIdentityWriteParentSyncFailureIsReturned","Output":"=== RUN   TestInitVaultIdentityWriteParentSyncFailureIsReturned\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestInitVaultIdentityWriteParentSyncFailureIsReturned","Output":"--- PASS: TestInitVaultIdentityWriteParentSyncFailureIsReturned (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestInitVaultIdentityWriteParentSyncFailureIsReturned"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestVault_List"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestVault_List","Output":"=== RUN   TestVault_List\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestVault_List","Output":"--- PASS: TestVault_List (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestVault_List"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestVault_Delete"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestVault_Delete","Output":"=== RUN   TestVault_Delete\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestVault_Delete","Output":"--- PASS: TestVault_Delete (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestVault_Delete"}
+{"Action":"run","Package":"mcp-local-hub/internal/secrets","Test":"TestVault_WrongIdentity"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestVault_WrongIdentity","Output":"=== RUN   TestVault_WrongIdentity\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Test":"TestVault_WrongIdentity","Output":"--- PASS: TestVault_WrongIdentity (0.49s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets","Test":"TestVault_WrongIdentity"}
+{"Action":"output","Package":"mcp-local-hub/internal/secrets","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/secrets"}

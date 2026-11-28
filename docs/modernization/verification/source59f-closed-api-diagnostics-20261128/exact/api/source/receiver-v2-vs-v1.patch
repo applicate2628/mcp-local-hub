@@ -1,0 +1,11 @@
+--- receive_closed_api59f.py
++++ receive_closed_api59f_v2.py
+@@ -319,7 +319,7 @@
+         proof=control(path,record["sha256"],16<<20)
+         need(proof==record["proof"]==row["completion_receiving"],"original API owner proof differs")
+         if label=="inventory-owner":
+-            need(record["kind"]=="contained" and path==CASE/"inventory/result.json"
++            need(set(record)=={"receipt","proof","sha256"} and path==CASE/"inventory/result.json"
+                  and proof.get("schema")=="literal-contained-test-run-v1" and proof.get("inventory") is True
+                  and proof.get("binary")==binary and proof.get("binary_sha256")==sha
+                  and proof.get("source_dir")==cwd and proof.get("args")==["-test.list=."]

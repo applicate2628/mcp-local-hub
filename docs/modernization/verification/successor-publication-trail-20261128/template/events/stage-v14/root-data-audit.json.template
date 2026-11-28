@@ -1,0 +1,173 @@
+{
+    "schema":  "publication-original-root-data-audit-v1",
+    "status":  "PASS",
+    "physical_complete":  true,
+    "scope":  "cache-acceptance-stage-20261128-v14",
+    "config_sha256":  "e9e87fbb844f8eb3300b2b2756b4aa8a4c5f4b8e6a77bcee62adf9cc7cededcc",
+    "receipt_sha256":  "b3c099bfd8c0c50d0e4433f0b14b63784b55001853f30f360e142c4484c8d889",
+    "root_sha256":  "f9e9b349fc4a151ac984fc096d5a63b328240f7abf4b58b2b4277ef39e657550",
+    "outer_sha256":  "9d3f9b8a09226e8bb6f8df56863e4813806188e04f8f212f4e78dba73dcd6de8",
+    "commands_verified":  7,
+    "captures_verified":  14,
+    "results":  [
+                    {
+                        "name":  "head.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rev-parse",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.04099210002459586,
+                        "exit_code":  0,
+                        "stdout_sha256":  "83b2c611d123badeb08a5271c7cbc11965324004ef7c5c71fb69a4a30c3f9736",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "01b4e915af6439e4c5e7c5c880a6d4885a2dbd3a\n"
+                    },
+                    {
+                        "name":  "starting-worktree-state.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "status",
+                                     "--porcelain=v1",
+                                     "--untracked-files=all"
+                                 ],
+                        "seconds":  0.05592800001613796,
+                        "exit_code":  0,
+                        "stdout_sha256":  "fddd7797c0db17c403f49e65c81e9e997dcbbc4361bb070c95f2e3bde2207002",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  " M .plans/2026-11/open-pr-integration-20261117.md\n?? docs/modernization/verification/original-full-v6-failure-20261128/.gitattributes\n?? docs/modernization/verification/original-full-v6-failure-20261128/README.md\n?? docs/modernization/verification/original-full-v6-failure-20261128/artifact-manifest.json\n?? docs/modernization/verification/original-full-v6-failure-20261128/data-reconstruction-proof.json\n?? docs/modernization/verification/original-full-v6-failure-20261128/disclosure-review.json\n?? docs/modernization/verification/original-full-v6-failure-20261128/exact/default-daemon/suite-owner.stderr.txt\n?? docs/modernization/verification/original-full-v6-failure-20261128/exact/default-oneapi/suite-owner.stderr.txt\n?? docs/modernization/verification/original-full-v6-failure-20261128/exact/default-process/suite-owner.stderr.txt\n?? docs/modernization/verification/original-full-v6-failure-20261128/exact/default-process/suite-owner.stdout.txt\n?? docs/modernization/verification/original-full-v6-failure-20261128/exact/full/outer-original.json\n?? docs/modernization/verification/original-full-v6-failure-20261128/excerpts/provenance.json\n?? docs/modernization/verification/original-full-v6-failure-20261128/excerpts/tagged-cli-build-failure.jsonl\n?? docs/modernization/verification/original-full-v6-failure-20261128/full-failure-evidence.json\n?? docs/modernization/verification/original-full-v6-failure-20261128/reconstruct_sources.py\n?? docs/modernization/verification/original-full-v6-failure-20261128/source-bindings.json\n?? docs/modernization/verification/original-full-v6-failure-20261128/templates/default-cli/receipt.json.template\n?? docs/modernization/verification/original-full-v6-failure-20261128/templates/default-cli/suite-owner.stderr.txt.template\n?? docs/modernization/verification/original-full-v6-failure-20261128/templates/default-cli/suite-owner.stdout.txt.template\n?? docs/modernization/verification/original-full-v6-failure-20261128/templates/default-daemon/receipt.json.template\n?? docs/modernization/verification/original-full-v6-failure-20261128/templates/default-daemon/suite-owner.stdout.txt.template\n?? docs/modernization/verification/original-full-v6-failure-20261128/templates/default-oneapi/receipt.json.template\n?? docs/modernization/verification/original-full-v6-failure-20261128/templates/default-oneapi/suite-owner.stdout.txt.template\n?? docs/modernization/verification/original-full-v6-failure-20261128/templates/default-process/receipt.json.template\n?? docs/"
+                    },
+                    {
+                        "name":  "stage-full-failure-and-reviewed-test-patches.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "add",
+                                     "--",
+                                     ".plans/2026-11/open-pr-integration-20261117.md",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/.gitattributes",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/README.md",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/artifact-manifest.json",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/data-reconstruction-proof.json",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/disclosure-review.json",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/exact/default-daemon/suite-owner.stderr.txt",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/exact/default-oneapi/suite-owner.stderr.txt",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/exact/default-process/suite-owner.stderr.txt",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/exact/default-process/suite-owner.stdout.txt",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/exact/full/outer-original.json",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/excerpts/provenance.json",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/excerpts/tagged-cli-build-failure.jsonl",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/full-failure-evidence.json",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/reconstruct_sources.py",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/source-bindings.json",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/templates/default-cli/receipt.json.template",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/templates/default-cli/suite-owner.stderr.txt.template",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/templates/default-cli/suite-owner.stdout.txt.template",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/templates/default-daemon/receipt.json.template",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/templates/default-daemon/suite-owner.stdout.txt.template",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/templates/default-oneapi/receipt.json.template",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/templates/default-oneapi/suite-owner.stdout.txt.template",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/templates/default-process/receipt.json.template",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/templates/full/parent.json.template",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/templates/full/receipt.json.template",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/templates/root-receiving/full-v6-root-audit-v1.ps1.template",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/templates/root-receiving/result.json.template",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/templates/state-api/receipt.json.template",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/templates/state-api/suite-owner.stderr.txt.template",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/templates/state-api/suite-owner.stdout.txt.template",
+                                     "docs/modernization/verification/original-full-v6-failure-20261128/verify_closed_full.py",
+                                     "docs/modernization/verification/source33-successor-test-fixes-20261128/.gitattributes",
+                                     "docs/modernization/verification/source33-successor-test-fixes-20261128/README.md",
+                                     "docs/modernization/verification/source33-successor-test-fixes-20261128/afterimages/internal/cli/attach_client_real_supervisor_windows_test.go",
+                                     "docs/modernization/verification/source33-successor-test-fixes-20261128/afterimages/internal/cli/supervisor_launch_successor_runtime_windows_test.go",
+                                     "docs/modernization/verification/source33-successor-test-fixes-20261128/afterimages/internal/cli/upgrade_gui_qualified_fixture_windows_test.go",
+                                     "docs/modernization/verification/source33-successor-test-fixes-20261128/afterimages/internal/cli/windows_canonical_entry_gui_native_replay_windows_test.go",
+                                     "docs/modernization/verification/source33-successor-test-fixes-20261128/afterimages/internal/cli/windows_product_preflight_original_windows_test.go",
+                                     "docs/modernization/verification/source33-successor-test-fixes-20261128/afterimages/internal/process/jobobject_windows_test.go",
+                                     "docs/modernization/verification/source33-successor-test-fixes-20261128/afterimages/internal/process/run_strictly_contained_windows_test.go",
+                                     "docs/modernization/verification/source33-successor-test-fixes-20261128/artifact-manifest.json",
+                                     "docs/modernization/verification/source33-successor-test-fixes-20261128/evidence.json",
+                                     "docs/modernization/verification/source33-successor-test-fixes-20261128/patches/full-suite-entry.patch",
+                                     "docs/modernization/verification/source33-successor-test-fixes-20261128/patches/strict-proof-window-v2.patch",
+                                     "docs/modernization/verification/source33-successor-test-fixes-20261128/successor.patch",
+                                     "docs/modernization/verification/successor14-manifest-pin-20261128/.gitattributes",
+                                     "docs/modernization/verification/successor14-manifest-pin-20261128/README.md",
+                                     "docs/modernization/verification/successor14-manifest-pin-20261128/afterimages/internal/cli/migrate_serena_test.go",
+                                     "docs/modernization/verification/successor14-manifest-pin-20261128/artifact-manifest.json",
+                                     "docs/modernization/verification/successor14-manifest-pin-20261128/evidence.json",
+                                     "docs/modernization/verification/successor14-manifest-pin-20261128/migration-source-pin.patch"
+                                 ],
+                        "seconds":  0.3002111000241712,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "new-documentation-and-data-verifier-whitespace.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "-c",
+                                     "core.whitespace=cr-at-eol",
+                                     "diff",
+                                     "--cached",
+                                     "--check",
+                                     "--",
+                                     ".",
+                                     ":(exclude)docs/modernization/verification/original-full-v6-failure-20261128/templates",
+                                     ":(exclude)docs/modernization/verification/original-full-v6-failure-20261128/exact",
+                                     ":(exclude)docs/modernization/verification/source33-successor-test-fixes-20261128/afterimages",
+                                     ":(exclude)docs/modernization/verification/source33-successor-test-fixes-20261128/patches",
+                                     ":(exclude)docs/modernization/verification/source33-successor-test-fixes-20261128/successor.patch",
+                                     ":(exclude)docs/modernization/verification/successor14-manifest-pin-20261128/afterimages",
+                                     ":(exclude)docs/modernization/verification/successor14-manifest-pin-20261128/migration-source-pin.patch"
+                                 ],
+                        "seconds":  0.1278661999385804,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "staged-name-status.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "diff",
+                                     "--cached",
+                                     "--name-status"
+                                 ],
+                        "seconds":  0.0384906999533996,
+                        "exit_code":  0,
+                        "stdout_sha256":  "61994879d9e5c6e3b98569051b1771a595f51d0305047ae273d44c9c2b9494e4",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "M\t.plans/2026-11/open-pr-integration-20261117.md\nA\tdocs/modernization/verification/original-full-v6-failure-20261128/.gitattributes\nA\tdocs/modernization/verification/original-full-v6-failure-20261128/README.md\nA\tdocs/modernization/verification/original-full-v6-failure-20261128/artifact-manifest.json\nA\tdocs/modernization/verification/original-full-v6-failure-20261128/data-reconstruction-proof.json\nA\tdocs/modernization/verification/original-full-v6-failure-20261128/disclosure-review.json\nA\tdocs/modernization/verification/original-full-v6-failure-20261128/exact/default-daemon/suite-owner.stderr.txt\nA\tdocs/modernization/verification/original-full-v6-failure-20261128/exact/default-oneapi/suite-owner.stderr.txt\nA\tdocs/modernization/verification/original-full-v6-failure-20261128/exact/default-process/suite-owner.stderr.txt\nA\tdocs/modernization/verification/original-full-v6-failure-20261128/exact/default-process/suite-owner.stdout.txt\nA\tdocs/modernization/verification/original-full-v6-failure-20261128/exact/full/outer-original.json\nA\tdocs/modernization/verification/original-full-v6-failure-20261128/excerpts/provenance.json\nA\tdocs/modernization/verification/original-full-v6-failure-20261128/excerpts/tagged-cli-build-failure.jsonl\nA\tdocs/modernization/verification/original-full-v6-failure-20261128/full-failure-evidence.json\nA\tdocs/modernization/verification/original-full-v6-failure-20261128/reconstruct_sources.py\nA\tdocs/modernization/verification/original-full-v6-failure-20261128/source-bindings.json\nA\tdocs/modernization/verification/original-full-v6-failure-20261128/templates/default-cli/receipt.json.template\nA\tdocs/modernization/verification/original-full-v6-failure-20261128/templates/default-cli/suite-owner.stderr.txt.template\nA\tdocs/modernization/verification/original-full-v6-failure-20261128/templates/default-cli/suite-owner.stdout.txt.template\nA\tdocs/modernization/verification/original-full-v6-failure-20261128/templates/default-daemon/receipt.json.template\nA\tdocs/modernization/verification/original-full-v6-failure-20261128/templates/default-daemon/suite-owner.stdout.txt.template\nA\tdocs/modernization/verification/original-full-v6-failure-20261128/templates/default-oneapi/receipt.json.template\nA\tdocs/modernization/verification/original-full-v6-failure-20261128/templates/default-oneapi/suite-owner.stdout.txt.template\nA\tdocs/modernization/verification/original-full-v6-failure-20261128/templates/default-process/receipt.json.template\nA\tdocs/modernization/verificatio"
+                    },
+                    {
+                        "name":  "staged-stat.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "diff",
+                                     "--cached",
+                                     "--stat"
+                                 ],
+                        "seconds":  0.0732240000506863,
+                        "exit_code":  0,
+                        "stdout_sha256":  "f5d89484ffb2c7d2f948c29f7ab7cea4cca5176a317e901c641031194c426391",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  " .plans/2026-11/open-pr-integration-20261117.md     |     23 +-\n .../.gitattributes                                 |      1 +\n .../original-full-v6-failure-20261128/README.md    |    180 +\n .../artifact-manifest.json                         |    168 +\n .../data-reconstruction-proof.json                 |    314 +\n .../disclosure-review.json                         |     37 +\n .../exact/default-daemon/suite-owner.stderr.txt    |      2 +\n .../exact/default-oneapi/suite-owner.stderr.txt    |      2 +\n .../exact/default-process/suite-owner.stderr.txt   |      2 +\n .../exact/default-process/suite-owner.stdout.txt   |   3731 +\n .../exact/full/outer-original.json                 |     15 +\n .../excerpts/provenance.json                       |     16 +\n .../excerpts/tagged-cli-build-failure.jsonl        |      6 +\n .../full-failure-evidence.json                     |   1238 +\n .../reconstruct_sources.py                         |    152 +\n .../source-bindings.json                           |    670 +\n .../templates/default-cli/receipt.json.template    |  31224 +++\n .../default-cli/suite-owner.stderr.txt.template    |    241 +\n .../default-cli/suite-owner.stdout.txt.template    |   8469 +\n .../templates/default-daemon/receipt.json.template |   5772 +\n .../default-daemon/suite-owner.stdout.txt.template |   1295 +\n .../templates/default-oneapi/receipt.json.template |   1672 +\n .../default-oneapi/suite-owner.stdout.txt.template |     60 +\n .../default-process/receipt.json.template          |  10553 +\n .../templates/full/parent.json.template            |     46 +\n .../templates/full/receipt.json.template           | 213788 ++++++++++++++++++\n .../full-v6-root-audit-v1.ps1.template             |     72 +\n .../templates/root-receiving/result.json.template  |     86 +\n .../templates/state-api/receipt.json.template      |  58800 +++++\n .../state-api/suite-owner.stderr.txt.template      |      4 +\n .../state-api/suite-owner.stdout.txt.template      |  19098 ++\n .../verify_closed_full.py                          |    211 +\n .../.gitattributes                                 |      1 +\n .../README.md                                      |     51 +\n .../attach_client_real_supervisor_windows_test.go  |    252 +\n ...rvisor_launch_successor_runtime_windows_test.go |    198 +\n .../upgrade_gui_qualified_fixture_windows_test.go  |    536 +\n ...nonical_entry_gui_native_replay_windows_test.go |    388 +\n ...dows_product_preflight_original_windows_test.go |    171 +\n .../internal/proc"
+                    },
+                    {
+                        "name":  "reviewed-staged-tree.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "write-tree"
+                                 ],
+                        "seconds":  0.10332729993388057,
+                        "exit_code":  0,
+                        "stdout_sha256":  "113ddfdf87626cefed901e40fe38dfe70d5cb603b351aa06db53a4c1a84b83c9",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "89f3c5715356ff424d8538c1409cb91e58b1977c\n"
+                    }
+                ],
+    "tests_executed":  false,
+    "reviewed_utc":  "2026-11-28T13:24:35.0775246Z"
+}

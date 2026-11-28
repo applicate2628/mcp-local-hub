@@ -1,0 +1,43 @@
+$ErrorActionPreference='Stop'
+$Root='@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1'
+$Source='@@RECOVERY_APPROVED_WORK_AREA@@\pub666-cli-fixtures-20261128'
+$Top=$Root+'\inputs-successor33-v1'
+$Rec=$Root+'\recovery-inputs-v1'
+function SHA([string]$p){$h=[Security.Cryptography.SHA256]::Create();try{[BitConverter]::ToString($h.ComputeHash([IO.File]::ReadAllBytes($p))).Replace('-','').ToLowerInvariant()}finally{$h.Dispose()}}
+function Need($ok,[string]$why){if(-not$ok){throw $why}}
+$MapPath=$Top+'\source-binding\source59f-input-sha256.json'
+Need ((SHA $MapPath)-ceq'e8c3fc2f577a130f92ba4eee7f8eee7153afc032dee909557cf1156890917c06') 'source map pin'
+$Map=[IO.File]::ReadAllText($MapPath)|ConvertFrom-Json
+$Observed=New-Object System.Collections.Generic.List[string]
+foreach($p in $Map.files.PSObject.Properties){$file=$Source+'\'+$p.Name;Need ((SHA $file)-ceq$p.Value) 'CLI source before edits';$Observed.Add($file)}
+Need ($Observed.Count-eq3369) 'exact source count'
+$Shared=$Rec+'\cli-shared-image-candidate-v1\share-foreign-test-image.patch'
+$Barrier=$Rec+'\cli-prespawn-barrier-candidate-v1\prespawn-barrier.patch'
+$Pins=[ordered]@{
+ $Shared='6fcaeef69bc366541e8c5658c6dcef71f4bd5a84c110868db11d44866dc0d61a'
+ $Barrier='60b608c3e807daae25158334d347da5546c8587e4eccc608df0e7bfb03fb30b8'
+ ($Rec+'\cli-shared-image-candidate-v1\afterimages\internal\cli\process_identity_match_windows_test.go')='e97fd7cc9cc9d9dfe09643c8e03334bd6f7f3e663b07a7f0fe711f0ef974708f'
+ ($Rec+'\cli-shared-image-candidate-v1\afterimages\internal\cli\settings_registry_test.go')='40de5fd188c8c94ec67e4fd852d89b0122aee602c3dde91fd8f8ceb2e4c7854a'
+ ($Rec+'\cli-prespawn-barrier-candidate-v1\supervise_prespawn_binary_gate_test.go.after.txt')='5e3a6517a9fed3a329cea60d12915965720b37c2bb6a865880d3c0c05ed48feb'
+ '@@RECOVERY_APPROVED_WORK_AREA@@\functional-route-20261126\runs\cache-acceptance-stage-20261128-v27\independent-root-data-audit.json'='5e94cb3e1697c4bdfc0a4c0b71601bbbb54749d9656223ccadc7d88037b5d9d8'
+ '@@RECOVERY_GO_DISTRIBUTION_ROOT@@\ucrt64\lib\go\bin\gofmt.exe'='95368e4aafefa20f962a345ab02f53ffc035ed69349612abbf385b52f4fb25c5'
+}
+foreach($p in $Pins.Keys){Need ((SHA $p)-ceq$Pins[$p]) 'patch/tool/closure pin';$Observed.Add($p)}
+$Config='@@RECOVERY_APPROVED_WORK_AREA@@\functional-route-20261126\cache-acceptance-stage-20261128-v28.json'
+Need (-not(Test-Path -LiteralPath $Config)) 'fresh config'
+$C=[IO.File]::ReadAllText($Top+'\cli-focused59f-baseline-v2-inputs\baseline-composition.json')|ConvertFrom-Json
+$Env=[ordered]@{};foreach($p in $C.environment.PSObject.Properties){$Env[$p.Name]=$p.Value};$Env['GIT_OPTIONAL_LOCKS']='0'
+$Selector='^(TestPidMatchesMcphub_(CurrentProcess|RejectsForeignPathSameBasename)|TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID|TestPreSpawnBinaryGate_(MissingBinaryNeverBurnsBudget|AutoRecoversWhenBinaryAppears|EmitsActionableOperatorMessage|MissingWorkspaceHolds|PresentBinarySpawns|EmptyCommandSpawns))$'
+$Plan=[ordered]@{run='runs/cache-acceptance-stage-20261128-v28';source=$Source;head='59f618ebfbf6d9f52c6994d68586e3c2ebc202a8';environment=$Env;observed_files=@($Observed);steps=@(
+ [ordered]@{name='check-shared-image-patch';argv=@('git','apply','--check',$Shared);timeout=30},
+ [ordered]@{name='check-prespawn-barrier-patch';argv=@('git','apply','--check',$Barrier);timeout=30},
+ [ordered]@{name='apply-shared-image-patch';argv=@('git','apply',$Shared);timeout=30;mutates_inputs=$true},
+ [ordered]@{name='apply-prespawn-barrier-patch';argv=@('git','apply',$Barrier);timeout=30;mutates_inputs=$true},
+ [ordered]@{name='format-three-test-files';argv=@('gofmt','-w','internal/cli/process_identity_match_windows_test.go','internal/cli/settings_registry_test.go','internal/cli/supervise_prespawn_binary_gate_test.go');timeout=30;mutates_inputs=$true},
+ [ordered]@{name='check-three-test-file-diff';argv=@('git','diff','--check');timeout=30},
+ [ordered]@{name='focused-fixtures-default';argv=@('go','test','-v','-count=1','-timeout','5m','-run',$Selector,'./internal/cli/');timeout=360},
+ [ordered]@{name='focused-fixtures-tagged';argv=@('go','test','-tags=test_state_path_env','-v','-count=1','-timeout','5m','-run',$Selector,'./internal/cli/');timeout=360},
+ [ordered]@{name='changed-test-files';argv=@('git','diff','--numstat');timeout=30}
+);root_review=[ordered]@{scope='Apply two reviewed test-only changes, run nine selected roots in both modes';production_edits=0;test_timeout='5m';native_outer_each=360;baseline_cache_last_closed_consumer='stage27';qualified_full_cli_layout=$false;full_cli_qualification_claimed=$false;identity_basename_scope='ordinary go test layout; parent basename is not claimed to equal mcphub.exe';original_14migration_2canonical_expected_refusal_not_substituted=$true}}
+[IO.File]::WriteAllText($Config,($Plan|ConvertTo-Json -Depth 10)+[char]10,[Text.UTF8Encoding]::new($false))
+[ordered]@{config=$Config;sha256=(SHA $Config);observed_files=$Observed.Count;selected_roots_per_mode=9;planned_commands=10}|ConvertTo-Json

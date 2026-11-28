@@ -1,0 +1,821 @@
+=== RUN   TestVariableMutationInvalidatesEarlierSetBinding
+--- PASS: TestVariableMutationInvalidatesEarlierSetBinding (0.00s)
+=== NAME  
+=== RUN   TestPinStatusProjection_NMinusOne_N_NPlusOne
+=== RUN   TestPinStatusProjection_NMinusOne_N_NPlusOne/N-1
+--- PASS: TestPinStatusProjection_NMinusOne_N_NPlusOne/N-1 (0.00s)
+=== NAME  TestPinStatusProjection_NMinusOne_N_NPlusOne
+=== RUN   TestPinStatusProjection_NMinusOne_N_NPlusOne/N
+--- PASS: TestPinStatusProjection_NMinusOne_N_NPlusOne/N (0.00s)
+=== NAME  TestPinStatusProjection_NMinusOne_N_NPlusOne
+=== RUN   TestPinStatusProjection_NMinusOne_N_NPlusOne/N+1
+--- PASS: TestPinStatusProjection_NMinusOne_N_NPlusOne/N+1 (0.00s)
+=== NAME  TestPinStatusProjection_NMinusOne_N_NPlusOne
+--- PASS: TestPinStatusProjection_NMinusOne_N_NPlusOne (0.01s)
+=== NAME  
+=== RUN   TestPinStatusProjection_RetainsOrderedFailureTuples
+--- PASS: TestPinStatusProjection_RetainsOrderedFailureTuples (0.00s)
+=== NAME  
+=== RUN   TestPinStatusProjection_ImpossibleCausalCoreFailsClosed
+--- PASS: TestPinStatusProjection_ImpossibleCausalCoreFailsClosed (0.00s)
+=== NAME  
+=== RUN   TestRemoteFailureProjectionPreservesExistingTriStateReasons
+=== RUN   TestRemoteFailureProjectionPreservesExistingTriStateReasons/reference_limit
+--- PASS: TestRemoteFailureProjectionPreservesExistingTriStateReasons/reference_limit (0.00s)
+=== NAME  TestRemoteFailureProjectionPreservesExistingTriStateReasons
+=== RUN   TestRemoteFailureProjectionPreservesExistingTriStateReasons/timeout
+--- PASS: TestRemoteFailureProjectionPreservesExistingTriStateReasons/timeout (0.00s)
+=== NAME  TestRemoteFailureProjectionPreservesExistingTriStateReasons
+=== RUN   TestRemoteFailureProjectionPreservesExistingTriStateReasons/canceled
+--- PASS: TestRemoteFailureProjectionPreservesExistingTriStateReasons/canceled (0.00s)
+=== NAME  TestRemoteFailureProjectionPreservesExistingTriStateReasons
+=== RUN   TestRemoteFailureProjectionPreservesExistingTriStateReasons/unclassified_error
+--- PASS: TestRemoteFailureProjectionPreservesExistingTriStateReasons/unclassified_error (0.00s)
+=== NAME  TestRemoteFailureProjectionPreservesExistingTriStateReasons
+--- PASS: TestRemoteFailureProjectionPreservesExistingTriStateReasons (0.00s)
+=== NAME  
+=== RUN   TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree
+=== RUN   TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree/containment
+--- PASS: TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree/containment (0.00s)
+=== NAME  TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree
+=== RUN   TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree/start
+--- PASS: TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree/start (0.00s)
+=== NAME  TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree
+=== RUN   TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree/parse_with_cleanup_timeout
+--- PASS: TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree/parse_with_cleanup_timeout (0.00s)
+=== NAME  TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree
+=== RUN   TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree/canceled
+--- PASS: TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree/canceled (0.00s)
+=== NAME  TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree
+=== RUN   TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree/timeout
+--- PASS: TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree/timeout (0.00s)
+=== NAME  TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree
+=== RUN   TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree/cleanup_timeout
+--- PASS: TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree/cleanup_timeout (0.00s)
+=== NAME  TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree
+=== RUN   TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree/git_exit
+--- PASS: TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree/git_exit (0.00s)
+=== NAME  TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree
+=== RUN   TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree/read
+--- PASS: TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree/read (0.00s)
+=== NAME  TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree
+=== RUN   TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree/wait
+--- PASS: TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree/wait (0.00s)
+=== NAME  TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree
+--- PASS: TestRemoteFailureProjectionLifecycleMatrixIsTypedAndSecretFree (0.00s)
+=== NAME  
+=== RUN   TestGitHubPinEqualToTrackedTip_Current
+--- PASS: TestGitHubPinEqualToTrackedTip_Current (0.00s)
+=== NAME  
+=== RUN   TestGitHubPinDifferent_UnknownPinNotAtTip_CarriesBothSHAs
+--- PASS: TestGitHubPinDifferent_UnknownPinNotAtTip_CarriesBothSHAs (0.00s)
+=== NAME  
+=== RUN   TestVcpkgFromGit_VariableRefResolvedFromLocalSet
+--- PASS: TestVcpkgFromGit_VariableRefResolvedFromLocalSet (0.00s)
+=== NAME  
+=== RUN   TestVersionRefResolvedFromSiblingManifestFields
+=== RUN   TestVersionRefResolvedFromSiblingManifestFields/version
+--- PASS: TestVersionRefResolvedFromSiblingManifestFields/version (0.00s)
+=== NAME  TestVersionRefResolvedFromSiblingManifestFields
+=== RUN   TestVersionRefResolvedFromSiblingManifestFields/version-string
+--- PASS: TestVersionRefResolvedFromSiblingManifestFields/version-string (0.00s)
+=== NAME  TestVersionRefResolvedFromSiblingManifestFields
+=== RUN   TestVersionRefResolvedFromSiblingManifestFields/version-date
+--- PASS: TestVersionRefResolvedFromSiblingManifestFields/version-date (0.00s)
+=== NAME  TestVersionRefResolvedFromSiblingManifestFields
+=== RUN   TestVersionRefResolvedFromSiblingManifestFields/version-semver
+--- PASS: TestVersionRefResolvedFromSiblingManifestFields/version-semver (0.00s)
+=== NAME  TestVersionRefResolvedFromSiblingManifestFields
+--- PASS: TestVersionRefResolvedFromSiblingManifestFields (0.00s)
+=== NAME  
+=== RUN   TestDefaultGuardChoosesSpeexdspReleaseDistfile
+--- PASS: TestDefaultGuardChoosesSpeexdspReleaseDistfile (0.00s)
+=== NAME  
+=== RUN   TestConditionalSourceRecordsNestedElseIfElseGuard
+--- PASS: TestConditionalSourceRecordsNestedElseIfElseGuard (0.00s)
+=== NAME  
+=== RUN   TestUnresolvedGuardReturnsCandidatesRatherThanGuess
+--- PASS: TestUnresolvedGuardReturnsCandidatesRatherThanGuess (0.00s)
+=== NAME  
+=== RUN   TestMultipleFetchCallsSelectsSourcePathAndReportsAllCandidates
+--- PASS: TestMultipleFetchCallsSelectsSourcePathAndReportsAllCandidates (0.00s)
+=== NAME  
+=== RUN   TestMultipleUnboundFetchCallsReturnUnknownWithAllCandidates
+--- PASS: TestMultipleUnboundFetchCallsReturnUnknownWithAllCandidates (0.00s)
+=== NAME  
+=== RUN   TestBracketCommentDecoyFetchIsInert
+--- PASS: TestBracketCommentDecoyFetchIsInert (0.00s)
+=== NAME  
+=== RUN   TestEqualsBracketArgumentRetainsLiteralDoubleClose
+--- PASS: TestEqualsBracketArgumentRetainsLiteralDoubleClose (0.00s)
+=== NAME  
+=== RUN   TestQuotedArgumentContinuationJoinsLines
+--- PASS: TestQuotedArgumentContinuationJoinsLines (0.00s)
+=== NAME  
+=== RUN   TestCallScannerKeepsCloseParenInsideQuotedRef
+--- PASS: TestCallScannerKeepsCloseParenInsideQuotedRef (0.00s)
+=== NAME  
+=== RUN   TestCallScannerKeepsCloseParenInsideBracketArgument
+--- PASS: TestCallScannerKeepsCloseParenInsideBracketArgument (0.00s)
+=== NAME  
+=== RUN   TestVcpkgFromGitLab_AllThreeFieldsVariables
+--- PASS: TestVcpkgFromGitLab_AllThreeFieldsVariables (0.00s)
+=== NAME  
+=== RUN   TestDistfileOnly_UnknownNotGitComparable
+--- PASS: TestDistfileOnly_UnknownNotGitComparable (0.00s)
+=== NAME  
+=== RUN   TestMetapackage_FetchesNothing_UnknownNotGitComparable
+--- PASS: TestMetapackage_FetchesNothing_UnknownNotGitComparable (0.00s)
+=== NAME  
+=== RUN   TestRemoteQueryError_UnknownRemoteQueryFailed_NeverCurrent
+--- PASS: TestRemoteQueryError_UnknownRemoteQueryFailed_NeverCurrent (0.00s)
+=== NAME  
+=== RUN   TestNetworkDisabled_EveryPortReturnsUnknownNetworkDisabled
+--- PASS: TestNetworkDisabled_EveryPortReturnsUnknownNetworkDisabled (0.00s)
+=== NAME  
+=== RUN   TestNetworkDisabled_FiresEvenForAPortDirThatDoesNotExist
+--- PASS: TestNetworkDisabled_FiresEvenForAPortDirThatDoesNotExist (0.00s)
+=== NAME  
+=== RUN   TestMissingPortfile_UnknownPortfileUnparsable
+--- PASS: TestMissingPortfile_UnknownPortfileUnparsable (0.00s)
+=== NAME  
+=== RUN   TestGitHubTagRef_FoundOnRemote_UnknownNamedRefNotComparable
+--- PASS: TestGitHubTagRef_FoundOnRemote_UnknownNamedRefNotComparable (0.00s)
+=== NAME  
+=== RUN   TestNamedRefsFoundOnRemoteAreUnknownWithTheirObservedCommit
+=== RUN   TestNamedRefsFoundOnRemoteAreUnknownWithTheirObservedCommit/tag
+--- PASS: TestNamedRefsFoundOnRemoteAreUnknownWithTheirObservedCommit/tag (0.00s)
+=== NAME  TestNamedRefsFoundOnRemoteAreUnknownWithTheirObservedCommit
+=== RUN   TestNamedRefsFoundOnRemoteAreUnknownWithTheirObservedCommit/branch
+--- PASS: TestNamedRefsFoundOnRemoteAreUnknownWithTheirObservedCommit/branch (0.00s)
+=== NAME  TestNamedRefsFoundOnRemoteAreUnknownWithTheirObservedCommit
+=== RUN   TestNamedRefsFoundOnRemoteAreUnknownWithTheirObservedCommit/resolved_variable_tag
+--- PASS: TestNamedRefsFoundOnRemoteAreUnknownWithTheirObservedCommit/resolved_variable_tag (0.00s)
+=== NAME  TestNamedRefsFoundOnRemoteAreUnknownWithTheirObservedCommit
+--- PASS: TestNamedRefsFoundOnRemoteAreUnknownWithTheirObservedCommit (0.00s)
+=== NAME  
+=== RUN   TestGitHubBranchRef_NotFoundOnRemote_UnknownRefNotFound
+--- PASS: TestGitHubBranchRef_NotFoundOnRemote_UnknownRefNotFound (0.00s)
+=== NAME  
+=== RUN   TestUnresolvableVariableRef_UnknownRefUnresolvable
+--- PASS: TestUnresolvableVariableRef_UnknownRefUnresolvable (0.00s)
+=== NAME  
+=== RUN   TestUnresolvedHeadRefDoesNotFallBackToRemoteHEAD
+--- PASS: TestUnresolvedHeadRefDoesNotFallBackToRemoteHEAD (0.00s)
+=== NAME  
+=== RUN   TestAbsentHeadRefStillUsesRemoteHEAD
+--- PASS: TestAbsentHeadRefStillUsesRemoteHEAD (0.00s)
+=== NAME  
+=== RUN   TestF23_EmptyBatchIsRefusedWithATopLevelTriState
+--- PASS: TestF23_EmptyBatchIsRefusedWithATopLevelTriState (0.00s)
+=== NAME  
+=== RUN   TestF23_NonEmptyBatchReportsOKAtTheToolLevel
+--- PASS: TestF23_NonEmptyBatchReportsOKAtTheToolLevel (0.00s)
+=== NAME  
+=== RUN   TestNoCodePathProducesBehind
+--- PASS: TestNoCodePathProducesBehind (0.00s)
+=== NAME  
+=== RUN   TestNoCodePathProducesBehind_RuntimeSweep
+--- PASS: TestNoCodePathProducesBehind_RuntimeSweep (0.01s)
+=== NAME  
+=== RUN   TestPinStatus_BatchOrderAndIndependence
+--- PASS: TestPinStatus_BatchOrderAndIndependence (0.00s)
+=== NAME  
+=== RUN   TestF24_CredentialNeverAppearsAnywhereInTheMarshaledResult
+--- PASS: TestF24_CredentialNeverAppearsAnywhereInTheMarshaledResult (0.00s)
+=== NAME  
+=== RUN   TestF24_CredentialBearingRemoteIsRefusedNotQueried
+--- PASS: TestF24_CredentialBearingRemoteIsRefusedNotQueried (0.00s)
+=== NAME  
+=== RUN   TestF24_CredentialOnANonSelectedCandidateIsAlsoRedacted
+--- PASS: TestF24_CredentialOnANonSelectedCandidateIsAlsoRedacted (0.00s)
+=== NAME  
+=== RUN   TestF24_RedactURLCoversUserinfoQueryParamsAndUnparsableInput
+=== RUN   TestF24_RedactURLCoversUserinfoQueryParamsAndUnparsableInput/user_and_password
+--- PASS: TestF24_RedactURLCoversUserinfoQueryParamsAndUnparsableInput/user_and_password (0.00s)
+=== NAME  TestF24_RedactURLCoversUserinfoQueryParamsAndUnparsableInput
+=== RUN   TestF24_RedactURLCoversUserinfoQueryParamsAndUnparsableInput/bare_token_as_username
+--- PASS: TestF24_RedactURLCoversUserinfoQueryParamsAndUnparsableInput/bare_token_as_username (0.00s)
+=== NAME  TestF24_RedactURLCoversUserinfoQueryParamsAndUnparsableInput
+=== RUN   TestF24_RedactURLCoversUserinfoQueryParamsAndUnparsableInput/secret_query_parameter
+--- PASS: TestF24_RedactURLCoversUserinfoQueryParamsAndUnparsableInput/secret_query_parameter (0.00s)
+=== NAME  TestF24_RedactURLCoversUserinfoQueryParamsAndUnparsableInput
+=== RUN   TestF24_RedactURLCoversUserinfoQueryParamsAndUnparsableInput/unparsable_authority
+--- PASS: TestF24_RedactURLCoversUserinfoQueryParamsAndUnparsableInput/unparsable_authority (0.00s)
+=== NAME  TestF24_RedactURLCoversUserinfoQueryParamsAndUnparsableInput
+--- PASS: TestF24_RedactURLCoversUserinfoQueryParamsAndUnparsableInput (0.00s)
+=== NAME  
+=== RUN   TestF24_CleanURLRoundTripsUnchanged
+--- PASS: TestF24_CleanURLRoundTripsUnchanged (0.00s)
+=== NAME  
+=== RUN   TestF8_RequestContextReachesTheRemoteQuery
+--- PASS: TestF8_RequestContextReachesTheRemoteQuery (0.00s)
+=== NAME  
+=== RUN   TestF8_CanceledRequestStopsTheBatchAndNeverQueries
+--- PASS: TestF8_CanceledRequestStopsTheBatchAndNeverQueries (0.00s)
+=== NAME  
+=== RUN   TestF8_TimeoutAndCancellationAreDistinctReasons
+--- PASS: TestF8_TimeoutAndCancellationAreDistinctReasons (0.00s)
+=== NAME  
+=== RUN   TestF25_RefCountCeilingTripsAndSurfacesAClosedReason
+--- PASS: TestF25_RefCountCeilingTripsAndSurfacesAClosedReason (0.04s)
+=== NAME  
+=== RUN   TestF25_OverlongRefLineIsRefusedNotBuffered
+--- PASS: TestF25_OverlongRefLineIsRefusedNotBuffered (0.00s)
+=== NAME  
+=== RUN   TestF25_NormalAdvertisementStillParsesUnchanged
+--- PASS: TestF25_NormalAdvertisementStillParsesUnchanged (0.00s)
+=== NAME  
+=== RUN   TestF24_CompareURLIsBuiltFromTheRedactedRemoteNotTheRawOne
+--- PASS: TestF24_CompareURLIsBuiltFromTheRedactedRemoteNotTheRawOne (0.00s)
+=== NAME  
+=== RUN   TestF24_UnclassifiedQueryNeverReachesCompareURL
+--- PASS: TestF24_UnclassifiedQueryNeverReachesCompareURL (0.00s)
+=== NAME  
+=== RUN   TestF25_TotalOutputCeilingTripsOnManyIndividuallyLegalLines
+    pinstatus_test.go:1242: note: 8193 lines are needed; they carry no tab so none is counted as a ref
+--- PASS: TestF25_TotalOutputCeilingTripsOnManyIndividuallyLegalLines (0.01s)
+=== NAME  
+=== RUN   TestFieldP1_RefContainingAVariableIsNeverReportedAsMissingUpstream
+=== RUN   TestFieldP1_RefContainingAVariableIsNeverReportedAsMissingUpstream/double-conversion
+--- PASS: TestFieldP1_RefContainingAVariableIsNeverReportedAsMissingUpstream/double-conversion (0.00s)
+=== NAME  TestFieldP1_RefContainingAVariableIsNeverReportedAsMissingUpstream
+=== RUN   TestFieldP1_RefContainingAVariableIsNeverReportedAsMissingUpstream/libxcrypt
+--- PASS: TestFieldP1_RefContainingAVariableIsNeverReportedAsMissingUpstream/libxcrypt (0.00s)
+=== NAME  TestFieldP1_RefContainingAVariableIsNeverReportedAsMissingUpstream
+=== RUN   TestFieldP1_RefContainingAVariableIsNeverReportedAsMissingUpstream/xorg-macros
+--- PASS: TestFieldP1_RefContainingAVariableIsNeverReportedAsMissingUpstream/xorg-macros (0.00s)
+=== NAME  TestFieldP1_RefContainingAVariableIsNeverReportedAsMissingUpstream
+--- PASS: TestFieldP1_RefContainingAVariableIsNeverReportedAsMissingUpstream (0.00s)
+=== NAME  
+=== RUN   TestFieldP1_UnexpandableRefFallsBackToUnresolvableNeverToANegative
+--- PASS: TestFieldP1_UnexpandableRefFallsBackToUnresolvableNeverToANegative (0.00s)
+=== NAME  
+=== RUN   TestFieldP1_WholeStringVariableRefStillReportsUnresolvable
+--- PASS: TestFieldP1_WholeStringVariableRefStillReportsUnresolvable (0.00s)
+=== NAME  
+=== RUN   TestFieldP1_PortVariableExpandsFromThePortDirectoryName
+--- PASS: TestFieldP1_PortVariableExpandsFromThePortDirectoryName (0.00s)
+=== NAME  
+=== RUN   TestFieldP1_EmbeddedVariablesExpandInRepoAndUrlFieldsToo
+--- PASS: TestFieldP1_EmbeddedVariablesExpandInRepoAndUrlFieldsToo (0.00s)
+=== NAME  
+=== RUN   TestRedactURL_UnparsableURLStillScrubsQueryCredentials
+=== RUN   TestRedactURL_UnparsableURLStillScrubsQueryCredentials/invalid_percent_escape_in_path
+--- PASS: TestRedactURL_UnparsableURLStillScrubsQueryCredentials/invalid_percent_escape_in_path (0.00s)
+=== NAME  TestRedactURL_UnparsableURLStillScrubsQueryCredentials
+=== RUN   TestRedactURL_UnparsableURLStillScrubsQueryCredentials/control_character_in_query
+--- PASS: TestRedactURL_UnparsableURLStillScrubsQueryCredentials/control_character_in_query (0.00s)
+=== NAME  TestRedactURL_UnparsableURLStillScrubsQueryCredentials
+=== RUN   TestRedactURL_UnparsableURLStillScrubsQueryCredentials/space_in_host
+--- PASS: TestRedactURL_UnparsableURLStillScrubsQueryCredentials/space_in_host (0.00s)
+=== NAME  TestRedactURL_UnparsableURLStillScrubsQueryCredentials
+=== RUN   TestRedactURL_UnparsableURLStillScrubsQueryCredentials/invalid_escape_in_fragment
+--- PASS: TestRedactURL_UnparsableURLStillScrubsQueryCredentials/invalid_escape_in_fragment (0.00s)
+=== NAME  TestRedactURL_UnparsableURLStillScrubsQueryCredentials
+=== RUN   TestRedactURL_UnparsableURLStillScrubsQueryCredentials/unparsable_userinfo_plus_secret_query
+--- PASS: TestRedactURL_UnparsableURLStillScrubsQueryCredentials/unparsable_userinfo_plus_secret_query (0.00s)
+=== NAME  TestRedactURL_UnparsableURLStillScrubsQueryCredentials
+--- PASS: TestRedactURL_UnparsableURLStillScrubsQueryCredentials (0.00s)
+=== NAME  
+=== RUN   TestRedactURL_UnparsableURLWithoutCredentialIsUnchanged
+--- PASS: TestRedactURL_UnparsableURLWithoutCredentialIsUnchanged (0.00s)
+=== NAME  
+=== RUN   TestRedactURL_QueryValueRedactionIsAnAllowlist
+--- PASS: TestRedactURL_QueryValueRedactionIsAnAllowlist (0.00s)
+=== NAME  
+=== RUN   TestArgvRefusal_EmptyValuedSecretParameterIsNotRefused
+--- PASS: TestArgvRefusal_EmptyValuedSecretParameterIsNotRefused (0.00s)
+=== NAME  
+=== RUN   TestUninvokedFunctionAndMacroFetchesAreExcluded
+--- PASS: TestUninvokedFunctionAndMacroFetchesAreExcluded (0.00s)
+=== NAME  
+=== RUN   TestPortfileReturnStopsOrInvalidatesLaterFetches
+--- PASS: TestPortfileReturnStopsOrInvalidatesLaterFetches (0.00s)
+=== NAME  
+=== RUN   TestInvokedFetchBearingDeclarationFailsClosedWithoutRemoteCall
+--- PASS: TestInvokedFetchBearingDeclarationFailsClosedWithoutRemoteCall (0.00s)
+=== NAME  
+=== RUN   TestPinStatusVariableEnvironmentUsesEachFetchCallSite
+--- PASS: TestPinStatusVariableEnvironmentUsesEachFetchCallSite (0.00s)
+=== NAME  
+=== RUN   TestPinStatusVariableEnvironmentDoesNotSeeLaterAssignment
+--- PASS: TestPinStatusVariableEnvironmentDoesNotSeeLaterAssignment (0.00s)
+=== NAME  
+=== RUN   TestPinStatusVariableEnvironmentUnknownAssignmentBlocksFallback
+--- PASS: TestPinStatusVariableEnvironmentUnknownAssignmentBlocksFallback (0.00s)
+=== NAME  
+=== RUN   TestPinStatusVariableEnvironmentLaterDefiniteWriteClosesUnknown
+--- PASS: TestPinStatusVariableEnvironmentLaterDefiniteWriteClosesUnknown (0.00s)
+=== NAME  
+=== RUN   TestPinStatusVariableEnvironmentConditionAndScopeStates
+=== RUN   TestPinStatusVariableEnvironmentConditionAndScopeStates/true_conditional_assignment_is_definite
+--- PASS: TestPinStatusVariableEnvironmentConditionAndScopeStates/true_conditional_assignment_is_definite (0.00s)
+=== NAME  TestPinStatusVariableEnvironmentConditionAndScopeStates
+=== RUN   TestPinStatusVariableEnvironmentConditionAndScopeStates/false_conditional_assignment_is_absent
+--- PASS: TestPinStatusVariableEnvironmentConditionAndScopeStates/false_conditional_assignment_is_absent (0.00s)
+=== NAME  TestPinStatusVariableEnvironmentConditionAndScopeStates
+=== RUN   TestPinStatusVariableEnvironmentConditionAndScopeStates/unsupported_function_scope_is_unknown
+--- PASS: TestPinStatusVariableEnvironmentConditionAndScopeStates/unsupported_function_scope_is_unknown (0.00s)
+=== NAME  TestPinStatusVariableEnvironmentConditionAndScopeStates
+=== RUN   TestPinStatusVariableEnvironmentConditionAndScopeStates/dynamic_target_taints_older_values_and_fallback
+--- PASS: TestPinStatusVariableEnvironmentConditionAndScopeStates/dynamic_target_taints_older_values_and_fallback (0.00s)
+=== NAME  TestPinStatusVariableEnvironmentConditionAndScopeStates
+--- PASS: TestPinStatusVariableEnvironmentConditionAndScopeStates (0.00s)
+=== NAME  
+=== RUN   TestPinStatusVariableEnvironmentFailsClosedAcrossFetchFields
+=== RUN   TestPinStatusVariableEnvironmentFailsClosedAcrossFetchFields/REF
+--- PASS: TestPinStatusVariableEnvironmentFailsClosedAcrossFetchFields/REF (0.00s)
+=== NAME  TestPinStatusVariableEnvironmentFailsClosedAcrossFetchFields
+=== RUN   TestPinStatusVariableEnvironmentFailsClosedAcrossFetchFields/HEAD_REF
+--- PASS: TestPinStatusVariableEnvironmentFailsClosedAcrossFetchFields/HEAD_REF (0.00s)
+=== NAME  TestPinStatusVariableEnvironmentFailsClosedAcrossFetchFields
+=== RUN   TestPinStatusVariableEnvironmentFailsClosedAcrossFetchFields/REPO
+--- PASS: TestPinStatusVariableEnvironmentFailsClosedAcrossFetchFields/REPO (0.00s)
+=== NAME  TestPinStatusVariableEnvironmentFailsClosedAcrossFetchFields
+=== RUN   TestPinStatusVariableEnvironmentFailsClosedAcrossFetchFields/URL
+--- PASS: TestPinStatusVariableEnvironmentFailsClosedAcrossFetchFields/URL (0.00s)
+=== NAME  TestPinStatusVariableEnvironmentFailsClosedAcrossFetchFields
+=== RUN   TestPinStatusVariableEnvironmentFailsClosedAcrossFetchFields/GITLAB_URL
+--- PASS: TestPinStatusVariableEnvironmentFailsClosedAcrossFetchFields/GITLAB_URL (0.00s)
+=== NAME  TestPinStatusVariableEnvironmentFailsClosedAcrossFetchFields
+--- PASS: TestPinStatusVariableEnvironmentFailsClosedAcrossFetchFields (0.00s)
+=== NAME  
+=== RUN   TestPortfileVariableResolutionHasNoWholeFileLookup
+--- PASS: TestPortfileVariableResolutionHasNoWholeFileLookup (0.00s)
+=== NAME  
+=== RUN   TestConditionallyAssignedRefVariableIsUnresolvableNotGuessed
+--- PASS: TestConditionallyAssignedRefVariableIsUnresolvableNotGuessed (0.00s)
+=== NAME  
+=== RUN   TestUnconditionallyAssignedRefVariableStillResolves
+--- PASS: TestUnconditionallyAssignedRefVariableStillResolves (0.00s)
+=== NAME  
+=== RUN   TestUpperCaseCommandNamesAreRecognized
+--- PASS: TestUpperCaseCommandNamesAreRecognized (0.00s)
+=== NAME  
+=== RUN   TestAbbreviatedCommitPinIsAnUnresolvableCommitNotAMissingRef
+--- PASS: TestAbbreviatedCommitPinIsAnUnresolvableCommitNotAMissingRef (0.00s)
+=== NAME  
+=== RUN   TestHexShapedNameThatTheRemoteAdvertisesIsANamedRefNotACommit
+--- PASS: TestHexShapedNameThatTheRemoteAdvertisesIsANamedRefNotACommit (0.00s)
+=== NAME  
+=== RUN   TestBoundedWriterReportsFullWritesWhileDiscardingExcess
+--- PASS: TestBoundedWriterReportsFullWritesWhileDiscardingExcess (0.00s)
+=== NAME  
+=== RUN   TestRelativePortDirIsRefusedBeforeFilesystemOrNetwork
+=== RUN   TestRelativePortDirIsRefusedBeforeFilesystemOrNetwork/network_enabled
+--- PASS: TestRelativePortDirIsRefusedBeforeFilesystemOrNetwork/network_enabled (0.00s)
+=== NAME  TestRelativePortDirIsRefusedBeforeFilesystemOrNetwork
+=== RUN   TestRelativePortDirIsRefusedBeforeFilesystemOrNetwork/network_disabled
+--- PASS: TestRelativePortDirIsRefusedBeforeFilesystemOrNetwork/network_disabled (0.00s)
+=== NAME  TestRelativePortDirIsRefusedBeforeFilesystemOrNetwork
+--- PASS: TestRelativePortDirIsRefusedBeforeFilesystemOrNetwork (0.00s)
+=== NAME  
+=== RUN   TestApproveRemoteURLClassification
+=== RUN   TestApproveRemoteURLClassification/https
+--- PASS: TestApproveRemoteURLClassification/https (0.00s)
+=== NAME  TestApproveRemoteURLClassification
+=== RUN   TestApproveRemoteURLClassification/scp
+--- PASS: TestApproveRemoteURLClassification/scp (0.00s)
+=== NAME  TestApproveRemoteURLClassification
+=== RUN   TestApproveRemoteURLClassification/relative_local_path
+--- PASS: TestApproveRemoteURLClassification/relative_local_path (0.00s)
+=== NAME  TestApproveRemoteURLClassification
+=== RUN   TestApproveRemoteURLClassification/valueless_query
+--- PASS: TestApproveRemoteURLClassification/valueless_query (0.00s)
+=== NAME  TestApproveRemoteURLClassification
+=== RUN   TestApproveRemoteURLClassification/empty_query_value
+--- PASS: TestApproveRemoteURLClassification/empty_query_value (0.00s)
+=== NAME  TestApproveRemoteURLClassification
+=== RUN   TestApproveRemoteURLClassification/userinfo_credential
+--- PASS: TestApproveRemoteURLClassification/userinfo_credential (0.00s)
+=== NAME  TestApproveRemoteURLClassification
+=== RUN   TestApproveRemoteURLClassification/credential_query
+--- PASS: TestApproveRemoteURLClassification/credential_query (0.00s)
+=== NAME  TestApproveRemoteURLClassification
+=== RUN   TestApproveRemoteURLClassification/unknown_query_value
+--- PASS: TestApproveRemoteURLClassification/unknown_query_value (0.00s)
+=== NAME  TestApproveRemoteURLClassification
+=== RUN   TestApproveRemoteURLClassification/unknown_malformed_query
+--- PASS: TestApproveRemoteURLClassification/unknown_malformed_query (0.00s)
+=== NAME  TestApproveRemoteURLClassification
+=== RUN   TestApproveRemoteURLClassification/malformed_shape
+--- PASS: TestApproveRemoteURLClassification/malformed_shape (0.00s)
+=== NAME  TestApproveRemoteURLClassification
+=== RUN   TestApproveRemoteURLClassification/missing_host
+--- PASS: TestApproveRemoteURLClassification/missing_host (0.00s)
+=== NAME  TestApproveRemoteURLClassification
+=== RUN   TestApproveRemoteURLClassification/fragment
+--- PASS: TestApproveRemoteURLClassification/fragment (0.00s)
+=== NAME  TestApproveRemoteURLClassification
+=== RUN   TestApproveRemoteURLClassification/empty
+--- PASS: TestApproveRemoteURLClassification/empty (0.00s)
+=== NAME  TestApproveRemoteURLClassification
+--- PASS: TestApproveRemoteURLClassification (0.00s)
+=== NAME  
+=== RUN   TestRemoteURLAdmissionRejectionsMakeZeroRemoteCalls
+=== RUN   TestRemoteURLAdmissionRejectionsMakeZeroRemoteCalls/credential
+--- PASS: TestRemoteURLAdmissionRejectionsMakeZeroRemoteCalls/credential (0.00s)
+=== NAME  TestRemoteURLAdmissionRejectionsMakeZeroRemoteCalls
+=== RUN   TestRemoteURLAdmissionRejectionsMakeZeroRemoteCalls/unclassified_query
+--- PASS: TestRemoteURLAdmissionRejectionsMakeZeroRemoteCalls/unclassified_query (0.00s)
+=== NAME  TestRemoteURLAdmissionRejectionsMakeZeroRemoteCalls
+=== RUN   TestRemoteURLAdmissionRejectionsMakeZeroRemoteCalls/invalid_shape
+--- PASS: TestRemoteURLAdmissionRejectionsMakeZeroRemoteCalls/invalid_shape (0.00s)
+=== NAME  TestRemoteURLAdmissionRejectionsMakeZeroRemoteCalls
+--- PASS: TestRemoteURLAdmissionRejectionsMakeZeroRemoteCalls (0.00s)
+=== NAME  
+=== RUN   TestApprovedRemoteURLHasOneConstructorAndTypedConsumers
+--- PASS: TestApprovedRemoteURLHasOneConstructorAndTypedConsumers (0.00s)
+=== NAME  
+=== RUN   TestRunContainedStreamImportGraphGuard
+--- PASS: TestRunContainedStreamImportGraphGuard (0.00s)
+=== NAME  
+=== RUN   TestRunContainedStreamSiblingCallerSourceGuard
+--- PASS: TestRunContainedStreamSiblingCallerSourceGuard (0.00s)
+=== NAME  
+=== RUN   TestVTuneRunContainedStreamCallerApproved
+--- PASS: TestVTuneRunContainedStreamCallerApproved (0.00s)
+=== NAME  
+=== RUN   TestOneAPIRunContainedStreamCallerApproved
+--- PASS: TestOneAPIRunContainedStreamCallerApproved (0.00s)
+=== NAME  
+=== RUN   TestR15RelativeLocalRemoteIsRefusedBeforeQuery
+--- PASS: TestR15RelativeLocalRemoteIsRefusedBeforeQuery (0.00s)
+=== NAME  
+=== RUN   TestR15BatchDeduplicatesOneRemoteSnapshot
+--- PASS: TestR15BatchDeduplicatesOneRemoteSnapshot (0.00s)
+=== NAME  
+=== RUN   TestR15ConcurrentBatchesShareFourRemoteQuerySlots
+--- PASS: TestR15ConcurrentBatchesShareFourRemoteQuerySlots (0.16s)
+=== NAME  
+=== RUN   TestR15BatchDeadlineBoundsWholeCall
+--- PASS: TestR15BatchDeadlineBoundsWholeCall (0.05s)
+=== NAME  
+=== RUN   TestR17PortfileRejectsDuplicateElseAndElseifAfterElse
+=== RUN   TestR17PortfileRejectsDuplicateElseAndElseifAfterElse/duplicate_else
+--- PASS: TestR17PortfileRejectsDuplicateElseAndElseifAfterElse/duplicate_else (0.00s)
+=== NAME  TestR17PortfileRejectsDuplicateElseAndElseifAfterElse
+=== RUN   TestR17PortfileRejectsDuplicateElseAndElseifAfterElse/elseif_after_else
+--- PASS: TestR17PortfileRejectsDuplicateElseAndElseifAfterElse/elseif_after_else (0.00s)
+=== NAME  TestR17PortfileRejectsDuplicateElseAndElseifAfterElse
+--- PASS: TestR17PortfileRejectsDuplicateElseAndElseifAfterElse (0.00s)
+=== NAME  
+=== RUN   TestR17PortfileFailsClosedOnIndirectExecutableSourcePaths
+=== RUN   TestR17PortfileFailsClosedOnIndirectExecutableSourcePaths/include
+--- PASS: TestR17PortfileFailsClosedOnIndirectExecutableSourcePaths/include (0.00s)
+=== NAME  TestR17PortfileFailsClosedOnIndirectExecutableSourcePaths
+=== RUN   TestR17PortfileFailsClosedOnIndirectExecutableSourcePaths/transitive_function
+--- PASS: TestR17PortfileFailsClosedOnIndirectExecutableSourcePaths/transitive_function (0.00s)
+=== NAME  TestR17PortfileFailsClosedOnIndirectExecutableSourcePaths
+--- PASS: TestR17PortfileFailsClosedOnIndirectExecutableSourcePaths (0.00s)
+=== NAME  
+=== RUN   TestR17InactiveIncludeDoesNotPoisonKnownSourceSelection
+--- PASS: TestR17InactiveIncludeDoesNotPoisonKnownSourceSelection (0.00s)
+=== NAME  
+=== RUN   TestR19SemanticFileRejectsSpecialFileBeforeOpen
+--- PASS: TestR19SemanticFileRejectsSpecialFileBeforeOpen (0.00s)
+=== NAME  
+=== RUN   TestR19PortfileCapsRetainedFetchCandidates
+--- PASS: TestR19PortfileCapsRetainedFetchCandidates (0.00s)
+=== NAME  
+=== RUN   TestR22PortfileFailsClosedOnFetchInsideExecutableLoop
+=== RUN   TestR22PortfileFailsClosedOnFetchInsideExecutableLoop/foreach
+--- PASS: TestR22PortfileFailsClosedOnFetchInsideExecutableLoop/foreach (0.00s)
+=== NAME  TestR22PortfileFailsClosedOnFetchInsideExecutableLoop
+=== RUN   TestR22PortfileFailsClosedOnFetchInsideExecutableLoop/while
+--- PASS: TestR22PortfileFailsClosedOnFetchInsideExecutableLoop/while (0.00s)
+=== NAME  TestR22PortfileFailsClosedOnFetchInsideExecutableLoop
+--- PASS: TestR22PortfileFailsClosedOnFetchInsideExecutableLoop (0.00s)
+=== NAME  
+=== RUN   TestR22InactiveLoopDoesNotPoisonKnownSourceSelection
+--- PASS: TestR22InactiveLoopDoesNotPoisonKnownSourceSelection (0.00s)
+=== NAME  
+=== RUN   TestR23ExternalRemoteHelperSchemeIsRejected
+--- PASS: TestR23ExternalRemoteHelperSchemeIsRejected (0.00s)
+=== NAME  
+=== RUN   TestR23ExternalRemoteHelperSchemeStartsNoRemoteQuery
+--- PASS: TestR23ExternalRemoteHelperSchemeStartsNoRemoteQuery (0.00s)
+=== NAME  
+=== RUN   TestRemoteHelperSyntaxIsRejectedBeforeRemoteQuery
+=== RUN   TestRemoteHelperSyntaxIsRejectedBeforeRemoteQuery/evil::attacker-controlled-address
+--- PASS: TestRemoteHelperSyntaxIsRejectedBeforeRemoteQuery/evil::attacker-controlled-address (0.00s)
+=== NAME  TestRemoteHelperSyntaxIsRejectedBeforeRemoteQuery
+=== RUN   TestRemoteHelperSyntaxIsRejectedBeforeRemoteQuery/ext::sh_-c_exploit
+--- PASS: TestRemoteHelperSyntaxIsRejectedBeforeRemoteQuery/ext::sh_-c_exploit (0.00s)
+=== NAME  TestRemoteHelperSyntaxIsRejectedBeforeRemoteQuery
+--- PASS: TestRemoteHelperSyntaxIsRejectedBeforeRemoteQuery (0.00s)
+=== NAME  
+=== RUN   TestRemoteHelperGuardPreservesNonHelperDoubleColonRemotes
+=== RUN   TestRemoteHelperGuardPreservesNonHelperDoubleColonRemotes/\\server\share\repo::mirror
+--- PASS: TestRemoteHelperGuardPreservesNonHelperDoubleColonRemotes/\\server\share\repo::mirror (0.00s)
+=== NAME  TestRemoteHelperGuardPreservesNonHelperDoubleColonRemotes
+=== RUN   TestRemoteHelperGuardPreservesNonHelperDoubleColonRemotes/[::1]:owner/repo
+--- PASS: TestRemoteHelperGuardPreservesNonHelperDoubleColonRemotes/[::1]:owner/repo (0.00s)
+=== NAME  TestRemoteHelperGuardPreservesNonHelperDoubleColonRemotes
+=== RUN   TestRemoteHelperGuardPreservesNonHelperDoubleColonRemotes/https://host/owner/repo::mirror
+--- PASS: TestRemoteHelperGuardPreservesNonHelperDoubleColonRemotes/https://host/owner/repo::mirror (0.00s)
+=== NAME  TestRemoteHelperGuardPreservesNonHelperDoubleColonRemotes
+=== RUN   TestRemoteHelperGuardPreservesNonHelperDoubleColonRemotes/example.com:owner/repo::mirror
+--- PASS: TestRemoteHelperGuardPreservesNonHelperDoubleColonRemotes/example.com:owner/repo::mirror (0.00s)
+=== NAME  TestRemoteHelperGuardPreservesNonHelperDoubleColonRemotes
+--- PASS: TestRemoteHelperGuardPreservesNonHelperDoubleColonRemotes (0.00s)
+=== NAME  
+=== RUN   TestRemoteHelperGuardMatchesGitLeadingTransportGrammar
+=== RUN   TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/evil::address
+--- PASS: TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/evil::address (0.00s)
+=== NAME  TestRemoteHelperGuardMatchesGitLeadingTransportGrammar
+=== RUN   TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/9evil::address
+--- PASS: TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/9evil::address (0.00s)
+=== NAME  TestRemoteHelperGuardMatchesGitLeadingTransportGrammar
+=== RUN   TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/git+foo::address
+--- PASS: TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/git+foo::address (0.00s)
+=== NAME  TestRemoteHelperGuardMatchesGitLeadingTransportGrammar
+=== RUN   TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/git.foo::address
+--- PASS: TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/git.foo::address (0.00s)
+=== NAME  TestRemoteHelperGuardMatchesGitLeadingTransportGrammar
+=== RUN   TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/git-foo::address
+--- PASS: TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/git-foo::address (0.00s)
+=== NAME  TestRemoteHelperGuardMatchesGitLeadingTransportGrammar
+=== RUN   TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/::address
+--- PASS: TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/::address (0.00s)
+=== NAME  TestRemoteHelperGuardMatchesGitLeadingTransportGrammar
+=== RUN   TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/.evil::address
+--- PASS: TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/.evil::address (0.00s)
+=== NAME  TestRemoteHelperGuardMatchesGitLeadingTransportGrammar
+=== RUN   TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/+evil::address
+--- PASS: TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/+evil::address (0.00s)
+=== NAME  TestRemoteHelperGuardMatchesGitLeadingTransportGrammar
+=== RUN   TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/-evil::address
+--- PASS: TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/-evil::address (0.00s)
+=== NAME  TestRemoteHelperGuardMatchesGitLeadingTransportGrammar
+=== RUN   TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/git_foo::address
+--- PASS: TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/git_foo::address (0.00s)
+=== NAME  TestRemoteHelperGuardMatchesGitLeadingTransportGrammar
+=== RUN   TestRemoteHelperGuardMatchesGitLeadingTransportGrammar//tmp/repo::mirror
+--- PASS: TestRemoteHelperGuardMatchesGitLeadingTransportGrammar//tmp/repo::mirror (0.00s)
+=== NAME  TestRemoteHelperGuardMatchesGitLeadingTransportGrammar
+=== RUN   TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/[::1]:owner/repo
+--- PASS: TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/[::1]:owner/repo (0.00s)
+=== NAME  TestRemoteHelperGuardMatchesGitLeadingTransportGrammar
+=== RUN   TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/https://host/repo::mirror
+--- PASS: TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/https://host/repo::mirror (0.00s)
+=== NAME  TestRemoteHelperGuardMatchesGitLeadingTransportGrammar
+=== RUN   TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/example.com:owner/repo::mirror
+--- PASS: TestRemoteHelperGuardMatchesGitLeadingTransportGrammar/example.com:owner/repo::mirror (0.00s)
+=== NAME  TestRemoteHelperGuardMatchesGitLeadingTransportGrammar
+--- PASS: TestRemoteHelperGuardMatchesGitLeadingTransportGrammar (0.00s)
+=== NAME  
+=== RUN   TestR25UninvokedDeclarationDoesNotMutateTopLevelVariables
+--- PASS: TestR25UninvokedDeclarationDoesNotMutateTopLevelVariables (0.00s)
+=== NAME  
+=== RUN   TestR27RejectedUnclassifiedFragmentValueIsNeverEmitted
+--- PASS: TestR27RejectedUnclassifiedFragmentValueIsNeverEmitted (0.00s)
+=== NAME  
+=== RUN   TestR28CommandNameCannotCrossLineEndingBeforeParen
+--- PASS: TestR28CommandNameCannotCrossLineEndingBeforeParen (0.00s)
+=== NAME  
+=== RUN   TestR29EnvironmentAndCacheRefsNeverReachRemote
+=== RUN   TestR29EnvironmentAndCacheRefsNeverReachRemote/$ENV{SOURCE_TAG}
+--- PASS: TestR29EnvironmentAndCacheRefsNeverReachRemote/$ENV{SOURCE_TAG} (0.00s)
+=== NAME  TestR29EnvironmentAndCacheRefsNeverReachRemote
+=== RUN   TestR29EnvironmentAndCacheRefsNeverReachRemote/$CACHE{SOURCE_TAG}
+--- PASS: TestR29EnvironmentAndCacheRefsNeverReachRemote/$CACHE{SOURCE_TAG} (0.00s)
+=== NAME  TestR29EnvironmentAndCacheRefsNeverReachRemote
+--- PASS: TestR29EnvironmentAndCacheRefsNeverReachRemote (0.00s)
+=== NAME  
+=== RUN   TestR29EnvironmentHeadRefNeverFallsBackToHEAD
+--- PASS: TestR29EnvironmentHeadRefNeverFallsBackToHEAD (0.00s)
+=== NAME  
+=== RUN   TestR29StringMutationInvalidatesRetainedRef
+--- PASS: TestR29StringMutationInvalidatesRetainedRef (0.00s)
+=== NAME  
+=== RUN   TestR29ActiveBlockScopeFailsClosed
+--- PASS: TestR29ActiveBlockScopeFailsClosed (0.00s)
+=== NAME  
+=== RUN   TestR31EscapedQuotedVariableReferenceRemainsLiteral
+--- PASS: TestR31EscapedQuotedVariableReferenceRemainsLiteral (0.00s)
+=== NAME  
+=== RUN   TestR31RefExpansionStopsAtCandidateByteLimit
+--- PASS: TestR31RefExpansionStopsAtCandidateByteLimit (0.00s)
+=== NAME  
+=== RUN   TestR32LowercaseNotConditionIsStructurallyUnparsable
+--- PASS: TestR32LowercaseNotConditionIsStructurallyUnparsable (0.00s)
+=== NAME  
+=== RUN   TestR32ListPopInvalidatesInputAndEveryOutputVariable
+=== RUN   TestR32ListPopInvalidatesInputAndEveryOutputVariable/POP_FRONT/PIN_LIST
+--- PASS: TestR32ListPopInvalidatesInputAndEveryOutputVariable/POP_FRONT/PIN_LIST (0.00s)
+=== NAME  TestR32ListPopInvalidatesInputAndEveryOutputVariable
+=== RUN   TestR32ListPopInvalidatesInputAndEveryOutputVariable/POP_FRONT/OUT_ONE
+--- PASS: TestR32ListPopInvalidatesInputAndEveryOutputVariable/POP_FRONT/OUT_ONE (0.00s)
+=== NAME  TestR32ListPopInvalidatesInputAndEveryOutputVariable
+=== RUN   TestR32ListPopInvalidatesInputAndEveryOutputVariable/POP_FRONT/OUT_TWO
+--- PASS: TestR32ListPopInvalidatesInputAndEveryOutputVariable/POP_FRONT/OUT_TWO (0.00s)
+=== NAME  TestR32ListPopInvalidatesInputAndEveryOutputVariable
+=== RUN   TestR32ListPopInvalidatesInputAndEveryOutputVariable/POP_BACK/PIN_LIST
+--- PASS: TestR32ListPopInvalidatesInputAndEveryOutputVariable/POP_BACK/PIN_LIST (0.00s)
+=== NAME  TestR32ListPopInvalidatesInputAndEveryOutputVariable
+=== RUN   TestR32ListPopInvalidatesInputAndEveryOutputVariable/POP_BACK/OUT_ONE
+--- PASS: TestR32ListPopInvalidatesInputAndEveryOutputVariable/POP_BACK/OUT_ONE (0.00s)
+=== NAME  TestR32ListPopInvalidatesInputAndEveryOutputVariable
+=== RUN   TestR32ListPopInvalidatesInputAndEveryOutputVariable/POP_BACK/OUT_TWO
+--- PASS: TestR32ListPopInvalidatesInputAndEveryOutputVariable/POP_BACK/OUT_TWO (0.00s)
+=== NAME  TestR32ListPopInvalidatesInputAndEveryOutputVariable
+--- PASS: TestR32ListPopInvalidatesInputAndEveryOutputVariable (0.00s)
+=== NAME  
+=== RUN   TestR34StringJSONInvalidatesOutputAndErrorDestinations
+=== RUN   TestR34StringJSONInvalidatesOutputAndErrorDestinations/OUT
+--- PASS: TestR34StringJSONInvalidatesOutputAndErrorDestinations/OUT (0.00s)
+=== NAME  TestR34StringJSONInvalidatesOutputAndErrorDestinations
+=== RUN   TestR34StringJSONInvalidatesOutputAndErrorDestinations/ERR
+--- PASS: TestR34StringJSONInvalidatesOutputAndErrorDestinations/ERR (0.00s)
+=== NAME  TestR34StringJSONInvalidatesOutputAndErrorDestinations
+--- PASS: TestR34StringJSONInvalidatesOutputAndErrorDestinations (0.00s)
+=== NAME  
+=== RUN   TestR34PinStatusPreAdmissionRejectsLargeCandidateAggregate
+--- PASS: TestR34PinStatusPreAdmissionRejectsLargeCandidateAggregate (0.00s)
+=== NAME  
+=== RUN   TestR35SCPLikeRemoteWithoutUserIsAdmitted
+--- PASS: TestR35SCPLikeRemoteWithoutUserIsAdmitted (0.00s)
+=== NAME  
+=== RUN   TestR35SCPLikeAdmissionPreservesLocalPathGuards
+=== RUN   TestR35SCPLikeAdmissionPreservesLocalPathGuards/relative_path
+--- PASS: TestR35SCPLikeAdmissionPreservesLocalPathGuards/relative_path (0.00s)
+=== NAME  TestR35SCPLikeAdmissionPreservesLocalPathGuards
+=== RUN   TestR35SCPLikeAdmissionPreservesLocalPathGuards/slash_before_colon
+--- PASS: TestR35SCPLikeAdmissionPreservesLocalPathGuards/slash_before_colon (0.00s)
+=== NAME  TestR35SCPLikeAdmissionPreservesLocalPathGuards
+=== RUN   TestR35SCPLikeAdmissionPreservesLocalPathGuards/windows_drive_relative
+--- PASS: TestR35SCPLikeAdmissionPreservesLocalPathGuards/windows_drive_relative (0.00s)
+=== NAME  TestR35SCPLikeAdmissionPreservesLocalPathGuards
+--- PASS: TestR35SCPLikeAdmissionPreservesLocalPathGuards (0.00s)
+=== NAME  
+=== RUN   TestRemoteRefsProcessHelper
+--- PASS: TestRemoteRefsProcessHelper (0.00s)
+=== NAME  
+=== RUN   TestDefaultRemoteRefsRealCommandStreamsAndSettles
+--- PASS: TestDefaultRemoteRefsRealCommandStreamsAndSettles (0.14s)
+=== NAME  
+=== RUN   TestDefaultRemoteRefsReadFailureTerminatesChildAndGrandchild
+--- PASS: TestDefaultRemoteRefsReadFailureTerminatesChildAndGrandchild (0.16s)
+=== NAME  
+=== RUN   TestDefaultRemoteRefsCancellationTerminatesChildAndGrandchild
+--- PASS: TestDefaultRemoteRefsCancellationTerminatesChildAndGrandchild (0.22s)
+=== NAME  
+=== RUN   TestDefaultFSBoundedSemanticReadHasExactBoundary
+=== RUN   TestDefaultFSBoundedSemanticReadHasExactBoundary/exact_limit
+--- PASS: TestDefaultFSBoundedSemanticReadHasExactBoundary/exact_limit (0.00s)
+=== NAME  TestDefaultFSBoundedSemanticReadHasExactBoundary
+=== RUN   TestDefaultFSBoundedSemanticReadHasExactBoundary/one_byte_over_limit
+--- PASS: TestDefaultFSBoundedSemanticReadHasExactBoundary/one_byte_over_limit (0.00s)
+=== NAME  TestDefaultFSBoundedSemanticReadHasExactBoundary
+--- PASS: TestDefaultFSBoundedSemanticReadHasExactBoundary (0.00s)
+=== NAME  
+=== RUN   TestPinStatusRejectsOversizedBatchBeforeFSClockOrRemote
+--- PASS: TestPinStatusRejectsOversizedBatchBeforeFSClockOrRemote (0.01s)
+=== NAME  
+=== RUN   TestR26PinStatusRejectsOversizedPathBeforeRowsFSClockOrRemote
+--- PASS: TestR26PinStatusRejectsOversizedPathBeforeRowsFSClockOrRemote (0.00s)
+=== NAME  
+=== RUN   TestPinStatusMaxBatchIsAdmitted
+--- PASS: TestPinStatusMaxBatchIsAdmitted (0.01s)
+=== NAME  
+=== RUN   TestPinStatusSemanticFileBudgetIsExplicitIncompleteEvidence
+=== RUN   TestPinStatusSemanticFileBudgetIsExplicitIncompleteEvidence/portfile_exact_limit_remains_complete
+--- PASS: TestPinStatusSemanticFileBudgetIsExplicitIncompleteEvidence/portfile_exact_limit_remains_complete (0.00s)
+=== NAME  TestPinStatusSemanticFileBudgetIsExplicitIncompleteEvidence
+=== RUN   TestPinStatusSemanticFileBudgetIsExplicitIncompleteEvidence/portfile_one_byte_over_limit_is_incomplete
+--- PASS: TestPinStatusSemanticFileBudgetIsExplicitIncompleteEvidence/portfile_one_byte_over_limit_is_incomplete (0.00s)
+=== NAME  TestPinStatusSemanticFileBudgetIsExplicitIncompleteEvidence
+=== RUN   TestPinStatusSemanticFileBudgetIsExplicitIncompleteEvidence/manifest_one_byte_over_limit_is_incomplete
+--- PASS: TestPinStatusSemanticFileBudgetIsExplicitIncompleteEvidence/manifest_one_byte_over_limit_is_incomplete (0.00s)
+=== NAME  TestPinStatusSemanticFileBudgetIsExplicitIncompleteEvidence
+--- PASS: TestPinStatusSemanticFileBudgetIsExplicitIncompleteEvidence (0.00s)
+=== NAME  
+=== RUN   TestS2_PublicWireRedactionCoversEveryRemoteCarrier
+=== RUN   TestS2_PublicWireRedactionCoversEveryRemoteCarrier/fragment
+--- PASS: TestS2_PublicWireRedactionCoversEveryRemoteCarrier/fragment (0.00s)
+=== NAME  TestS2_PublicWireRedactionCoversEveryRemoteCarrier
+=== RUN   TestS2_PublicWireRedactionCoversEveryRemoteCarrier/percent_encoded
+--- PASS: TestS2_PublicWireRedactionCoversEveryRemoteCarrier/percent_encoded (0.00s)
+=== NAME  TestS2_PublicWireRedactionCoversEveryRemoteCarrier
+=== RUN   TestS2_PublicWireRedactionCoversEveryRemoteCarrier/triple_encoded
+--- PASS: TestS2_PublicWireRedactionCoversEveryRemoteCarrier/triple_encoded (0.00s)
+=== NAME  TestS2_PublicWireRedactionCoversEveryRemoteCarrier
+=== RUN   TestS2_PublicWireRedactionCoversEveryRemoteCarrier/nested_URL
+--- PASS: TestS2_PublicWireRedactionCoversEveryRemoteCarrier/nested_URL (0.00s)
+=== NAME  TestS2_PublicWireRedactionCoversEveryRemoteCarrier
+=== RUN   TestS2_PublicWireRedactionCoversEveryRemoteCarrier/bare_opaque
+--- PASS: TestS2_PublicWireRedactionCoversEveryRemoteCarrier/bare_opaque (0.00s)
+=== NAME  TestS2_PublicWireRedactionCoversEveryRemoteCarrier
+=== RUN   TestS2_PublicWireRedactionCoversEveryRemoteCarrier/malformed_encoded_delimiter
+--- PASS: TestS2_PublicWireRedactionCoversEveryRemoteCarrier/malformed_encoded_delimiter (0.00s)
+=== NAME  TestS2_PublicWireRedactionCoversEveryRemoteCarrier
+=== RUN   TestS2_PublicWireRedactionCoversEveryRemoteCarrier/fused_credential_key
+--- PASS: TestS2_PublicWireRedactionCoversEveryRemoteCarrier/fused_credential_key (0.00s)
+=== NAME  TestS2_PublicWireRedactionCoversEveryRemoteCarrier
+--- PASS: TestS2_PublicWireRedactionCoversEveryRemoteCarrier (0.00s)
+=== NAME  
+=== RUN   TestS2_CredentialKeyRecognitionCoversDelimitedAndFusedIdentifiers
+--- PASS: TestS2_CredentialKeyRecognitionCoversDelimitedAndFusedIdentifiers (0.00s)
+=== NAME  
+=== RUN   TestS2_ProducerRejectsSecretBearingRepoBeforeRemoteCall
+=== RUN   TestS2_ProducerRejectsSecretBearingRepoBeforeRemoteCall/fragment
+--- PASS: TestS2_ProducerRejectsSecretBearingRepoBeforeRemoteCall/fragment (0.00s)
+=== NAME  TestS2_ProducerRejectsSecretBearingRepoBeforeRemoteCall
+=== RUN   TestS2_ProducerRejectsSecretBearingRepoBeforeRemoteCall/percent_encoded_repo
+--- PASS: TestS2_ProducerRejectsSecretBearingRepoBeforeRemoteCall/percent_encoded_repo (0.00s)
+=== NAME  TestS2_ProducerRejectsSecretBearingRepoBeforeRemoteCall
+=== RUN   TestS2_ProducerRejectsSecretBearingRepoBeforeRemoteCall/triple_encoded_repo
+--- PASS: TestS2_ProducerRejectsSecretBearingRepoBeforeRemoteCall/triple_encoded_repo (0.00s)
+=== NAME  TestS2_ProducerRejectsSecretBearingRepoBeforeRemoteCall
+=== RUN   TestS2_ProducerRejectsSecretBearingRepoBeforeRemoteCall/nested_URL
+--- PASS: TestS2_ProducerRejectsSecretBearingRepoBeforeRemoteCall/nested_URL (0.00s)
+=== NAME  TestS2_ProducerRejectsSecretBearingRepoBeforeRemoteCall
+=== RUN   TestS2_ProducerRejectsSecretBearingRepoBeforeRemoteCall/bare_opaque_repo
+--- PASS: TestS2_ProducerRejectsSecretBearingRepoBeforeRemoteCall/bare_opaque_repo (0.00s)
+=== NAME  TestS2_ProducerRejectsSecretBearingRepoBeforeRemoteCall
+=== RUN   TestS2_ProducerRejectsSecretBearingRepoBeforeRemoteCall/malformed_encoded_delimiter
+--- PASS: TestS2_ProducerRejectsSecretBearingRepoBeforeRemoteCall/malformed_encoded_delimiter (0.00s)
+=== NAME  TestS2_ProducerRejectsSecretBearingRepoBeforeRemoteCall
+=== RUN   TestS2_ProducerRejectsSecretBearingRepoBeforeRemoteCall/fused_credential_key
+--- PASS: TestS2_ProducerRejectsSecretBearingRepoBeforeRemoteCall/fused_credential_key (0.00s)
+=== NAME  TestS2_ProducerRejectsSecretBearingRepoBeforeRemoteCall
+--- PASS: TestS2_ProducerRejectsSecretBearingRepoBeforeRemoteCall (0.01s)
+=== NAME  
+=== RUN   TestS2_OpaqueRemoteMetadataDecodingFailsClosedAtBound
+--- PASS: TestS2_OpaqueRemoteMetadataDecodingFailsClosedAtBound (0.00s)
+=== NAME  
+=== RUN   TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls
+=== RUN   TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls/safe_owner/repo
+--- PASS: TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls/safe_owner/repo (0.00s)
+=== NAME  TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls
+=== RUN   TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls/safe_group/sub/project
+--- PASS: TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls/safe_group/sub/project (0.00s)
+=== NAME  TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls
+=== RUN   TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls/safe_gitlab.example:8443/group/project
+--- PASS: TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls/safe_gitlab.example:8443/group/project (0.00s)
+=== NAME  TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls
+=== RUN   TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls/safe_[2001:db8::1]:8443/group/project
+--- PASS: TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls/safe_[2001:db8::1]:8443/group/project (0.00s)
+=== NAME  TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls
+=== RUN   TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls/safe_git@host:owner/repo.git
+--- PASS: TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls/safe_git@host:owner/repo.git (0.00s)
+=== NAME  TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls
+=== RUN   TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls/safe_group/%2Fproject
+--- PASS: TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls/safe_group/%2Fproject (0.00s)
+=== NAME  TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls
+=== RUN   TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls/safe_https://host/group/repo@v1.git
+--- PASS: TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls/safe_https://host/group/repo@v1.git (0.00s)
+=== NAME  TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls
+=== RUN   TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls/github
+--- PASS: TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls/github (0.00s)
+=== NAME  TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls
+=== RUN   TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls/gitlab
+--- PASS: TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls/gitlab (0.00s)
+=== NAME  TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls
+--- PASS: TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls (0.00s)
+=== NAME  
+=== RUN   TestS2_SafeRemoteSpellingsRemainAdmissible
+=== RUN   TestS2_SafeRemoteSpellingsRemainAdmissible/https://host/group/sub/repo.git
+--- PASS: TestS2_SafeRemoteSpellingsRemainAdmissible/https://host/group/sub/repo.git (0.00s)
+=== NAME  TestS2_SafeRemoteSpellingsRemainAdmissible
+=== RUN   TestS2_SafeRemoteSpellingsRemainAdmissible/https://host:8443/group/repo.git
+--- PASS: TestS2_SafeRemoteSpellingsRemainAdmissible/https://host:8443/group/repo.git (0.00s)
+=== NAME  TestS2_SafeRemoteSpellingsRemainAdmissible
+=== RUN   TestS2_SafeRemoteSpellingsRemainAdmissible/https://[2001:db8::1]:8443/group/repo.git
+--- PASS: TestS2_SafeRemoteSpellingsRemainAdmissible/https://[2001:db8::1]:8443/group/repo.git (0.00s)
+=== NAME  TestS2_SafeRemoteSpellingsRemainAdmissible
+=== RUN   TestS2_SafeRemoteSpellingsRemainAdmissible/git@host:owner/repo.git
+--- PASS: TestS2_SafeRemoteSpellingsRemainAdmissible/git@host:owner/repo.git (0.00s)
+=== NAME  TestS2_SafeRemoteSpellingsRemainAdmissible
+=== RUN   TestS2_SafeRemoteSpellingsRemainAdmissible/redaction_only_https://host/group/repo.git#design=dark
+--- PASS: TestS2_SafeRemoteSpellingsRemainAdmissible/redaction_only_https://host/group/repo.git#design=dark (0.00s)
+=== NAME  TestS2_SafeRemoteSpellingsRemainAdmissible
+--- PASS: TestS2_SafeRemoteSpellingsRemainAdmissible (0.00s)
+=== NAME  
+=== RUN   TestS2_URLPathAtSignIsNotAuthorityCredential
+--- PASS: TestS2_URLPathAtSignIsNotAuthorityCredential (0.00s)
+=== NAME  
+=== RUN   TestS2_EvidenceCommandsRedactRepoOnlyCarrierOnEveryPublicBoundary
+--- PASS: TestS2_EvidenceCommandsRedactRepoOnlyCarrierOnEveryPublicBoundary (0.00s)
+=== NAME  
+=== RUN   TestS2_EvidenceCommandsAreSanitizedIndependentlyOfRemote
+=== RUN   TestS2_EvidenceCommandsAreSanitizedIndependentlyOfRemote/empty_remote
+--- PASS: TestS2_EvidenceCommandsAreSanitizedIndependentlyOfRemote/empty_remote (0.00s)
+=== NAME  TestS2_EvidenceCommandsAreSanitizedIndependentlyOfRemote
+=== RUN   TestS2_EvidenceCommandsAreSanitizedIndependentlyOfRemote/different_remote
+--- PASS: TestS2_EvidenceCommandsAreSanitizedIndependentlyOfRemote/different_remote (0.00s)
+=== NAME  TestS2_EvidenceCommandsAreSanitizedIndependentlyOfRemote
+=== RUN   TestS2_EvidenceCommandsAreSanitizedIndependentlyOfRemote/malformed_encoded_delimiter
+--- PASS: TestS2_EvidenceCommandsAreSanitizedIndependentlyOfRemote/malformed_encoded_delimiter (0.00s)
+=== NAME  TestS2_EvidenceCommandsAreSanitizedIndependentlyOfRemote
+=== RUN   TestS2_EvidenceCommandsAreSanitizedIndependentlyOfRemote/fused_credential_key
+--- PASS: TestS2_EvidenceCommandsAreSanitizedIndependentlyOfRemote/fused_credential_key (0.00s)
+=== NAME  TestS2_EvidenceCommandsAreSanitizedIndependentlyOfRemote
+=== RUN   TestS2_EvidenceCommandsAreSanitizedIndependentlyOfRemote/safe_control
+--- PASS: TestS2_EvidenceCommandsAreSanitizedIndependentlyOfRemote/safe_control (0.00s)
+=== NAME  TestS2_EvidenceCommandsAreSanitizedIndependentlyOfRemote
+--- PASS: TestS2_EvidenceCommandsAreSanitizedIndependentlyOfRemote (0.00s)
+=== NAME  
+PASS

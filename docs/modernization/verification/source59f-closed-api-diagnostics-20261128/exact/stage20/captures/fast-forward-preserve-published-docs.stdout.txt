@@ -1,0 +1,34 @@
+Updating 05fbffa3..27d90e62
+Fast-forward
+ .plans/2026-11/open-pr-integration-20261117.md     |    14 +-
+ .../recovery-search-20261128/.gitattributes        |     2 +
+ .../recovery-search-20261128/README.md             |   113 +
+ .../archive-content-v1.json                        | 96992 +++++++++++++++++++
+ .../archive-content-v2.json                        |   185 +
+ .../archive-evidence-schema-v1.md                  |    30 +
+ .../archive-recovery-summary-v2.json               |   219 +
+ .../archive-selection-v1.json                      |  1396 +
+ .../archive-transformation-manifest-v1.json        |    99 +
+ .../artifact-bindings.json                         |   132 +
+ .../git-recovery-readset.jsonl                     |  5985 ++
+ .../git-recovery-report.json                       |   983 +
+ .../publication-and-disposition.json               |   328 +
+ .../structural-verification.json                   |   308 +
+ .../transport-inputs-v1.json                       |  1844 +
+ .../transport-inputs-v2.json                       |   630 +
+ 16 files changed, 109255 insertions(+), 5 deletions(-)
+ create mode 100644 docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/.gitattributes
+ create mode 100644 docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/README.md
+ create mode 100644 docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-content-v1.json
+ create mode 100644 docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-content-v2.json
+ create mode 100644 docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-evidence-schema-v1.md
+ create mode 100644 docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-recovery-summary-v2.json
+ create mode 100644 docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-selection-v1.json
+ create mode 100644 docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/archive-transformation-manifest-v1.json
+ create mode 100644 docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/artifact-bindings.json
+ create mode 100644 docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/git-recovery-readset.jsonl
+ create mode 100644 docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/git-recovery-report.json
+ create mode 100644 docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/publication-and-disposition.json
+ create mode 100644 docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/structural-verification.json
+ create mode 100644 docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/transport-inputs-v1.json
+ create mode 100644 docs/modernization/verification/failed-owner-receiving-20261126/recovery-search-20261128/transport-inputs-v2.json

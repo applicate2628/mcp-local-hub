@@ -1,0 +1,10 @@
+{
+  "product_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-native-product\\bundle",
+  "source_epoch": "",
+  "product_version": "0.4.65",
+  "build_id": "cbedb3d4399440c2a78094d2e0a6a517",
+  "reverse_projection": "../mcphub.exe",
+  "canonical_entry_sha256": "c8785e92541f041a4bce1d1abf62fbc2dae87e7682f119e675e4a599902dd40d",
+  "product_sha256": "bc73231cfde8d390f2e95f6b6adfdd718df5db0f8ca5643126d8772e7e73578d",
+  "identity_sha256": "868f33dedef8bc1a4f9083f40710d9f5ab35423d34ada364f25c79cdb70a953f"
+}

@@ -1,0 +1,15 @@
+{"Action":"start","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/fixture"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/fixture","Test":"TestClosedInitializeCancellationAndOneWayRelease"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/fixture","Test":"TestClosedInitializeCancellationAndOneWayRelease","Output":"=== RUN   TestClosedInitializeCancellationAndOneWayRelease\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/fixture","Test":"TestClosedInitializeCancellationAndOneWayRelease","Output":"--- PASS: TestClosedInitializeCancellationAndOneWayRelease (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/fixture","Test":"TestClosedInitializeCancellationAndOneWayRelease"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/fixture","Test":"TestOpenSessionLifecycleAndBoundedEvents"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/fixture","Test":"TestOpenSessionLifecycleAndBoundedEvents","Output":"=== RUN   TestOpenSessionLifecycleAndBoundedEvents\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/fixture","Test":"TestOpenSessionLifecycleAndBoundedEvents","Output":"--- PASS: TestOpenSessionLifecycleAndBoundedEvents (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/fixture","Test":"TestOpenSessionLifecycleAndBoundedEvents"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/fixture","Test":"TestEventLogRetainsNewest64RecordedLifecycleEvents"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/fixture","Test":"TestEventLogRetainsNewest64RecordedLifecycleEvents","Output":"=== RUN   TestEventLogRetainsNewest64RecordedLifecycleEvents\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/fixture","Test":"TestEventLogRetainsNewest64RecordedLifecycleEvents","Output":"--- PASS: TestEventLogRetainsNewest64RecordedLifecycleEvents (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/fixture","Test":"TestEventLogRetainsNewest64RecordedLifecycleEvents"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/fixture","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/fixture"}

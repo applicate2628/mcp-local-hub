@@ -1,0 +1,39 @@
+{"Action":"start","Package":"mcp-local-hub/internal/buildinfo"}
+{"Action":"run","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark"}
+{"Action":"output","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark","Output":"=== RUN   TestRustOwnerBuildBindingClassifiesAbsentMark\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark/absent"}
+{"Action":"output","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark/absent","Output":"=== RUN   TestRustOwnerBuildBindingClassifiesAbsentMark/absent\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark/absent","Output":"--- PASS: TestRustOwnerBuildBindingClassifiesAbsentMark/absent (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark/absent"}
+{"Action":"run","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark/short"}
+{"Action":"output","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark/short","Output":"=== RUN   TestRustOwnerBuildBindingClassifiesAbsentMark/short\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark/short","Output":"--- PASS: TestRustOwnerBuildBindingClassifiesAbsentMark/short (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark/short"}
+{"Action":"run","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark/uppercase"}
+{"Action":"output","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark/uppercase","Output":"=== RUN   TestRustOwnerBuildBindingClassifiesAbsentMark/uppercase\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark/uppercase","Output":"--- PASS: TestRustOwnerBuildBindingClassifiesAbsentMark/uppercase (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark/uppercase"}
+{"Action":"run","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark/non-hex"}
+{"Action":"output","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark/non-hex","Output":"=== RUN   TestRustOwnerBuildBindingClassifiesAbsentMark/non-hex\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark/non-hex","Output":"--- PASS: TestRustOwnerBuildBindingClassifiesAbsentMark/non-hex (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark/non-hex"}
+{"Action":"run","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark/whitespace"}
+{"Action":"output","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark/whitespace","Output":"=== RUN   TestRustOwnerBuildBindingClassifiesAbsentMark/whitespace\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark/whitespace","Output":"--- PASS: TestRustOwnerBuildBindingClassifiesAbsentMark/whitespace (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark/whitespace"}
+{"Action":"run","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark/canonical"}
+{"Action":"output","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark/canonical","Output":"=== RUN   TestRustOwnerBuildBindingClassifiesAbsentMark/canonical\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark/canonical","Output":"--- PASS: TestRustOwnerBuildBindingClassifiesAbsentMark/canonical (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark/canonical"}
+{"Action":"output","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark","Output":"--- PASS: TestRustOwnerBuildBindingClassifiesAbsentMark (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingClassifiesAbsentMark"}
+{"Action":"run","Package":"mcp-local-hub/internal/buildinfo","Test":"TestValidateRustOwnerBuildMark"}
+{"Action":"output","Package":"mcp-local-hub/internal/buildinfo","Test":"TestValidateRustOwnerBuildMark","Output":"=== RUN   TestValidateRustOwnerBuildMark\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/buildinfo","Test":"TestValidateRustOwnerBuildMark","Output":"--- PASS: TestValidateRustOwnerBuildMark (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/buildinfo","Test":"TestValidateRustOwnerBuildMark"}
+{"Action":"run","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingRejectsUnmarkedAndMalformed"}
+{"Action":"output","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingRejectsUnmarkedAndMalformed","Output":"=== RUN   TestRustOwnerBuildBindingRejectsUnmarkedAndMalformed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingRejectsUnmarkedAndMalformed","Output":"--- PASS: TestRustOwnerBuildBindingRejectsUnmarkedAndMalformed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/buildinfo","Test":"TestRustOwnerBuildBindingRejectsUnmarkedAndMalformed"}
+{"Action":"output","Package":"mcp-local-hub/internal/buildinfo","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/buildinfo"}

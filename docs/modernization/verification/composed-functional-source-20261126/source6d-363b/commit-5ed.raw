@@ -1,0 +1,6 @@
+tree 75c703052e518b8f286f3aa4f079f630de951441
+parent e66f5c6fab7da2a2eff16ff1f0891991ca1a839c
+author applicate2628 <dima_den@inbox.ru> 1795703650 +0300
+committer applicate2628 <dima_den@inbox.ru> 1795703650 +0300
+
+Fix liveness ownership and supervisor control status in composed source

@@ -1,0 +1,145 @@
+=== RUN   TestState_String_AllStates
+--- PASS: TestState_String_AllStates (0.00s)
+=== NAME  
+=== RUN   TestState_String_Unknown
+--- PASS: TestState_String_Unknown (0.00s)
+=== NAME  
+=== RUN   TestNew_ReturnsBackendForCurrentOS
+--- PASS: TestNew_ReturnsBackendForCurrentOS (0.00s)
+=== NAME  
+=== RUN   TestStartOwnerForExpectedProductAdmission
+=== RUN   TestStartOwnerForExpectedProductAdmission/nil-context
+--- PASS: TestStartOwnerForExpectedProductAdmission/nil-context (0.00s)
+=== NAME  TestStartOwnerForExpectedProductAdmission
+=== RUN   TestStartOwnerForExpectedProductAdmission/canceled
+--- PASS: TestStartOwnerForExpectedProductAdmission/canceled (0.00s)
+=== NAME  TestStartOwnerForExpectedProductAdmission
+=== RUN   TestStartOwnerForExpectedProductAdmission/empty
+--- PASS: TestStartOwnerForExpectedProductAdmission/empty (0.00s)
+=== NAME  TestStartOwnerForExpectedProductAdmission
+=== RUN   TestStartOwnerForExpectedProductAdmission/relative
+--- PASS: TestStartOwnerForExpectedProductAdmission/relative (0.00s)
+=== NAME  TestStartOwnerForExpectedProductAdmission
+=== RUN   TestStartOwnerForExpectedProductAdmission/missing
+--- PASS: TestStartOwnerForExpectedProductAdmission/missing (0.00s)
+=== NAME  TestStartOwnerForExpectedProductAdmission
+--- PASS: TestStartOwnerForExpectedProductAdmission (0.00s)
+=== NAME  
+=== RUN   TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel
+=== RUN   TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel/factory
+--- PASS: TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel/factory (0.00s)
+=== NAME  TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel
+=== RUN   TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel/status
+--- PASS: TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel/status (0.00s)
+=== NAME  TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel
+--- PASS: TestWindowsBackend_StatusSchedulerUnavailableMapsToObservationSentinel (0.00s)
+=== NAME  
+=== RUN   TestWindowsBackend_StatusSnapshotSchedulerUnavailableRemainsFailClosed
+--- PASS: TestWindowsBackend_StatusSnapshotSchedulerUnavailableRemainsFailClosed (0.00s)
+=== NAME  
+=== RUN   TestWindowsBackend_EnableCreatesTask
+--- PASS: TestWindowsBackend_EnableCreatesTask (0.00s)
+=== NAME  
+=== RUN   TestWindowsBackend_DefaultExecutableRoutesOwnedLogonThroughCanonicalProduct
+--- PASS: TestWindowsBackend_DefaultExecutableRoutesOwnedLogonThroughCanonicalProduct (0.00s)
+=== NAME  
+=== RUN   TestWindowsBackend_EnableStrictModeAddsFlag
+--- PASS: TestWindowsBackend_EnableStrictModeAddsFlag (0.00s)
+=== NAME  
+=== RUN   TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand
+=== RUN   TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/gui_non-strict
+--- PASS: TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/gui_non-strict (0.00s)
+=== NAME  TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand
+=== RUN   TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/gui_strict
+--- PASS: TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/gui_strict (0.00s)
+=== NAME  TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand
+=== RUN   TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/supervise_non-strict
+--- PASS: TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/supervise_non-strict (0.00s)
+=== NAME  TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand
+=== RUN   TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/supervise_strict
+--- PASS: TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand/supervise_strict (0.00s)
+=== NAME  TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand
+--- PASS: TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand (0.00s)
+=== NAME  
+=== RUN   TestWindowsBackend_EnableRejectsInvalidOwnerBeforeMutatingTask
+--- PASS: TestWindowsBackend_EnableRejectsInvalidOwnerBeforeMutatingTask (0.00s)
+=== NAME  
+=== RUN   TestWindowsBackend_EnableReplacesExistingTask
+--- PASS: TestWindowsBackend_EnableReplacesExistingTask (0.00s)
+=== NAME  
+=== RUN   TestWindowsBackend_DisableDeletesTask
+--- PASS: TestWindowsBackend_DisableDeletesTask (0.00s)
+=== NAME  
+=== RUN   TestWindowsBackend_DisableIdempotent
+--- PASS: TestWindowsBackend_DisableIdempotent (0.00s)
+=== NAME  
+=== RUN   TestWindowsBackend_StatusAbsent
+--- PASS: TestWindowsBackend_StatusAbsent (0.00s)
+=== NAME  
+=== RUN   TestWindowsBackend_StatusEnabledRunning
+--- PASS: TestWindowsBackend_StatusEnabledRunning (0.00s)
+=== NAME  
+=== RUN   TestWindowsBackend_StatusEnabledStopped
+--- PASS: TestWindowsBackend_StatusEnabledStopped (0.00s)
+=== NAME  
+=== RUN   TestWindowsBackend_StatusDrifted_StrictModeMissing
+--- PASS: TestWindowsBackend_StatusDrifted_StrictModeMissing (0.00s)
+=== NAME  
+=== RUN   TestWindowsBackend_StatusDrifted_StrictModeUnwanted
+--- PASS: TestWindowsBackend_StatusDrifted_StrictModeUnwanted (0.00s)
+=== NAME  
+=== RUN   TestWindowsBackend_StatusDrifted_LegacySupervisorSubcommand
+--- PASS: TestWindowsBackend_StatusDrifted_LegacySupervisorSubcommand (0.00s)
+=== NAME  
+=== RUN   TestWindowsBackend_StatusDrifted_WhenOwnerModeDoesNotMatchTask
+--- PASS: TestWindowsBackend_StatusDrifted_WhenOwnerModeDoesNotMatchTask (0.00s)
+=== NAME  
+=== RUN   TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv
+=== RUN   TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_canonical
+--- PASS: TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_canonical (0.00s)
+=== NAME  TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv
+=== RUN   TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_missing_no-browser
+--- PASS: TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_missing_no-browser (0.00s)
+=== NAME  TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv
+=== RUN   TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_extra_token
+--- PASS: TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_extra_token (0.00s)
+=== NAME  TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv
+=== RUN   TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_duplicate_strict
+--- PASS: TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/gui_duplicate_strict (0.00s)
+=== NAME  TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv
+=== RUN   TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/supervise_canonical
+--- PASS: TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/supervise_canonical (0.00s)
+=== NAME  TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv
+=== RUN   TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/supervise_must_not_carry_no-browser
+--- PASS: TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/supervise_must_not_carry_no-browser (0.00s)
+=== NAME  TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv
+=== RUN   TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/supervise_extra_token
+--- PASS: TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv/supervise_extra_token (0.00s)
+=== NAME  TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv
+--- PASS: TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv (0.00s)
+=== NAME  
+=== RUN   TestWindowsBackend_StatusDrifted_EmptyArguments
+--- PASS: TestWindowsBackend_StatusDrifted_EmptyArguments (0.00s)
+=== NAME  
+=== RUN   TestWindowsBackend_StatusDrifted_CommandPath
+--- PASS: TestWindowsBackend_StatusDrifted_CommandPath (0.00s)
+=== NAME  
+=== RUN   TestWindowsBackend_StatusXMLUnavailable_TreatedAsRunning
+--- PASS: TestWindowsBackend_StatusXMLUnavailable_TreatedAsRunning (0.00s)
+=== NAME  
+=== RUN   TestWindowsBackend_StatusSchedulerFactoryError
+--- PASS: TestWindowsBackend_StatusSchedulerFactoryError (0.00s)
+=== NAME  
+=== RUN   TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed
+=== RUN   TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed/export-error
+--- PASS: TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed/export-error (0.00s)
+=== NAME  TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed
+=== RUN   TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed/empty-xml
+--- PASS: TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed/empty-xml (0.00s)
+=== NAME  TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed
+--- PASS: TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed (0.00s)
+=== NAME  
+=== RUN   TestWindowsBackend_StatusSnapshotSpecFingerprintTracksShimSpecOnly
+--- PASS: TestWindowsBackend_StatusSnapshotSpecFingerprintTracksShimSpecOnly (0.00s)
+=== NAME  
+PASS

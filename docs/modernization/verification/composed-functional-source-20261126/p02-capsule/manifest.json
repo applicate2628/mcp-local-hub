@@ -1,0 +1,518 @@
+{
+  "schema": "p02-snapshot-capsule-v1",
+  "scope": "Exact P02 source snapshot only; no history replay, build, qualification, product execution, new commit, branch/tag ref or publication",
+  "repository": "https://github.com/applicate2628/mcp-local-hub",
+  "target": {
+    "commit": "b6f82b3f531bb3eec197049167cdc5971b44e2b0",
+    "tree": "645ddcd88647b8c628ec966f037762886bd56b31",
+    "raw_commit_file": "p02.commit",
+    "raw_commit_bytes": 276,
+    "raw_commit_sha256": "90cd1bfdae7fb18d12c94bb24fb9a3660ae7294687722d83320c758e9e8b1fed",
+    "parents": [
+      "afdf474930da60080e9aa132a3a373fcf2009bab"
+    ],
+    "history_complete": false,
+    "unique_object_count": 4107,
+    "object_ids_sha256": "5c5eb07623da17e1a22f077f2718ca520651c8f726ae61a0af55d4f43aa69c6a",
+    "unique_object_types": {
+      "commit": 1,
+      "tree": 273,
+      "blob": 3833
+    },
+    "tree_path_entries": 273,
+    "blob_path_entries": 3861
+  },
+  "public_inputs_origin": {
+    "commit": "0c255490461fed0a3ee3d43acdd5216e2e064a53",
+    "path": ".plans/2026-11/integration-audit-20261125/composition.json",
+    "blob": "71a40a48291eb5b1aaa67929a0ae4e10d5013441",
+    "sha256": "cdcb3f9583e1c6b06171e978bab75102808b230c648a99c7dccd5a38fc0b31b6",
+    "required_input_commits": 39,
+    "earlier_transfer_missing_commit_list_count": 36,
+    "earlier_transfer_list_is_subset_of_explicit_inputs": true
+  },
+  "public_snapshots": [
+    {
+      "commit": "09dc07e01d1a3236ab5f45f384e11fe2f9dfd30d",
+      "tree": "0b8e6e6ada91cbaf2b3fb610d7c464f6e660c80f",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3601,
+      "P02_objects_added_to_union": 3243,
+      "snapshot_object_ids_sha256": "a2cd51e30c4fea50a32ef0c9f107f93ac4b39895779ba3b01830950ee7bd377e",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/09dc07e01d1a3236ab5f45f384e11fe2f9dfd30d"
+    },
+    {
+      "commit": "0b3a9e0edafc41e7e8567abfde878e8f169405ef",
+      "tree": "5d04d926ac128c403b4e2bc21c316850be60a6e1",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3459,
+      "P02_objects_added_to_union": 30,
+      "snapshot_object_ids_sha256": "62bb5948fb841a4ffda1e2f954769394fc75d6ea6da1a760c1e9698b692bc311",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/0b3a9e0edafc41e7e8567abfde878e8f169405ef"
+    },
+    {
+      "commit": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "tree": "dca478794d2b91050606848d5bfe7fb98627b6ad",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3368,
+      "P02_objects_added_to_union": 0,
+      "snapshot_object_ids_sha256": "0b34fc10c0039db7598e87641d9109445e2e4c2073826311ed1de710691e0b3d",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/17bc78fc602efa204a74596409c939a3bf1ddc42"
+    },
+    {
+      "commit": "1a5a7dd04fe732df5c539860dde813c8c703586d",
+      "tree": "c3fc3bb69ca4c4023e59a7b0e5cd02d8e0cad314",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3376,
+      "P02_objects_added_to_union": 7,
+      "snapshot_object_ids_sha256": "11a410d049519e237e16f024c14c67af2b08c21925501b671d01d2ef638aa52d",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/1a5a7dd04fe732df5c539860dde813c8c703586d"
+    },
+    {
+      "commit": "1b6395657f1b88d3fe7de3a792473abdeb82b29d",
+      "tree": "e994a9d777a5c459e861e671af2fdf868d7f6508",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3548,
+      "P02_objects_added_to_union": 139,
+      "snapshot_object_ids_sha256": "feb9fa9cf41b369bce963342707dc264ca360a161cc7b37d7f5bcb9d459b0d12",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/1b6395657f1b88d3fe7de3a792473abdeb82b29d"
+    },
+    {
+      "commit": "1b7655ae9a0dec7d6821d8419087fd92ccadbb62",
+      "tree": "d4fa28257ecd088b4c7cf49c974633cd93b796a4",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3446,
+      "P02_objects_added_to_union": 6,
+      "snapshot_object_ids_sha256": "38d84fcd04084466d759763b7b77478cf925fc4a36846f667859c270f17d9041",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/1b7655ae9a0dec7d6821d8419087fd92ccadbb62"
+    },
+    {
+      "commit": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+      "tree": "0ddb867f57118cd226f1ce66c5cbff7b16439f15",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3368,
+      "P02_objects_added_to_union": 2,
+      "snapshot_object_ids_sha256": "27e0f06d375d897b9b391a55a4de69f65aa35fb3bf83033ec5fdaae9b107f38c",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/1df32782e7ade719e1d7f8c6153b4455a6ea740a"
+    },
+    {
+      "commit": "23ed6b5c6a942812a72e345c5d886b3310e9017e",
+      "tree": "39f1eae0bf7e11c81a2acc6c9badc470429b5e03",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3369,
+      "P02_objects_added_to_union": 1,
+      "snapshot_object_ids_sha256": "3d32a4dc8b67c5e6eb98e156178b5a0422c6778a0410da8377418f279f452416",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/23ed6b5c6a942812a72e345c5d886b3310e9017e"
+    },
+    {
+      "commit": "279887a4ec79186672c331e075c70e0b4555daa8",
+      "tree": "b0adc6cecf4215db5765a9251c5a007472b91c4a",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3391,
+      "P02_objects_added_to_union": 22,
+      "snapshot_object_ids_sha256": "6c4726bea1b7ad9dd5ba23b75da054e7765484811131ebeec736b367a892576a",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/279887a4ec79186672c331e075c70e0b4555daa8"
+    },
+    {
+      "commit": "2a273c10f6e5c0651e89860f88ef0b6a0e3748ef",
+      "tree": "712f175be713b1d27843942a31fadf8edd56e61a",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3370,
+      "P02_objects_added_to_union": 3,
+      "snapshot_object_ids_sha256": "62db54dbba7d40c4e496cbca2905b40b46ff83356e885f39a545a1fd106a703a",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/2a273c10f6e5c0651e89860f88ef0b6a0e3748ef"
+    },
+    {
+      "commit": "5c36f626467bc6c8446d621f3a2b3fc7fd507b4b",
+      "tree": "c1fc663b0049ecc66260639aa9841240776d8f35",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3403,
+      "P02_objects_added_to_union": 34,
+      "snapshot_object_ids_sha256": "9883ac7668e8df7b6a2a97b76ee32e26ca128e44b42f38a4eb73db8a1314818c",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/5c36f626467bc6c8446d621f3a2b3fc7fd507b4b"
+    },
+    {
+      "commit": "6743f3d552027395daf06bfd4fbc0123a374703b",
+      "tree": "bc4ad937a3f9f4ba2f1de31167e033085fa68176",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3378,
+      "P02_objects_added_to_union": 4,
+      "snapshot_object_ids_sha256": "a3324b3650f54d06cb485bef587859602fff4d106ca1f4731bb80da14d50f59f",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/6743f3d552027395daf06bfd4fbc0123a374703b"
+    },
+    {
+      "commit": "6808e99bacc0961fef2a511b1ae1a088f12a1e12",
+      "tree": "56da3274832fc5f8de5128f237e84f69850a0139",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3408,
+      "P02_objects_added_to_union": 40,
+      "snapshot_object_ids_sha256": "336e4d21a615e98ed5c93b05967230dfb8d96f7a7d13a89fe22b6265c5f60f5f",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/6808e99bacc0961fef2a511b1ae1a088f12a1e12"
+    },
+    {
+      "commit": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "tree": "cb3eec77c23f9400be962d91c9f23834b84f7643",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3435,
+      "P02_objects_added_to_union": 0,
+      "snapshot_object_ids_sha256": "4b79527abba67abfbba831df23e7c9c9f77bcb14a790cd6a09544711b7757aca",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/75dbc6406123e22468f168b861d5e0622c9d5769"
+    },
+    {
+      "commit": "81d84cc80096ddba216b482e9fb9601a1728bfc6",
+      "tree": "5303d32fa500bd70e95ced7f42c78adf1ee3be32",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3448,
+      "P02_objects_added_to_union": 11,
+      "snapshot_object_ids_sha256": "01ab759af6d7a61f88e4fcdf98548f502ee3eed29a74ac0ca93e97e8fc9ee012",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/81d84cc80096ddba216b482e9fb9601a1728bfc6"
+    },
+    {
+      "commit": "85a0f021a1e267b35645af5019c2591cabb1e86e",
+      "tree": "639240304fac5f8973a9323062a6cca89a98e9dd",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3471,
+      "P02_objects_added_to_union": 30,
+      "snapshot_object_ids_sha256": "d16e164e9241f8918b9b68544f9f1353cc78d13c0c916bd35973a861134991c9",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/85a0f021a1e267b35645af5019c2591cabb1e86e"
+    },
+    {
+      "commit": "891ef8bfd0764a969db2f800578fd45acd5623d6",
+      "tree": "660ecb0afd1f6ed8126602b66acc78be5733a29a",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3610,
+      "P02_objects_added_to_union": 19,
+      "snapshot_object_ids_sha256": "8d939eedebbe516067514d2d6392c68a4372ec482154a519f13dd2e2324bd08c",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/891ef8bfd0764a969db2f800578fd45acd5623d6"
+    },
+    {
+      "commit": "892fa82e0e1aa5746d97365f96a9b69ef7934168",
+      "tree": "fc76c5646211d7497d0020a54d7367ab5950cd05",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3454,
+      "P02_objects_added_to_union": 92,
+      "snapshot_object_ids_sha256": "b0924bd37bf864e82cdc1d842d7e044713d7c6792324250f2c329c68ba323a16",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/892fa82e0e1aa5746d97365f96a9b69ef7934168"
+    },
+    {
+      "commit": "8d4f2606c9af7e20181e4ad290b29be0e0a2dd0f",
+      "tree": "b830f0afd37de133a98a2d4d21d6384329eee8c4",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3461,
+      "P02_objects_added_to_union": 21,
+      "snapshot_object_ids_sha256": "2d5a3f2e0ff8d6fb2e187cc08a900dbf417bb613266575b2edf969db95c0cb0f",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/8d4f2606c9af7e20181e4ad290b29be0e0a2dd0f"
+    },
+    {
+      "commit": "8fd3c20592655c03461676d95c41ba2993e81b61",
+      "tree": "6d07a51239c2f4bf9e9781453f79ac4883ba2078",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3527,
+      "P02_objects_added_to_union": 58,
+      "snapshot_object_ids_sha256": "2c204ff417d0667d9751fecc14dd2537fe68c0c2c1afdf07494db88fc14d3d84",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/8fd3c20592655c03461676d95c41ba2993e81b61"
+    },
+    {
+      "commit": "9043acae5a778b9b123b195d3c04cb213e5e568d",
+      "tree": "f616a685b8648a088b45be9b198137fe25b1be26",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3385,
+      "P02_objects_added_to_union": 19,
+      "snapshot_object_ids_sha256": "ff9938a389df77e63dee9b8d0b1ba0e6631db7821974d371b192743dcaf10a44",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/9043acae5a778b9b123b195d3c04cb213e5e568d"
+    },
+    {
+      "commit": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+      "tree": "1d85032f558dd79b0fcec43b69a5e8fd7b54ffe4",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3370,
+      "P02_objects_added_to_union": 2,
+      "snapshot_object_ids_sha256": "758baebb425707deb7902f8efa2d7f0e842b6781ad61964b796fd668cce1699c",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/90fd6f69ea4a59856375e29b34cebf4953cb2ff4"
+    },
+    {
+      "commit": "a2203ced6046f1cd6e2ba40394d22e4b900e14e1",
+      "tree": "d5915a6c4e39628938eeff2f7dc7b19d110f5527",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3463,
+      "P02_objects_added_to_union": 38,
+      "snapshot_object_ids_sha256": "0781caea78824e3957d1527d6176f244d68a769de78ebcaf2c0ac810a8214c52",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/a2203ced6046f1cd6e2ba40394d22e4b900e14e1"
+    },
+    {
+      "commit": "a3568dfe3426afaca4176d57a2310097e5214e77",
+      "tree": "317a0b0763f311cef209b563a9d911e33de92bbe",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3375,
+      "P02_objects_added_to_union": 0,
+      "snapshot_object_ids_sha256": "431a5584a9b82abd960d4f4426444e4a30f4e556958597b52db9e3a8ce608b37",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/a3568dfe3426afaca4176d57a2310097e5214e77"
+    },
+    {
+      "commit": "a4274b4e6902c508a0a99a86b9c7c7bd1bad8d7c",
+      "tree": "63f140c6304647f5ebd47bfa9730a9079745c81a",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3472,
+      "P02_objects_added_to_union": 0,
+      "snapshot_object_ids_sha256": "509394bdc80b8c434151d49b8edc039cc672d8dea7964d5c8faa6a6f0c2f1d3b",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/a4274b4e6902c508a0a99a86b9c7c7bd1bad8d7c"
+    },
+    {
+      "commit": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "tree": "bda8789467feb6795d2ab341479a32b27e8cb489",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3369,
+      "P02_objects_added_to_union": 0,
+      "snapshot_object_ids_sha256": "4884b4f1a61fd40149ffd41a9c64469669cb44fd42757a3e538c15877beacc3f",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+    },
+    {
+      "commit": "b74b15b7d85516cc75779b09484c0f7f24908f15",
+      "tree": "c7cbb4a82101bbd2e247e02a2e1a47c318d6f631",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3435,
+      "P02_objects_added_to_union": 0,
+      "snapshot_object_ids_sha256": "92151d18cb7f6e37c4f1537ec3cd8d77edc5130f1842ca427d26f72b311a0c93",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/b74b15b7d85516cc75779b09484c0f7f24908f15"
+    },
+    {
+      "commit": "b884b1ea90edd041204bc15ac6c9f0f3fb8b6da0",
+      "tree": "63f5fc0be17b71deb182a8b3a06d79cf28ac44e3",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3540,
+      "P02_objects_added_to_union": 0,
+      "snapshot_object_ids_sha256": "525c339b9ae06e2076f04aa2c33904e69f635f3cdeab25898cd6b359be2d5545",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/b884b1ea90edd041204bc15ac6c9f0f3fb8b6da0"
+    },
+    {
+      "commit": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+      "tree": "200a2d58e659c25b13a04c965a5eba384063cde3",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3370,
+      "P02_objects_added_to_union": 2,
+      "snapshot_object_ids_sha256": "912e5c353f46a4c71781e218921fee0cd447a7a895c651a34ad8727e93d64b76",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c"
+    },
+    {
+      "commit": "d07f77b11a19e368f767d3d7e964f5ca1f1f2276",
+      "tree": "d89fd92b58d16f3ba851e15f7e7980879325e55a",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3540,
+      "P02_objects_added_to_union": 2,
+      "snapshot_object_ids_sha256": "fb458901dffd7cb0d702d2bfc8e098dced89f28ea14f64242c09ca8bd522a130",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/d07f77b11a19e368f767d3d7e964f5ca1f1f2276"
+    },
+    {
+      "commit": "d10a8180166370f93a0126d83f4edcf4b266b713",
+      "tree": "cb00e93aa55f8b480a1d3262ff8c66be8dd0fa98",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3549,
+      "P02_objects_added_to_union": 12,
+      "snapshot_object_ids_sha256": "15bc0b5bb626881748a1073b7561b8824d7b44991fa43502bb481856f445c88d",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/d10a8180166370f93a0126d83f4edcf4b266b713"
+    },
+    {
+      "commit": "dca92972e90c5280e6c217409acfc6fd0dfb38ea",
+      "tree": "5e0192aec3522f3dd2f1f6110910cf3274fb0b38",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3370,
+      "P02_objects_added_to_union": 2,
+      "snapshot_object_ids_sha256": "ea337fb9cc49caa7aba7aa0f5b6417b4758f7937051f79101a34a3146a427bff",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/dca92972e90c5280e6c217409acfc6fd0dfb38ea"
+    },
+    {
+      "commit": "e33924ac97449c7cb8f103d80a39ecbb064310d3",
+      "tree": "f7b5bb5efad64587bd4be58cb3b0ff3aeda10eca",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3405,
+      "P02_objects_added_to_union": 0,
+      "snapshot_object_ids_sha256": "3a6d3a6aad3cb5b9eae54ef0aab6c336781c768bdd45437d054fa7c47e62377d",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/e33924ac97449c7cb8f103d80a39ecbb064310d3"
+    },
+    {
+      "commit": "e67472f606eac43efaf9aa0aab28d1994e73a7b2",
+      "tree": "4d3933ed85c64957323d162d0a2b15e762a5c919",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3548,
+      "P02_objects_added_to_union": 16,
+      "snapshot_object_ids_sha256": "6d64862eb0c5bc2b85b1818c67b28387ccf38ba78db8ba74c26ae2fe76df30d6",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/e67472f606eac43efaf9aa0aab28d1994e73a7b2"
+    },
+    {
+      "commit": "e7fee02b5ce1b965486b15f13938bd0d67c841d8",
+      "tree": "d62fd25bf4b9f4e33ecdbd272a6afe1cfe785f4b",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3457,
+      "P02_objects_added_to_union": 0,
+      "snapshot_object_ids_sha256": "bb6a27be1f9f5256707aa78804e37964e6fb9e756be4da80f94b1231d77f1d08",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/e7fee02b5ce1b965486b15f13938bd0d67c841d8"
+    },
+    {
+      "commit": "ec2248643d875390c41b519b85424a5ca0ce90d1",
+      "tree": "9215ca75741d05a7fa4f34508ae372f704cb54bc",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3441,
+      "P02_objects_added_to_union": 6,
+      "snapshot_object_ids_sha256": "477c107641bc84ffb1a0b0f2da48e011faf5cce1d0704b10d0ffe540558ea557",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/ec2248643d875390c41b519b85424a5ca0ce90d1"
+    },
+    {
+      "commit": "ee20f6009a8581c8141352cdbd261e1a97a0e805",
+      "tree": "1d63154b5cb9c57edcab7229e5064e9656ba309b",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3400,
+      "P02_objects_added_to_union": 0,
+      "snapshot_object_ids_sha256": "254ed0d93f92e8162aba82cd4cca94e4ff605b18bb75b420235a05595033f9a4",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/ee20f6009a8581c8141352cdbd261e1a97a0e805"
+    },
+    {
+      "commit": "f20bc4ae5a369e7c0be0f7ad4a0f0ba9ea758a57",
+      "tree": "ce9723adac860dd50eec8d4515302fc1ab51d53e",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3378,
+      "P02_objects_added_to_union": 8,
+      "snapshot_object_ids_sha256": "40de3f8515b1fc6e91f0274adfe5445957ffcdf70c73ea0cfb4db88d6e2fe7bf",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/f20bc4ae5a369e7c0be0f7ad4a0f0ba9ea758a57"
+    },
+    {
+      "commit": "fd2d8969392a402c9826288d3d614de9f8d4ff31",
+      "tree": "abe0794b4362702012976eb0f150a96004240a1a",
+      "role": "integration-replay-required-input",
+      "snapshot_object_count": 3436,
+      "P02_objects_added_to_union": 0,
+      "snapshot_object_ids_sha256": "adbf293491a03d2286e72e47b6ae19a2e62693a7badd4c4f31430a28c707b6d7",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/fd2d8969392a402c9826288d3d614de9f8d4ff31"
+    },
+    {
+      "commit": "123858ef8292aceb86d8ca7ef71d4e4dea1fec91",
+      "tree": "b643515f8a646e19d878a3c425348e47660eae27",
+      "role": "published-#637",
+      "snapshot_object_count": 3530,
+      "P02_objects_added_to_union": 10,
+      "snapshot_object_ids_sha256": "0cd710228181e5450f0e63edb68bb1b24455bf702acc34de84fb7a2e6f5035b5",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/123858ef8292aceb86d8ca7ef71d4e4dea1fec91"
+    },
+    {
+      "commit": "6f59746beae329d9f3f6e4f5af4d503d822d2e4f",
+      "tree": "652009a8f326c7c217c8696ab6833e86ec29e889",
+      "role": "published-#659",
+      "snapshot_object_count": 3394,
+      "P02_objects_added_to_union": 6,
+      "snapshot_object_ids_sha256": "e9a65ad6644b3dae46e48c1edb1b0c3e8143b71c391da58bb80dda7f3d6caab7",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/6f59746beae329d9f3f6e4f5af4d503d822d2e4f"
+    },
+    {
+      "commit": "ff8128a5f717fae75b263de55c382933a0bc9121",
+      "tree": "448179c9448d7d2bf615db044cf5a992e1af82b0",
+      "role": "published-#671",
+      "snapshot_object_count": 3629,
+      "P02_objects_added_to_union": 78,
+      "snapshot_object_ids_sha256": "c9170c81d75378aa1926fa87b15fce9e6d66695710805145b59ad9cf0c8430c3",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/ff8128a5f717fae75b263de55c382933a0bc9121"
+    },
+    {
+      "commit": "0c255490461fed0a3ee3d43acdd5216e2e064a53",
+      "tree": "3c88ce4b6a028f72aec8fcaf6c94bbb886c63a74",
+      "role": "published-#664",
+      "snapshot_object_count": 3676,
+      "P02_objects_added_to_union": 11,
+      "snapshot_object_ids_sha256": "797ac9b438d612bac35b9400273df0ab7fd22f0bf8cf65c9f6e5e70654607dc1",
+      "url": "https://github.com/applicate2628/mcp-local-hub/commit/0c255490461fed0a3ee3d43acdd5216e2e064a53"
+    }
+  ],
+  "coverage": {
+    "public_snapshot_count": 43,
+    "public_union_object_count": 5328,
+    "public_union_object_ids_sha256": "acb3b6629262a5c93173412c760fdabb46fa7f4b767c6c472f4fd62a46791c7b",
+    "public_tree_object_count": 625,
+    "public_tree_object_ids_sha256": "de32ca3abd4fa36c3806f35bd5db493f08f65d462ff45a3920f544a6bb59ed55",
+    "P02_objects_from_public_snapshots": 3974,
+    "P02_objects_from_original_private_pack": 131,
+    "P02_objects_from_additional_pack": 2,
+    "three_sources_pairwise_disjoint": true,
+    "public_only_staging_tree_count": 383,
+    "expected_restored_database_objects": 4490
+  },
+  "packs": [
+    {
+      "path": "p02-private-objects.pack",
+      "bytes": 1110609,
+      "sha256": "730e0e54b338685b6e7e214d6a365060abcfe988d87673fa64ec0b1fadccb4f0",
+      "object_count": 131,
+      "object_ids_sha256": "299304c4f2a97bfece5f3f402c6d2cb141c4084bc5cab941456418cda79a536b",
+      "standalone": true
+    },
+    {
+      "path": "p02-additional-objects.pack",
+      "bytes": 20814,
+      "sha256": "48a5ef42c6ebac5e2a886be3cdd0b3464ec71c9299fbc990afa3f635ca4cf6be",
+      "object_count": 2,
+      "object_ids_sha256": "37db1b760f2a96167de65742615cdbeb045ae977d07be2b338f8aeae18e66304",
+      "standalone": true
+    }
+  ],
+  "additional_objects": [
+    {
+      "oid": "dc709de845f45906a6b4cd0541a86916cea17329",
+      "type": "blob",
+      "path": "internal/cli/windows_product_pair_test.go",
+      "bytes": 44094,
+      "sha256": "d4217aafd42bf0fff714a4c06b347a9b6bb92ca040df33829c768a81d1047308"
+    },
+    {
+      "oid": "f51fe7e38b8fd2803a9949dc9c33af0ce3b8cf61",
+      "type": "blob",
+      "path": "internal/api/register_supervisor.go",
+      "bytes": 46401,
+      "sha256": "ea1bdd7abd1309d92a5b778568d381f4af5739eab88c2746013623b3b4efb2a4"
+    }
+  ],
+  "considered_but_not_required": [
+    {
+      "commit": "e6f1ce535db0e2b2d626fba87ae62d83fe49c2a2",
+      "tree": "b79a40cbb8f2c47443ad060e8c55f384a27909bf",
+      "role": "published-#660",
+      "snapshot_object_count": 3482,
+      "P02_objects_added_to_union": 0
+    },
+    {
+      "commit": "d910767902f7e1385b97e12afdc675b0c9d27b99",
+      "tree": "ba4489846447f3ca2652ddd146369e35e0d69c3c",
+      "role": "published-#627",
+      "snapshot_object_count": 3388,
+      "P02_objects_added_to_union": 0
+    },
+    {
+      "commit": "62c853e8a9e9b2817f5fcaf15018450b76798690",
+      "tree": "32b55d2e5708462a2bf4cddb4a5cc7143ddf59e4",
+      "role": "published-#631",
+      "snapshot_object_count": 3489,
+      "P02_objects_added_to_union": 0
+    },
+    {
+      "commit": "ba14bd241370afd2ecb4ad2daad25356177f6013",
+      "tree": "9dd3cea81347795ee059186775d4cb51c02dd884",
+      "role": "published-#644",
+      "snapshot_object_count": 3413,
+      "P02_objects_added_to_union": 0
+    }
+  ],
+  "verification_method": "Explicit public snapshot trees only; import public tree nodes, standalone private packs, then exactly the missing P02 blobs whose IDs belong to the public union. Rehash every target object in a fresh bare DB with no alternates or lazy/network fetch. No ancestry traversal.",
+  "limits": [
+    "Snapshot restoration does not restore parent history.",
+    "The raw P02 commit is preserved including its original parent header; no synthetic parent or rewritten commit is created.",
+    "Public snapshot commits must already be locally available; the script performs no fetch.",
+    "The output DB also contains only explicitly declared public tree nodes used to enumerate the P02 graph; these are counted separately.",
+    "The existing A+B combined patch is separate and is neither embedded nor modified by this capsule.",
+    "A future Source commit, Go/native execution and publication are performed separately by root."
+  ],
+  "reproducer": {
+    "path": "restore.py",
+    "bytes": 11711,
+    "sha256": "f535cca5480ccd0c33e54c439eaee7d539e9c7864d3caf2e9682063e77f533ce",
+    "requirements": "Python 3 and Git supporting ls-tree --format; existing local object database containing all 43 pinned public snapshots",
+    "network": "disabled",
+    "source_repository_access": "read-only",
+    "output": "new owned bare object database; no checkout"
+  }
+}

@@ -1,0 +1,75 @@
+$ErrorActionPreference='Stop'
+$TaskRoot='@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1'
+$SourceRoot='@@RECOVERY_APPROVED_WORK_AREA@@\pub666-recovered-20261128'
+$WarmInputs=$TaskRoot+'\inputs-successor33-v1\warm-cache'
+$WarmOutput=$TaskRoot+'\original-helper-cache-warm-v7'
+function HashBytes([byte[]]$raw,[string]$algorithm='SHA256'){$h=[Security.Cryptography.HashAlgorithm]::Create($algorithm);try{[BitConverter]::ToString($h.ComputeHash($raw)).Replace('-','').ToLowerInvariant()}finally{$h.Dispose()}}
+function TaskSHA([string]$path){HashBytes ([IO.File]::ReadAllBytes($path))}
+function GitBlob([byte[]]$raw){$h=[Security.Cryptography.SHA1]::Create();try{$prefix=[Text.Encoding]::UTF8.GetBytes(('blob '+$raw.Length+[char]0));[void]$h.TransformBlock($prefix,0,$prefix.Length,$prefix,0);[void]$h.TransformFinalBlock($raw,0,$raw.Length);[BitConverter]::ToString($h.Hash).Replace('-','').ToLowerInvariant()}finally{$h.Dispose()}}
+function FreshJSON([string]$path,$value){if(Test-Path -LiteralPath $path){throw 'Output metadata already exists'};[IO.File]::WriteAllText($path,($value|ConvertTo-Json -Depth 12)+[char]10,(New-Object Text.UTF8Encoding($false)))}
+if(Test-Path -LiteralPath $WarmOutput){throw 'Warm native output must remain absent before launch'}
+$MapPath=$TaskRoot+'\inputs-successor33-v1\source-binding\source04e-git-map.json'
+if((TaskSHA $MapPath) -cne '6dfe7895fad816826630a29c604f1452d756f712c0d316bd37b2e94217d97d75'){throw 'Source map differs'}
+$Map=Get-Content -Raw -Encoding UTF8 $MapPath|ConvertFrom-Json
+if($Map.commit -cne '04e5b4eadd6407cbff4e04ba453546d278314bd7' -or $Map.tree -cne 'f68f7584dba7744e7607b07f615758f3ff633f54' -or @($Map.files.PSObject.Properties).Count -ne 3369){throw 'Source identity differs'}
+$Pins=[ordered]@{};$SourcePins=[ordered]@{};$SourceBytes=0
+foreach($entry in $Map.files.PSObject.Properties|Sort-Object Name){
+ $path=[IO.Path]::GetFullPath((Join-Path $SourceRoot $entry.Name))
+ if(-not $path.StartsWith($SourceRoot+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Source path escaped'}
+ $file=Get-Item -LiteralPath $path
+ if(($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $file.PSIsContainer){throw 'Source file is not ordinary'}
+ $raw=[IO.File]::ReadAllBytes($path)
+ if((GitBlob $raw) -cne $entry.Value.git_blob){throw ('Source Git blob differs: '+$entry.Name)}
+ $sha=HashBytes $raw;$Pins.Add($path,$sha);$SourcePins.Add($entry.Name,$sha);$SourceBytes+=$raw.Length
+}
+$SourceSHAFile=$WarmInputs+'\source04e-input-sha256.json'
+$Known=[ordered]@{
+ ($TaskRoot+'\inputs-error-dword-v4\run_owned_commands.py')='6d16652d4893273b7e9d584920892ce5f5917622e7e242a62eb78ec824bcfb93'
+ ($TaskRoot+'\inputs-error-dword-v4\guard-custody.py')='e7c663f4ba2fd558005bc110173609cb19465ff33d3f4678aeb53b5ba00e0924'
+ ($TaskRoot+'\inputs-error-dword-v4\windows_job.py')='d94583001a33ef34adb67feec34b4f4b0bf3626df9f63da3c7a7c85bf3e0b552'
+ ($TaskRoot+'\inputs-original-v6\copy_closed_caches_v6.py')='2577deae637071dbc9eb2dae6e6f64946379a30b093b6bc3fa120f687b365a16'
+ ($TaskRoot+'\inputs-error-dword-v4\serena-product-inputs-v2-plan.json')='e756d9109c96670a135224b47d0aed3b56379a43854b41738816832d06ef1254'
+ ($TaskRoot+'\serena-product-inputs-v2\parent.json')='4a11f613e91c10121bacf9438eb7849962e880277a9e7f4c0809491bc453d440'
+ ($TaskRoot+'\serena-product-inputs-v2\commands\execution.json')='f1ae3cd770c7a4cc6437735c97cc6e87c7cf6344a1d65f153aded23c9674a8c0'
+ '@@RECOVERY_GO_DISTRIBUTION_ROOT@@\ucrt64\lib\go\bin\go.exe'='0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113'
+ '@@RECOVERY_GO_DISTRIBUTION_ROOT@@\ucrt64\bin\gcc.exe'='f6ff9378c1edb591131304518eac6456708d28720284105930d0d687136bcdd3'
+ '@@RECOVERY_GIT_INSTALLATION_HOME@@\cmd\git.exe'='177bc8a9af84fa3a400c694c975fda731d048279c074e1a93947ce8b067ebb48'
+ '@@RECOVERY_WINDOWS_SYSTEM_ROOT@@\System32\WindowsPowerShell\v1.0\powershell.exe'='75f490d70f821afbbbb28d8ae45fa712c0ef39f73832af5ff0df284beb22a9fc'
+ '@@RECOVERY_NATIVE_USER_PROFILE@@\AppData\Local\Python\pythoncore-3.15-64\python.exe'='d4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd'
+}
+foreach($path in $Known.Keys){if((TaskSHA $path) -cne $Known[$path]){throw ('Tool or donor differs: '+$path)};$Pins.Add($path,$Known[$path])}
+$GitFile=$SourceRoot+'\.git';$GitDirLine=[IO.File]::ReadAllText($GitFile).Trim()
+if(-not $GitDirLine.StartsWith('gitdir: ')){throw 'Expected linked worktree metadata'}
+$GitDir=[IO.Path]::GetFullPath([IO.Path]::Combine($SourceRoot,$GitDirLine.Substring(8)))
+$GitHead=$GitDir+'\HEAD';$HeadText=[IO.File]::ReadAllText($GitHead).Trim()
+$Pins.Add($GitFile,(TaskSHA $GitFile));$Pins.Add($GitHead,(TaskSHA $GitHead))
+if($HeadText.StartsWith('ref: ')){
+ $CommonPath=$GitDir+'\commondir';$Common=[IO.Path]::GetFullPath([IO.Path]::Combine($GitDir,[IO.File]::ReadAllText($CommonPath).Trim()))
+ $RefPath=Join-Path $Common $HeadText.Substring(5)
+ if([IO.File]::ReadAllText($RefPath).Trim() -cne $Map.commit){throw 'Actual worktree commit differs'}
+ $Pins.Add($CommonPath,(TaskSHA $CommonPath));$Pins.Add($RefPath,(TaskSHA $RefPath))
+}else{if($HeadText -cne $Map.commit){throw 'Actual detached worktree commit differs'}}
+$OldPlanPath=$TaskRoot+'\inputs-original-v6\original-helper-inputs-v6-plan.json'
+$OldPlan=Get-Content -Raw -Encoding UTF8 $OldPlanPath|ConvertFrom-Json
+$WarmEnvironment=[ordered]@{}
+foreach($entry in $OldPlan.environment.PSObject.Properties){
+ if($entry.Name -ceq 'GIT_ALLOW_PROTOCOL'){continue}
+ $WarmEnvironment.Add($entry.Name,$entry.Value.Replace($OldPlan.output,$WarmOutput))
+}
+$WarmEnvironment['GOENV']='off';$WarmEnvironment['GOOS']='windows';$WarmEnvironment['GOARCH']='amd64'
+$WarmEnvironment['GOFLAGS']='-mod=readonly -ldflags=-H=windowsgui'
+$WarmEnvironment['ProgramFiles']='@@RECOVERY_PROGRAM_FILES_64@@';$WarmEnvironment['ProgramFiles(x86)']='@@RECOVERY_PROGRAM_FILES_32@@'
+$Wrapper=$WarmInputs+'\invoke_warm_build.ps1'
+$SourceRecord=([ordered]@{schema='source04e-actual-byte-inputs-v1';source_root=$SourceRoot;commit=$Map.commit;tree=$Map.tree;git_map_sha256=(TaskSHA $MapPath);tracked_files=3369;tracked_bytes=$SourceBytes;files=$SourcePins;new_source_execution=$false})
+if(Test-Path -LiteralPath $SourceSHAFile){$expected=[Text.Encoding]::UTF8.GetBytes(($SourceRecord|ConvertTo-Json -Depth 12)+[char]10);if((TaskSHA $SourceSHAFile) -cne (HashBytes $expected)){throw 'Existing DATA source snapshot differs'}}else{FreshJSON $SourceSHAFile $SourceRecord}
+foreach($path in @($MapPath,$SourceSHAFile,$OldPlanPath,$Wrapper,($WarmInputs+'\freeze_warm_plan.ps1'))){$Pins.Add($path,(TaskSHA $path))}
+$Python='@@RECOVERY_NATIVE_USER_PROFILE@@\AppData\Local\Python\pythoncore-3.15-64\python.exe'
+$PowerShell='@@RECOVERY_WINDOWS_SYSTEM_ROOT@@\System32\WindowsPowerShell\v1.0\powershell.exe'
+$Commands=@([ordered]@{name='copy-original-pass-donor-caches';argv=@($Python,'-I','-S','-B',($TaskRoot+'\inputs-original-v6\copy_closed_caches_v6.py'),$WarmOutput,'4a11f613e91c10121bacf9438eb7849962e880277a9e7f4c0809491bc453d440');cwd=$TaskRoot;seconds=600;executable_sha256=$Known[$Python]})
+foreach($mode in @('provider-386','provider-amd64','cli-state')){
+ $Commands+=[ordered]@{name=('build-'+$mode);argv=@($PowerShell,'-NoLogo','-NoProfile','-NonInteractive','-File',$Wrapper,'-Mode',$mode);cwd=$SourceRoot;seconds=300;executable_sha256=$Known[$PowerShell]}
+}
+$Plan=[ordered]@{schema='fresh-owned-commands-v1';reviewed=$true;output=$WarmOutput;parent_seconds=1620;python_sha256=$Known[$Python];payload=$OldPlan.payload;environment=$WarmEnvironment;input_files=$Pins;commands=$Commands;source_context=[ordered]@{commit=$Map.commit;tree=$Map.tree;path=$SourceRoot;source_sha256_map=$SourceSHAFile;source_sha256_map_sha256=(TaskSHA $SourceSHAFile);scope='Ordinary cache preparation only; no test or Product qualification';new_test_execution=$false}}
+$PlanFile=$WarmInputs+'\helper-cache-warm-v7-plan.json'
+FreshJSON $PlanFile $Plan
+[ordered]@{plan=$PlanFile;plan_sha256=(TaskSHA $PlanFile);source_map=$SourceSHAFile;source_map_sha256=(TaskSHA $SourceSHAFile);source_files=$SourcePins.Count;source_bytes=$SourceBytes;input_files=$Pins.Count;wrapper_sha256=(TaskSHA $Wrapper);commands=$Commands.Count;output_still_absent=(-not (Test-Path -LiteralPath $WarmOutput));native_or_test_execution=$false}|ConvertTo-Json -Compress

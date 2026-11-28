@@ -1,0 +1,983 @@
+{
+  "schema": "git-source-recovery-observation-v1",
+  "date": "2026-11-28",
+  "scope": "read-only recovery search; not product/native qualification",
+  "source_head": "01b4e915af6439e4c5e7c5c880a6d4885a2dbd3a",
+  "stores": {
+    "published": "Common store serving the existing publication worktrees",
+    "working": "Independent working repository store",
+    "composition_e": "Relocated composition-p02 store discovered through an existing worktree pointer"
+  },
+  "inventory": {
+    "stores": [
+      {
+        "store": "published",
+        "object_count": 31735,
+        "types": {
+          "tree": 12687,
+          "blob": 16429,
+          "commit": 2612,
+          "tag": 7
+        },
+        "named_objects": 25061,
+        "path_map_complete": true,
+        "inventory_sha256": "4b62b02437d3b966f43e74485b2b9aa58ebd18d6193dbb7943d83be155a3c65d",
+        "paths_sha256": "91bbfe34115f93a5680458ba4978cf48c3d929d8f8874931478466fede966b70"
+      },
+      {
+        "store": "working",
+        "object_count": 64750,
+        "types": {
+          "tree": 25733,
+          "commit": 7331,
+          "blob": 31679,
+          "tag": 7
+        },
+        "named_objects": 49271,
+        "path_map_complete": true,
+        "inventory_sha256": "21fd71d9ef097be2283707bb58194d71d6d5fdf28bfac3d756690aadb1e9d9b6",
+        "paths_sha256": "19161c5706b5fa577b0f78596c50cb9fcef62634e4305087ed24836ab6af7d94"
+      },
+      {
+        "store": "composition_e",
+        "object_count": 26807,
+        "types": {
+          "tree": 10319,
+          "blob": 14401,
+          "commit": 2087
+        },
+        "named_objects": 0,
+        "path_map_complete": false,
+        "inventory_sha256": "d8f89210a41a43d7487f1a7a31817bd025a805a938245f6aa1a772693cb6b4ef",
+        "paths_sha256": "afd2de41550079479174d807137abd2f287c79c513127364b962d8faa5a956ee"
+      }
+    ],
+    "union_object_count": 68298,
+    "union_types": {
+      "tree": 27217,
+      "blob": 33451,
+      "commit": 7623,
+      "tag": 7
+    },
+    "blob_bytes": 2639836645,
+    "by_size": [
+      {
+        "oid": "73e585c102d8bcc13af20f009243c0379edb484c",
+        "type": "blob",
+        "bytes": 1099,
+        "stores": [
+          "published",
+          "working",
+          "composition_e"
+        ],
+        "paths": [
+          "internal/vcpkgmcp/cmaketrace/r22_bot_regressions_test.go"
+        ]
+      },
+      {
+        "oid": "7f50e113e6aa2c987bc97a61af779fcac8bca5e7",
+        "type": "blob",
+        "bytes": 3121,
+        "stores": [
+          "published",
+          "working",
+          "composition_e"
+        ],
+        "paths": [
+          "internal/api/attach_client_competing.go"
+        ]
+      },
+      {
+        "oid": "a3031c47d9b18ca49e734191595f131648c22266",
+        "type": "blob",
+        "bytes": 1348,
+        "stores": [
+          "published",
+          "working",
+          "composition_e"
+        ],
+        "paths": [
+          "internal/process/start_with_job_errors.go"
+        ]
+      },
+      {
+        "oid": "f7480a1acd63d71d9e45f13d98fde44bc85a15a9",
+        "type": "blob",
+        "bytes": 3121,
+        "stores": [
+          "published",
+          "working",
+          "composition_e"
+        ],
+        "paths": [
+          "internal/drmemory/discovery_test.go"
+        ]
+      },
+      {
+        "oid": "3dd0a223dc230525fc43f21385d46027838432a1",
+        "type": "blob",
+        "bytes": 1099,
+        "stores": [
+          "working"
+        ],
+        "paths": [
+          "work-items/archive/2026-08/2026-07-16-productization-gui-solidify/agent-runs.jsonl"
+        ]
+      }
+    ],
+    "by_name_count": 33,
+    "selected_count": 5985,
+    "selected_bytes": 203394778,
+    "unmapped_small_count": 5947,
+    "unmapped_small_bytes": 202639441
+  },
+  "search": {
+    "status": "COMPLETE",
+    "hashed_blobs": 5985,
+    "hashed_bytes": 203394778,
+    "hits": [],
+    "references": [],
+    "batches": [
+      {
+        "store": "published",
+        "objects": 66,
+        "bytes": 1091152,
+        "sha256": "f6f435414bad496c1a86e41ad23982774ef4ffb947450ce551f1ea25a4bdfa49"
+      },
+      {
+        "store": "working",
+        "objects": 5482,
+        "bytes": 185540412,
+        "sha256": "a95da783add9b81df969b06bc7df85f88eb125bae054c4f43ef77edfee073e1f"
+      },
+      {
+        "store": "composition_e",
+        "objects": 437,
+        "bytes": 17079604,
+        "sha256": "f80676a864a88c25a79d828b8d0a5c68dd6a00492f575b36bc71249eb865a1d5"
+      }
+    ],
+    "scope": "exact sizes plus named candidates and all globally unmapped blobs <=262144 B; duplicate Git IDs read once"
+  },
+  "whole_blob_receiver_sizes_found": 0,
+  "limits": [
+    "All available Git object metadata was enumerated in each store; objects absent from available stores cannot be inferred.",
+    "Content hashing selected exact-size and named candidates plus globally unmapped blobs <=262144 bytes; other named or larger content and embedded encodings were not exhaustively read.",
+    "Composition store path traversal failed on missing parent ed510d97235884e1fc1aec095d32238668344cc9 while traversing 09dc07e01d1a3236ab5f45f384e11fe2f9dfd30d; available-object metadata enumeration succeeded.",
+    "No Git refs, index, worktree contents or stored object bytes were edited; no repository repair, garbage collection, fetch, build, product test, install or CI dispatch was performed."
+  ],
+  "preserved_failures": [
+    {
+      "stage": "initial tool preparation",
+      "outcome": "A dependent write ran before asynchronous directory creation completed; missing-config launcher returned exit1 before command owner startup. Tool outcomes preserved; no native command launched in that attempt."
+    },
+    {
+      "stage": "stale composition pointer",
+      "outcome": "Original pointer destination was absent; command exit128/CLOSED. Relocated store read explicitly; pointer unchanged."
+    },
+    {
+      "stage": "composition history traversal",
+      "outcome": "Missing parent caused exit128/CLOSED; available-object metadata retained; no fabricated complete history."
+    },
+    {
+      "stage": "first batch transport",
+      "outcome": "Shell quoting produced exit1/CLOSED before batch output creation; corrected transport used separate explicit command files."
+    }
+  ],
+  "readset": {
+    "file": "git-recovery-readset.jsonl",
+    "bytes": 995579,
+    "sha256": "c997a2540d2caf2349330d436cd8870769c17187b10fca6c4707b2c82e775cf5",
+    "rows": 5985
+  },
+  "run_receipts": [
+    {
+      "run": "inventory-run",
+      "status": "PASS",
+      "error": null,
+      "receipt_sha256": "97915c801d0815af1c370d75c1faa37c5c72638948fca0276fdeccab2fb33fd4",
+      "config_sha256": "838e4c5947bd1c5b6182a69967240d66499de5b22119ac039ae57668f896b169",
+      "controller_exit_code": 0,
+      "controller_reaped": true,
+      "controller_captures_closed": true,
+      "commands": [
+        {
+          "capture_name": "head",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "streams": {
+            "stdout": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 41,
+              "bytes_stored": 41
+            },
+            "stderr": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0
+            }
+          }
+        },
+        {
+          "capture_name": "git-version",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "streams": {
+            "stdout": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 29,
+              "bytes_stored": 29
+            },
+            "stderr": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0
+            }
+          }
+        },
+        {
+          "capture_name": "objects",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "streams": {
+            "stdout": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 1622110,
+              "bytes_stored": 1622110
+            },
+            "stderr": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0
+            }
+          }
+        },
+        {
+          "capture_name": "paths",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "streams": {
+            "stdout": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 1939499,
+              "bytes_stored": 1939499
+            },
+            "stderr": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "run": "parse-run",
+      "status": "PASS",
+      "error": null,
+      "receipt_sha256": "2b0c5c60197920a21fd8ec2f8b78fae7117a3a872aaa884b5de5dfc7bc4cc113",
+      "config_sha256": "3dd9f46f56ad3d987cefe456d47f40f4d40c9ff1bcb2b214a1c5e256a1630fbd",
+      "controller_exit_code": 0,
+      "controller_reaped": true,
+      "controller_captures_closed": true,
+      "commands": [
+        {
+          "capture_name": "head",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "streams": {
+            "stdout": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 41,
+              "bytes_stored": 41
+            },
+            "stderr": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0
+            }
+          }
+        },
+        {
+          "capture_name": "parse",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "streams": {
+            "stdout": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 3165,
+              "bytes_stored": 3165
+            },
+            "stderr": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "run": "independent-inventory-run",
+      "status": "FAIL",
+      "error": "RuntimeError: composition-objects exit 128 expected 0",
+      "receipt_sha256": "057ff2d8cde0ff77559f132c604514808d944dd193647513a4c63f0bc89429fd",
+      "config_sha256": "b1622d33d1d5f729970a79a34b47f3466f5e3aead629b82fa3a98b001881462f",
+      "controller_exit_code": 1,
+      "controller_reaped": true,
+      "controller_captures_closed": true,
+      "commands": [
+        {
+          "capture_name": "head",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "streams": {
+            "stdout": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 41,
+              "bytes_stored": 41
+            },
+            "stderr": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0
+            }
+          }
+        },
+        {
+          "capture_name": "composition-objects",
+          "exit_code": 128,
+          "lifecycle_state": "CLOSED",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "streams": {
+            "stdout": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0
+            },
+            "stderr": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 110,
+              "bytes_stored": 110
+            }
+          }
+        }
+      ]
+    },
+    {
+      "run": "working-inventory-run",
+      "status": "PASS",
+      "error": null,
+      "receipt_sha256": "9598592c59de19ac632a1a417e853ee8f0730a453281bfa649e4ab3dce7b2eb9",
+      "config_sha256": "49eeb7245f4dc82791d0e9ab8207a461f29e8f9f0283b4c4534fc1df9c9ae637",
+      "controller_exit_code": 0,
+      "controller_reaped": true,
+      "controller_captures_closed": true,
+      "commands": [
+        {
+          "capture_name": "head",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "streams": {
+            "stdout": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 41,
+              "bytes_stored": 41
+            },
+            "stderr": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0
+            }
+          }
+        },
+        {
+          "capture_name": "objects",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "streams": {
+            "stdout": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 3317880,
+              "bytes_stored": 3317880
+            },
+            "stderr": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0
+            }
+          }
+        },
+        {
+          "capture_name": "paths",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "streams": {
+            "stdout": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 3874389,
+              "bytes_stored": 3874389
+            },
+            "stderr": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "run": "composition-e-inventory-run",
+      "status": "FAIL",
+      "error": "RuntimeError: paths exit 128 expected 0",
+      "receipt_sha256": "a288cdf2ba02942852eb848445b5d6d823a8a9c4bb9fc7670028d8badebceba9",
+      "config_sha256": "6c88ca41c61044a7f7151e9c374c962006a6704f567fae26e2bd17e5dd17a883",
+      "controller_exit_code": 1,
+      "controller_reaped": true,
+      "controller_captures_closed": true,
+      "commands": [
+        {
+          "capture_name": "head",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "streams": {
+            "stdout": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 41,
+              "bytes_stored": 41
+            },
+            "stderr": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0
+            }
+          }
+        },
+        {
+          "capture_name": "objects",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "streams": {
+            "stdout": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 1370092,
+              "bytes_stored": 1370092
+            },
+            "stderr": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0
+            }
+          }
+        },
+        {
+          "capture_name": "paths",
+          "exit_code": 128,
+          "lifecycle_state": "CLOSED",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "streams": {
+            "stdout": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 3731,
+              "bytes_stored": 3731
+            },
+            "stderr": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 148,
+              "bytes_stored": 148
+            }
+          }
+        }
+      ]
+    },
+    {
+      "run": "union-parse-run",
+      "status": "PASS",
+      "error": null,
+      "receipt_sha256": "e9abdafc242d0653b0d7e8c6f87dad8d28fcac0657f82e639decad89a0d7f60d",
+      "config_sha256": "0edd262f3c261785a4d92d45ce9fb4a40cce06bc9118cf63c1ab9331c5ac69ac",
+      "controller_exit_code": 0,
+      "controller_reaped": true,
+      "controller_captures_closed": true,
+      "commands": [
+        {
+          "capture_name": "head",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "streams": {
+            "stdout": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 41,
+              "bytes_stored": 41
+            },
+            "stderr": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0
+            }
+          }
+        },
+        {
+          "capture_name": "parse",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "streams": {
+            "stdout": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 2277,
+              "bytes_stored": 2277
+            },
+            "stderr": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "run": "hash-run",
+      "status": "FAIL",
+      "error": "RuntimeError: batch-published exit 1 expected 0",
+      "receipt_sha256": "bead7ca53fe7e4958c484a8181084a124b42d721116439d4a0bec950f53947b0",
+      "config_sha256": "8ea543dfc5f8a94f81dfb35fa9bf0d048cb1c5c6952f943e61a1c0d7b6068a5d",
+      "controller_exit_code": 1,
+      "controller_reaped": true,
+      "controller_captures_closed": true,
+      "commands": [
+        {
+          "capture_name": "head",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "streams": {
+            "stdout": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 41,
+              "bytes_stored": 41
+            },
+            "stderr": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0
+            }
+          }
+        },
+        {
+          "capture_name": "batch-published",
+          "exit_code": 1,
+          "lifecycle_state": "CLOSED",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "streams": {
+            "stdout": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0
+            },
+            "stderr": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 68,
+              "bytes_stored": 68
+            }
+          }
+        }
+      ]
+    },
+    {
+      "run": "hash-v2-run",
+      "status": "PASS",
+      "error": null,
+      "receipt_sha256": "e7c6884e8edafe8c21fc3e4cff1713c744833222233b95c0dce551ebe47f0376",
+      "config_sha256": "79f74012319ce08b6a6069e794422d75f7813cf5f8441f2a8ce5ad5f0b0dd844",
+      "controller_exit_code": 0,
+      "controller_reaped": true,
+      "controller_captures_closed": true,
+      "commands": [
+        {
+          "capture_name": "head",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "streams": {
+            "stdout": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 41,
+              "bytes_stored": 41
+            },
+            "stderr": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0
+            }
+          }
+        },
+        {
+          "capture_name": "batch-published",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "streams": {
+            "stdout": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0
+            },
+            "stderr": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0
+            }
+          }
+        },
+        {
+          "capture_name": "batch-working",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "streams": {
+            "stdout": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0
+            },
+            "stderr": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0
+            }
+          }
+        },
+        {
+          "capture_name": "batch-composition_e",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "streams": {
+            "stdout": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0
+            },
+            "stderr": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0
+            }
+          }
+        },
+        {
+          "capture_name": "hash",
+          "exit_code": 0,
+          "lifecycle_state": "CLOSED",
+          "direct_reaped": true,
+          "active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "streams": {
+            "stdout": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 647,
+              "bytes_stored": 647
+            },
+            "stderr": {
+              "worker_complete": true,
+              "eof": true,
+              "pipe_close_returned": true,
+              "capture_close_returned": true,
+              "error": null,
+              "bytes_seen": 0,
+              "bytes_stored": 0
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "raw_batch_disposition": "Retained outside trash pending publication readback and independent confirmation that original Git objects remain available.",
+  "provenance": "Internal delegated Git-recovery investigation using the existing pinned native command owner; no external model/provider execution."
+}

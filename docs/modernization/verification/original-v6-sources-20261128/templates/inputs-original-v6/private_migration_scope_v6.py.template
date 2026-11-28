@@ -1,0 +1,264 @@
+r"""Create a new, private Windows test-run scope; never repair an existing tree.
+
+Import create_private_run_scope(scope), or explicitly invoke:
+    python -B private_run_scope.py --create NEW_UNIQUE_NAME
+
+Run scopes are direct children of WORK/runs. Artifact scopes are new qualified-*
+children of the fixed repository .scratch directory. CreateDirectoryW
+creates each directory exclusively with its final protected security descriptor.
+There is no SetSecurityInfo, recursive ACL operation, deletion, token mutation,
+test execution or mutation of an old/active run. A failure leaves new evidence
+in place. Existing ancestors are opened read-only without delete sharing.
+
+New test-created descendants inherit the allowlist DACL. Their default OWNER
+still comes from their process token; legacy owner-sensitive fixtures must set
+their own newly created objects' owner explicitly.
+"""
+import sys
+sys.dont_write_bytecode = True
+
+import argparse
+import contextlib
+import ctypes as C
+from ctypes import wintypes as W
+import json
+import os
+from pathlib import Path
+
+REVIEW_COMPLETE = True
+if REVIEW_COMPLETE is not True:
+    raise RuntimeError("disabled task-bound draft: actual source admission and root review are pending")
+import re
+
+RUNS = Path(r"@@RECOVERY_WORK_AREA_RAW@@")
+ARTIFACTS = Path(r"@@RECOVERY_WORK_AREA_RAW@@\mcp-acceptance-rebuild-20261127-v1\source-original3ebe-v2\.scratch")
+PARTS = ()  # Empty fresh evidence parent; no seed/cache authority is created.
+SYSTEM_SID = "S-1-5-18"
+ADMIN_SID = "S-1-5-32-544"
+FILE_ALL_ACCESS = 0x001F01FF
+READ_CONTROL = 0x00020000
+FILE_READ_ATTRIBUTES = 0x80
+FILE_ATTRIBUTE_DIRECTORY = 0x10
+FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+SE_DACL_PROTECTED = 0x1000
+SE_DACL_PRESENT = 0x0004
+
+if os.name != "nt":
+    raise RuntimeError("private run scopes require native Windows")
+K = C.WinDLL("kernel32", use_last_error=True)
+A = C.WinDLL("advapi32", use_last_error=True)
+P = C.c_void_p
+PP = C.POINTER(P)
+PD = C.POINTER(W.DWORD)
+
+class SecurityAttributes(C.Structure):
+    _fields_ = [("length", W.DWORD), ("descriptor", P), ("inherit", W.BOOL)]
+
+class FileInfo(C.Structure):
+    _fields_ = [
+        ("attributes", W.DWORD), ("created", W.FILETIME),
+        ("accessed", W.FILETIME), ("written", W.FILETIME),
+        ("volume", W.DWORD), ("size_high", W.DWORD), ("size_low", W.DWORD),
+        ("links", W.DWORD), ("index_high", W.DWORD), ("index_low", W.DWORD),
+    ]
+
+class ACL(C.Structure):
+    _fields_ = [
+        ("revision", W.BYTE), ("reserved", W.BYTE), ("size", W.WORD),
+        ("count", W.WORD), ("reserved2", W.WORD),
+    ]
+
+class AceHeader(C.Structure):
+    _fields_ = [("kind", W.BYTE), ("flags", W.BYTE), ("size", W.WORD)]
+
+def bind(dll, name, result, arguments):
+    function = getattr(dll, name)
+    function.restype, function.argtypes = result, arguments
+    return function
+
+bind(K, "GetCurrentProcess", P, [])
+bind(K, "CloseHandle", W.BOOL, [P])
+bind(K, "LocalFree", P, [P])
+bind(K, "CreateDirectoryW", W.BOOL, [W.LPCWSTR, C.POINTER(SecurityAttributes)])
+bind(K, "CreateFileW", P, [W.LPCWSTR, W.DWORD, W.DWORD, P, W.DWORD, W.DWORD, P])
+bind(K, "GetFileInformationByHandle", W.BOOL, [P, C.POINTER(FileInfo)])
+bind(A, "OpenProcessToken", W.BOOL, [P, W.DWORD, PP])
+bind(A, "GetTokenInformation", W.BOOL, [P, W.DWORD, P, W.DWORD, PD])
+bind(A, "ConvertSidToStringSidW", W.BOOL, [P, PP])
+bind(A, "IsValidSid", W.BOOL, [P])
+bind(A, "GetLengthSid", W.DWORD, [P])
+bind(A, "ConvertStringSecurityDescriptorToSecurityDescriptorW", W.BOOL, [W.LPCWSTR, W.DWORD, PP, PD])
+bind(A, "GetSecurityInfo", W.DWORD, [P, W.DWORD, W.DWORD, PP, PP, PP, PP, PP])
+bind(A, "GetSecurityDescriptorControl", W.BOOL, [P, C.POINTER(W.WORD), PD])
+bind(A, "ConvertSecurityDescriptorToStringSecurityDescriptorW", W.BOOL, [P, W.DWORD, W.DWORD, PP, PD])
+bind(A, "GetAce", W.BOOL, [P, W.DWORD, PP])
+
+def require(success, operation):
+    if not success:
+        error = C.get_last_error()
+        raise OSError(error, operation + ": " + C.FormatError(error))
+
+@contextlib.contextmanager
+def handle_scope(handle):
+    if handle in (None, 0, C.c_void_p(-1).value):
+        raise OSError(C.get_last_error(), "invalid native handle")
+    try:
+        yield handle
+    finally:
+        # A close failure also fails setup; it never authorizes running tests.
+        if not K.CloseHandle(handle):
+            close_error = OSError(C.get_last_error(), "CloseHandle failed")
+            prior = sys.exc_info()[1]
+            if prior is None:
+                raise close_error
+            if hasattr(prior, "add_note"):
+                prior.add_note(str(close_error))
+
+def sid_string(pointer):
+    if not pointer or not A.IsValidSid(pointer):
+        raise RuntimeError("missing or invalid security identifier")
+    result = P()
+    require(A.ConvertSidToStringSidW(pointer, C.byref(result)), "ConvertSidToStringSidW")
+    try:
+        return C.wstring_at(result)
+    finally:
+        K.LocalFree(result)
+
+def token_identity():
+    token = P()
+    require(A.OpenProcessToken(K.GetCurrentProcess(), 0x0008, C.byref(token)), "OpenProcessToken(TOKEN_QUERY)")
+    values = {}
+    with handle_scope(token.value):
+        for information_class, name in ((1, "user_sid"), (4, "default_owner_sid")):
+            length = W.DWORD()
+            if A.GetTokenInformation(token, information_class, None, 0, C.byref(length)) or C.get_last_error() != 122:
+                raise RuntimeError("unexpected token-size query response")
+            buffer = C.create_string_buffer(length.value)
+            require(A.GetTokenInformation(token, information_class, buffer, length.value, C.byref(length)), "GetTokenInformation")
+            values[name] = sid_string(P.from_buffer(buffer).value)
+    return values
+
+def open_directory(path):
+    # OPEN_EXISTING, BACKUP_SEMANTICS|OPEN_REPARSE_POINT, read/write sharing
+    # without delete sharing keeps each original ancestor stable during setup.
+    handle = K.CreateFileW(str(path), READ_CONTROL | FILE_READ_ATTRIBUTES,
+                           1 | 2, None, 3, 0x02000000 | 0x00200000, None)
+    if handle in (None, C.c_void_p(-1).value):
+        raise OSError(C.get_last_error(), "open original directory: " + str(path))
+    return handle_scope(handle)
+
+def directory_identity(handle):
+    info = FileInfo()
+    require(K.GetFileInformationByHandle(handle, C.byref(info)), "GetFileInformationByHandle")
+    if not info.attributes & FILE_ATTRIBUTE_DIRECTORY or info.attributes & FILE_ATTRIBUTE_REPARSE_POINT:
+        raise RuntimeError("run-scope path must be an ordinary directory")
+    return {"volume_serial": info.volume,
+            "file_index": (int(info.index_high) << 32) | info.index_low}
+
+def security_receipt(handle, expected_user):
+    owner, dacl, descriptor = P(), P(), P()
+    status = A.GetSecurityInfo(handle, 1, 1 | 4, C.byref(owner), None, C.byref(dacl), None, C.byref(descriptor))
+    if status:
+        raise OSError(status, "GetSecurityInfo: " + C.FormatError(status))
+    try:
+        control, revision = W.WORD(), W.DWORD()
+        require(A.GetSecurityDescriptorControl(descriptor, C.byref(control), C.byref(revision)), "GetSecurityDescriptorControl")
+        actual_owner = sid_string(owner)
+        if actual_owner != expected_user:
+            raise RuntimeError("new run directory owner differs from TokenUser")
+        if not control.value & SE_DACL_PROTECTED or not control.value & SE_DACL_PRESENT or not dacl:
+            raise RuntimeError("new run directory requires a protected non-null DACL")
+        header = C.cast(dacl, C.POINTER(ACL)).contents
+        expected = {expected_user, SYSTEM_SID, ADMIN_SID}
+        if header.count != len(expected):
+            raise RuntimeError("unexpected ACE count in new run directory")
+        rules = []
+        observed = set()
+        for index in range(header.count):
+            ace = P()
+            require(A.GetAce(dacl, index, C.byref(ace)), "GetAce")
+            record = C.cast(ace, C.POINTER(AceHeader)).contents
+            offset = ace.value - dacl.value
+            if offset < C.sizeof(ACL) or record.size < 16 or offset + record.size > header.size:
+                raise RuntimeError("invalid ACL record bounds")
+            mask = W.DWORD.from_address(ace.value + 4).value
+            sid = ace.value + 8
+            if not A.IsValidSid(sid) or A.GetLengthSid(sid) + 8 != record.size:
+                raise RuntimeError("invalid SID bounds in ACL")
+            principal = sid_string(sid)
+            # Plain ALLOW, OI|CI, exact full file access: no deny, extra,
+            # inherit-only, inherited or unrelated principal is accepted.
+            if record.kind != 0 or record.flags != 3 or mask != FILE_ALL_ACCESS or principal not in expected or principal in observed:
+                raise RuntimeError("new run directory DACL differs from exact inheritable allowlist")
+            observed.add(principal)
+            rules.append({"sid": principal, "mask": mask, "flags": record.flags})
+        if observed != expected:
+            raise RuntimeError("incomplete new run directory allowlist")
+        text = P()
+        require(A.ConvertSecurityDescriptorToStringSecurityDescriptorW(descriptor, 1, 1 | 4, C.byref(text), None), "security descriptor serialization")
+        try:
+            sddl = C.wstring_at(text)
+        finally:
+            K.LocalFree(text)
+        return {"owner_sid": actual_owner, "dacl_protected": True, "rules": rules, "sddl": sddl}
+    finally:
+        K.LocalFree(descriptor)
+
+def _create_private_scope(scope, root, parts):
+    scope = Path(scope)
+    # Only the missing, fixed Source artifact parent may have a dot-name.
+    artifact_parent = scope == ARTIFACTS and root == ARTIFACTS.parent and parts == ()
+    if scope.parent != root or (not artifact_parent and not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", scope.name)):
+        raise ValueError("scope must be one new direct ASCII-named child of its fixed D-only root")
+    identity = token_identity()
+    current = identity["user_sid"]
+    sddl = "O:" + current + "D:P" + "".join("(A;OICI;FA;;;" + sid + ")" for sid in (current, SYSTEM_SID, ADMIN_SID))
+    descriptor = P()
+    require(A.ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, 1, C.byref(descriptor), None), "parse private scope descriptor")
+    created = []
+    try:
+        attributes = SecurityAttributes(C.sizeof(SecurityAttributes), descriptor, False)
+        with contextlib.ExitStack() as retained:
+            # Every existing ancestor is read-only, including the fixed scope root.
+            for ancestor in list(reversed(root.parents)) + [root]:
+                original = retained.enter_context(open_directory(ancestor))
+                directory_identity(original)
+            for path in (scope,) + tuple(scope / part for part in parts):
+                if not K.CreateDirectoryW(str(path), C.byref(attributes)):
+                    error = C.get_last_error()
+                    raise OSError(error, "exclusive private directory create failed; no existing ACL was changed: " + str(path))
+                created.append({"path": str(path), "created_exclusively": True})
+                original = retained.enter_context(open_directory(path))
+                created[-1].update(directory_identity(original))
+                created[-1].update(security_receipt(original, current))
+    except Exception as error:
+        # No rollback/removal: preserve any newly created directory for review.
+        if hasattr(error, "add_note"):
+            error.add_note("New directories retained: " + json.dumps(created))
+        raise
+    finally:
+        K.LocalFree(descriptor)
+    return {"token": identity, "scope": str(scope), "directories": created,
+            "existing_objects_mutated": False, "recursive_acl_operations": False}
+
+def create_private_run_scope(scope):
+    return _create_private_scope(scope, RUNS, PARTS)
+
+def create_private_artifact_parent():
+    """Create exactly the absent Source/.scratch; never repair an existing object."""
+    return _create_private_scope(ARTIFACTS, ARTIFACTS.parent, ())
+
+def create_private_artifact_scope(scope):
+    scope = Path(scope)
+    if not scope.name.startswith("qualified-"):
+        raise ValueError("repository artifact scope requires a fresh qualified-* name")
+    return _create_private_scope(scope, ARTIFACTS, ())
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--create", required=True, metavar="NEW_UNIQUE_NAME")
+    args = parser.parse_args()
+    print(json.dumps(create_private_run_scope(RUNS / args.create), indent=2))
+
+if __name__ == "__main__":
+    main()

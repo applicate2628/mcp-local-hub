@@ -1,0 +1,21 @@
+{
+  "schema": "root-runtime-custody-composition-probe-v1",
+  "status": "PASS",
+  "controller_exit_code": 0,
+  "original_controller_reaped": true,
+  "original_capture_handles_closed": true,
+  "diagnostic": null,
+  "seconds": 0.7375590000010561,
+  "runner_sha256": "a6d5ec713719a1cc7a069072d51f77241a82c28b21427cbbc219567a5ce4830e",
+  "inputs": {
+    "run_literal_go_gate_ready_v1.py": "43822b4ac69464505819f1c5719b844b1b1c0f0a2a702ad3accff5137aa6a450",
+    "literal_go_exec_adapter_ready_v1.py": "83b0f13017a65d4a2753d10b26c04c9e0b44f3d301ba638b5c8f4fabd0d84dba",
+    "run_partitioned_go_gate_full_v1.py": "83cb6329605039e6cee517d9a530881030f6d614ce568e03c96dad2655ea82bd",
+    "qualified_windows_products_consumer_v1.py": "a19fde2ae8ee6a79f8afff37fd669707bd4ba1258edd779bfb1fb9d201d9db69",
+    "receive_fresh_full_inputs_v1.py": "d1f22787c5241a9972289e707e620fdb06729144c87f784062e79a6d3ea8890a",
+    "private_run_scope.py": "e1796e716f457af234dfc1061c917ce7d177852da537210d76d66bbf8936949a"
+  },
+  "receipt_sha256": "e18d3acec9fd75d2d7b6d8eb104ab6d920e12a2fb623618df4dd4b1e4dc9fa1d",
+  "full_regression_executed": false,
+  "scope": "full import, actual scope/source/resource DATA admission and owner-runtime loading; two synthetic original-custody failure schedules"
+}

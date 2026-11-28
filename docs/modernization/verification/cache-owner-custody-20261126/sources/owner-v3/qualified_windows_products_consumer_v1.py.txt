@@ -1,0 +1,1780 @@
+"""Coordinated Windows fixture builder. Prepare only until root freezes source.
+
+build produces an actual test-isolated launcher/Product and a separately admitted
+internal/cli test Product. cli-test and launcher-probe are explicit later actions.
+No installed Product, scheduler, download, system registration or source export.
+"""
+import sys
+sys.dont_write_bytecode = True
+import argparse, hashlib, importlib.util, json, os, re, shutil, stat, subprocess, time, uuid
+from pathlib import Path
+
+REPO = Path('<TASK>\\native-consumer-source-v2')
+WORK = Path('<TASK>')
+HELPERS = WORK / "final-gates-v7"
+RUNS = WORK / "runs"
+HELPER = Path('<TASK>\\final-gates-v10-fresh\\private_run_scope.py')
+HELPER_SHA = '1625254b763ba987fc65b3b9b3205cd85ad019d4f2492495ae8a1c68ee490d12'
+GO = Path(r"C:\msys64\ucrt64\lib\go\bin\go.exe")
+GIT = Path(r"C:\Program Files\Git\cmd\git.exe")
+PWSH = Path(r"<USERPROFILE>\AppData\Local\Microsoft\WindowsApps\Microsoft.PowerShell_8wekyb3d8bbwe\pwsh.exe")
+CC = Path(r"C:\msys64\ucrt64\bin\gcc.exe")
+MODULE_PROXY = WORK / "imports/go-proxy"
+PROXY_ADMISSION = WORK / "cli-focused-inputs/proxy-admission.json"
+PROXY_ADMISSION_SHA = "b138b087c545df95fe710b516c812c2610131d592e9b361f89e696fae3e97e5b"
+BUILD_CACHE = Path('<TASK>\\runs\\literal-final-v8\\isolated-build-cache')
+# No expanded-module or build-cache donor is configured.
+TOOL_RECEIPT = PROXY_ADMISSION  # Existing API: accepted archive-input receipt only.
+PRODUCT_SYSO = REPO / "cmd" / "mcphub" / "zz_product_versioninfo.syso"
+CLI_SYSO = REPO / "internal" / "cli" / "zz_qualified_cli_versioninfo_windows_amd64.syso"
+API_SYSO = REPO / "internal" / "api" / "zz_qualified_api_versioninfo_windows_amd64.syso"
+BUNDLE_FILES = ("mcphub.exe", "windows-product-identity.json", "mcphub-product/mcphub.exe", "mcphub-product/mcphub-owner.dll", "mcphub-product/mcphub-owner-identity.json")
+REPARSE = 0x400
+REVIEW_COMPLETE = True
+if REVIEW_COMPLETE is not True:
+    raise RuntimeError("disabled task-bound draft: actual source admission and root review are pending")
+# Only these existing read-only tool paths may resolve aliases. Artifact,
+# repository, private-scope and cleanup paths still use strict ordinary().
+TOOL_ALIASES = {
+    "go": GO, "git": GIT, "gcc": CC, "pwsh": PWSH,
+    "python": Path(sys.executable),
+    "node": Path(r"<USERPROFILE>\AppData\Local\Author Software\nvm\installs\v26.12.1\node.exe"),
+    "windows-powershell": Path(r"C:\windows\System32\WindowsPowerShell\v1.0\powershell.exe"),
+}
+# Read-only Get-AppxPackage Microsoft.PowerShell returned this exact install.
+# AppExecLink is not a regular symlink and pathlib correctly refuses to follow
+# it; pin its observed installed target instead of executing the alias.
+PWSH_INSTALLED = Path(r"C:\Program Files\WindowsApps\Microsoft.PowerShell_7.7.0.0_x64__8wekyb3d8bbwe\pwsh.exe")
+TOOL_PATHS = {}
+TOOL_RECORDS = {}
+PYTHON = Path(sys.executable)
+WINPS = Path(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
+WINPS_SHA256 = "75f490d70f821afbbbb28d8ae45fa712c0ef39f73832af5ff0df284beb22a9fc"
+NATIVE_UTILITY_PINS = {
+    r"C:\Windows\System32\WindowsPowerShell\v1.0\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1": "c09df190addc67f7c6c38e7ea1dca719fd87807107f688c3f60ed8816e1c48a6",
+    r"C:\Windows\System32\WindowsPowerShell\v1.0\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psm1": "f9232f3de3c94dd03caf40f54b22876c9d810c657c41e54ab2d10469b45f26b5",
+}
+WINPS_HOST_ADMISSION = WORK / "guarded-winps-qualification-v1/root-receiving.json"
+WINPS_HOST_ADMISSION_SHA256 = "96de049abae24fd1e775f2b3b76a0b1559cedebbf924cf087ceb3b83014c7151"
+
+def sha(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+def new_json(path, value):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("x", encoding="utf-8", newline="\n") as f:
+        json.dump(value, f, indent=2)
+        f.write("\n")
+
+def ordinary(path, directory=None):
+    path = Path(os.path.abspath(path))
+    for p in list(reversed(path.parents)) + [path]:
+        info = p.lstat()
+        if getattr(info, "st_file_attributes", 0) & REPARSE or stat.S_ISLNK(info.st_mode):
+            raise RuntimeError("reparse path refused: " + str(p))
+    if directory is True and not path.is_dir():
+        raise RuntimeError("directory required: " + str(path))
+    if directory is False and not path.is_file():
+        raise RuntimeError("ordinary file required: " + str(path))
+    return path
+
+def resolve_toolchain():
+    global GO, GIT, CC, PWSH, PYTHON
+    if TOOL_RECORDS:
+        return TOOL_RECORDS
+    paths, records = {}, {}
+    for name, configured in TOOL_ALIASES.items():
+        candidate = PWSH_INSTALLED if name == "pwsh" else configured
+        resolved = ordinary(candidate.resolve(strict=True), False)
+        paths[name] = resolved
+        records[name] = {"configured":str(configured), "resolved":str(resolved),
+                         "bytes":resolved.stat().st_size, "sha256":sha(resolved)}
+        if name == "pwsh":
+            records[name]["resolution"] = "read-only Get-AppxPackage Microsoft.PowerShell_7.7.0.0_x64__8wekyb3d8bbwe"
+        else:
+            records[name]["resolution"] = "Path.resolve(strict=True), then strict ordinary-file verification"
+    TOOL_PATHS.update(paths)
+    TOOL_RECORDS.update(records)
+    GO, GIT, CC, PWSH, PYTHON = (paths[name] for name in ("go","git","gcc","pwsh","python"))
+    return TOOL_RECORDS
+
+def scope_name(name):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", name):
+        raise ValueError("name must be 1..80 ASCII letters, digits, underscore or hyphen")
+    return name
+
+def scope_helper():
+    ordinary(HELPER, False)
+    if sha(HELPER) != HELPER_SHA:
+        raise RuntimeError("private scope helper changed; coordinate and pin its reviewed hash")
+    spec = importlib.util.spec_from_file_location("qualified_private_scope", HELPER)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+def private_run(name):
+    run = RUNS / scope_name(name)
+    security = scope_helper().create_private_run_scope(run)
+    new_json(run / "run-scope-security.json", security)
+    return run
+
+def tree(root):
+    root = ordinary(root, True)
+    result = {}
+    for p in sorted(root.rglob("*")):
+        ordinary(p)
+        if p.is_file():
+            result[p.relative_to(root).as_posix()] = {"bytes":p.stat().st_size, "sha256":sha(p)}
+    return result
+
+def copy_file(src, dst):
+    src = ordinary(src, False)
+    dst = Path(dst)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    with src.open("rb") as reader, dst.open("xb") as writer:
+        shutil.copyfileobj(reader, writer)
+    if sha(src) != sha(dst):
+        raise RuntimeError("copy hash mismatch: " + str(src))
+    return sha(dst)
+
+def copy_tree(src, dst):
+    before = tree(src)
+    dst.mkdir(parents=True, exist_ok=False)
+    for rel in before:
+        copy_file(src / Path(rel), dst / Path(rel))
+    if tree(src) != before or tree(dst) != before:
+        raise RuntimeError("tree changed during copy")
+    return before
+
+CACHE_HANDOFFS = WORK / 'final-gates-v9/cache-handoffs'
+SHARED_MODULE_CACHE = Path('<TASK>\\runs\\literal-final-v8\\seed-modules')
+CACHE_COMMIT = '3ebe335a2f666a5279d7fafc31a6f4dc3feedff4'
+CACHE_HANDOFF = None
+CACHE_ENVIRONMENT_RUN = None
+CACHE_BOOTSTRAP = None
+CACHE_BOOTSTRAP_SOURCE = None
+SEED_SOURCE_RECEIVED = None
+# Fill only from the actual source composition and its original closed receipt.
+# The changed-path inventory is unknown until that real composition exists.
+SOURCE_PARENT_COMMIT = 'c3b8c802be190c335b84ff7323a14d9eb63518b6'
+SOURCE_PATHS = ()
+SOURCE_CHANGES = {}
+SOURCE_BEFORE_COUNT = 3505
+SOURCE_COUNT = 3508
+SOURCE_DONOR_REPOSITORY = '<TASK>\\final-source-v2'
+SOURCE_ADMISSION = {'root_path': '<TASK>\\runs\\native-consumer-source-admission-v2\\root-receiving.json', 'root_sha256': '1dd4e9e2ba862ab1910423d803277fd60372fa755e3bf995e305a65b053de13f', 'original_path': '<TASK>\\runs\\native-consumer-source-admission-v2\\receipt.json', 'original_sha256': '419ba7767ba5b7f7ee73e1848268623ed3e93cf67a336bb64c1a26be380a78af', 'parent_path': '<TASK>\\native-consumer-source-v2-launch.json', 'parent_sha256': 'aa65cb8a7ac7615277dbb11f5a5693a13ac10888b88ca11f7d986a9d7620eab1', 'snapshot_path': '<TASK>\\runs\\native-consumer-source-admission-v2\\source-after.json', 'snapshot_sha256': '671d60c8f1e96de28eb616b9e7aeacccae50d00359ab27a59418bea61648ee16', 'issuer_path': '<TASK>\\native-consumer-source-inputs-v2\\issue_native_consumer_source_v2.py', 'issuer_sha256': 'd1b5f75b8b050c924023701b0aac61ba2039d0c0052b8c74ab0eb8095f4ce399'}
+# The historical native compilation is separate from the new source parent.
+NATIVE_SOURCE_COMMIT = "efa73c0e23f7af16b8aa2ccb047b745a58ba4f71"
+NATIVE_SOURCE_COUNT = 3499
+NATIVE_WORK = Path('<TASK_WORKSPACE>\\mcp-rust-contained-stream-work-20261120')
+NATIVE_REPOSITORY = '<TASK_WORKSPACE>\\mcp-regression-console-copy-20261122'
+NATIVE_ADMISSION = {'root_path': '<TASK_WORKSPACE>\\mcp-rust-contained-stream-work-20261120\\runs\\native-console-build-v1\\root-receiving.json',
+ 'root_sha256': 'f1d6a3ac66b16fc58e1681693d5940baca3e561fae5def873f5cd3e63e734ad9',
+ 'root_schema': 'root-windows-console-native-build-v1',
+ 'original_path': '<TASK_WORKSPACE>\\mcp-rust-contained-stream-work-20261120\\runs\\native-console-build-v1\\receipt.json',
+ 'original_sha256': 'd375c2a1368c602d34477546e42fceada914dffb732be9f40f21e86c549542d7',
+ 'original_schema': 'windows-console-native-build-v1',
+ 'parent': {'pid': 135924,
+            'exit_code': 0,
+            'seconds': 47.2,
+            'status': 'COMPLETE',
+            'terminal_exit_received': True,
+            'cwd': '<TASK_WORKSPACE>\\mcp-rust-contained-stream-work-20261120',
+            'argv': ['<USERPROFILE>\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe',
+                     '-I',
+                     '-S',
+                     '-B',
+                     '<TASK_WORKSPACE>\\mcp-rust-contained-stream-work-20261120\\serena_console_v1\\run_native_console_build_v1.py']},
+ 'source_snapshot': {'path': '<TASK_WORKSPACE>\\mcp-rust-contained-stream-work-20261120\\runs\\native-console-build-v1\\source-before.json',
+                     'sha256': 'a2e93e16783e54e8afe94d78a9f73236a526fd614e84bba27740284c55d83c2b'},
+ 'native_sources': {'experiments/rust-process-owner/Cargo.lock': '4198fa4fdbc041142493b86b1183f3446b1e5c24236cfab1020a888bbb46c63c',
+                    'experiments/rust-process-owner/Cargo.toml': '4abbdc2936ced47001a6eb474143ddabad7a4235ca52e8920ae9e4d593299cdd',
+                    'experiments/rust-process-owner/ffi/Cargo.lock': '76b59b101ff09d63eca5fe56751167ef2dab1cbf1dfded80c771e0f7c475e30d',
+                    'experiments/rust-process-owner/ffi/Cargo.toml': '799e8e79ff6cd009ef9715b2c68b5c7a3d03e61ba3e2a5f69957f1848590f65f',
+                    'experiments/rust-process-owner/ffi/go/admission_windows.go': '4a3185d4edd221e943ffae73192c7a4b75501c9a80624426612ce88078e939c2',
+                    'experiments/rust-process-owner/ffi/go/admission_windows_test.go': '650c67c78d4a69d999493735a05e6203859f8805c5f64b95d2d41e8226da9575',
+                    'experiments/rust-process-owner/ffi/go/bridge_windows.go': 'c2e6055dbe2874dcc9544fc455b8a190cc2f75c9b02ea01b62a4ea12fab91811',
+                    'experiments/rust-process-owner/ffi/go/bridge_windows_test.go': '6dff0a3d8d8bbdd8e7e61e827347dc9ffbcb256c15aa4c6ddf32761532c59bef',
+                    'experiments/rust-process-owner/ffi/go/environment_windows.go': '2131922df4d2686606c9a759c90c8eaf504b8e3d4060861e610c25a899d89ef0',
+                    'experiments/rust-process-owner/ffi/go/environment_windows_test.go': 'e5f31851d4507722b8db2d12926cbc71b8cf1cb88a391d1d61bdcf8cdc76f373',
+                    'experiments/rust-process-owner/ffi/go/faults_windows_test.go': '34419e6249fcc08b4a2fd7a0db022ec6cd14ad039afcd60c68af3497b0f5b3fc',
+                    'experiments/rust-process-owner/ffi/go/finish_context_windows.go': '64046068cab96d7a0e587091a3e0b2a7909a8870ddc7ccbfa28d1bdbe43a271d',
+                    'experiments/rust-process-owner/ffi/go/finish_context_windows_test.go': 'aadfaccf34fe5b69a7b7f2e3f9e600544a843ca0dbdcdaeb0777722c6dcc1cad',
+                    'experiments/rust-process-owner/ffi/go/go.mod': '99502c9ced07df2ba8052a397081e34f6254cd91c7f0d3d47388a060538bef93',
+                    'experiments/rust-process-owner/ffi/go/identity_faults_windows_test.go': 'e3bd5b296d13915f4d2d21748fea401e58f3f6301dea96006a53c1710696c997',
+                    'experiments/rust-process-owner/ffi/go/identity_legacy_windows_test.go': '6021fbefba3b648901452f653aa0f5cf4b40490a8fd85965f0f4b4b917d74e7b',
+                    'experiments/rust-process-owner/ffi/go/identity_query_faults_windows_test.go': 'd0423f0cf7f6a42ac7516f06bec47f21d994b3f4ac18bb898068e8c93ca7939a',
+                    'experiments/rust-process-owner/ffi/go/identity_query_legacy_windows_test.go': '1579ae6d3ed64083ec39611db1e121e2566dffee261f2a7aef2f52d5acefcc9d',
+                    'experiments/rust-process-owner/ffi/go/identity_query_windows_test.go': 'ae57f3fff161157fcfe8a93eefaa8691fe74c1e84b6b336bda22cda7aaf04caa',
+                    'experiments/rust-process-owner/ffi/go/identity_windows.go': '9408ed59ccc01e0333d53e7347766ea49ba148138142fee67857ed3ca84f6b97',
+                    'experiments/rust-process-owner/ffi/go/identity_windows_test.go': 'cf95db6c1a2882e379d266f5f7862ec459655abd5796e1ef211313380e60201e',
+                    'experiments/rust-process-owner/ffi/go/io_lifecycle_windows_test.go': '797fdd4b33b40e14264d8e107d488a649e14cad500f9002f60803d21a970f74b',
+                    'experiments/rust-process-owner/ffi/go/loader_windows_test.go': '41a0450e6d0096f95b1514af3807deb0ace9474f7bb749c58cf04af7cd1e9263',
+                    'experiments/rust-process-owner/ffi/go/members_faults_windows_test.go': '455e617e0f29d4d758b0c2597724bb548da8d926e92721453f0365f689cdb2bc',
+                    'experiments/rust-process-owner/ffi/go/members_legacy_windows_test.go': '9ef493577c54ea3cb607dd7fac95b536e2d430fcff740b51efe2d0d1922cd424',
+                    'experiments/rust-process-owner/ffi/go/members_report_windows_test.go': '1e619517ba2dd3abc490f12b2e345052ebb60785741a7e1dd6ea17de24fc5c42',
+                    'experiments/rust-process-owner/ffi/go/members_windows.go': '0cfc5364d54b4177adbd8926bda478acd24acf9f207e43e3645c34df88837940',
+                    'experiments/rust-process-owner/ffi/go/members_windows_test.go': '508732e3a61f9e44f659b15b51c5f78cc595de6ba2d8a30978fc3e3fbb8700bb',
+                    'experiments/rust-process-owner/ffi/go/native_cleanup_windows_test.go': '310f9ca2a26f93740ebc81ad4acb3e792fb47c8266ccf80c9c5b5aad399b6d60',
+                    'experiments/rust-process-owner/ffi/go/outcome_faults_windows_test.go': '85d7340070eb96c24ee9406484c57dc0e338b57b9d12912de0425a996a58cfea',
+                    'experiments/rust-process-owner/ffi/go/outcome_windows.go': '6ce7b2f82c52f163b6a17e93fef66cf65e76f2ee41cfdaa619e045cca0cb0448',
+                    'experiments/rust-process-owner/ffi/go/outcome_windows_test.go': '0627df97b50054cc9382e35e461b8e28a6d5dbcb5407a35a56b2fccf78f41f18',
+                    'experiments/rust-process-owner/ffi/go/stdio_windows.go': 'd1fada91384230ff84d68dd3359ce5f066637cf0ca6448976d078f37bd11a2d9',
+                    'experiments/rust-process-owner/ffi/go/stdio_windows_test.go': '5c1d333eabd8c700c343f2c415d859e022add6a91db1494a737858946837c68f',
+                    'experiments/rust-process-owner/ffi/go/wait_legacy_windows_test.go': 'a45cfed4aa9fb9d67ef6d1201f6225db149d64ed4feface8aba698c384fe3bbb',
+                    'experiments/rust-process-owner/ffi/go/wait_windows.go': 'e68d3c473974ca6d22964f1d211b50edb020663c3c1a669152499f6421ba6925',
+                    'experiments/rust-process-owner/ffi/go/wait_windows_test.go': '43d79be4ba2701d9b8ed6d0ff849c71c9b92f1f5072ef4b9fce1b95e119b205d',
+                    'experiments/rust-process-owner/ffi/include/identity_v1.h': '8735b65a7fb2a58ced76d829b0ad7c66fab0fd35dbae304a7174c2586c260f1d',
+                    'experiments/rust-process-owner/ffi/include/members_v1.h': 'd8baf33952a41383ec24a954e6e9363b93fa136d9b81a8723a1805dbb54b71ac',
+                    'experiments/rust-process-owner/ffi/include/owner_v1.h': '441ee6dfb105e00c3073d42bd69d828864711cc3053aafa3676f9da928e60615',
+                    'experiments/rust-process-owner/ffi/src/argv0_tests.rs': 'b2dc5ea754413ca83e4729592ae35dfb2342a2a46a0554bdfa7db0c73b3121cf',
+                    'experiments/rust-process-owner/ffi/src/identity.rs': 'f4a091e54e31975482fcca4943c69085701caf30fbcc133faeaca452f7ba5ec5',
+                    'experiments/rust-process-owner/ffi/src/lib.rs': '4bbb985928887c11b311baa7194a38de39c6e4fbdaf8480a4bd25700a27fb025',
+                    'experiments/rust-process-owner/ffi/src/members.rs': 'a666f1f1493199d8539513aaacab407561b2ec83ccfe7fcf9b994aa536f2d88b',
+                    'experiments/rust-process-owner/ffi/src/members_tests.rs': 'f4fdc69e4231684c3714a8a91345006a213c76255414251f8318625b84a506cc',
+                    'experiments/rust-process-owner/ffi/src/process_borrow.rs': '7df96b3a204297629d1217d7c13e8a335f8942c6f7b8cc7dd9079c0463a3e575',
+                    'experiments/rust-process-owner/ffi/src/process_borrow_tests.rs': '7699969906725b8d05d1398654e53b438b7c35058b43f03ba8f9cb2e17936dbe',
+                    'experiments/rust-process-owner/ffi/src/tests.rs': 'd4700a00cc24958869078a1a0e1a0c2bf1f982ba19f9621abffa0d10786d0716',
+                    'experiments/rust-process-owner/src/argv0_tests.rs': 'd1ed861fd8cf6fd8c7a757193e44eba649d89873b3bd23879fbfa71b25623afe',
+                    'experiments/rust-process-owner/src/bin/owner_child.rs': 'b7fb2b2084aabecb35963acee9e975d63cc40a37b169be97c73ca67fee326758',
+                    'experiments/rust-process-owner/src/bin/owner_crash_fixture.rs': '12b12ec814778c6de86eb7cf959c4d5f24f94bad785437f878862e4bb073323e',
+                    'experiments/rust-process-owner/src/foreground_console_tests.rs': 'e48bef218af28e0952fc71bbdae7e3f8347c28818781e1a475018d0456db2012',
+                    'experiments/rust-process-owner/src/job_member_tests.rs': '23c7b213c8fba97d71665f057d099a12c51cff8067c1ce86b3db57a19ec31a28',
+                    'experiments/rust-process-owner/src/job_members.rs': '47a8581a90130db5288fe1a188b357b5aa1a95fc4edffab7375d51c6e6b44db0',
+                    'experiments/rust-process-owner/src/launch_context.rs': 'bd6aad65d1a753076da0b81a41ab1dec31b67e8da6f0d451c1d6e8ed8be5322a',
+                    'experiments/rust-process-owner/src/lib.rs': '8619ae0038dce21748270284180913a91e5340e1de91f898f25758a95101a8d9',
+                    'experiments/rust-process-owner/src/native_failure_tests.rs': 'adda0b64a265e3daa58387366b0e4056903f6f06027c33778a90e021cab20a6f',
+                    'experiments/rust-process-owner/src/process_borrow_tests.rs': '115b4141c8059d4dd7f6da690571d959c3bb5ae28edbe195acb306265b853244',
+                    'experiments/rust-process-owner/src/token_user.rs': 'e42eb6063b51e7b8e7284c460548b3f182ff4f9097880e379370e989cb44f839',
+                    'experiments/rust-process-owner/src/windows.rs': '110d7cec3dc450cf4049c8e8435fd54f50f734fb4c7d42bd126a75158459f499',
+                    'experiments/rust-process-owner/tests/launch_context.rs': 'd493658aa4b3ba42d86cf40773b0c7868785f6ed201af7a69393ee209c91dcee',
+                    'experiments/rust-process-owner/tests/lifecycle.rs': 'fe94856d11533d2966e1c73eeaa1fffee7185df0a28bf6a34283d3efd385e6cd',
+                    'experiments/rust-process-owner/tests/owner_crash.rs': '0e37033ec3845a6fd0d881b4ab5ee12edc60a4a011406e1d9b189ce6d386cd8e',
+                    'experiments/rust-process-owner/tests/stdio.rs': 'fb7183d8fe2d3adc2bcb74a93fbe929b0277212079048c58d6f1d105c430476f'},
+ 'library': {'path': '<TASK_WORKSPACE>\\mcp-rust-contained-stream-work-20261120\\runs\\native-console-build-v1\\targets\\release\\mcphub_owner_ffi_spike.dll',
+             'sha256': 'dfa87a10a39e9110cda735ae6a987bfa64b03446529072710723e9b6ea0dca56',
+             'bytes': 192512},
+ 'member_child': {'path': '<TASK_WORKSPACE>\\mcp-rust-contained-stream-work-20261120\\runs\\native-console-build-v1\\targets\\release\\owner_child.exe',
+                  'sha256': '6b0a10de809cc1b1779ba55da185a53d58807618dc91ceeff696a27f711cca82',
+                  'bytes': 280576}}
+# Only the three new private/full consumers can use these fresh caches.
+BOOTSTRAP_RUN = Path('<TASK>\\runs\\literal-final-v8')
+FULL_RUN = Path('<TASK>\\runs\\literal-final-v8')
+CACHE_PREDECESSORS = {'serena-state-final-v7': 'native-consumer-focused-v8', 'literal-final-v7': 'serena-state-final-v7'}
+CACHE_SCHEMAS = {'serena-state-final-v7': 'root-serena-native-focused-receiving-v1', 'literal-final-v7': 'regression-resume-migration-build-only-receiving-v1'}
+ROOT_CACHE_FIELDS = {'regression-resume-compiled-artifacts-receiving-v2': ('head', 'receipt_sha256', 'PASS'),
+ 'regression-resume-migration-build-only-receiving-v1': ('source_commit',
+                                                         'receipt_sha256',
+                                                         'PASS'),
+ 'root-serena-native-focused-receiving-v1': ('source_commit',
+                                             'receipt_sha256',
+                                             'PASS')}
+# Already closed passive UV archive: a separately pinned historical input.
+SEED_PACKAGE = NATIVE_WORK / "runs/uv-cache-seed-package-v1"
+SEED_PARENT_COMMIT = "95ee8682b4afeddab73ae15f2db8984e35c2ca14"
+SEED_PACKAGE_ROOT_SHA = "8762576b620d2df0b94cdf9c18fd15c748e8776f7fd54fede83193733ba1d0b2"
+SEED_PACKAGE_RECEIPT_SHA = "02254ae8881792361e7fa3555d7cfef92bf3a855cad195d3b7edccac1d30183c"
+SEED_FILES = {
+    "descriptor": {"path": "seed-descriptor.json", "bytes": 1842,
+                   "sha256": "0285a1be7101fe62c3c60f4375772dc3b791488594c686a931f0d3e72eb007cd"},
+    "manifest": {"path": "cache-manifest.json", "bytes": 1768458,
+                 "sha256": "e84302720cc6edd0482983a00b7823d3bd7a1671f8de327152119748382ed42d"},
+    "archive": {"path": "cache.tar", "bytes": 163614720, "format": "pax-tar-uncompressed",
+                "sha256": "8ff0f576ea9323db15c2659142eb612600ba37bb3abca09955493a5cae316f9b"},
+}
+
+
+PRODUCT_DONOR = RUNS / "product-final-v7"
+PRODUCT_RUN = PRODUCT_DONOR
+FOCUSED_RUN = RUNS / 'native-consumer-focused-v8'
+# Bound by each immutable successor configuration after Product has actually closed.
+PRODUCT_ADMISSION_PATH = HELPERS / "product-admission.json"
+PRODUCT_ADMISSION_SHA256 = '9d967cbb76407fe6fada96a1b51ec94303c1c12960aa1c313804c4ace07ea404'
+PRODUCT_FINALIZATION = {'root_path': '<TASK>\\runs\\product-final-v7-finalization\\root-receiving.json',
+ 'root_sha256': '2260f6ca380d87b24ae2b6c5778cf9ac7818f5e4100c484ac3de512efcd9a8b7',
+ 'parent_path': '<TASK>\\product-finalization-v7-launch.json',
+ 'parent_sha256': '89d06616d6f41be1671d5b86ff9c3584c0e9b09198ad511bfb64d7b2af81e07b',
+ 'receiver_path': '<TASK>\\final-receivers\\receive_product_finalization_v7.py',
+ 'receiver_sha256': '233f854d4f28272c870b2f931e27362ffd02f33fed0db036792c295e58bd97a7'}
+FIRST_CACHE_HANDOFF = {"path": str(HELPERS / "cache-handoffs/product-final-v7.json"), "sha256": '3c1bcf76fcdc0785b2284b6d1c89347bb4e62ec9a02af00b1b0f6a3f611f9d44'}
+RECOVERY_PARENT_BINDING = {"path": str(WORK / "product-recovery-v7-launch.json"), "sha256": '7c953586561b7f3edd40882e2390e98285fbe3242f57aadd0afe3e5ae591aff4'}
+CACHE_HANDOFF_INPUTS = {}
+CLOSED_FOCUS_CACHE = WORK / 'final-gates-v8/closed_focus_cache_v8.py'
+CLOSED_FOCUS_CACHE_SHA = '660d0be830c42a436334fdc252efa33e58690113f8c177a126681a33636528af'
+STATE_RUN = RUNS / 'serena-state-final-v7'
+STATE_CONTINUATION_GRANT = RUNS / 'native-consumer-headless-v10/state-cache-handoff.json'
+STATE_CONTINUATION_CACHE = WORK / 'final-gates-v9/closed_focus_continuation_cache_v9.py'
+STATE_CONTINUATION_CACHE_SHA = '42f0494f60a4afbe3972084cb0ba08c1570729810aef2a4b2d548d927471c005'
+SOURCE_RECEIVER = Path('<TASK>\\final-gates-v10-fresh\\receive_fresh_full_inputs_v1.py')
+SOURCE_RECEIVER_SHA256 = '32e7b92a47679b1ea9a7f7c54dfaaf6c32ef8f1dbb0d821d55db214a57bf4bc8'
+TEST_STAGING_SUPPLEMENT = Path('<TASK>\\final-gates-v10-fresh\\test-staging-supplement-v10.json')
+TEST_STAGING_SUPPLEMENT_SHA256 = 'd576d028eea5ff4693c180d9d48a2a04667ac8500514ebc27316226f1f3daf90'
+TEST_STAGING_RECEIVED = None
+_source_receiver = None
+
+
+def source_receiver():
+    global _source_receiver
+    if _source_receiver is None:
+        raw = ordinary(SOURCE_RECEIVER, False).read_bytes()
+        if hashlib.sha256(raw).hexdigest() != SOURCE_RECEIVER_SHA256:
+            raise RuntimeError("source/cache DATA receiver changed")
+        spec = importlib.util.spec_from_file_location("source_cache_data_v7", SOURCE_RECEIVER)
+        _source_receiver = importlib.util.module_from_spec(spec)
+        exec(compile(raw, str(SOURCE_RECEIVER), "exec"), _source_receiver.__dict__)
+    return _source_receiver
+
+
+def receive_test_staging(owner):
+    if Path(owner) != FULL_RUN:
+        raise RuntimeError("test staging belongs only to the one fresh full consumer")
+    value = pinned_json(TEST_STAGING_SUPPLEMENT, TEST_STAGING_SUPPLEMENT_SHA256)
+    if (value.get("schema") != "reviewed-source-test-staging-supplement-v1"
+            or value.get("status") != "REVIEWED_SCOPE_ONLY_NO_EXECUTION"
+            or value.get("repository") != str(REPO) or value.get("source_commit") != CACHE_COMMIT
+            or value.get("source_root_receiving") != {"path": SOURCE_ADMISSION["root_path"], "sha256": SOURCE_ADMISSION["root_sha256"]}
+            or value.get("scopes") != {'literal-final-v8': {'private_parent': '.scratch', 'private_scopes': ['.scratch/qualified-literal-final-v8-receiver', '.scratch/qualified-literal-final-v8-canonical'], 'fixed_files': ['internal/api/zz_qualified_api_versioninfo_windows_amd64.syso']}}
+            or value.get("conditions") != {'tracked_source_bytes_and_git_controls_unchanged': True, 'create_only_owned_scopes_no_repair_of_existing_paths': True, 'controller_inputs_bound_by_exact_reviewed_helper_manifest': True, 'versioninfo_bytes_copied_only_from_same_commit_received_product': True, 'no_disposition_before_original_native_and_io_closure': True, 'retain_required_outputs_outside_trash_before_owned_disposition': True, 'tracked_source_snapshot_and_clean_status_after': True, 'no_cache_access_grant': True, 'no_ready_or_native_authority_issued': True, 'no_test_deadline_change': True}):
+        raise RuntimeError("independent test-staging supplement differs")
+    return {"path": str(TEST_STAGING_SUPPLEMENT), "sha256": TEST_STAGING_SUPPLEMENT_SHA256,
+            "consumer": str(owner), "record": value}
+
+
+def receive_product_donor(run, admission_sha256=None):
+    """Receive compiled artifacts and later source finalization; retain original FAIL."""
+    if Path(run) != PRODUCT_DONOR:
+        raise RuntimeError("only the exact independently accepted compiled Product is admitted")
+    expected = PRODUCT_ADMISSION_SHA256 if admission_sha256 is None else admission_sha256
+    if not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected):
+        raise RuntimeError("actual compiled-artifact admission SHA256 is pending")
+    binding = pinned_json(PRODUCT_ADMISSION_PATH, expected)
+    expected_paths = {"root_path": str(PRODUCT_DONOR / "root-receiving.json"),
+        "original_path": str(PRODUCT_DONOR / "receipt.json"),
+        "parent_path": str(WORK / "product-final-v7-launch.json")}
+    if (any(binding.get(key) != value for key, value in expected_paths.items())
+            or binding.get("original_sha256") != "aacceb890e09f68b86b1e095b70cd86fd787a4993a5795acf28a8a153a6d68e0"
+            or binding.get("parent_sha256") != "4b430b6bcef955a9d5aca66179516f141bd0cf648dd4cf900e913a115298a87b"
+            or binding.get("finalization") != PRODUCT_FINALIZATION):
+        raise RuntimeError("exact original Product failure and separate finalization bindings differ")
+    values, raws, inputs = {}, {}, {str(PRODUCT_ADMISSION_PATH): expected}
+    controls = {key: (binding[key + "_path"], binding[key + "_sha256"])
+                for key in ("root", "original", "parent")}
+    controls.update({"finalization_root": (PRODUCT_FINALIZATION["root_path"], PRODUCT_FINALIZATION["root_sha256"]),
+        "finalization_parent": (PRODUCT_FINALIZATION["parent_path"], PRODUCT_FINALIZATION["parent_sha256"])})
+    for label, (path, pin) in controls.items():
+        with ordinary(path, False).open("rb") as stream:
+            raw = stream.read((16 << 20) + 1)
+        if len(raw) > 16 << 20 or hashlib.sha256(raw).hexdigest() != pin:
+            raise RuntimeError("accepted compiled Product control changed: " + label)
+        values[label], raws[label], inputs[str(path)] = json.loads(raw), raw, pin
+    accepted, original, parent = values["root"], values["original"], values["parent"]
+    finalized, final_parent = values["finalization_root"], values["finalization_parent"]
+
+    def projection(value, expected_schema, exit_code, argv):
+        if (value.get("schema") != expected_schema or value.get("state") != "received"
+                or type(value.get("original_pid")) is not int or value["original_pid"] <= 0
+                or type(value.get("exit_code")) is not int or value["exit_code"] != exit_code
+                or type(value.get("seconds")) not in (int, float)
+                or not 0 <= value["seconds"] <= value.get("outer_diagnostic_seconds", -1)
+                or value.get("terminal_exit_received") is not True
+                or value.get("parent_capture_files_closed") is not True
+                or value.get("deadline_exceeded") is not False or "launcher_error" in value
+                or value.get("cwd") != str(WORK) or value.get("argv") != argv):
+            raise RuntimeError("original Product/finalization parent is not actually closed")
+        return {"pid": value["original_pid"], "exit_code": exit_code, "seconds": value["seconds"],
+            "status": "COMPLETE", "terminal_exit_received": True, "cwd": value["cwd"], "argv": value["argv"]}
+
+    original_parent = projection(parent, "native-final-product-parent-v1", 1,
+        [str(PYTHON), "-I", "-S", "-B", str(HELPERS / "qualified_windows_products_full_v1.py"),
+         "build", "--name", PRODUCT_DONOR.name, "--native-library", NATIVE_ADMISSION["library"]["path"],
+         "--native-sha256", NATIVE_ADMISSION["library"]["sha256"], "--commit", CACHE_COMMIT])
+    accepted_parent = projection(final_parent, "native-product-source-finalization-parent-v1", 0,
+        [str(PYTHON), "-I", "-S", "-B", PRODUCT_FINALIZATION["receiver_path"]])
+    failure = "RuntimeError: Product source snapshot is not fully closed and clean"
+    postconditions = {name: True for name in ("tracked_source_unchanged", "source_restored",
+        "original_inputs_unchanged", "resource_tool_proxy_unchanged")}
+    snapshot = original.get("source_before", {})
+    if (accepted.get("schema") != "regression-resume-compiled-artifacts-receiving-v2"
+            or accepted.get("status") != "PASS" or accepted.get("head") != CACHE_COMMIT
+            or accepted.get("original_status") != "FAIL" or accepted.get("original_error") != failure
+            or accepted.get("original_status_rewritten") is not False
+            or any(accepted.get(key) is not False for key in
+                   ("compilation_repeated", "tests_executed", "qualification_passed", "ready_issued"))
+            or accepted.get("parent") != accepted_parent or binding.get("parent") != accepted_parent
+            or accepted.get("original_parent") != original_parent or binding.get("original_parent") != original_parent
+            or accepted.get("finalization") != PRODUCT_FINALIZATION
+            or accepted.get("artifact_postconditions") != postconditions
+            or any(value is not True for value in accepted.get("artifact_postconditions", {}).values())
+            or accepted.get("source_snapshot") != snapshot
+            or accepted.get("receipt_sha256") != binding["original_sha256"]
+            or accepted.get("parent_receipt_sha256") != binding["parent_sha256"]
+            or (accepted.get("commands"), accepted.get("captures"), accepted.get("inputs"), accepted.get("sources"))
+               != (19, 38, len(original.get("input_files", {})), SOURCE_COUNT)
+            or snapshot.get("head") != CACHE_COMMIT or len(snapshot.get("files", {})) != SOURCE_COUNT
+            or original.get("schema") != "qualified-windows-products-run-v1"
+            or original.get("run") != str(PRODUCT_DONOR) or original.get("status") != "FAIL"
+            or original.get("error") != failure or original.get("source_observation_error") != failure
+            or any(key in original for key in ("source_unchanged", "original_inputs_unchanged", "resource_tool_proxy_unchanged"))
+            or original.get("commands_quiescent") is not True or len(original.get("commands", [])) != 19
+            or original.get("command_quiescence", {}).get("complete") is not True
+            or parent.get("child_status") != "FAIL" or parent.get("commands_quiescent") is not True
+            or parent.get("command_count") != 19 or parent.get("original_receipt_sha256") != binding["original_sha256"]
+            or finalized.get("schema") != "root-product-source-finalization-v1"
+            or finalized.get("status") != "SOURCE_FINALIZATION_RECEIVED"
+            or finalized.get("prior_status") != "FAIL" or finalized.get("old_status_rewritten") is not False
+            or finalized.get("source_after_finalization") != snapshot
+            or finalized.get("original_receipt") != {"path": binding["original_path"], "sha256": binding["original_sha256"]}
+            or finalized.get("original_parent") != {"path": binding["parent_path"], "sha256": binding["parent_sha256"]}
+            or finalized.get("original_commands_received") != 19 or finalized.get("captures_received") != 38
+            or finalized.get("original_inputs_verified") != len(original.get("input_files", {}))
+            or any(finalized.get(key) is not True for key in ("commands_quiescent", "tracked_source_unchanged",
+                "full_source_restored", "original_git_controls_unchanged", "original_inputs_unchanged", "native_setup_handles_closed"))
+            or final_parent.get("runner_sha256") != PRODUCT_FINALIZATION["receiver_sha256"]
+            or final_parent.get("child_status") != "SOURCE_FINALIZATION_RECEIVED"
+            or final_parent.get("original_receipt_sha256") != PRODUCT_FINALIZATION["root_sha256"]):
+        raise RuntimeError("compiled artifact postconditions and unchanged original failed provenance differ")
+    states = original["command_quiescence"].get("commands", [])
+    if len(states) != 19:
+        raise RuntimeError("original nineteen-command closure inventory differs")
+    for row, state in zip(original["commands"], states):
+        proof = row.get("completion_receiving", {})
+        native, io = proof.get("native", {}), proof.get("io", {})
+        if (type(row.get("exit_code")) is not int or row["exit_code"] != 0
+                or row.get("quiescence_state") != "complete" or row.get("captures_measured") is not True
+                or state.get("state") != "complete" or state.get("direct_exit_known") is not True
+                or Path(row.get("stdout", "")).name != state.get("name", "") + ".stdout.txt"
+                or native != {"direct_exit_code": 0, "direct_reaped": True, "active_zero": True,
+                    "job_terminated": False, "handles_closed": True, "issues": []}
+                or any(io.get(side, {}).get(key) is not True for side in ("stdout", "stderr")
+                    for key in ("acquired", "worker_started", "worker_complete", "eof", "pipe_close_returned", "capture_close_returned"))
+                or any(io.get(side, {}).get("error") is not None for side in ("stdout", "stderr"))):
+            raise RuntimeError("an original compiled Product owner or reader is not closed")
+    held = (WORK / 'runs/serena-default-final-v4/seed-modules',
+            WORK / 'runs/serena-default-final-v4/isolated-build-cache')
+    if any(Path(path).is_relative_to(cache) for path in original["input_files"] for cache in held):
+        raise RuntimeError("compiled Product admission unexpectedly depends on shared cache contents")
+    receiver = PRODUCT_FINALIZATION["receiver_path"]
+    if sha(ordinary(receiver, False)) != PRODUCT_FINALIZATION["receiver_sha256"]:
+        raise RuntimeError("received source-finalization implementation changed")
+    inputs[receiver] = PRODUCT_FINALIZATION["receiver_sha256"]
+    return {"root": PRODUCT_DONOR, "path": Path(binding["original_path"]), "raw": raws["original"],
+        "value": original, "binding": binding, "input_files": inputs,
+        "acceptance": accepted, "snapshot": snapshot, "postconditions": postconditions}
+
+
+def receive_cache_handoff(run):
+    """Receive only Product -> default -> exact focused -> state -> full."""
+    global CACHE_HANDOFF_INPUTS
+    run = Path(run)
+    if run == STATE_RUN:
+        if not isinstance(STATE_CONTINUATION_CACHE_SHA, str) or not re.fullmatch(r"[0-9a-f]{64}", STATE_CONTINUATION_CACHE_SHA):
+            raise RuntimeError("reviewed state continuation cache receiver is not bound")
+        raw = ordinary(STATE_CONTINUATION_CACHE, False).read_bytes()
+        if hashlib.sha256(raw).hexdigest() != STATE_CONTINUATION_CACHE_SHA:
+            raise RuntimeError("state continuation cache receiver changed")
+        spec = importlib.util.spec_from_file_location("state_continuation_cache_v9", STATE_CONTINUATION_CACHE)
+        module = importlib.util.module_from_spec(spec)
+        exec(compile(raw, str(STATE_CONTINUATION_CACHE), "exec"), module.__dict__)
+        accepted, CACHE_HANDOFF_INPUTS = module.receive(SimpleNamespace(**globals()), run)
+        CACHE_HANDOFF_INPUTS[str(STATE_CONTINUATION_CACHE)] = STATE_CONTINUATION_CACHE_SHA
+        return accepted
+    if run == FOCUSED_RUN:
+        if not isinstance(CLOSED_FOCUS_CACHE_SHA, str) or not re.fullmatch(r"[0-9a-f]{64}", CLOSED_FOCUS_CACHE_SHA):
+            raise RuntimeError("reviewed closed-focused retry receiver is not bound")
+        raw = ordinary(CLOSED_FOCUS_CACHE, False).read_bytes()
+        if hashlib.sha256(raw).hexdigest() != CLOSED_FOCUS_CACHE_SHA:
+            raise RuntimeError("closed-focused retry receiver changed")
+        spec = importlib.util.spec_from_file_location("closed_focused_cache_v8", CLOSED_FOCUS_CACHE)
+        module = importlib.util.module_from_spec(spec)
+        exec(compile(raw, str(CLOSED_FOCUS_CACHE), "exec"), module.__dict__)
+        accepted, CACHE_HANDOFF_INPUTS = module.receive(SimpleNamespace(**globals()), run)
+        CACHE_HANDOFF_INPUTS[str(CLOSED_FOCUS_CACHE)] = CLOSED_FOCUS_CACHE_SHA
+        return accepted
+    if run == PRODUCT_RUN:
+        accepted, CACHE_HANDOFF_INPUTS = source_receiver().receive_failed_product_cache_handoff(
+            FIRST_CACHE_HANDOFF, run, SOURCE_ADMISSION, CACHE_COMMIT)
+        return accepted
+    if run.parent != RUNS or scope_name(run.name) != run.name or run.name not in CACHE_PREDECESSORS:
+        raise RuntimeError("Only the four exact sequential successors of the new Product are admitted")
+    path = CACHE_HANDOFFS / (run.name + ".json")
+    raw = ordinary(path, False).read_bytes()
+    handoff = json.loads(raw)
+    caches = {"GOMODCACHE": str(SHARED_MODULE_CACHE), "GOCACHE": str(BUILD_CACHE)}
+    prior = RUNS / CACHE_PREDECESSORS[run.name]
+    accepted = handoff.get("received_root", {})
+    expected_schema = CACHE_SCHEMAS[run.name]
+    if (handoff.get("schema") != "go-cache-handoff-v2"
+            or handoff.get("consumer_run") != str(run) or handoff.get("prior_run") != str(prior)
+            or not isinstance(CACHE_COMMIT, str) or not re.fullmatch(r"[0-9a-f]{40}", CACHE_COMMIT)
+            or handoff.get("consumer_source_commit") != CACHE_COMMIT
+            or handoff.get("prior_source_commit") != CACHE_COMMIT
+            or handoff.get("shared_cache_paths") != caches
+            or accepted.get("path") != str(prior / "root-receiving.json")
+            or accepted.get("schema") != expected_schema or accepted.get("status") != "PASS"):
+        raise RuntimeError("exact task consumer/source/predecessor and isolated cache paths required")
+
+    if prior == PRODUCT_RUN:
+        donor = receive_product_donor(prior)
+        received, original, binding = donor["acceptance"], donor["value"], donor["binding"]
+        expected_root = {"path": binding["root_path"], "sha256": binding["root_sha256"],
+            "schema": "regression-resume-compiled-artifacts-receiving-v2", "status": "PASS", "parent": binding["parent"]}
+        if (accepted != expected_root or handoff.get("original_receipt_sha256") != binding["original_sha256"]
+                or received.get("shared_cache_paths") != caches
+                or any(original.get("environment", {}).get(key) != value for key, value in caches.items())):
+            raise RuntimeError("exact compiled Product and original cache-lineage controls differ")
+        first, first_inputs = source_receiver().receive_recorded_product_handoff(
+            FIRST_CACHE_HANDOFF, PRODUCT_RUN, SOURCE_ADMISSION, CACHE_COMMIT)
+        if (original.get("cache_handoff") != first or received.get("cache_handoff") != first
+                or received.get("cache_object_identities_after") != first["record"]["cache_object_identities"]
+                or any(original.get("input_files", {}).get(path) != digest for path, digest in first_inputs.items())):
+            raise RuntimeError("compiled Product lost its exact original closed-cache handoff")
+        for name in ("go.mod", "go.sum"):
+            if sha(ordinary(REPO / name, False)) != donor["snapshot"]["files"][name]:
+                raise RuntimeError("current dependency definitions differ from the compiled Product")
+        return {"path": str(path), "sha256": hashlib.sha256(raw).hexdigest(), "record": handoff}
+
+    def pinned_control(control_path, expected):
+        if not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected):
+            raise RuntimeError("actual original control SHA-256 required")
+        original = ordinary(control_path, False).read_bytes()
+        if hashlib.sha256(original).hexdigest() != expected:
+            raise RuntimeError("original cache control changed: " + str(control_path))
+        return json.loads(original)
+
+    received = pinned_control(prior / "root-receiving.json", accepted["sha256"])
+    fields = ROOT_CACHE_FIELDS[expected_schema]
+    parent = accepted.get("parent", {})
+    if (received.get("schema") != expected_schema or received.get("status") != "PASS"
+            or received.get("parent") != parent or parent.get("status") != "COMPLETE"
+            or parent.get("terminal_exit_received") is not True
+            or type(parent.get("pid")) is not int or parent["pid"] <= 0
+            or type(parent.get("exit_code")) is not int or parent["exit_code"] != 0
+            or type(parent.get("seconds")) not in (int, float) or not 0 <= parent["seconds"] < float("inf")
+            or parent.get("cwd") != str(WORK)
+            or received.get(fields[0]) != CACHE_COMMIT
+            or received.get(fields[1]) != handoff.get("original_receipt_sha256")):
+        raise RuntimeError("pinned original task root receiving/parent/source differs")
+    original = pinned_control(prior / "receipt.json", handoff["original_receipt_sha256"])
+    snapshot = original.get("source_before", {})
+    if original.get("schema") == "private-serena-migration-build-wrapper-v3":
+        snapshot = snapshot.get("snapshot", {})
+    rows = original.get("commands", [])
+    quiet = original.get("command_quiescence", {})
+    states = quiet.get("commands", [])
+    if (original.get("run") != str(prior) or original.get("status") != "PASS"
+            or not rows or len(rows) != len(states)
+            or original.get("commands_quiescent") is not True or quiet.get("complete") is not True
+            or original.get("source_unchanged") is not True
+            or original.get("original_inputs_unchanged") is not True
+            or snapshot.get("head") != CACHE_COMMIT
+            or len(snapshot.get("files", {})) != SOURCE_COUNT
+            or any(original.get("environment", {}).get(key) != value for key, value in caches.items())):
+        raise RuntimeError("prior original task command/source/cache controls are incomplete")
+    for row, state in zip(rows, states):
+        if (type(row.get("exit_code")) is not int
+                or row.get("quiescence_state") != "complete" or row.get("captures_measured") is not True
+                or state.get("state") != "complete" or state.get("direct_exit_known") is not True
+                or Path(row.get("stdout", "")).name != state.get("name", "") + ".stdout.txt"
+                or any(not isinstance(row.get(stream + "_sha256"), str)
+                       or not re.fullmatch(r"[0-9a-f]{64}", row[stream + "_sha256"])
+                       for stream in ("stdout", "stderr"))):
+            raise RuntimeError("prior original task command/capture metadata is incomplete")
+    if prior == FOCUSED_RUN:
+        if (original.get("schema") != "private-serena-native-focused-run-v1"
+                or original.get("full_gate_passed") is not False
+                or original.get("literal_pre_push_commands_passed") is not False
+                or received.get("full_gate_passed") is not False
+                or received.get("literal_pre_push_commands_passed") is not False):
+            raise RuntimeError("focused native gate must not claim the full regression gates")
+    dependency_files = {name: snapshot["files"].get(name) for name in ("go.mod", "go.sum")}
+    if any(not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
+           or sha(ordinary(REPO / name, False)) != digest for name, digest in dependency_files.items()):
+        raise RuntimeError("current dependency definition differs from the exact task predecessor")
+    return {"path": str(path), "sha256": hashlib.sha256(raw).hexdigest(), "record": handoff}
+
+
+def receive_bootstrap_source():
+    """Receive the real Git-only issuer; no synthetic source_copy/parent fields."""
+    global SEED_SOURCE_RECEIVED
+    snapshot, dependencies, SEED_SOURCE_RECEIVED = source_receiver().receive_source(SOURCE_ADMISSION, REPO, CACHE_COMMIT)
+    if len(snapshot["files"]) != SOURCE_COUNT:
+        raise RuntimeError("actual source count differs")
+    SEED_SOURCE_RECEIVED["input_files"][str(SOURCE_RECEIVER)] = SOURCE_RECEIVER_SHA256
+    return snapshot, dependencies
+
+
+def receive_cache_bootstrap(run, expected):
+    """Receive the existing bootstrap for its same-run compiler participant or successor."""
+    global CACHE_BOOTSTRAP_SOURCE
+    run = Path(run)
+    path = run / "cache-bootstrap.json"
+    if (run != BOOTSTRAP_RUN or not isinstance(expected, dict)
+            or expected.get("path") != str(path)
+            or not isinstance(expected.get("sha256"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", expected["sha256"])):
+        raise RuntimeError("one pinned original private-default bootstrap is required")
+    raw = ordinary(path, False).read_bytes()
+    record = json.loads(raw)
+    snapshot, dependencies = receive_bootstrap_source()
+    caches = {"GOMODCACHE": str(SHARED_MODULE_CACHE), "GOCACHE": str(BUILD_CACHE)}
+    if (hashlib.sha256(raw).hexdigest() != expected["sha256"] or record != expected.get("record")
+            or record.get("schema") != "go-cache-bootstrap-v1"
+            or record.get("consumer_run") != str(run) or record.get("consumer_source_commit") != CACHE_COMMIT
+            or record.get("prior_cache_consumer") is not None
+            or record.get("source_admission") != SOURCE_ADMISSION or record.get("dependency_files") != dependencies
+            or record.get("shared_cache_paths") != caches or set(record.get("created_caches", {})) != set(caches)):
+        raise RuntimeError("original private-default cache bootstrap control differs")
+    for key, value in record["created_caches"].items():
+        cache = Path(caches[key])
+        info = ordinary(cache, True).stat()
+        if (cache.parent != run or value.get("path") != str(cache)
+                or value.get("created_exclusively") is not True or value.get("empty_at_creation") is not True
+                or type(value.get("inode")) is not int or value["inode"] <= 0
+                or info.st_ino != value["inode"] or info.st_dev != value.get("device")):
+            raise RuntimeError("original private-default cache object identity differs")
+    CACHE_BOOTSTRAP_SOURCE = snapshot
+    return {"path": str(path), "sha256": hashlib.sha256(raw).hexdigest(), "record": record}
+
+
+def create_cache_bootstrap(run):
+    """Create the fixed first consumer's two caches exclusively, without a prior handoff."""
+    global CACHE_BOOTSTRAP_SOURCE
+    run = Path(run)
+    if run != BOOTSTRAP_RUN or CACHE_BOOTSTRAP is not None or CACHE_HANDOFF is not None:
+        raise RuntimeError("cache bootstrap belongs only to the one fresh first consumer")
+    snapshot, dependencies = receive_bootstrap_source()
+    ordinary(run, True)
+    caches = {"GOMODCACHE": SHARED_MODULE_CACHE, "GOCACHE": BUILD_CACHE}
+    created = {}
+    for key, path in caches.items():
+        if path.parent != run:
+            raise RuntimeError("fresh cache must be a direct child of its original private run")
+        path.mkdir(exist_ok=False)
+        info = ordinary(path, True).stat()
+        if type(info.st_ino) is not int or info.st_ino <= 0 or any(path.iterdir()):
+            raise RuntimeError("new cache identity/empty creation was not observed")
+        created[key] = {"path": str(path), "device": info.st_dev, "inode": info.st_ino,
+                        "created_exclusively": True, "empty_at_creation": True}
+    record = {"schema": "go-cache-bootstrap-v1", "consumer_run": str(run),
+              "consumer_source_commit": CACHE_COMMIT, "prior_cache_consumer": None,
+              "source_admission": SOURCE_ADMISSION, "dependency_files": dependencies,
+              "shared_cache_paths": {key: str(path) for key, path in caches.items()},
+              "created_caches": created,
+              "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    path = run / "cache-bootstrap.json"
+    new_json(path, record)
+    CACHE_BOOTSTRAP_SOURCE = snapshot
+    return {"path": str(path), "sha256": sha(path), "record": record}
+
+
+def ensure_private_telemetry_off(run):
+    parent = ordinary(run / "appdata", True)
+    for component in ("go", "telemetry"):
+        parent = parent / component
+        try:
+            parent.mkdir()
+        except FileExistsError:
+            pass
+        ordinary(parent, True)
+    mode = parent / "mode"
+    try:
+        with mode.open("xb") as stream:
+            stream.write(b"off")
+    except FileExistsError:
+        pass
+    if ordinary(mode, False).read_bytes() != b"off":
+        raise RuntimeError("private telemetry mode must remain exactly off")
+
+
+# Fixed per-run configuration for both complete literal test phases. This is
+# private test environment data; no repository/source or native predicate changes.
+HEADLESS_BYTES = (b"projects: []\n"
+                  b"gui_log_window: false\n"
+                  b"web_dashboard: false\n"
+                  b"web_dashboard_open_on_launch: false\n")
+HEADLESS_SHA = "96f52df38eddbfd3bef53d29ca5f445099a2c63e292b06be8c63616172ec1484"
+HEADLESS_SETTINGS = {"gui_log_window": False, "web_dashboard": False, "web_dashboard_open_on_launch": False}
+
+
+def headless_config_snapshot(root, raw):
+    """Pure DATA for our own generated YAML; matching the headless10 predicate."""
+    if type(raw) is not bytes or len(raw) > 1 << 20:
+        raise RuntimeError("headless configuration exceeds its fixed bound")
+    text = raw.decode("utf-8").replace("\r\n", "\n")
+    for key in HEADLESS_SETTINGS:
+        if (len(re.findall(r"^" + key + r"[ \t]*:", text, re.MULTILINE)) != 1
+                or len(re.findall(r"^" + key + r":[ \t]*false[ \t]*(?:#.*)?$", text, re.MULTILINE)) != 1):
+            raise RuntimeError("private headless setting changed: " + key)
+    if len(re.findall(r"^projects[ \t]*:", text, re.MULTILINE)) != 1:
+        raise RuntimeError("required Serena projects field is missing or duplicated")
+    return {"path": str(Path(root) / "profile/serena_config.yml"), "bytes": len(raw),
+            "sha256": hashlib.sha256(raw).hexdigest(), "settings": dict(HEADLESS_SETTINGS),
+            "projects_are_mutable_output": True}
+
+
+def prepare_headless_environment(root, env):
+    """Exclusive immutable seed and mutable private copy, before any test launch."""
+    root = ordinary(root, True)
+    if root.parent != RUNS or hashlib.sha256(HEADLESS_BYTES).hexdigest() != HEADLESS_SHA:
+        raise RuntimeError("fixed private headless scope and seed required")
+    for path in (root / "headless-config-input.yml", root / "profile/serena_config.yml"):
+        ordinary(path.parent, True)
+        with path.open("xb") as stream:
+            stream.write(HEADLESS_BYTES)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if sha(ordinary(path, False)) != HEADLESS_SHA:
+            raise RuntimeError("new private headless configuration differs")
+    env["SERENA_HOME"] = str(root / "profile")
+
+
+def receive_headless_before(root, env):
+    """Called immediately before the original full-suite owner is acquired."""
+    root = ordinary(root, True)
+    seed, config = root / "headless-config-input.yml", root / "profile/serena_config.yml"
+    if env.get("SERENA_HOME") != str(root / "profile") or root.parent != RUNS:
+        raise RuntimeError("actual full-suite headless environment escaped its private scope")
+    for path in (seed, config):
+        with ordinary(path, False).open("rb") as stream:
+            raw = stream.read((1 << 20) + 1)
+        if raw != HEADLESS_BYTES or hashlib.sha256(raw).hexdigest() != HEADLESS_SHA:
+            raise RuntimeError("fixed headless seed/config changed before suite creation")
+    return {"schema": "serena-private-headless-config-v1",
+        "seed": {"path": str(seed), "sha256": HEADLESS_SHA, "bytes": len(HEADLESS_BYTES)},
+        "mutable_config": str(config), "settings": dict(HEADLESS_SETTINGS), "initial_projects_empty": True,
+        "before": headless_config_snapshot(root, HEADLESS_BYTES), "before_launch_verified": True,
+        "scope": "supported private headless configuration; default GUI behavior is not qualified"}
+
+
+def receive_headless_after(root, env, record):
+    """Read only after original native/IO closure; projects are mutable output."""
+    root = ordinary(root, True)
+    seed, config = root / "headless-config-input.yml", root / "profile/serena_config.yml"
+    if (root.parent != RUNS or env.get("SERENA_HOME") != str(root / "profile")
+            or record.get("schema") != "serena-private-headless-config-v1"
+            or record.get("seed") != {"path": str(seed), "sha256": HEADLESS_SHA, "bytes": len(HEADLESS_BYTES)}
+            or record.get("mutable_config") != str(config) or record.get("settings") != HEADLESS_SETTINGS
+            or record.get("initial_projects_empty") is not True or record.get("before_launch_verified") is not True
+            or record.get("before") != headless_config_snapshot(root, HEADLESS_BYTES)
+            or record.get("scope") != "supported private headless configuration; default GUI behavior is not qualified"):
+        raise RuntimeError("original full-suite headless configuration binding differs")
+    with ordinary(seed, False).open("rb") as stream:
+        seed_raw = stream.read((1 << 20) + 1)
+    if seed_raw != HEADLESS_BYTES or hashlib.sha256(seed_raw).hexdigest() != HEADLESS_SHA:
+        raise RuntimeError("immutable headless input changed during the full suite")
+    with ordinary(config, False).open("rb") as stream:
+        raw = stream.read((1 << 20) + 1)
+    return headless_config_snapshot(root, raw)
+
+
+def clean_environment(run, cache_owner=None, *, cache_bootstrap=None):
+    global CACHE_HANDOFF, CACHE_BOOTSTRAP, CACHE_ENVIRONMENT_RUN, TEST_STAGING_RECEIVED
+    run = Path(run)
+    owner = run if cache_owner is None else Path(cache_owner)
+    if owner != run and (owner not in (FULL_RUN, FOCUSED_RUN) or run.parent != RUNS
+                         or not re.fullmatch(r"x[0-9a-f]{12}", run.name)):
+        raise RuntimeError("cache participant requires the fixed full driver and its fresh adapter scope")
+    if owner != FULL_RUN or BOOTSTRAP_RUN != FULL_RUN:
+        raise RuntimeError("only the one fresh full-run cache owner is admitted")
+    TEST_STAGING_RECEIVED = receive_test_staging(owner)
+    CACHE_HANDOFF = None
+    if owner == run:
+        if cache_bootstrap is not None or CACHE_BOOTSTRAP is not None:
+            raise RuntimeError("the fresh full driver must create its caches exactly once")
+        CACHE_BOOTSTRAP = create_cache_bootstrap(owner)
+    else:
+        if cache_bootstrap is None:
+            raise RuntimeError("a full-run participant requires its frozen plan bootstrap")
+        CACHE_BOOTSTRAP = receive_cache_bootstrap(owner, cache_bootstrap)
+    CACHE_ENVIRONMENT_RUN = run
+    resolve_toolchain()
+    env = os.environ.copy()
+    for key in list(env):
+        if key.startswith(("GO", "CGO", "MCPHUB_", "PYTHON")) or key.upper() == "PSMODULEANALYSISCACHEPATH":
+            env.pop(key, None)
+    env.pop("TEST_TELEMETRY_DIR", None)
+    dirs = {"TEMP":run/"tmp", "TMP":run/"tmp", "TMPDIR":run/"tmp", "GOTMPDIR":run/"tmp",
+            "USERPROFILE":run/"profile", "APPDATA":run/"appdata", "LOCALAPPDATA":run/"localappdata",
+            "GOPATH":run/"go-path"}
+    for key, path in dirs.items():
+        path.mkdir(parents=True, exist_ok=True)
+        env[key] = str(path)
+    if owner == FULL_RUN:
+        prepare_headless_environment(run, env)
+    # PowerShell 5.1 reads this before startup; keep its module cache in this run.
+    env["PSMODULEANALYSISCACHEPATH"] = str(run / "localappdata" / "powershell-module-analysis.cache")
+    ensure_private_telemetry_off(run)
+    env["GOMODCACHE"] = str(ordinary(SHARED_MODULE_CACHE, True))
+    ordinary(BUILD_CACHE, True)
+    # The one accepted task-local archive proxy, then off; no expanded-cache donor.
+    receive_module_proxy()
+    proxies = [ordinary(MODULE_PROXY, True).as_uri()]
+    env.update({"GOROOT":str(GO.parent.parent), "GOENV":"off", "GOWORK":"off", "GOTOOLCHAIN":"local",
+        "GOFLAGS":"-mod=readonly", "GOPROXY":",".join(proxies+["off"]), "GONOPROXY":"none",
+        "GOSUMDB":"off", "GOVCS":"*:off", "GOTELEMETRY":"off", "GOPRIVATE":"", "GONOSUMDB":"",
+        "GOINSECURE":"", "GOOS":"windows", "GOARCH":"amd64", "CGO_ENABLED":"1", "CC":str(CC),
+        "GOCACHE":str(BUILD_CACHE), "GIT_OPTIONAL_LOCKS":"0", "GIT_TERMINAL_PROMPT":"0",
+        "PYTHONDONTWRITEBYTECODE":"1", "MCPHUB_STATE_DIR_OVERRIDE":str(run/"localappdata"),
+        "PATH":os.pathsep.join([str(GO.parent), str(GIT.parent), str(CC.parent), str(PWSH.parent),
+                                str(Path(os.environ["SystemRoot"])/"System32")])})
+    return env
+
+class Run:
+    def __init__(self, root, env):
+        consumer = Path(env["APPDATA"]).parent
+        if (CACHE_ENVIRONMENT_RUN != consumer or Path(root) not in (consumer, consumer / "exec")
+                or env.get("GOMODCACHE") != str(SHARED_MODULE_CACHE) or env.get("GOCACHE") != str(BUILD_CACHE)):
+            raise RuntimeError("Run requires its exact original cache environment")
+        if CACHE_BOOTSTRAP is not None:
+            owner = Path(CACHE_BOOTSTRAP["record"]["consumer_run"])
+            if (owner != BOOTSTRAP_RUN or owner != FULL_RUN or CACHE_HANDOFF is not None
+                    or (owner != consumer and (consumer.parent != RUNS
+                        or not re.fullmatch(r"x[0-9a-f]{12}", consumer.name) or Path(root) != consumer))):
+                raise RuntimeError("fresh bootstrap participant differs from its one full driver")
+            cache_binding = {"cache_bootstrap": CACHE_BOOTSTRAP, "cache_owner_run": str(owner)}
+        else:
+            if CACHE_HANDOFF is None:
+                raise RuntimeError("Run requires its original received cache handoff")
+            owner = Path(CACHE_HANDOFF["record"]["consumer_run"])
+            if owner != consumer and (owner not in (FULL_RUN, FOCUSED_RUN) or consumer.parent != RUNS
+                                      or not re.fullmatch(r"x[0-9a-f]{12}", consumer.name) or Path(root) != consumer):
+                raise RuntimeError("Run cache participant differs from the original full driver")
+            cache_binding = {"cache_handoff": CACHE_HANDOFF, "cache_owner_run": str(owner)}
+        self.root, self.env = root, env
+        self.receipt = {"schema":"qualified-windows-products-run-v1", "run":str(root), "commands":[],
+                        "status":"running", "started_utc":time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+        self.receipt.update(cache_binding)
+        if CACHE_BOOTSTRAP is not None:
+            if SEED_SOURCE_RECEIVED is None or TEST_STAGING_RECEIVED is None:
+                raise RuntimeError("fresh source and exact staging receiving are required")
+            self.receipt["source_admission"] = SOURCE_ADMISSION
+            self.receipt["guard_admission"] = _guard_admission
+            self.receipt["input_files"] = dict(SEED_SOURCE_RECEIVED["input_files"])
+            for received in (CACHE_BOOTSTRAP, TEST_STAGING_RECEIVED, _guard_admission):
+                self.receipt["input_files"][received["path"]] = received["sha256"]
+            self.receipt["input_files"][str(_guard_path)] = _guard_sha
+        if TEST_STAGING_RECEIVED is not None:
+            self.receipt["test_staging_admission"] = TEST_STAGING_RECEIVED
+        self.receipt["module_proxy_admission"] = {"path": str(PROXY_ADMISSION),
+            "sha256": PROXY_ADMISSION_SHA, "proxy_root": str(MODULE_PROXY),
+            "scope": "archive input only; one newly created full-run bootstrap owns empty-at-creation module/build caches"}
+        mode = ordinary(Path(env["APPDATA"]) / "go/telemetry/mode", False)
+        self.receipt["effective_telemetry_mode"] = {"path": str(mode), "sha256": sha(mode), "value": "off"}
+        self.receipt["read_only_tool_aliases"] = TOOL_RECORDS
+        self.receipt["environment"] = {k:env[k] for k in sorted(env) if k.startswith(("GO","CGO","MCPHUB_")) or k in ("TEMP","TMP","TMPDIR","USERPROFILE","APPDATA","LOCALAPPDATA","CC","PATH","PSMODULEANALYSISCACHEPATH","SERENA_HOME")}
+        self.save()
+    def save(self):
+        (self.root/"receipt.json").write_text(json.dumps(self.receipt, indent=2)+"\n", encoding="utf-8")
+    def command(self, argv, name, cwd=REPO, timeout=600, check=True, stdin_path=None):
+        row = {"argv":[str(x) for x in argv], "cwd":str(cwd), "stdout":str(self.root/(name+".stdout.txt")), "stderr":str(self.root/(name+".stderr.txt"))}
+        self.receipt["commands"].append(row)
+        self.save()
+        start = time.monotonic()
+        try:
+            with Path(row["stdout"]).open("xb") as out, Path(row["stderr"]).open("xb") as err:
+                stdin = Path(stdin_path).open("rb") if stdin_path else subprocess.DEVNULL
+                try:
+                    done = subprocess.run(row["argv"], cwd=str(cwd), env=self.env, stdin=stdin, stdout=out, stderr=err,
+                        timeout=timeout, check=False, creationflags=subprocess.CREATE_NO_WINDOW)
+                finally:
+                    if stdin_path:
+                        stdin.close()
+            row["exit_code"] = done.returncode
+        finally:
+            row["seconds"] = round(time.monotonic()-start, 3)
+            for stream in ("stdout","stderr"):
+                if Path(row[stream]).exists():
+                    row[stream+"_sha256"] = sha(row[stream])
+            self.save()
+        if check and done.returncode:
+            raise RuntimeError(name+" exited "+str(done.returncode)+"; see "+row["stderr"])
+        return Path(row["stdout"]).read_text(encoding="utf-8-sig", errors="strict")
+    def validator(self, flags, name):
+        return json.loads(self.command([GO, "run", "./tools/windows-product-validate", *flags], name, timeout=180))
+    def retain_failed_full_workers(self, failure_published):
+        """Keep this actual failed owner; receive closure without changing its gate."""
+        pending_exception = sys.exc_info()[0] is not None
+        original_receipt = self.root / "receipt.json"
+        metadata_error = None
+        try:
+            original_digest = sha(original_receipt)
+        except BaseException as error:
+            original_digest = None
+            metadata_error = error
+        original_states = self.quiescence_snapshot()
+        while True:
+            try:
+                proof = self.receive_failed_worker_closure(time.monotonic() + 30)
+                valid = (proof.get("schema") == "failed-original-worker-physical-closure-v1"
+                    and proof.get("original_command_states_unchanged") is True
+                    and proof.get("capture_access_issued") is False
+                    and proof.get("new_commands_permitted") is False
+                    and proof.get("qualification_passed") is False
+                    and self.quiescence_snapshot() == original_states)
+                if (valid and proof.get("status") == "CLOSED" and proof.get("commands")
+                        and all(row.get("state") == "CLOSED" for row in proof["commands"])):
+                    break
+            except BaseException:
+                pass
+            # The actual Run, native owner and original workers remain retained.
+            # This wait grants no qualification time and starts no new work.
+            try:
+                time.sleep(0.05)
+            except BaseException:
+                continue
+        try:
+            new_json(self.root / "failed-original-physical-closure.json", {
+                "schema": "literal-full-failed-original-physical-closure-v1", "status": "CLOSED",
+                "original_receipt": {"path": str(original_receipt), "sha256": original_digest},
+                "receipt_digest_scope": "actual observed on-disk metadata only",
+                "original_failure_publication_completed": failure_published,
+                "intended_failure_receipt_bound": failure_published and original_digest is not None,
+                "original_gate_status": "FAIL", "original_gate_reclassified": False,
+                "original_command_states": original_states, "commands_quiescent": False,
+                "physical_receiving": proof, "capture_access_issued": False,
+                "new_commands_permitted": False, "source_or_cache_access_issued": False,
+                "qualification_deadlines_extended": False})
+        except BaseException:
+            # Preserve an earlier save/print failure after actual physical closure.
+            if not pending_exception:
+                raise
+        if metadata_error is not None and not pending_exception:
+            raise metadata_error
+
+    def finish(self, status, error=None):
+        owned_failure = (Path(self.root) == FULL_RUN and any(
+            item["state"] != "complete" and any(custody.get("run") is self and custody["row"] is item["row"]
+                for custody in _guard.RETAINED_COMMANDS)
+            for item in self._command_receiving.values()))
+        if owned_failure:
+            status = "FAIL"
+            self.receipt["commands_quiescent"] = False
+            self.receipt["command_quiescence"] = self.quiescence_snapshot()
+        self.receipt["status"] = status
+        self.receipt["finished_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        if error is not None:
+            self.receipt["error"] = type(error).__name__+": "+str(error)
+        published = False
+        try:
+            self.save()
+            published = True
+            print(json.dumps({"status":status,"run":str(self.root),"receipt":str(self.root/"receipt.json")}), flush=True)
+        finally:
+            if owned_failure:
+                self.retain_failed_full_workers(published)
+
+# Reuse the reviewed command receiver; no change to subprocess or native owners.
+from types import SimpleNamespace
+_guard_path = Path('<TASK>\\worker-custody-inputs-v2\\guard-candidate.py')
+_guard_sha = '70c7a4b607351fa7d3468fb1b8fe0923af3e212b213ad048acc3333ac5f60eed'
+_guard_admission = source_receiver().receive_guard_admission()
+if sha(_guard_path) != _guard_sha:
+    raise RuntimeError("reviewed command guard changed")
+OriginalRun = Run  # Composition seam: exactly one selected guard wraps each concrete Run.
+_guard_spec = importlib.util.spec_from_file_location("qualified_build_command_guard", _guard_path)
+_guard = importlib.util.module_from_spec(_guard_spec)
+_guard_spec.loader.exec_module(_guard)
+Run = _guard.make_guarded_run_class(SimpleNamespace(Run=Run, REPO=REPO, sha=sha, subprocess=subprocess))
+
+def source_snapshot(run, suffix):
+    head = run.command([GIT,"-C",REPO,"rev-parse","HEAD"], "head-"+suffix, timeout=30).strip()
+    if head != CACHE_COMMIT:
+        raise RuntimeError("actual consumer HEAD differs from its cache handoff commit")
+    paths = run.command([GIT,"-C",REPO,"ls-files","--cached","--others","--exclude-standard","-z"], "source-files-"+suffix, timeout=30).split("\0")
+    files = {}
+    for rel in sorted(set(p for p in paths if p)):
+        path = REPO / Path(rel)
+        ordinary(path, False)
+        files[rel] = sha(path)
+    snapshot = {"head":head, "files":files}
+    if CACHE_BOOTSTRAP is not None and suffix == "before" and snapshot != CACHE_BOOTSTRAP_SOURCE:
+        raise RuntimeError("actual initial source differs from the admitted bootstrap source snapshot")
+    new_json(run.root/("source-"+suffix+".json"), snapshot)
+    return snapshot
+
+def cleanup_move(run_path, source, builder_pid=None, *, owner_run=None):
+    if owner_run is None or Path(owner_run.root) != Path(run_path) or not owner_run.commands_quiescent():
+        raise RuntimeError("cleanup requires the retained original native/IO owner to be closed")
+    run_path = ordinary(run_path, True)
+    if run_path.parent != RUNS:
+        raise RuntimeError("cleanup requires the original fixed private run")
+    config = json.loads((run_path/"cleanup-contract.json").read_text(encoding="utf-8"))
+    if config["runner_sha256"] != sha(__file__):
+        raise RuntimeError("cleanup runner changed")
+    source = ordinary(source)
+    if config.get("mode") == "harness":
+        owner_pid = int((run_path/"harness-owner.pid").read_text(encoding="ascii").strip())
+        rel = source.relative_to(REPO/".scratch")
+        allowed = bool(rel.parts and re.fullmatch(r"windows-(?:build-plan|build-json-encoding|linker-probe)-"+str(owner_pid)+r"-[0-9a-f]{32}", rel.parts[0]))
+    else:
+        artifact = Path(config["artifact"])
+        allowed = source == PRODUCT_SYSO or source == CLI_SYSO or (source == artifact or source.is_relative_to(artifact))
+        if builder_pid is not None and source.parent == REPO/".scratch":
+            allowed = allowed or bool(re.fullmatch(r"windows-versioninfo-"+str(int(builder_pid))+r"-[0-9a-f]{32}", source.name))
+    if not allowed:
+        raise RuntimeError("cleanup path is not owned by this new run: "+str(source))
+    ident = uuid.uuid4().hex
+    preserved = run_path/"cleanup-evidence"/ident/source.name
+    trash = WORK/"trash"/("qualified-"+run_path.name)/ident/source.name
+    if source.is_dir():
+        manifest = copy_tree(source, preserved)
+    else:
+        digest = copy_file(source, preserved)
+        manifest = {"": {"bytes":source.stat().st_size, "sha256":digest}}
+    trash.parent.mkdir(parents=True, exist_ok=False)
+    source.rename(trash)
+    observed = tree(trash) if trash.is_dir() else {"":{"bytes":trash.stat().st_size,"sha256":sha(trash)}}
+    if source.exists() or observed != manifest:
+        raise RuntimeError("cleanup move did not preserve the original content")
+    result = {"source":str(source),"preserved":str(preserved),"trash":str(trash),"manifest":manifest}
+    new_json(run_path/"cleanup-records"/(ident+".json"), result)
+    return result
+
+def ps_literal(value):
+    return "'" + str(value).replace("'", "''") + "'"
+
+def builder_script(run, artifact, library):
+    original_path = ordinary(REPO / "build.ps1", False)
+    raw = original_path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != "5038e339e55b4dcc4b2fca3d1231790c00a833431bb3608826ce74d4bca8c9f6":
+        raise RuntimeError("exact original Product builder changed")
+    original = raw.decode("utf-8-sig")
+    first = ("    try {\n        if (Test-Path -LiteralPath $runtimeScratch -ErrorAction Stop) {\n"
+             "            $outputAbsolute = [IO.Path]::GetFullPath($outDir).TrimEnd([IO.Path]::DirectorySeparatorChar)\n")
+    last = "    if ($builderCleanupErrors.Count -gt 0) {\n"
+    if original.count(first) != 1 or original.count(last) != 1:
+        raise RuntimeError("exact original cleanup region is ambiguous")
+    start, stop = original.index(first), original.index(last)
+    if stop <= start:
+        raise RuntimeError("exact original cleanup region is reversed")
+    deferred = r'''    # v5: no filesystem observation or disposition in this cleanup region.
+    # Original build errors and environment restoration remain unchanged.
+    $script:DeferredProductCleanup.Add([ordered]@{path=$runtimeScratch; directory=$true; role='runtime-scratch'})
+    if (-not $runtimePublished -or $null -ne $builderPrimaryError -or $null -ne $builderPrimaryExitCode) {
+        foreach ($incompleteRuntimePath in @($runtimeOutputPath, $runtimeIdentityOutputPath)) {
+            $script:DeferredProductCleanup.Add([ordered]@{path=$incompleteRuntimePath; directory=$false; role='incomplete-runtime'})
+        }
+    }
+    foreach ($ownedResource in $generatedResources) {
+        $script:DeferredProductCleanup.Add([ordered]@{path=$ownedResource; directory=$false; role='product-resource'})
+    }
+    $script:DeferredProductCleanup.Add([ordered]@{path=$resourceScratch; directory=$true; role='resource-scratch'})
+'''
+    derived = original[:start] + deferred + original[stop:]
+    cleanup_only_sha256 = hashlib.sha256(derived.encode("utf-8")).hexdigest()
+    if cleanup_only_sha256 != "e900a0a39f44b06bc11b33a5d9acd83378367e8749524e17ba52886b0d3fe979":
+        raise RuntimeError("reviewed cleanup-only Product derivation changed")
+    # .NET Framework has no IsPathFullyQualified. This fixed invocation admits
+    # exactly the already received absolute D-only H6 library, and no other input.
+    runtime_predicate = "[IO.Path]::IsPathFullyQualified($RuntimeLibraryInput)"
+    expected_library = NATIVE_ADMISSION["library"]["path"]
+    if str(library) != expected_library or not re.match(r"^<TASK_WORKSPACE>\\", expected_library):
+        raise RuntimeError("fixed host compatibility requires the exact admitted D-only native library")
+    fixed_predicate = "[string]::Equals($RuntimeLibraryInput, " + ps_literal(library) + ", [StringComparison]::Ordinal)"
+    if derived.count(runtime_predicate) != 1:
+        raise RuntimeError("fixed RuntimeLibraryInput predicate is ambiguous")
+    derived = derived.replace(runtime_predicate, fixed_predicate)
+    derived_path = run.root / "derived-product-builder.ps1"
+    with derived_path.open("xb") as stream:
+        stream.write(derived.encode("utf-8"))
+    derivation = {"schema": "product-owned-cleanup-and-fixed-host-compatibility-v2", "original": str(original_path),
+        "original_sha256": hashlib.sha256(raw).hexdigest(), "derived": str(derived_path), "derived_sha256": sha(derived_path),
+        "replaced_region_sha256": hashlib.sha256(original[start:stop].encode("utf-8")).hexdigest(),
+        "replacement_sha256": hashlib.sha256(deferred.encode("utf-8")).hexdigest(),
+        "source_filename_preserved": str(original_path), "outside_reviewed_regions_unchanged": True,
+        "cleanup_only_derived_sha256": cleanup_only_sha256,
+        "fixed_runtime_predicate": {"original": runtime_predicate, "replacement": fixed_predicate,
+            "argument": str(library), "argument_sha256": sha(library),
+            "domain": "one exact received absolute D-only native library path"},
+        "scope": "Original cleanup deferral plus an equivalent fixed-input path guard for native Windows PowerShell"}
+    new_json(run.root / "product-builder-derivation.json", derivation)
+    run.receipt["product_builder_derivation"] = derivation
+    run.receipt["input_files"][str(derived_path)] = sha(derived_path)
+    script = r'''$ErrorActionPreference = 'Stop'
+if ($PSVersionTable.PSVersion -lt [Version]'5.1' -or
+    $ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
+    throw 'The fixed Product builder requires its existing native Windows PowerShell host'
+}
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+$OutputEncoding = [Console]::OutputEncoding
+# Resolve module commands through native modules in this process only.
+$nativePSHome = "C:\Windows\System32\WindowsPowerShell\v1.0"
+if (-not [string]::Equals([IO.Path]::GetFullPath($PSHOME), $nativePSHome, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "The admitted native Windows PowerShell home differs"
+}
+$env:PSModulePath = [IO.Path]::Combine($nativePSHome, "Modules")
+$utilityBase = [IO.Path]::Combine($nativePSHome, "Modules", "Microsoft.PowerShell.Utility")
+$utilityManifest = [IO.Path]::Combine($utilityBase, "Microsoft.PowerShell.Utility.psd1")
+$utilityScript = [IO.Path]::Combine($utilityBase, "Microsoft.PowerShell.Utility.psm1")
+$utilityPins = @{
+    $utilityManifest = "c09df190addc67f7c6c38e7ea1dca719fd87807107f688c3f60ed8816e1c48a6"
+    $utilityScript = "f9232f3de3c94dd03caf40f54b22876c9d810c657c41e54ab2d10469b45f26b5"
+}
+foreach ($utilityPath in $utilityPins.Keys) {
+    if (-not [IO.File]::Exists($utilityPath) -or
+        ([IO.File]::GetAttributes($utilityPath) -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "The pinned native Utility module file is missing or redirected"
+    }
+    $utilityHasher = [Security.Cryptography.SHA256]::Create()
+    try { $utilityDigest = [BitConverter]::ToString($utilityHasher.ComputeHash([IO.File]::ReadAllBytes($utilityPath))).Replace("-", "").ToLowerInvariant() }
+    finally { $utilityHasher.Dispose() }
+    if ($utilityDigest -cne $utilityPins[$utilityPath]) { throw "The native Utility module bytes changed" }
+}
+$utilityModules = @(Import-Module -Name $utilityManifest -Force -PassThru -ErrorAction Stop)
+if ($utilityModules.Count -ne 1 -or $utilityModules[0].Name -cne "Microsoft.PowerShell.Utility" -or
+    $utilityModules[0].Version -ne [Version]"3.1.0.0" -or
+    @($utilityManifest, $utilityScript) -inotcontains $utilityModules[0].Path) {
+    throw "The explicitly imported native Utility manifest differs"
+}
+$hashCommand = Get-Command -Name Get-FileHash -CommandType Function -ErrorAction Stop
+if ($hashCommand.ModuleName -cne "Microsoft.PowerShell.Utility" -or
+    @($utilityManifest, $utilityScript) -inotcontains $hashCommand.Module.Path -or
+    -not [string]::Equals($hashCommand.ScriptBlock.File, $utilityScript, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Get-FileHash did not resolve to the pinned native Utility module"
+}
+$script:DeferredProductCleanup = [Collections.Generic.List[object]]::new()
+function Remove-Item {
+    [CmdletBinding(DefaultParameterSetName='Path')]
+    param(
+        [Parameter(Position=0, Mandatory=$true, ParameterSetName='Path')][string[]]$Path,
+        [Parameter(Mandatory=$true, ParameterSetName='LiteralPath')][string[]]$LiteralPath,
+        [switch]$Recurse, [switch]$Force
+    )
+    $targets = if ($PSCmdlet.ParameterSetName -eq 'LiteralPath') { $LiteralPath } else { $Path }
+    foreach ($target in $targets) {
+        if ($target -notin @('Env:GOOS','Env:GOARCH','Env:GOFLAGS','Env:CARGO_TARGET_DIR')) {
+            throw "Filesystem cleanup must wait for the original guarded owner: $target"
+        }
+        Microsoft.PowerShell.Management\Remove-Item -LiteralPath $target -ErrorAction Stop
+    }
+}
+$derivedPath = __DERIVED__
+$sourceFullPath = __BUILD__
+$sourceText = [Text.UTF8Encoding]::new($false, $true).GetString([IO.File]::ReadAllBytes($derivedPath))
+[System.Management.Automation.Language.Token[]]$sourceTokens = $null
+[System.Management.Automation.Language.ParseError[]]$sourceErrors = $null
+$sourceAst = [System.Management.Automation.Language.Parser]::ParseInput(
+    $sourceText, $sourceFullPath, [ref]$sourceTokens, [ref]$sourceErrors)
+if ($null -ne $sourceErrors -and $sourceErrors.Count -ne 0) {
+    throw [System.Management.Automation.ParseException]::new($sourceErrors)
+}
+if (-not [string]::Equals($sourceAst.Extent.File, $sourceFullPath, [StringComparison]::OrdinalIgnoreCase) -or
+    $sourceAst.ScriptRequirements.RequiredPSVersion -ne [Version]'5.1') {
+    throw 'Derived builder did not preserve the original source filename and PS contract'
+}
+$sourceBlock = $sourceAst.GetScriptBlock()
+if (-not [string]::Equals($sourceBlock.File, $sourceFullPath, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Derived builder lost its original source filename'
+}
+try {
+    . $sourceBlock -TestStateIsolatedProduct -OutputDirectory __ARTIFACT__ -RuntimeLibraryInput __LIBRARY__
+    if (-not $plan.testOnly -or $plan.commit -cne __COMMIT__) { throw 'Actual build plan identity changed' }
+    foreach ($artifact in $plan.artifacts) {
+        if (($artifact.buildTags -join '|') -cne 'test_state_path_env') { throw 'Both test-only executables must declare isolation' }
+    }
+    [IO.File]::WriteAllText(__PLAN__, ($plan | ConvertTo-Json -Depth 15) + [char]10, (New-Object Text.UTF8Encoding($false)))
+    [IO.File]::WriteAllText(__OBSERVATION__, ($entrySetResult | ConvertTo-Json -Depth 10) + [char]10, (New-Object Text.UTF8Encoding($false)))
+} finally {
+    # Paths and roles only. PID attributes the names; it proves no quiescence.
+    $record = [ordered]@{schema='product-deferred-owned-cleanup-v1'; builder_pid=$PID;
+        source=$sourceFullPath; artifact=__ARTIFACT__; targets=@($script:DeferredProductCleanup.ToArray())}
+    $recordBytes = [Text.UTF8Encoding]::new($false).GetBytes(($record | ConvertTo-Json -Depth 8) + [char]10)
+    $recordStream = [IO.File]::Open(__CLEANUP__, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    try { $recordStream.Write($recordBytes, 0, $recordBytes.Length); $recordStream.Flush($true) }
+    finally { $recordStream.Dispose() }
+}
+'''
+    values = {"__DERIVED__": derived_path, "__BUILD__": original_path, "__ARTIFACT__": artifact, "__LIBRARY__": library,
+              "__COMMIT__": run.receipt["source_before"]["head"], "__PLAN__": run.root / "actual-build-plan.json",
+              "__OBSERVATION__": run.root / "actual-build-observation.json", "__CLEANUP__": run.root / "deferred-cleanup.json"}
+    for key, value in values.items():
+        script = script.replace(key, ps_literal(value))
+    path = run.root / "invoke-actual-builder.ps1"
+    with path.open("x", encoding="utf-8", newline="\n") as stream:
+        stream.write(script)
+    run.receipt["input_files"][str(path)] = sha(path)
+    return path
+
+def complete_product_cleanup(run, artifact):
+    # commands_quiescent inspects the still-retained original guard owners.
+    # No filesystem observation is allowed on the unresolved path.
+    if not run.commands_quiescent():
+        raise RuntimeError("original Product command/native/IO custody is unresolved")
+    rows = [row for row in run.receipt["commands"] if Path(row["stdout"]).name == "actual-builder.stdout.txt"]
+    if len(rows) != 1:
+        raise RuntimeError("one original actual-builder command required before disposition")
+    row = rows[0]
+    if (row.get("quiescence_state") != "complete" or row.get("original_owner_retained") is not True
+            or row.get("original_readers_joined") is not True or row.get("captures_measured") is not True
+            or row.get("completion_receiving", {}).get("lifecycle_state") != "CLOSED"
+            or row.get("native", {}).get("active_zero") is not True
+            or row.get("native", {}).get("handles_closed") is not True
+            or row.get("native", {}).get("direct_reaped") is not True):
+        raise RuntimeError("original actual-builder closure differs")
+    path = run.root / "deferred-cleanup.json"
+    record = json.loads(ordinary(path, False).read_bytes())
+    pid = record.get("builder_pid")
+    if (record.get("schema") != "product-deferred-owned-cleanup-v1" or type(pid) is not int
+            or pid != row.get("original_pid") or record.get("source") != str(REPO / "build.ps1")
+            or record.get("artifact") != str(artifact) or not isinstance(record.get("targets"), list)):
+        raise RuntimeError("closed builder cleanup-plan attribution differs")
+    targets, seen, roles = [], set(), []
+    for target in record["targets"]:
+        if not isinstance(target, dict) or set(target) != {"path", "directory", "role"} or type(target["directory"]) is not bool:
+            raise RuntimeError("closed builder cleanup target shape differs")
+        source, role = Path(target["path"]), target["role"]
+        allowed = ((role == "product-resource" and source == PRODUCT_SYSO and target["directory"] is False)
+            or (role == "resource-scratch" and source.parent == REPO / ".scratch" and target["directory"] is True
+                and re.fullmatch(r"windows-versioninfo-" + str(pid) + r"-[0-9a-f]{32}", source.name))
+            or (role == "runtime-scratch" and source.parent == artifact and target["directory"] is True
+                and re.fullmatch(r"mcphub-rust-owner-" + str(pid) + r"-[0-9a-f]{32}", source.name))
+            or (role == "incomplete-runtime" and target["directory"] is False and row.get("exit_code") != 0
+                and source in (artifact / "mcphub-product/mcphub-owner.dll", artifact / "mcphub-product/mcphub-owner-identity.json")))
+        if not allowed or source in seen:
+            raise RuntimeError("unowned or repeated deferred cleanup path")
+        seen.add(source)
+        roles.append(role)
+        targets.append((source, target["directory"], role))
+    if row.get("exit_code") == 0 and sorted(roles) != ["product-resource", "resource-scratch", "runtime-scratch"]:
+        raise RuntimeError("successful Product cleanup inventory must contain its exact three targets")
+    # Validate all metadata before observing or disposing any target.
+    records = []
+    for source, directory, role in targets:
+        if os.path.lexists(source):
+            ordinary(source, directory)
+            if role == "resource-scratch":
+                if any(child.name != "product.json" or not child.is_file() for child in source.iterdir()):
+                    raise RuntimeError("resource scratch contains an unowned leaf")
+            records.append(cleanup_move(run.root, source, pid, owner_run=run))
+        elif row.get("exit_code") == 0:
+            raise RuntimeError("successful builder did not retain its deferred cleanup target")
+    run.receipt["deferred_cleanup"] = {"path": str(path), "sha256": sha(path), "original_pid": pid,
+        "native_and_io_closed_before_disposition": True, "records": records}
+    run.save()
+
+
+def product_source_snapshot(run, suffix):
+    snapshot = source_snapshot(run, suffix)
+    status = run.command([GIT, "--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false",
+                          "-C", REPO, "status", "--porcelain=v1", "--untracked-files=all", "-z"],
+                         "clean-" + suffix, timeout=30)
+    if status or not run.commands_quiescent() or len(snapshot["files"]) != SOURCE_COUNT:
+        raise RuntimeError("Product source snapshot is not fully closed and clean")
+    # The owned artifact tree is disposed before the final observation. Detect
+    # even ignored extra files; .git is the sole excluded control directory.
+    observed = set()
+    for folder, directories, names in os.walk(REPO, topdown=True, followlinks=False):
+        directory = Path(folder)
+        if directory == REPO:
+            directories[:] = [name for name in directories if name != ".git"]
+        for name in directories:
+            ordinary(directory / name, True)
+        for name in names:
+            path = ordinary(directory / name, False)
+            observed.add(path.relative_to(REPO).as_posix())
+    if observed != set(snapshot["files"]):
+        raise RuntimeError("complete Product source inventory contains unadmitted files")
+    controls = SEED_SOURCE_RECEIVED["original"]["git_controls"]
+    if any(sha(ordinary(REPO / ".git" / name, False)) != digest for name, digest in controls.items()):
+        raise RuntimeError("Product changed issued source Git controls")
+    return snapshot
+
+
+def bundle_admission(run, bundle, plan, name, native_sha):
+    launcher = bundle/"mcphub.exe"
+    product = bundle/"mcphub-product"/"mcphub.exe"
+    identity = bundle/"windows-product-identity.json"
+    native = bundle/"mcphub-product"/"mcphub-owner.dll"
+    expected = {"build_id":plan["entrySetBuildID"],"canonical_entry_sha256":sha(launcher),
+                "product_sha256":sha(product),"identity_sha256":sha(identity)}
+    if expected["canonical_entry_sha256"] != plan["canonicalEntry"]["expectedCanonicalEntrySHA256"] or sha(native) != native_sha:
+        raise RuntimeError("copied bundle differs from its original launcher or native owner")
+    common = ["--expected-entry-set-build-id",expected["build_id"],
+              "--expected-canonical-entry-sha256",expected["canonical_entry_sha256"],
+              "--canonical-entry-reverse-projection","../mcphub.exe",
+              "--expected-version",plan["version"],"--expected-commit",plan["commit"],"--expected-build-date",plan["buildDate"]]
+    observations = {}
+    for mode, schema in (("validate-entry-set-build","windows-canonical-entry-build-observation-v1"),("validate-entry-set","windows-canonical-entry-set-v1")):
+        observed = run.validator(["--"+mode,str(launcher),*common], name+"-"+mode)
+        if observed.get("schema") != schema or any(observed.get(k) != v for k,v in expected.items()):
+            raise RuntimeError("complete entry-set admission disagrees with original bytes")
+        observations[mode] = observed
+    native_identity = run.validator(["--runtime-library",str(native),"--runtime-library-profile","owner-v1-members-v1-borrow-v1","--expected-commit",plan["commit"]], name+"-native")
+    adjacent_identity = json.loads((native.parent/"mcphub-owner-identity.json").read_text(encoding="utf-8-sig"))
+    if native_identity != adjacent_identity or native_identity.get("sha256") != native_sha or native_identity.get("sourceCommit") != plan["commit"]:
+        raise RuntimeError("native admission differs from the copied exact-profile receipt")
+    fixture = {"product_root":str(bundle),"source_epoch":"","product_version":plan["version"],
+               "build_id":expected["build_id"],"reverse_projection":"../mcphub.exe",
+               "canonical_entry_sha256":expected["canonical_entry_sha256"],"product_sha256":expected["product_sha256"],
+               "identity_sha256":expected["identity_sha256"]}
+    new_json(run.root/(name+"-fixture.json"), fixture)
+    return {"path":str(bundle),"files":tree(bundle),"fixture":str(run.root/(name+"-fixture.json")),"observations":observations,"native_identity":native_identity}
+
+def receive_module_proxy():
+    """Receive the imported closed H5 archive input; never read its donor caches."""
+    prepared = pinned_json(PROXY_ADMISSION, PROXY_ADMISSION_SHA)
+    manifest = prepared.get("manifest", {})
+    if (prepared.get("schema") != "closed-go-module-proxy-import-v1" or prepared.get("status") != "PASS"
+            or prepared.get("proxy_root") != str(MODULE_PROXY)
+            or prepared.get("files") != 96 or not isinstance(manifest, dict) or len(manifest) != 96
+            or prepared.get("total_bytes") != 30182335
+            or prepared.get("manifests_before_after_equal") is not True
+            or prepared.get("processes_started_by_importer") != 0
+            or prepared.get("readonly_donor") is not True
+            or any(not isinstance(row, dict) or type(row.get("bytes")) is not int or row["bytes"] < 0
+                   or not isinstance(row.get("sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", row["sha256"])
+                   for row in manifest.values())
+            or sum(row["bytes"] for row in manifest.values()) != prepared["total_bytes"]):
+        raise RuntimeError("pinned imported offline module proxy admission differs")
+    ordinary(MODULE_PROXY, True)
+    return prepared
+
+
+def resource_tool_proxy(root):
+    # Only the two complete tool tuples in the already accepted archive import.
+    prepared = receive_module_proxy()
+    proxy = root / "resource-tool-proxy"
+    proxy.mkdir(exist_ok=False)
+    sources, versions = {}, {}
+    for module, version in (("github.com/josephspurrier/goversioninfo", "v1.5.0"),
+                            ("github.com/akavel/rsrc", "v0.10.2")):
+        relbase = Path(module) / "@v" / version
+        for suffix in (".info", ".mod", ".zip"):
+            relative = Path(str(relbase) + suffix)
+            source = ordinary(MODULE_PROXY / relative, False)
+            expected = prepared["manifest"].get(relative.as_posix())
+            if expected is None or source.stat().st_size != expected["bytes"] or sha(source) != expected["sha256"]:
+                raise RuntimeError("imported resource-tool input differs from pinned receipt: " + str(source))
+            if suffix == ".info" and json.loads(source.read_text(encoding="utf-8")).get("Version") != version:
+                raise RuntimeError("imported resource-tool version metadata disagrees")
+            copy_file(source, proxy / relative)
+            sources[str(source)] = expected["sha256"]
+        index = proxy / Path(module) / "@v" / "list"
+        with index.open("x", encoding="ascii", newline="\n") as f:
+            f.write(version + "\n")
+        versions[module] = [version]
+    result = {"path": str(proxy), "versions": versions, "source_files": sources, "files": tree(proxy),
+              "tool_receipt_sha256": PROXY_ADMISSION_SHA,
+              "scope": "Accepted task-local archive bytes plus a per-run @v/list; no donor cache access or network"}
+    new_json(root / "resource-tool-proxy.json", result)
+    return proxy, result
+
+def pinned_json(path, expected, limit=16 << 20):
+    with ordinary(path, False).open("rb") as reader:
+        raw = reader.read(limit + 1)
+    if len(raw) > limit or not re.fullmatch(r"[0-9a-f]{64}", expected) or hashlib.sha256(raw).hexdigest() != expected:
+        raise RuntimeError("original bounded control changed: " + str(path))
+    return json.loads(raw)
+
+
+def receive_native_reuse(args):
+    """Reuse the received H6 native outputs only for the unchanged exact 64-source map."""
+    if not REVIEW_COMPLETE or args.name != PRODUCT_RUN.name or args.commit != CACHE_COMMIT:
+        raise RuntimeError("disabled or different source-bound fresh Product build")
+    recovery_inputs = source_receiver().receive_recovery_parent(RECOVERY_PARENT_BINDING)
+    snapshot, _ = receive_bootstrap_source()
+    binding = NATIVE_ADMISSION
+    native_run = Path(binding["original_path"]).parent
+    root_path, original_path = native_run / "root-receiving.json", native_run / "receipt.json"
+    received = pinned_json(root_path, binding["root_sha256"])
+    original = pinned_json(original_path, binding["original_sha256"])
+    native_snapshot_source = original.get("source_before", {})
+    if (native_snapshot_source.get("head") != NATIVE_SOURCE_COMMIT
+            or len(native_snapshot_source.get("files", {})) != NATIVE_SOURCE_COUNT):
+        raise RuntimeError("historical native source differs from its exact compilation lineage")
+    parent = binding["parent"]
+    native_sources = binding["native_sources"]
+    if (binding.get("root_path") != str(root_path) or binding.get("original_path") != str(original_path)
+            or received.get("schema") != "root-windows-console-native-build-v1" or received.get("status") != "PASS"
+            or received.get("repository") != NATIVE_REPOSITORY
+            or received.get("source_commit") != NATIVE_SOURCE_COMMIT
+            or received.get("original_receipt_sha256") != binding["original_sha256"]
+            or received.get("parent") != parent or parent.get("status") != "COMPLETE"
+            or parent.get("terminal_exit_received") is not True or parent.get("cwd") != str(NATIVE_WORK)
+            or type(parent.get("pid")) is not int or parent["pid"] <= 0
+            or type(parent.get("exit_code")) is not int or parent["exit_code"] != 0
+            or type(parent.get("seconds")) not in (int, float) or not 0 <= parent["seconds"] < float("inf")
+            or original.get("schema") != "windows-console-native-build-v1" or original.get("status") != "PASS"
+            or original.get("run") != str(native_run) or original.get("repository") != NATIVE_REPOSITORY
+            or original.get("source_commit") != NATIVE_SOURCE_COMMIT
+            or original.get("source_before") != native_snapshot_source
+            or any(original.get(key) is not True for key in
+                   ("source_unchanged", "offline_cache_unchanged", "inputs_unchanged", "commands_quiescent"))
+            or len(native_sources) != 64 or received.get("native_sources") != native_sources
+            or original.get("native_sources_before") != native_sources or original.get("native_sources_after") != native_sources
+            or any(native_snapshot_source["files"].get(name) != digest
+                   or snapshot["files"].get(name) != digest for name, digest in native_sources.items())):
+        raise RuntimeError("original H6 Rust compilation or exact unchanged current native map differs")
+    rows = original.get("commands", [])
+    quiet = original.get("command_quiescence", {})
+    states = quiet.get("commands", [])
+    if (not rows or len(rows) != len(states) or quiet.get("complete") is not True
+            or received.get("captures_verified") != 2 * len(rows)):
+        raise RuntimeError("received H6 Rust original command/IO completion differs")
+    for row, state in zip(rows, states):
+        if (type(row.get("exit_code")) is not int or row["exit_code"] != 0
+                or row.get("quiescence_state") != "complete" or row.get("captures_measured") is not True
+                or state.get("state") != "complete" or state.get("direct_exit_known") is not True or state.get("reason")
+                or Path(row.get("stdout", "")).name != state.get("name", "") + ".stdout.txt"
+                or any(not isinstance(row.get(side + "_sha256"), str)
+                       or not re.fullmatch(r"[0-9a-f]{64}", row[side + "_sha256"]) for side in ("stdout", "stderr"))):
+            raise RuntimeError("received H6 Rust original command/capture metadata is incomplete")
+    snapshot_record = binding["source_snapshot"]
+    snapshot_path = Path(snapshot_record["path"])
+    if (snapshot_path.parent != native_run or received.get("source_snapshot") != snapshot_record
+            or pinned_json(snapshot_path, snapshot_record["sha256"]) != native_snapshot_source):
+        raise RuntimeError("original H6 native compiler source snapshot differs")
+    inputs = original.get("input_files", {})
+    if not inputs or received.get("inputs_verified") != len(inputs):
+        raise RuntimeError("original H6 native compiler input inventory differs")
+    for path, digest in inputs.items():
+        if (not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                or sha(ordinary(path, False)) != digest):
+            raise RuntimeError("original H6 native compiler input changed: " + path)
+    # These are build artifacts, first read after the received original controls.
+    for key in ("library", "member_child"):
+        artifact = binding[key]
+        path = Path(artifact["path"])
+        if (received.get(key) != artifact or original.get(key) != artifact
+                or not path.is_relative_to(native_run / "targets")
+                or type(artifact.get("bytes")) is not int or artifact["bytes"] <= 0
+                or ordinary(path, False).stat().st_size != artifact["bytes"]
+                or sha(path) != artifact["sha256"]):
+            raise RuntimeError("retained H6 native output changed: " + key)
+    current_native_inputs = {}
+    for name, digest in native_sources.items():
+        path = ordinary(REPO / name, False)
+        if sha(path) != digest:
+            raise RuntimeError("current native source differs from received H6 bytes: " + name)
+        current_native_inputs[str(path)] = digest
+    library = binding["library"]
+    if Path(args.native_library) != Path(library["path"]) or args.native_sha256 != library["sha256"]:
+        raise RuntimeError("fresh Product requires the exact received H6 native library")
+    tracked = dict(SEED_SOURCE_RECEIVED["input_files"])
+    tracked.update(recovery_inputs)
+    tracked.update(inputs)
+    tracked.update(current_native_inputs)
+    tracked.update({str(root_path): binding["root_sha256"], str(original_path): binding["original_sha256"],
+                    str(snapshot_path): snapshot_record["sha256"],
+                    library["path"]: library["sha256"],
+                    binding["member_child"]["path"]: binding["member_child"]["sha256"]})
+    return snapshot, {"source_commit": CACHE_COMMIT, "native_source_commit": NATIVE_SOURCE_COMMIT,
+        "native_repository": NATIVE_REPOSITORY, "native_sources_unchanged": 64,
+        "native_recompiled": False, "qualification_reused": False,
+        "source_receiving": SOURCE_ADMISSION, "native_admission": binding,
+        "native_sources": native_sources, "library": library, "member_child": binding["member_child"],
+        "input_files": tracked}
+
+
+def receive_seed_package_inputs():
+    """Receive a closed passive seed; no UV, namespace, native or Ready authority."""
+    received = pinned_json(SEED_PACKAGE / "root-receiving.json", SEED_PACKAGE_ROOT_SHA)
+    original = pinned_json(SEED_PACKAGE / "receipt.json", SEED_PACKAGE_RECEIPT_SHA, 4 << 20)
+    if (received.get("schema") != "root-uv-cache-seed-package-receiving-v1"
+            or received.get("status") != "RECEIVED_PASS" or received.get("receipt_sha256") != SEED_PACKAGE_RECEIPT_SHA
+            or received.get("original_handles_closed") is not True
+            or received.get("source_and_inputs_unchanged") is not True
+            or received.get("archive_independently_verified") is not True
+            or received.get("source_commit") != SEED_PARENT_COMMIT
+            or received.get("parent", {}).get("pid") != 25776 or received["parent"].get("exit_code") != 0
+            or received["parent"].get("status") != "COMPLETE" or received["parent"].get("terminal_exit_received") is not True
+            or original.get("schema") != "uv-cache-seed-package-run-v1" or original.get("status") != "PASS"
+            or original.get("run") != str(SEED_PACKAGE) or original.get("original_handles_closed") is not True
+            or original.get("source_unchanged") is not True or original.get("archive_independently_verified") is not True
+            or any(received.get(key) != row or original.get(key) != row for key, row in SEED_FILES.items())):
+        raise RuntimeError("original closed seed package differs")
+    inputs = {str(SEED_PACKAGE / "root-receiving.json"): SEED_PACKAGE_ROOT_SHA,
+              str(SEED_PACKAGE / "receipt.json"): SEED_PACKAGE_RECEIPT_SHA}
+    for row in SEED_FILES.values():
+        path = ordinary(SEED_PACKAGE / row["path"], False)
+        before = path.stat()
+        measured, count = hashlib.sha256(), 0
+        with path.open("rb") as reader:
+            opened = os.fstat(reader.fileno())
+            if not os.path.samestat(before, opened) or opened.st_size != row["bytes"]:
+                raise RuntimeError("seed file identity/size differs")
+            while True:
+                block = reader.read(min(1 << 20, row["bytes"] - count + 1))
+                if not block:
+                    break
+                count += len(block)
+                if count > row["bytes"]:
+                    raise RuntimeError("seed file exceeded its exact bound")
+                measured.update(block)
+            final = os.fstat(reader.fileno())
+        after = path.stat()
+        if (not os.path.samestat(opened, final) or not os.path.samestat(final, after)
+                or (before.st_size, before.st_mtime_ns) != (final.st_size, final.st_mtime_ns)
+                or (final.st_size, final.st_mtime_ns) != (after.st_size, after.st_mtime_ns)
+                or count != row["bytes"] or measured.hexdigest() != row["sha256"]):
+            raise RuntimeError("original seed file changed while receiving")
+        inputs[str(path)] = row["sha256"]
+    descriptor = pinned_json(SEED_PACKAGE / "seed-descriptor.json", SEED_FILES["descriptor"]["sha256"], 64 << 10)
+    if (descriptor.get("schema") != "private-serena-uv-cache-seed-v1"
+            or descriptor.get("archive") != SEED_FILES["archive"]
+            or any(descriptor.get("manifest", {}).get(k) != v for k, v in SEED_FILES["manifest"].items())):
+        raise RuntimeError("descriptor does not bind the exact fixed sibling seed files")
+    return {"path": str(SEED_PACKAGE / "seed-descriptor.json"),
+            "sha256": SEED_FILES["descriptor"]["sha256"]}, inputs
+
+
+def build(args):
+    admitted_source, native_reuse = receive_native_reuse(args)
+    # The exact unchanged H6 native map is received before fresh Product creates its own isolated caches.
+    if os.path.lexists(API_SYSO):
+        raise RuntimeError("API compile-only must not consume a retained qualified source resource")
+    if len(args.name) > 70:
+        raise ValueError("build name must leave room for the qualified- artifact prefix")
+    if not re.fullmatch(r"[0-9a-f]{40}", args.commit) or not re.fullmatch(r"[0-9a-f]{64}", args.native_sha256):
+        raise ValueError("canonical source commit and native SHA-256 required")
+    library = ordinary(Path(args.native_library), False)
+    if not library.is_relative_to(Path(r"<TASK_WORKSPACE>")) or sha(library) != args.native_sha256:
+        raise RuntimeError("explicit D-only native input differs from qualified SHA-256")
+    for syso in (PRODUCT_SYSO, CLI_SYSO):
+        if syso.exists():
+            raise RuntimeError("pre-existing resource must not be overwritten: "+str(syso))
+    proxy_admission = receive_module_proxy()
+    if tree(MODULE_PROXY) != proxy_admission["manifest"]:
+        raise RuntimeError("accepted imported module archive bytes changed before the fresh bootstrap")
+    root = private_run(args.name)
+    run = Run(root, clean_environment(root))
+    staged_cli_hash = None
+    try:
+        run.receipt["scope_helper_sha256"] = HELPER_SHA
+        run.receipt["input_files"] = {str(p):sha(ordinary(p, False)) for p in (GO,GIT,CC,PWSH,PYTHON,REPO/"build.ps1",Path(__file__),TOOL_RECEIPT,library,_guard_path)}
+        host_receipt = pinned_json(WINPS_HOST_ADMISSION, WINPS_HOST_ADMISSION_SHA256)
+        if (host_receipt.get("schema") != "native-winps-root-receiving-v1" or host_receipt.get("status") != "PASS"
+                or host_receipt.get("commands_quiescent") is not True or host_receipt.get("guard_use_admitted") is not True
+                or host_receipt.get("guard_sha256") != _guard_sha or host_receipt.get("powershell_path") != str(WINPS)
+                or host_receipt.get("powershell_sha256") != WINPS_SHA256
+                or sha(ordinary(WINPS, False)) != WINPS_SHA256):
+            raise RuntimeError("original native Windows PowerShell host admission differs")
+        run.receipt["input_files"].update({str(WINPS): WINPS_SHA256,
+            str(WINPS_HOST_ADMISSION): WINPS_HOST_ADMISSION_SHA256, **NATIVE_UTILITY_PINS})
+        if any(sha(ordinary(path, False)) != digest for path, digest in NATIVE_UTILITY_PINS.items()):
+            raise RuntimeError("pinned native Windows PowerShell Utility inputs differ")
+        run.receipt["product_host"] = {"path": str(WINPS), "sha256": WINPS_SHA256,
+            "qualification": {"path": str(WINPS_HOST_ADMISSION), "sha256": WINPS_HOST_ADMISSION_SHA256},
+            "utility_inputs": NATIVE_UTILITY_PINS}
+        run.receipt["input_files"].update(native_reuse["input_files"])
+        run.receipt["input_files"].update(CACHE_HANDOFF_INPUTS)
+        run.receipt["input_files"].update({str(MODULE_PROXY / name): row["sha256"]
+            for name, row in proxy_admission["manifest"].items()})
+        run.receipt["native_reuse"] = native_reuse
+        run.receipt["source_before"] = product_source_snapshot(run, "before")
+        if run.receipt["source_before"] != admitted_source or admitted_source["head"] != args.commit:
+            raise RuntimeError("actual source differs from its accepted Ready/finalization commit")
+        proxy, proxy_record = resource_tool_proxy(root)
+        run.env["GOPROXY"] = proxy.as_uri()+","+run.env["GOPROXY"]
+        run.receipt["environment"]["GOPROXY"] = run.env["GOPROXY"]
+        run.receipt["resource_tool_proxy"] = proxy_record
+        run.receipt["input_files"].update(proxy_record["source_files"])
+        run.save()
+        artifact = REPO/".scratch"/("qualified-"+args.name)
+        artifact_security = scope_helper().create_private_artifact_scope(artifact)
+        new_json(root/"artifact-scope-security.json", artifact_security)
+        new_json(root/"cleanup-contract.json", {"artifact":str(artifact),"runner_sha256":sha(__file__)})
+        wrapper = builder_script(run, artifact, library)
+        run.command([WINPS,"-NoLogo","-NoProfile","-File",wrapper], "actual-builder", timeout=900)
+        complete_product_cleanup(run, artifact)
+        if PRODUCT_SYSO.exists():
+            raise RuntimeError("actual builder left its source resource in place")
+        plan = json.loads((root/"actual-build-plan.json").read_text(encoding="utf-8"))
+        if plan["commit"] != args.commit or not plan["testOnly"] or plan["buildTags"] != ["test_state_path_env"] or len(plan["artifacts"]) != 2:
+            raise RuntimeError("actual test-only build plan changed")
+        if any(a["buildTags"] != ["test_state_path_env"] for a in plan["artifacts"]):
+            raise RuntimeError("test-only isolation is not paired")
+        actual = root/"product"
+        actual.mkdir()
+        for rel in BUNDLE_FILES:
+            copy_file(artifact/Path(rel), actual/Path(rel))
+        actual_record = bundle_admission(run, actual, plan, "actual", args.native_sha256)
+        preserved_resources = []
+        for record in sorted((root/"cleanup-records").glob("*.json")):
+            row = json.loads(record.read_text(encoding="utf-8"))
+            if Path(row["source"]) == PRODUCT_SYSO:
+                preserved_resources.append(Path(row["preserved"]))
+        if len(preserved_resources) != 1:
+            raise RuntimeError("one actual Product resource must have been preserved before trash")
+        resource = ordinary(preserved_resources[0], False)
+        resource_copy = root/"resources"/"product-versioninfo.syso"
+        copy_file(resource, resource_copy)
+        cli = root/"cli-test-product"
+        cli.mkdir()
+        for rel in BUNDLE_FILES:
+            if rel not in ("mcphub-product/mcphub.exe","windows-product-identity.json"):
+                copy_file(actual/Path(rel), cli/Path(rel))
+        staged_cli_hash = copy_file(resource_copy, CLI_SYSO)
+        ldflags = " ".join(["-H=windowsgui","-X mcp-local-hub/internal/buildinfo.version="+plan["version"],
+            "-X mcp-local-hub/internal/buildinfo.commit="+plan["commit"],
+            "-X mcp-local-hub/internal/buildinfo.date="+plan["buildDate"]])
+        try:
+            run.command([GO,"test","-c","-trimpath","-tags","test_state_path_env","-ldflags",ldflags,
+                         "-o",cli/"mcphub-product"/"mcphub.exe","./internal/cli"], "cli-test-compile", timeout=600)
+        finally:
+            if run.commands_quiescent():
+                if CLI_SYSO.exists():
+                    if sha(CLI_SYSO) != staged_cli_hash:
+                        raise RuntimeError("staged CLI resource changed; retained for review")
+                    cleanup_move(root, CLI_SYSO, owner_run=run)
+            else:
+                run.receipt["retained_source_resource"] = {
+                    "path": str(CLI_SYSO), "expected_sha256": staged_cli_hash,
+                    "reason": "original compiler completion is unconfirmed; no observation or disposition"}
+        product_identity = run.validator(["--candidate",str(cli/"mcphub-product"/"mcphub.exe"),
+            "--expected-version",plan["version"],"--expected-commit",plan["commit"],"--expected-build-date",plan["buildDate"]], "cli-product-identity")
+        new_json(cli/"windows-product-identity.json", product_identity)
+        cli_record = bundle_admission(run, cli, plan, "cli", args.native_sha256)
+        actual_record["product_rust_marked"] = True
+        cli_record["product_rust_marked"] = False
+        cli_record["test_build_tags"] = ["test_state_path_env"]
+        api_image = root / "api-compile-only.test.exe"
+        if os.path.lexists(api_image):
+            raise RuntimeError("API compilation requires one new output in the Product run")
+        run.command([GO, "test", "-c", "-trimpath", "-tags", "test_state_path_env",
+                     "-o", api_image, "./internal/api"], "api-test-compile-only", timeout=600)
+        run.receipt["api_test_compilation"] = {"path": str(api_image), "sha256": sha(ordinary(api_image, False)),
+            "build_tags": ["test_state_path_env"], "tests_executed": False,
+            "qualification_passed": False, "command": "api-test-compile-only"}
+        run.receipt.update({"actual_product":actual_record,"cli_test_product":cli_record,"build_plan":plan,
+            "resource_sha256":sha(resource_copy),"native_input_sha256":args.native_sha256,
+            "qualification":"compiled artifacts plus portable and native entry-set/sidecar admission; no launcher execution, tests or console qualification"})
+        run.receipt["artifact_staging_disposition"] = cleanup_move(root, artifact, owner_run=run)
+        after = product_source_snapshot(run, "after")
+        if after != run.receipt["source_before"] or PRODUCT_SYSO.exists() or CLI_SYSO.exists() or os.path.lexists(API_SYSO):
+            raise RuntimeError("source tree changed during coordinated fixture build")
+        run.receipt["source_unchanged"] = True
+        if any(sha(path) != digest for path, digest in run.receipt["input_files"].items()):
+            raise RuntimeError("original build tool or native input changed")
+        run.receipt["original_inputs_unchanged"] = True
+        run.receipt["commands_quiescent"] = run.commands_quiescent()
+        run.receipt["command_quiescence"] = run.quiescence_snapshot()
+        if tree(proxy) != proxy_record["files"]:
+            raise RuntimeError("per-run resource-tool proxy changed")
+        run.receipt["resource_tool_proxy_unchanged"] = True
+        new_json(root/"next-qualification.json", {
+            "build_run": str(root),
+            "status": "compiled and admitted only; no runtime execution",
+            "remaining": ["actual launcher receiving", "fixed canonical GUI replay diagnostic"],
+            "execution_rule": "use a separately reviewed original-owner receiver; this runner admits only build and owned cleanup"})
+        run.finish("PASS")
+    except BaseException as exc:
+        if run.commands_quiescent():
+            try:
+                if "artifact" in locals() and "deferred_cleanup" not in run.receipt and (root / "deferred-cleanup.json").exists():
+                    complete_product_cleanup(run, artifact)
+                if "artifact" in locals() and artifact.exists():
+                    run.receipt["artifact_staging_disposition"] = cleanup_move(root, artifact, owner_run=run)
+                after_failure = product_source_snapshot(run, "after-failure")
+                expected_source = run.receipt.get("source_before", locals().get("before"))
+                run.receipt["pending_source_resources"] = [str(p) for p in (PRODUCT_SYSO, CLI_SYSO) if p.exists()]
+                run.receipt["source_unchanged"] = expected_source is not None and after_failure == expected_source and not run.receipt["pending_source_resources"]
+            except BaseException as observation_error:
+                run.receipt["source_observation_error"] = type(observation_error).__name__+": "+str(observation_error)
+        else:
+            run.receipt["finalization_observations"] = {
+                "source_after": "NOT_PERFORMED", "resource_disposition": "NOT_PERFORMED",
+                "input_hashes": "NOT_PERFORMED",
+                "reason": "original command completion is unconfirmed"}
+        run.receipt["commands_quiescent"] = run.commands_quiescent()
+        run.receipt["command_quiescence"] = run.quiescence_snapshot()
+        run.finish("FAIL", exc)
+        raise
+
+def received_bundle(args, which):
+    donor = receive_product_donor(Path(args.build_run))
+    receipt = donor["value"]
+    if which not in ("actual_product", "cli_test_product"):
+        raise RuntimeError("only the two independently admitted Product bundles are available")
+    bundle = receipt[which]
+    if tree(Path(bundle["path"])) != bundle["files"]:
+        raise RuntimeError("compiled bundle changed since independent artifact admission")
+    return donor["root"], receipt, bundle
+
+def execute(args, cli):
+    original, built, bundle = received_bundle(args, "cli_test_product" if cli else "actual_product")
+    root = private_run(args.name)
+    env = clean_environment(root)
+    if cli:
+        env.update({"MCPHUB_CANONICAL_ENTRY_FIXTURE":bundle["fixture"],"MCPHUB_CANONICAL_FIXTURE_TEST_PRODUCT":"1",
+                    "MCPHUB_CANONICAL_ENTRY_FIXTURE_REQUIRED":"1","MCPHUB_CANONICAL_COMMAND_FIXTURE_REQUIRED":"1"})
+    run = Run(root, env)
+    try:
+        run.receipt.update({"build_run":str(original),"bundle":bundle,"scope_helper_sha256":HELPER_SHA})
+        before = source_snapshot(run, "before")
+        if before != built["source_before"]:
+            raise RuntimeError("tests or probe must receive the exact built source snapshot")
+        if cli:
+            exe = Path(bundle["path"])/"mcphub-product"/"mcphub.exe"
+            run.command([exe,"-test.v=test2json","-test.count=1","-test.timeout=120s","-test.run="+args.pattern], "qualified-cli", timeout=150, check=False)
+            test_exit = run.receipt["commands"][-1]["exit_code"]
+            raw = root/"qualified-cli.stdout.txt"
+            converted = run.command([GO,"tool","test2json","-p","mcp-local-hub/internal/cli"], "test2json", timeout=30, stdin_path=raw)
+            events = [json.loads(line) for line in converted.splitlines()]
+            selected = [e for e in events if e.get("Test") and e.get("Action") in ("pass","fail","skip")]
+            run.receipt["test_events"] = selected
+            if test_exit or any(e["Action"] == "fail" for e in selected):
+                raise RuntimeError("qualified CLI tests failed; exact outcomes are retained")
+            if not any(e["Action"] == "pass" for e in selected):
+                raise RuntimeError("selected qualified CLI tests produced no PASS")
+        else:
+            output = run.command([Path(bundle["path"])/"mcphub.exe","version"], "actual-launcher-version", timeout=30)
+            plan = built["build_plan"]
+            expected_product = str(Path(bundle["path"])/"mcphub-product"/"mcphub.exe")
+            reported_paths = [line.split("running:", 1)[1].strip() for line in output.splitlines() if line.strip().startswith("running:")]
+            if "mcp-local-hub "+plan["version"] not in output or "commit:     "+plan["commit"] not in output or len(reported_paths) != 1 or not os.path.samefile(reported_paths[0], expected_product):
+                raise RuntimeError("actual launcher did not report its qualified Product")
+            run.receipt["qualification"] = "actual launcher -> actual Product version with regular redirected stdio; native held entry-set/fence/borrow path required by the compiled receiver; no console/ConPTY qualification"
+        if source_snapshot(run, "after") != before or tree(Path(bundle["path"])) != bundle["files"]:
+            raise RuntimeError("source or original qualified bundle changed during execution")
+        run.receipt["source_unchanged"] = True
+        run.receipt["bundle_unchanged"] = True
+        run.finish("PASS")
+    except BaseException as exc:
+        if run.commands_quiescent():
+            try:
+                after_failure = source_snapshot(run, "after-failure")
+                expected_source = run.receipt.get("source_before", locals().get("before"))
+                run.receipt["pending_source_resources"] = [str(p) for p in (PRODUCT_SYSO, CLI_SYSO) if p.exists()]
+                run.receipt["source_unchanged"] = expected_source is not None and after_failure == expected_source and not run.receipt["pending_source_resources"]
+            except BaseException as observation_error:
+                run.receipt["source_observation_error"] = type(observation_error).__name__+": "+str(observation_error)
+        else:
+            run.receipt["finalization_observations"] = {
+                "source_after": "NOT_PERFORMED", "resource_disposition": "NOT_PERFORMED",
+                "input_hashes": "NOT_PERFORMED",
+                "reason": "original command completion is unconfirmed"}
+        run.receipt["commands_quiescent"] = run.commands_quiescent()
+        run.receipt["command_quiescence"] = run.quiescence_snapshot()
+        run.finish("FAIL", exc)
+        raise
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="action", required=True)
+    p = sub.add_parser("build")
+    p.add_argument("--name", required=True, type=scope_name)
+    p.add_argument("--native-library", required=True)
+    p.add_argument("--native-sha256", required=True)
+    p.add_argument("--commit", required=True)
+    for action in ("cli-test","launcher-probe"):
+        p = sub.add_parser(action)
+        p.add_argument("--name", required=True, type=scope_name)
+        p.add_argument("--build-run", required=True)
+        if action == "cli-test":
+            p.add_argument("--pattern", required=True)
+    p = sub.add_parser("cleanup")
+    p.add_argument("--run", required=True)
+    p.add_argument("--path", required=True)
+    p.add_argument("--builder-pid", type=int)
+    args = parser.parse_args()
+    if args.action == "build":
+        build(args)
+    elif args.action == "cleanup":
+        raise RuntimeError("v6 cleanup is in-process after the retained original Run closes")
+    else:
+        raise RuntimeError("this versioned runner is build/owned-cleanup only; execution requires an original owner receiver")
+
+if __name__ == "__main__":
+    main()

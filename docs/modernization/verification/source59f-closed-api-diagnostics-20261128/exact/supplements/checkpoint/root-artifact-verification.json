@@ -1,0 +1,50 @@
+{
+    "schema":  "root-checkpoint-artifact-byte-verification-v1",
+    "status":  "PASS",
+    "capsules":  [
+                     {
+                         "capsule":  "successor-publication-trail-evidence-v1",
+                         "manifest_sha256":  "06d5fbade7858982647e71fd48a0780219c575856834f89c15aa005bd968cfe3",
+                         "files":  120,
+                         "payload_bytes":  7840723,
+                         "every_file_size_and_sha256_matched":  true
+                     },
+                     {
+                         "capsule":  "successor59f-preparation-evidence-v1\\publication",
+                         "manifest_sha256":  "ca61ea6352390bd9d2fd946bf2ece66c42e6741b0d1629e0f7f012f121f21029",
+                         "files":  121,
+                         "payload_bytes":  23651807,
+                         "every_file_size_and_sha256_matched":  true
+                     },
+                     {
+                         "capsule":  "original-full-v6-complete-captures-evidence-v1",
+                         "manifest_sha256":  "957bd9669689fa1d7aef5efebe7e97758b040a34ccfbd72aa366d5dfc6fb99a9",
+                         "files":  346,
+                         "payload_bytes":  50476117,
+                         "every_file_size_and_sha256_matched":  true
+                     },
+                     {
+                         "capsule":  "original-full-v6-owner-replay-evidence-v1",
+                         "manifest_sha256":  "686aa8b03f461bb5f7c80f0deeafc8cfa2c0e0118c3a98678a30bd74e1734046",
+                         "files":  6,
+                         "payload_bytes":  111164,
+                         "every_file_size_and_sha256_matched":  true
+                     },
+                     {
+                         "capsule":  "old-cli-budget-analysis-v1",
+                         "manifest_sha256":  "bcfeae39f1c96fc4656e5f0490497649545919dbc437e6577d464dd6b5df8252",
+                         "files":  8,
+                         "payload_bytes":  526948,
+                         "every_file_size_and_sha256_matched":  true
+                     },
+                     {
+                         "capsule":  "cli-shared-image-candidate-v1",
+                         "manifest_sha256":  "74ef1f32f87f005ac265e07199f67c2e76931d000936e43107a1c3a02a3484af",
+                         "files":  7,
+                         "payload_bytes":  51172,
+                         "every_file_size_and_sha256_matched":  true
+                     }
+                 ],
+    "native_or_test_execution":  false,
+    "qualification_inherited":  false
+}

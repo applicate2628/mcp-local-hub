@@ -1,0 +1,304 @@
+=== RUN   TestExecuteTerminationCommittedOutcomeMatrix
+=== RUN   TestExecuteTerminationCommittedOutcomeMatrix/precommit_unknown_task
+--- PASS: TestExecuteTerminationCommittedOutcomeMatrix/precommit_unknown_task (0.00s)
+=== NAME  TestExecuteTerminationCommittedOutcomeMatrix
+=== RUN   TestExecuteTerminationCommittedOutcomeMatrix/unbound_success
+--- PASS: TestExecuteTerminationCommittedOutcomeMatrix/unbound_success (0.00s)
+=== NAME  TestExecuteTerminationCommittedOutcomeMatrix
+=== RUN   TestExecuteTerminationCommittedOutcomeMatrix/committed_success
+--- PASS: TestExecuteTerminationCommittedOutcomeMatrix/committed_success (0.00s)
+=== NAME  TestExecuteTerminationCommittedOutcomeMatrix
+=== RUN   TestExecuteTerminationCommittedOutcomeMatrix/committed_termination_unconfirmed
+--- PASS: TestExecuteTerminationCommittedOutcomeMatrix/committed_termination_unconfirmed (0.00s)
+=== NAME  TestExecuteTerminationCommittedOutcomeMatrix
+=== RUN   TestExecuteTerminationCommittedOutcomeMatrix/postcommit_respawn_transport_error
+--- PASS: TestExecuteTerminationCommittedOutcomeMatrix/postcommit_respawn_transport_error (0.00s)
+=== NAME  TestExecuteTerminationCommittedOutcomeMatrix
+--- PASS: TestExecuteTerminationCommittedOutcomeMatrix (0.01s)
+=== NAME  
+=== RUN   TestExecuteUnknownTaskDoesNotProbeTerminateOrRespawn
+--- PASS: TestExecuteUnknownTaskDoesNotProbeTerminateOrRespawn (0.00s)
+=== NAME  
+=== RUN   TestExecuteForeignAndUnverifiedOwnerRefuseWithoutTerminateOrRespawn
+=== RUN   TestExecuteForeignAndUnverifiedOwnerRefuseWithoutTerminateOrRespawn/foreign_executable
+--- PASS: TestExecuteForeignAndUnverifiedOwnerRefuseWithoutTerminateOrRespawn/foreign_executable (0.00s)
+=== NAME  TestExecuteForeignAndUnverifiedOwnerRefuseWithoutTerminateOrRespawn
+=== RUN   TestExecuteForeignAndUnverifiedOwnerRefuseWithoutTerminateOrRespawn/unverifiable_identity
+--- PASS: TestExecuteForeignAndUnverifiedOwnerRefuseWithoutTerminateOrRespawn/unverifiable_identity (0.00s)
+=== NAME  TestExecuteForeignAndUnverifiedOwnerRefuseWithoutTerminateOrRespawn
+--- PASS: TestExecuteForeignAndUnverifiedOwnerRefuseWithoutTerminateOrRespawn (0.00s)
+=== NAME  
+=== RUN   TestExecuteVerifiedOwnerTerminatesWithIdentityBeforeSingleForceRespawn
+--- PASS: TestExecuteVerifiedOwnerTerminatesWithIdentityBeforeSingleForceRespawn (0.00s)
+=== NAME  
+=== RUN   TestExecuteUnboundPortSkipsTerminateAndForcesRespawn
+--- PASS: TestExecuteUnboundPortSkipsTerminateAndForcesRespawn (0.00s)
+=== NAME  
+=== RUN   TestExecuteUnboundPortStateReadFailureFailsClosedBeforeTerminateOrRespawn
+--- PASS: TestExecuteUnboundPortStateReadFailureFailsClosedBeforeTerminateOrRespawn (0.00s)
+=== NAME  
+=== RUN   TestExecuteUnboundPortMissingTargetStateRowFailsClosedBeforeTerminateOrRespawn
+--- PASS: TestExecuteUnboundPortMissingTargetStateRowFailsClosedBeforeTerminateOrRespawn (0.00s)
+=== NAME  
+=== RUN   TestExecuteUnresolvablePortStateReadFailureFailsClosedBeforeRespawn
+--- PASS: TestExecuteUnresolvablePortStateReadFailureFailsClosedBeforeRespawn (0.00s)
+=== NAME  
+=== RUN   TestExecutePortProbeErrorStateReadFailureFailsClosedBeforeRespawn
+--- PASS: TestExecutePortProbeErrorStateReadFailureFailsClosedBeforeRespawn (0.00s)
+=== NAME  
+=== RUN   TestExecuteAlreadyExitedStillRequestsForceRespawn
+--- PASS: TestExecuteAlreadyExitedStillRequestsForceRespawn (0.00s)
+=== NAME  
+=== RUN   TestExecuteCommittedTerminationWaitErrorIsUnconfirmedAndStillRespawns
+--- PASS: TestExecuteCommittedTerminationWaitErrorIsUnconfirmedAndStillRespawns (0.00s)
+=== NAME  
+=== RUN   TestExecutePIDReuseSameExecutableDifferentArgvDoesNotTerminate
+--- PASS: TestExecutePIDReuseSameExecutableDifferentArgvDoesNotTerminate (0.00s)
+=== NAME  
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/duplicate_same_task-name
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/duplicate_same_task-name/\mcp-local-hub-serena-a
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/duplicate_same_task-name/\mcp-local-hub-serena-a (0.00s)
+=== NAME  TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/duplicate_same_task-name
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/duplicate_same_task-name (0.00s)
+=== NAME  TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_task-name
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_task-name/\mcp-local-hub-serena-a
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_task-name/\mcp-local-hub-serena-a (0.00s)
+=== NAME  TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_task-name
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_task-name/\mcp-local-hub-serena-b
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_task-name/\mcp-local-hub-serena-b (0.00s)
+=== NAME  TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_task-name
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_task-name (0.00s)
+=== NAME  TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/duplicate_same_workspace
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/duplicate_same_workspace/\mcp-local-hub-mcp-language-server-go-a
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/duplicate_same_workspace/\mcp-local-hub-mcp-language-server-go-a (0.00s)
+=== NAME  TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/duplicate_same_workspace
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/duplicate_same_workspace (0.00s)
+=== NAME  TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_workspace
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_workspace/\mcp-local-hub-mcp-language-server-go-a
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_workspace/\mcp-local-hub-mcp-language-server-go-a (0.00s)
+=== NAME  TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_workspace
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_workspace/\mcp-local-hub-mcp-language-server-go-b
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_workspace/\mcp-local-hub-mcp-language-server-go-b (0.00s)
+=== NAME  TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_workspace
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_workspace (0.00s)
+=== NAME  TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/duplicate_same_language
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/duplicate_same_language/\mcp-local-hub-mcp-language-server-go-a
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/duplicate_same_language/\mcp-local-hub-mcp-language-server-go-a (0.00s)
+=== NAME  TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/duplicate_same_language
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/duplicate_same_language (0.00s)
+=== NAME  TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_language
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_language/\mcp-local-hub-mcp-language-server-go-a
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_language/\mcp-local-hub-mcp-language-server-go-a (0.00s)
+=== NAME  TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_language
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_language/\mcp-local-hub-mcp-language-server-python-a
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_language/\mcp-local-hub-mcp-language-server-python-a (0.00s)
+=== NAME  TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_language
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_language (0.00s)
+=== NAME  TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/duplicate_same_server
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/duplicate_same_server/\mcp-local-hub-memory-default
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/duplicate_same_server/\mcp-local-hub-memory-default (0.00s)
+=== NAME  TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/duplicate_same_server
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/duplicate_same_server (0.00s)
+=== NAME  TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_server
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_server/\mcp-local-hub-memory-default
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_server/\mcp-local-hub-memory-default (0.00s)
+=== NAME  TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_server
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_server/\mcp-local-hub-time-default
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_server/\mcp-local-hub-time-default (0.00s)
+=== NAME  TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_server
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_server (0.00s)
+=== NAME  TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/duplicate_same_daemon
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/duplicate_same_daemon/\mcp-local-hub-memory-default
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/duplicate_same_daemon/\mcp-local-hub-memory-default (0.00s)
+=== NAME  TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/duplicate_same_daemon
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/duplicate_same_daemon (0.00s)
+=== NAME  TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_daemon
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_daemon/\mcp-local-hub-memory-default
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_daemon/\mcp-local-hub-memory-default (0.00s)
+=== NAME  TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_daemon
+=== RUN   TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_daemon/\mcp-local-hub-memory-secondary
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_daemon/\mcp-local-hub-memory-secondary (0.00s)
+=== NAME  TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_daemon
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate/conflicting_daemon (0.00s)
+=== NAME  TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate
+--- PASS: TestExecuteRejectsDuplicateOrConflictingTaskDiscriminatorsWithoutTerminate (0.01s)
+=== NAME  
+=== RUN   TestExecuteSameExecutableAndArgvOutsideHeldStartProofDoesNotTerminate
+--- PASS: TestExecuteSameExecutableAndArgvOutsideHeldStartProofDoesNotTerminate (0.00s)
+=== NAME  
+=== RUN   TestExecuteIdentityMismatchAtKillBoundarySkipsOwnershipProbeAndTerminate
+--- PASS: TestExecuteIdentityMismatchAtKillBoundarySkipsOwnershipProbeAndTerminate (0.00s)
+=== NAME  
+=== RUN   TestExecutePortOwnerChangedAtKillBoundaryDoesNotTerminate
+--- PASS: TestExecutePortOwnerChangedAtKillBoundaryDoesNotTerminate (0.00s)
+=== NAME  
+=== RUN   TestExecuteBoundaryStateRereadRefusesNewSupervisorTrackedChild
+--- PASS: TestExecuteBoundaryStateRereadRefusesNewSupervisorTrackedChild (0.00s)
+=== NAME  
+=== RUN   TestExecuteStateReadFailureFailsClosedBeforeTerminateOrRespawn
+--- PASS: TestExecuteStateReadFailureFailsClosedBeforeTerminateOrRespawn (0.00s)
+=== NAME  
+=== RUN   TestExecuteMissingTargetStateRowFailsClosedBeforeTerminateOrRespawn
+=== RUN   TestExecuteMissingTargetStateRowFailsClosedBeforeTerminateOrRespawn/empty_state_map
+--- PASS: TestExecuteMissingTargetStateRowFailsClosedBeforeTerminateOrRespawn/empty_state_map (0.00s)
+=== NAME  TestExecuteMissingTargetStateRowFailsClosedBeforeTerminateOrRespawn
+=== RUN   TestExecuteMissingTargetStateRowFailsClosedBeforeTerminateOrRespawn/target_row_missing
+--- PASS: TestExecuteMissingTargetStateRowFailsClosedBeforeTerminateOrRespawn/target_row_missing (0.00s)
+=== NAME  TestExecuteMissingTargetStateRowFailsClosedBeforeTerminateOrRespawn
+--- PASS: TestExecuteMissingTargetStateRowFailsClosedBeforeTerminateOrRespawn (0.00s)
+=== NAME  
+=== RUN   TestExecuteBoundPortWithoutReadableOwnerPIDRefusesWithoutTerminateOrRespawn
+=== RUN   TestExecuteBoundPortWithoutReadableOwnerPIDRefusesWithoutTerminateOrRespawn/pid_0
+--- PASS: TestExecuteBoundPortWithoutReadableOwnerPIDRefusesWithoutTerminateOrRespawn/pid_0 (0.00s)
+=== NAME  TestExecuteBoundPortWithoutReadableOwnerPIDRefusesWithoutTerminateOrRespawn
+=== RUN   TestExecuteBoundPortWithoutReadableOwnerPIDRefusesWithoutTerminateOrRespawn/pid_-1
+--- PASS: TestExecuteBoundPortWithoutReadableOwnerPIDRefusesWithoutTerminateOrRespawn/pid_-1 (0.00s)
+=== NAME  TestExecuteBoundPortWithoutReadableOwnerPIDRefusesWithoutTerminateOrRespawn
+--- PASS: TestExecuteBoundPortWithoutReadableOwnerPIDRefusesWithoutTerminateOrRespawn (0.00s)
+=== NAME  
+=== RUN   TestExecuteCanceledBeforeKillDoesNotTerminate
+--- PASS: TestExecuteCanceledBeforeKillDoesNotTerminate (0.00s)
+=== NAME  
+=== RUN   TestExecuteTerminationObserverRunsBeforePostCommitRecovery
+--- PASS: TestExecuteTerminationObserverRunsBeforePostCommitRecovery (0.00s)
+=== NAME  
+=== RUN   TestExecuteInitialPortProbeHonorsContextDeadlineWithoutOpeningGeneration
+--- PASS: TestExecuteInitialPortProbeHonorsContextDeadlineWithoutOpeningGeneration (0.02s)
+=== NAME  
+=== RUN   TestExecuteCancellationDuringSuccessfulBoundaryProbeAuditsOnceAndDoesNotTerminate
+--- PASS: TestExecuteCancellationDuringSuccessfulBoundaryProbeAuditsOnceAndDoesNotTerminate (0.00s)
+=== NAME  
+=== RUN   TestExecuteBlockingPortProbeReturnsOnContextDeadlineAndClosesHeldGeneration
+--- PASS: TestExecuteBlockingPortProbeReturnsOnContextDeadlineAndClosesHeldGeneration (0.02s)
+=== NAME  
+=== RUN   TestExecuteCancellationAfterPointOfNoReturnStillAttemptsDetachedRespawn
+--- PASS: TestExecuteCancellationAfterPointOfNoReturnStillAttemptsDetachedRespawn (0.00s)
+=== NAME  
+=== RUN   TestExecuteSupervisorUnreachableAtPreKillProbeRefusesWithoutTerminateOrRespawn
+--- PASS: TestExecuteSupervisorUnreachableAtPreKillProbeRefusesWithoutTerminateOrRespawn (0.00s)
+=== NAME  
+=== RUN   TestExecuteBlockingPostCommitAuditCannotPreemptRespawn
+--- PASS: TestExecuteBlockingPostCommitAuditCannotPreemptRespawn (0.09s)
+=== NAME  
+=== RUN   TestExecuteAlreadyExitedBlockingAuditCannotPreemptRespawn
+--- PASS: TestExecuteAlreadyExitedBlockingAuditCannotPreemptRespawn (0.05s)
+=== NAME  
+=== RUN   TestExecuteDoesNotHangWhenAuditWorkerNeverSettles
+--- PASS: TestExecuteDoesNotHangWhenAuditWorkerNeverSettles (0.07s)
+=== NAME  
+=== RUN   TestExecuteLateAuditWorkerSettlingAfterReturnProducesExactlyOneRow
+--- PASS: TestExecuteLateAuditWorkerSettlingAfterReturnProducesExactlyOneRow (0.28s)
+=== NAME  
+=== RUN   TestExecutePendingCommittedAuditSurvivesProcessExitAndReplaysOnce
+--- PASS: TestExecutePendingCommittedAuditSurvivesProcessExitAndReplaysOnce (0.16s)
+=== NAME  
+=== RUN   TestExecuteFastCommittedAuditIsDurableBeforeRespawn
+--- PASS: TestExecuteFastCommittedAuditIsDurableBeforeRespawn (0.00s)
+=== NAME  
+=== RUN   TestExecuteAuditHandoffPersistenceFailureReturnsFailureAuditDurabilityAfterRespawn
+--- PASS: TestExecuteAuditHandoffPersistenceFailureReturnsFailureAuditDurabilityAfterRespawn (0.00s)
+=== NAME  
+=== RUN   TestExecuteAuditDurabilityFailurePreservesRespawnFailureFact
+--- PASS: TestExecuteAuditDurabilityFailurePreservesRespawnFailureFact (0.00s)
+=== NAME  
+=== RUN   TestExecuteRespawnFailureReturnsCommittedReapFact
+--- PASS: TestExecuteRespawnFailureReturnsCommittedReapFact (0.00s)
+=== NAME  
+=== RUN   TestExecutePanickingPostCommitNotifyCannotPreemptRespawn
+--- PASS: TestExecutePanickingPostCommitNotifyCannotPreemptRespawn (0.00s)
+=== NAME  
+=== RUN   TestExecuteTerminateWaitConsumesSharedPostCommitBudgetAndStillRespawns
+--- PASS: TestExecuteTerminateWaitConsumesSharedPostCommitBudgetAndStillRespawns (0.01s)
+=== NAME  
+=== RUN   TestExecuteTerminateConsumesAttemptBudgetStillRespawnsAndReportsAuditDurability
+--- PASS: TestExecuteTerminateConsumesAttemptBudgetStillRespawnsAndReportsAuditDurability (0.00s)
+=== NAME  
+=== RUN   TestExecuteRuntimeRespawnReservationDepletionRefusesBeforeTerminate
+--- PASS: TestExecuteRuntimeRespawnReservationDepletionRefusesBeforeTerminate (0.00s)
+=== NAME  
+=== RUN   TestExecuteStaticRespawnReservationRefusalHasDedicatedKind
+--- PASS: TestExecuteStaticRespawnReservationRefusalHasDedicatedKind (0.00s)
+=== NAME  
+=== RUN   TestExecutePermittedGUIIdentityAndProbeLatencyPreservesFullDetachedReserve
+--- PASS: TestExecutePermittedGUIIdentityAndProbeLatencyPreservesFullDetachedReserve (0.17s)
+=== NAME  
+=== RUN   TestExecuteCommittedKillPortNeverFreesStillRespawnsOnceAndReportsPortWaitOutcome
+--- PASS: TestExecuteCommittedKillPortNeverFreesStillRespawnsOnceAndReportsPortWaitOutcome (0.04s)
+=== NAME  
+=== RUN   TestBoundedPortWaitBudgetReservesRespawnRemainder
+--- PASS: TestBoundedPortWaitBudgetReservesRespawnRemainder (0.00s)
+=== NAME  
+=== RUN   TestBoundEventFieldUsesShared2048ByteLimit
+--- PASS: TestBoundEventFieldUsesShared2048ByteLimit (0.00s)
+=== NAME  
+=== RUN   TestExecuteDeclinedReapEmitsExactlyOneConfirmationDeclinedAudit
+--- PASS: TestExecuteDeclinedReapEmitsExactlyOneConfirmationDeclinedAudit (0.00s)
+=== NAME  
+=== RUN   TestExecuteMapsRespawnSetupFailureToStateReadAndDialFailureToUnavailable
+=== RUN   TestExecuteMapsRespawnSetupFailureToStateReadAndDialFailureToUnavailable/local_setup_failure
+--- PASS: TestExecuteMapsRespawnSetupFailureToStateReadAndDialFailureToUnavailable/local_setup_failure (0.00s)
+=== NAME  TestExecuteMapsRespawnSetupFailureToStateReadAndDialFailureToUnavailable
+=== RUN   TestExecuteMapsRespawnSetupFailureToStateReadAndDialFailureToUnavailable/transport_dial_failure
+--- PASS: TestExecuteMapsRespawnSetupFailureToStateReadAndDialFailureToUnavailable/transport_dial_failure (0.00s)
+=== NAME  TestExecuteMapsRespawnSetupFailureToStateReadAndDialFailureToUnavailable
+--- PASS: TestExecuteMapsRespawnSetupFailureToStateReadAndDialFailureToUnavailable (0.00s)
+=== NAME  
+=== RUN   TestQueueIdempotentAuditFallbackOutcomeMatrix
+=== RUN   TestQueueIdempotentAuditFallbackOutcomeMatrix/FastSuccess
+--- PASS: TestQueueIdempotentAuditFallbackOutcomeMatrix/FastSuccess (0.00s)
+=== NAME  TestQueueIdempotentAuditFallbackOutcomeMatrix
+=== RUN   TestQueueIdempotentAuditFallbackOutcomeMatrix/NoAttempt
+--- PASS: TestQueueIdempotentAuditFallbackOutcomeMatrix/NoAttempt (0.01s)
+=== NAME  TestQueueIdempotentAuditFallbackOutcomeMatrix
+=== RUN   TestQueueIdempotentAuditFallbackOutcomeMatrix/LockAcquisitionTimeout
+--- PASS: TestQueueIdempotentAuditFallbackOutcomeMatrix/LockAcquisitionTimeout (0.01s)
+=== NAME  TestQueueIdempotentAuditFallbackOutcomeMatrix
+=== RUN   TestQueueIdempotentAuditFallbackOutcomeMatrix/DirectDefiniteFailure
+--- PASS: TestQueueIdempotentAuditFallbackOutcomeMatrix/DirectDefiniteFailure (0.01s)
+=== NAME  TestQueueIdempotentAuditFallbackOutcomeMatrix
+=== RUN   TestQueueIdempotentAuditFallbackOutcomeMatrix/DirectReleaseFailure
+--- PASS: TestQueueIdempotentAuditFallbackOutcomeMatrix/DirectReleaseFailure (0.00s)
+=== NAME  TestQueueIdempotentAuditFallbackOutcomeMatrix
+=== RUN   TestQueueIdempotentAuditFallbackOutcomeMatrix/PendingSuccess
+--- PASS: TestQueueIdempotentAuditFallbackOutcomeMatrix/PendingSuccess (0.00s)
+=== NAME  TestQueueIdempotentAuditFallbackOutcomeMatrix
+=== RUN   TestQueueIdempotentAuditFallbackOutcomeMatrix/PendingStillUnsettled
+--- PASS: TestQueueIdempotentAuditFallbackOutcomeMatrix/PendingStillUnsettled (0.00s)
+=== NAME  TestQueueIdempotentAuditFallbackOutcomeMatrix
+=== RUN   TestQueueIdempotentAuditFallbackOutcomeMatrix/PendingReleaseFailure
+--- PASS: TestQueueIdempotentAuditFallbackOutcomeMatrix/PendingReleaseFailure (0.00s)
+=== NAME  TestQueueIdempotentAuditFallbackOutcomeMatrix
+=== RUN   TestQueueIdempotentAuditFallbackOutcomeMatrix/PendingDefiniteFailure
+--- PASS: TestQueueIdempotentAuditFallbackOutcomeMatrix/PendingDefiniteFailure (0.01s)
+=== NAME  TestQueueIdempotentAuditFallbackOutcomeMatrix
+--- PASS: TestQueueIdempotentAuditFallbackOutcomeMatrix (0.05s)
+=== NAME  
+=== RUN   TestCommittedAuditFinalizerHandoffReadsProcessLockOwner
+=== RUN   TestCommittedAuditFinalizerHandoffReadsProcessLockOwner/DiscardedFireAndForgetAuditStrandsTheLock
+--- PASS: TestCommittedAuditFinalizerHandoffReadsProcessLockOwner/DiscardedFireAndForgetAuditStrandsTheLock (0.01s)
+=== NAME  TestCommittedAuditFinalizerHandoffReadsProcessLockOwner
+=== RUN   TestCommittedAuditFinalizerHandoffReadsProcessLockOwner/AbandonedWorkerStillHoldsTheLock
+--- PASS: TestCommittedAuditFinalizerHandoffReadsProcessLockOwner/AbandonedWorkerStillHoldsTheLock (0.11s)
+=== NAME  TestCommittedAuditFinalizerHandoffReadsProcessLockOwner
+=== RUN   TestCommittedAuditFinalizerHandoffReadsProcessLockOwner/ReplayPathReleaseFailureStrandsTheLock
+--- PASS: TestCommittedAuditFinalizerHandoffReadsProcessLockOwner/ReplayPathReleaseFailureStrandsTheLock (0.01s)
+=== NAME  TestCommittedAuditFinalizerHandoffReadsProcessLockOwner
+--- PASS: TestCommittedAuditFinalizerHandoffReadsProcessLockOwner (0.12s)
+=== NAME  
+=== RUN   TestCommittedAuditFinalizerReportsPendingNotStrandedForAConcurrentHealthyEmit
+--- PASS: TestCommittedAuditFinalizerReportsPendingNotStrandedForAConcurrentHealthyEmit (0.00s)
+=== NAME  
+=== RUN   TestCommittedAuditFinalizerBoundsDurableCarrierPersistence
+--- PASS: TestCommittedAuditFinalizerBoundsDurableCarrierPersistence (0.04s)
+=== NAME  
+PASS

@@ -1,0 +1,15 @@
+{"Action":"start","Package":"mcp-local-hub/internal/urlredact"}
+{"Action":"run","Package":"mcp-local-hub/internal/urlredact","Test":"TestMarketplaceURLForErrorRedactsSchemeRelativeUserinfo"}
+{"Action":"output","Package":"mcp-local-hub/internal/urlredact","Test":"TestMarketplaceURLForErrorRedactsSchemeRelativeUserinfo","Output":"=== RUN   TestMarketplaceURLForErrorRedactsSchemeRelativeUserinfo\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/urlredact","Test":"TestMarketplaceURLForErrorRedactsSchemeRelativeUserinfo","Output":"--- PASS: TestMarketplaceURLForErrorRedactsSchemeRelativeUserinfo (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/urlredact","Test":"TestMarketplaceURLForErrorRedactsSchemeRelativeUserinfo"}
+{"Action":"run","Package":"mcp-local-hub/internal/urlredact","Test":"TestScrubParseErrorRedactsCredentialsInURLParseError"}
+{"Action":"output","Package":"mcp-local-hub/internal/urlredact","Test":"TestScrubParseErrorRedactsCredentialsInURLParseError","Output":"=== RUN   TestScrubParseErrorRedactsCredentialsInURLParseError\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/urlredact","Test":"TestScrubParseErrorRedactsCredentialsInURLParseError","Output":"--- PASS: TestScrubParseErrorRedactsCredentialsInURLParseError (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/urlredact","Test":"TestScrubParseErrorRedactsCredentialsInURLParseError"}
+{"Action":"run","Package":"mcp-local-hub/internal/urlredact","Test":"TestScrubParseErrorPassesThroughNonURLErrors"}
+{"Action":"output","Package":"mcp-local-hub/internal/urlredact","Test":"TestScrubParseErrorPassesThroughNonURLErrors","Output":"=== RUN   TestScrubParseErrorPassesThroughNonURLErrors\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/urlredact","Test":"TestScrubParseErrorPassesThroughNonURLErrors","Output":"--- PASS: TestScrubParseErrorPassesThroughNonURLErrors (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/urlredact","Test":"TestScrubParseErrorPassesThroughNonURLErrors"}
+{"Action":"output","Package":"mcp-local-hub/internal/urlredact","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/urlredact"}

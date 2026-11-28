@@ -1,0 +1,169 @@
+"""Prepare the current literal runtime from reviewed templates and explicit artifacts.
+DATA only: no import of generated code, native owner, process, test, build or model.
+"""
+import sys
+sys.dont_write_bytecode=True
+import argparse,ast,hashlib,json,os,re,stat
+from pathlib import Path
+TASK=Path(r"@@RECOVERY_WORK_AREA_RAW@@\mcp-acceptance-rebuild-20261127-v1")
+SOURCE_COMMIT="727d66753814dc218e26d699e57402db2d13190a"
+PRODUCT_COMMIT="3ebe335a2f666a5279d7fafc31a6f4dc3feedff4"
+SOURCE_EVIDENCE_PINS={"test_snapshot":"b37a149da3a88b7b87eec0f0ed0ace83178cf7a2add88e97a906989073f1a096",
+ "product_snapshot":"5f59bbe051cbd6e160e3e84e67180d96940b13191988b7e41eb760d3eea1ac6f",
+ "compatibility":"4b33af00603c81c290abe1e4871b4ad1b6009d9e0a56f97bd1c228e198882d50",
+ "selected_inputs":"77f1aa84d4bcea91e6a6c153095995dd165449e93d90edeffd19ba564f14b1c7"}
+RECEIVER_SHA="6ad13e7c57e604111552fd553f10a66a174c9ba9b96dc37484dfba071a9bf2a0"
+
+def require(ok,message):
+    if not ok: raise RuntimeError(message)
+def sha(path):
+    with Path(path).open("rb") as stream:
+        return hashlib.file_digest(stream,"sha256").hexdigest()
+def ordinary(path,directory=False):
+    path=Path(path)
+    require(path.is_absolute() and ".." not in path.parts,"absolute ordinary input required")
+    for value in (*reversed(path.parents),path):
+        info=value.lstat()
+        require(not stat.S_ISLNK(info.st_mode) and not getattr(info,"st_file_attributes",0)&0x400,
+                "reparse input refused")
+    require(path.is_dir() if directory else path.is_file(),"input has wrong kind")
+    return path
+def pin(row):
+    require(isinstance(row,dict) and set(row)=={"path","sha256"}
+            and isinstance(row["path"],str) and isinstance(row["sha256"],str)
+            and re.fullmatch("[0-9a-f]{64}",row["sha256"]),"unfilled required artifact path/SHA256")
+    path=ordinary(row["path"])
+    require(sha(path)==row["sha256"],"explicit artifact bytes differ: "+str(path))
+    return path
+def write(path,raw):
+    with path.open("xb") as stream:
+        stream.write(raw);stream.flush();os.fsync(stream.fileno())
+    return sha(path)
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--bindings",required=True)
+    parser.add_argument("--bindings-sha256",required=True)
+    parser.add_argument("--output",required=True)
+    parser.add_argument("--reviewed",action="store_true",
+                        help="root has reviewed this concrete runtime composition; no execution occurs")
+    args=parser.parse_args()
+    origin=Path(__file__).absolute().parent
+    raw=pin({"path":args.bindings,"sha256":args.bindings_sha256}).read_bytes()
+    cfg=json.loads(raw)
+    expected={"schema","task_root","source_dir","source_commit","product_source_commit","runs_root","run_name","trash_root",
+              "source_context","source_evidence","tools","guard","windows_job","controllers","canonical_tools","legacy",
+              "marked","publisher","serena_preparation_tools","short_temp_parent","cache_copy","cache_parent",
+              "migration","closed_producer_receipts","input_files","environment","outer_seconds"}
+    require(set(cfg)==expected and cfg["schema"]=="literal-original-inputs-v6","explicit current input schema required")
+    require(Path(cfg["task_root"])==TASK and Path(cfg["source_dir"])==TASK/"source-original727d-v2"
+            and cfg["source_commit"]==SOURCE_COMMIT and cfg["product_source_commit"]==PRODUCT_COMMIT,
+            "exact recovered original727d and separate3ebe source binding required")
+    require(Path(cfg["runs_root"]).is_relative_to(TASK) and ".." not in Path(cfg["runs_root"]).parts
+            and re.fullmatch("[A-Za-z0-9_-]{1,45}",cfg["run_name"])
+            and not (Path(cfg["runs_root"])/cfg["run_name"]).exists(),"fresh exact run root required")
+    require(Path(cfg["trash_root"])==Path(r"@@RECOVERY_WORK_AREA_RAW@@\trash"),"same-PC user trash required")
+    require(type(cfg["outer_seconds"]) is int and 1800<=cfg["outer_seconds"]<=86400,"bounded full-driver budget required")
+    require(Path(cfg["source_context"]["path"]).is_relative_to(TASK),"fresh source recovery context required")
+    require(set(cfg["source_evidence"])==set(SOURCE_EVIDENCE_PINS)
+            and all(cfg["source_evidence"][key]["sha256"]==digest for key,digest in SOURCE_EVIDENCE_PINS.items()),
+            "exact historical DATA evidence pins required; no old working-tree/cache binding")
+    short=Path(cfg["short_temp_parent"])
+    require(short.parent==Path(r"@@RECOVERY_WORK_AREA_RAW@@") and re.fullmatch("[A-Za-z0-9]{1,5}",short.name)
+            and len(str(short/"x0123456789ab"))<=31 and not short.exists(),
+            "one fresh bounded original short-temp parent required")
+    require(set(cfg["tools"])=={"go","git","gcc","pwsh","python"}
+            and set(cfg["controllers"])=={"contained","namespace","canonical","job","test2json","validator"},
+            "exact tool/controller roles required")
+    require(set(cfg["canonical_tools"]) in ({"powershell","netstat","netsh","conhost"},
+                                         {"powershell","netstat","netsh","conhost","wmic"}),"canonical tool roles differ")
+    require(set(cfg["legacy"])=={"build_plan","native_actor_fixture"}
+            and set(cfg["marked"])=={"inputs","build_plan","compiler_resource","bundle_root"}
+            and set(cfg["publisher"])=={"source_root","source_snapshot","build_receipt"}
+            and set(cfg["migration"])=={"default","state"}
+            and set(cfg["serena_preparation_tools"])=={"uv","uvx","python"},
+            "three separate build DATA roles and both original migration modes required")
+    require(cfg["marked"]["inputs"]["sha256"]=="b716a16b9cbe69d67c3a2adc15b24576d1121e32ff6080c7eefc460fe64bafc0"
+            and cfg["marked"]["build_plan"]["sha256"]=="63ed22049a25de657157e4d3d49d4e2a615239e66f26bf2ffba7b8c8de8b98b3"
+            and cfg["marked"]["compiler_resource"]["sha256"]=="959b6ac719cf65a93e4fa63aa015e783b62497daaa0e0e72d288c43527e5a11b"
+            and cfg["legacy"]["build_plan"]["sha256"]=="52ba50f7e5702bb94ff059aea8769bc82b01c2808a63ddcbdac7cbdeccfc75ce",
+            "original marked727d metadata/resource and separate3ebe native plan required")
+    require(Path(cfg["marked"]["bundle_root"]).is_relative_to(TASK)
+            and Path(cfg["publisher"]["source_root"])==TASK/"original-product-inputs-v6/source",
+            "new independent input operands are required")
+    require(isinstance(cfg["closed_producer_receipts"],list) and cfg["closed_producer_receipts"],
+            "original producer closure inputs required")
+    # Admit the frozen closed producer metadata before observing its output payloads.
+    for row in cfg["closed_producer_receipts"]:
+        path=pin(row)
+        value=json.loads(path.read_text(encoding="utf-8-sig"))
+        require(value.get("terminal_exit_received") is True and value.get("parent_capture_files_closed") is True
+                and value.get("physical_complete") is True,"producer physical completion is unreceived")
+    all_pins=[cfg["source_context"],cfg["guard"],cfg["windows_job"],*cfg["tools"].values(),
+              *cfg["controllers"].values(),*cfg["canonical_tools"].values(),*cfg["legacy"].values(),
+              *cfg["source_evidence"].values(),*cfg["serena_preparation_tools"].values(),
+              cfg["marked"]["inputs"],cfg["marked"]["build_plan"],cfg["marked"]["compiler_resource"],
+              cfg["publisher"]["source_snapshot"],cfg["publisher"]["build_receipt"],cfg["cache_copy"],cfg["cache_parent"],
+              *cfg["migration"].values(),*cfg["closed_producer_receipts"]]
+    require(isinstance(cfg["input_files"],dict),"explicit auxiliary input pins required")
+    all_pins += [{"path":path,"sha256":digest} for path,digest in cfg["input_files"].items()]
+    for row in all_pins: pin(row)
+    env=cfg["environment"]
+    require(isinstance(env,dict) and all(isinstance(k,str) and isinstance(v,str) and "\0" not in k+v for k,v in env.items())
+            and len({k.upper() for k in env})==len(env),"explicit unambiguous environment required")
+    require(all(key in env for key in ("SystemRoot","WINDIR","COMSPEC","PATH","PATHEXT"))
+            and not any(k.upper().startswith(("MCPHUB_","PYTHON")) or k.upper() in ("SERENA_HOME","TEST_TELEMETRY_DIR") for k in env),
+            "no ambient test/runtime opt-ins are accepted")
+    require(str(Path(cfg["canonical_tools"]["powershell"]["path"]).parent).lower()
+            in [p.lower() for p in env["PATH"].split(";")],"exact Windows PowerShell directory must be on PATH")
+    output=Path(args.output)
+    require(output.is_absolute() and ".." not in output.parts and output.parent==origin and not output.exists(),
+            "fresh direct child of inputs-original-v6 required")
+    # Verify templates before writing a single composed file.
+    source_manifest=json.loads((origin/"templates-manifest.json").read_text(encoding="utf-8"))
+    for name,digest in source_manifest["files"].items():
+        require(Path(name).name==name and sha(ordinary(origin/name))==digest,"reviewed template changed")
+    require(sha(origin/"canonical_receiving_v4.py")==RECEIVER_SHA,"published current receiver changed")
+    output.mkdir()
+    config_path=output/"runtime-inputs.json"
+    config_sha=write(config_path,(json.dumps(cfg,indent=2,sort_keys=True)+"\n").encode("utf-8"))
+    values={"CONFIG_PATH_REPR":repr(str(config_path)),"CONFIG_SHA_REPR":repr(config_sha),
+            "TASK_PATH_REPR":repr(cfg["task_root"]),"INPUTS_PATH_REPR":repr(str(output)),
+            "RUNS_PATH_REPR":repr(cfg["runs_root"]),"ARTIFACTS_PATH_REPR":repr(str(Path(cfg["source_dir"])/".scratch")),
+            "GUARD_PATH_REPR":repr(cfg["guard"]["path"]),"GUARD_SHA_REPR":repr(cfg["guard"]["sha256"])}
+    files={"runtime-inputs.json":config_sha}
+    def compose(template,name,role):
+        text=(origin/template).read_text(encoding="utf-8")
+        for key,value in values.items(): text=text.replace("@@"+key+"@@",value)
+        require(not re.search(r"@@[A-Z_]+@@",text),"runtime substitution remains unresolved: "+name)
+        ast.parse(text,filename=name)
+        digest=write(output/name,text.encode("utf-8"))
+        files[name]=digest
+        if role:
+            values[role+"_PATH_REPR"]=repr(str(output/name))
+            values[role+"_SHA_REPR"]=repr(digest)
+    compose("private_run_scope.py.in","private_run_scope.py","SCOPE")
+    compose("qualified_windows_products_consumer_v6.py.in","qualified_windows_products_consumer_v6.py","CORE")
+    compose("run_partitioned_go_gate_v6.py.in","run_partitioned_go_gate_v6.py","PART")
+    compose("literal_migration_receiving_v6.py.in","literal_migration_receiving_v6.py","MIGRATION")
+    files["canonical_receiving_v4.py"]=write(output/"canonical_receiving_v4.py",(origin/"canonical_receiving_v4.py").read_bytes())
+    values["RECEIVER_PATH_REPR"]=repr(str(output/"canonical_receiving_v4.py"))
+    values["RECEIVER_SHA_REPR"]=repr(files["canonical_receiving_v4.py"])
+    compose("literal_go_exec_adapter_v6.py.in","literal_go_exec_adapter_v6.py","ADAPTER")
+    compose("run_literal_go_gate_v6.py.in","run_literal_go_gate_v6.py","DRIVER")
+    compose("launch_literal_v6.py.in","launch_literal_v6.py","")
+    manifest={"schema":"literal-original-runtime-v6","reviewed":args.reviewed,
+              "source_commit":SOURCE_COMMIT,"configuration":{"path":str(config_path),"sha256":config_sha},
+              "files":files,"source_provenance":source_manifest["provenance"],
+              "qualification":"NOT_RUN","native_or_test_commands_started":False}
+    manifest_path=output/"runtime-manifest.json"
+    digest=write(manifest_path,(json.dumps(manifest,indent=2)+"\n").encode("utf-8"))
+    command=[cfg["tools"]["python"]["path"],"-I","-S","-B",str(output/"launch_literal_v6.py"),
+             "--manifest",str(manifest_path),"--manifest-sha256",digest]
+    result={"schema":"literal-original-preparation-v6","status":"PREPARED_NOT_EXECUTED",
+            "manifest":{"path":str(manifest_path),"sha256":digest},"launch_argv":command,
+            "reviewed":args.reviewed,"source_mutation_performed":False,"native_or_test_commands_started":False}
+    write(output/"preparation.json",(json.dumps(result,indent=2)+"\n").encode("utf-8"))
+    print(json.dumps(result,indent=2))
+    return 0
+if __name__=="__main__":
+    raise SystemExit(main())

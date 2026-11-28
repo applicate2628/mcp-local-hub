@@ -1,0 +1,20 @@
+=== RUN   TestPidMatchesMcphub_CurrentProcess
+--- PASS: TestPidMatchesMcphub_CurrentProcess (0.00s)
+=== RUN   TestPidMatchesMcphub_RejectsForeignPathSameBasename
+--- PASS: TestPidMatchesMcphub_RejectsForeignPathSameBasename (4.61s)
+=== RUN   TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID
+--- PASS: TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID (0.26s)
+=== RUN   TestPreSpawnBinaryGate_MissingBinaryNeverBurnsBudget
+--- PASS: TestPreSpawnBinaryGate_MissingBinaryNeverBurnsBudget (0.33s)
+=== RUN   TestPreSpawnBinaryGate_AutoRecoversWhenBinaryAppears
+--- PASS: TestPreSpawnBinaryGate_AutoRecoversWhenBinaryAppears (0.04s)
+=== RUN   TestPreSpawnBinaryGate_PresentBinarySpawns
+--- PASS: TestPreSpawnBinaryGate_PresentBinarySpawns (0.02s)
+=== RUN   TestPreSpawnBinaryGate_EmptyCommandSpawns
+--- PASS: TestPreSpawnBinaryGate_EmptyCommandSpawns (0.01s)
+=== RUN   TestPreSpawnBinaryGate_EmitsActionableOperatorMessage
+--- PASS: TestPreSpawnBinaryGate_EmitsActionableOperatorMessage (0.02s)
+=== RUN   TestPreSpawnBinaryGate_MissingWorkspaceHolds
+--- PASS: TestPreSpawnBinaryGate_MissingWorkspaceHolds (0.02s)
+PASS
+ok  	mcp-local-hub/internal/cli	5.476s

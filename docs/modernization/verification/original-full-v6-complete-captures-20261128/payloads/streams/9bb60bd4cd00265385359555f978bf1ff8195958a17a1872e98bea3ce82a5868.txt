@@ -1,0 +1,215 @@
+{"Action":"start","Package":"mcp-local-hub/internal/vcpkgmcp/discovery"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_ExplicitParamWins"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_ExplicitParamWins","Output":"=== RUN   TestDiscoverRoot_ExplicitParamWins\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_ExplicitParamWins","Output":"--- PASS: TestDiscoverRoot_ExplicitParamWins (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_ExplicitParamWins"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_EnvVarWhenNoExplicit"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_EnvVarWhenNoExplicit","Output":"=== RUN   TestDiscoverRoot_EnvVarWhenNoExplicit\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_EnvVarWhenNoExplicit","Output":"--- PASS: TestDiscoverRoot_EnvVarWhenNoExplicit (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_EnvVarWhenNoExplicit"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_PathLookup"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_PathLookup","Output":"=== RUN   TestDiscoverRoot_PathLookup\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_PathLookup","Output":"--- PASS: TestDiscoverRoot_PathLookup (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_PathLookup"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_ManifestWalkup"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_ManifestWalkup","Output":"=== RUN   TestDiscoverRoot_ManifestWalkup\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_ManifestWalkup","Output":"--- PASS: TestDiscoverRoot_ManifestWalkup (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_ManifestWalkup"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_ManifestFoundButNoSubmoduleBinary_FallsThrough"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_ManifestFoundButNoSubmoduleBinary_FallsThrough","Output":"=== RUN   TestDiscoverRoot_ManifestFoundButNoSubmoduleBinary_FallsThrough\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_ManifestFoundButNoSubmoduleBinary_FallsThrough","Output":"--- PASS: TestDiscoverRoot_ManifestFoundButNoSubmoduleBinary_FallsThrough (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_ManifestFoundButNoSubmoduleBinary_FallsThrough"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_HeuristicSingleHit_NeverSelected"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_HeuristicSingleHit_NeverSelected","Output":"=== RUN   TestDiscoverRoot_HeuristicSingleHit_NeverSelected\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_HeuristicSingleHit_NeverSelected","Output":"--- PASS: TestDiscoverRoot_HeuristicSingleHit_NeverSelected (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_HeuristicSingleHit_NeverSelected"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_HeuristicMultipleHits_ReportsAllNeverPicks"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_HeuristicMultipleHits_ReportsAllNeverPicks","Output":"=== RUN   TestDiscoverRoot_HeuristicMultipleHits_ReportsAllNeverPicks\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_HeuristicMultipleHits_ReportsAllNeverPicks","Output":"--- PASS: TestDiscoverRoot_HeuristicMultipleHits_ReportsAllNeverPicks (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_HeuristicMultipleHits_ReportsAllNeverPicks"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_NoneFound_OffersManualSpecification"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_NoneFound_OffersManualSpecification","Output":"=== RUN   TestDiscoverRoot_NoneFound_OffersManualSpecification\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_NoneFound_OffersManualSpecification","Output":"--- PASS: TestDiscoverRoot_NoneFound_OffersManualSpecification (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_NoneFound_OffersManualSpecification"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_ExplicitInvalid_IsTerminal_NeverFallsThrough"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_ExplicitInvalid_IsTerminal_NeverFallsThrough","Output":"=== RUN   TestDiscoverRoot_ExplicitInvalid_IsTerminal_NeverFallsThrough\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_ExplicitInvalid_IsTerminal_NeverFallsThrough","Output":"--- PASS: TestDiscoverRoot_ExplicitInvalid_IsTerminal_NeverFallsThrough (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_ExplicitInvalid_IsTerminal_NeverFallsThrough"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_ExplicitUnreadable_DistinctFromInvalid"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_ExplicitUnreadable_DistinctFromInvalid","Output":"=== RUN   TestDiscoverRoot_ExplicitUnreadable_DistinctFromInvalid\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_ExplicitUnreadable_DistinctFromInvalid","Output":"--- PASS: TestDiscoverRoot_ExplicitUnreadable_DistinctFromInvalid (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_ExplicitUnreadable_DistinctFromInvalid"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_POSIXHeuristics_NeverSelected"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_POSIXHeuristics_NeverSelected","Output":"=== RUN   TestDiscoverRoot_POSIXHeuristics_NeverSelected\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_POSIXHeuristics_NeverSelected","Output":"--- PASS: TestDiscoverRoot_POSIXHeuristics_NeverSelected (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestDiscoverRoot_POSIXHeuristics_NeverSelected"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestRelativeExplicitRootIsTerminalBeforeProbe"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestRelativeExplicitRootIsTerminalBeforeProbe","Output":"=== RUN   TestRelativeExplicitRootIsTerminalBeforeProbe\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestRelativeExplicitRootIsTerminalBeforeProbe","Output":"--- PASS: TestRelativeExplicitRootIsTerminalBeforeProbe (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestRelativeExplicitRootIsTerminalBeforeProbe"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/regular-executable"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/regular-executable","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/explicit/regular-executable\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/regular-executable","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/explicit/regular-executable (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/regular-executable"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/followed-executable-symlink-target"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/followed-executable-symlink-target","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/explicit/followed-executable-symlink-target\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/followed-executable-symlink-target","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/explicit/followed-executable-symlink-target (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/followed-executable-symlink-target"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/regular-non-executable"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/regular-non-executable","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/explicit/regular-non-executable\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/regular-non-executable","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/explicit/regular-non-executable (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/regular-non-executable"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/directory"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/directory","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/explicit/directory\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/directory","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/explicit/directory (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/directory"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/fifo"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/fifo","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/explicit/fifo\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/fifo","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/explicit/fifo (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/fifo"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/socket"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/socket","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/explicit/socket\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/socket","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/explicit/socket (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/socket"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/device"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/device","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/explicit/device\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/device","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/explicit/device (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/explicit/device"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/regular-executable"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/regular-executable","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/env/regular-executable\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/regular-executable","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/env/regular-executable (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/regular-executable"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/followed-executable-symlink-target"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/followed-executable-symlink-target","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/env/followed-executable-symlink-target\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/followed-executable-symlink-target","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/env/followed-executable-symlink-target (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/followed-executable-symlink-target"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/regular-non-executable"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/regular-non-executable","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/env/regular-non-executable\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/regular-non-executable","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/env/regular-non-executable (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/regular-non-executable"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/directory"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/directory","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/env/directory\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/directory","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/env/directory (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/directory"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/fifo"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/fifo","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/env/fifo\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/fifo","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/env/fifo (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/fifo"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/socket"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/socket","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/env/socket\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/socket","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/env/socket (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/socket"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/device"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/device","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/env/device\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/device","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/env/device (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/env/device"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/regular-executable"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/regular-executable","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/path/regular-executable\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/regular-executable","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/path/regular-executable (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/regular-executable"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/followed-executable-symlink-target"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/followed-executable-symlink-target","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/path/followed-executable-symlink-target\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/followed-executable-symlink-target","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/path/followed-executable-symlink-target (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/followed-executable-symlink-target"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/regular-non-executable"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/regular-non-executable","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/path/regular-non-executable\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/regular-non-executable","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/path/regular-non-executable (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/regular-non-executable"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/directory"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/directory","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/path/directory\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/directory","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/path/directory (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/directory"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/fifo"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/fifo","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/path/fifo\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/fifo","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/path/fifo (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/fifo"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/socket"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/socket","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/path/socket\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/socket","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/path/socket (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/socket"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/device"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/device","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/path/device\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/device","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/path/device (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/path/device"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/regular-executable"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/regular-executable","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/manifest/regular-executable\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/regular-executable","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/manifest/regular-executable (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/regular-executable"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/followed-executable-symlink-target"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/followed-executable-symlink-target","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/manifest/followed-executable-symlink-target\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/followed-executable-symlink-target","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/manifest/followed-executable-symlink-target (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/followed-executable-symlink-target"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/regular-non-executable"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/regular-non-executable","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/manifest/regular-non-executable\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/regular-non-executable","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/manifest/regular-non-executable (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/regular-non-executable"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/directory"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/directory","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/manifest/directory\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/directory","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/manifest/directory (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/directory"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/fifo"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/fifo","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/manifest/fifo\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/fifo","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/manifest/fifo (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/fifo"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/socket"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/socket","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/manifest/socket\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/socket","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/manifest/socket (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/socket"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/device"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/device","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/manifest/device\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/device","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/manifest/device (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/manifest/device"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/regular-executable"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/regular-executable","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/regular-executable\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/regular-executable","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/regular-executable (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/regular-executable"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/followed-executable-symlink-target"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/followed-executable-symlink-target","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/followed-executable-symlink-target\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/followed-executable-symlink-target","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/followed-executable-symlink-target (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/followed-executable-symlink-target"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/regular-non-executable"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/regular-non-executable","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/regular-non-executable\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/regular-non-executable","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/regular-non-executable (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/regular-non-executable"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/directory"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/directory","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/directory\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/directory","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/directory (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/directory"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/fifo"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/fifo","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/fifo\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/fifo","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/fifo (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/fifo"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/socket"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/socket","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/socket\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/socket","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/socket (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/socket"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/device"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/device","Output":"=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/device\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/device","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/device (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/device"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission","Output":"--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestEveryDiscoveryTierUsesExecutableAdmission"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestManifestWalkupRequiresRegularMarker"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestManifestWalkupRequiresRegularMarker","Output":"=== RUN   TestManifestWalkupRequiresRegularMarker\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestManifestWalkupRequiresRegularMarker","Output":"--- PASS: TestManifestWalkupRequiresRegularMarker (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestManifestWalkupRequiresRegularMarker"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestR20PathLookupResolvesExecutableSymlinkBeforeRoot"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestR20PathLookupResolvesExecutableSymlinkBeforeRoot","Output":"=== RUN   TestR20PathLookupResolvesExecutableSymlinkBeforeRoot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestR20PathLookupResolvesExecutableSymlinkBeforeRoot","Output":"--- PASS: TestR20PathLookupResolvesExecutableSymlinkBeforeRoot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestR20PathLookupResolvesExecutableSymlinkBeforeRoot"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestR21RelativeEnvironmentRootFailsClosedBeforeFilesystemProbe"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestR21RelativeEnvironmentRootFailsClosedBeforeFilesystemProbe","Output":"=== RUN   TestR21RelativeEnvironmentRootFailsClosedBeforeFilesystemProbe\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestR21RelativeEnvironmentRootFailsClosedBeforeFilesystemProbe","Output":"--- PASS: TestR21RelativeEnvironmentRootFailsClosedBeforeFilesystemProbe (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestR21RelativeEnvironmentRootFailsClosedBeforeFilesystemProbe"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestR25PathLookupRootIsMadeAbsolute"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestR25PathLookupRootIsMadeAbsolute","Output":"=== RUN   TestR25PathLookupRootIsMadeAbsolute\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestR25PathLookupRootIsMadeAbsolute","Output":"--- PASS: TestR25PathLookupRootIsMadeAbsolute (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestR25PathLookupRootIsMadeAbsolute"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestR35ExplicitRegularFileIsInvalidRoot"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestR35ExplicitRegularFileIsInvalidRoot","Output":"=== RUN   TestR35ExplicitRegularFileIsInvalidRoot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestR35ExplicitRegularFileIsInvalidRoot","Output":"--- PASS: TestR35ExplicitRegularFileIsInvalidRoot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Test":"TestR35ExplicitRegularFileIsInvalidRoot"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/discovery","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/discovery"}

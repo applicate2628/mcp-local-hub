@@ -1,0 +1,15 @@
+{"Action":"start","Package":"mcp-local-hub/internal/mcproute"}
+{"Action":"run","Package":"mcp-local-hub/internal/mcproute","Test":"TestAllowedHost_Loopback"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcproute","Test":"TestAllowedHost_Loopback","Output":"=== RUN   TestAllowedHost_Loopback\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcproute","Test":"TestAllowedHost_Loopback","Output":"--- PASS: TestAllowedHost_Loopback (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/mcproute","Test":"TestAllowedHost_Loopback"}
+{"Action":"run","Package":"mcp-local-hub/internal/mcproute","Test":"TestAllowedOrigin_Loopback"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcproute","Test":"TestAllowedOrigin_Loopback","Output":"=== RUN   TestAllowedOrigin_Loopback\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcproute","Test":"TestAllowedOrigin_Loopback","Output":"--- PASS: TestAllowedOrigin_Loopback (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/mcproute","Test":"TestAllowedOrigin_Loopback"}
+{"Action":"run","Package":"mcp-local-hub/internal/mcproute","Test":"TestAllowedHost_PortIndependence"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcproute","Test":"TestAllowedHost_PortIndependence","Output":"=== RUN   TestAllowedHost_PortIndependence\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcproute","Test":"TestAllowedHost_PortIndependence","Output":"--- PASS: TestAllowedHost_PortIndependence (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/mcproute","Test":"TestAllowedHost_PortIndependence"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcproute","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/mcproute"}

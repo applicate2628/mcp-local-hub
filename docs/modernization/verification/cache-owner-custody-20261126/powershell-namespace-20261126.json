@@ -1,0 +1,297 @@
+{
+  "schema": "relocated-powershell-namespace-qualification-projection-v1",
+  "date_utc": "2026-11-26",
+  "scope": "Three Windows recovery namespace tests in tagged mode, on exact isolated Test Source",
+  "status": "PASS",
+  "source": {
+    "commit": "001648f44bf6ef0191f1e21d92f1aecf2a2a3022",
+    "parent": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+    "porcelain": "",
+    "sha256": {
+      "go.mod": "805a7dd76431a24ebd6ce346682e7bc321e4dae0e37488448811bfa624122edd",
+      "go.sum": "61f4a30f006f3bc99b1d2500646d9fd381c3c8d72050ca76dce2f9321c3ecae2",
+      "internal/api/main_test.go": "338e9c528d8d00bf5824b2d192f7637fd761e2674d7243160c7994dfbd8e9415",
+      "internal/api/secrets_init_recovery_test.go": "39edc56ba1ee357de7b8a328f20e0b02caa98875664db84f95675bfff46283d4",
+      "scripts/test-recovery-namespace/helper.ps1": "1124cee665be8249ef2c1f10460b7a4626dd24170db8ceed73fb51b5ab4d7b3b",
+      "tools/test-recovery-namespace/main_windows.go": "4c1c1f55c3f9841ce9a242b068e62e3843dd3f7ff4637a879e3e42513d6534eb",
+      "tools/test-recovery-namespace/prebuilt_windows.go": "9dad104853af599aee599ae4cbcb71c464d6f1f1b30e9656511d395685beb6c1"
+    },
+    "tree": "9700ffd68a009ec714b1962427d53567d07a228d"
+  },
+  "source_before_after_equal": true,
+  "prior_store_namespace": {
+    "status": "FAIL",
+    "win32_error": 5,
+    "new_result_reclassified_old": false
+  },
+  "runtime": {
+    "source_package_version": "7.7.0.0",
+    "architecture": "x64",
+    "copy_status": "PASS",
+    "files": 1276,
+    "subdirectories": 52,
+    "bytes": 310287418,
+    "three_equal_manifests_sha256": "5933d944eda2b7b40705411d02fbc18f0c8ae6f7c6096ff3a64f68a5d128a52c",
+    "exe_sha256": "f2833e07a5a7d59153ffc63db83bd6b62f6c63ffd8b5b5099a2feadf6b605336",
+    "copy_manifests_equal": true,
+    "copy_sha_unchanged_after_suite": true,
+    "native_copy_probe": {
+      "read_control": true,
+      "read_attributes": true,
+      "no_reparse": true,
+      "handles_opened": 11,
+      "handles_closed": 11
+    },
+    "preflight": {
+      "status": "PASS",
+      "seconds": 0.8928811999503523,
+      "version": "7.7.0",
+      "framework": ".NET 11.0.0",
+      "copied_pshome_and_managed_assembly_confirmed": true,
+      "add_type_marker": 61,
+      "scope": "v3 reused original closed v2 smoke"
+    },
+    "host_acl_or_installed_state_changed": false
+  },
+  "go": {
+    "same_executable_via_canonical_ordinary_path": true,
+    "sha256": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113",
+    "stage_inputs_reused_from_closed_v2": true
+  },
+  "attempts": [
+    {
+      "id": "v1",
+      "status": "FAIL",
+      "command_started": false,
+      "cause": "Original guard refused controller without an attached hidden console"
+    },
+    {
+      "id": "v2",
+      "status": "FAIL",
+      "original_parent_and_commands_closed": true,
+      "exit_codes": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "copied_pwsh_preflight": "PASS",
+      "offline_dependency_preparation": "PASS",
+      "native_launcher_build": "PASS",
+      "cause": "Configured Go route has symbolic-link ancestor; ordinary-path admission refused before fixture root"
+    },
+    {
+      "id": "v3",
+      "status": "PASS",
+      "parent_exit_code": 0,
+      "parent_seconds": 410.1639874000102,
+      "original_command_seconds": 379.11194119998254,
+      "original_commands_closed": true,
+      "production_ownership_observations": "PASS",
+      "snapshot_count": 12
+    }
+  ],
+  "native_launcher_sha256": "068e71d92358e02e18904d56dce9f12175a86911fffeab514a7cc5b3b6a95e5b",
+  "invariant_deadlines": {
+    "build_seconds": 300,
+    "go_test_seconds": 180,
+    "native_cleanup_reserve_seconds": 10
+  },
+  "original_stages": [
+    {
+      "stage": "build",
+      "exit_code": 0,
+      "complete": true,
+      "native_complete": true,
+      "io_complete": true,
+      "original_root_identity_known": true,
+      "original_wait_known": true,
+      "original_native_handles_closed": true,
+      "native_final_active": 0,
+      "native_total_members": 533,
+      "original_stdout_eof": true,
+      "original_stderr_eof": true,
+      "stdout_worker_complete": true,
+      "stderr_worker_complete": true,
+      "stdout_bytes": 0,
+      "stderr_bytes": 0,
+      "custody_retained": false
+    },
+    {
+      "stage": "tests",
+      "exit_code": 0,
+      "complete": true,
+      "native_complete": true,
+      "io_complete": true,
+      "original_root_identity_known": true,
+      "original_wait_known": true,
+      "original_native_handles_closed": true,
+      "native_final_active": 0,
+      "native_total_members": 46,
+      "original_stdout_eof": true,
+      "original_stderr_eof": true,
+      "stdout_worker_complete": true,
+      "stderr_worker_complete": true,
+      "stdout_bytes": 1883,
+      "stderr_bytes": 0,
+      "custody_retained": false
+    }
+  ],
+  "test_results": [
+    {
+      "status": "PASS",
+      "test": "TestSecretsInit_RecoveryNamespaceBoundary",
+      "seconds": 87.54
+    },
+    {
+      "status": "PASS",
+      "test": "TestSecretsInit_RecoveryNamespaceRetainedDirectory",
+      "seconds": 10.7
+    },
+    {
+      "status": "PASS",
+      "test": "TestSecretsInit_RecoveryNamespaceFailurePaths",
+      "seconds": 2.41
+    }
+  ],
+  "tests": {
+    "pass_roots": 3,
+    "skip_roots": 0,
+    "fail_roots": 0,
+    "package_exit": 0
+  },
+  "limitations": {
+    "both_full_literal_commands_qualified_by_this_run": false,
+    "installed_product_or_task_scheduler_changed": false,
+    "full_run_existing_v14_edited": false,
+    "copy_is_an_independent_input_candidate_for_a_fresh_full_run": true
+  },
+  "original_file_paths_relative_to": "isolated task root; fixture-proof denotes the single original fixture proof directory",
+  "original_files": [
+    {
+      "path": "copy_pwsh_runtime.py",
+      "bytes": 7082,
+      "sha256": "c56aef70ad78a8f2f80e90dd1fb61e8e82d7a94f6ea1a7b128cfedd0c6cd99ca"
+    },
+    {
+      "path": "copy-verification/receipt.json",
+      "bytes": 3688,
+      "sha256": "cd9025da34c3dea9e567c7295d06f32a2f2946287d6f3f8920aa2a9dc1a99118"
+    },
+    {
+      "path": "copy-verification/source-before.json",
+      "bytes": 217958,
+      "sha256": "5933d944eda2b7b40705411d02fbc18f0c8ae6f7c6096ff3a64f68a5d128a52c"
+    },
+    {
+      "path": "copy-verification/source-after.json",
+      "bytes": 217958,
+      "sha256": "5933d944eda2b7b40705411d02fbc18f0c8ae6f7c6096ff3a64f68a5d128a52c"
+    },
+    {
+      "path": "copy-verification/destination.json",
+      "bytes": 217958,
+      "sha256": "5933d944eda2b7b40705411d02fbc18f0c8ae6f7c6096ff3a64f68a5d128a52c"
+    },
+    {
+      "path": "namespace-qualification/receipt.json",
+      "bytes": 1624,
+      "sha256": "bcd4bf4f90af69c2a30839949086d71f1ce21cbae0c0070959f72ce62c8a16b2"
+    },
+    {
+      "path": "namespace-qualification-v2-parent.json",
+      "bytes": 1381,
+      "sha256": "76b23ba096d6c92a4075ead0a9474d7b433c1499707bde7eb52a081b49fa40ea"
+    },
+    {
+      "path": "namespace-qualification-v2/receipt.json",
+      "bytes": 31662,
+      "sha256": "a37c58de381f0470cc611a8335b6463a00089cf65f1396464bd77a04da82e9e2"
+    },
+    {
+      "path": "namespace-qualification-v3-parent.json",
+      "bytes": 1380,
+      "sha256": "649eb2cded2d20ae1df5b33b0f27e6c11e582b30925ee66f6d9e2363683c54e3"
+    },
+    {
+      "path": "namespace-qualification-v3/receipt.json",
+      "bytes": 10783,
+      "sha256": "65f9d89f52a3e413c33645b615bbf4b55ba5e71df0c41574ac1c1680760af08d"
+    },
+    {
+      "path": "namespace-qualification-v3/native-namespace-fixture.stdout.txt",
+      "bytes": 530,
+      "sha256": "3a33393f9680e7e35b27fd2411cbe376fb904d22aeb1f4361c09e40a97f93cd5"
+    },
+    {
+      "path": "namespace-qualification-v3/native-namespace-fixture.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "launch_namespace_v3.py",
+      "bytes": 5274,
+      "sha256": "80a372420d04cdea93f49df836ac7b3cae41d318a7c2152f93c024a047b00a76"
+    },
+    {
+      "path": "qualify_namespace_relocated_v3.py",
+      "bytes": 11541,
+      "sha256": "2b06f89dbcf244b03d3d1a1a84940a994132e7125c4175eb1c6296fa7231f626"
+    },
+    {
+      "path": "fixture-proof/inputs.json",
+      "bytes": 1548,
+      "sha256": "a633e00db378fa9fbe9504c972070b0fa7165c814e4221015d0fe1563ad2d703"
+    },
+    {
+      "path": "fixture-proof/binary.json",
+      "bytes": 218,
+      "sha256": "e041f980bb0a4083111681d1bfaabe45be10ec2115ab04aae35df349c07c294f"
+    },
+    {
+      "path": "fixture-proof/build.settlement.json",
+      "bytes": 1970,
+      "sha256": "64e727bad2df6ee9b0f32a689472f1555f03090d6d5d8d4d556567b67596c3a4"
+    },
+    {
+      "path": "fixture-proof/build.stdout.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "fixture-proof/build.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "fixture-proof/tests.settlement.json",
+      "bytes": 1972,
+      "sha256": "e2276935e69b7585499cc6209653a2fa837a139fb8ef402c8930f63651707325"
+    },
+    {
+      "path": "fixture-proof/tests.stdout.log",
+      "bytes": 1883,
+      "sha256": "eee34c07f9c1c84dd1bf714a67bf4d5406c1b36812f85ac2eecabe98873ea8a5"
+    },
+    {
+      "path": "fixture-proof/tests.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "namespace-qualification-v2/literal-namespace.exe",
+      "bytes": 7191552,
+      "sha256": "068e71d92358e02e18904d56dce9f12175a86911fffeab514a7cc5b3b6a95e5b"
+    },
+    {
+      "path": "namespace-qualification-v2/native-namespace-fixture.stderr.txt",
+      "bytes": 76,
+      "sha256": "f5c49e5163550a48d5bf8e3d2508bd41f4ea4900dfa7e2d666ea4db23bbc4870"
+    },
+    {
+      "path": "namespace-qualification-v2/pwsh-smoke.stdout.txt",
+      "bytes": 175,
+      "sha256": "7e372bc32b9ce60af8dea0af9cb2e868f7d0e5f1c758f8f6f6733a8b76cf5ff0"
+    }
+  ]
+}

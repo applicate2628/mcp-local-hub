@@ -1,0 +1,434 @@
+{
+  "schema": "parole-dispatch-barrier-overlay-results-v1",
+  "date": "2026-11-26",
+  "source": {
+    "commit": "52a2d9ef57b7c372b9fa149adf062ad7e503b22d",
+    "tree": "51258ebd9ad3a654418b6ecb9163947734ef0314",
+    "changed_by_execution": false,
+    "candidate_committed_by_this_run": false,
+    "capsule": "../composed-functional-source-20261126/source52-363b/README.md"
+  },
+  "scope": {
+    "platform": "Windows",
+    "test_build_tags": [],
+    "test_selector": "^TestSupervisorController_ParoleQueuedStop_PostSelfHonorsStop$",
+    "package_selector": "./internal/cli/",
+    "count": 1,
+    "go_test_timeout_seconds": 300,
+    "owner_command_timeout_seconds": 360,
+    "test_barrier_timeout_seconds": 5,
+    "unchanged_general_state_wait_timeout_seconds": 2,
+    "full_suite": "NOT_RUN_BY_THIS_EXECUTION",
+    "state_tagged_control": "NOT_RUN_BY_THIS_EXECUTION",
+    "product_runtime_acceptance": false,
+    "old_holds_settled": false
+  },
+  "outcome": {
+    "candidate_positive": "PASS",
+    "negative_control": "EXPECTED_FAIL_AT_EXACT_ASSERTION",
+    "batch_status": "PASS",
+    "physical": "CLOSED",
+    "command_count": 5,
+    "original_reader_count": 10,
+    "parent": {
+      "controller_exit_code": 0,
+      "original_controller_reaped": true,
+      "controller_capture_handles_closed": true,
+      "seconds": 203.17816219996894,
+      "receipt_sha256": "f558bde54cb3f313859d856ddf11913fae93f4244a617164577769193aec47f5"
+    },
+    "original_receipt_sha256": "f558bde54cb3f313859d856ddf11913fae93f4244a617164577769193aec47f5",
+    "receipt_note": "Original receipt digest retained by the parent owner. The independently hashed local receiving summary is a distinct derivative, not the original receipt bytes."
+  },
+  "results": [
+    {
+      "role": "positive",
+      "test": "TestSupervisorController_ParoleQueuedStop_PostSelfHonorsStop",
+      "package": "mcp-local-hub/internal/cli",
+      "command_exit_code": 0,
+      "test_action": "pass",
+      "package_action": "pass",
+      "test_elapsed_seconds": 0.27,
+      "package_terminal_event_elapsed_seconds": 0.799,
+      "command_seconds": 145.28387230000226,
+      "test_terminal_time_original": "2026-11-26T20:11:13.186356+03:00",
+      "package_terminal_time_original": "2026-11-26T20:11:13.3045234+03:00",
+      "stdout_bytes": 1425,
+      "stdout_sha256": "bd09e749df489d7b3ad5337cb3425b00eaf00026170e07f12c7b3b641f263857",
+      "stdout_event_count": 8,
+      "decoded_bytes_match_original_measured_capture": true,
+      "physical": "CLOSED",
+      "interpretation": "CANDIDATE_TEST_PASS"
+    },
+    {
+      "role": "negative",
+      "test": "TestSupervisorController_ParoleQueuedStop_PostSelfHonorsStop",
+      "package": "mcp-local-hub/internal/cli",
+      "command_exit_code": 1,
+      "test_action": "fail",
+      "package_action": "fail",
+      "test_elapsed_seconds": 0.06,
+      "package_terminal_event_elapsed_seconds": 0.584,
+      "command_seconds": 53.01949570002034,
+      "test_terminal_time_original": "2026-11-26T20:11:58.0113268+03:00",
+      "package_terminal_time_original": "2026-11-26T20:11:58.0999362+03:00",
+      "stdout_bytes": 1806,
+      "stdout_sha256": "a04fa3663d3e143db77975358cf50c5e4c97ac3a13fc5e9bd0afab6b116493d5",
+      "stdout_event_count": 9,
+      "decoded_bytes_match_original_measured_capture": true,
+      "physical": "CLOSED",
+      "interpretation": "EXPECTED_NEGATIVE_ASSERTION_FAILURE",
+      "assertion_file": "internal/cli/supervise_lostchild_f6_f2_test.go",
+      "assertion_line": 651,
+      "assertion_fragment": "after queued dispatch = quarantined (present=true), want exiting",
+      "package_text_output_elapsed_seconds": 0.582,
+      "elapsed_rule": "The JSON terminal package action supplies 0.584 s; the output line independently displays 0.582 s. Neither is the command wall time."
+    }
+  ],
+  "commands": [
+    {
+      "name": "head",
+      "exit_code": 0,
+      "command_seconds": 0.1910364999785088,
+      "physical": "CLOSED",
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_readers_joined": true,
+      "streams": {
+        "stdout": {
+          "bytes_seen": 41,
+          "bytes_stored": 41,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "limit_exceeded": false,
+          "sha256": "ef3e4f771265c261306e8bfb2144e4e0aee244c988be4fe8e0410516b3e3154e"
+        },
+        "stderr": {
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "limit_exceeded": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "name": "parole-positive-dispatch-barrier",
+      "exit_code": 0,
+      "command_seconds": 145.28387230000226,
+      "physical": "CLOSED",
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_readers_joined": true,
+      "streams": {
+        "stdout": {
+          "bytes_seen": 1425,
+          "bytes_stored": 1425,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "limit_exceeded": false,
+          "sha256": "bd09e749df489d7b3ad5337cb3425b00eaf00026170e07f12c7b3b641f263857"
+        },
+        "stderr": {
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "limit_exceeded": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "name": "parole-negative-try-post",
+      "exit_code": 1,
+      "command_seconds": 53.01949570002034,
+      "physical": "CLOSED",
+      "native": {
+        "direct_exit_code": 1,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_readers_joined": true,
+      "streams": {
+        "stdout": {
+          "bytes_seen": 1806,
+          "bytes_stored": 1806,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "limit_exceeded": false,
+          "sha256": "a04fa3663d3e143db77975358cf50c5e4c97ac3a13fc5e9bd0afab6b116493d5"
+        },
+        "stderr": {
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "limit_exceeded": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "name": "source-clean-after-parole-controls",
+      "exit_code": 0,
+      "command_seconds": 2.325031200016383,
+      "physical": "CLOSED",
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_readers_joined": true,
+      "streams": {
+        "stdout": {
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "limit_exceeded": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stderr": {
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "limit_exceeded": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "name": "source-status-after-parole-controls",
+      "exit_code": 0,
+      "command_seconds": 0.29677640000591055,
+      "physical": "CLOSED",
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_readers_joined": true,
+      "streams": {
+        "stdout": {
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "limit_exceeded": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stderr": {
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "limit_exceeded": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    }
+  ],
+  "candidate_contract": {
+    "positive_changes": "Use the existing five-second dispatch barrier in the single queue-order test, then directly require StExiting; update the stale TryPost comment to StQuarantined.",
+    "negative_changes": "Use the same positive test plus exactly one PostSelf-to-TryPost method change in the parole restart enqueue; retain require_running_intent.",
+    "unchanged": [
+      "production durability in the positive run",
+      "other two-second state-wait helper call sites",
+      "existing five-second barrier",
+      "original EventLoop cancellation and join",
+      "stop assertion",
+      "require_running_intent",
+      "source worktree bytes"
+    ],
+    "negative_mutation_production_eligible": false,
+    "earlier_failure_stack_overlay_included": false
+  },
+  "input_pins": [
+    {
+      "role": "local receiving summary of the original closed execution",
+      "artifact": "native-closed-receiving.json",
+      "bytes": 11189,
+      "sha256": "acf99329c0ee2e310146cb40a99fcde98780c9ec3120cd55192107342cb60cd4"
+    },
+    {
+      "role": "base64 transport of the two admitted original stdout captures",
+      "artifact": "native-captures.transport.json",
+      "bytes": 4338,
+      "sha256": "a6d2d226dfd5668e021f39acf5923238e1e7fa7b2858fc4c773809fccec564ed"
+    },
+    {
+      "role": "exact execution configuration; machine paths omitted from this public report",
+      "artifact": "native-execution-config.json",
+      "bytes": 3106,
+      "sha256": "536332d8ae04b9c5ca9a34d56e8b01f1305b314fee7d252b7452e89af5ac81e8"
+    },
+    {
+      "role": "original launcher snapshot embedding the exact execution configuration and input pins",
+      "artifact": "launch-parole-candidate-52a2-363b-v1.ps1",
+      "bytes": 9157,
+      "sha256": "20a5f6283765dcf9bcbf864a9af9f22a355aa408158c6be961e425c404a525d2"
+    },
+    {
+      "role": "positive Go overlay mapping",
+      "artifact": "positive-overlay.json",
+      "bytes": 235,
+      "sha256": "df1ff9d8c7fd68ebd033704809245dd2265574df7795d2b8c2a69c4b22468d5c"
+    },
+    {
+      "role": "negative Go overlay mapping",
+      "artifact": "negative-overlay.json",
+      "bytes": 430,
+      "sha256": "35d2e6d822a26880b439d5d78b9b513ae5ac46d3f1e4cc4a024a9a4d2d8478f3"
+    },
+    {
+      "role": "candidate test-only patch",
+      "artifact": "queued-stop-dispatch-barrier.patch",
+      "bytes": 2670,
+      "sha256": "96d432f7fdc9ec7c61ca0fa372249029d975ba8cfcc597300b43710b1e901678"
+    },
+    {
+      "role": "one-site production mutation used only by the negative overlay",
+      "artifact": "negative-parole-trypost.patch",
+      "bytes": 567,
+      "sha256": "6bccf7c5e909cd2b2261f969b9ca8001e8d45995518ac61e1e96c1c990cfc6ae"
+    },
+    {
+      "role": "existing ordinary v2 coordinator snapshot",
+      "artifact": "provenance/coordinator-v2.snapshot.txt",
+      "bytes": 8463,
+      "sha256": "74ddf8a3610dc6c8f1bfcda4dbc349833bf334baf0f695999196fe5bd340b5fe"
+    },
+    {
+      "role": "frozen pre-execution candidate manifest; NOT_RUN fields are historical",
+      "artifact": "manifest.json",
+      "bytes": 3318,
+      "sha256": "933fcfe0660345b29d17fbc7f2bcf99c693b26f83c0640b97abb8440830f4a53"
+    }
+  ],
+  "source_images": [
+    {
+      "role": "source52_test_preimage",
+      "artifact": "before/internal/cli/supervise_lostchild_f6_f2_test.go",
+      "bytes": 41462,
+      "sha256": "8bd40a8b1d41becc6d21192044883f994516e666951d781a61cc1eda71e65be4",
+      "repository_path": "internal/cli/supervise_lostchild_f6_f2_test.go",
+      "git_blob_oid": "8d6414f0e64d6dd02fbacbca357a6edd692aa359"
+    },
+    {
+      "role": "positive_candidate_test",
+      "artifact": "after/internal/cli/supervise_lostchild_f6_f2_test.go",
+      "bytes": 41482,
+      "sha256": "ab655745fd82f65864dc82d35face33f367201e8db12a9996868628d8025f13a",
+      "repository_path": "internal/cli/supervise_lostchild_f6_f2_test.go",
+      "git_blob_oid": "993a90c5eae0c40a47cd26f339c9dbd9e23876a2"
+    },
+    {
+      "role": "source52_production_controller",
+      "artifact": "before/internal/cli/supervisor_controller.go",
+      "bytes": 246194,
+      "sha256": "a3216efbca82df399c8546a0eaa851e6bb0a69b1f32c09bf2a0ff4c273cc5a06",
+      "repository_path": "internal/cli/supervisor_controller.go",
+      "git_blob_oid": "7c25903c38eff08844e957310ff678b4e0e33ffe"
+    },
+    {
+      "role": "negative_only_controller",
+      "artifact": "negative/internal/cli/supervisor_controller.go",
+      "bytes": 246193,
+      "sha256": "fc46f9402d72e505aa72ba8b1e71fb39ef770be43dd61761336b8482efff5258",
+      "repository_path": "internal/cli/supervisor_controller.go",
+      "git_blob_oid": "fbb87fa7b8d0c5b975613216cf86243077928c98"
+    }
+  ],
+  "original_source_postchecks": {
+    "git_diff_source52": "exit 0, empty stdout and stderr",
+    "git_status_porcelain": "exit 0, empty stdout and stderr",
+    "source_head_capture_sha_matches_commit_newline": true
+  },
+  "preserved_history": [
+    {
+      "case": "initial Source52 focused controller run",
+      "status": "FAIL",
+      "physical": "CLOSED",
+      "test_seconds": 14.05,
+      "blocking_instruction": "UNDETERMINED",
+      "receipt_sha256": "5ce22474571013d116634bf2b08043372487b594e577122e341f08eb8ca7b430",
+      "report": "README.md"
+    },
+    {
+      "case": "separate Source52 failure-stack diagnostic overlay",
+      "status": "FAIL",
+      "physical": "CLOSED",
+      "test_seconds": 3.16,
+      "blocking_instruction_at_snapshot": "original EventLoop in windows.FlushFileBuffers before fake spawn and HealthOK",
+      "receipt_sha256": "99124603fad77b49a254559dda80025e1ef7ba5b74f91a40b5990caec92d888f",
+      "report": "parole-diagnostic-20261126.md"
+    },
+    {
+      "case": "older held negative batch",
+      "physical": "UNKNOWN",
+      "scope": "Unchanged separate history; no release, failed-capture access or reclassification by this execution."
+    }
+  ],
+  "limits": [
+    "The positive result is for one default-mode test with an overlay, not the unchanged Source52 test bytes.",
+    "The expected negative failure demonstrates discrimination for this queue-order mutation; it does not turn the production mutation into accepted code.",
+    "No duration bound for FlushFileBuffers or external cause of earlier stalls is established.",
+    "No full API/CLI, tagged, installed Product, Scheduler or complete A/B qualification is established.",
+    "The frozen candidate manifest and execution-plan NOT_RUN fields remain as pre-execution snapshots; this additive result is the later observed outcome."
+  ],
+  "sanitization": "Native filesystem locations, usernames, process identifiers and raw captures are excluded. Exact artifact names, hashes, repository paths, selected terminal facts and timing values are retained."
+}

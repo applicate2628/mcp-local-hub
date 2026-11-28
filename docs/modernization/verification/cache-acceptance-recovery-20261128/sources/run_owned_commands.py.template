@@ -1,0 +1,483 @@
+"""Fresh ordinary commands using the published original-Job/reader guard.
+
+This is a thin plan/receipt adapter and original parent, not a cache receiver.
+Named/external owners require their own existing adapter and are not registered
+here. A new run never reads or reclassifies any historical run or cache.
+"""
+import sys
+sys.dont_write_bytecode = True
+
+import hashlib
+import importlib.util
+import json
+import math
+import os
+from pathlib import Path
+import re
+import subprocess
+import time
+import types
+
+REVIEW_COMPLETE = True
+SCHEMA = "fresh-owned-commands-v1"
+RETAINED_PARENT = []
+
+
+def require(ok, message):
+    if not ok:
+        raise RuntimeError(message)
+
+
+def sha(path):
+    with Path(path).open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def save(path, value):
+    """Publish control metadata in the same fresh output directory."""
+    path = Path(path)
+    pending = path.with_name(path.name + ".pending")
+    with pending.open("w", encoding="utf-8", newline="\n") as stream:
+        json.dump(value, stream, ensure_ascii=False, indent=2)
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(pending, path)
+
+
+def load_plan(path, expected_sha):
+    raw = Path(path).read_bytes()
+    require(hashlib.sha256(raw).hexdigest() == expected_sha, "plan bytes differ")
+    plan = json.loads(raw)
+    require(REVIEW_COMPLETE is True and plan.get("reviewed") is True,
+            "disabled candidate: root review and exact bindings are required")
+    require(os.name == "nt" and plan.get("schema") == SCHEMA, "Windows plan required")
+    require(set(plan["payload"]) == {"runner", "guard", "windows_job"}, "exact payload roles required")
+    names = {"runner": "run_owned_commands.py", "guard": "guard-custody.py", "windows_job": "windows_job.py"}
+    for role, name in names.items():
+        require(sha(Path(__file__).with_name(name)) == plan["payload"][role], "payload differs: " + role)
+    require(sha(sys.executable) == plan["python_sha256"], "original Python image differs")
+    inputs = plan["input_files"]
+    require(isinstance(inputs, dict) and all(isinstance(p, str) and Path(p).is_absolute() and ".." not in Path(p).parts
+            and isinstance(pin, str) and re.fullmatch(r"[0-9a-f]{64}", pin) for p, pin in inputs.items()),
+            "explicit auxiliary input-file pins required")
+    require({p: sha(p) for p in inputs} == inputs, "auxiliary input bytes differ")
+    commands = plan["commands"]
+    require(isinstance(commands, list) and 0 < len(commands) <= 64, "bounded nonempty command plan required")
+    base = Path(r"__APPROVED_WORK_AREA_RAW__")
+    seen = set()
+    for command in commands:
+        require(set(command) == {"name", "argv", "cwd", "seconds", "executable_sha256"}, "unexpected command field")
+        name = command["name"]
+        require(isinstance(name, str) and re.fullmatch(r"[a-zA-Z0-9_-]{1,60}", name) and name not in seen,
+                "unique capture-safe command name required")
+        seen.add(name)
+        argv = command["argv"]
+        require(isinstance(argv, list) and argv and all(isinstance(v, str) and "\0" not in v for v in argv),
+                "explicit command argv required")
+        require(Path(argv[0]).is_absolute() and sha(argv[0]) == command["executable_sha256"], "command image differs")
+        seconds = command["seconds"]
+        require(type(seconds) in (int, float) and math.isfinite(seconds) and 0 < seconds <= 86400,
+                "finite original command deadline required")
+        require(".." not in Path(command["cwd"]).parts and Path(command["cwd"]).is_relative_to(base)
+                and Path(command["cwd"]).is_dir(),
+                "working directory must exist under __APPROVED_WORK_AREA_ESCAPED__")
+    root = Path(plan["output"])
+    require(root.is_absolute() and ".." not in root.parts and root.is_relative_to(base) and root != base,
+            "fresh output must be under __APPROVED_WORK_AREA_ESCAPED__")
+    env = plan["environment"]
+    require(isinstance(env, dict) and env and all(isinstance(k, str) and k and isinstance(v, str)
+            and "\0" not in k + v and "=" not in k for k, v in env.items()), "explicit environment required")
+    require(len({k.upper() for k in env}) == len(env), "duplicate Windows environment key")
+    for key in ("TEMP", "TMP", "TMPDIR", "GOTMPDIR", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA"):
+        require(Path(env[key]).is_absolute() and ".." not in Path(env[key]).parts
+                and Path(env[key]).is_relative_to(root / "private"),
+                "fresh private environment directory required: " + key)
+    require(env.get("GOTOOLCHAIN") == "local" and env.get("GOWORK") == "off", "local isolated Go tools required")
+    for key in ("GOCACHE", "GOMODCACHE"):
+        require(Path(env[key]).is_absolute() and ".." not in Path(env[key]).parts
+                and Path(env[key]).is_relative_to(root / "private"),
+                "this adapter accepts only its fresh private Go caches")
+    parent_seconds = plan["parent_seconds"]
+    require(type(parent_seconds) in (int, float) and math.isfinite(parent_seconds)
+            and parent_seconds >= sum(c["seconds"] + 10 for c in commands) + 30,
+            "parent budget must include every original work/cleanup interval")
+    return plan
+
+
+class CoreRun:
+    def __init__(self, root, env):
+        self.root = Path(root)
+        self.root.mkdir()
+        self.env = dict(env)
+        self.receipt = {"schema": SCHEMA, "status": "RUNNING", "commands": []}
+
+    def save(self):
+        save(self.root / "execution.json", self.receipt)
+
+
+def receive_prestart_failure(row, state, execution_status, is_last):
+    """Shared DATA predicate for one positively closed CreateProcessW(false)."""
+    native, creation = row.get("native", {}), row.get("process_creation", {})
+    require(execution_status == "FAIL" and is_last is True
+            and row.get("lifecycle_state") == "CLOSED_PRESTART_FAIL"
+            and state.get("state") == "complete" and state.get("direct_exit_known") is False
+            and row.get("quiescence_state") == "complete"
+            and row.get("command_executed") is False and row.get("command_success") is False
+            and row.get("termination_code_is_command_result") is False
+            and "exit_code" not in row and "original_pid" not in row
+            and row.get("captures") == "NOT_CREATED" and row.get("readers") == "NOT_STARTED"
+            and row.get("captures_measured") is False and row.get("io") == {}
+            and row.get("stdin_mode") == "null" and row.get("stdin", {}) == {}
+            and row.get("worker_join_observations") == []
+            and row.get("original_owner_retained") is False and row.get("original_readers_joined") is False
+            and row.get("original_input_writer_joined") is False
+            and row.get("before_resume_entered") is False and row.get("before_resume_returned") is False
+            and row.get("before_resume_deadline_exceeded") is False
+            and row.get("phases_elapsed_seconds", {}).get("launch_returned") is None
+            and row.get("error") == "WindowsJobError: WJOB-PROCESS-CREATE:process-create"
+            and set(creation) == {"attempted", "created", "win32_last_error"}
+            and creation.get("attempted") is True and creation.get("created") is False
+            and type(creation.get("win32_last_error")) is int and 0 <= creation["win32_last_error"] <= 0xffffffff
+            and native == {"direct_exit_code": None, "direct_reaped": True, "active_zero": True,
+                           "job_terminated": True, "handles_closed": True, "issues": []},
+            "prestart failure lacks original no-process/closed-resource proof")
+    proof = row.get("completion_receiving")
+    require(proof == {"schema": "ordinary-original-native-io-completion-v1", "native": native,
+                     "io": {}, "stdin_mode": "null", "stdin": {}, "original_owner_retained": False,
+                     "original_readers_joined": False, "original_input_writer_joined": False,
+                     "lifecycle_state": "CLOSED_PRESTART_FAIL", "process_creation": creation},
+            "prestart original completion proof differs")
+    return proof
+
+
+def receive_execution(plan, execution):
+    """DATA only: a new receipt must prove all actually started ordinary commands."""
+    require(execution.get("schema") == SCHEMA and execution.get("status") in ("PASS", "FAIL"), "nonterminal execution")
+    rows = execution.get("commands", [])
+    states = execution.get("command_quiescence", {}).get("commands", [])
+    require(len(rows) <= len(plan["commands"]) and len(states) == len(rows), "command inventory differs")
+    require(execution.get("commands_quiescent") is True
+            and execution.get("command_quiescence", {}).get("complete") is True, "original commands are unresolved")
+    input_steps = execution.get("step_inputs", [])
+    if execution["status"] == "PASS":
+        require(rows and len(input_steps) == len(rows) and execution.get("input_files_unchanged") is True,
+                "closed auxiliary input observations missing")
+        for planned, observation in zip(plan["commands"], input_steps):
+            require(observation == {"name": planned["name"], "before": plan["input_files"], "after": plan["input_files"]},
+                    "auxiliary inputs changed around a closed command")
+    elif not rows:
+        require(execution.get("no_command_started") is True, "no-create failure is unreceived")
+    for planned, row, state in zip(plan["commands"], rows, states):
+        require(row.get("argv") == planned["argv"] and row.get("cwd") == planned["cwd"]
+                and row.get("work_seconds") == planned["seconds"] and row.get("cleanup_seconds") == 10,
+                "original command binding/deadline differs")
+        require(state.get("name") == planned["name"] and state.get("state") == "complete"
+                and row.get("quiescence_state") == "complete",
+                "original command completion missing")
+        native = row.get("native", {})
+        require(row.get("native_owner", {}).get("sha256") == plan["payload"]["windows_job"],
+                "original owner implementation differs")
+        if row.get("lifecycle_state") == "CLOSED_PRESTART_FAIL":
+            receive_prestart_failure(row, state, execution["status"], row is rows[-1])
+            continue
+        require(state.get("direct_exit_known") is True, "original direct exit is unreceived")
+        if row.get("lifecycle_state") == "CLOSED_PRE_RESUME_FAIL":
+            # The pinned native launch closed its suspended child before any
+            # descriptor transfer. Its termination code is never a command result.
+            require(execution["status"] == "FAIL" and row is rows[-1]
+                    and row.get("command_executed") is False and row.get("command_success") is False
+                    and row.get("termination_code_is_command_result") is False
+                    and row.get("captures") == "NOT_CREATED" and row.get("readers") == "NOT_STARTED"
+                    and row.get("captures_measured") is False and row.get("io") == {}
+                    and row.get("worker_join_observations") == [] and "original_pid" not in row
+                    and row.get("original_owner_retained") is False and row.get("original_readers_joined") is False
+                    and row.get("stdin_mode") == "null" and row.get("before_resume_entered") is True
+                    and row.get("before_resume_returned") is False and row.get("before_resume_deadline_exceeded") is True
+                    and row.get("phases_elapsed_seconds", {}).get("launch_returned") is None
+                    and row.get("error") == "RuntimeError: work deadline elapsed before original resume"
+                    and row.get("exit_code") == 1 and native == {"direct_exit_code": 1, "direct_reaped": True,
+                        "active_zero": True, "job_terminated": True, "handles_closed": True, "issues": []},
+                    "pre-resume failure lacks original no-execution closure")
+            require(row.get("completion_receiving") == {
+                    "schema": "ordinary-original-native-io-completion-v1", "native": native, "io": {},
+                    "stdin_mode": "null", "stdin": {}, "original_owner_retained": False,
+                    "original_readers_joined": False, "original_input_writer_joined": False,
+                    "lifecycle_state": "CLOSED_PRE_RESUME_FAIL"}, "pre-resume original proof differs")
+            continue
+        require(type(row.get("original_pid")) is int and row["original_pid"] > 0
+                and type(row.get("exit_code")) is int and row["exit_code"] == native.get("direct_exit_code")
+                and all(native.get(k) is True for k in ("direct_reaped", "active_zero", "handles_closed"))
+                and native.get("issues") == [], "original process/Job closure incomplete")
+        require(row.get("original_owner_retained") is True and row.get("original_readers_retained") is True
+                and row.get("original_readers_joined") is True and row.get("stdin_mode") == "null",
+                "original custody differs")
+        io = row.get("io", {})
+        require(set(io) == {"stdout", "stderr"}, "two original streams required")
+        proof = row.get("completion_receiving", {})
+        require(proof.get("schema") == "ordinary-original-native-io-completion-v1"
+                and proof.get("native") == native and proof.get("io") == io
+                and proof.get("lifecycle_state") == "CLOSED", "received original proof differs")
+        for side, stream in io.items():
+            require(all(stream.get(k) is True for k in ("acquired", "worker_started", "worker_complete", "eof",
+                    "pipe_close_returned", "capture_close_returned")) and stream.get("error") is None,
+                    "original EOF/close missing: " + side)
+            capture = Path(plan["output"]) / "commands" / (planned["name"] + "." + side + ".txt")
+            require(row.get(side) == str(capture), "original capture path differs")
+            if execution["status"] == "PASS":
+                require(row.get("captures_measured") is True and capture.stat().st_size == stream.get("bytes_stored")
+                        and sha(capture) == row.get(side + "_sha256"), "closed capture changed")
+        if execution["status"] == "PASS":
+            require(row.get("command_success") is True and row["exit_code"] == 0
+                    and row.get("timed_out") is False and row.get("work_deadline_exceeded") is False
+                    and row.get("cleanup_deadline_exceeded") is False and native.get("job_terminated") is False,
+                    "failed or late command cannot pass")
+    if execution["status"] == "PASS":
+        require(len(rows) == len(plan["commands"]), "PASS requires the entire planned command set")
+    return execution["status"]
+
+
+def receive_late_native(row, record):
+    """Receive a new physical observation bound to this retained original owner."""
+    before, after = row.get("native", {}), record.get("native", {})
+    binding = row.get("original_owner_binding", {})
+    require(set(binding) == {"schema", "object_id", "pid", "process", "job"}
+            and binding.get("schema") == "ordinary-original-native-owner-binding-v1"
+            and all(type(binding.get(key)) is int and binding[key] > 0
+                    for key in ("object_id", "pid", "process", "job"))
+            and binding["pid"] == row.get("original_pid")
+            and record.get("original_owner_binding") == binding
+            and record.get("same_original_owner_retained") is True
+            and record.get("original_closure_bound") is True
+            and record.get("native_before") == before,
+            "late native observation is not bound to the original owner/snapshot")
+    retained = record.get("retained_native_handles_before", {})
+    require(set(retained) == {"process", "job"}, "original retained handle inventory differs")
+    if before.get("direct_reaped") is not True:
+        require(before.get("direct_exit_code") is None and before.get("handles_closed") is False
+                and before.get("active_zero") is True and before.get("issues") == []
+                and retained == {"process": binding["process"], "job": binding["job"]},
+                "unreceived original wait did not retain those exact native handles")
+    else:
+        require(after == before, "already received native closure must remain unchanged")
+    require(type(after.get("direct_exit_code")) is int
+            and all(after.get(key) is True for key in ("direct_reaped", "active_zero", "handles_closed"))
+            and after.get("job_terminated") == before.get("job_terminated")
+            and after.get("issues") == [], "late original native closure is incomplete")
+    return after
+
+
+def receive_late_physical(plan, execution, proof):
+    """Accept physical closure only; original FAIL/UNKNOWN and captures stay unchanged."""
+    require(execution.get("schema") == SCHEMA and execution.get("status") == "FAIL"
+            and execution.get("commands_quiescent") is False, "original failed execution required")
+    rows = execution.get("commands", [])
+    states = execution.get("command_quiescence", {}).get("commands", [])
+    require(rows and len(rows) <= len(plan["commands"]) and len(rows) == len(states), "original command count differs")
+    require(proof.get("schema") == "failed-original-worker-physical-closure-v1" and proof.get("status") == "CLOSED"
+            and proof.get("original_command_states_unchanged") is True
+            and all(proof.get(k) is False for k in ("qualification_passed", "capture_access_issued", "new_commands_permitted")),
+            "physical proof attempts to qualify or release captures")
+    failed = [(row, state) for row, state in zip(rows, states) if state.get("state") != "complete"]
+    records = proof.get("commands", [])
+    require(failed and len(records) == len(failed), "failed original inventory differs")
+    for planned, row, state in zip(plan["commands"], rows, states):
+        require(row.get("argv") == planned["argv"] and row.get("cwd") == planned["cwd"]
+                and row.get("work_seconds") == planned["seconds"] and row.get("cleanup_seconds") == 10
+                and state.get("name") == planned["name"] and row.get("quiescence_state") == state.get("state"),
+                "original physical command binding differs")
+        native = row.get("native", {})
+        require(type(row.get("original_pid")) is int and row["original_pid"] > 0,
+                "original direct process identity is missing")
+        require(row.get("native_owner", {}).get("sha256") == plan["payload"]["windows_job"], "original owner differs")
+        if state["state"] == "complete":
+            require(type(native.get("direct_exit_code")) is int
+                    and all(native.get(k) is True for k in ("direct_reaped", "active_zero", "handles_closed"))
+                    and native.get("issues") == [], "earlier original native closure is unknown")
+            io = row.get("io", {})
+            require(row.get("original_readers_joined") is True and set(io) == {"stdout", "stderr"}
+                    and all(s.get("error") is None and all(s.get(k) is True for k in ("acquired", "worker_started",
+                    "worker_complete", "eof", "pipe_close_returned", "capture_close_returned")) for s in io.values()),
+                    "earlier original command IO is unknown")
+    for (row, state), record in zip(failed, records):
+        require(record.get("name") == state["name"] and record.get("state") == "CLOSED"
+                and record.get("original_state") == state["state"]
+                and record.get("capture_access_issued") is False, "late original proof differs")
+        receive_late_native(row, record)
+        workers = record.get("workers", [])
+        original_workers = row.get("worker_join_observations", [])
+        require(len(workers) == len(original_workers) == 2 and row.get("stdin_mode") == "null", "original workers differ")
+        for old, new in zip(original_workers, workers):
+            require(all(new.get(k) == old.get(k) for k in ("name", "ident", "native_id"))
+                    and type(new.get("ident")) is int and new["ident"] > 0
+                    and new.get("joined") is True and new.get("alive_after") is False
+                    and new.get("join_error_count") == 0, "late receiving replaced or failed an original reader")
+        io = record.get("io", {})
+        require(set(io) == {"stdout", "stderr"} and all(state.get("error") is None
+                and all(state.get(k) is True for k in ("acquired", "worker_started", "worker_complete", "eof",
+                    "pipe_close_returned", "capture_close_returned")) for state in io.values()), "late EOF/close is unknown")
+    return "FAIL"
+
+
+def worker(plan, plan_sha):
+    guard_path = Path(__file__).with_name("guard-custody.py")
+    raw = guard_path.read_bytes()
+    require(hashlib.sha256(raw).hexdigest() == plan["payload"]["guard"], "guard changed before load")
+    spec = importlib.util.spec_from_file_location("fresh_original_command_guard", guard_path)
+    guard = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = guard
+    exec(compile(raw, str(guard_path), "exec"), guard.__dict__)
+    core = types.SimpleNamespace(Run=CoreRun, REPO=Path(plan["commands"][0]["cwd"]), sha=sha, subprocess=subprocess)
+    run = guard.make_guarded_run_class(core)(Path(plan["output"]) / "commands", plan["environment"])
+    run.receipt["plan_sha256"] = plan_sha
+    run.receipt["payload"] = plan["payload"]
+    run.receipt["step_inputs"] = []
+    try:
+        for command in plan["commands"]:
+            before = {p: sha(p) for p in plan["input_files"]}
+            require(before == plan["input_files"], "auxiliary input changed before command")
+            observation = {"name": command["name"], "before": before, "after": None}
+            run.receipt["step_inputs"].append(observation)
+            try:
+                run.command(command["argv"], command["name"], cwd=command["cwd"], timeout=command["seconds"])
+            finally:
+                if run.commands_quiescent():
+                    observation["after"] = {p: sha(p) for p in plan["input_files"]}
+                    require(observation["after"] == before, "auxiliary input changed after closed command")
+        run.receipt["status"] = "PASS"
+    except BaseException as error:
+        run.receipt.update(status="FAIL", error=type(error).__name__ + ": " + str(error))
+    run.receipt["commands_quiescent"] = run.commands_quiescent()
+    run.receipt["command_quiescence"] = run.quiescence_snapshot()
+    run.receipt["no_command_started"] = not run.receipt["commands"]
+    run.receipt["input_files_unchanged"] = bool(run.receipt["step_inputs"]) and all(
+        step["before"] == step["after"] == plan["input_files"] for step in run.receipt["step_inputs"])
+    try:
+        run.save()
+    finally:
+        if not run.commands_quiescent():
+            # Even failed metadata publication must keep these original owners.
+            # Late physical closure never changes the saved qualification FAIL.
+            while True:
+                try:
+                    proof = run.receive_failed_worker_closure(time.monotonic() + 30)
+                    with (run.root / "physical-observations.jsonl").open("a", encoding="utf-8") as stream:
+                        stream.write(json.dumps(proof, ensure_ascii=False) + "\n")
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    if proof["status"] == "CLOSED":
+                        save(run.root / "failed-physical-closure.json", proof)
+                        break
+                except BaseException:
+                    pass  # Publication failure never releases retained native objects.
+                time.sleep(1)
+    return 0 if run.receipt["status"] == "PASS" else 1
+
+
+def parent_run(plan, path, pin):
+    root = Path(plan["output"])
+    root.mkdir()
+    for key in ("TEMP", "TMP", "TMPDIR", "GOTMPDIR", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "GOCACHE", "GOMODCACHE"):
+        Path(plan["environment"][key]).mkdir(parents=True, exist_ok=True)
+    custody = {"process": None, "files": []}
+    RETAINED_PARENT.append(custody)
+    out = (root / "controller.stdout.txt").open("xb")
+    custody["files"].append(out)
+    err = (root / "controller.stderr.txt").open("xb")
+    custody["files"].append(err)
+    argv = [sys.executable, "-I", "-S", "-B", str(Path(__file__).absolute()), str(path), pin, "--worker"]
+    started = time.monotonic()
+    record = {"schema": SCHEMA + "-parent", "status": "RUNNING", "plan_sha256": pin,
+              "argv": argv, "original_pid": None, "terminal_exit_received": False,
+              "parent_capture_files_closed": False, "deadline_exceeded": False}
+    startup = subprocess.STARTUPINFO()
+    startup.dwFlags = subprocess.STARTF_USESHOWWINDOW
+    startup.wShowWindow = subprocess.SW_HIDE
+    original = subprocess.Popen(argv, cwd=str(root), env=plan["environment"], stdin=subprocess.DEVNULL,
+        stdout=out, stderr=err, startupinfo=startup, creationflags=subprocess.CREATE_NEW_CONSOLE)
+    custody["process"] = original
+    record["original_pid"] = original.pid
+    save(root / "parent.json", record)
+    try:
+        code = original.wait(timeout=plan["parent_seconds"])
+    except subprocess.TimeoutExpired:
+        record.update(status="UNKNOWN", deadline_exceeded=True)
+        save(root / "parent.json", record)
+        # The original child owns UNKNOWN resources. Do not kill/reopen/replace it.
+        while True:
+            try:
+                code = original.wait(timeout=1)
+                break
+            except subprocess.TimeoutExpired:
+                continue
+    record.update(terminal_exit_received=True, exit_code=code, seconds=time.monotonic() - started)
+    execution_path = root / "commands" / "execution.json"
+    try:
+        raw = execution_path.read_bytes()
+        execution = json.loads(raw)
+        require(execution.get("plan_sha256") == pin and execution.get("payload") == plan["payload"], "worker binding differs")
+        if execution.get("commands_quiescent") is True:
+            result = receive_execution(plan, execution)
+        else:
+            physical_path = root / "commands" / "failed-physical-closure.json"
+            physical_raw = physical_path.read_bytes()
+            result = receive_late_physical(plan, execution, json.loads(physical_raw))
+            record["failed_physical_sha256"] = hashlib.sha256(physical_raw).hexdigest()
+            record["original_failure_unchanged"] = True
+            record["command_capture_access_issued"] = False
+        require(code == (0 if result == "PASS" else 1), "worker exit/status mismatch")
+        record["execution_sha256"] = hashlib.sha256(raw).hexdigest()
+        record["child_status"] = result
+        record["physical_complete"] = True
+    except BaseException as error:
+        record.update(status="UNKNOWN", receiving_error=type(error).__name__ + ": " + str(error))
+        save(root / "parent.json", record)
+        while True:
+            time.sleep(30)  # No incomplete child receipt can become a new authority.
+    closes = []
+    for name, capture in (("stdout", out), ("stderr", err)):
+        observation = {"name": name, "close_attempted": True, "close_returned": False, "wrapper_closed": False}
+        closes.append(observation)
+        try:
+            capture.close()
+            observation.update(close_returned=True, wrapper_closed=capture.closed)
+            require(capture.closed is True, "original parent capture close did not complete")
+        except BaseException as error:
+            observation["error"] = type(error).__name__ + ": " + str(error)
+            record.update(status="UNKNOWN", capture_closure=closes)
+            save(root / "parent.json", record)
+            while True:
+                time.sleep(30)
+    record["capture_closure"] = closes
+    record["parent_capture_files_closed"] = all(v["close_returned"] and v["wrapper_closed"] for v in closes)
+    record["status"] = result if not record["deadline_exceeded"] else "FAIL"
+    record["parent_captures"] = {side: {"bytes": (root / ("controller." + side + ".txt")).stat().st_size,
+        "sha256": sha(root / ("controller." + side + ".txt"))} for side in ("stdout", "stderr")}
+    save(root / "parent.json", record)
+    return 0 if record["status"] == "PASS" else 1
+
+
+def parent(plan, path, pin):
+    try:
+        return parent_run(plan, path, pin)
+    except BaseException as error:
+        if not RETAINED_PARENT:
+            raise
+        # An unexpected publication/wait failure must not release the original
+        # controller and files. This is a failure record, never a completion proof.
+        try:
+            save(Path(plan["output"]) / "parent-error.json",
+                 {"schema": SCHEMA + "-parent-error", "status": "UNKNOWN", "plan_sha256": pin,
+                  "error": type(error).__name__ + ": " + str(error)})
+        except BaseException:
+            pass
+        while True:
+            time.sleep(30)
+
+
+if __name__ == "__main__":
+    require(len(sys.argv) in (3, 4) and (len(sys.argv) == 3 or sys.argv[3] == "--worker"), "usage: runner PLAN SHA256 [--worker]")
+    plan_path = Path(sys.argv[1]).absolute()
+    plan_pin = sys.argv[2]
+    plan = load_plan(plan_path, plan_pin)
+    raise SystemExit(worker(plan, plan_pin) if len(sys.argv) == 4 else parent(plan, plan_path, plan_pin))

@@ -1,0 +1,172 @@
+=== RUN   TestWindowsConsolePolicyApplication
+=== RUN   TestWindowsConsolePolicyApplication/GUI_calls_no_APIs
+--- PASS: TestWindowsConsolePolicyApplication/GUI_calls_no_APIs (0.00s)
+=== NAME  TestWindowsConsolePolicyApplication
+=== RUN   TestWindowsConsolePolicyApplication/background_calls_no_APIs
+--- PASS: TestWindowsConsolePolicyApplication/background_calls_no_APIs (0.00s)
+=== NAME  TestWindowsConsolePolicyApplication
+=== RUN   TestWindowsConsolePolicyApplication/stdio_protocol_calls_no_APIs
+--- PASS: TestWindowsConsolePolicyApplication/stdio_protocol_calls_no_APIs (0.00s)
+=== NAME  TestWindowsConsolePolicyApplication
+=== RUN   TestWindowsConsolePolicyApplication/background_ignores_debug_console_prefix
+--- PASS: TestWindowsConsolePolicyApplication/background_ignores_debug_console_prefix (0.00s)
+=== NAME  TestWindowsConsolePolicyApplication
+=== RUN   TestWindowsConsolePolicyApplication/stdio_protocol_ignores_debug_console_prefix
+--- PASS: TestWindowsConsolePolicyApplication/stdio_protocol_ignores_debug_console_prefix (0.00s)
+=== NAME  TestWindowsConsolePolicyApplication
+=== RUN   TestWindowsConsolePolicyApplication/explicit_attaches_to_parent
+--- PASS: TestWindowsConsolePolicyApplication/explicit_attaches_to_parent (0.00s)
+=== NAME  TestWindowsConsolePolicyApplication
+=== RUN   TestWindowsConsolePolicyApplication/explicit_allocates_without_parent
+--- PASS: TestWindowsConsolePolicyApplication/explicit_allocates_without_parent (0.00s)
+=== NAME  TestWindowsConsolePolicyApplication
+=== RUN   TestWindowsConsolePolicyApplication/explicit_dual_failure_is_typed
+--- PASS: TestWindowsConsolePolicyApplication/explicit_dual_failure_is_typed (0.00s)
+=== NAME  TestWindowsConsolePolicyApplication
+=== RUN   TestWindowsConsolePolicyApplication/valid_redirected_handles_are_preserved
+--- PASS: TestWindowsConsolePolicyApplication/valid_redirected_handles_are_preserved (0.00s)
+=== NAME  TestWindowsConsolePolicyApplication
+--- PASS: TestWindowsConsolePolicyApplication (0.00s)
+=== NAME  
+=== RUN   TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs
+=== RUN   TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/valid_inherited_standard_handles_need_no_console_API
+--- PASS: TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/valid_inherited_standard_handles_need_no_console_API (0.00s)
+=== NAME  TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs
+=== RUN   TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/invalid_output_attaches_once_and_never_allocates
+--- PASS: TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/invalid_output_attaches_once_and_never_allocates (0.00s)
+=== NAME  TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs
+=== RUN   TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/attach_failure_is_typed
+--- PASS: TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/attach_failure_is_typed (0.00s)
+=== NAME  TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs
+=== RUN   TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/repair_still_invalid_is_typed
+--- PASS: TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/repair_still_invalid_is_typed (0.00s)
+=== NAME  TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs
+--- PASS: TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs (0.00s)
+=== NAME  
+=== RUN   TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput
+=== RUN   TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput/input_alone_requires_parent_attachment
+--- PASS: TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput/input_alone_requires_parent_attachment (0.00s)
+=== NAME  TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput
+=== RUN   TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput/no_parent_leaves_input_optional
+--- PASS: TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput/no_parent_leaves_input_optional (0.00s)
+=== NAME  TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput
+=== RUN   TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput/unavailable_console_input_remains_optional
+--- PASS: TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput/unavailable_console_input_remains_optional (0.00s)
+=== NAME  TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput
+--- PASS: TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput (0.00s)
+=== NAME  
+=== RUN   TestWindowsOptedOutBareUsesCLIOutputAcquisition
+--- PASS: TestWindowsOptedOutBareUsesCLIOutputAcquisition (0.00s)
+=== NAME  
+=== RUN   TestPrepareInvocationWindowsBareLaunchReturnsWithoutInlineCobra
+--- PASS: TestPrepareInvocationWindowsBareLaunchReturnsWithoutInlineCobra (0.00s)
+=== NAME  
+=== RUN   TestClassifyWindowsEntrypointMode_CBuildIsStdioProtocol
+--- PASS: TestClassifyWindowsEntrypointMode_CBuildIsStdioProtocol (0.00s)
+=== NAME  
+=== RUN   TestPrepareInvocationPreservesNonBareAndOptOutRoutes
+=== RUN   TestPrepareInvocationPreservesNonBareAndOptOutRoutes/explicit_gui
+--- PASS: TestPrepareInvocationPreservesNonBareAndOptOutRoutes/explicit_gui (0.00s)
+=== NAME  TestPrepareInvocationPreservesNonBareAndOptOutRoutes
+=== RUN   TestPrepareInvocationPreservesNonBareAndOptOutRoutes/version
+--- PASS: TestPrepareInvocationPreservesNonBareAndOptOutRoutes/version (0.00s)
+=== NAME  TestPrepareInvocationPreservesNonBareAndOptOutRoutes
+=== RUN   TestPrepareInvocationPreservesNonBareAndOptOutRoutes/debug_console
+--- PASS: TestPrepareInvocationPreservesNonBareAndOptOutRoutes/debug_console (0.00s)
+=== NAME  TestPrepareInvocationPreservesNonBareAndOptOutRoutes
+=== RUN   TestPrepareInvocationPreservesNonBareAndOptOutRoutes/bare_opt_out
+--- PASS: TestPrepareInvocationPreservesNonBareAndOptOutRoutes/bare_opt_out (0.00s)
+=== NAME  TestPrepareInvocationPreservesNonBareAndOptOutRoutes
+--- PASS: TestPrepareInvocationPreservesNonBareAndOptOutRoutes (0.00s)
+=== NAME  
+=== RUN   TestPrepareInvocationBareLaunchFailureRemainsVisible
+--- PASS: TestPrepareInvocationBareLaunchFailureRemainsVisible (0.00s)
+=== NAME  
+=== RUN   TestPrepareInvocationNormalizedDebugBareStaysInline
+--- PASS: TestPrepareInvocationNormalizedDebugBareStaysInline (0.00s)
+=== NAME  
+=== RUN   TestPrepareInvocationNormalizedPlainBareCallsDetachedCoordinator
+--- PASS: TestPrepareInvocationNormalizedPlainBareCallsDetachedCoordinator (0.00s)
+=== NAME  
+=== RUN   TestRouteBareInvocationProducesTrayEnabledGUIArgs
+--- PASS: TestRouteBareInvocationProducesTrayEnabledGUIArgs (0.00s)
+=== NAME  
+=== RUN   TestShouldAutoLaunchGUIForArgs
+=== RUN   TestShouldAutoLaunchGUIForArgs/bare_invocation_routes_to_gui
+--- PASS: TestShouldAutoLaunchGUIForArgs/bare_invocation_routes_to_gui (0.00s)
+=== NAME  TestShouldAutoLaunchGUIForArgs
+=== RUN   TestShouldAutoLaunchGUIForArgs/bare_invocation_with_absolute_path
+--- PASS: TestShouldAutoLaunchGUIForArgs/bare_invocation_with_absolute_path (0.00s)
+=== NAME  TestShouldAutoLaunchGUIForArgs
+=== RUN   TestShouldAutoLaunchGUIForArgs/defensive:_empty_argv_treated_as_bare
+--- PASS: TestShouldAutoLaunchGUIForArgs/defensive:_empty_argv_treated_as_bare (0.00s)
+=== NAME  TestShouldAutoLaunchGUIForArgs
+=== RUN   TestShouldAutoLaunchGUIForArgs/--help_still_prints_the_command_list
+--- PASS: TestShouldAutoLaunchGUIForArgs/--help_still_prints_the_command_list (0.00s)
+=== NAME  TestShouldAutoLaunchGUIForArgs
+=== RUN   TestShouldAutoLaunchGUIForArgs/-h_still_prints_the_command_list
+--- PASS: TestShouldAutoLaunchGUIForArgs/-h_still_prints_the_command_list (0.00s)
+=== NAME  TestShouldAutoLaunchGUIForArgs
+=== RUN   TestShouldAutoLaunchGUIForArgs/help_subcommand_untouched
+--- PASS: TestShouldAutoLaunchGUIForArgs/help_subcommand_untouched (0.00s)
+=== NAME  TestShouldAutoLaunchGUIForArgs
+=== RUN   TestShouldAutoLaunchGUIForArgs/gui_subcommand_untouched
+--- PASS: TestShouldAutoLaunchGUIForArgs/gui_subcommand_untouched (0.00s)
+=== NAME  TestShouldAutoLaunchGUIForArgs
+=== RUN   TestShouldAutoLaunchGUIForArgs/status_subcommand_untouched
+--- PASS: TestShouldAutoLaunchGUIForArgs/status_subcommand_untouched (0.00s)
+=== NAME  TestShouldAutoLaunchGUIForArgs
+=== RUN   TestShouldAutoLaunchGUIForArgs/subcommand_with_flags_untouched
+--- PASS: TestShouldAutoLaunchGUIForArgs/subcommand_with_flags_untouched (0.00s)
+=== NAME  TestShouldAutoLaunchGUIForArgs
+--- PASS: TestShouldAutoLaunchGUIForArgs (0.00s)
+=== NAME  
+=== RUN   TestShouldAutoLaunchGUIIsConsoleIndependent
+--- PASS: TestShouldAutoLaunchGUIIsConsoleIndependent (0.00s)
+=== NAME  
+=== RUN   TestShouldAutoLaunchGUI_EnvOptOut
+=== RUN   TestShouldAutoLaunchGUI_EnvOptOut/unset:_bare_mcphub_starts_the_hub
+--- PASS: TestShouldAutoLaunchGUI_EnvOptOut/unset:_bare_mcphub_starts_the_hub (0.00s)
+=== NAME  TestShouldAutoLaunchGUI_EnvOptOut
+=== RUN   TestShouldAutoLaunchGUI_EnvOptOut/empty_value_is_not_an_opt-out
+--- PASS: TestShouldAutoLaunchGUI_EnvOptOut/empty_value_is_not_an_opt-out (0.00s)
+=== NAME  TestShouldAutoLaunchGUI_EnvOptOut
+=== RUN   TestShouldAutoLaunchGUI_EnvOptOut/0_is_not_an_opt-out
+--- PASS: TestShouldAutoLaunchGUI_EnvOptOut/0_is_not_an_opt-out (0.00s)
+=== NAME  TestShouldAutoLaunchGUI_EnvOptOut
+=== RUN   TestShouldAutoLaunchGUI_EnvOptOut/arbitrary_value_is_not_an_opt-out
+--- PASS: TestShouldAutoLaunchGUI_EnvOptOut/arbitrary_value_is_not_an_opt-out (0.00s)
+=== NAME  TestShouldAutoLaunchGUI_EnvOptOut
+=== RUN   TestShouldAutoLaunchGUI_EnvOptOut/1_opts_out
+--- PASS: TestShouldAutoLaunchGUI_EnvOptOut/1_opts_out (0.00s)
+=== NAME  TestShouldAutoLaunchGUI_EnvOptOut
+=== RUN   TestShouldAutoLaunchGUI_EnvOptOut/true_opts_out
+--- PASS: TestShouldAutoLaunchGUI_EnvOptOut/true_opts_out (0.00s)
+=== NAME  TestShouldAutoLaunchGUI_EnvOptOut
+=== RUN   TestShouldAutoLaunchGUI_EnvOptOut/TRUE_opts_out_(case-insensitive)
+--- PASS: TestShouldAutoLaunchGUI_EnvOptOut/TRUE_opts_out_(case-insensitive) (0.00s)
+=== NAME  TestShouldAutoLaunchGUI_EnvOptOut
+=== RUN   TestShouldAutoLaunchGUI_EnvOptOut/padded_value_opts_out_(trimmed)
+--- PASS: TestShouldAutoLaunchGUI_EnvOptOut/padded_value_opts_out_(trimmed) (0.00s)
+=== NAME  TestShouldAutoLaunchGUI_EnvOptOut
+--- PASS: TestShouldAutoLaunchGUI_EnvOptOut (0.00s)
+=== NAME  
+=== RUN   TestShouldAutoLaunchGUI_OptOutDoesNotLeakIntoThePureSeam
+--- PASS: TestShouldAutoLaunchGUI_OptOutDoesNotLeakIntoThePureSeam (0.00s)
+=== NAME  
+=== RUN   TestClassifyWindowsEntrypointModeExhaustiveRootCommands
+--- PASS: TestClassifyWindowsEntrypointModeExhaustiveRootCommands (0.00s)
+=== NAME  
+=== RUN   TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp
+=== RUN   TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp/1
+--- PASS: TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp/1 (0.03s)
+=== NAME  TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp
+=== RUN   TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp/true
+--- PASS: TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp/true (0.03s)
+=== NAME  TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp
+=== RUN   TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp/_TRUE_
+--- PASS: TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp/_TRUE_ (0.03s)
+=== NAME  TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp
+--- PASS: TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp (0.09s)
+=== NAME  
+PASS

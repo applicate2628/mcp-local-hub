@@ -1,0 +1,104 @@
+#Requires -Version 7.5
+# DATA inventory of six completed helper outputs. Does not execute those images.
+$ErrorActionPreference='Stop'
+$Task='@@RECOVERY_APPROVED_WORK_AREA_RAW@@\mcp-acceptance-rebuild-20261127-v1'
+$InputRoot=$Task+'\inputs-successor33-v1\producer-candidate'
+$OutputRoot=$Task+'\successor-product-helper-inputs-v1'
+$Source='@@RECOVERY_APPROVED_WORK_AREA_RAW@@\pub666-recovered-20261128'
+$RootReceiving=$InputRoot+'\successor-product-helper-inputs-v1-root-receiving.json'
+$RootSHA='6e8568fd054048a082fe48feea83069e5759289b733294e534169d2fd5b77743'
+$BindingPath=$InputRoot+'\helper-build-bindings-v2.json'
+$BindingSHA='d078d88d6455056efc71fd5dfa800d1bd2dd026b8debb41997445590f58b1b01'
+$Target=$InputRoot+'\compiled-helpers-v1-receiving.json'
+function Require($Value,[string]$Message){if(-not $Value){throw $Message}}
+function SHA([string]$Path){
+ $a=[Security.Cryptography.SHA256]::Create()
+ try{[BitConverter]::ToString($a.ComputeHash([IO.File]::ReadAllBytes($Path))).Replace('-','').ToLowerInvariant()}finally{$a.Dispose()}
+}
+function ReadData([string]$Path){return ([IO.File]::ReadAllText($Path)|ConvertFrom-Json -AsHashtable -DateKind String)}
+function EqualData($Left,$Right){
+ if($null-eq$Left -or $null-eq$Right){return ($null-eq$Left -and $null-eq$Right)}
+ if($Left-is[Collections.IDictionary]){
+  if($Right-isnot[Collections.IDictionary] -or $Left.Count-ne$Right.Count){return $false}
+  foreach($key in $Left.Keys){if(-not $Right.Contains($key) -or -not(EqualData $Left[$key] $Right[$key])){return $false}}
+  return $true
+ }
+ if($Left-is[Array]){
+  if($Right-isnot[Array] -or $Left.Count-ne$Right.Count){return $false}
+  for($index=0;$index-lt$Left.Count;$index++){if(-not(EqualData $Left[$index] $Right[$index])){return $false}}
+  return $true
+ }
+ if($Left-is[bool] -or $Right-is[bool]){return ($Left-is[bool] -and $Right-is[bool] -and $Left-eq$Right)}
+ return ($Left-ceq$Right)
+}
+function Artifact([string]$Path){
+ $item=Get-Item -LiteralPath $Path -Force
+ Require (-not $item.PSIsContainer) ('regular file required: '+$Path)
+ for($ancestor=$item;$null-ne$ancestor;){
+  Require (($ancestor.Attributes-band[IO.FileAttributes]::ReparsePoint)-eq0) ('reparse entry: '+$Path)
+  $ancestor=if($ancestor-is[IO.FileInfo]){$ancestor.Directory}else{$ancestor.Parent}
+ }
+ return [ordered]@{path=$Path;bytes=$item.Length;sha256=(SHA $Path)}
+}
+function VerifyArtifact($Pair,[string]$ExpectedPath){
+ Require ($Pair.path-ceq$ExpectedPath -and $Pair.sha256-cmatch'^[0-9a-f]{64}$') 'artifact binding'
+ $actual=Artifact $ExpectedPath
+ Require ($actual.sha256-ceq$Pair.sha256) ('artifact SHA: '+$ExpectedPath)
+ if($Pair.Contains('bytes')){Require ($actual.bytes-eq$Pair.bytes) ('artifact size: '+$ExpectedPath)}
+ return $actual
+}
+
+
+Require ((SHA $RootReceiving)-ceq$RootSHA -and (SHA $BindingPath)-ceq$BindingSHA) 'original closed receiver and binding pins'
+$received=ReadData $RootReceiving
+$binding=ReadData $BindingPath
+Require ($received.schema-ceq'successor-product-helper-root-receiving-v1' -and $received.status-ceq'FAIL' -and $received.closure-ceq'CLOSED' -and $received.physical_complete-eq$true -and $received.original_parent_status-ceq'FAIL' -and $received.original_execution_status-ceq'FAIL' -and $received.original_exit_code-eq1) 'preserved whole producer FAIL/CLOSED required'
+Require ($received.plan_sha256-ceq'99333ab4cb43f9a01720c70e567782475065b0f7077d70a3f157dca475c9c15a' -and $received.actual_commands-eq10 -and $received.input_files_verified-eq3398 -and $received.step_maps_verified-eq20 -and $received.command_captures_verified-eq20 -and @($received.input_issues).Count-eq0) 'complete original root receiving differs'
+Require ($received.full_acceptance_executed-eq$false -and $received.full_acceptance_pass-eq$false -and $received.original_status_changed-eq$false -and $received.auxiliary_parser_tests_executed-eq$true) 'qualification scope differs'
+$expected=@('copy-closed-warm-caches','stage-exact-source-and-helpers','build-validator','build-test2json','build-job','build-contained','build-namespace','build-cli','check-foreground-framed-parser')
+for($i=0;$i-lt$expected.Count;$i++){
+ $row=$received.commands[$i]
+ Require ($row.name-ceq$expected[$i] -and $row.command_passed-eq$true -and $row.closure-ceq'CLOSED' -and $row.exit_code-eq0) ('original completed preparation command: '+$i)
+}
+Require ($received.commands[9].name-ceq'build-marked-product' -and $received.commands[9].exit_code-eq1 -and $received.commands[9].closure-ceq'CLOSED' -and $received.commands[9].command_passed-eq$false) 'preserved later Product failure'
+Require ((SHA ($OutputRoot+'\parent.json'))-ceq$received.parent_sha256 -and
+ (SHA ($OutputRoot+'\commands\execution.json'))-ceq$received.execution_sha256 -and
+ (SHA ($InputRoot+'\successor-product-helper-inputs-v1-outer-original.json'))-ceq$received.outer_sha256) 'original terminal metadata changed'
+Require ($binding.source_commit-ceq$received.source_commit -and $binding.source_tree-ceq$received.source_tree -and $binding.output_root-ceq$OutputRoot -and $binding.source_root-ceq$Source) 'helper source scope'
+$preparationPath=$OutputRoot+'\source-helper-preparation.json'
+$preparation=ReadData $preparationPath
+Require ($preparation.schema-ceq'successor-source-helper-preparation-v1' -and $preparation.status-ceq'STAGED_DATA_ONLY' -and $preparation.source_commit-ceq$binding.source_commit -and $preparation.source_tree-ceq$binding.source_tree -and $preparation.source_file_count-eq3369 -and $preparation.all_export_source_bytes_equal-eq$true -and $preparation.tracked_source_mutated-eq$false -and $preparation.staged_sources.Count-eq7 -and $preparation.binding.path-ceq$BindingPath -and $preparation.binding.sha256-ceq$BindingSHA) 'original staged helper/source binding'
+$staged=[ordered]@{}
+foreach($role in @('job','contained','namespace','cli')){
+ foreach($leaf in $binding.auxiliary_sources[$role].Keys){
+  $pin=$binding.auxiliary_sources[$role][$leaf]
+  Require ((SHA $pin.path)-ceq$pin.sha256) 'original auxiliary source input changed'
+  $path=$Source+'\.scratch\'+$binding.scope_names[$role]+'\'+$leaf
+  $actual=Artifact $path
+  Require ($actual.sha256-ceq$pin.sha256 -and $actual.sha256-ceq$preparation.staged_sources[$path].sha256 -and $actual.bytes-eq$preparation.staged_sources[$path].bytes) 'staged helper source changed'
+  $staged[$path]=$actual
+ }
+}
+$binaries=[ordered]@{}
+foreach($role in @('validator','test2json','job','contained','namespace','cli')){
+ $actual=Artifact $binding.binaries[$role]
+ Require ($actual.bytes-gt0) 'empty compiled helper output'
+ $binaries[$role]=$actual
+}
+Require ((SHA $RootReceiving)-ceq$RootSHA -and (SHA $BindingPath)-ceq$BindingSHA) 'original control pins changed during DATA inventory'
+$result=[ordered]@{
+ schema='successor-compiled-helper-receiving-v1';status='COMPILED_DATA_ONLY';physical_complete=$true
+ source_commit=$binding.source_commit;source_tree=$binding.source_tree;source_file_count=3369
+ root_receiving=[ordered]@{path=$RootReceiving;sha256=$RootSHA}
+ original_producer_status='FAIL';original_producer_closure='CLOSED';original_failure_preserved=$true
+ binding=[ordered]@{path=$BindingPath;sha256=$BindingSHA}
+ preparation=(Artifact $preparationPath);successful_original_commands=$expected;staged_sources=$staged;binaries=$binaries
+ foreground_parser_unit_check=[ordered]@{command=$received.commands[8];scope='Five original auxiliary parser tests only; no full CLI execution'}
+ product_inputs_received=$false;full_acceptance_executed=$false;full_acceptance_pass=$false
+ helper_runtime_qualification_passed=$false;native_authority_transferred=$false;failed_run_cache_reused=$false
+ receiving_utc=[DateTime]::UtcNow.ToString('o')
+}
+$raw=[Text.UTF8Encoding]::new($false).GetBytes(($result|ConvertTo-Json -Depth 30)+[char]10)
+$writer=[IO.File]::Open($Target,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+try{$writer.Write($raw,0,$raw.Length);$writer.Flush($true)}finally{$writer.Dispose()}
+[pscustomobject]@{path=$Target;sha256=(SHA $Target);bytes=([IO.FileInfo]$Target).Length;helpers=$binaries;original_status='FAIL/CLOSED';scope='COMPILED_DATA_ONLY'}|ConvertTo-Json -Depth 10

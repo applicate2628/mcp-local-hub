@@ -1,0 +1,19 @@
+--- original-v6/namespace-receiving
++++ successor33/namespace-receiving-v2
+@@ -24,11 +24,14 @@
+                 or not isinstance(proof.get("failure"), str) or not proof["failure"]):
+             raise RuntimeError("namespace pre-child refusal differs from the original request")
+         return "prechild-refusal"
+-    if (proof.get("schema") != "api-namespace-full-suite-v1"
+-            or proof.get("mode") != "prebuilt-full-suite"
++    if (proof.get("schema") != "api-namespace-full-suite-v2"
++            or proof.get("mode") != "incoming-go-image-copy"
+             or proof.get("binary") != binding["binary"]
+             or proof.get("expected_sha256") != binding["expected_sha256"]
+             or proof.get("binary_sha256") != binding["expected_sha256"]
++            or proof.get("evidence_root") != str(Path(binding["parent"])/"r")
++            or proof.get("execution_binary") != str(Path(binding["parent"])/"r"/"bin"/"api.test.exe")
++            or proof.get("execution_sha256") != binding["expected_sha256"]
+             or proof.get("source_dir") != binding["source_dir"] or proof.get("args") != binding["args"]
+             or proof.get("compiled_tags") != (["test_state_path_env"] if binding["test_state_path_env"] else [])
+             or not native_settled("namespace", proof)):

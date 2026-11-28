@@ -1,0 +1,244 @@
+"""Prepare exact successor source/export and private auxiliary scopes, or collect
+compiled DATA. Native builders are separate commands in the reviewed owner plan.
+"""
+import sys
+sys.dont_write_bytecode = True
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import types
+
+TASK = Path(r"@@RECOVERY_APPROVED_WORK_AREA_RAW@@\mcp-acceptance-rebuild-20261127-v1")
+CANDIDATE = TASK / "inputs-successor33-v1" / "producer-candidate"
+SOURCE = Path(r"@@RECOVERY_APPROVED_WORK_AREA_RAW@@\pub666-recovered-20261128")
+OUTPUT = TASK / "successor-product-helper-inputs-v1"
+COMMIT = "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8"
+TREE = "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1"
+SCOPES = {"job": "qualified-successor-job", "contained": "qualified-successor-contained",
+          "namespace": "qualified-successor-namespace", "cli": "qualified-successor-cli",
+          "native_product": "qualified-successor-native-product"}
+REPARSE = 0x400
+
+
+def need(ok, message):
+    if not ok:
+        raise RuntimeError(message)
+
+
+def ordinary(path, directory=False):
+    path = Path(path)
+    need(path.is_absolute() and ".." not in path.parts, "absolute clean path required")
+    for item in (*reversed(path.parents), path):
+        info = item.lstat()
+        need(not info.st_file_attributes & REPARSE and not stat.S_ISLNK(info.st_mode),
+             "reparse path refused: " + str(item))
+        need(stat.S_ISDIR(info.st_mode) if item != path or directory else stat.S_ISREG(info.st_mode),
+             "ordinary path type differs: " + str(item))
+    return path
+
+
+def digest(raw):
+    return hashlib.sha256(raw).hexdigest()
+
+
+def pinned(pair):
+    need(isinstance(pair, dict) and re.fullmatch("[0-9a-f]{64}", pair.get("sha256", "")),
+         "exact input pair required")
+    raw = ordinary(pair["path"]).read_bytes()
+    need(digest(raw) == pair["sha256"], "input bytes differ: " + pair["path"])
+    return raw
+
+
+def write_new(path, raw):
+    ordinary(path.parent, True)
+    with path.open("xb") as stream:
+        stream.write(raw)
+        stream.flush()
+        os.fsync(stream.fileno())
+    need(path.read_bytes() == raw, "new bytes differ")
+
+
+def write_json(path, value):
+    write_new(path, (json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8"))
+
+
+def artifact(path):
+    path = ordinary(path)
+    raw = path.read_bytes()
+    return {"path": str(path), "sha256": digest(raw), "bytes": len(raw)}
+
+
+def load_bindings(path, expected):
+    need(path == CANDIDATE / "helper-build-bindings-v2.json", "fixed helper binding path required")
+    cfg = json.loads(pinned({"path": str(path), "sha256": expected}))
+    need(cfg.get("schema") == "successor-helper-build-bindings-v1"
+         and cfg.get("source_root") == str(SOURCE) and cfg.get("source_commit") == COMMIT
+         and cfg.get("source_tree") == TREE and cfg.get("output_root") == str(OUTPUT)
+         and cfg.get("scope_names") == SCOPES, "final successor scope differs")
+    product = json.loads(pinned(cfg["product_config"]))
+    need(product["source_root"] == str(SOURCE) and product["source_commit"] == COMMIT
+         and product["source_tree"] == TREE and product["source_file_count"] == 3369
+         and product["source_map"] == cfg["source_map"]
+         and product["export_root"] == str(OUTPUT / "source")
+         and product["output_root"] == str(OUTPUT)
+         and product["native_output"] == str(SOURCE / ".scratch" / SCOPES["native_product"] / "bundle"),
+         "Product roles and helper source differ")
+    source = json.loads(pinned(cfg["source_map"]))
+    git = json.loads(pinned(cfg["source_git_map"]))
+    need(source.get("schema") == "source59f-actual-byte-inputs-v1"
+         and source.get("source_root") == str(SOURCE) and source.get("commit") == COMMIT
+         and source.get("tree") == TREE and source.get("tracked_files") == 3369
+         and source.get("git_map_sha256") == cfg["source_git_map"]["sha256"]
+         and git.get("schema") == "exact-source-git-map-v1"
+         and git.get("commit") == COMMIT and git.get("tree") == TREE
+         and len(source.get("files", {})) == 3369 and set(source["files"]) == set(git["files"]),
+         "complete original Source maps differ")
+    runtime = json.loads(pinned(cfg["runtime_snapshot"]))
+    publisher = json.loads(pinned(product["source_snapshot"]))
+    need(runtime == {"head": COMMIT, "files": source["files"]}
+         and publisher == {"schema": "reused-graphify-source-snapshot-v1",
+                           "files": {p: {"sha256": sha} for p, sha in source["files"].items()}},
+         "runtime/Publisher source projections differ")
+    ordinary(SOURCE, True)
+    ordinary(OUTPUT, True)
+    return cfg, product, source, git
+
+
+def source_rows(source, git):
+    result = {}
+    for relative, sha in sorted(source["files"].items()):
+        name = Path(relative)
+        need(not name.is_absolute() and ".." not in name.parts
+             and git["files"][relative]["mode"] in ("100644", "100755"), "ordinary tracked Source row required")
+        path = ordinary(SOURCE / name)
+        raw = path.read_bytes()
+        blob = hashlib.sha1(b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw).hexdigest()
+        need(digest(raw) == sha and blob == git["files"][relative]["git_blob"],
+             "tracked Source byte/blob mismatch: " + relative)
+        result[relative] = raw
+    return result
+
+
+def auxiliary_rows(cfg):
+    expected = {"job": {"main_windows.go", "owner_windows.go"},
+                "contained": {"main_windows.go"},
+                "namespace": {"main_windows.go", "prebuilt_windows.go"},
+                "cli": {"main_windows.go", "main_windows_test.go"}}
+    need(set(cfg["auxiliary_sources"]) == set(expected), "four original auxiliary roles required")
+    rows = {}
+    for role, names in expected.items():
+        need(set(cfg["auxiliary_sources"][role]) == names, "fixed auxiliary source inventory differs")
+        for name in sorted(names):
+            pair = cfg["auxiliary_sources"][role][name]
+            rows[SOURCE / ".scratch" / SCOPES[role] / name] = pinned(pair)
+    return rows
+
+
+def verify_staged(cfg):
+    rows = auxiliary_rows(cfg)
+    actual = set()
+    for role in ("job", "contained", "namespace", "cli"):
+        root = ordinary(SOURCE / ".scratch" / SCOPES[role], True)
+        for path in root.rglob("*"):
+            ordinary(path, path.is_dir())
+            if path.is_file():
+                actual.add(path)
+    need(actual == set(rows), "auxiliary staged path inventory differs")
+    for path, raw in rows.items():
+        need(path.read_bytes() == raw, "auxiliary staged bytes differ")
+    return {str(path): {"sha256": digest(raw), "bytes": len(raw)} for path, raw in rows.items()}
+
+
+def stage(cfg, product, source, git, binding):
+    rows = source_rows(source, git)
+    export = Path(product["export_root"])
+    need(not export.exists() and not (SOURCE / ".scratch").exists(), "fresh export and private artifact parent required")
+    ordinary(export.parent, True)
+    export.mkdir()
+    for relative, raw in rows.items():
+        target = export / Path(relative)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        write_new(target, raw)
+    exported = {}
+    for path in export.rglob("*"):
+        ordinary(path, path.is_dir())
+        if path.is_file():
+            exported[path.relative_to(export).as_posix()] = digest(path.read_bytes())
+    need(exported == source["files"], "export must contain exactly every tracked source byte")
+    helper_raw = pinned(cfg["scope_helper"])
+    need(cfg["scope_helper"]["path"] == str(CANDIDATE / "private_producer_scope.py"),
+         "fixed private scope implementation required")
+    helper = types.ModuleType("successor_private_producer_scope")
+    helper.__file__ = cfg["scope_helper"]["path"]
+    exec(compile(helper_raw, helper.__file__, "exec"), helper.__dict__)
+    need(helper.ARTIFACTS == SOURCE / ".scratch" and helper.RUNS == OUTPUT / "runs",
+         "private scope roots differ")
+    security = {"parent": helper.create_private_artifact_parent()}
+    for role, name in SCOPES.items():
+        security[role] = helper.create_private_artifact_scope(SOURCE / ".scratch" / name)
+    for path, raw in auxiliary_rows(cfg).items():
+        write_new(path, raw)
+    staged = verify_staged(cfg)
+    need(source_rows(source, git) == rows, "tracked Source changed during independent copies")
+    write_json(OUTPUT / "source-helper-preparation.json", {
+        "schema": "successor-source-helper-preparation-v1", "status": "STAGED_DATA_ONLY",
+        "source_commit": COMMIT, "source_tree": TREE, "source_file_count": 3369,
+        "binding": binding, "source_map": cfg["source_map"], "source_git_map": cfg["source_git_map"],
+        "runtime_snapshot": cfg["runtime_snapshot"], "publisher_snapshot": product["source_snapshot"],
+        "export_root": str(export), "all_export_source_bytes_equal": True,
+        "staged_sources": staged, "scope_security": security, "tracked_source_mutated": False,
+        "native_builds_or_tests_executed": False, "qualification_passed": False})
+    return {"status": "STAGED_DATA_ONLY", "tracked_files": len(rows), "auxiliary_files": len(staged)}
+
+
+def receive(cfg, product, source, git, binding):
+    source_rows(source, git)
+    staged = verify_staged(cfg)
+    preparation = json.loads(ordinary(OUTPUT / "source-helper-preparation.json").read_bytes())
+    need(preparation.get("schema") == "successor-source-helper-preparation-v1"
+         and preparation.get("status") == "STAGED_DATA_ONLY" and preparation.get("binding") == binding
+         and preparation.get("staged_sources") == staged and preparation.get("source_commit") == COMMIT
+         and preparation.get("source_tree") == TREE, "actual preparation binding differs")
+    binaries = {role: artifact(Path(path)) for role, path in cfg["binaries"].items()}
+    need(set(binaries) == {"validator", "test2json", "job", "contained", "namespace", "cli"}
+         and all(row["bytes"] > 0 for row in binaries.values()), "six compiled helpers required")
+    products = {}
+    for role, key in (("product", "marked_receipt_root"), ("native_product", "native_receipt_root")):
+        path = Path(product[key]) / "product-inputs.json"
+        value = json.loads(ordinary(path).read_bytes())
+        need(value.get("schema") == "current-source-product-receiver-inputs-v1"
+             and value.get("source_commit") == COMMIT, "actual final-source Product inputs differ")
+        products[role] = artifact(path)
+    result = {"schema": "successor-compiled-inputs-v1", "status": "COMPILED_DATA_ONLY",
+        "source_commit": COMMIT, "source_tree": TREE, "source_file_count": 3369,
+        "binding": binding, "preparation": artifact(OUTPUT / "source-helper-preparation.json"),
+        "source_map": cfg["source_map"], "source_git_map": cfg["source_git_map"],
+        "runtime_snapshot": cfg["runtime_snapshot"], "publisher_snapshot": product["source_snapshot"],
+        "staged_sources": staged, "binaries": binaries, "products": products,
+        "parser_check_receiving": "separate original auxiliary go test command receipt",
+        "native_build_exit_receiving": "separate original owned-command execution and parent receipts",
+        "full_acceptance_executed": False, "qualification_passed": False, "native_authority_transferred": False}
+    write_json(OUTPUT / "compiled-inputs.json", result)
+    return {"status": "COMPILED_DATA_ONLY", "binaries": binaries, "products": products}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("mode", choices=("stage", "receive"))
+    parser.add_argument("--bindings", type=Path, required=True)
+    parser.add_argument("--bindings-sha256", required=True)
+    args = parser.parse_args()
+    need(os.name == "nt", "native Windows DATA preparation required")
+    cfg, product, source, git = load_bindings(args.bindings, args.bindings_sha256)
+    binding = {"path": str(args.bindings), "sha256": args.bindings_sha256}
+    result = stage(cfg, product, source, git, binding) if args.mode == "stage" else receive(cfg, product, source, git, binding)
+    pinned(binding)
+    print(json.dumps(result, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()

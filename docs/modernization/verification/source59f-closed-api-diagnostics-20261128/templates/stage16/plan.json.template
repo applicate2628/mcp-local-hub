@@ -1,0 +1,97 @@
+{
+  "run": "runs/cache-acceptance-stage-20261128-v16",
+  "source": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub664-363b",
+  "head": "27d90e626465dc9a3a012e50785d62785d4c5e7e",
+  "environment": {
+    "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_NO_REPLACE_OBJECTS": "1",
+    "GIT_NO_LAZY_FETCH": "1"
+  },
+  "observed_files": [],
+  "steps": [
+    {
+      "name": "verify-frozen-source-commit-object",
+      "argv": [
+        "git",
+        "--git-dir",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-product-rust-custody-retry-20261119\\.git",
+        "cat-file",
+        "-e",
+        "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8^{commit}"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "existing-worktree-metadata",
+      "argv": [
+        "git",
+        "--git-dir",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-product-rust-custody-retry-20261119\\.git",
+        "worktree",
+        "list",
+        "--porcelain"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "new-local-branch-must-be-absent",
+      "argv": [
+        "git",
+        "--git-dir",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-product-rust-custody-retry-20261119\\.git",
+        "show-ref",
+        "--verify",
+        "--quiet",
+        "refs/heads/work/recovered-cli-acceptance-20261128-v2"
+      ],
+      "expected_exit": 1,
+      "timeout": 30
+    },
+    {
+      "name": "isolate-frozen-source-from-unknown-run",
+      "argv": [
+        "git",
+        "--git-dir",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-product-rust-custody-retry-20261119\\.git",
+        "worktree",
+        "add",
+        "-b",
+        "work/recovered-cli-acceptance-20261128-v2",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-acceptance-20261128-v2",
+        "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8"
+      ],
+      "timeout": 120,
+      "mutates_inputs": true
+    },
+    {
+      "name": "new-source-identity",
+      "argv": [
+        "git",
+        "-C",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-acceptance-20261128-v2",
+        "show",
+        "-s",
+        "--format=%H%n%T%n%P"
+      ],
+      "stdout_contains": [
+        "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+        "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+        "74e7563db244ede5984834233ce8d59072e92c0a"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "new-worktree-state",
+      "argv": [
+        "git",
+        "-C",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-acceptance-20261128-v2",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all"
+      ],
+      "timeout": 30
+    }
+  ]
+}

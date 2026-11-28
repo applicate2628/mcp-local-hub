@@ -1,0 +1,2039 @@
+{
+  "schema": "mcphub-integration-replay-v1",
+  "status": "PINNED_SOURCE_RECIPE",
+  "scope": "27 captured public PR inputs, seven reviewed owner source inputs, test-only API overlay, and separately recorded native follow-up patches",
+  "initial": {
+    "pr": 671,
+    "head": "09dc07e01d1a3236ab5f45f384e11fe2f9dfd30d",
+    "tree": "0b8e6e6ada91cbaf2b3fb610d7c464f6e660c80f"
+  },
+  "target": {
+    "commit": "c730cae455ef84d226ac5323953d9e7209b4016e",
+    "tree": "0c42ea39f241077cb6a9e1a64efe6d1e0a726751",
+    "pre_gofmt_commit": "2c71dd70fba1125bd10d4a3506516be4d6820101",
+    "pre_gofmt_tree": "f500c523b030c6aa7739446973615cbbd539e4f7",
+    "native_runtime_acceptance": "Not established by source replay; tracked in separate native evidence",
+    "native_formatted_commit": "c2901b4a006ee0813b3b8b4e4afbb211f27b1cd4",
+    "native_formatted_tree": "6081e50fc5f3c33c27b223cfd68e2d1dbe404356",
+    "pre_fixture_commit": "14af01ea06063a2c2306aeaa1accf454151d7e6b",
+    "pre_fixture_tree": "386923930b874526a0e6896bde1857c4ecc95d63"
+  },
+  "excluded_prs": [
+    {
+      "pr": 623,
+      "reason": "Roadmap; retained separately"
+    },
+    {
+      "pr": 625,
+      "reason": "Rust experiment; retained separately"
+    },
+    {
+      "pr": 627,
+      "reason": "Rust experiment; retained separately"
+    },
+    {
+      "pr": 631,
+      "reason": "Rust experiment; retained separately"
+    },
+    {
+      "pr": 644,
+      "reason": "Rust experiment; retained separately"
+    }
+  ],
+  "public_inputs": [
+    {
+      "pr": 671,
+      "base": "8d31c8abdd88468ee1b5b1a6ac102c8f25327611",
+      "head": "09dc07e01d1a3236ab5f45f384e11fe2f9dfd30d",
+      "role": "initial_tree"
+    },
+    {
+      "pr": 668,
+      "base": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "head": "1b7655ae9a0dec7d6821d8419087fd92ccadbb62",
+      "role": "delta"
+    },
+    {
+      "pr": 669,
+      "base": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "head": "ec2248643d875390c41b519b85424a5ca0ce90d1",
+      "role": "delta"
+    },
+    {
+      "pr": 632,
+      "base": "b74b15b7d85516cc75779b09484c0f7f24908f15",
+      "head": "fd2d8969392a402c9826288d3d614de9f8d4ff31",
+      "role": "delta"
+    },
+    {
+      "pr": 635,
+      "base": "fd2d8969392a402c9826288d3d614de9f8d4ff31",
+      "head": "81d84cc80096ddba216b482e9fb9601a1728bfc6",
+      "role": "delta"
+    },
+    {
+      "pr": 643,
+      "base": "81d84cc80096ddba216b482e9fb9601a1728bfc6",
+      "head": "85a0f021a1e267b35645af5019c2591cabb1e86e",
+      "role": "delta"
+    },
+    {
+      "pr": 649,
+      "base": "85a0f021a1e267b35645af5019c2591cabb1e86e",
+      "head": "a4274b4e6902c508a0a99a86b9c7c7bd1bad8d7c",
+      "role": "delta"
+    },
+    {
+      "pr": 637,
+      "base": "a4274b4e6902c508a0a99a86b9c7c7bd1bad8d7c",
+      "head": "8fd3c20592655c03461676d95c41ba2993e81b61",
+      "role": "delta"
+    },
+    {
+      "pr": 646,
+      "base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "head": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+      "role": "delta"
+    },
+    {
+      "pr": 647,
+      "base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "head": "dca92972e90c5280e6c217409acfc6fd0dfb38ea",
+      "role": "delta"
+    },
+    {
+      "pr": 650,
+      "base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "head": "2a273c10f6e5c0651e89860f88ef0b6a0e3748ef",
+      "role": "delta"
+    },
+    {
+      "pr": 653,
+      "base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "head": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+      "role": "delta"
+    },
+    {
+      "pr": 654,
+      "base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "head": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+      "role": "delta"
+    },
+    {
+      "pr": 655,
+      "base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "head": "1a5a7dd04fe732df5c539860dde813c8c703586d",
+      "role": "delta"
+    },
+    {
+      "pr": 628,
+      "base": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "head": "e7fee02b5ce1b965486b15f13938bd0d67c841d8",
+      "role": "delta"
+    },
+    {
+      "pr": 660,
+      "base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "head": "892fa82e0e1aa5746d97365f96a9b69ef7934168",
+      "role": "delta"
+    },
+    {
+      "pr": 659,
+      "base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "head": "a3568dfe3426afaca4176d57a2310097e5214e77",
+      "role": "delta"
+    },
+    {
+      "pr": 663,
+      "base": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "head": "a2203ced6046f1cd6e2ba40394d22e4b900e14e1",
+      "role": "delta"
+    },
+    {
+      "pr": 657,
+      "base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "head": "f20bc4ae5a369e7c0be0f7ad4a0f0ba9ea758a57",
+      "role": "delta"
+    },
+    {
+      "pr": 661,
+      "base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "head": "23ed6b5c6a942812a72e345c5d886b3310e9017e",
+      "role": "delta"
+    },
+    {
+      "pr": 664,
+      "base": "e7fee02b5ce1b965486b15f13938bd0d67c841d8",
+      "head": "d07f77b11a19e368f767d3d7e964f5ca1f1f2276",
+      "role": "delta"
+    },
+    {
+      "pr": 665,
+      "base": "b884b1ea90edd041204bc15ac6c9f0f3fb8b6da0",
+      "head": "1b6395657f1b88d3fe7de3a792473abdeb82b29d",
+      "role": "delta"
+    },
+    {
+      "pr": 666,
+      "base": "b884b1ea90edd041204bc15ac6c9f0f3fb8b6da0",
+      "head": "e67472f606eac43efaf9aa0aab28d1994e73a7b2",
+      "role": "delta"
+    },
+    {
+      "pr": 667,
+      "base": "b884b1ea90edd041204bc15ac6c9f0f3fb8b6da0",
+      "head": "d10a8180166370f93a0126d83f4edcf4b266b713",
+      "role": "delta"
+    },
+    {
+      "pr": 624,
+      "base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "head": "ee20f6009a8581c8141352cdbd261e1a97a0e805",
+      "role": "delta"
+    },
+    {
+      "pr": 626,
+      "base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "head": "279887a4ec79186672c331e075c70e0b4555daa8",
+      "role": "delta"
+    },
+    {
+      "pr": 629,
+      "base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "head": "e33924ac97449c7cb8f103d80a39ecbb064310d3",
+      "role": "delta"
+    }
+  ],
+  "owner_inputs": {
+    "file": "owner-inputs.json",
+    "sha256": "c858e955a4c264f945a5bde5404c92b6933445d2046c709a70b46e3f325d2880"
+  },
+  "required_input_commits": [
+    "09dc07e01d1a3236ab5f45f384e11fe2f9dfd30d",
+    "0b3a9e0edafc41e7e8567abfde878e8f169405ef",
+    "17bc78fc602efa204a74596409c939a3bf1ddc42",
+    "1a5a7dd04fe732df5c539860dde813c8c703586d",
+    "1b6395657f1b88d3fe7de3a792473abdeb82b29d",
+    "1b7655ae9a0dec7d6821d8419087fd92ccadbb62",
+    "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+    "23ed6b5c6a942812a72e345c5d886b3310e9017e",
+    "279887a4ec79186672c331e075c70e0b4555daa8",
+    "2a273c10f6e5c0651e89860f88ef0b6a0e3748ef",
+    "5c36f626467bc6c8446d621f3a2b3fc7fd507b4b",
+    "6743f3d552027395daf06bfd4fbc0123a374703b",
+    "6808e99bacc0961fef2a511b1ae1a088f12a1e12",
+    "75dbc6406123e22468f168b861d5e0622c9d5769",
+    "81d84cc80096ddba216b482e9fb9601a1728bfc6",
+    "85a0f021a1e267b35645af5019c2591cabb1e86e",
+    "891ef8bfd0764a969db2f800578fd45acd5623d6",
+    "892fa82e0e1aa5746d97365f96a9b69ef7934168",
+    "8d4f2606c9af7e20181e4ad290b29be0e0a2dd0f",
+    "8fd3c20592655c03461676d95c41ba2993e81b61",
+    "9043acae5a778b9b123b195d3c04cb213e5e568d",
+    "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+    "a2203ced6046f1cd6e2ba40394d22e4b900e14e1",
+    "a3568dfe3426afaca4176d57a2310097e5214e77",
+    "a4274b4e6902c508a0a99a86b9c7c7bd1bad8d7c",
+    "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+    "b74b15b7d85516cc75779b09484c0f7f24908f15",
+    "b884b1ea90edd041204bc15ac6c9f0f3fb8b6da0",
+    "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+    "d07f77b11a19e368f767d3d7e964f5ca1f1f2276",
+    "d10a8180166370f93a0126d83f4edcf4b266b713",
+    "dca92972e90c5280e6c217409acfc6fd0dfb38ea",
+    "e33924ac97449c7cb8f103d80a39ecbb064310d3",
+    "e67472f606eac43efaf9aa0aab28d1994e73a7b2",
+    "e7fee02b5ce1b965486b15f13938bd0d67c841d8",
+    "ec2248643d875390c41b519b85424a5ca0ce90d1",
+    "ee20f6009a8581c8141352cdbd261e1a97a0e805",
+    "f20bc4ae5a369e7c0be0f7ad4a0f0ba9ea758a57",
+    "fd2d8969392a402c9826288d3d614de9f8d4ff31"
+  ],
+  "steps": [
+    {
+      "id": "public-668",
+      "kind": "commit_delta",
+      "pr": 668,
+      "owner": null,
+      "input": {
+        "base": "75dbc6406123e22468f168b861d5e0622c9d5769",
+        "head": "1b7655ae9a0dec7d6821d8419087fd92ccadbb62"
+      },
+      "selected_paths": [
+        "docs/modernization/verification/go-reader-close-errors-20261122/README.md",
+        "docs/modernization/verification/go-reader-close-errors-20261122/raw-evidence.tar.gz",
+        "docs/modernization/verification/go-reader-close-errors-20261122/runtime-review.json",
+        "docs/modernization/verification/go-reader-close-errors-20261122/runtime-summary.json",
+        "docs/modernization/verification/go-reader-close-errors-20261122/source-review.json",
+        "internal/api/state_read_beneath_root_windows.go"
+      ],
+      "already_identical_paths": [
+        "internal/api/managed_backend_install.go",
+        "internal/api/managed_backend_reader_failures_test.go",
+        "internal/api/state_read_beneath_root_common.go",
+        "internal/api/state_read_beneath_root_failures_posix_test.go",
+        "internal/api/state_read_beneath_root_failures_test.go",
+        "internal/api/state_read_beneath_root_failures_windows_test.go",
+        "internal/api/state_read_beneath_root_posix.go"
+      ],
+      "before_tree": "0b8e6e6ada91cbaf2b3fb610d7c464f6e660c80f",
+      "expected_tree": "2b94bf81d498b9149a67ac758a21e6b03b195a9a",
+      "historical_composition_commit": "9682323eaf23799264ac0a82878acf2dbb8716d9",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": []
+    },
+    {
+      "id": "public-669",
+      "kind": "commit_delta",
+      "pr": 669,
+      "owner": null,
+      "input": {
+        "base": "75dbc6406123e22468f168b861d5e0622c9d5769",
+        "head": "ec2248643d875390c41b519b85424a5ca0ce90d1"
+      },
+      "selected_paths": [
+        "docs/qualification/secrets-recovery-release-20261123/README.md",
+        "docs/qualification/secrets-recovery-release-20261123/audit.json",
+        "docs/qualification/secrets-recovery-release-20261123/b1-release-20261123-57604a3a.zip",
+        "internal/api/secrets_init_recovery.go",
+        "internal/api/secrets_init_recovery_lock_test.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "2b94bf81d498b9149a67ac758a21e6b03b195a9a",
+      "expected_tree": "8c76e7fbf4b3b1eef1d54327ed0da155359bc30b",
+      "historical_composition_commit": "897b3ec21cd80e4536a2f6e6140bcddb9fed412d",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": []
+    },
+    {
+      "id": "public-632",
+      "kind": "commit_delta",
+      "pr": 632,
+      "owner": null,
+      "input": {
+        "base": "b74b15b7d85516cc75779b09484c0f7f24908f15",
+        "head": "fd2d8969392a402c9826288d3d614de9f8d4ff31"
+      },
+      "selected_paths": [
+        "internal/api/serena_prepared_inputs.go",
+        "internal/api/serena_prepared_uv_discovery_test.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "8c76e7fbf4b3b1eef1d54327ed0da155359bc30b",
+      "expected_tree": "4610d5041402d8e304ec2ec3b3ad15b01c62ff56",
+      "historical_composition_commit": "79924f37a0cc5d892cf491256144fd21ec4b4520",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": []
+    },
+    {
+      "id": "public-635",
+      "kind": "commit_delta",
+      "pr": 635,
+      "owner": null,
+      "input": {
+        "base": "fd2d8969392a402c9826288d3d614de9f8d4ff31",
+        "head": "81d84cc80096ddba216b482e9fb9601a1728bfc6"
+      },
+      "selected_paths": [
+        "docs/modernization/verification/serena-publisher-2026-11-18/.gitattributes",
+        "docs/modernization/verification/serena-publisher-2026-11-18/RESULTS.md",
+        "docs/modernization/verification/serena-publisher-2026-11-18/SHA256SUMS",
+        "docs/modernization/verification/serena-publisher-2026-11-18/logs.zip",
+        "docs/modernization/verification/serena-publisher-2026-11-18/manifest.json",
+        "internal/binaryadmission/windows_pe.go",
+        "internal/binaryadmission/windows_pe_test.go",
+        "internal/binaryadmission/windows_serena_qualification_test.go",
+        "internal/binaryadmission/windows_versioninfo.go",
+        "tools/test-serena-publisher/README.md",
+        "tools/test-serena-publisher/main_windows.go",
+        "tools/test-serena-publisher/main_windows_test.go"
+      ],
+      "already_identical_paths": [
+        "internal/binaryadmission/source_prepare.go",
+        "internal/binaryadmission/source_prepare_test.go"
+      ],
+      "before_tree": "4610d5041402d8e304ec2ec3b3ad15b01c62ff56",
+      "expected_tree": "b94fd611b2a0083572d6680856194af17dd99cc4",
+      "historical_composition_commit": "62e1d5b8af00e814d6d8ce05b9d7f10ab129efa3",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": []
+    },
+    {
+      "id": "public-643",
+      "kind": "commit_delta",
+      "pr": 643,
+      "owner": null,
+      "input": {
+        "base": "81d84cc80096ddba216b482e9fb9601a1728bfc6",
+        "head": "85a0f021a1e267b35645af5019c2591cabb1e86e"
+      },
+      "selected_paths": [
+        "docs/modernization/verification/serena-owner-composition-2026-11-22/PRESERVATION.md",
+        "docs/modernization/verification/serena-owner-composition-2026-11-22/README.md",
+        "docs/modernization/verification/serena-owner-composition-2026-11-22/archive.json",
+        "docs/modernization/verification/serena-owner-composition-2026-11-22/manifest18.json",
+        "docs/modernization/verification/serena-owner-composition-2026-11-22/publication-readback.json",
+        "docs/modernization/verification/serena-owner-composition-2026-11-22/qualification.json",
+        "docs/modernization/verification/serena-owner-composition-2026-11-22/serena-composition-evidence.zip",
+        "docs/modernization/verification/serena-owner-composition-2026-11-22/source-subtraction-proof.json",
+        "internal/api/serena_build_constraint_policy_windows_test.go",
+        "internal/api/serena_build_environment.go",
+        "internal/api/serena_owned_attempt_layout_windows_test.go",
+        "internal/api/serena_owned_tree.go",
+        "internal/api/serena_owned_tree_cleanup_windows_test.go",
+        "internal/api/serena_owned_tree_delete_windows_test.go",
+        "internal/api/serena_owned_tree_streams_windows_test.go",
+        "internal/api/serena_owned_tree_unsupported.go",
+        "internal/api/serena_owned_tree_windows.go",
+        "internal/api/serena_prepared_acquisition.go",
+        "internal/api/serena_prepared_build_constraint.go",
+        "internal/api/serena_prepared_build_constraint_integration_windows_test.go",
+        "internal/api/serena_prepared_build_constraint_pin_windows_test.go",
+        "internal/api/serena_prepared_build_constraint_test.go",
+        "internal/api/serena_prepared_build_constraint_unsupported.go",
+        "internal/api/serena_prepared_build_constraint_windows.go",
+        "internal/api/serena_prepared_effects.go",
+        "internal/api/serena_prepared_execution.go",
+        "internal/api/serena_prepared_file_unsupported.go",
+        "internal/api/serena_prepared_file_windows.go",
+        "internal/api/serena_prepared_inputs.go",
+        "internal/api/serena_prepared_install_effects.go",
+        "internal/api/serena_prepared_owned_file_windows.go",
+        "internal/api/serena_prepared_owned_file_windows_test.go",
+        "internal/api/serena_prepared_owned_generation_integration_windows_test.go",
+        "internal/api/serena_prepared_qualification.go",
+        "internal/api/serena_prepared_runtime.go",
+        "internal/api/serena_qualification_resources.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "b94fd611b2a0083572d6680856194af17dd99cc4",
+      "expected_tree": "64f40820ae749b0b6f2e182fe40913c6e1a1f004",
+      "historical_composition_commit": "d0ea3b6c7a32de58728a4771ec92276ee907ca03",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": []
+    },
+    {
+      "id": "public-649",
+      "kind": "commit_delta",
+      "pr": 649,
+      "owner": null,
+      "input": {
+        "base": "85a0f021a1e267b35645af5019c2591cabb1e86e",
+        "head": "a4274b4e6902c508a0a99a86b9c7c7bd1bad8d7c"
+      },
+      "selected_paths": [
+        "internal/api/serena_qualification_profiles_windows_test.go",
+        "internal/api/serena_qualification_resources.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "64f40820ae749b0b6f2e182fe40913c6e1a1f004",
+      "expected_tree": "58225d1eeca5b2f5c281943d40b93f111110552e",
+      "historical_composition_commit": "8ec1b8d5115588be3a91b6b881447121a8a8e12a",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": []
+    },
+    {
+      "id": "public-637",
+      "kind": "commit_delta",
+      "pr": 637,
+      "owner": null,
+      "input": {
+        "base": "a4274b4e6902c508a0a99a86b9c7c7bd1bad8d7c",
+        "head": "8fd3c20592655c03461676d95c41ba2993e81b61"
+      },
+      "selected_paths": [
+        "docs/modernization/verification/serena-namespace-2026-11-18/.gitattributes",
+        "docs/modernization/verification/serena-namespace-2026-11-18/RESULTS.md",
+        "docs/modernization/verification/serena-namespace-2026-11-18/SHA256SUMS",
+        "docs/modernization/verification/serena-namespace-2026-11-18/logs.zip",
+        "docs/modernization/verification/serena-namespace-2026-11-18/manifest.json",
+        "docs/qualification/serena-private-test-compilation-20261124.md",
+        "docs/testing/serena-qualification.md",
+        "internal/api/api.go",
+        "internal/api/serena_consumer_coordinator.go",
+        "internal/api/serena_consumer_invocation.go",
+        "internal/api/serena_intent_repair.go",
+        "internal/api/serena_parsed_preparation.go",
+        "internal/api/serena_parsed_preparation_test.go",
+        "internal/api/serena_preparation_assembly.go",
+        "internal/api/serena_prepared_acquisition.go",
+        "internal/api/serena_prepared_consumer.go",
+        "internal/api/serena_prepared_consumer_ticket.go",
+        "internal/api/serena_prepared_effects.go",
+        "internal/api/serena_prepared_inputs.go",
+        "internal/api/serena_prepared_launch.go",
+        "internal/api/serena_prepared_runtime.go",
+        "internal/api/serena_private_cache_seed.go",
+        "internal/api/serena_private_cache_seed_tar.go",
+        "internal/api/serena_private_cache_seed_test.go",
+        "internal/api/serena_private_cache_seed_unsupported.go",
+        "internal/api/serena_private_cache_seed_windows.go",
+        "internal/api/serena_private_cache_seed_windows_test.go",
+        "internal/api/serena_private_integration_publisher.go",
+        "internal/api/serena_private_integration_publisher_test.go",
+        "internal/api/serena_private_publisher_namespace.go",
+        "internal/api/serena_private_publisher_namespace_test.go",
+        "internal/api/serena_publisher_image.go",
+        "internal/api/serena_publisher_image_policy.go",
+        "internal/api/serena_publisher_image_policy_test.go",
+        "internal/api/serena_publisher_role.go",
+        "internal/api/serena_publisher_role_qualification_windows.go",
+        "internal/api/serena_publisher_role_qualification_windows_test.go",
+        "internal/api/serena_qualification_namespace_directory_windows.go",
+        "internal/api/serena_qualification_namespace_unavailable_test.go",
+        "internal/api/serena_qualification_namespace_windows.go",
+        "internal/api/serena_qualification_namespace_windows_test.go",
+        "internal/api/state_dir_resolution_observed.go",
+        "internal/api/state_dir_resolution_observed_production_windows.go",
+        "internal/api/state_dir_resolution_observed_qualification_incomplete_windows.go",
+        "internal/api/state_dir_resolution_observed_qualification_incomplete_windows_test.go",
+        "internal/api/state_dir_resolution_observed_qualification_unavailable.go",
+        "internal/api/state_dir_resolution_observed_windows.go",
+        "internal/api/state_dir_resolution_observed_windows_test.go",
+        "internal/binaryadmission/windows_pe.go",
+        "internal/binaryadmission/windows_publisher_test_identity_test.go",
+        "internal/binaryadmission/windows_versioninfo.go",
+        "internal/cli/migrate_serena.go",
+        "internal/cli/migrate_serena_prepared_fixture_path_windows_test.go",
+        "internal/cli/migrate_serena_prepared_fixture_test.go",
+        "internal/cli/migrate_serena_prepared_fixture_unsupported_test.go",
+        "internal/cli/migrate_serena_prepared_fixture_windows_test.go",
+        "internal/cli/migrate_serena_test.go",
+        "internal/cli/private_publisher_observation_windows_test.go",
+        "internal/cli/private_serena_migration_case_contract_windows_test.go",
+        "internal/cli/private_serena_migration_case_other_test.go",
+        "internal/cli/private_serena_migration_case_windows_test.go",
+        "internal/cli/private_serena_migration_consumer_receipt_validation_windows_test.go",
+        "internal/cli/private_serena_migration_consumer_receipt_windows_test.go",
+        "internal/cli/private_serena_migration_consumer_windows_test.go",
+        "internal/cli/private_serena_migration_data_windows_test.go",
+        "internal/cli/private_serena_migration_fixture_windows_test.go",
+        "internal/cli/private_serena_migration_publish_windows_test.go",
+        "internal/cli/private_serena_migration_seed_windows_test.go",
+        "internal/cli/private_serena_publisher_namespace_windows_test.go",
+        "internal/cli/serena_prepared_run.go",
+        "internal/cli/serena_qualification_namespace_lifetime_windows_test.go",
+        "internal/cli/upgrade_gui_qualified_fixture_windows_test.go",
+        "internal/runtimeidentity/library.go",
+        "internal/runtimeidentity/library_borrow_test.go",
+        "internal/runtimeidentity/library_test.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "58225d1eeca5b2f5c281943d40b93f111110552e",
+      "expected_tree": "97fe8da6523cb24ce7ba979140076766c4add8d6",
+      "historical_composition_commit": "ab7555d287a592e3dd64cfc769fb0ab5db6d7a7a",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": [
+        "Preserve semantic three-way union; remove only inherited extra blank EOF lines in two newly added private Serena test files, without changing test assertions."
+      ],
+      "post_merge": {
+        "file": "patches/post-merge-public-637.patch",
+        "sha256": "6f7da9ee282b2c40362ccca8e9ec68a93e2aa6e88baf2b5d586717560a17f238",
+        "bytes": 1146,
+        "before_tree": "81118c5c99dd324e603b1d04e978a1302d1a33f9",
+        "changed_paths": [
+          "internal/cli/private_serena_migration_fixture_windows_test.go",
+          "internal/cli/private_serena_migration_publish_windows_test.go"
+        ],
+        "scope": "Remove exactly one extra blank EOF line in each of two new private Serena test files; assertions are unchanged."
+      }
+    },
+    {
+      "id": "public-646",
+      "kind": "commit_delta",
+      "pr": 646,
+      "owner": null,
+      "input": {
+        "base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "head": "1df32782e7ade719e1d7f8c6153b4455a6ea740a"
+      },
+      "selected_paths": [
+        "internal/api/serena_preparation_policy.go",
+        "internal/api/serena_preparation_policy_test.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "97fe8da6523cb24ce7ba979140076766c4add8d6",
+      "expected_tree": "7e63313a85aa38440d5c024425c1b661424f9820",
+      "historical_composition_commit": "1c65800c23cda5109895a2e43b669fb06c25543e",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": []
+    },
+    {
+      "id": "public-647",
+      "kind": "commit_delta",
+      "pr": 647,
+      "owner": null,
+      "input": {
+        "base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "head": "dca92972e90c5280e6c217409acfc6fd0dfb38ea"
+      },
+      "selected_paths": [
+        "internal/api/serena_build_environment.go",
+        "internal/api/serena_build_environment_executable_windows_test.go",
+        "internal/api/serena_build_environment_python_test.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "7e63313a85aa38440d5c024425c1b661424f9820",
+      "expected_tree": "e7494a115fee73c60f7bdb3803c0b0a7e4ef9f6d",
+      "historical_composition_commit": "7fcd8ceb2f60e109dc90adbc7932415c76f11745",
+      "observed_text_conflict_paths": [
+        "internal/api/serena_build_environment.go"
+      ],
+      "resolutions": [
+        {
+          "path": "internal/api/serena_build_environment.go",
+          "mode": "100644",
+          "blob": "7a39553076034e669a26b2d02c829e14f2dd0f5a",
+          "file": "resolutions/7a39553076034e669a26b2d02c829e14f2dd0f5a.txt",
+          "sha256": "425f687f2b0fa984e778335623752b383161606b57ece9aaa1f260aac7118bcb",
+          "bytes": 15082
+        }
+      ],
+      "notes": [
+        "serena_build_environment.go: retain owned UV build-constraint projection from #643 and add #647 Windows PATHEXT/executable-only plus Git long-path environment policy in the same Windows block; preserve runtime-only PYTHONUNBUFFERED classification."
+      ]
+    },
+    {
+      "id": "public-650",
+      "kind": "commit_delta",
+      "pr": 650,
+      "owner": null,
+      "input": {
+        "base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "head": "2a273c10f6e5c0651e89860f88ef0b6a0e3748ef"
+      },
+      "selected_paths": [
+        "internal/daemon/relay_qualification.go",
+        "internal/daemon/relay_qualification_connection_close_test.go",
+        "internal/daemon/relay_qualification_test.go",
+        "internal/daemon/relay_qualification_transport_test.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "e7494a115fee73c60f7bdb3803c0b0a7e4ef9f6d",
+      "expected_tree": "b7cc4bfa49748404a80c7d6b53de0529bb463799",
+      "historical_composition_commit": "c09cc6076f9b57ef0be4fa1b237657e019bff073",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": []
+    },
+    {
+      "id": "public-653",
+      "kind": "commit_delta",
+      "pr": 653,
+      "owner": null,
+      "input": {
+        "base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+        "head": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4"
+      },
+      "selected_paths": [
+        "internal/api/serena_tcp_rows_observed.go",
+        "internal/api/serena_tcp_rows_observed_native_windows_test.go",
+        "internal/api/serena_tcp_rows_observed_test.go",
+        "internal/api/serena_tcp_rows_observed_windows.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "b7cc4bfa49748404a80c7d6b53de0529bb463799",
+      "expected_tree": "89acf527e780fbb30bf161354cf7c9ca7b54a2c0",
+      "historical_composition_commit": "c9863949dd5205336b8aa2f6f31066624fe2a1e7",
+      "observed_text_conflict_paths": [
+        "internal/api/serena_tcp_rows_observed_windows.go"
+      ],
+      "resolutions": [
+        {
+          "path": "internal/api/serena_tcp_rows_observed_windows.go",
+          "mode": "100644",
+          "blob": "da858faf674fd05ebca0a311584adab24c3cc146",
+          "file": "resolutions/da858faf674fd05ebca0a311584adab24c3cc146.txt",
+          "sha256": "84d7ae02bced5ce75ca3c398774188a17a8318155ec95db1058f466dbc8522ed",
+          "bytes": 4299
+        }
+      ],
+      "notes": [
+        "serena_tcp_rows_observed_windows.go: keep #637 original qualification/stream custody helper decomposition; apply #653 millisecond-truncated remaining cleanup budget to both legacy public row observation and qualified frame observation before calling shared runner."
+      ]
+    },
+    {
+      "id": "public-654",
+      "kind": "commit_delta",
+      "pr": 654,
+      "owner": null,
+      "input": {
+        "base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+        "head": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c"
+      },
+      "selected_paths": [
+        "internal/api/serena_prepared_publication.go",
+        "internal/api/serena_prepared_publication_native_windows_test.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "89acf527e780fbb30bf161354cf7c9ca7b54a2c0",
+      "expected_tree": "0d247414b2b33e194822e5bfb9d28705cf80465f",
+      "historical_composition_commit": "141dbb17dd68648c6da5f242451437473061336b",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": []
+    },
+    {
+      "id": "public-655",
+      "kind": "commit_delta",
+      "pr": 655,
+      "owner": null,
+      "input": {
+        "base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+        "head": "1a5a7dd04fe732df5c539860dde813c8c703586d"
+      },
+      "selected_paths": [
+        "docs/modernization/verification/serena-wrapper-receipt-20261122/README.md",
+        "docs/modernization/verification/serena-wrapper-receipt-20261122/raw-evidence.zip",
+        "docs/modernization/verification/serena-wrapper-receipt-20261122/results.json",
+        "internal/api/serena_finalization_context_windows_test.go",
+        "internal/api/serena_prepared_runtime.go",
+        "internal/cli/serena_prepared_run.go",
+        "internal/cli/serena_prepared_wrapper_close.go",
+        "internal/cli/serena_prepared_wrapper_close_windows_test.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "0d247414b2b33e194822e5bfb9d28705cf80465f",
+      "expected_tree": "71bdb65c74b5c4e2f561fdf33b42f6ef26fe1c34",
+      "historical_composition_commit": "1684e4d959ab62376e823f26abc5629abef91de9",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": []
+    },
+    {
+      "id": "public-628",
+      "kind": "commit_delta",
+      "pr": 628,
+      "owner": null,
+      "input": {
+        "base": "75dbc6406123e22468f168b861d5e0622c9d5769",
+        "head": "e7fee02b5ce1b965486b15f13938bd0d67c841d8"
+      },
+      "selected_paths": [
+        "docs/modernization/verification/native-observation-2026-11-18/.gitattributes",
+        "docs/modernization/verification/native-observation-2026-11-18/RESULTS.md",
+        "docs/modernization/verification/native-observation-2026-11-18/SHA256SUMS",
+        "docs/modernization/verification/native-observation-2026-11-18/logs.zip",
+        "docs/modernization/verification/native-observation-2026-11-18/manifest.json",
+        "docs/modernization/verification/status-observation-2026-11-19/RESULTS.md",
+        "docs/modernization/verification/status-observation-2026-11-19/evidence-redacted.zip",
+        "internal/cli/supervise_liveness.go",
+        "internal/cli/supervise_status.go",
+        "internal/cli/supervise_status_pending_ram_test.go",
+        "internal/cli/supervise_status_process_other.go",
+        "internal/cli/supervise_status_process_test.go",
+        "internal/cli/supervise_status_process_windows.go",
+        "internal/process/background_console_native_windows_test.go",
+        "internal/process/contained_stream_windows.go",
+        "internal/process/contained_stream_windows_test.go",
+        "internal/process/foreground_windows.go",
+        "internal/process/jobobject_capture_race_windows_test.go",
+        "internal/process/jobobject_windows.go",
+        "internal/process/jobobject_windows_test.go",
+        "internal/process/native_observation_benchmark_windows_test.go",
+        "internal/process/pid_alive_test.go",
+        "internal/process/pid_identity_windows_test.go",
+        "internal/process/pid_status.go",
+        "internal/process/pid_status_windows.go",
+        "internal/process/pid_status_windows_test.go",
+        "internal/process/process_rss_windows.go",
+        "internal/process/start_with_job_original_windows.go",
+        "internal/process/start_with_job_windows.go",
+        "internal/process/tool_console_other.go",
+        "internal/process/tool_console_windows.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "71bdb65c74b5c4e2f561fdf33b42f6ef26fe1c34",
+      "expected_tree": "d463b056dd68e8a8a99a7a99c5dc63a07393870e",
+      "historical_composition_commit": "5a7b60a4f6496dd756f621c8464ec8a376865a71",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": [
+        "Preserve existing native Job custody changes and legitimate CRLF line endings; whitespace check accepts CR-at-EOL without changing source bytes."
+      ]
+    },
+    {
+      "id": "public-660",
+      "kind": "commit_delta",
+      "pr": 660,
+      "owner": null,
+      "input": {
+        "base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+        "head": "892fa82e0e1aa5746d97365f96a9b69ef7934168"
+      },
+      "selected_paths": [
+        "docs/modernization/verification/prune-recovery-2026-11-21/README.md",
+        "docs/modernization/verification/prune-recovery-2026-11-21/evidence.zip",
+        "docs/modernization/verification/prune-recovery-2026-11-21/verify_evidence.py",
+        "docs/modernization/verification/scheduler-hidden-task-2026-11-19/RESULTS.md",
+        "docs/modernization/verification/scheduler-hidden-task-2026-11-19/evidence-redacted.zip",
+        "docs/modernization/verification/scheduler-hold-composition-20261122/README.md",
+        "docs/modernization/verification/scheduler-hold-composition-20261122/export-receipt.json",
+        "docs/modernization/verification/scheduler-hold-composition-20261122/qualification-evidence.zip",
+        "docs/modernization/verification/scheduler-hold-composition-20261122/qualification.json",
+        "docs/modernization/verification/scheduler-sid-predelete-20261122/README.md",
+        "docs/modernization/verification/scheduler-sid-predelete-20261122/artifact-index.json",
+        "docs/modernization/verification/scheduler-sid-predelete-20261122/raw-evidence.tar.gz",
+        "docs/modernization/verification/scheduler-sid-predelete-20261122/root-review.json",
+        "docs/modernization/verification/scheduler-sid-predelete-20261122/scheduler-composition-independent-review.json",
+        "docs/modernization/verification/scheduler-sid-predelete-20261122/scheduler-predelete-independent-review.json",
+        "docs/modernization/verification/scheduler-sid-predelete-20261122/scheduler-predelete-root-review.json",
+        "docs/modernization/verification/scheduler-sid-predelete-20261122/scheduler-predelete-source-review.json",
+        "docs/modernization/verification/scheduler-sid-predelete-20261122/scheduler-sid-predelete-results-review.json",
+        "docs/modernization/verification/scheduler-sid-predelete-20261122/scheduler-sid-predelete-results.json",
+        "docs/modernization/verification/scheduler-stop-errors-20261122/README.md",
+        "docs/modernization/verification/scheduler-stop-errors-20261122/raw-evidence.zip",
+        "docs/modernization/verification/scheduler-stop-errors-20261122/results.json",
+        "docs/modernization/verification/scheduler-upgrade-recovery-20261122/README.md",
+        "docs/modernization/verification/scheduler-upgrade-recovery-20261122/evidence.json",
+        "docs/modernization/verification/scheduler-upgrade-recovery-20261122/raw-evidence.zip",
+        "docs/modernization/verification/scheduler-upgrade-snapshot-20261122/README.md",
+        "docs/modernization/verification/scheduler-upgrade-snapshot-20261122/raw-evidence.zip",
+        "docs/modernization/verification/scheduler-upgrade-snapshot-20261122/results.json",
+        "docs/modernization/verification/weekly-result-owner-20261122/README.md",
+        "docs/modernization/verification/weekly-result-owner-20261122/a1-unresolved-review.md",
+        "docs/modernization/verification/weekly-result-owner-20261122/a2-owner-inventory-review.md",
+        "docs/modernization/verification/weekly-result-owner-20261122/audit.json",
+        "docs/modernization/verification/weekly-result-owner-20261122/audit_evidence.py",
+        "docs/modernization/verification/weekly-result-owner-20261122/raw-evidence.zip",
+        "docs/modernization/verification/weekly-result-owner-20261122/weekly-generation-contract.md",
+        "docs/qualification/install-scheduler-generation-20261123/README.md",
+        "docs/qualification/install-scheduler-generation-20261123/audit.json",
+        "docs/qualification/install-scheduler-generation-20261123/install-generation-20261123-57604a3a.zip",
+        "docs/qualification/known-folder-census-20261124/README.md",
+        "docs/qualification/known-folder-census-20261124/census-qualification-20261124-57604a3a.zip",
+        "docs/qualification/known-folder-census-20261124/evidence-manifest.json",
+        "docs/qualification/scheduler-generation-error-origins-20261123/README.md",
+        "docs/qualification/scheduler-generation-error-origins-20261123/audit.json",
+        "docs/qualification/scheduler-generation-error-origins-20261123/scheduler-error-origins-20261123-57604a3a.zip",
+        "docs/qualification/scheduler-generation-error-origins-20261123/scheduler-standalone-20261123-57604a3a.zip",
+        "internal/api/adopt.go",
+        "internal/api/adopt_provenance_events.go",
+        "internal/api/adopt_scheduler_recovery_test.go",
+        "internal/api/install.go",
+        "internal/api/install_hyphen_family_ownership_test.go",
+        "internal/api/install_own_port_test.go",
+        "internal/api/install_parsed_manifest.go",
+        "internal/api/install_prune_recovery_test.go",
+        "internal/api/install_scheduler_snapshot_test.go",
+        "internal/api/install_scheduler_stop_failure_test.go",
+        "internal/api/install_task_mutation_failure_test.go",
+        "internal/api/install_task_recovery.go",
+        "internal/api/install_task_recovery_storage_test.go",
+        "internal/api/install_task_recovery_test.go",
+        "internal/api/install_task_rollback.go",
+        "internal/api/install_task_rollback_test.go",
+        "internal/api/prune_tasks_test.go",
+        "internal/api/r36_lane_a2_fixes_test.go",
+        "internal/api/register.go",
+        "internal/api/scheduler_mgmt.go",
+        "internal/api/scheduler_mgmt_validation_test.go",
+        "internal/api/scheduler_owner_sid_windows_test.go",
+        "internal/api/scheduler_replacement.go",
+        "internal/api/scheduler_replacement_test.go",
+        "internal/api/scheduler_swap.go",
+        "internal/api/scheduler_swap_test.go",
+        "internal/api/scheduler_upgrade_recovery_test.go",
+        "internal/api/scheduler_upgrade_snapshot_test.go",
+        "internal/api/supervisor_intent_lock_ownership_test.go",
+        "internal/api/testhooks.go",
+        "internal/api/weekly_refresh.go",
+        "internal/api/weekly_refresh_applied_result_test.go",
+        "internal/api/weekly_refresh_atomic_test.go",
+        "internal/api/weekly_refresh_call_graph_origins_test.go",
+        "internal/api/weekly_refresh_recovery_test.go",
+        "internal/api/weekly_refresh_test.go",
+        "internal/api/weekly_refresh_testhooks.go",
+        "internal/autostart/linux.go",
+        "internal/autostart/linux_exec_percent_test.go",
+        "internal/gui/daemons_test.go",
+        "internal/gui/weekly_schedule_applied_result_test.go",
+        "internal/scheduler/entrypoint_migration_windows.go",
+        "internal/scheduler/entrypoint_migration_windows_test.go",
+        "internal/scheduler/scheduler.go",
+        "internal/scheduler/scheduler_com_windows.go",
+        "internal/scheduler/scheduler_com_windows_test.go",
+        "internal/scheduler/scheduler_create_conflict_windows_test.go",
+        "internal/scheduler/scheduler_hidden_task_windows_test.go",
+        "internal/scheduler/scheduler_last_result_windows_test.go",
+        "internal/scheduler/scheduler_owned_run_windows_test.go",
+        "internal/scheduler/scheduler_owner_sid_windows_test.go",
+        "internal/scheduler/scheduler_windows.go",
+        "internal/scheduler/scheduler_windows_test.go",
+        "internal/scheduler/scheduler_xml_create_windows.go",
+        "internal/scheduler/scheduler_xml_create_windows_test.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "d463b056dd68e8a8a99a7a99c5dc63a07393870e",
+      "expected_tree": "ca4343c9660d7aba0d3ba66cb5beea90287db1f1",
+      "historical_composition_commit": "0e19525fb54e33b2ee705e64cf3c7c4d37c7c1df",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": []
+    },
+    {
+      "id": "public-659",
+      "kind": "commit_delta",
+      "pr": 659,
+      "owner": null,
+      "input": {
+        "base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+        "head": "a3568dfe3426afaca4176d57a2310097e5214e77"
+      },
+      "selected_paths": [
+        "docs/modernization/verification/port-observation-2026-11-18/RESULTS.md",
+        "docs/modernization/verification/port-observation-2026-11-18/evidence-redacted.zip",
+        "internal/api/install.go",
+        "internal/api/install_hyphen_family_ownership_test.go",
+        "internal/api/install_internal_port_probe_timeout_test.go",
+        "internal/api/install_own_port_test.go",
+        "internal/api/install_parsed_manifest_lane_b_test.go",
+        "internal/api/install_parsed_manifest_test.go",
+        "internal/api/lane_a_internal_review_test.go",
+        "internal/api/main_test.go",
+        "internal/api/phase_f_lifecycle_test.go",
+        "internal/api/port_pid_outcome_test.go",
+        "internal/api/port_pid_probe_test.go",
+        "internal/api/processes.go",
+        "internal/api/r36_lane_a2_fixes_test.go",
+        "internal/api/restart_supervisor_test.go",
+        "internal/api/status_enrich.go",
+        "internal/api/status_enrich_test.go",
+        "internal/api/stop_force_supervisor.go",
+        "internal/api/stop_force_supervisor_other_test.go",
+        "internal/api/stop_force_supervisor_sentinel_windows_test.go",
+        "internal/api/stop_force_supervisor_windows_test.go",
+        "internal/api/supervisor_seal_guard_test.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "ca4343c9660d7aba0d3ba66cb5beea90287db1f1",
+      "expected_tree": "fa4de8aacc0cba7830ddb76d0d4aa574ff039834",
+      "historical_composition_commit": "46728a2d581d7e0d0bac5b17c95e0d6442fd51dc",
+      "observed_text_conflict_paths": [
+        "internal/api/main_test.go"
+      ],
+      "resolutions": [
+        {
+          "path": "internal/api/main_test.go",
+          "mode": "100644",
+          "blob": "9b91ebf374ae57c495d2a8b8ec2123292491e0ed",
+          "file": "resolutions/9b91ebf374ae57c495d2a8b8ec2123292491e0ed.txt",
+          "sha256": "a15464c4552d62f9ab6f9aa1d0f144481030de8e7dc1eb5d797acc9e8d50b3c5",
+          "bytes": 15813
+        }
+      ],
+      "notes": [
+        "main_test.go: retain #660 argument/environment-classified caller-start-time oracle and add #659 port-probe child entry; do not restore obsolete environment-only caller oracle. Later #664/#665 test-role composition remains required before execution."
+      ]
+    },
+    {
+      "id": "public-663",
+      "kind": "commit_delta",
+      "pr": 663,
+      "owner": null,
+      "input": {
+        "base": "75dbc6406123e22468f168b861d5e0622c9d5769",
+        "head": "a2203ced6046f1cd6e2ba40394d22e4b900e14e1"
+      },
+      "selected_paths": [
+        "architecture/baseline.yaml",
+        "architecture/owners.yaml",
+        "architecture/policy.yaml",
+        "docs/modernization/verification/archguard-migration-2026-11-21/README.md",
+        "docs/modernization/verification/archguard-migration-2026-11-21/migration-audit.zip",
+        "docs/modernization/verification/archguard-migration-2026-11-21/qualification.json",
+        "docs/modernization/verification/client-prefs-owner-20261122/README.md",
+        "docs/modernization/verification/client-prefs-owner-20261122/audit.json",
+        "docs/modernization/verification/client-prefs-owner-20261122/audit.py",
+        "docs/modernization/verification/client-prefs-owner-20261122/raw-evidence.zip",
+        "docs/modernization/verification/gui-owner-policy-20261122/README.md",
+        "docs/modernization/verification/gui-owner-policy-20261122/evidence.json",
+        "docs/modernization/verification/gui-owner-policy-20261122/raw-evidence.zip",
+        "docs/modernization/verification/lsp-router-owner-20261122/README.md",
+        "docs/modernization/verification/lsp-router-owner-20261122/raw-evidence.zip",
+        "docs/modernization/verification/lsp-router-owner-20261122/results.json",
+        "docs/modernization/verification/manifest-services-2026-11-22/README.md",
+        "docs/modernization/verification/manifest-services-2026-11-22/manifest-services-evidence.zip",
+        "docs/modernization/verification/manifest-services-2026-11-22/results.json",
+        "docs/qualification/settings-owner-20261124/README.md",
+        "docs/qualification/settings-owner-20261124/evidence-manifest.json",
+        "docs/qualification/settings-owner-20261124/settings-qualification-20261124-57604a3a.zip",
+        "internal/gui/client_install_prefs.go",
+        "internal/gui/client_install_prefs_test.go",
+        "internal/gui/gui_owner_lifecycle.go",
+        "internal/gui/gui_owner_lifecycle_test.go",
+        "internal/gui/gui_owner_policy_test.go",
+        "internal/gui/lsp_router_control.go",
+        "internal/gui/lsp_router_control_test.go",
+        "internal/gui/server.go",
+        "internal/gui/settings.go",
+        "internal/gui/settings_test.go",
+        "internal/gui/single_instance.go",
+        "internal/mcproute/serena_router_lifecycle.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "fa4de8aacc0cba7830ddb76d0d4aa574ff039834",
+      "expected_tree": "b03dcb4fc0d387d95274beae39022a441e25a01c",
+      "historical_composition_commit": "3084d09ced2bc7857f83f6d2ca7561eee2890ffb",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": []
+    },
+    {
+      "id": "public-657",
+      "kind": "commit_delta",
+      "pr": 657,
+      "owner": null,
+      "input": {
+        "base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+        "head": "f20bc4ae5a369e7c0be0f7ad4a0f0ba9ea758a57"
+      },
+      "selected_paths": [
+        "build.ps1",
+        "docs/modernization/verification/product-inventory-20261122/README.md",
+        "docs/modernization/verification/product-inventory-20261122/raw-evidence.zip",
+        "docs/modernization/verification/product-inventory-20261122/results.json",
+        "docs/modernization/verification/product-powershell51-parser-20261122/README.md",
+        "docs/modernization/verification/product-powershell51-parser-20261122/raw-evidence.zip",
+        "docs/modernization/verification/product-powershell51-parser-20261122/results.json",
+        "scripts/test-windows-product-build.ps1"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "b03dcb4fc0d387d95274beae39022a441e25a01c",
+      "expected_tree": "ab41c224a0c1f331a04742c9699a29be5223a53f",
+      "historical_composition_commit": "3f01449b319c125fd0ff1b2aa5c9ccb6b2218933",
+      "observed_text_conflict_paths": [
+        "build.ps1"
+      ],
+      "resolutions": [
+        {
+          "path": "build.ps1",
+          "mode": "100644",
+          "blob": "2b3564ea10ca7a2ce5b5a64760f51fee4bba3382",
+          "file": "resolutions/2b3564ea10ca7a2ce5b5a64760f51fee4bba3382.txt",
+          "sha256": "54f649eff7e0f054d23346e68427344664842c6c5b483b7cc12a97030d0c4b40",
+          "bytes": 43582
+        }
+      ],
+      "notes": [
+        "build.ps1: retain #671 prepared V4 runtime staging and source/runtime digest admission; add #657 canonical command test-package/fixture variables alongside it, preserving separate Product roles and output domains."
+      ]
+    },
+    {
+      "id": "public-661",
+      "kind": "commit_delta",
+      "pr": 661,
+      "owner": null,
+      "input": {
+        "base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+        "head": "23ed6b5c6a942812a72e345c5d886b3310e9017e"
+      },
+      "selected_paths": [
+        "internal/cli/install_reconcile_mcp_front_v3_test.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "ab41c224a0c1f331a04742c9699a29be5223a53f",
+      "expected_tree": "e60437e56278232259b5d716d98e6e2e0678ee72",
+      "historical_composition_commit": "567e70ed409bb50203fb2e504c472fab99b7278f",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": []
+    },
+    {
+      "id": "public-664",
+      "kind": "commit_delta",
+      "pr": 664,
+      "owner": null,
+      "input": {
+        "base": "e7fee02b5ce1b965486b15f13938bd0d67c841d8",
+        "head": "d07f77b11a19e368f767d3d7e964f5ca1f1f2276"
+      },
+      "selected_paths": [
+        ".plans/2026-11/archguard-source-binding-20261122.json",
+        ".plans/2026-11/cmake-terminal-closeout-20261122.json",
+        ".plans/2026-11/continuation-closeout-20261122.json",
+        ".plans/2026-11/continuation-closeout-evidence-20261122.tar.xz",
+        ".plans/2026-11/continuation-final-readback-20261122.json",
+        ".plans/2026-11/continuation-scope-audit-20261122.md",
+        ".plans/2026-11/open-pr-integration-20261117.md",
+        ".plans/2026-11/p0-continuation-closeout-20261122.json",
+        ".plans/2026-11/p0-continuation-evidence-20261122.zip",
+        ".plans/2026-11/p0-continuation-local-cleanup-20261122/cleanup_local.py",
+        ".plans/2026-11/p0-continuation-local-cleanup-20261122/local-cleanup-inventory.jsonl.gz",
+        ".plans/2026-11/p0-continuation-local-cleanup-20261122/local-cleanup.json",
+        ".plans/2026-11/p0-continuation-local-cleanup-20261122/plan-publication-readback.json",
+        ".plans/2026-11/p0-next-architecture-triage-20261122.json",
+        ".plans/2026-11/p0-next-closeout-20261122.json",
+        ".plans/2026-11/p0-next-evidence-20261122.zip",
+        ".plans/2026-11/p0-publication-closeout-20261122.json",
+        ".plans/2026-11/p0-publication-readback-20261122.json",
+        ".plans/2026-11/prune-recovery-closeout-20261121.json",
+        ".plans/2026-11/reader-relay-closeout-20261122.json",
+        ".plans/2026-11/reader-relay-closeout-evidence-20261122.tar.gz",
+        ".plans/2026-11/reader-relay-local-cleanup-20261122.json",
+        ".plans/2026-11/residual-closeout-20261122.json",
+        ".plans/2026-11/serena-composition-closeout-20261122.json",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "CONTRIBUTING.md",
+        "cmd/mcphub/main_test.go",
+        "docs/agent-runbook.md",
+        "docs/frontend-flowbite.md",
+        "docs/modernization/verification/gui-original-owner-2026-11-22/README.md",
+        "docs/modernization/verification/gui-original-owner-2026-11-22/archive.json",
+        "docs/modernization/verification/gui-original-owner-2026-11-22/gui-owner-evidence.zip",
+        "docs/modernization/verification/gui-original-owner-2026-11-22/publication-readback.json",
+        "docs/modernization/verification/gui-original-owner-2026-11-22/qualification.json",
+        "docs/modernization/verification/gui-original-owner-2026-11-22/source-composition-proof.json",
+        "docs/modernization/verification/p0-safe-test-gates-2026-11-21/README.md",
+        "docs/modernization/verification/p0-safe-test-gates-2026-11-21/p0-gates-evidence.zip",
+        "docs/modernization/verification/p0-safe-test-gates-2026-11-21/qualification.json",
+        "docs/modernization/verification/publisher-roles-20261123/README.md",
+        "docs/modernization/verification/publisher-roles-20261123/audit.json",
+        "docs/modernization/verification/publisher-roles-20261123/namespace-build-receipt.json",
+        "docs/modernization/verification/publisher-roles-20261123/preparation-attempt-v1.txt",
+        "docs/modernization/verification/publisher-roles-20261123/publisher-roles-20261123-57604a3a.zip",
+        "docs/modernization/verification/publisher-roles-20261123/residual-plan.md",
+        "docs/modernization/verification/publisher-roles-20261123/trash-receipt.json",
+        "docs/modernization/verification/residual-next-closeout-20261122/C-source-triage/A217-SOURCE-ACQUIRED.md",
+        "docs/modernization/verification/residual-next-closeout-20261122/C-source-triage/README.md",
+        "docs/modernization/verification/residual-next-closeout-20261122/C-source-triage/archive.json",
+        "docs/modernization/verification/residual-next-closeout-20261122/C-source-triage/source-evidence.zip",
+        "docs/modernization/verification/residual-next-closeout-20261122/README.md",
+        "docs/modernization/verification/residual-next-closeout-20261122/archive.json",
+        "docs/modernization/verification/residual-next-closeout-20261122/queue-audit/README-pre664-publication-20261122T213449Z.md",
+        "docs/modernization/verification/residual-next-closeout-20261122/queue-audit/README.md",
+        "docs/modernization/verification/residual-next-closeout-20261122/queue-audit/queue-snapshot-pre664-publication-20261122T213449Z.json",
+        "docs/modernization/verification/residual-next-closeout-20261122/queue-audit/queue-snapshot.json",
+        "docs/modernization/verification/residual-next-closeout-20261122/verification-evidence.zip",
+        "docs/modernization/verification/serena-product-composition-20261122/README.md",
+        "docs/modernization/verification/serena-product-composition-20261122/candidate-inputs.zip",
+        "docs/modernization/verification/serena-product-composition-20261122/compose.py",
+        "docs/modernization/verification/serena-product-composition-20261122/composition-evidence.json",
+        "docs/modernization/verification/serena-product-composition-20261122/manifest.json",
+        "docs/modernization/verification/serena-source-preparation-20261122/README.md",
+        "docs/modernization/verification/serena-source-preparation-20261122/archive.json",
+        "docs/modernization/verification/serena-source-preparation-20261122/audit-report.md",
+        "docs/modernization/verification/serena-source-preparation-20261122/audit.json",
+        "docs/modernization/verification/serena-source-preparation-20261122/bundle.zip",
+        "docs/modernization/verification/serena-source-preparation-20261122/replay.py",
+        "docs/modernization/verification/serena-source-preparation-20261122/verification.json",
+        "docs/skills/mcphub-explained/SKILL.md",
+        "internal/api/lsp_routing/main_test.go",
+        "internal/api/lsp_routing/resolver_benchmark_test.go",
+        "internal/api/lsp_routing/resolver_test.go",
+        "internal/api/serena_routing/main_test.go",
+        "internal/api/serena_routing/resolver_test.go",
+        "internal/api/serena_routing/shared_observer_public_test.go",
+        "internal/cbuild/exec_windows.go",
+        "internal/cli/gui_force_test.go",
+        "internal/cli/supervise_reconcile_ipc_test.go",
+        "internal/clients/codex_cli_test.go",
+        "internal/cmakegraph/cmakegraph_test.go",
+        "internal/daemon/host_original_windows_test.go",
+        "internal/daemon/lazy_proxy_readiness_test.go",
+        "internal/daemon/lazy_proxy_test.go",
+        "internal/daemon/main_dispatch_test.go",
+        "internal/daemon/main_test.go",
+        "internal/daemonrecovery/recovery_test.go",
+        "internal/e2e/cst_observer_custody_fake_windows_test.go",
+        "internal/e2e/cst_saved_field_result_tree_probe_windows_test.go",
+        "internal/gui/audit_lock_state_test.go",
+        "internal/gui/audit_lock_terminal_worker_test.go",
+        "internal/gui/test_seams.go",
+        "internal/gui/testmain_dispatch_test.go",
+        "internal/oneapi/setvars_windows.go",
+        "internal/oneapirun/async_owner_test.go",
+        "internal/oneapirun/async_test.go",
+        "internal/oneapirun/main_test.go",
+        "internal/sonnet/strict_driver_test.go",
+        "internal/testkit/golden_test.go",
+        "internal/vcpkgmcp/pinstatus/remote_process_test.go",
+        "internal/vcpkgmcp/reversedepgraph/process_tree_test.go",
+        "internal/vcpkgmcp/vcpkgserver/public_contract_decision_test.go",
+        "tools/testshards/main.go",
+        "tools/testshards/main_test.go"
+      ],
+      "already_identical_paths": [
+        "internal/api/hub_mcp_state_read_inode_windows.go",
+        "internal/api/hub_mcp_state_read_policy_windows_test.go"
+      ],
+      "before_tree": "e60437e56278232259b5d716d98e6e2e0678ee72",
+      "expected_tree": "31dfcf2b37efacbc65a93b105601b11e152d59d2",
+      "historical_composition_commit": "edf8b4a9ee5913db9f2f4181bdd1aa25455c1cdc",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": [
+        "Use captured #664 d07f77b only, not later audit publication. Preserve three-way integration with existing test-role safeguards; normalize one extra trailing blank EOF in historical publication-readback JSON without altering its data."
+      ],
+      "post_merge": {
+        "file": "patches/post-merge-public-664.patch",
+        "sha256": "162a6eec63625f7feec9c45b26741ece657644338f5eb17a517c6bdb7fb135ab",
+        "bytes": 552,
+        "before_tree": "6fbde2dd0f8d6ad9ae381271d47096445e08d8a6",
+        "changed_paths": [
+          "docs/modernization/verification/gui-original-owner-2026-11-22/publication-readback.json"
+        ],
+        "scope": "Remove one extra trailing blank EOF line in historical publication-readback JSON; data is unchanged."
+      }
+    },
+    {
+      "id": "public-665",
+      "kind": "commit_delta",
+      "pr": 665,
+      "owner": null,
+      "input": {
+        "base": "b884b1ea90edd041204bc15ac6c9f0f3fb8b6da0",
+        "head": "1b6395657f1b88d3fe7de3a792473abdeb82b29d"
+      },
+      "selected_paths": [
+        "docs/modernization/verification/api-helper-dispatch-2026-11-21/README.md",
+        "docs/modernization/verification/api-helper-dispatch-2026-11-21/api-evidence.zip",
+        "docs/modernization/verification/api-helper-dispatch-2026-11-21/source-inputs.json",
+        "docs/qualification/api-peer-transport-compilation-20261124.md",
+        "internal/api/adopt_lease_owner_test.go",
+        "internal/api/adopt_provider_working_directory_windows_test.go",
+        "internal/api/attach_client_public_cli_receiving_windows_test.go",
+        "internal/api/client_install_prefs_test.go",
+        "internal/api/daemon_intent_test.go",
+        "internal/api/intent_audit_caller_oracle_test.go",
+        "internal/api/main_helper_dispatch_test.go",
+        "internal/api/main_helper_dispatch_validation_test.go",
+        "internal/api/main_test.go",
+        "internal/api/manifest_canonical_root_test.go",
+        "internal/api/manifest_test_remote_test.go",
+        "internal/api/project_codex_adapter_composition_test.go",
+        "internal/api/register_test.go",
+        "internal/api/secrets_test.go",
+        "internal/api/secure_create_client_config_parent_windows_test.go",
+        "internal/api/supervisor_ipc_peer_transport_windows_test.go",
+        "internal/api/supervisor_ipc_status_client_test.go",
+        "internal/api/tool_catalog_test.go",
+        "internal/api/upgrade_fence_test.go",
+        "internal/api/weekly_refresh_atomic_test.go",
+        "internal/api/workspace_prune_test.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "31dfcf2b37efacbc65a93b105601b11e152d59d2",
+      "expected_tree": "4d16d80048ad6dab0c96d7ff61067be4af87f55e",
+      "historical_composition_commit": "dc5ee66daeb597dfe54bcd0eb7e87156321efb93",
+      "observed_text_conflict_paths": [
+        "internal/api/intent_audit_caller_oracle_test.go",
+        "internal/api/main_test.go"
+      ],
+      "resolutions": [
+        {
+          "path": "internal/api/intent_audit_caller_oracle_test.go",
+          "mode": "100644",
+          "blob": "3e3519ace5001b0e092f976d382f4e5d9a9a093e",
+          "file": "resolutions/3e3519ace5001b0e092f976d382f4e5d9a9a093e.txt",
+          "sha256": "80a86cb5b33de1817a861d4d7abdb09c07cb94aaff1bb60a2b40428b21d1642f",
+          "bytes": 9104
+        },
+        {
+          "path": "internal/api/main_test.go",
+          "mode": "100644",
+          "blob": "76236efec30425dfc8425c4566caa2c53ecc0be6",
+          "file": "resolutions/76236efec30425dfc8425c4566caa2c53ecc0be6.txt",
+          "sha256": "eb0be9119ecd0a530e612152bb55b4046b4d4374e55dba4b441ced97f696181f",
+          "bytes": 16477
+        }
+      ],
+      "notes": [
+        "Reconcile #660 private caller-start-time oracle with #665 dispatcher: retain exact role/three-second delay and private stdout result; run shared mixed-role checks before oracle execution; dispatcher tests now require that role and reject former directory authority, wrong delay, mixed roles. Add #665 NoConsole to the surviving context-bound oracle command."
+      ],
+      "post_merge": {
+        "file": "patches/post-merge-public-665.patch",
+        "sha256": "319e6c77b4815fe44c31490dcab732494248ad3141e33bf1dc8fa3b31b9f3140",
+        "bytes": 4975,
+        "before_tree": "f1eacbc00ca2473d32ca21c27d5fe9e65806e60d",
+        "changed_paths": [
+          "internal/api/main_helper_dispatch_test.go",
+          "internal/api/main_helper_dispatch_validation_test.go"
+        ],
+        "scope": "Align dispatcher and regression expectations with the retained closed caller-start-time oracle role and fixed delay; reject former arbitrary directory authority."
+      }
+    },
+    {
+      "id": "public-666",
+      "kind": "commit_delta",
+      "pr": 666,
+      "owner": null,
+      "input": {
+        "base": "b884b1ea90edd041204bc15ac6c9f0f3fb8b6da0",
+        "head": "e67472f606eac43efaf9aa0aab28d1994e73a7b2"
+      },
+      "selected_paths": [
+        "docs/modernization/verification/cli-helper-dispatch-2026-11-21/README.md",
+        "docs/modernization/verification/cli-helper-dispatch-2026-11-21/cli-evidence.zip",
+        "docs/modernization/verification/cli-helper-dispatch-2026-11-21/source-inputs.json",
+        "internal/cli/daemon_mcpcompat_test.go",
+        "internal/cli/daemon_reliability_test.go",
+        "internal/cli/daemon_test.go",
+        "internal/cli/gui_force_test.go",
+        "internal/cli/gui_integration_test.go",
+        "internal/cli/gui_tray_state_test.go",
+        "internal/cli/process_identity_match_windows_test.go",
+        "internal/cli/relay_test.go",
+        "internal/cli/secrets_audit_test.go",
+        "internal/cli/secrets_helper_dispatch_test.go",
+        "internal/cli/settings_registry_test.go",
+        "internal/cli/supervise_reconcile_wiring_test.go",
+        "internal/cli/supervisor_death_forensics_test.go",
+        "internal/cli/testmain_dispatch_test.go",
+        "internal/cli/testmain_helpers_test.go",
+        "internal/cli/testmain_paths_other_test.go",
+        "internal/cli/testmain_paths_windows_test.go",
+        "internal/cli/upgrade_gui_qualified_fixture_windows_test.go",
+        "internal/cli/workspace_cmd_test.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "4d16d80048ad6dab0c96d7ff61067be4af87f55e",
+      "expected_tree": "f1e0e211a441f9346a80a6994f1472819fd6a1ca",
+      "historical_composition_commit": "b300a97d00dc04c08bb61654072c4a43d117c6f1",
+      "observed_text_conflict_paths": [
+        "internal/cli/secrets_audit_test.go",
+        "internal/cli/settings_registry_test.go",
+        "internal/cli/testmain_helpers_test.go"
+      ],
+      "resolutions": [
+        {
+          "path": "internal/cli/secrets_audit_test.go",
+          "mode": "100644",
+          "blob": "a84a4bea5216ff35cf2fb80ae91cb044facddb98",
+          "file": "resolutions/a84a4bea5216ff35cf2fb80ae91cb044facddb98.txt",
+          "sha256": "a2b44b1e6da8584510221cd330b7fe444eecceefd087ee1b73fb158f1f8b5c85",
+          "bytes": 27534
+        },
+        {
+          "path": "internal/cli/settings_registry_test.go",
+          "mode": "100644",
+          "blob": "ca4415dc553fbf51b5fc167fcb8240d9f6439bb1",
+          "file": "resolutions/ca4415dc553fbf51b5fc167fcb8240d9f6439bb1.txt",
+          "sha256": "46945fdd353faed224a911a5ef28c4c0a7715add66379c1f53c7caaa8b2145d5",
+          "bytes": 31555
+        },
+        {
+          "path": "internal/cli/testmain_helpers_test.go",
+          "mode": "100644",
+          "blob": "84e9478f008721cad88eadd609af5265e69d5f7f",
+          "file": "resolutions/84e9478f008721cad88eadd609af5265e69d5f7f.txt",
+          "sha256": "94023a61af22b6719475272e87783d6e3bc07fa8e9d5d9a6aba86bac2d3b1c45",
+          "bytes": 8004
+        }
+      ],
+      "notes": [
+        "#660 secure secrets helper contract supersedes #666 arbitrary key/value/path envelope: preserve original root/file identities and fixed fixture values; retain exact argv, NoConsole, path checker for mapped-image role, and must-exit handling for other roles. Redirect child API state to the same admitted root. Adapt the #666 end-to-end root-bypass test to original fixture identity on stdin, preserve no-extra-package-root and vault-update assertions, and retain obsolete-envelope refusal cases."
+      ],
+      "post_merge": {
+        "file": "patches/post-merge-public-666.patch",
+        "sha256": "5420f11a0f8582918f0ddb323c672b63859c657ced3d258ef26c6c6b66b3011f",
+        "bytes": 9460,
+        "before_tree": "880078d267676ba1fa85ae4a31b4f121b9f6f7a5",
+        "changed_paths": [
+          "internal/cli/secrets_helper_dispatch_test.go",
+          "internal/cli/testmain_dispatch_test.go"
+        ],
+        "scope": "Adapt the root-bypass regression to original fixture identities and fixed secrets values; reject the superseded arbitrary-path/value envelope before any path checker."
+      }
+    },
+    {
+      "id": "public-667",
+      "kind": "commit_delta",
+      "pr": 667,
+      "owner": null,
+      "input": {
+        "base": "b884b1ea90edd041204bc15ac6c9f0f3fb8b6da0",
+        "head": "d10a8180166370f93a0126d83f4edcf4b266b713"
+      },
+      "selected_paths": [
+        "docs/modernization/verification/perftools-stdout-fixture-2026-11-21/README.md",
+        "docs/modernization/verification/perftools-stdout-fixture-2026-11-21/shell-evidence.zip",
+        "docs/modernization/verification/perftools-version-probe-2026-11-22/README.md",
+        "docs/modernization/verification/perftools-version-probe-2026-11-22/probe-evidence-manifest.json",
+        "docs/modernization/verification/perftools-version-probe-2026-11-22/probe-evidence.tar.xz",
+        "docs/modernization/verification/perftools-version-probe-2026-11-22/verify_evidence.py",
+        "internal/perftools/discovery.go",
+        "internal/perftools/exec.go",
+        "internal/perftools/exec_test.go",
+        "internal/perftools/handlers_test.go",
+        "internal/perftools/hyperfine.go",
+        "internal/perftools/llvmnm_size_test.go"
+      ],
+      "already_identical_paths": [
+        "internal/perftools/discovery_test.go"
+      ],
+      "before_tree": "f1e0e211a441f9346a80a6994f1472819fd6a1ca",
+      "expected_tree": "2c2825ee25932199eda3626ee2c26da31c99be74",
+      "historical_composition_commit": "b0eaab48794baf2dc6347d21181c53b658815733",
+      "observed_text_conflict_paths": [
+        "internal/perftools/discovery.go",
+        "internal/perftools/exec.go",
+        "internal/perftools/exec_test.go"
+      ],
+      "resolutions": [
+        {
+          "path": "internal/perftools/discovery.go",
+          "mode": "100644",
+          "blob": "860b2bdf318d79a76eb37dd28b13bc83bace94f0",
+          "file": "resolutions/860b2bdf318d79a76eb37dd28b13bc83bace94f0.txt",
+          "sha256": "bbccd1c318b37b2de0b7ca282b49e3498900484a3aa7ada6ecd63ba7e6e7221b",
+          "bytes": 4062
+        },
+        {
+          "path": "internal/perftools/exec.go",
+          "mode": "100644",
+          "blob": "c868274f1b894c82e4b8fee168717857df48d3de",
+          "file": "resolutions/c868274f1b894c82e4b8fee168717857df48d3de.txt",
+          "sha256": "1a1a5f3657b4520f6a008922126290f8d13db85300b669e0561279916cdda848",
+          "bytes": 4064
+        },
+        {
+          "path": "internal/perftools/exec_test.go",
+          "mode": "100644",
+          "blob": "e33bb99c941326bd4ac9c870f56a634aa4f0dc24",
+          "file": "resolutions/e33bb99c941326bd4ac9c870f56a634aa4f0dc24.txt",
+          "sha256": "d08b1f2313d6db3c59fe14525ac49b20982114c4d40b945a278f0ed19a2b187b",
+          "bytes": 1034
+        }
+      ],
+      "notes": [
+        "#660 and #667 independently introduced the same explicit-environment capture seam. Keep the #660 argument order and same-test-binary 3 MiB stdout positive/negative oracle, avoiding a duplicate Bash fixture; retain #667 environment semantics comment, HideToolConsole policy for ordinary tools, bounded version-probe behavior, and its source-qualified evidence."
+      ]
+    },
+    {
+      "id": "public-624",
+      "kind": "commit_delta",
+      "pr": 624,
+      "owner": null,
+      "input": {
+        "base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "head": "ee20f6009a8581c8141352cdbd261e1a97a0e805"
+      },
+      "selected_paths": [
+        "docs/modernization/verification/cmake-sdk-consumer-profile-20261122/README.md",
+        "docs/modernization/verification/cmake-sdk-consumer-profile-20261122/artifact-index.json",
+        "docs/modernization/verification/cmake-sdk-consumer-profile-20261122/cmake-sdk-profile-independent-doc-review.json",
+        "docs/modernization/verification/cmake-sdk-consumer-profile-20261122/cmake-sdk-profile-own-review.json",
+        "docs/modernization/verification/cmake-sdk-consumer-profile-20261122/cmake-sdk-profile-postformat-review.json",
+        "docs/modernization/verification/cmake-sdk-consumer-profile-20261122/cmake-sdk-profile-results.json",
+        "docs/modernization/verification/cmake-sdk-consumer-profile-20261122/doc-review-resolution.json",
+        "docs/modernization/verification/cmake-sdk-consumer-profile-20261122/raw-evidence.tar.gz",
+        "docs/modernization/verification/cmake-sdk-consumer-profile-20261122/root-review.json",
+        "docs/modernization/verification/cmaketrace-2026-11-18/.gitattributes",
+        "docs/modernization/verification/cmaketrace-2026-11-18/RESULTS.md",
+        "docs/modernization/verification/cmaketrace-2026-11-18/SHA256SUMS",
+        "docs/modernization/verification/cmaketrace-2026-11-18/logs.zip",
+        "docs/modernization/verification/cmaketrace-2026-11-18/manifest.json",
+        "docs/modernization/verification/cmaketrace-terminal-cancellation-2026-11-22/README.md",
+        "docs/modernization/verification/cmaketrace-terminal-cancellation-2026-11-22/archive.json",
+        "docs/modernization/verification/cmaketrace-terminal-cancellation-2026-11-22/evidence.zip",
+        "docs/modernization/verification/cmaketrace-terminal-cancellation-2026-11-22/publication-readback.json",
+        "docs/modernization/verification/cmaketrace-terminal-cancellation-2026-11-22/qualification.json",
+        "docs/modernization/verification/cmaketrace-terminal-cancellation-2026-11-22/source-composition-proof.json",
+        "internal/vcpkgmcp/cmaketrace/cmaketrace.go",
+        "internal/vcpkgmcp/cmaketrace/parse_benchmark_test.go",
+        "internal/vcpkgmcp/cmaketrace/trace_benchmark_contract_test.go",
+        "internal/vcpkgmcp/cmaketrace/trace_retained_records_test.go",
+        "internal/vcpkgmcp/cmaketrace/trace_terminal_cancellation_test.go",
+        "internal/vcpkgmcp/vcpkgserver/cmake_trace_sdk_memory_windows_test.go",
+        "internal/vcpkgmcp/vcpkgserver/cmake_trace_sdk_profile_windows_test.go",
+        "internal/vcpkgmcp/vcpkgserver/testdata/cmake_trace_sdk_profile_oracle.json"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "2c2825ee25932199eda3626ee2c26da31c99be74",
+      "expected_tree": "820def5a4f98f7f8ddedeea53a145a10bcc09141",
+      "historical_composition_commit": "f5a365c13b290addb39a0f1aec949ce50933d163",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": []
+    },
+    {
+      "id": "public-626",
+      "kind": "commit_delta",
+      "pr": 626,
+      "owner": null,
+      "input": {
+        "base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "head": "279887a4ec79186672c331e075c70e0b4555daa8"
+      },
+      "selected_paths": [
+        "docs/modernization/verification/relay-oracle-2026-11-18/RESULTS.md",
+        "docs/modernization/verification/relay-oracle-2026-11-18/receipt.json",
+        "docs/modernization/verification/relay-oracle-2026-11-18/run.py",
+        "docs/modernization/verification/relay-oracle-2026-11-18/testdata/main.go",
+        "docs/modernization/verification/relay-sdk-consumer-profile-20261122/README.md",
+        "docs/modernization/verification/relay-sdk-consumer-profile-20261122/artifact-index.json",
+        "docs/modernization/verification/relay-sdk-consumer-profile-20261122/raw-evidence.tar.gz",
+        "docs/modernization/verification/relay-sdk-consumer-profile-20261122/relay-sdk-profile-independent-review.json",
+        "docs/modernization/verification/relay-sdk-consumer-profile-20261122/relay-sdk-profile-results-review.json",
+        "docs/modernization/verification/relay-sdk-consumer-profile-20261122/relay-sdk-profile-results.json",
+        "docs/modernization/verification/relay-sdk-consumer-profile-20261122/root-review.json",
+        "internal/daemon/relay_benchmark_test.go",
+        "internal/daemon/relay_binary_probe_windows_test.go",
+        "internal/daemon/relay_load_test.go",
+        "internal/daemon/relay_private_memory_probe_windows_test.go",
+        "internal/daemon/relay_sdk_profile_windows_test.go",
+        "internal/daemon/testdata/relay-minimal/main.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "820def5a4f98f7f8ddedeea53a145a10bcc09141",
+      "expected_tree": "f6ef2a362e168a7523794863c68c96d5555b0761",
+      "historical_composition_commit": "e3358040c0c94779e75af1ec67be6a17987d3c8a",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": []
+    },
+    {
+      "id": "public-629",
+      "kind": "commit_delta",
+      "pr": 629,
+      "owner": null,
+      "input": {
+        "base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "head": "e33924ac97449c7cb8f103d80a39ecbb064310d3"
+      },
+      "selected_paths": [
+        "cmd/mcphub/main.go",
+        "cmd/mcphub/relay_input_windows_test.go",
+        "docs/modernization/verification/relay-response-qualification-20261122/README.md",
+        "docs/modernization/verification/relay-response-qualification-20261122/input-pins.json",
+        "docs/modernization/verification/relay-response-qualification-20261122/qualification-results.json",
+        "docs/modernization/verification/relay-response-qualification-20261122/qualify_relay.py",
+        "docs/modernization/verification/relay-response-qualification-20261122/relay-evidence.tar.xz",
+        "docs/modernization/verification/relay-response-qualification-20261122/self-review.md",
+        "docs/modernization/verification/relay-response-qualification-20261122/source-composition-proof.json",
+        "docs/modernization/verification/relay-response-qualification-20261122/summarize_evidence.py",
+        "docs/modernization/verification/relay-session-retry-20261122/README.md",
+        "docs/modernization/verification/relay-session-retry-20261122/raw-evidence.tar.gz",
+        "docs/modernization/verification/relay-session-retry-20261122/runtime-review.json",
+        "docs/modernization/verification/relay-session-retry-20261122/runtime-summary.json",
+        "docs/modernization/verification/relay-session-retry-20261122/source-review.json",
+        "docs/qualification/relay-post-resumption-20261124/README.md",
+        "docs/qualification/relay-post-resumption-20261124/evidence-manifest.json",
+        "docs/qualification/relay-post-resumption-20261124/relay-qualification-20261124-57604a3a.zip",
+        "internal/cli/relay.go",
+        "internal/cli/relay_process_input.go",
+        "internal/cli/relay_process_input_native_windows_test.go",
+        "internal/cli/relay_process_input_other.go",
+        "internal/cli/relay_process_input_test.go",
+        "internal/cli/relay_process_input_windows.go",
+        "internal/cli/relay_process_input_windows_test.go",
+        "internal/daemon/relay.go",
+        "internal/daemon/relay_consumer_profile_test.go",
+        "internal/daemon/relay_input_contract_test.go",
+        "internal/daemon/relay_output_contract_test.go",
+        "internal/daemon/relay_post_consumer_test.go",
+        "internal/daemon/relay_post_resume.go",
+        "internal/daemon/relay_post_resume_test.go",
+        "internal/daemon/relay_protocol_contract_test.go",
+        "internal/daemon/relay_qualification.go",
+        "internal/daemon/relay_response_contract_test.go",
+        "internal/daemon/relay_sse_session_retry_test.go",
+        "internal/daemon/relay_test.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "f6ef2a362e168a7523794863c68c96d5555b0761",
+      "expected_tree": "40f27c0a8318184d71d8733df2e1e6c4408406bc",
+      "historical_composition_commit": "81ce175a25342c570d9af04d8d09880a1d44610d",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": []
+    },
+    {
+      "id": "owner-cmake",
+      "kind": "commit_delta",
+      "pr": 624,
+      "owner": "cmake",
+      "input": {
+        "base": "ee20f6009a8581c8141352cdbd261e1a97a0e805",
+        "head": "5c36f626467bc6c8446d621f3a2b3fc7fd507b4b"
+      },
+      "selected_paths": [
+        "internal/vcpkgmcp/cmaketrace/parse.go",
+        "internal/vcpkgmcp/cmaketrace/trace_read_error_limits_test.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "40f27c0a8318184d71d8733df2e1e6c4408406bc",
+      "expected_tree": "6ac4185086da9437361f512d3f2bfca2ed38c98f",
+      "historical_composition_commit": "168828125862733d69d35a35cdbe696d6937bd95",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": []
+    },
+    {
+      "id": "owner-relay",
+      "kind": "commit_delta",
+      "pr": 629,
+      "owner": "relay",
+      "input": {
+        "base": "e33924ac97449c7cb8f103d80a39ecbb064310d3",
+        "head": "6808e99bacc0961fef2a511b1ae1a088f12a1e12"
+      },
+      "selected_paths": [
+        "internal/daemon/relay.go",
+        "internal/daemon/relay_admission_contract_test.go",
+        "internal/daemon/relay_test.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "6ac4185086da9437361f512d3f2bfca2ed38c98f",
+      "expected_tree": "a98687d91ccefb82c50ac66b874f3cfa2095f228",
+      "historical_composition_commit": "18da8b60b0e6044b6a6c1cc7f6dfc91a1dffb10a",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": []
+    },
+    {
+      "id": "owner-serena",
+      "kind": "commit_delta",
+      "pr": 655,
+      "owner": "serena",
+      "input": {
+        "base": "1a5a7dd04fe732df5c539860dde813c8c703586d",
+        "head": "6743f3d552027395daf06bfd4fbc0123a374703b"
+      },
+      "selected_paths": [
+        "internal/api/serena_idle_shutdown.go",
+        "internal/api/serena_idle_shutdown_test.go",
+        "internal/api/testhooks.go",
+        "internal/api/workspace_registry_snapshot.go",
+        "internal/api/workspace_registry_snapshot_test.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "a98687d91ccefb82c50ac66b874f3cfa2095f228",
+      "expected_tree": "703d37ed1aecca336da743178d49d8379f0586e2",
+      "historical_composition_commit": "66f04f2375bfecebe95b82838a3643fd0ed74736",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": []
+    },
+    {
+      "id": "owner-scheduler",
+      "kind": "commit_delta",
+      "pr": 660,
+      "owner": "scheduler",
+      "input": {
+        "base": "892fa82e0e1aa5746d97365f96a9b69ef7934168",
+        "head": "8d4f2606c9af7e20181e4ad290b29be0e0a2dd0f"
+      },
+      "selected_paths": [
+        "internal/api/api_surfaces.go",
+        "internal/api/install.go",
+        "internal/api/install_test.go",
+        "internal/api/lsp_auto_register.go",
+        "internal/api/register.go",
+        "internal/api/register_supervisor.go",
+        "internal/api/scheduler_mgmt.go",
+        "internal/api/scheduler_operation_context_test.go",
+        "internal/api/status_enrich.go",
+        "internal/api/types.go",
+        "internal/cli/install_migration_wiring_windows.go",
+        "internal/cli/windows_product_pair.go",
+        "internal/cli/windows_product_pair_test.go",
+        "internal/scheduler/entrypoint_migration_windows.go",
+        "internal/scheduler/entrypoint_migration_windows_test.go",
+        "internal/scheduler/enumerate_all_windows.go",
+        "internal/scheduler/scheduler.go",
+        "internal/scheduler/scheduler_com_windows.go",
+        "internal/scheduler/scheduler_com_windows_test.go",
+        "internal/scheduler/scheduler_command_windows.go",
+        "internal/scheduler/scheduler_context.go",
+        "internal/scheduler/scheduler_hidden_task_windows_test.go",
+        "internal/scheduler/scheduler_last_result_windows_test.go",
+        "internal/scheduler/scheduler_next_run_windows_test.go",
+        "internal/scheduler/scheduler_noop.go",
+        "internal/scheduler/scheduler_operation_context_windows_test.go",
+        "internal/scheduler/scheduler_owner_sid_windows_test.go",
+        "internal/scheduler/scheduler_windows.go",
+        "internal/scheduler/scheduler_xml_create_windows.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "703d37ed1aecca336da743178d49d8379f0586e2",
+      "expected_tree": "52f85abe4262200fb6f325032a4145bc21c7aa59",
+      "historical_composition_commit": "115f570d825dede7b559093920f87bd279021acd",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": []
+    },
+    {
+      "id": "owner-process",
+      "kind": "commit_delta",
+      "pr": 628,
+      "owner": "process",
+      "input": {
+        "base": "e7fee02b5ce1b965486b15f13938bd0d67c841d8",
+        "head": "0b3a9e0edafc41e7e8567abfde878e8f169405ef"
+      },
+      "selected_paths": [
+        "internal/process/run_strictly_contained_windows_test.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "52f85abe4262200fb6f325032a4145bc21c7aa59",
+      "expected_tree": "c54b32c925b13816d837690c5b3133c65fd3cbc3",
+      "historical_composition_commit": "4bdf14845023855c5397ee0a905b55b5b5e3639d",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": []
+    },
+    {
+      "id": "owner-windows",
+      "kind": "commit_delta",
+      "pr": 671,
+      "owner": "windows",
+      "input": {
+        "base": "09dc07e01d1a3236ab5f45f384e11fe2f9dfd30d",
+        "head": "891ef8bfd0764a969db2f800578fd45acd5623d6"
+      },
+      "selected_paths": [
+        "internal/api/hub_mcp_aggregator.go",
+        "internal/api/hub_mcp_handler.go",
+        "internal/api/hub_mcp_resolver.go",
+        "internal/api/hub_mcp_session.go",
+        "internal/api/hub_mcp_stdio.go",
+        "internal/api/hub_mcp_stdio_test.go",
+        "internal/api/testhooks.go",
+        "internal/cli/gui_supervisor_owner.go",
+        "internal/cli/gui_supervisor_owner_control_test.go",
+        "internal/cli/gui_supervisor_owner_other.go",
+        "internal/cli/gui_supervisor_restart_windows.go",
+        "internal/cli/route_aggregate_windows.go",
+        "internal/cli/route_stdio.go",
+        "internal/cli/supervisor_launch.go",
+        "internal/cli/supervisor_launch_windows.go",
+        "internal/cli/windows_canonical_entry_recovery_windows.go",
+        "internal/cli/windows_v2_producttxn_native_windows_test.go",
+        "internal/daemon/isolated_stdio.go",
+        "internal/daemon/isolated_stdio_windows_test.go",
+        "internal/daemon/isolated_stdio_write.go",
+        "internal/mcproute/hub_listener.go",
+        "internal/mcproute/hub_stdio.go",
+        "internal/mcproute/hub_stdio_windows_test.go",
+        "npm/generate-platform-packages.js",
+        "npm/packages/win32-x64/README.md",
+        "npm/platform-packages.test.js"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "c54b32c925b13816d837690c5b3133c65fd3cbc3",
+      "expected_tree": "30ea08ccdfdd7757a470b79d35abcaa3e92bd6d4",
+      "historical_composition_commit": "1335b647f463ac89c9581c75bc52cb5be5270ade",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": []
+    },
+    {
+      "id": "owner-windows-npm",
+      "kind": "commit_delta",
+      "pr": 671,
+      "owner": "windows",
+      "input": {
+        "base": "09dc07e01d1a3236ab5f45f384e11fe2f9dfd30d",
+        "head": "891ef8bfd0764a969db2f800578fd45acd5623d6"
+      },
+      "selected_paths": [
+        "npm/postinstall.test.js"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "30ea08ccdfdd7757a470b79d35abcaa3e92bd6d4",
+      "expected_tree": "a12dab34bbb3bbfdfeb92a9ee1f8013576424e56",
+      "historical_composition_commit": "7d160af87c5714ce00286115f4026149d287f470",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": [
+        "Apply only the V4 postinstall expectation correction from the same Windows owner commit."
+      ]
+    },
+    {
+      "id": "owner-force_stop",
+      "kind": "commit_delta",
+      "pr": 659,
+      "owner": "force_stop",
+      "input": {
+        "base": "a3568dfe3426afaca4176d57a2310097e5214e77",
+        "head": "9043acae5a778b9b123b195d3c04cb213e5e568d"
+      },
+      "selected_paths": [
+        "internal/api/install.go",
+        "internal/api/install_intent.go",
+        "internal/api/install_parsed_manifest.go",
+        "internal/api/install_parsed_manifest_lane_b_test.go",
+        "internal/api/main_test.go",
+        "internal/api/original_process_owner_required_test.go",
+        "internal/api/phase_f_lifecycle_test.go",
+        "internal/api/stop_force_supervisor.go",
+        "internal/api/stop_force_supervisor_other.go",
+        "internal/api/stop_supervisor_lane_b_test.go",
+        "internal/api/supervisor_force_stop.go",
+        "internal/api/supervisor_force_stop_test.go",
+        "internal/api/supervisor_ipc_force_stop_client.go",
+        "internal/api/supervisor_ipc_status_client.go",
+        "internal/api/supervisor_seal_guard_test.go",
+        "internal/cli/supervise.go",
+        "internal/cli/supervise_force_stop.go",
+        "internal/cli/supervise_force_stop_test.go",
+        "internal/cli/supervise_force_stop_windows_test.go",
+        "internal/cli/supervise_status.go",
+        "internal/cli/supervisor_controller.go",
+        "internal/cli/supervise_root_exit_test.go"
+      ],
+      "already_identical_paths": [],
+      "before_tree": "a12dab34bbb3bbfdfeb92a9ee1f8013576424e56",
+      "expected_tree": "edc0477d7f40137bc72f706f17b8907873d0c874",
+      "historical_composition_commit": "86d694e5c517755d7b4da655ba00ebf1e31543ff",
+      "observed_text_conflict_paths": [
+        "internal/cli/supervise.go",
+        "internal/cli/supervisor_controller.go"
+      ],
+      "resolutions": [
+        {
+          "path": "internal/cli/supervise.go",
+          "mode": "100644",
+          "blob": "c04fde761da8b770c68e2912e0fdf4bd37900ed8",
+          "file": "resolutions/c04fde761da8b770c68e2912e0fdf4bd37900ed8.txt",
+          "sha256": "1fc90864cb3201343ed3cd899eb3a6e3b47a034e9873d8fa8141aad14a93695b",
+          "bytes": 214101
+        },
+        {
+          "path": "internal/cli/supervisor_controller.go",
+          "mode": "100644",
+          "blob": "b51ea9d3b26d21f56b0b0126310df36e26b4c68e",
+          "file": "resolutions/b51ea9d3b26d21f56b0b0126310df36e26b4c68e.txt",
+          "sha256": "821642bcdab2ae34c4686211843fae84a8e18711e4b3e3b912d38023f1599e44",
+          "bytes": 246166
+        }
+      ],
+      "notes": [
+        "Keep the existing #671 daemonCreators allocation and routeAggregate owner; do not shadow or recreate it for force-stop. Preserve routeAggregateStarted, routeDescriptorSHA256 and retireRouteAggregateBinding.",
+        "Retain route admission and force-stop as separate controller event cases; add the original creator field beside existing route/intent fields.",
+        "Keep composed Scheduler operation context and rollback guard; preserve sealed private API oracle, port-probe dispatcher, secure CLI secrets fixture and Serena/Status test hooks.",
+        "Apply receipt-3 as an incremental three-path overlay over already resolved force inputs; reuse admitted sleeper and exit helper, preserve native creator exit code consumer correction without adding helper roles."
+      ]
+    },
+    {
+      "id": "test-api-port-helper",
+      "kind": "patch",
+      "pr": 664,
+      "scope": "Test-only helper admission overlay",
+      "patch": {
+        "file": "patches/api-port-helper-admission.patch",
+        "sha256": "45aa667479122298a9e7b8beb0e0bdefd017ceafb30ea83ddf67eeb227854595",
+        "bytes": 8764
+      },
+      "selected_paths": [
+        "internal/api/main_test.go",
+        "internal/api/main_helper_dispatch_test.go",
+        "internal/api/main_helper_dispatch_validation_test.go",
+        "internal/api/port_pid_probe_test.go"
+      ],
+      "before_tree": "edc0477d7f40137bc72f706f17b8907873d0c874",
+      "expected_tree": "f500c523b030c6aa7739446973615cbbd539e4f7",
+      "historical_composition_commit": "2c71dd70fba1125bd10d4a3506516be4d6820101",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": [
+        "Move the port fixture after both pure role gates; preserve private oracle and force-stop TestMain seals."
+      ]
+    },
+    {
+      "id": "native-gofmt",
+      "kind": "patch",
+      "pr": 664,
+      "scope": "Native formatting only",
+      "patch": {
+        "file": "patches/native-gofmt.patch",
+        "sha256": "5cfd3fdfa094a16b4961a069ff82275f80875b2f032dc200eba6dd814209332e",
+        "bytes": 683
+      },
+      "selected_paths": [
+        "internal/api/main_helper_dispatch_test.go"
+      ],
+      "before_tree": "f500c523b030c6aa7739446973615cbbd539e4f7",
+      "expected_tree": "6081e50fc5f3c33c27b223cfd68e2d1dbe404356",
+      "historical_composition_commit": "c2901b4a006ee0813b3b8b4e4afbb211f27b1cd4",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": [
+        "Native gofmt changed only four struct field alignments (eight diff lines). No behavior or test assertion changed."
+      ]
+    },
+    {
+      "id": "native-test-fixture-margin",
+      "kind": "patch",
+      "pr": 664,
+      "scope": "Test infrastructure deadline only",
+      "patch": {
+        "file": "patches/native-test-fixture-margin.patch",
+        "sha256": "f4860cb2698fa78f2f0e9828de0ef8a15297981fa3e91cd86e72b7ad499c92ac",
+        "bytes": 627
+      },
+      "selected_paths": [
+        "internal/api/port_pid_probe_test.go"
+      ],
+      "before_tree": "6081e50fc5f3c33c27b223cfd68e2d1dbe404356",
+      "expected_tree": "386923930b874526a0e6896bde1857c4ecc95d63",
+      "historical_composition_commit": "14af01ea06063a2c2306aeaa1accf454151d7e6b",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": [
+        "Raise only the copied test-image child deadline from 10s to 30s after an observed ordinary-netstat child admission timeout at 14.25s. Preserve failure-on-timeout assertions, 1s WaitDelay and the 90s package test budget. No production timeout changes.",
+        "This margin does not reserve 30s for each of six sequential cases; native rerun evidence remains a separate requirement."
+      ]
+    },
+    {
+      "id": "native-gate-fixtures",
+      "kind": "patch",
+      "pr": 664,
+      "scope": "Four test fixture files only; no production changes or assertion deadline increases",
+      "patch": {
+        "file": "patches/native-gate-fixtures.patch",
+        "sha256": "4fd19883e0c133725b56f12567000bc89f4da48d0b15cd9bbe30df9fc08bc56e",
+        "bytes": 10779
+      },
+      "selected_paths": [
+        "internal/api/adopt_lease_namespace_windows_test.go",
+        "internal/cli/adopt_test.go",
+        "internal/daemonrecovery/recovery_test.go",
+        "internal/sonnet/server_test.go"
+      ],
+      "before_tree": "386923930b874526a0e6896bde1857c4ecc95d63",
+      "expected_tree": "0c42ea39f241077cb6a9e1a64efe6d1e0a726751",
+      "historical_composition_commit": "c730cae455ef84d226ac5323953d9e7209b4016e",
+      "source_base_commit": "14af01ea06063a2c2306aeaa1accf454151d7e6b",
+      "observed_text_conflict_paths": [],
+      "resolutions": [],
+      "notes": [
+        "Set the current token user as owner of newly created legacy namespace fixture objects, read back through the same handle, and verify the DACL remains unchanged.",
+        "Keep the real auto-port planner for the CLI redaction fixture. Supply a valid plan through the existing test seam so host port allocation cannot preempt the typed namespace-refusal assertion.",
+        "Release the original audit flock and join the original recovery Execute call before TempDir cleanup. Deferred completion-channel closure covers Goexit; an explicit returned flag distinguishes missing execution results from a nil error.",
+        "Close the original Sonnet server on every test exit and observe Close errors. Preserve the existing explicit success-path Close assertion.",
+        "Native gofmt on all four fixture files returned identical bytes. Existing test assertion deadlines are preserved; runtime and full-gate acceptance remain separate native evidence."
+      ]
+    }
+  ],
+  "negative_control": {
+    "file": "negative-controls/api-port-helper-admission-negative.patch",
+    "sha256": "862f2bc447f6d319743878642b8f7c88950d31ea0c927ddba36f10fa07d3a5d6",
+    "bytes": 2502,
+    "scope": "Negative causal control only; never applied by replay.py and excluded from the target tree"
+  },
+  "replay_contract": {
+    "compared_result": "Exact source tree at every recorded step",
+    "historical_composition_commits_required": false,
+    "creates_commits_or_refs": false,
+    "uses_private_index": true,
+    "executes_application_or_native_code": false,
+    "network_required_by_script": false,
+    "public_binary_evidence_copied_into_this_artifact_set": false
+  },
+  "skills_applied": [
+    "Git workflow and versioning: pinned deltas, isolated index, exact tree verification",
+    "Ponytail: reuse public inputs and existing owners; no duplicate evidence archives",
+    "Go data consistency and security: preserve original creator, private helper and rollback boundaries",
+    "Go testing and verification: separate source replay, negative control, focused native results and full gates"
+  ],
+  "post_merge_adjustment_summary": [
+    {
+      "step": "public-637",
+      "paths": [
+        "internal/cli/private_serena_migration_fixture_windows_test.go",
+        "internal/cli/private_serena_migration_publish_windows_test.go"
+      ],
+      "bytes": 1146
+    },
+    {
+      "step": "public-664",
+      "paths": [
+        "docs/modernization/verification/gui-original-owner-2026-11-22/publication-readback.json"
+      ],
+      "bytes": 552
+    },
+    {
+      "step": "public-665",
+      "paths": [
+        "internal/api/main_helper_dispatch_test.go",
+        "internal/api/main_helper_dispatch_validation_test.go"
+      ],
+      "bytes": 4975
+    },
+    {
+      "step": "public-666",
+      "paths": [
+        "internal/cli/secrets_helper_dispatch_test.go",
+        "internal/cli/testmain_dispatch_test.go"
+      ],
+      "bytes": 9460
+    }
+  ],
+  "owner_publication_readback": {
+    "status": "PUBLISHED_TO_EXISTING_OPEN_DRAFT_PRS",
+    "scope": "Exact owner head readback supplied by the coordinating reviewer after publication; source replay performs no remote request",
+    "capture_date": "2026-11-25",
+    "input_readback_sha256": "42a7e2849c6b8cb0cb415fa215cb004d94574a11f921012a7cef19364f46f3c6",
+    "owner_input_pins_match": true,
+    "pull_requests": [
+      {
+        "pr": 624,
+        "branch": "perf/rx01-cmaketrace-benchmark-20261112",
+        "sha": "5c36f626467bc6c8446d621f3a2b3fc7fd507b4b",
+        "state": "open",
+        "draft": true,
+        "merged": false
+      },
+      {
+        "pr": 629,
+        "branch": "fix/relay-output-failure-contract-20261113",
+        "sha": "6808e99bacc0961fef2a511b1ae1a088f12a1e12",
+        "state": "open",
+        "draft": true,
+        "merged": false
+      },
+      {
+        "pr": 655,
+        "branch": "fix/serena-finalize-context-20261115",
+        "sha": "6743f3d552027395daf06bfd4fbc0123a374703b",
+        "state": "open",
+        "draft": true,
+        "merged": false
+      },
+      {
+        "pr": 660,
+        "branch": "fix/scheduler-hidden-task-lookup-20261119",
+        "sha": "8d4f2606c9af7e20181e4ad290b29be0e0a2dd0f",
+        "state": "open",
+        "draft": true,
+        "merged": false
+      },
+      {
+        "pr": 628,
+        "branch": "perf/rx16-native-observation-20261112",
+        "sha": "0b3a9e0edafc41e7e8567abfde878e8f169405ef",
+        "state": "open",
+        "draft": true,
+        "merged": false
+      },
+      {
+        "pr": 671,
+        "branch": "codex/windows-installer-review",
+        "sha": "891ef8bfd0764a969db2f800578fd45acd5623d6",
+        "state": "open",
+        "draft": true,
+        "merged": false
+      },
+      {
+        "pr": 659,
+        "branch": "fix/api-port-pid-observation-20261118",
+        "sha": "9043acae5a778b9b123b195d3c04cb213e5e568d",
+        "state": "open",
+        "draft": true,
+        "merged": false
+      }
+    ]
+  }
+}

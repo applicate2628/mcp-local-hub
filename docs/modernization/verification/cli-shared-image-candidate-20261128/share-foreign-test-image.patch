@@ -1,0 +1,139 @@
+diff --git a/internal/cli/process_identity_match_windows_test.go b/internal/cli/process_identity_match_windows_test.go
+index 37f22c85350aab49185355c0485338fb16bc46cc..059eec22dc7701ed8f1a1d2f2baac82962d815df 100644
+--- a/internal/cli/process_identity_match_windows_test.go
++++ b/internal/cli/process_identity_match_windows_test.go
+@@ -3,10 +3,12 @@
+ package cli
+ 
+ import (
++	"fmt"
+ 	"io"
+ 	"os"
+ 	"os/exec"
+ 	"path/filepath"
++	"sync"
+ 	"testing"
+ 	"time"
+ 
+@@ -22,7 +24,7 @@
+ }
+ 
+ func TestPidMatchesMcphub_RejectsForeignPathSameBasename(t *testing.T) {
+-	helperPath := copyCurrentTestBinaryAs(t, "mcphub.exe")
++	helperPath := sharedPIDMatchTestBinary(t)
+ 	cmd := exec.Command(helperPath, "-test.run=TestPidMatchesMcphub_HelperSleep")
+ 	process.NoConsole(cmd)
+ 	cmd.Env = append(os.Environ(), "MCPHUB_PID_MATCH_HELPER=1")
+@@ -50,7 +52,7 @@
+ 
+ func TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID(t *testing.T) {
+ 	tmpHome := apitest.HardenedTempDir(t)
+-	helperPath := copyCurrentTestBinaryAs(t, "mcphub.exe")
++	helperPath := sharedPIDMatchTestBinary(t)
+ 	cmd := exec.Command(helperPath, "-test.run=TestPidMatchesMcphub_HelperSleep")
+ 	process.NoConsole(cmd)
+ 	cmd.Env = append(os.Environ(), "MCPHUB_PID_MATCH_HELPER=1")
+@@ -104,29 +106,58 @@
+ 	time.Sleep(60 * time.Second)
+ }
+ 
+-func copyCurrentTestBinaryAs(t *testing.T, name string) string {
++var pidMatchTestBinary struct {
++	once sync.Once
++	path string
++	err  error
++}
++
++// Both identity tests need the same read-only image at a foreign path. The
++// package TestMain owns that file until both tests and their child waits finish;
++// each test still starts a distinct process and checks its original identity.
++func sharedPIDMatchTestBinary(t *testing.T) string {
+ 	t.Helper()
+ 
+-	srcPath, err := os.Executable()
+-	if err != nil {
+-		t.Fatalf("os.Executable: %v", err)
+-	}
+-	dstPath := filepath.Join(t.TempDir(), name)
+-	src, err := os.Open(srcPath)
+-	if err != nil {
+-		t.Fatalf("open test binary: %v", err)
+-	}
+-	defer src.Close()
+-	dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
+-	if err != nil {
+-		t.Fatalf("create helper binary: %v", err)
+-	}
+-	if _, err := io.Copy(dst, src); err != nil {
+-		_ = dst.Close()
+-		t.Fatalf("copy helper binary: %v", err)
+-	}
+-	if err := dst.Close(); err != nil {
+-		t.Fatalf("close helper binary: %v", err)
++	pidMatchTestBinary.once.Do(func() {
++		if cliTestMainArtifactRoot == "" {
++			pidMatchTestBinary.err = fmt.Errorf("package test artifact root is unavailable")
++			return
++		}
++		srcPath, err := os.Executable()
++		if err != nil {
++			pidMatchTestBinary.err = fmt.Errorf("find test binary: %w", err)
++			return
++		}
++		dir := filepath.Join(cliTestMainArtifactRoot, "pid-match-helper")
++		if err := os.Mkdir(dir, 0o700); err != nil {
++			pidMatchTestBinary.err = fmt.Errorf("create shared helper directory: %w", err)
++			return
++		}
++		src, err := os.Open(srcPath)
++		if err != nil {
++			pidMatchTestBinary.err = fmt.Errorf("open test binary: %w", err)
++			return
++		}
++		defer src.Close()
++		dstPath := filepath.Join(dir, "mcphub.exe")
++		dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o755)
++		if err != nil {
++			pidMatchTestBinary.err = fmt.Errorf("create shared helper binary: %w", err)
++			return
++		}
++		if _, err := io.Copy(dst, src); err != nil {
++			_ = dst.Close()
++			pidMatchTestBinary.err = fmt.Errorf("copy shared helper binary: %w", err)
++			return
++		}
++		if err := dst.Close(); err != nil {
++			pidMatchTestBinary.err = fmt.Errorf("close shared helper binary: %w", err)
++			return
++		}
++		pidMatchTestBinary.path = dstPath
++	})
++	if pidMatchTestBinary.err != nil {
++		t.Fatal(pidMatchTestBinary.err)
+ 	}
+-	return dstPath
++	return pidMatchTestBinary.path
+ }
+diff --git a/internal/cli/settings_registry_test.go b/internal/cli/settings_registry_test.go
+index b7ac3ac94b837e46f6a754377d8af92c17ae38bc..563e80dff195deb1378e45431c0b374aa0a25012 100644
+--- a/internal/cli/settings_registry_test.go
++++ b/internal/cli/settings_registry_test.go
+@@ -226,6 +226,10 @@
+ 	}
+ }
+ 
++// cliTestMainArtifactRoot owns shared immutable test files through m.Run.
++// It is removed by TestMain's existing package-root cleanup.
++var cliTestMainArtifactRoot string
++
+ // TestMain ensures any leftover env state from prior tests doesn't leak.
+ // The withTempHome helper sets envs per-test via t.Setenv, which is
+ // auto-restored. No extra setup needed.
+@@ -453,6 +457,7 @@
+ 	if err := apitest.HardenedDirForTestMain(tmp); err != nil {
+ 		panic(errors.Join(err, apitest.RemoveTestMainRoot(tmp)))
+ 	}
++	cliTestMainArtifactRoot = tmp
+ 	restore := api.SetDaemonStateRootForTest(tmp)
+ 	// Install/adopt transaction fixtures deliberately use non-runnable
+ 	// canonical descriptor paths to isolate their later mutation stages. The

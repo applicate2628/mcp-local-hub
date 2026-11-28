@@ -1,0 +1,26 @@
+=== RUN   TestDir_WindowsUsesLocalAppData
+--- PASS: TestDir_WindowsUsesLocalAppData (0.00s)
+=== NAME  
+=== RUN   TestDir_WindowsFallsBackToHomeWhenLocalAppDataEmpty
+--- PASS: TestDir_WindowsFallsBackToHomeWhenLocalAppDataEmpty (0.00s)
+=== NAME  
+=== RUN   TestDir_NonWindowsUsesUserCacheDir
+    hubtemp_test.go:49: non-Windows user cache branch
+--- SKIP: TestDir_NonWindowsUsesUserCacheDir (0.00s)
+=== NAME  
+=== RUN   TestEnsurePrivateDirCreatesOwnerWritableDirectory
+--- PASS: TestEnsurePrivateDirCreatesOwnerWritableDirectory (0.00s)
+=== NAME  
+=== RUN   TestSweepStaleSkipsActiveMarkedDirectory
+--- PASS: TestSweepStaleSkipsActiveMarkedDirectory (0.00s)
+=== NAME  
+=== RUN   TestMarkActiveRefreshesMarkerDuringLongRun
+--- PASS: TestMarkActiveRefreshesMarkerDuringLongRun (0.02s)
+=== NAME  
+=== RUN   TestSweepStaleRemovesExpiredActiveMarkedDirectory
+--- PASS: TestSweepStaleRemovesExpiredActiveMarkedDirectory (0.00s)
+=== NAME  
+=== RUN   TestSweepStaleRemovesUnmarkedStaleDirectory
+--- PASS: TestSweepStaleRemovesUnmarkedStaleDirectory (0.00s)
+=== NAME  
+PASS

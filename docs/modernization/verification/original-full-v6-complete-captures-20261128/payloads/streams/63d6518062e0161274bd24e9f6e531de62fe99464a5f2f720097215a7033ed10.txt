@@ -1,0 +1,59 @@
+{"Action":"start","Package":"mcp-local-hub/internal/mcpcompat/readinesswire"}
+{"Action":"run","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1CanonicalRoundTrip"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1CanonicalRoundTrip","Output":"=== RUN   TestFailureV1CanonicalRoundTrip\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1CanonicalRoundTrip","Output":"--- PASS: TestFailureV1CanonicalRoundTrip (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1CanonicalRoundTrip"}
+{"Action":"run","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1DiagnosticUnsupportedProtocolRoundTrip"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1DiagnosticUnsupportedProtocolRoundTrip","Output":"=== RUN   TestFailureV1DiagnosticUnsupportedProtocolRoundTrip\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1DiagnosticUnsupportedProtocolRoundTrip","Output":"--- PASS: TestFailureV1DiagnosticUnsupportedProtocolRoundTrip (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1DiagnosticUnsupportedProtocolRoundTrip"}
+{"Action":"run","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1LegacyFallbackIsExactAndBounded"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1LegacyFallbackIsExactAndBounded","Output":"=== RUN   TestFailureV1LegacyFallbackIsExactAndBounded\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1LegacyFallbackIsExactAndBounded","Output":"--- PASS: TestFailureV1LegacyFallbackIsExactAndBounded (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1LegacyFallbackIsExactAndBounded"}
+{"Action":"run","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent","Output":"=== RUN   TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/status_mismatch"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/status_mismatch","Output":"=== RUN   TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/status_mismatch\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/status_mismatch","Output":"--- PASS: TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/status_mismatch (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/status_mismatch"}
+{"Action":"run","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/unknown_key"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/unknown_key","Output":"=== RUN   TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/unknown_key\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/unknown_key","Output":"--- PASS: TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/unknown_key (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/unknown_key"}
+{"Action":"run","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/duplicate_key"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/duplicate_key","Output":"=== RUN   TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/duplicate_key\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/duplicate_key","Output":"--- PASS: TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/duplicate_key (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/duplicate_key"}
+{"Action":"run","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/non_canonical_whitespace"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/non_canonical_whitespace","Output":"=== RUN   TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/non_canonical_whitespace\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/non_canonical_whitespace","Output":"--- PASS: TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/non_canonical_whitespace (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/non_canonical_whitespace"}
+{"Action":"run","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/extra_media_parameter"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/extra_media_parameter","Output":"=== RUN   TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/extra_media_parameter\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/extra_media_parameter","Output":"--- PASS: TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/extra_media_parameter (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/extra_media_parameter"}
+{"Action":"run","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/oversize"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/oversize","Output":"=== RUN   TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/oversize\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/oversize","Output":"--- PASS: TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/oversize (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/oversize"}
+{"Action":"run","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/malformed_utf8"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/malformed_utf8","Output":"=== RUN   TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/malformed_utf8\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/malformed_utf8","Output":"--- PASS: TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/malformed_utf8 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent/malformed_utf8"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent","Output":"--- PASS: TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1InvalidClaimedWireFailsClosedWithoutRawContent"}
+{"Action":"run","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1WriterRejectsUnregisteredOrUnboundedValuesBeforeCommit"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1WriterRejectsUnregisteredOrUnboundedValuesBeforeCommit","Output":"=== RUN   TestFailureV1WriterRejectsUnregisteredOrUnboundedValuesBeforeCommit\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1WriterRejectsUnregisteredOrUnboundedValuesBeforeCommit","Output":"--- PASS: TestFailureV1WriterRejectsUnregisteredOrUnboundedValuesBeforeCommit (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1WriterRejectsUnregisteredOrUnboundedValuesBeforeCommit"}
+{"Action":"run","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1WrongContentTypeIsClassifiedWithoutReadingStreamingBody"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1WrongContentTypeIsClassifiedWithoutReadingStreamingBody","Output":"=== RUN   TestFailureV1WrongContentTypeIsClassifiedWithoutReadingStreamingBody\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1WrongContentTypeIsClassifiedWithoutReadingStreamingBody","Output":"--- PASS: TestFailureV1WrongContentTypeIsClassifiedWithoutReadingStreamingBody (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestFailureV1WrongContentTypeIsClassifiedWithoutReadingStreamingBody"}
+{"Action":"run","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestIsRetryableFailureIDUsesRegistry"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestIsRetryableFailureIDUsesRegistry","Output":"=== RUN   TestIsRetryableFailureIDUsesRegistry\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestIsRetryableFailureIDUsesRegistry","Output":"--- PASS: TestIsRetryableFailureIDUsesRegistry (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Test":"TestIsRetryableFailureIDUsesRegistry"}
+{"Action":"output","Package":"mcp-local-hub/internal/mcpcompat/readinesswire","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/mcpcompat/readinesswire"}

@@ -1,0 +1,529 @@
+=== RUN   TestCanonicalEntrySetTaskProjectionPreservesUnrelatedXMLAndRestoresBothPriors
+--- PASS: TestCanonicalEntrySetTaskProjectionPreservesUnrelatedXMLAndRestoresBothPriors (0.00s)
+=== NAME  
+=== RUN   TestCanonicalEntrySetTaskProjectionRejectsUnqualifiedLegacyBeforeBackend
+--- PASS: TestCanonicalEntrySetTaskProjectionRejectsUnqualifiedLegacyBeforeBackend (0.00s)
+=== NAME  
+=== RUN   TestScanOwnedEntrypointTaskReferencesKeepsForeignTasksOutOfManagedInventory
+--- PASS: TestScanOwnedEntrypointTaskReferencesKeepsForeignTasksOutOfManagedInventory (0.00s)
+=== NAME  
+=== RUN   TestEntrypointTaskTxnPreservesRawXMLOutsideCommand
+=== PAUSE TestEntrypointTaskTxnPreservesRawXMLOutsideCommand
+=== NAME  
+=== RUN   TestEntrypointTaskTxnDigestUsesSortedCanonicalNamesAndExactLiveXML
+--- PASS: TestEntrypointTaskTxnDigestUsesSortedCanonicalNamesAndExactLiveXML (0.00s)
+=== NAME  
+=== RUN   TestEntrypointTaskTxnKeepsExistingRuntimeAndIgnoresOperatorCommand
+=== PAUSE TestEntrypointTaskTxnKeepsExistingRuntimeAndIgnoresOperatorCommand
+=== NAME  
+=== RUN   TestEntrypointTaskTxnMigratesCaseVariantPriorPathButKeepsDifferentTarget
+--- PASS: TestEntrypointTaskTxnMigratesCaseVariantPriorPathButKeepsDifferentTarget (0.00s)
+=== NAME  
+=== RUN   TestEntrypointTaskTxnRewriteFailureLeavesCompensationToCoordinator
+=== PAUSE TestEntrypointTaskTxnRewriteFailureLeavesCompensationToCoordinator
+=== NAME  
+=== RUN   TestEntrypointTaskTxnReopenRestoresRetainedXMLSnapshots
+=== PAUSE TestEntrypointTaskTxnReopenRestoresRetainedXMLSnapshots
+=== NAME  
+=== RUN   TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation
+=== PAUSE TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation
+=== NAME  
+=== RUN   TestEntrypointTaskTxnRetainFailurePreservesCause
+=== PAUSE TestEntrypointTaskTxnRetainFailurePreservesCause
+=== NAME  
+=== RUN   TestEntrypointTaskTxnRejectsEmptyRetainedReference
+=== PAUSE TestEntrypointTaskTxnRejectsEmptyRetainedReference
+=== NAME  
+=== RUN   TestEntrypointTaskTxnReopenPreservesLoadCause
+=== PAUSE TestEntrypointTaskTxnReopenPreservesLoadCause
+=== NAME  
+=== RUN   TestEntrypointTaskExcludedRestoreBarrier
+--- PASS: TestEntrypointTaskExcludedRestoreBarrier (0.00s)
+=== NAME  
+=== RUN   TestEntrypointTaskExcludedCandidateFinalPreservesDisabledOriginal
+--- PASS: TestEntrypointTaskExcludedCandidateFinalPreservesDisabledOriginal (0.00s)
+=== NAME  
+=== RUN   TestEntrypointTaskExcludedAdmissionGuards
+=== RUN   TestEntrypointTaskExcludedAdmissionGuards/apply
+--- PASS: TestEntrypointTaskExcludedAdmissionGuards/apply (0.00s)
+=== NAME  TestEntrypointTaskExcludedAdmissionGuards
+=== RUN   TestEntrypointTaskExcludedAdmissionGuards/nil-context
+--- PASS: TestEntrypointTaskExcludedAdmissionGuards/nil-context (0.00s)
+=== NAME  TestEntrypointTaskExcludedAdmissionGuards
+=== RUN   TestEntrypointTaskExcludedAdmissionGuards/cancelled-context
+--- PASS: TestEntrypointTaskExcludedAdmissionGuards/cancelled-context (0.00s)
+=== NAME  TestEntrypointTaskExcludedAdmissionGuards
+=== RUN   TestEntrypointTaskExcludedAdmissionGuards/nil-inventory
+--- PASS: TestEntrypointTaskExcludedAdmissionGuards/nil-inventory (0.00s)
+=== NAME  TestEntrypointTaskExcludedAdmissionGuards
+=== RUN   TestEntrypointTaskExcludedAdmissionGuards/empty-inventory
+--- PASS: TestEntrypointTaskExcludedAdmissionGuards/empty-inventory (0.00s)
+=== NAME  TestEntrypointTaskExcludedAdmissionGuards
+=== RUN   TestEntrypointTaskExcludedAdmissionGuards/store
+--- PASS: TestEntrypointTaskExcludedAdmissionGuards/store (0.00s)
+=== NAME  TestEntrypointTaskExcludedAdmissionGuards
+=== RUN   TestEntrypointTaskExcludedAdmissionGuards/backup
+--- PASS: TestEntrypointTaskExcludedAdmissionGuards/backup (0.00s)
+=== NAME  TestEntrypointTaskExcludedAdmissionGuards
+=== RUN   TestEntrypointTaskExcludedAdmissionGuards/backup-body
+--- PASS: TestEntrypointTaskExcludedAdmissionGuards/backup-body (0.00s)
+=== NAME  TestEntrypointTaskExcludedAdmissionGuards
+=== RUN   TestEntrypointTaskExcludedAdmissionGuards/equal-images
+--- PASS: TestEntrypointTaskExcludedAdmissionGuards/equal-images (0.00s)
+=== NAME  TestEntrypointTaskExcludedAdmissionGuards
+=== RUN   TestEntrypointTaskExcludedAdmissionGuards/closed
+--- PASS: TestEntrypointTaskExcludedAdmissionGuards/closed (0.00s)
+=== NAME  TestEntrypointTaskExcludedAdmissionGuards
+=== RUN   TestEntrypointTaskExcludedAdmissionGuards/nil-owner-context
+--- PASS: TestEntrypointTaskExcludedAdmissionGuards/nil-owner-context (0.00s)
+=== NAME  TestEntrypointTaskExcludedAdmissionGuards
+--- PASS: TestEntrypointTaskExcludedAdmissionGuards (0.01s)
+=== NAME  
+=== RUN   TestEntrypointTaskExcludedEnabledShapeGuards
+=== RUN   TestEntrypointTaskExcludedEnabledShapeGuards/missing
+--- PASS: TestEntrypointTaskExcludedEnabledShapeGuards/missing (0.00s)
+=== NAME  TestEntrypointTaskExcludedEnabledShapeGuards
+=== RUN   TestEntrypointTaskExcludedEnabledShapeGuards/duplicate
+--- PASS: TestEntrypointTaskExcludedEnabledShapeGuards/duplicate (0.00s)
+=== NAME  TestEntrypointTaskExcludedEnabledShapeGuards
+=== RUN   TestEntrypointTaskExcludedEnabledShapeGuards/nested
+--- PASS: TestEntrypointTaskExcludedEnabledShapeGuards/nested (0.00s)
+=== NAME  TestEntrypointTaskExcludedEnabledShapeGuards
+=== RUN   TestEntrypointTaskExcludedEnabledShapeGuards/namespace
+--- PASS: TestEntrypointTaskExcludedEnabledShapeGuards/namespace (0.00s)
+=== NAME  TestEntrypointTaskExcludedEnabledShapeGuards
+=== RUN   TestEntrypointTaskExcludedEnabledShapeGuards/settings-namespace
+--- PASS: TestEntrypointTaskExcludedEnabledShapeGuards/settings-namespace (0.00s)
+=== NAME  TestEntrypointTaskExcludedEnabledShapeGuards
+=== RUN   TestEntrypointTaskExcludedEnabledShapeGuards/boolean
+--- PASS: TestEntrypointTaskExcludedEnabledShapeGuards/boolean (0.00s)
+=== NAME  TestEntrypointTaskExcludedEnabledShapeGuards
+=== RUN   TestEntrypointTaskExcludedEnabledShapeGuards/empty
+--- PASS: TestEntrypointTaskExcludedEnabledShapeGuards/empty (0.00s)
+=== NAME  TestEntrypointTaskExcludedEnabledShapeGuards
+=== RUN   TestEntrypointTaskExcludedEnabledShapeGuards/entity
+--- PASS: TestEntrypointTaskExcludedEnabledShapeGuards/entity (0.00s)
+=== NAME  TestEntrypointTaskExcludedEnabledShapeGuards
+=== RUN   TestEntrypointTaskExcludedEnabledShapeGuards/duplicate-settings
+--- PASS: TestEntrypointTaskExcludedEnabledShapeGuards/duplicate-settings (0.00s)
+=== NAME  TestEntrypointTaskExcludedEnabledShapeGuards
+--- PASS: TestEntrypointTaskExcludedEnabledShapeGuards (0.00s)
+=== NAME  
+=== RUN   TestEntrypointTaskExcludedSetAndSourceDriftGuards
+=== RUN   TestEntrypointTaskExcludedSetAndSourceDriftGuards/extra
+--- PASS: TestEntrypointTaskExcludedSetAndSourceDriftGuards/extra (0.00s)
+=== NAME  TestEntrypointTaskExcludedSetAndSourceDriftGuards
+=== RUN   TestEntrypointTaskExcludedSetAndSourceDriftGuards/missing
+--- PASS: TestEntrypointTaskExcludedSetAndSourceDriftGuards/missing (0.00s)
+=== NAME  TestEntrypointTaskExcludedSetAndSourceDriftGuards
+=== RUN   TestEntrypointTaskExcludedSetAndSourceDriftGuards/duplicate
+--- PASS: TestEntrypointTaskExcludedSetAndSourceDriftGuards/duplicate (0.00s)
+=== NAME  TestEntrypointTaskExcludedSetAndSourceDriftGuards
+=== RUN   TestEntrypointTaskExcludedSetAndSourceDriftGuards/owner
+--- PASS: TestEntrypointTaskExcludedSetAndSourceDriftGuards/owner (0.00s)
+=== NAME  TestEntrypointTaskExcludedSetAndSourceDriftGuards
+=== RUN   TestEntrypointTaskExcludedSetAndSourceDriftGuards/source
+--- PASS: TestEntrypointTaskExcludedSetAndSourceDriftGuards/source (0.00s)
+=== NAME  TestEntrypointTaskExcludedSetAndSourceDriftGuards
+=== RUN   TestEntrypointTaskExcludedSetAndSourceDriftGuards/command-drift
+--- PASS: TestEntrypointTaskExcludedSetAndSourceDriftGuards/command-drift (0.00s)
+=== NAME  TestEntrypointTaskExcludedSetAndSourceDriftGuards
+--- PASS: TestEntrypointTaskExcludedSetAndSourceDriftGuards (0.00s)
+=== NAME  
+=== RUN   TestEntrypointTaskExcludedSnapshotBindingAndCopy
+=== RUN   TestEntrypointTaskExcludedSnapshotBindingAndCopy/forged
+--- PASS: TestEntrypointTaskExcludedSnapshotBindingAndCopy/forged (0.00s)
+=== NAME  TestEntrypointTaskExcludedSnapshotBindingAndCopy
+=== RUN   TestEntrypointTaskExcludedSnapshotBindingAndCopy/map
+--- PASS: TestEntrypointTaskExcludedSnapshotBindingAndCopy/map (0.00s)
+=== NAME  TestEntrypointTaskExcludedSnapshotBindingAndCopy
+=== RUN   TestEntrypointTaskExcludedSnapshotBindingAndCopy/digest
+--- PASS: TestEntrypointTaskExcludedSnapshotBindingAndCopy/digest (0.00s)
+=== NAME  TestEntrypointTaskExcludedSnapshotBindingAndCopy
+=== RUN   TestEntrypointTaskExcludedSnapshotBindingAndCopy/target
+--- PASS: TestEntrypointTaskExcludedSnapshotBindingAndCopy/target (0.00s)
+=== NAME  TestEntrypointTaskExcludedSnapshotBindingAndCopy
+=== RUN   TestEntrypointTaskExcludedSnapshotBindingAndCopy/extra
+--- PASS: TestEntrypointTaskExcludedSnapshotBindingAndCopy/extra (0.00s)
+=== NAME  TestEntrypointTaskExcludedSnapshotBindingAndCopy
+=== RUN   TestEntrypointTaskExcludedSnapshotBindingAndCopy/missing
+--- PASS: TestEntrypointTaskExcludedSnapshotBindingAndCopy/missing (0.00s)
+=== NAME  TestEntrypointTaskExcludedSnapshotBindingAndCopy
+--- PASS: TestEntrypointTaskExcludedSnapshotBindingAndCopy (0.00s)
+=== NAME  
+=== RUN   TestEntrypointTaskExcludedReadinessGuards
+=== RUN   TestEntrypointTaskExcludedReadinessGuards/request-apply
+--- PASS: TestEntrypointTaskExcludedReadinessGuards/request-apply (0.00s)
+=== NAME  TestEntrypointTaskExcludedReadinessGuards
+=== RUN   TestEntrypointTaskExcludedReadinessGuards/target
+--- PASS: TestEntrypointTaskExcludedReadinessGuards/target (0.00s)
+=== NAME  TestEntrypointTaskExcludedReadinessGuards
+=== RUN   TestEntrypointTaskExcludedReadinessGuards/path
+--- PASS: TestEntrypointTaskExcludedReadinessGuards/path (0.00s)
+=== NAME  TestEntrypointTaskExcludedReadinessGuards
+=== RUN   TestEntrypointTaskExcludedReadinessGuards/hash
+--- PASS: TestEntrypointTaskExcludedReadinessGuards/hash (0.00s)
+=== NAME  TestEntrypointTaskExcludedReadinessGuards
+=== RUN   TestEntrypointTaskExcludedReadinessGuards/zero-hash
+--- PASS: TestEntrypointTaskExcludedReadinessGuards/zero-hash (0.00s)
+=== NAME  TestEntrypointTaskExcludedReadinessGuards
+=== RUN   TestEntrypointTaskExcludedReadinessGuards/pid
+--- PASS: TestEntrypointTaskExcludedReadinessGuards/pid (0.00s)
+=== NAME  TestEntrypointTaskExcludedReadinessGuards
+=== RUN   TestEntrypointTaskExcludedReadinessGuards/started
+--- PASS: TestEntrypointTaskExcludedReadinessGuards/started (0.00s)
+=== NAME  TestEntrypointTaskExcludedReadinessGuards
+=== RUN   TestEntrypointTaskExcludedReadinessGuards/zero-started
+--- PASS: TestEntrypointTaskExcludedReadinessGuards/zero-started (0.00s)
+=== NAME  TestEntrypointTaskExcludedReadinessGuards
+=== RUN   TestEntrypointTaskExcludedReadinessGuards/fractional-started
+--- PASS: TestEntrypointTaskExcludedReadinessGuards/fractional-started (0.00s)
+=== NAME  TestEntrypointTaskExcludedReadinessGuards
+=== RUN   TestEntrypointTaskExcludedReadinessGuards/nil-check
+--- PASS: TestEntrypointTaskExcludedReadinessGuards/nil-check (0.00s)
+=== NAME  TestEntrypointTaskExcludedReadinessGuards
+=== RUN   TestEntrypointTaskExcludedReadinessGuards/callback-fail
+--- PASS: TestEntrypointTaskExcludedReadinessGuards/callback-fail (0.00s)
+=== NAME  TestEntrypointTaskExcludedReadinessGuards
+=== RUN   TestEntrypointTaskExcludedReadinessGuards/callback-cancel
+--- PASS: TestEntrypointTaskExcludedReadinessGuards/callback-cancel (0.00s)
+=== NAME  TestEntrypointTaskExcludedReadinessGuards
+=== RUN   TestEntrypointTaskExcludedReadinessGuards/proof-target
+--- PASS: TestEntrypointTaskExcludedReadinessGuards/proof-target (0.00s)
+=== NAME  TestEntrypointTaskExcludedReadinessGuards
+=== RUN   TestEntrypointTaskExcludedReadinessGuards/proof-image
+--- PASS: TestEntrypointTaskExcludedReadinessGuards/proof-image (0.00s)
+=== NAME  TestEntrypointTaskExcludedReadinessGuards
+=== RUN   TestEntrypointTaskExcludedReadinessGuards/proof-hash
+--- PASS: TestEntrypointTaskExcludedReadinessGuards/proof-hash (0.00s)
+=== NAME  TestEntrypointTaskExcludedReadinessGuards
+=== RUN   TestEntrypointTaskExcludedReadinessGuards/proof-pid
+--- PASS: TestEntrypointTaskExcludedReadinessGuards/proof-pid (0.00s)
+=== NAME  TestEntrypointTaskExcludedReadinessGuards
+=== RUN   TestEntrypointTaskExcludedReadinessGuards/proof-started
+--- PASS: TestEntrypointTaskExcludedReadinessGuards/proof-started (0.00s)
+=== NAME  TestEntrypointTaskExcludedReadinessGuards
+=== RUN   TestEntrypointTaskExcludedReadinessGuards/proof-evidence
+--- PASS: TestEntrypointTaskExcludedReadinessGuards/proof-evidence (0.00s)
+=== NAME  TestEntrypointTaskExcludedReadinessGuards
+=== RUN   TestEntrypointTaskExcludedReadinessGuards/empty-proof
+--- PASS: TestEntrypointTaskExcludedReadinessGuards/empty-proof (0.00s)
+=== NAME  TestEntrypointTaskExcludedReadinessGuards
+=== RUN   TestEntrypointTaskExcludedReadinessGuards/post-callback-drift
+--- PASS: TestEntrypointTaskExcludedReadinessGuards/post-callback-drift (0.00s)
+=== NAME  TestEntrypointTaskExcludedReadinessGuards
+=== RUN   TestEntrypointTaskExcludedReadinessGuards/post-callback-extra
+--- PASS: TestEntrypointTaskExcludedReadinessGuards/post-callback-extra (0.00s)
+=== NAME  TestEntrypointTaskExcludedReadinessGuards
+=== RUN   TestEntrypointTaskExcludedReadinessGuards/post-callback-missing
+--- PASS: TestEntrypointTaskExcludedReadinessGuards/post-callback-missing (0.00s)
+=== NAME  TestEntrypointTaskExcludedReadinessGuards
+--- PASS: TestEntrypointTaskExcludedReadinessGuards (0.01s)
+=== NAME  
+=== RUN   TestEntrypointTaskExcludedRestoreContinuesAndRetainsCause
+--- PASS: TestEntrypointTaskExcludedRestoreContinuesAndRetainsCause (0.00s)
+=== NAME  
+=== RUN   TestEntrypointTaskExcludedDurableLoadCauseAndReadOnlyTarget
+--- PASS: TestEntrypointTaskExcludedDurableLoadCauseAndReadOnlyTarget (0.00s)
+=== NAME  
+=== RUN   TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows
+=== RUN   TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/import
+--- PASS: TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/import (0.00s)
+=== NAME  TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows
+=== RUN   TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/readback
+--- PASS: TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/readback (0.00s)
+=== NAME  TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows
+=== RUN   TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/foreign-drift
+--- PASS: TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/foreign-drift (0.00s)
+=== NAME  TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows
+=== RUN   TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/compensation-fail
+--- PASS: TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows/compensation-fail (0.00s)
+=== NAME  TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows
+--- PASS: TestEntrypointTaskExcludedFinalFailureCompensatesKnownRows (0.00s)
+=== NAME  
+=== RUN   TestEntrypointTaskExcludedCreatorContextCancellation
+=== RUN   TestEntrypointTaskExcludedCreatorContextCancellation/callback
+--- PASS: TestEntrypointTaskExcludedCreatorContextCancellation/callback (0.00s)
+=== NAME  TestEntrypointTaskExcludedCreatorContextCancellation
+=== RUN   TestEntrypointTaskExcludedCreatorContextCancellation/post-readback
+--- PASS: TestEntrypointTaskExcludedCreatorContextCancellation/post-readback (0.00s)
+=== NAME  TestEntrypointTaskExcludedCreatorContextCancellation
+=== RUN   TestEntrypointTaskExcludedCreatorContextCancellation/between-imports
+--- PASS: TestEntrypointTaskExcludedCreatorContextCancellation/between-imports (0.00s)
+=== NAME  TestEntrypointTaskExcludedCreatorContextCancellation
+=== RUN   TestEntrypointTaskExcludedCreatorContextCancellation/final-readback
+--- PASS: TestEntrypointTaskExcludedCreatorContextCancellation/final-readback (0.00s)
+=== NAME  TestEntrypointTaskExcludedCreatorContextCancellation
+--- PASS: TestEntrypointTaskExcludedCreatorContextCancellation (0.00s)
+=== NAME  
+=== RUN   TestEnumerateAllMcphubTasks_ParsesMixedOwners
+--- PASS: TestEnumerateAllMcphubTasks_ParsesMixedOwners (0.00s)
+=== NAME  
+=== RUN   TestEnumerateAllMcphubTasks_FiltersByMcphubPrefix
+--- PASS: TestEnumerateAllMcphubTasks_FiltersByMcphubPrefix (0.00s)
+=== NAME  
+=== RUN   TestEnumerateAllMcphubTasks_EmptyTaskStore
+=== RUN   TestEnumerateAllMcphubTasks_EmptyTaskStore/empty_body
+--- PASS: TestEnumerateAllMcphubTasks_EmptyTaskStore/empty_body (0.00s)
+=== NAME  TestEnumerateAllMcphubTasks_EmptyTaskStore
+=== RUN   TestEnumerateAllMcphubTasks_EmptyTaskStore/whitespace_only
+--- PASS: TestEnumerateAllMcphubTasks_EmptyTaskStore/whitespace_only (0.00s)
+=== NAME  TestEnumerateAllMcphubTasks_EmptyTaskStore
+=== RUN   TestEnumerateAllMcphubTasks_EmptyTaskStore/non-mcp_tasks_only
+--- PASS: TestEnumerateAllMcphubTasks_EmptyTaskStore/non-mcp_tasks_only (0.00s)
+=== NAME  TestEnumerateAllMcphubTasks_EmptyTaskStore
+--- PASS: TestEnumerateAllMcphubTasks_EmptyTaskStore (0.00s)
+=== NAME  
+=== RUN   TestEnumerateAllMcphubTasks_MalformedXML
+--- PASS: TestEnumerateAllMcphubTasks_MalformedXML (0.00s)
+=== NAME  
+=== RUN   TestEnumerateAllMcphubTasks_ExtractsOwner
+--- PASS: TestEnumerateAllMcphubTasks_ExtractsOwner (0.00s)
+=== NAME  
+=== RUN   TestEnumerateAllMcphubTasks_NoPanicOnNilInput
+--- PASS: TestEnumerateAllMcphubTasks_NoPanicOnNilInput (0.00s)
+=== NAME  
+=== RUN   TestEnumerateAllMcphubTasks_HandlesDOMAINPrefix
+--- PASS: TestEnumerateAllMcphubTasks_HandlesDOMAINPrefix (0.00s)
+=== NAME  
+=== RUN   TestSplitConcatenatedTaskXML
+=== RUN   TestSplitConcatenatedTaskXML/empty
+--- PASS: TestSplitConcatenatedTaskXML/empty (0.00s)
+=== NAME  TestSplitConcatenatedTaskXML
+=== RUN   TestSplitConcatenatedTaskXML/single_doc
+--- PASS: TestSplitConcatenatedTaskXML/single_doc (0.00s)
+=== NAME  TestSplitConcatenatedTaskXML
+=== RUN   TestSplitConcatenatedTaskXML/two_docs_back-to-back
+--- PASS: TestSplitConcatenatedTaskXML/two_docs_back-to-back (0.00s)
+=== NAME  TestSplitConcatenatedTaskXML
+=== RUN   TestSplitConcatenatedTaskXML/two_docs_with_extra_whitespace
+--- PASS: TestSplitConcatenatedTaskXML/two_docs_with_extra_whitespace (0.00s)
+=== NAME  TestSplitConcatenatedTaskXML
+--- PASS: TestSplitConcatenatedTaskXML (0.00s)
+=== NAME  
+=== RUN   TestParseTasksAtomicAcceptsAttributedWrapper
+--- PASS: TestParseTasksAtomicAcceptsAttributedWrapper (0.00s)
+=== NAME  
+=== RUN   TestEnumerateAllMcphubTasks_BypassesSameUserFilter
+--- PASS: TestEnumerateAllMcphubTasks_BypassesSameUserFilter (0.00s)
+=== NAME  
+=== RUN   TestEnumerateAllMcphubTasks_ErrorIsTyped
+--- PASS: TestEnumerateAllMcphubTasks_ErrorIsTyped (0.00s)
+=== NAME  
+=== RUN   TestSchedulerCOMTargetLifecycle
+    scheduler_com_target_windows_test.go:22: set MCPHUB_TARGET_SCHEDULER_QA=1 to run the target Scheduler COM smoke
+--- SKIP: TestSchedulerCOMTargetLifecycle (0.00s)
+=== NAME  
+=== RUN   TestSchedulerCOMTypedOutcomesIgnoreHostileLocalizedText
+--- PASS: TestSchedulerCOMTypedOutcomesIgnoreHostileLocalizedText (0.00s)
+=== NAME  
+=== RUN   TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable
+=== RUN   TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable/permission_denied
+--- PASS: TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable/permission_denied (0.00s)
+=== NAME  TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable
+=== RUN   TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable/task_corrupt
+--- PASS: TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable/task_corrupt (0.00s)
+=== NAME  TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable
+=== RUN   TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable/scheduler_unavailable
+--- PASS: TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable/scheduler_unavailable (0.00s)
+=== NAME  TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable
+--- PASS: TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable (0.00s)
+=== NAME  
+=== RUN   TestTaskStatusFromCOMUsesNumericStateOnly
+--- PASS: TestTaskStatusFromCOMUsesNumericStateOnly (0.00s)
+=== NAME  
+=== RUN   TestSchedulerCOMScriptSerializesNegativeHRESULT
+--- PASS: TestSchedulerCOMScriptSerializesNegativeHRESULT (0.40s)
+=== NAME  
+=== RUN   TestSchedulerCOMScriptUTF8ConsoleRoundTripsUnicodeTaskJSON
+--- PASS: TestSchedulerCOMScriptUTF8ConsoleRoundTripsUnicodeTaskJSON (0.35s)
+=== NAME  
+=== RUN   TestBuildLivenessXML_Contract
+--- PASS: TestBuildLivenessXML_Contract (0.00s)
+=== NAME  
+=== RUN   TestBuildLivenessXML_SeparatesEscapedPrincipalSIDAndLogonAccount
+--- PASS: TestBuildLivenessXML_SeparatesEscapedPrincipalSIDAndLogonAccount (0.00s)
+=== NAME  
+=== RUN   TestWindowsLegacyEntrypointPathSelectsExactRetiredSibling
+--- PASS: TestWindowsLegacyEntrypointPathSelectsExactRetiredSibling (0.00s)
+=== NAME  
+=== RUN   TestNew_WithoutEnvReturnsPlatformImpl
+--- PASS: TestNew_WithoutEnvReturnsPlatformImpl (0.00s)
+=== NAME  
+=== RUN   TestNew_WithE2EEnvReturnsNoop
+warning: MCPHUB_E2E_SCHEDULER=none — scheduler returns empty/noop responses. This flag is for E2E tests only; never set it in production.
+--- PASS: TestNew_WithE2EEnvReturnsNoop (0.00s)
+=== NAME  
+=== RUN   TestNoopScheduler_StatusReturnsNotFound
+--- PASS: TestNoopScheduler_StatusReturnsNotFound (0.00s)
+=== NAME  
+=== RUN   TestNoopScheduler_MutationsAreRejected
+--- PASS: TestNoopScheduler_MutationsAreRejected (0.00s)
+=== NAME  
+=== RUN   TestSchedulerRunOwnedAdmissionAndPositiveReply
+--- PASS: TestSchedulerRunOwnedAdmissionAndPositiveReply (0.00s)
+=== NAME  
+=== RUN   TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/matching
+--- PASS: TestSchedulerCOMGuardedRunDefinition/matching (0.47s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/omitted-enabled-defaults-true
+--- PASS: TestSchedulerCOMGuardedRunDefinition/omitted-enabled-defaults-true (0.50s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/numeric-true
+--- PASS: TestSchedulerCOMGuardedRunDefinition/numeric-true (0.47s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/xml-disabled
+--- PASS: TestSchedulerCOMGuardedRunDefinition/xml-disabled (0.46s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/numeric-false
+--- PASS: TestSchedulerCOMGuardedRunDefinition/numeric-false (0.45s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/empty-enabled
+--- PASS: TestSchedulerCOMGuardedRunDefinition/empty-enabled (0.46s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/malformed-enabled
+--- PASS: TestSchedulerCOMGuardedRunDefinition/malformed-enabled (0.43s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/duplicate-enabled
+--- PASS: TestSchedulerCOMGuardedRunDefinition/duplicate-enabled (0.44s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/nested-enabled
+--- PASS: TestSchedulerCOMGuardedRunDefinition/nested-enabled (0.45s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/foreign-enabled-namespace
+--- PASS: TestSchedulerCOMGuardedRunDefinition/foreign-enabled-namespace (0.43s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/native-disabled
+--- PASS: TestSchedulerCOMGuardedRunDefinition/native-disabled (0.44s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/creator-shape
+--- PASS: TestSchedulerCOMGuardedRunDefinition/creator-shape (0.45s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/strict-gui
+--- PASS: TestSchedulerCOMGuardedRunDefinition/strict-gui (0.48s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/foreign-target
+--- PASS: TestSchedulerCOMGuardedRunDefinition/foreign-target (0.44s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/wrong-native-owner
+--- PASS: TestSchedulerCOMGuardedRunDefinition/wrong-native-owner (0.45s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/wrong-xml-owner
+--- PASS: TestSchedulerCOMGuardedRunDefinition/wrong-xml-owner (0.45s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/wrong-uri
+--- PASS: TestSchedulerCOMGuardedRunDefinition/wrong-uri (0.44s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/wrong-role
+--- PASS: TestSchedulerCOMGuardedRunDefinition/wrong-role (0.44s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/extra-argument
+--- PASS: TestSchedulerCOMGuardedRunDefinition/extra-argument (0.44s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/multi-action
+--- PASS: TestSchedulerCOMGuardedRunDefinition/multi-action (0.42s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/malformed
+--- PASS: TestSchedulerCOMGuardedRunDefinition/malformed (0.42s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/missing-expectation
+--- PASS: TestSchedulerCOMGuardedRunDefinition/missing-expectation (0.41s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/wrong-expected-role
+--- PASS: TestSchedulerCOMGuardedRunDefinition/wrong-expected-role (0.38s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/empty-expected-target
+--- PASS: TestSchedulerCOMGuardedRunDefinition/empty-expected-target (0.42s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/disabled
+--- PASS: TestSchedulerCOMGuardedRunDefinition/disabled (0.48s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+=== RUN   TestSchedulerCOMGuardedRunDefinition/definition-drift
+--- PASS: TestSchedulerCOMGuardedRunDefinition/definition-drift (0.62s)
+=== NAME  TestSchedulerCOMGuardedRunDefinition
+--- PASS: TestSchedulerCOMGuardedRunDefinition (11.73s)
+=== NAME  
+=== RUN   TestBuildCreateXML_Logon
+--- PASS: TestBuildCreateXML_Logon (0.00s)
+=== NAME  
+=== RUN   TestBuildCreateXML_Weekly
+--- PASS: TestBuildCreateXML_Weekly (0.00s)
+=== NAME  
+=== RUN   TestBuildCreateXML_QuotesArgsWithSpaces
+--- PASS: TestBuildCreateXML_QuotesArgsWithSpaces (0.00s)
+=== NAME  
+=== RUN   TestBuildCreateXML_HandlesInternalQuotes
+--- PASS: TestBuildCreateXML_HandlesInternalQuotes (0.00s)
+=== NAME  
+=== RUN   TestBuildCreateXML_HandlesTrailingBackslash
+--- PASS: TestBuildCreateXML_HandlesTrailingBackslash (0.00s)
+=== NAME  
+=== RUN   TestSameWindowsUser
+=== RUN   TestSameWindowsUser/exact
+--- PASS: TestSameWindowsUser/exact (0.00s)
+=== NAME  TestSameWindowsUser
+=== RUN   TestSameWindowsUser/domain_prefixed
+--- PASS: TestSameWindowsUser/domain_prefixed (0.00s)
+=== NAME  TestSameWindowsUser
+=== RUN   TestSameWindowsUser/case-insensitive
+--- PASS: TestSameWindowsUser/case-insensitive (0.00s)
+=== NAME  TestSameWindowsUser
+=== RUN   TestSameWindowsUser/different_user
+--- PASS: TestSameWindowsUser/different_user (0.00s)
+=== NAME  TestSameWindowsUser
+=== RUN   TestSameWindowsUser/empty_owner
+--- PASS: TestSameWindowsUser/empty_owner (0.00s)
+=== NAME  TestSameWindowsUser
+--- PASS: TestSameWindowsUser (0.00s)
+=== NAME  
+=== RUN   TestResolveSchtasksPath
+--- PASS: TestResolveSchtasksPath (0.00s)
+=== NAME  
+=== RUN   TestResolveSchtasksPathFallbackAndMissing
+--- PASS: TestResolveSchtasksPathFallbackAndMissing (0.00s)
+=== NAME  
+=== RUN   TestPrepareTaskXMLForImportEncodesUnicodeUTF8AsUTF16LEBOM
+--- PASS: TestPrepareTaskXMLForImportEncodesUnicodeUTF8AsUTF16LEBOM (0.00s)
+=== NAME  
+=== RUN   TestPrepareTaskXMLForImportPreservesUTF16LEBOMBytes
+--- PASS: TestPrepareTaskXMLForImportPreservesUTF16LEBOMBytes (0.00s)
+=== NAME  
+=== RUN   TestPrepareTaskXMLForImportRejectsInvalidBytes
+--- PASS: TestPrepareTaskXMLForImportRejectsInvalidBytes (0.00s)
+=== NAME  
+=== CONT  TestEntrypointTaskTxnPreservesRawXMLOutsideCommand
+=== CONT  TestEntrypointTaskTxnRetainFailurePreservesCause
+=== RUN   TestEntrypointTaskTxnRetainFailurePreservesCause/ref-present=false
+=== CONT  TestEntrypointTaskTxnReopenRestoresRetainedXMLSnapshots
+=== CONT  TestEntrypointTaskTxnKeepsExistingRuntimeAndIgnoresOperatorCommand
+=== CONT  TestEntrypointTaskTxnReopenPreservesLoadCause
+=== CONT  TestEntrypointTaskTxnRejectsEmptyRetainedReference
+=== RUN   TestEntrypointTaskTxnRejectsEmptyRetainedReference/bytes=0
+=== CONT  TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation
+=== CONT  TestEntrypointTaskTxnRewriteFailureLeavesCompensationToCoordinator
+=== RUN   TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation/foreign_owner
+--- PASS: TestEntrypointTaskTxnPreservesRawXMLOutsideCommand (0.01s)
+--- PASS: TestEntrypointTaskTxnRewriteFailureLeavesCompensationToCoordinator (0.01s)
+--- PASS: TestEntrypointTaskTxnReopenRestoresRetainedXMLSnapshots (0.01s)
+--- PASS: TestEntrypointTaskTxnKeepsExistingRuntimeAndIgnoresOperatorCommand (0.01s)
+--- PASS: TestEntrypointTaskTxnRejectsEmptyRetainedReference/bytes=0 (0.01s)
+=== NAME  TestEntrypointTaskTxnRejectsEmptyRetainedReference
+=== RUN   TestEntrypointTaskTxnRejectsEmptyRetainedReference/bytes=2
+--- PASS: TestEntrypointTaskTxnReopenPreservesLoadCause (0.01s)
+--- PASS: TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation/foreign_owner (0.01s)
+=== NAME  TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation
+=== RUN   TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation/multiple_actions
+--- PASS: TestEntrypointTaskTxnRetainFailurePreservesCause/ref-present=false (0.01s)
+=== NAME  TestEntrypointTaskTxnRetainFailurePreservesCause
+=== RUN   TestEntrypointTaskTxnRetainFailurePreservesCause/ref-present=true
+--- PASS: TestEntrypointTaskTxnRejectsEmptyRetainedReference/bytes=2 (0.00s)
+=== NAME  TestEntrypointTaskTxnRejectsEmptyRetainedReference
+--- PASS: TestEntrypointTaskTxnRejectsEmptyRetainedReference (0.01s)
+--- PASS: TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation/multiple_actions (0.00s)
+=== NAME  TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation
+--- PASS: TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation (0.01s)
+--- PASS: TestEntrypointTaskTxnRetainFailurePreservesCause/ref-present=true (0.00s)
+=== NAME  TestEntrypointTaskTxnRetainFailurePreservesCause
+--- PASS: TestEntrypointTaskTxnRetainFailurePreservesCause (0.01s)
+PASS

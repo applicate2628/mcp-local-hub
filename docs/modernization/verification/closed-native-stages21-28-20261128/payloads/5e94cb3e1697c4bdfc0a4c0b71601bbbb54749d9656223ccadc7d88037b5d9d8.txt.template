@@ -1,0 +1,64 @@
+{
+    "schema":  "publication-original-root-data-audit-v1",
+    "status":  "PASS",
+    "physical_complete":  true,
+    "scope":  "cache-acceptance-stage-20261128-v27",
+    "config_sha256":  "d5f5c36b73655ff74616758937bb7ed739b2d2531e37cd284299acd2aed5e7e1",
+    "receipt_sha256":  "e73c107d696ddcc645f1b00854de858b1eace6e59551d14f2df1b6f98f831259",
+    "root_sha256":  "d835235c1fdf3dd1b0afbb0bbda90ea1d634593b7f6439ebf6f6f2ead8d60ebf",
+    "outer_sha256":  "b35fa0543dfd08e730f80de78af18df9735e125a8c056cb088ff9e40a1a07d20",
+    "commands_verified":  3,
+    "captures_verified":  6,
+    "results":  [
+                    {
+                        "name":  "head.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rev-parse",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.03514990000985563,
+                        "exit_code":  0,
+                        "stdout_sha256":  "fe69bf89766a772b8e2c0910d80842e23bd30ae77fd518c0ffa9240c0f12083d",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8\n"
+                    },
+                    {
+                        "name":  "build-timing-only-namespace-owner.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe",
+                                     "build",
+                                     "-p=1",
+                                     "-mod=readonly",
+                                     "-trimpath=false",
+                                     "-ldflags=-H=windowsgui",
+                                     "-overlay",
+                                     "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-admission-diagnostic-driver-v1\\namespace-timing-overlay.json",
+                                     "-o",
+                                     "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\namespace-admission-diagnostic-build-v1\\namespace-timing-owner.exe",
+                                     "./tools/test-recovery-namespace"
+                                 ],
+                        "seconds":  17.26094629999716,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "safe-source-still-clean.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "status",
+                                     "--porcelain=v1",
+                                     "--untracked-files=all"
+                                 ],
+                        "seconds":  0.08234259998425841,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    }
+                ],
+    "tests_executed":  false,
+    "reviewed_utc":  "2026-11-28T16:40:20.2354689Z"
+}

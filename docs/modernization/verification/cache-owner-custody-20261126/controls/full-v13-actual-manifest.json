@@ -1,0 +1,146 @@
+{
+  "schema": "fresh-full-runtime-v13-candidate-v1",
+  "status": "ROOT_REVIEWED_READY",
+  "remote_helper_root": "<TASK>\\final-gates-v13-root",
+  "repository": "<TASK>\\native-consumer-source-v3",
+  "full_run": "<TASK>\\runs\\literal-final-v10",
+  "source_commit": "aca81a1743ccfbf3e10902769a9b071eb911919e",
+  "guard": {
+    "path": "<OWNER_V3>\\guard-custody.py",
+    "sha256": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2"
+  },
+  "guard_admission": {
+    "path": "<OWNER_V3>\\native-owner-qualification\\root-receiving.json",
+    "sha256": "87fe6b959cc726b6116080ef0eca863d8d6f415f362123d8dbe65c9765da3747"
+  },
+  "source_admission": {
+    "base": {
+      "root_path": "<TASK>\\runs\\native-consumer-source-admission-v3\\root-receiving.json",
+      "root_sha256": "0215f8f67a4dcca2f44f4832e3c3012c8192786f9508f027eccaa2e703cfac11",
+      "original_path": "<TASK>\\runs\\native-consumer-source-admission-v3\\receipt.json",
+      "original_sha256": "eb014bc75f5cebec1c5f8fc1acb0faae319430690468ae7fe59b8385bbd7c526",
+      "parent_path": "<TASK>\\native-consumer-source-v3-launch.json",
+      "parent_sha256": "524f95d8a5c2e8ee3cf1ca651e5ba674eb641679fb79d6582a71693499b85661",
+      "snapshot_path": "<TASK>\\runs\\native-consumer-source-admission-v3\\source-after.json",
+      "snapshot_sha256": "671d60c8f1e96de28eb616b9e7aeacccae50d00359ab27a59418bea61648ee16",
+      "issuer_path": "<TASK>\\native-consumer-source-inputs-v3\\issue_native_consumer_source_v3.py",
+      "issuer_sha256": "e0a970255ad947c829ab67c5e3cb3c48ec7d857cc18363fe73bc8d83710776d2"
+    },
+    "update": {
+      "root_path": "<TASK>\\runs\\test-source-update-v1\\root-receiving.json",
+      "root_sha256": "8b04a4902ca7d08e6d6acd27ec0a765a0ea859ea2d3ffb3a90545f0fa8bc5998",
+      "original_path": "<TASK>\\runs\\test-source-update-v1\\receipt.json",
+      "original_sha256": "f73b8435d423cae532cc4d0d38a7b83be2bbda1464a30efa47c62e49164a3b08",
+      "parent_path": "<TASK>\\test-source-update-v1-launch.json",
+      "parent_sha256": "0b3cdb2d90f19f7972ad3f40af0cd54a34c2ab257ddccae9aa22b1f76829520e",
+      "before_path": "<TASK>\\runs\\test-source-update-v1\\source-before.json",
+      "before_sha256": "671d60c8f1e96de28eb616b9e7aeacccae50d00359ab27a59418bea61648ee16",
+      "snapshot_path": "<TASK>\\runs\\test-source-update-v1\\source-after.json",
+      "snapshot_sha256": "afe857956e9596133a6e4a1dfbea31f81112c8277c41bf3a1524157bee9e0dc1",
+      "issuer_path": "<TASK>\\test-source-update-inputs-v1\\issue_test_source_update_v1.py",
+      "issuer_sha256": "8adf48ae2b5672bc194859b43c0d52dde5cb798e127701283d63df00a028bee9",
+      "delta_map_path": "<TASK>\\test-source-update-inputs-v1\\delta-map.json",
+      "delta_map_sha256": "b0fb77499a3e2f5dd20a543047d65b6e0f96afc40101ec7c0ccbe143a8312234",
+      "patch_path": "<TASK>\\test-source-update-inputs-v1\\test-source.patch",
+      "patch_sha256": "f361229184be36c3d7b7e1be106036c2a03216d4bf8506f45795d188be4a98cf"
+    }
+  },
+  "retained_admission": {
+    "path": "<TASK>\\final-gates-v13-root\\retained-input-access.json",
+    "sha256": "6a28ce3b3f245044a4dcc0e6e518139773eae59e1001e99298b84c7e9d231b18"
+  },
+  "root_adapter_source": {
+    "path": "<OWNER_V3>\\literal_go_exec_adapter_ready_v1.py",
+    "sha256": "e9ad8ea12d6e87833c8d5f347602a352e0a1733e8bf8ba83a9d6a3b36828403f"
+  },
+  "retained_helper_manifest": {
+    "path": "<TASK>\\final-gates-v8\\actual-manifest.json",
+    "sha256": "622d9d26fb0c20e49bd7ca23c03d5df3f056fdb592504b432748c159e96dccba"
+  },
+  "original_manifest_sha256": "1c40f9d93ec326857d3d02548becc3582bd2c46a1b7a5af9c44b9d9fc0945485",
+  "bootstrap_contract": {
+    "consumer_run": "<TASK>\\runs\\literal-final-v10",
+    "module_cache": "<TASK>\\runs\\literal-final-v10\\seed-modules",
+    "build_cache": "<TASK>\\runs\\literal-final-v10\\isolated-build-cache",
+    "module_proxy": "<TASK>\\imports\\go-proxy",
+    "created_exclusively": true,
+    "empty_at_creation": true,
+    "predecessor_cache_authority": false
+  },
+  "files": {
+    "receive_fresh_full_inputs_v1.py": {
+      "sha256": "d1f22787c5241a9972289e707e620fdb06729144c87f784062e79a6d3ea8890a",
+      "bytes": 48578
+    },
+    "test-staging-supplement-v13.json": {
+      "sha256": "5945ef5898033e27cd5b073021b86ee712529630144d3d69e65f75b90f194774",
+      "bytes": 2039
+    },
+    "private_run_scope.py": {
+      "sha256": "e1796e716f457af234dfc1061c917ce7d177852da537210d76d66bbf8936949a",
+      "bytes": 12572
+    },
+    "qualified_windows_products_consumer_v1.py": {
+      "sha256": "a19fde2ae8ee6a79f8afff37fd669707bd4ba1258edd779bfb1fb9d201d9db69",
+      "bytes": 126487
+    },
+    "run_partitioned_go_gate_full_v1.py": {
+      "sha256": "83cb6329605039e6cee517d9a530881030f6d614ce568e03c96dad2655ea82bd",
+      "bytes": 35949
+    },
+    "literal_migration_receiving_seed_v1.py": {
+      "sha256": "af4577ab669b42710f59b8323c9933aa8926a38e929e4583f5179322fdb2438e",
+      "bytes": 50650
+    },
+    "literal_go_exec_adapter_ready_v1.py": {
+      "sha256": "83b0f13017a65d4a2753d10b26c04c9e0b44f3d301ba638b5c8f4fabd0d84dba",
+      "bytes": 58244
+    },
+    "run_literal_go_gate_ready_v1.py": {
+      "sha256": "43822b4ac69464505819f1c5719b844b1b1c0f0a2a702ad3accff5137aa6a450",
+      "bytes": 50292
+    }
+  },
+  "headless_bytes_unchanged": 92,
+  "literal_commands_and_timeouts_unchanged": true,
+  "cache_route": "one create-exclusive empty bootstrap with original identity receipt; exact frozen-plan participants only",
+  "prior_source_or_cache_read_authority": false,
+  "remote_operations_executed": true,
+  "product_source_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+  "reviewed_changes_from_runtime10": [
+    "Actual root-owned Invocation retained independently of the Go adapter client",
+    "Guarded bounded metadata command with EOF drain and same original owner",
+    "Register actual outer Run before first command and retain through finalization errors",
+    "Separate TestSource/Product commits and exact 11-file compatibility receiver",
+    "Fresh full-run source/caches and separately created d10/s10 evidence parents",
+    "Receive unchanged old artifacts only through explicit new grant and closed-v8 control proof",
+    "Bind actual private scope helper to the same source-v3 and run parent before effects",
+    "Receive original closed-v9 preparation controls without reusing its caches or d9/s9"
+  ],
+  "native_composition_scope": "Full actual module/owner import, actual scope path binding, source/retained DATA receiving and two synthetic original-custody failure schedules; full commands not executed by this probe.",
+  "full_regression_passed": false,
+  "composition_qualification": {
+    "root": {
+      "path": "<TASK>\\composition-qualification-v2\\native-composition-probe\\root-receiving.json",
+      "sha256": "bca138548ff08ad9fa15736ef5fb71fc25c45084d3a12262aa2dae7a1219d856"
+    },
+    "cases": {
+      "path": "<TASK>\\composition-qualification-v2\\native-composition-probe\\cases\\receipt.json",
+      "sha256": "e18d3acec9fd75d2d7b6d8eb104ab6d920e12a2fb623618df4dd4b1e4dc9fa1d"
+    },
+    "runner": {
+      "path": "<TASK>\\composition-qualification-v2\\qualify_runtime_custody.py",
+      "sha256": "a6d5ec713719a1cc7a069072d51f77241a82c28b21427cbbc219567a5ce4830e"
+    }
+  },
+  "closed_preparation_attempt": {
+    "parent": {
+      "path": "<TASK>\\literal-final-v9-launch.json",
+      "sha256": "f19530c79d1c396a2631895b3b3fa90ef5eb992e4ab20a0ba6f6125eff86a622"
+    },
+    "receipt": {
+      "path": "<TASK>\\runs\\literal-final-v9\\receipt.json",
+      "sha256": "e61b7c3873cf395e3592182134e69d0235f4a7eaf8471ef14fc7409075b29ee4"
+    }
+  }
+}

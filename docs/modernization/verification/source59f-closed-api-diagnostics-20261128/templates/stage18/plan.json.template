@@ -1,0 +1,83 @@
+{
+  "run": "runs/cache-acceptance-stage-20261128-v18",
+  "source": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-acceptance-20261128-v2",
+  "head": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+  "environment": {
+    "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_NO_REPLACE_OBJECTS": "1",
+    "GIT_NO_LAZY_FETCH": "1",
+    "GOOS": "windows",
+    "GOARCH": "amd64",
+    "CGO_ENABLED": "0",
+    "GOTOOLCHAIN": "local"
+  },
+  "observed_files": [
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-copy-probe-v1\\main_windows.go",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\closed-api-receiving-v1\\root-api-receiving-v3.json"
+  ],
+  "steps": [
+    {
+      "name": "raw-source04e-commit",
+      "argv": [
+        "git",
+        "cat-file",
+        "commit",
+        "04e5b4eadd6407cbff4e04ba453546d278314bd7"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "raw-source74e-commit",
+      "argv": [
+        "git",
+        "cat-file",
+        "commit",
+        "74e7563db244ede5984834233ce8d59072e92c0a"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "raw-source59f-commit",
+      "argv": [
+        "git",
+        "cat-file",
+        "commit",
+        "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "build-closed-api-copy-data-probe",
+      "argv": [
+        "go",
+        "build",
+        "-o",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-copy-probe-v1\\namespace-copy-probe.exe",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-copy-probe-v1\\main_windows.go"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "compiled-data-probe-build-info",
+      "argv": [
+        "go",
+        "version",
+        "-m",
+        "-json",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-copy-probe-v1\\namespace-copy-probe.exe"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "isolated-source-still-clean",
+      "argv": [
+        "git",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all"
+      ],
+      "timeout": 30
+    }
+  ]
+}

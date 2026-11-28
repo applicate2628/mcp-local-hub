@@ -1,0 +1,138 @@
+//go:build windows && amd64
+
+package canonicalcaseowner
+
+import (
+	"bytes"
+	"errors"
+	"io"
+	"os"
+	"sync"
+	"sync/atomic"
+)
+
+// capture owns both original pipe files. Its only worker closes the reader.
+// The debug thread closes the parent's writer after Cmd.Start returns.
+// No caller closes a reader while its worker may still access it.
+type capture struct {
+	reader, writer                          *os.File
+	limit                                   int64
+	done                                    chan struct{}
+	overflow                                atomic.Bool
+	mu                                      sync.Mutex
+	data                                    []byte
+	total                                   uint64
+	eof                                     bool
+	readErr, readerCloseErr, writerCloseErr error
+	writerCloseAttempted                    bool
+	writerClosed                            bool
+	started                                 bool
+}
+
+type CaptureResult struct {
+	WorkerReturned       bool
+	EOF                  bool
+	WriterCloseAttempted bool
+	WriterClosed         bool
+	ReaderClosed         bool
+	Bytes                uint64
+	Overflow             bool
+	ReadError            string
+	ReaderCloseError     string
+	WriterCloseError     string
+}
+
+func newCapture(limit int64) (*capture, error) {
+	c := &capture{limit: limit, done: make(chan struct{})}
+	var err error
+	c.reader, c.writer, err = os.Pipe()
+	return c, err
+}
+
+func (c *capture) start() {
+	c.started = true
+	go c.drain()
+}
+
+func (c *capture) drain() {
+	defer close(c.done)
+	var block [32768]byte
+	for {
+		n, err := c.reader.Read(block[:])
+		if n > 0 {
+			c.mu.Lock()
+			c.total += uint64(n)
+			remaining := c.limit - int64(len(c.data))
+			keep := n
+			if int64(keep) > remaining {
+				keep = int(remaining)
+				c.overflow.Store(true)
+			}
+			if keep > 0 {
+				c.data = append(c.data, block[:keep]...)
+			}
+			c.mu.Unlock()
+		}
+		if err != nil {
+			c.mu.Lock()
+			c.eof = errors.Is(err, io.EOF)
+			if !c.eof {
+				c.readErr = err
+			}
+			c.mu.Unlock()
+			break
+		}
+	}
+	c.readerCloseErr = c.reader.Close()
+}
+
+func (c *capture) closeWriter() error {
+	if c == nil || c.writer == nil {
+		return nil
+	}
+	if c.writerCloseAttempted {
+		return c.writerCloseErr
+	}
+	c.writerCloseAttempted = true
+	c.writerCloseErr = c.writer.Close()
+	c.writerClosed = c.writerCloseErr == nil
+	return c.writerCloseErr
+}
+
+func (c *capture) closeBeforeWorker() error {
+	if c == nil {
+		return nil
+	}
+	err := c.closeWriter()
+	if c.reader != nil && !c.started {
+		c.readerCloseErr = c.reader.Close()
+		err = errors.Join(err, c.readerCloseErr)
+	}
+	return err
+}
+
+func (c *capture) closedResult() CaptureResult {
+	r := CaptureResult{WorkerReturned: true, EOF: c.eof,
+		WriterCloseAttempted: c.writerCloseAttempted, WriterClosed: c.writerClosed,
+		ReaderClosed: c.readerCloseErr == nil, Bytes: c.total,
+		Overflow: c.overflow.Load(), ReadError: errorText(c.readErr),
+		ReaderCloseError: errorText(c.readerCloseErr), WriterCloseError: errorText(c.writerCloseErr)}
+	return r
+}
+
+func (c *capture) complete() bool {
+	return c.eof && c.readErr == nil && c.readerCloseErr == nil &&
+		c.writerCloseAttempted && c.writerClosed
+}
+
+// Called only after native completion AND both capture workers returned.
+func (c *capture) completedBytes() []byte {
+	return bytes.Clone(c.data)
+}
+
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}

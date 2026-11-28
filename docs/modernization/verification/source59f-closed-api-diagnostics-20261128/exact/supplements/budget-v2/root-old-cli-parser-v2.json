@@ -1,0 +1,12 @@
+{
+    "schema":  "old-cli-data-replay-root-v2",
+    "status":  "PASS_EXACT_LEDGER",
+    "manifest_sha256":  "aa72bc02efb434dec5aeef46f630b2ec3115cd6fd3367c64a43e4fff4ac6deee",
+    "files_verified":  7,
+    "ledger_sha256":  "6a687a7e45efcf069e46e0bbafd36edcf09247e8f09e49467c59278925c34ea8",
+    "bytes":  456870,
+    "summary_sha256":  "5d43ab87593f292636ff377996d17b2e5e7f3bb73d363a4484a7da8159511acb",
+    "native_or_test_commands":  false,
+    "original_data_v1":  "FAIL_UnicodeDecodeError_preserved",
+    "historical_qualification":  "FAIL/CLOSED"
+}

@@ -1,0 +1,622 @@
+"""Local custody fault schedules. Fake Windows owner; real OS pipes/threads and child consumers."""
+import sys
+sys.dont_write_bytecode = True
+import ast, dataclasses, hashlib, importlib.util, io, json, os, subprocess, threading, time, types, uuid
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+OUT = ROOT / ("local-evidence-" + uuid.uuid4().hex[:12])
+NATIVE = False
+ALL_FIXTURES = []
+GO_PATH = None
+
+def digest(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+def write_json(path, value):
+    with Path(path).open("x", encoding="utf-8", newline="\n") as out:
+        json.dump(value, out, indent=2)
+        out.write("\n")
+
+def module(path, name):
+    spec = importlib.util.spec_from_file_location(name, path)
+    obj = importlib.util.module_from_spec(spec)
+    sys.modules[name] = obj
+    spec.loader.exec_module(obj)
+    return obj
+
+adapter = module(ROOT / "literal_go_exec_adapter_ready_v1.py", "local_owner_candidate")
+adapter_tree = ast.parse((ROOT / "literal_go_exec_adapter_ready_v1.py").read_bytes())
+runtime_node = next(n for n in adapter_tree.body if isinstance(n, ast.FunctionDef) and n.name == "load_owner_runtime")
+invocation_node = next(n for n in runtime_node.body if isinstance(n, ast.ClassDef) and n.name == "RootInvocation")
+
+@dataclasses.dataclass
+class Closure:
+    direct_exit_code: int = 0
+    direct_reaped: bool = True
+    active_zero: bool = True
+    job_terminated: bool = False
+    handles_closed: bool = True
+    issues: tuple = ()
+
+class CoreRun:
+    def __init__(self, root, env):
+        self.root, self.env = root, env
+        self.receipt = {"commands": [], "native_custody_settled": True, "status": "running"}
+        self.final_receipt_published = False
+        self.save()
+    def save(self):
+        (self.root / "receipt.json").write_text(json.dumps(self.receipt, indent=2) + "\n")
+
+# Use the actual retained-owner receiver, not a stand-in implementation.
+core_tree = ast.parse((ROOT / "qualified_windows_products_consumer_v1.py").read_bytes())
+core_class = next(node for node in core_tree.body if isinstance(node, ast.ClassDef) and node.name == "Run")
+retention = next(node for node in core_class.body if isinstance(node, ast.FunctionDef) and node.name == "retain_failed_full_workers")
+retention_ns = {"sys": sys, "time": time, "sha": digest, "new_json": write_json}
+exec(compile(ast.Module(body=[retention], type_ignores=[]), "exact-core-retention", "exec"), retention_ns)
+def observe_retention(self, failure_published):
+    retention_ns["retain_failed_full_workers"](self, failure_published)
+    self.fixture_physical_receiving_completed = True
+
+CoreRun.retain_failed_full_workers = observe_retention
+
+def guard_fixture(folder, *, payload=b"{}", join_fault=False, hold=False, metadata_passthrough=False):
+    guard = module(ROOT / "guard-custody.py", "fixture_guard_" + uuid.uuid4().hex)
+    release, held = threading.Event(), threading.Event()
+    threads, producers, joins, hashes = [], [], [], []
+    first_fault = [join_fault]
+    real_drain = guard.drain
+
+    class PipeOwner:
+        def __init__(self):
+            self.pid = 0
+            self.fds = {}
+            for side, data in (("stdout", payload), ("stderr", b"")):
+                rd, wr = os.pipe()
+                self.fds[side] = rd
+                def produce(fd=wr, value=data):
+                    try:
+                        offset = 0
+                        while offset < len(value):
+                            offset += os.write(fd, value[offset:])
+                    finally:
+                        os.close(fd)
+                producer = threading.Thread(target=produce, name="fixture-producer-" + side)
+                producers.append(producer)
+                producer.start()
+        @classmethod
+        def launch(cls, **kwargs):
+            kwargs["before_resume"]()
+            return cls()
+        def take_stdout_fd(self): return self.fds.pop("stdout")
+        def take_stderr_fd(self): return self.fds.pop("stderr")
+        def wait(self, deadline):
+            for producer in producers:
+                producer.join(max(0, deadline - time.monotonic()))
+                assert not producer.is_alive()
+            return 0
+        def settle(self, deadline, terminate=False):
+            assert not terminate and not self.fds
+            return Closure()
+
+    class ObservedThread(threading.Thread):
+        def join(self, timeout=None):
+            joins.append((self.name, timeout))
+            if first_fault[0] and self.name.endswith("-stdout"):
+                assert not hold or held.wait(2)
+                first_fault[0] = False
+                raise RuntimeError("injected first original metadata join failure")
+            return super().join(timeout)
+
+    def thread_factory(**kwargs):
+        worker = ObservedThread(**kwargs)
+        threads.append(worker)
+        return worker
+
+    def drain(fd, path, state, custody):
+        real_drain(fd, path, state, custody)
+        if hold and path.name.endswith(".stdout.txt"):
+            held.set()
+            release.wait()
+
+    def measured(path):
+        hashes.append(str(path))
+        return digest(path)
+
+    if not NATIVE:
+        guard.load_original_owner = lambda: None
+        guard.OWNER_MODULE = types.SimpleNamespace(WindowsJobOwnerV1=PipeOwner, WindowsJobClosureV1=Closure)
+        guard.hidden_console = lambda: {"attached": True, "visible": False}
+    guard.threading = types.SimpleNamespace(Thread=thread_factory)
+    guard.drain = drain
+    fixture_core = types.SimpleNamespace(Run=CoreRun, REPO=folder, GO=Path(sys.executable), sha=measured)
+    base = guard.make_guarded_run_class(fixture_core)
+    invocation_ns = {"base":base,"time":time,"TOTAL_SECONDS":adapter.TOTAL_SECONDS,"json":json}
+    exec(compile(ast.Module(body=[invocation_node],type_ignores=[]),"exact-root-invocation", "exec"),invocation_ns)
+    class Run(invocation_ns["RootInvocation"]):
+        def command(self, argv, name, **kwargs):
+            if NATIVE and name == "incoming-build-info" and not metadata_passthrough:
+                # Only the tool's bytes are synthetic. The native owner, Job,
+                # process, pipes, workers, timeout, cap and receiver are real.
+                encoded = repr(payload) if len(payload) < 100 else repr(payload[:1]) + "*" + str(len(payload))
+                assert len(payload) < 100 or payload == payload[:1] * len(payload)
+                argv = [sys.executable, "-I", "-S", "-B", "-c",
+                        "import sys; sys.stdout.buffer.write(" + encoded + ")"]
+            return super().command(argv, name, **kwargs)
+    env = dict(os.environ)
+    for name in ("TEMP", "TMP", "TMPDIR", "APPDATA", "LOCALAPPDATA", "USERPROFILE"):
+        target = folder / name.lower()
+        target.mkdir()
+        env[name] = str(target)
+    env.update(PYTHONDONTWRITEBYTECODE="1", GOENV="off", GOWORK="off", GOTELEMETRY="off",
+               GOPROXY="off", GOSUMDB="off", GOTOOLCHAIN="local")
+    run = Run(folder, env, "unused-fixture-validator", time.monotonic(), lambda:False)
+    adapter.core = types.SimpleNamespace(GO=Path(sys.executable), new_json=write_json)
+    fixture = types.SimpleNamespace(guard=guard, run=run, threads=threads, producers=producers,
+        joins=joins, hashes=hashes, held=held, release=release)
+    ALL_FIXTURES.append(fixture)
+    return fixture
+
+def cleanup_fixture(fixture):
+    fixture.release.set()
+    for worker in fixture.threads + fixture.producers:
+        threading.Thread.join(worker, 3)
+        assert not worker.is_alive(), worker.name
+
+def metadata_case(name, **kwargs):
+    folder = OUT / name
+    folder.mkdir()
+    fixture = guard_fixture(folder, **kwargs)
+    error = None
+    try:
+        try:
+            value = adapter.incoming_build_info(fixture.run, Path("incoming.exe"))
+        except BaseException as exc:
+            error = type(exc).__name__ + ": " + str(exc)
+        row = fixture.run.receipt["commands"][0]
+        assert row["work_seconds"] == 5 and row["cleanup_seconds"] == 10
+        assert len(fixture.guard.RETAINED_COMMANDS) == 1
+        assert fixture.guard.RETAINED_COMMANDS[0]["run"] is fixture.run
+        assert all(timeout == 0 for _, timeout in fixture.joins)
+        if kwargs.get("join_fault"):
+            assert error == "RuntimeError: injected first original metadata join failure"
+            assert {name.rsplit("-", 1)[1] for name, _ in fixture.joins} == {"stdout", "stderr"}
+            assert row["quiescence_state"] == "unknown" and not fixture.hashes
+            fixture.run.receipt["status"] = "FAIL"
+            fixture.run.save()
+            fixture.run.final_receipt_published = True
+            frozen = (folder / "receipt.json").read_bytes()
+            assert fixture.run.receive_failed_worker_closure(time.monotonic() + .02)["status"] == "UNKNOWN"
+            fixture.release.set()
+            fixture.run.retain_failed_full_workers(True)
+            assert (folder / "receipt.json").read_bytes() == frozen
+            assert not fixture.hashes and not row["captures_measured"]
+            try:
+                fixture.run.command([sys.executable], "successor", timeout=1)
+            except RuntimeError as exc:
+                assert "new command refused" in str(exc)
+            else:
+                raise AssertionError("failed metadata admitted a successor")
+        elif len(kwargs.get("payload", b"{}")) > adapter.METADATA_CAPTURE_LIMIT:
+            assert error and "ordinary command failed after original native/IO closure" in error
+            assert row["io"]["stdout"]["limit_exceeded"]
+            assert row["io"]["stdout"]["bytes_stored"] == adapter.METADATA_CAPTURE_LIMIT
+            assert row["io"]["stdout"]["bytes_seen"] == len(kwargs["payload"])
+            assert row["io"]["stdout"]["eof"] and row["original_readers_joined"]
+            assert row["quiescence_state"] == "complete" and not row["command_success"]
+            assert fixture.run.receipt["native_custody_settled"] is True
+        else:
+            assert value == {} and error is None and row["command_success"]
+        return {"case": name, "status": "PASS", "error": error,
+                "command_state": row["quiescence_state"], "capture_hash_calls": len(fixture.hashes),
+                "original_workers_attempted": len({name for name, _ in fixture.joins}),
+                "bytes_seen": row["io"]["stdout"]["bytes_seen"], "bytes_stored": row["io"]["stdout"]["bytes_stored"]}
+    finally:
+        cleanup_fixture(fixture)
+
+def make_plan(name):
+    folder = OUT / name
+    folder.mkdir()
+    registry = folder / "invocations-default"
+    registry.mkdir()
+    temporary = folder / "tmp"
+    temporary.mkdir()
+    binary = temporary / "package.test.exe"
+    binary.write_bytes(b"fixture image, never executed")
+    cwd = folder / "package"
+    cwd.mkdir()
+    package = "fixture/package"
+    plan = {"schema": "literal-go-test-plan-v1", "phase": "default", "driver_root": str(folder),
+        "commit": "a" * 40, "source_snapshot_sha256": "b" * 64,
+        "packages": {package: {"directory": str(cwd)}}, "temporary_directory": str(temporary),
+        "invocations": str(registry), "original_issuer": adapter.issuer_plan(registry)}
+    path = folder / "plan-default.json"
+    write_json(path, plan)
+    plan["plan_sha256"] = digest(path)
+    return folder, path, plan, binary, cwd, package
+
+CLIENT = '''import time
+started=time.monotonic_ns()
+import importlib.util,sys,types
+spec=importlib.util.spec_from_file_location("thin_fixture_consumer",sys.argv[1])
+module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+args=types.SimpleNamespace(plan=sys.argv[2],plan_sha256=sys.argv[3],binary=sys.argv[4],
+    test_args=["-test.paniconexit0","-test.v=test2json","-test.count=1","-test.timeout=5m"])
+if len(sys.argv)>5 and sys.argv[5]=="expire":
+    import pathlib
+    clock=module.time
+    marker=pathlib.Path(sys.argv[6])
+    module.time=types.SimpleNamespace(sleep=clock.sleep,
+        monotonic_ns=lambda: clock.monotonic_ns()+(355_000_000_000 if marker.exists() else 0))
+try: code=module.consume(args,started_ns=started)
+except BaseException as error:
+    print(type(error).__name__+": "+str(error),file=sys.stderr);code=1
+raise SystemExit(code)
+'''
+
+def client(path, plan, binary, cwd, out, err, timeout_marker=None):
+    return subprocess.Popen([sys.executable, "-I", "-S", "-B", "-c", CLIENT,
+        str(ROOT / "literal_go_exec_adapter_ready_v1.py"), str(path), plan["plan_sha256"], str(binary),
+        *(["expire",str(timeout_marker)] if timeout_marker is not None else [])],
+        cwd=cwd, stdin=subprocess.DEVNULL, stdout=out, stderr=err)
+
+def request_for(plan, binary, cwd, package):
+    started = time.monotonic_ns()
+    return {"schema": adapter.REQUEST_SCHEMA, "issuer_nonce": plan["original_issuer"]["nonce"],
+        "nonce": uuid.uuid4().hex, "plan": str(Path(plan["driver_root"]) / "plan-default.json"),
+        "plan_sha256": plan["plan_sha256"], "phase": "default", "commit": plan["commit"],
+        "source_snapshot_sha256": plan["source_snapshot_sha256"], "package": package,
+        "binary": str(binary), "binary_sha256": digest(binary),
+        "argv": ["-test.paniconexit0", "-test.v=test2json", "-test.count=1", "-test.timeout=5m"],
+        "cwd": str(cwd), "started_ns": started, "deadline_ns": started + 355_000_000_000,
+        "ambient_present": []}
+
+def safe_replay(name, code):
+    folder, path, plan, binary, cwd, package = make_plan(name)
+    raw = b"\x16=== RUN   TestFixture\n--- " + (b"PASS" if code == 0 else b"FAIL") + b": TestFixture (0.00s)\n"
+    errors = b"original child stderr\n"
+    adapter.load_owner_runtime = lambda: None
+    adapter.core = types.SimpleNamespace(new_json=write_json)
+    def execute(options, retain, cancelled):
+        assert not cancelled()
+        case = folder / "actual-owner"
+        case.mkdir()
+        run = CoreRun(case, {})
+        run.commands_quiescent = lambda: True
+        retain(run)
+        stdout, stderr = case / "suite-owner.stdout.txt", case / "suite-owner.stderr.txt"
+        stdout.write_bytes(raw)
+        stderr.write_bytes(errors)
+        row = {"stdout": str(stdout), "stderr": str(stderr), "captures_measured": True,
+               "stdout_sha256": digest(stdout), "stderr_sha256": digest(stderr)}
+        run.receipt.update(status="PASS" if code == 0 else "FAIL", commands=[row], commands_quiescent=True,
+            request_sha256=options.request_sha256, request_nonce=options.request_nonce,
+            raw_replay={side: {"path": row[side], "sha256": row[side + "_sha256"]} for side in ("stdout", "stderr")},
+            replay_deadline_monotonic_ns=min(options.started_ns+355_000_000_000,time.monotonic_ns()+10_000_000_000))
+        run.save()
+        run.final_receipt_published = True
+        return run, code
+    adapter.execute = execute
+    issuer = adapter.OriginalInvocationIssuer(folder, {"default": plan})
+    proc = None
+    try:
+        issuer.start_phase("default")
+        with (folder / "consumer.stdout").open("xb") as out, (folder / "consumer.stderr").open("xb") as err:
+            proc = client(path, plan, binary, cwd, out, err)
+            assert proc.wait(timeout=10) == code
+        issuer.stop_phase()
+        assert issuer.failure is None and issuer.worker is None
+        assert (folder / "consumer.stdout").read_bytes() == raw
+        assert (folder / "consumer.stderr").read_bytes() == errors
+        record = issuer.records[("default", package)]
+        assert record["ack"]["exit_code"] == code and record["ack"]["replayed_identical"]
+        return {"case": name, "status": "PASS", "child_exit": code,
+                "raw_stdout_identical": True, "raw_stderr_identical": True, "original_issuer_joined": True}
+    finally:
+        if proc is not None and proc.poll() is None:
+            proc.kill(); proc.wait()
+        issuer.stop_phase()
+
+def client_death(timeout=False):
+    name = "client-timeout" if timeout else "client-death"
+    folder, path, plan, binary, cwd, package = make_plan(name)
+    made, finish = threading.Event(), threading.Event()
+    fixtures = []
+    adapter.load_owner_runtime = lambda: None
+    def execute(options, retain, cancelled):
+        case = folder / "actual-owner"
+        case.mkdir()
+        fixture = guard_fixture(case, join_fault=True, hold=True)
+        fixtures.append(fixture)
+        run = fixture.run
+        run.cancelled = cancelled
+        retain(run)
+        try:
+            adapter.incoming_build_info(run, binary)
+        except RuntimeError:
+            pass
+        run.receipt.update(status="FAIL", commands_quiescent=False,
+            request_sha256=options.request_sha256, request_nonce=options.request_nonce)
+        run.save()
+        run.final_receipt_published = True
+        made.set()
+        if timeout:
+            (folder / "expire-client-clock").touch(exist_ok=False)
+        assert finish.wait(5)
+        return run, 1
+    adapter.execute = execute
+    adapter.core = types.SimpleNamespace(new_json=write_json)
+    issuer = adapter.OriginalInvocationIssuer(folder, {"default": plan})
+    proc = None
+    try:
+        issuer.start_phase("default")
+        with (folder / "consumer.stdout").open("xb") as out, (folder / "consumer.stderr").open("xb") as err:
+            proc = client(path, plan, binary, cwd, out, err, folder / "expire-client-clock" if timeout else None)
+            assert made.wait(5)
+            fixture = fixtures[0]
+            original_run = issuer.invocations[0]
+            assert original_run is fixture.run and any(w.is_alive() for w in fixture.threads)
+            frozen = (original_run.root / "receipt.json").read_bytes()
+            if not timeout:
+                proc.kill()
+            exit_code = proc.wait(timeout=3)
+            if timeout:
+                assert exit_code == 1
+                assert adapter.abandoned_slot(adapter.request_slot(plan, package)).exists()
+            assert issuer.invocations[0] is original_run and any(w.is_alive() for w in fixture.threads)
+            finish.set()
+        issuer.stop_phase()
+        assert issuer.failure and len(issuer.invocations) == 1
+        response, _ = adapter.read_channel_json(adapter.response_slot(adapter.request_slot(plan, package)))
+        assert response["replay"] is None and response["original_custody_complete"] is False
+        try:
+            issuer.start_phase("default")
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("UNKNOWN issuer admitted successor")
+        fixture.release.set()
+        issuer.retain_failed_invocations()
+        assert (original_run.root / "receipt.json").read_bytes() == frozen
+        assert not fixture.hashes and not fixture.run.commands_quiescent()
+        return {"case": name, "status": "PASS", "original_client_reaped": True,
+                "same_root_invocation_retained": True, "live_original_worker_survived_client": True,
+                "unknown_response_no_raw": True, "successor_refused": True, "failure_immutable": True,
+                "consumer_clock_expiry_injected":timeout,"real_355_second_latency_measured":False}
+    finally:
+        finish.set()
+        for fixture in fixtures:
+            fixture.release.set()
+        if proc is not None and proc.poll() is None:
+            proc.kill(); proc.wait()
+        issuer.stop_phase()
+        for fixture in fixtures:
+            cleanup_fixture(fixture)
+
+def request_negatives():
+    folder, path, plan, binary, cwd, package = make_plan("request-negatives")
+    accepted = request_for(plan, binary, cwd, package)
+    slot = adapter.request_slot(plan, package)
+    adapter.validate_request(plan, accepted, slot, time.monotonic_ns())
+    rejected = []
+    for key, value in (("issuer_nonce", "0"*32), ("plan_sha256", "0"*64), ("binary_sha256", "0"*64),
+            ("commit", "0"*40), ("source_snapshot_sha256", "0"*64), ("cwd", str(folder)),
+            ("argv", ["-test.run=ignored"]), ("started_ns", time.monotonic_ns()+1_000_000_000),
+            ("deadline_ns", accepted["deadline_ns"]+1)):
+        request = dict(accepted, **{key:value})
+        try:
+            adapter.validate_request(plan, request, slot, time.monotonic_ns())
+        except RuntimeError:
+            rejected.append(key)
+        else:
+            raise AssertionError("unbound request accepted: " + key)
+    adapter.publish_channel_json(slot, accepted)
+    try:
+        adapter.publish_channel_json(slot, accepted)
+    except RuntimeError:
+        rejected.append("duplicate_slot")
+    else:
+        raise AssertionError("duplicate request published")
+    return {"case": "request-negatives", "status": "PASS", "rejected": rejected, "native_commands": 0}
+
+def early_start_failure():
+    folder, path, plan, binary, cwd, package = make_plan("start-failure")
+    adapter.load_owner_runtime = lambda: None
+    adapter.core = types.SimpleNamespace(new_json=write_json)
+    original_threading = adapter.threading
+    class RefusedThread:
+        ident = None
+        def __init__(self, **kwargs): pass
+        def start(self): raise RuntimeError("injected thread creation failure")
+        def join(self, timeout=None): raise AssertionError("unstarted worker must not be joined")
+    adapter.threading = types.SimpleNamespace(Thread=RefusedThread, Event=threading.Event, Lock=threading.Lock)
+    try:
+        issuer = adapter.OriginalInvocationIssuer(folder, {"default": plan})
+        try:
+            issuer.start_phase("default")
+        except RuntimeError as exc:
+            assert str(exc) == "injected thread creation failure"
+        else:
+            raise AssertionError("thread creation failure hidden")
+        issuer.stop_phase()
+        assert issuer.worker is None and issuer.failure and not issuer.invocations
+        return {"case": "start-failure", "status": "PASS", "no_unstarted_join": True, "native_commands": 0}
+    finally:
+        adapter.threading = original_threading
+
+def finalization_failure():
+    folder = OUT / "finalization-failure"
+    folder.mkdir()
+    fixture = guard_fixture(folder, join_fault=True, hold=True)
+    try:
+        try: adapter.incoming_build_info(fixture.run, Path("incoming.exe"))
+        except RuntimeError: pass
+        fixture.run.receipt["status"] = "FAIL"
+        fixture.run.save()
+        frozen = (folder / "receipt.json").read_bytes()
+        fixture.run.final_receipt_published = False
+        adapter.load_owner_runtime = lambda: None
+        issuer = adapter.OriginalInvocationIssuer.__new__(adapter.OriginalInvocationIssuer)
+        issuer.worker = None
+        issuer.stop = threading.Event()
+        issuer.invocations = [fixture.run]
+        tree = ast.parse((ROOT / "run_literal_go_gate_ready_v1.py").read_bytes())
+        execute = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "execute")
+        entered = threading.Event()
+        def failing_gate(args, issuers):
+            issuers.append(issuer)
+            entered.set()
+            raise OSError("injected receipt-save/finalization failure")
+        namespace = {"execute_gate": failing_gate}
+        exec(compile(ast.Module(body=[execute], type_ignores=[]), "exact-driver-finalization", "exec"), namespace)
+        observed = []
+        def invoke():
+            try: namespace["execute"](None)
+            except OSError as exc: observed.append(str(exc))
+        worker = threading.Thread(target=invoke)
+        worker.start()
+        assert entered.wait(2)
+        time.sleep(.025)
+        assert worker.is_alive() and any(w.is_alive() for w in fixture.threads)
+        fixture.release.set()
+        worker.join(3)
+        assert not worker.is_alive() and observed == ["injected receipt-save/finalization failure"]
+        assert (folder / "receipt.json").read_bytes() == frozen and not fixture.hashes
+        proof = json.loads((folder / "failed-original-physical-closure.json").read_text())
+        assert proof["original_failure_publication_completed"] is False
+        return {"case": "finalization-failure", "status": "PASS", "outermost_retention_executed": True,
+                "original_error_preserved": True, "failure_immutable": True, "false_publication_not_claimed": True}
+    finally:
+        cleanup_fixture(fixture)
+
+def failed_receipt_save():
+    folder = OUT / "failed-receipt-save"
+    folder.mkdir()
+    fixture = guard_fixture(folder, join_fault=True, hold=True)
+    save = fixture.run.save
+    def refused_save():
+        if any(row.get("quiescence_state") == "unknown" for row in fixture.run.receipt["commands"]):
+            raise OSError("injected actual failed-receipt save")
+        save()
+    fixture.run.save = refused_save
+    try:
+        try:
+            adapter.incoming_build_info(fixture.run, Path("incoming.exe"))
+        except OSError as error:
+            assert str(error) == "injected actual failed-receipt save"
+        else:
+            raise AssertionError("actual save fault did not execute")
+        assert not fixture.run.commands_quiescent() and any(w.is_alive() for w in fixture.threads)
+        frozen = (folder / "receipt.json").read_bytes()
+        fixture.release.set()
+        fixture.run.retain_failed_full_workers(False)
+        assert (folder / "receipt.json").read_bytes() == frozen and not fixture.hashes
+        proof = json.loads((folder / "failed-original-physical-closure.json").read_text())
+        assert proof["original_failure_publication_completed"] is False
+        return {"case":"failed-receipt-save","status":"PASS","actual_save_failure_injected":True,
+                "original_failure_publication_not_claimed":True,"original_custody_retained":True,
+                "held_capture_hash_calls":0}
+    finally:
+        cleanup_fixture(fixture)
+
+def native_ordinary():
+    folder = OUT / "native-ordinary-stdin"
+    folder.mkdir()
+    fixture = guard_fixture(folder)
+    payload = b"stdin\x00" * 10000
+    input_path = folder / "stdin.bin"
+    input_path.write_bytes(payload)
+    try:
+        output = fixture.run.command([sys.executable,"-I","-S","-B","-c",
+            "import sys; data=sys.stdin.buffer.read(); assert data==b'stdin\\x00'*10000; "
+            "sys.stdout.buffer.write(b'x'*65536); sys.stderr.buffer.write(b'y'*65536)"],
+            "ordinary",timeout=10,stdin_path=input_path)
+        row = fixture.run.receipt["commands"][-1]
+        assert output == "x" * 65536 and Path(row["stderr"]).read_bytes() == b"y" * 65536
+        assert row["native"]["active_zero"] and row["original_readers_joined"] and row["original_input_writer_joined"]
+        assert row["stdin"]["bytes_written"] == len(payload) and row["command_success"]
+        return {"case":"native-ordinary-stdin","status":"PASS","native_owner":True,
+                "original_pid":row["original_pid"],"stdin_bytes":len(payload),"output_bytes_per_stream":65536}
+    finally:
+        cleanup_fixture(fixture)
+
+def invocation_deadline_and_cancellation():
+    folder = OUT / "invocation-deadline"
+    folder.mkdir()
+    fixture = guard_fixture(folder)
+    try:
+        for expired in (True,False):
+            fixture.run.started = time.monotonic() - (356 if expired else 0)
+            fixture.run.cancelled = lambda:not expired
+            try:
+                fixture.run.command([sys.executable],"not-created",timeout=5)
+            except RuntimeError as error:
+                assert "original consumer deadline or admission ended" in str(error)
+            else:
+                raise AssertionError("expired/cancelled invocation launched a command")
+        assert not fixture.run.receipt["commands"] and not fixture.threads and not fixture.producers
+        return {"case":"invocation-deadline","status":"PASS","actual_root_invocation_method":True,
+                "original_deadline_not_restarted":True,"cancelled_successor_refused":True,"native_commands":0}
+    finally:
+        cleanup_fixture(fixture)
+
+def native_go_metadata():
+    folder = OUT / "native-go-metadata"
+    folder.mkdir()
+    fixture = guard_fixture(folder, metadata_passthrough=True)
+    adapter.core.GO = GO_PATH
+    try:
+        result = adapter.incoming_build_info(fixture.run, GO_PATH)
+        row = fixture.run.receipt["commands"][-1]
+        assert result.get("Path") == "cmd/go" and row["command_success"]
+        assert row["argv"] == [str(GO_PATH),"version","-m","-json",str(GO_PATH)]
+        return {"case":"native-go-metadata","status":"PASS","literal_go_metadata_command":True,
+                "original_pid":row["original_pid"],"budgets_seconds":[row["work_seconds"],row["cleanup_seconds"]]}
+    finally:
+        cleanup_fixture(fixture)
+
+def retain_unsettled_fixtures():
+    for fixture in ALL_FIXTURES:
+        if (not fixture.run.commands_quiescent()
+                and not getattr(fixture.run,"fixture_physical_receiving_completed",False)):
+            fixture.run.retain_failed_full_workers(fixture.run.final_receipt_published)
+
+def main():
+    OUT.mkdir()
+    cases = []
+    result = {"schema": "root-owner-custody-local-fixtures-v1", "status": "FAIL",
+        "platform": sys.platform, "native_windows_owner": NATIVE, "remote_processes": NATIVE,
+        "old_held_scope_accessed": False, "cases": cases,
+        "inputs": {p.name: digest(p) for p in ROOT.glob("*.py")}}
+    try:
+        if NATIVE:
+            cases.append(native_ordinary())
+            cases.append(native_go_metadata())
+        cases.append(metadata_case("metadata-normal"))
+        cases.append(metadata_case("metadata-first-join", join_fault=True, hold=True))
+        cases.append(metadata_case("metadata-overflow", payload=b"x"*(adapter.METADATA_CAPTURE_LIMIT+17)))
+        cases.append(safe_replay("safe-pass-replay", 0))
+        cases.append(safe_replay("safe-fail-replay", 1))
+        cases.append(client_death())
+        cases.append(client_death(timeout=True))
+        cases.append(request_negatives())
+        cases.append(early_start_failure())
+        cases.append(finalization_failure())
+        cases.append(failed_receipt_save())
+        cases.append(invocation_deadline_and_cancellation())
+        result.update(status="PASS", all_original_fixture_threads_joined=True,
+                      all_original_local_children_reaped=True)
+    except BaseException as error:
+        result["error"] = type(error).__name__ + ": " + str(error)
+        import traceback
+        result["traceback"] = traceback.format_exc()
+    write_json(OUT / "receipt.json", result)
+    print(json.dumps(result, indent=2))
+    print(str(OUT / "receipt.json"))
+    # If an actual native fault remains unresolved, publish FAIL, then retain
+    # its original objects. A fixture failure cannot turn into interpreter exit.
+    retain_unsettled_fixtures()
+    return 0 if result["status"] == "PASS" else 1
+
+if __name__ == "__main__":
+    raise SystemExit(main())

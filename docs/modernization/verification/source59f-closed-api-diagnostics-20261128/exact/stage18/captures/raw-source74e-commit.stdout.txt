@@ -1,0 +1,6 @@
+tree bcf1bd3539a8ba5ab54cff123adbb4bc071276d3
+parent 04e5b4eadd6407cbff4e04ba453546d278314bd7
+author applicate2628 <dima_den@inbox.ru> 1795871806 +0300
+committer applicate2628 <dima_den@inbox.ru> 1795871806 +0300
+
+test: pin migration fixture source to the Serena catalog revision

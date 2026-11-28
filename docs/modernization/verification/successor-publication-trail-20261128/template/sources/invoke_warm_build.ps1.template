@@ -1,0 +1,31 @@
+param(
+    [Parameter(Mandatory=$true)]
+    [ValidateSet('provider-386','provider-amd64','cli-state')]
+    [string]$Mode
+)
+$ErrorActionPreference='Stop'
+$SourceRoot='@@RECOVERY_APPROVED_WORK_AREA@@\pub666-recovered-20261128'
+$OutputRoot='@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\original-helper-cache-warm-v7'
+$Go='@@RECOVERY_GO_DISTRIBUTION_ROOT@@\ucrt64\lib\go\bin\go.exe'
+$env:GOOS='windows'
+$env:GOARCH='amd64'
+if($Mode -eq 'provider-386'){$env:GOARCH='386'}
+if($Mode -eq 'cli-state'){
+    if($env:CGO_ENABLED -ne '1'){throw 'CLI preparation must preserve the declared CGO environment'}
+    $WorkingDirectory=$SourceRoot
+    $OutputImage=Join-Path $OutputRoot 'cli-state-mcphub.exe'
+    $BuildArgs=@('build','-tags','test_state_path_env','-o',$OutputImage,'./cmd/mcphub')
+}else{
+    $env:CGO_ENABLED='0'
+    $WorkingDirectory=Join-Path $SourceRoot 'internal\api'
+    $OutputImage=Join-Path $OutputRoot ('provider-cwd-helper-'+$env:GOARCH+'.exe')
+    $BuildArgs=@('build','-ldflags=-H=windowsgui','-o',$OutputImage,'./testdata/provider-cwd-helper')
+}
+if(-not [IO.Directory]::Exists($OutputRoot) -or [IO.File]::Exists($OutputImage) -or [IO.Directory]::Exists($OutputImage)){throw 'Fresh owned output required'}
+if($env:GOFLAGS -cne '-mod=readonly -ldflags=-H=windowsgui' -or $env:GOENV -cne 'off' -or $env:GOWORK -cne 'off' -or $env:GOTOOLCHAIN -cne 'local'){throw 'Declared build environment differs'}
+Set-Location -LiteralPath $WorkingDirectory
+[ordered]@{mode=$Mode;argv=@($Go)+$BuildArgs;cwd=$WorkingDirectory;GOOS=$env:GOOS;GOARCH=$env:GOARCH;CGO_ENABLED=$env:CGO_ENABLED;GOFLAGS=$env:GOFLAGS;GOCACHE=$env:GOCACHE;GOMODCACHE=$env:GOMODCACHE;test_execution=$false}|ConvertTo-Json -Depth 3 -Compress
+& $Go @BuildArgs
+$BuildExit=$LASTEXITCODE
+if($null -eq $BuildExit){throw 'Compiler did not return a native exit code'}
+exit $BuildExit

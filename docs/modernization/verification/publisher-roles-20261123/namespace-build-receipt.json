@@ -1,0 +1,100 @@
+{
+  "schema": 1,
+  "phase": "namespace-build-20261123-57604a3a",
+  "manifest_sha256": "ea54bf2fd7741ebb667ff02349e9a8dbf10a049a9e4445d10f90639155d2b183",
+  "runner_sha256": "a483536d689df8c5713fddbdfd221b85953cf0ce4f9d578a31c4cdbfc6b9a26e",
+  "started_utc": "2026-11-23T12:35:45.759564+00:00",
+  "source_head": "858812988833a84368c60fba1540ae601155fa71",
+  "source_tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+  "commands": [
+    {
+      "label": "namespace-launcher-build",
+      "argv": [
+        "C:\\msys64\\ucrt64\\bin\\go.exe",
+        "build",
+        "-o",
+        "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\exports\\recovery-namespace-continuation-20261123-57604a3a.exe",
+        "./tools/test-recovery-namespace"
+      ],
+      "cwd": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\candidate-next-continuation-20261123-57604a3a",
+      "started_utc": "2026-11-23T12:35:50.380505+00:00",
+      "direct_timeout_seconds": 300,
+      "settled": true,
+      "timed_out": false,
+      "whole_process_tree_deadline_enforced": false,
+      "pid": 56600,
+      "exit_code": 0,
+      "seconds": 0.715186599874869,
+      "finished_utc": "2026-11-23T12:35:51.096079+00:00",
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "oracle_pass": true
+    }
+  ],
+  "completed": true,
+  "native_scheduler_operations": false,
+  "environment": {
+    "APPDATA": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\namespace-build-20261123-57604a3a\\appdata",
+    "CC": "C:\\msys64\\ucrt64\\bin\\gcc.exe",
+    "GOARCH": "amd64",
+    "GOAUTH": "off",
+    "GOCACHE": "D:\\dev\\ChatGPT\\mcp-pr616-qualification-20261114\\gocache",
+    "GOENV": "off",
+    "GOFLAGS": "-mod=readonly",
+    "GOGC": "100",
+    "GOMAXPROCS": "4",
+    "GOMODCACHE": "D:\\dev\\ChatGPT\\mcp-pr616-qualification-20261114\\gomodcache",
+    "GOOS": "windows",
+    "GOPATH": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\namespace-build-20261123-57604a3a\\gopath",
+    "GOPROXY": "off",
+    "GOROOT": "C:\\msys64\\ucrt64\\lib\\go",
+    "GOSUMDB": "off",
+    "GOTELEMETRY": "off",
+    "GOTMPDIR": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\namespace-build-20261123-57604a3a\\tmp",
+    "GOTOOLCHAIN": "local",
+    "GOVCS": "*:off",
+    "GOWORK": "off",
+    "LOCALAPPDATA": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\namespace-build-20261123-57604a3a\\localappdata",
+    "MCPHUB_E2E_SCHEDULER": "none",
+    "MCPHUB_NO_AUTO_GUI": "1",
+    "PSMODULEANALYSISCACHEPATH": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\namespace-build-20261123-57604a3a\\localappdata\\module-cache",
+    "TEMP": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\namespace-build-20261123-57604a3a\\tmp",
+    "TMP": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\namespace-build-20261123-57604a3a\\tmp",
+    "USERPROFILE": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\namespace-build-20261123-57604a3a\\profile",
+    "XDG_CACHE_HOME": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\namespace-build-20261123-57604a3a\\xdg-cache",
+    "XDG_CONFIG_HOME": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\namespace-build-20261123-57604a3a\\xdg-config",
+    "XDG_DATA_HOME": "D:\\dev\\ChatGPT\\mcp-residual-next-20261122-dcb40fba\\runtime\\namespace-build-20261123-57604a3a\\xdg-data"
+  },
+  "tools_sha256": {
+    "C:\\msys64\\ucrt64\\bin\\go.exe": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113",
+    "C:\\msys64\\ucrt64\\bin\\gofmt.exe": "95368e4aafefa20f962a345ab02f53ffc035ed69349612abbf385b52f4fb25c5",
+    "C:\\msys64\\ucrt64\\bin\\gcc.exe": "f6ff9378c1edb591131304518eac6456708d28720284105930d0d687136bcdd3"
+  },
+  "source_before": {
+    "files": 3312,
+    "bytes": 50921399,
+    "inventory_sha256": "e59a96f4da3ec901af9c497f1af1b52737f9bc95969c41e282fc917fd52bc36f"
+  },
+  "inputs_before": {
+    "files": 4,
+    "bytes": 44646,
+    "inventory_sha256": "7f2f3ae39a359306e4297d0631e4272265eaff4628c88297fff158a089990594"
+  },
+  "source_after": {
+    "files": 3312,
+    "bytes": 50921399,
+    "inventory_sha256": "e59a96f4da3ec901af9c497f1af1b52737f9bc95969c41e282fc917fd52bc36f"
+  },
+  "inputs_after": {
+    "files": 4,
+    "bytes": 44646,
+    "inventory_sha256": "7f2f3ae39a359306e4297d0631e4272265eaff4628c88297fff158a089990594"
+  },
+  "finished_utc": "2026-11-23T12:35:55.308516+00:00"
+}

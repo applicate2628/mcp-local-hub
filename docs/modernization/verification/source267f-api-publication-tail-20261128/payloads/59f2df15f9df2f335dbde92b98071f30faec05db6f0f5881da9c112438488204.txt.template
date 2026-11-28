@@ -1,0 +1,93 @@
+panic: test timed out after 5m0s
+	running tests:
+		TestRunDaemonIntentCollapse_MintsSupervisorIntentForLegacyOnlyActiveStop (0s)
+
+goroutine 8120 [running]:
+testing.(*M).startAlarm.func1()
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2961 +0x34a
+created by time.goFunc
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/time/sleep.go:182 +0x2d
+
+goroutine 1 [chan receive]:
+testing.(*T).Run(0x15848d204800, {0x7ff79879bc0f?, 0x15848d46f8b8?}, 0x7ff799765070)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2268 +0x4d2
+testing.runTests.func1(0x15848d204800)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2744 +0x37
+testing.tRunner(0x15848d204800, 0x15848d46f9d8)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2195 +0xc3
+testing.runTests({0x7ff79867b557, 0xd}, {0x7ff7986a6b5e, 0x1a}, 0x15848d20c2d0, {0x7ff7997ff878, 0xd84, 0xd84}, {0xc2bae14287db8ca4, 0x45d9bbfaad, ...})
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2742 +0x505
+testing.(*M).Run(0x15848d4075e0)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2602 +0x6af
+mcp-local-hub/internal/api.TestMain(0x15848d4075e0)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/pub666-recovered-20261128/internal/api/main_test.go:249 +0x630
+main.main()
+	_testmain.go:6970 +0xa5
+
+goroutine 741 [syscall]:
+syscall.syscalln(0x0?, 0x0?, {0x15848d557f08?, 0x15848d5b76c0?, 0x0?})
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/runtime/syscall_windows.go:427 +0x48
+syscall.SyscallN(0x3e3?, {0x15848d557f08?, 0x0?, 0x15848d5bbb18?})
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/syscall/dll_windows.go:99 +0x1e
+github.com/Microsoft/go-winio.getQueuedCompletionStatus(0x5c0, 0x15848d557f8c?, 0x15848d557f90?, 0x15848d557f98?, 0xffffffff)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/r7/full59f/private/go-mod/github.com/!microsoft/go-winio@v0.6.2/zsyscall_windows.go:327 +0xab
+github.com/Microsoft/go-winio.ioCompletionProcessor(0x5c0)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/r7/full59f/private/go-mod/github.com/!microsoft/go-winio@v0.6.2/file.go:162 +0x7f
+created by github.com/Microsoft/go-winio.initIO in goroutine 786
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/r7/full59f/private/go-mod/github.com/!microsoft/go-winio@v0.6.2/file.go:58 +0x65
+
+goroutine 7502 [select]:
+mcp-local-hub/internal/api.(*HubSessionStore).sweepLoop(0x15848d3c2090)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/pub666-recovered-20261128/internal/api/hub_mcp_session.go:653 +0xf3
+created by mcp-local-hub/internal/api.NewHubSessionStore in goroutine 7689
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/pub666-recovered-20261128/internal/api/hub_mcp_session.go:439 +0x24b
+
+goroutine 7688 [select]:
+mcp-local-hub/internal/api.(*HubSessionStore).sweepLoop(0x15848dd941b0)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/pub666-recovered-20261128/internal/api/hub_mcp_session.go:653 +0xf3
+created by mcp-local-hub/internal/api.NewHubSessionStore in goroutine 7687
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/pub666-recovered-20261128/internal/api/hub_mcp_session.go:439 +0x24b
+
+goroutine 8135 [syscall]:
+syscall.syscalln(0x0?, 0x0?, {0x15848d24ba18?, 0x30c?, 0x0?})
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/runtime/syscall_windows.go:427 +0x48
+syscall.SyscallN(0x7ff7997e76f8?, {0x15848d24ba18?, 0x7ff79955c8d8?, 0x15848d9ace00?})
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/syscall/dll_windows.go:99 +0x1e
+syscall.FlushFileBuffers(0x61c)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/syscall/zsyscall_windows.go:633 +0x56
+syscall.Fsync(...)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/syscall/syscall_windows.go:756
+internal/poll.(*FD).Fsync(0x15848d9ace00?)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/internal/poll/fd_fsync_windows.go:15 +0xd8
+os.(*File).Sync(0x15848d85abe0)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/os/file_posix.go:167 +0x3b
+mcp-local-hub/internal/api.appendHubMcpLogLineUnlockedCore({0x15848d67e900, 0x8b}, {0x15848d9ace00, 0x30b, 0x380}, 0x0, {0x7ff799769900, 0x7ff799769290, 0x7ff7997690f8, 0x7ff799768f90, ...}, ...)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/pub666-recovered-20261128/internal/api/hub_mcp_log_observation.go:458 +0x382
+mcp-local-hub/internal/api.appendHubMcpLogLineCore({0x15848d9ace00, 0x30b, 0x380}, 0x0, {0x7ff799769900, 0x7ff799769290, 0x7ff7997690f8, 0x7ff799768f90, 0x7ff799766a40, 0x15848d4c9710, ...}, ...)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/pub666-recovered-20261128/internal/api/hub_mcp_log_observation.go:358 +0xc25
+mcp-local-hub/internal/api.appendHubMcpLogLine({0x15848d9ace00, 0x30b, 0x380})
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/pub666-recovered-20261128/internal/api/hub_mcp_log.go:268 +0xf4
+mcp-local-hub/internal/api.LogHubMcpEvent({0x7ff79866eb93?, 0x15848d72bc80?}, {0x7ff7987030a4?, 0x4?}, 0x0?)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/pub666-recovered-20261128/internal/api/hub_mcp_log.go:104 +0x36
+mcp-local-hub/internal/api.readStateFileInodeAnchoredWithObservation({0x15848d3e7d00, 0x92}, 0x7ff799769308, 0x1000000, 0x1, 0x0, 0x7ff799766a80, 0x7ff799769748, {0x0, 0x0}, ...)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/pub666-recovered-20261128/internal/api/hub_mcp_state_read_inode_windows.go:277 +0x1c10
+mcp-local-hub/internal/api.readStateFileInodeAnchoredWithOptions(...)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/pub666-recovered-20261128/internal/api/hub_mcp_state_read_inode_windows.go:103
+mcp-local-hub/internal/api.readStateFileInodeAnchoredWithStrictPolicy({0x15848d3e7d00, 0x92}, 0x7ff799769308)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/pub666-recovered-20261128/internal/api/hub_mcp_state_read_inode_windows.go:85 +0x5a
+mcp-local-hub/internal/api.readStateFileInodeAnchored(...)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/pub666-recovered-20261128/internal/api/hub_mcp_state_read_inode_windows.go:81
+mcp-local-hub/internal/api.readDaemonIntentFileInodeAnchored({0x15848d3e7d00?, 0xf0d4e81a2198e8fb?})
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/pub666-recovered-20261128/internal/api/daemon_intent.go:361 +0x1f
+mcp-local-hub/internal/api.readDaemonIntentForMerge({0x15848d3e7d00?, 0x1?})
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/pub666-recovered-20261128/internal/api/intent_collapse.go:662 +0x1f
+mcp-local-hub/internal/api.runDaemonIntentCollapse({0x15848d36e620, 0x7f}, {0xa?, {0xa?, 0xa?, 0x0?}})
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/pub666-recovered-20261128/internal/api/intent_collapse.go:431 +0x549
+mcp-local-hub/internal/api.RunDaemonIntentCollapse(...)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/pub666-recovered-20261128/internal/api/intent_collapse.go:354
+mcp-local-hub/internal/api.TestRunDaemonIntentCollapse_MintsSupervisorIntentForLegacyOnlyActiveStop(0x15848d972000)
+	@@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/pub666-recovered-20261128/internal/api/intent_collapse_test.go:408 +0x2c8
+testing.tRunner(0x15848d972000, 0x7ff799765070)
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2195 +0xc3
+created by testing.(*T).Run in goroutine 1
+	@@RECOVERY_NATIVE_TOOLCHAIN_ROOT_FORWARD@@/ucrt64/lib/go/src/testing/testing.go:2260 +0x4b4

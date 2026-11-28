@@ -1,0 +1,10 @@
+=== RUN   TestClosedInitializeCancellationAndOneWayRelease
+--- PASS: TestClosedInitializeCancellationAndOneWayRelease (0.00s)
+=== NAME  
+=== RUN   TestOpenSessionLifecycleAndBoundedEvents
+--- PASS: TestOpenSessionLifecycleAndBoundedEvents (0.00s)
+=== NAME  
+=== RUN   TestEventLogRetainsNewest64RecordedLifecycleEvents
+--- PASS: TestEventLogRetainsNewest64RecordedLifecycleEvents (0.02s)
+=== NAME  
+PASS

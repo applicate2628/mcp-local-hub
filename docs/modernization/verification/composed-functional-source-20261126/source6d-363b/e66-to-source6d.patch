@@ -1,0 +1,3009 @@
+diff --git a/internal/api/liveness_task.go b/internal/api/liveness_task.go
+index dfb417d4f0f51eee221f0f42cd115cb066ddf4db..6c852d6eb172b51708f2d5618163b8ebc4138ff2 100644
+--- a/internal/api/liveness_task.go
++++ b/internal/api/liveness_task.go
+@@ -88,30 +88,29 @@ func defaultCurrentWindowsUser() (string, error) {
+ // constant so callers reference one literal.
+ const LivenessTaskName = "\\mcp-local-hub-liveness"
+ 
+-// LivenessTaskResult identifies the pre-state that an EnsureLivenessTask
+-// receipt can restore. It is an internal transaction result, not a public CLI
+-// state string.
++// LivenessTaskResult identifies the outcome of EnsureLivenessTask. It is an
++// internal transaction result, not a public CLI state string or task-generation
++// authority.
+ type LivenessTaskResult string
+ 
+ const (
+ 	LivenessTaskUnchanged LivenessTaskResult = "unchanged"
+ 	LivenessTaskCreated   LivenessTaskResult = "created-from-absent"
+-	LivenessTaskReplaced  LivenessTaskResult = "replaced-with-prior-xml"
++	// LivenessTaskReplaced is retained for old receipts; EnsureLivenessTask no
++	// longer replaces an occupied name and RestoreLivenessTask refuses it.
++	LivenessTaskReplaced LivenessTaskResult = "replaced-with-prior-xml"
+ )
+ 
+-// LivenessTaskReceipt is valid only for the setup transaction that received
+-// it. The captured settled XML is a compare-before-restore fence: rollback
+-// refuses to delete or overwrite a liveness task changed after settlement.
++// LivenessTaskReceipt records creation or an unchanged observation. Neither an
++// acknowledged creation nor matching XML permits deletion by task name.
+ type LivenessTaskReceipt struct {
+-	Result     LivenessTaskResult
+-	priorXML   []byte
+-	settledXML []byte
++	Result LivenessTaskResult
+ }
+ 
+ var ErrLivenessTaskRollbackConflict = errors.New("api: liveness task rollback conflict")
+ 
+ // LivenessTaskPostImportStage identifies a failure after Task Scheduler has
+-// accepted a replacement liveness-task definition.
++// accepted liveness XML creation. The type name is kept for existing callers.
+ type LivenessTaskPostImportStage string
+ 
+ const (
+@@ -119,8 +118,8 @@ const (
+ 	LivenessTaskPostImportSemanticDrift LivenessTaskPostImportStage = "semantic-drift"
+ )
+ 
+-// LivenessTaskPostImportError preserves the original post-import failure and,
+-// when necessary, the failure to restore the exact captured pre-state.
++// LivenessTaskPostImportError preserves the original post-create failure and,
++// when necessary, the refusal or failure to confirm the prior absent state.
+ type LivenessTaskPostImportError struct {
+ 	Stage    LivenessTaskPostImportStage
+ 	Cause    error
+@@ -129,9 +128,9 @@ type LivenessTaskPostImportError struct {
+ 
+ func (e *LivenessTaskPostImportError) Error() string {
+ 	if e.Rollback != nil {
+-		return fmt.Sprintf("liveness task post-import %s failure: %v; rollback failed: %v", e.Stage, e.Cause, e.Rollback)
++		return fmt.Sprintf("liveness task post-create %s failure: %v; rollback incomplete: %v", e.Stage, e.Cause, e.Rollback)
+ 	}
+-	return fmt.Sprintf("liveness task post-import %s failure: %v", e.Stage, e.Cause)
++	return fmt.Sprintf("liveness task post-create %s failure: %v", e.Stage, e.Cause)
+ }
+ 
+ func (e *LivenessTaskPostImportError) Unwrap() []error {
+@@ -152,24 +151,24 @@ func (e *LivenessTaskPostImportError) LivenessTaskRollbackError() error {
+ // InstallLivenessTask is the idempotent install of the supervisor-liveness
+ // scheduled task: resolve the canonical mcphub.exe path + the current Windows
+ // user, render the liveness XML via scheduler.BuildLivenessXML, encode it
+-// for Task Scheduler's /XML parser, and ImportXML it under LivenessTaskName.
++// for Task Scheduler's XML parser, and create it only under an absent name.
+ //
+ // CLI-level concerns (admin-elevation refusal, audit entry, interactive
+ // confirm) live in the CLI layer that calls this (runSetupWatchdog rides the
+ // same state-dir-sanity + elevation gates); this API method is the
+-// unconditional execution path.
++// scheduler execution owner.
+ //
+ // On Linux/macOS scheduler.New() returns "not implemented" so this fails
+-// loud at the ImportXML call — the liveness task is a Windows-GA capability
++// loud at the scheduler call — the liveness task is a Windows-GA capability
+ // in v0.6.
+ func (a *API) InstallLivenessTask() error {
+ 	_, err := a.EnsureLivenessTask()
+ 	return err
+ }
+ 
+-// EnsureLivenessTask settles the API-owned liveness task and returns an exact
+-// rollback receipt. The caller is responsible for proving the supervisor
+-// target first; this owner never creates or mutates that separate resource.
++// EnsureLivenessTask accepts a matching liveness definition or creates one after
++// confirmed absence. It retains and refuses an observed differing definition.
++// The caller proves the separate supervisor target; this owner never mutates it.
+ func (a *API) EnsureLivenessTask() (LivenessTaskReceipt, error) {
+ 	canonicalExe, err := canonicalMcphubPathFn()
+ 	if err != nil {
+@@ -198,33 +197,35 @@ func ensureLivenessTaskResolved(canonicalExe, workingDir, principalSID, userName
+ 	prior, exportErr := sch.ExportXML(LivenessTaskName)
+ 	receipt := LivenessTaskReceipt{}
+ 	if exportErr != nil {
+-		if !errors.Is(exportErr, scheduler.ErrTaskNotFound) {
+-			return receipt, fmt.Errorf("snapshot liveness task: %w", exportErr)
++		if !errors.Is(exportErr, scheduler.ErrTaskNotFound) || len(prior) != 0 {
++			cause := fmt.Errorf("snapshot liveness task: %w", exportErr)
++			if len(prior) != 0 {
++				cause = errors.Join(cause, refuseSchedulerTaskReplacement(LivenessTaskName, prior))
++			}
++			return receipt, cause
+ 		}
+-		receipt.Result = LivenessTaskCreated
+ 	} else {
+-		receipt.Result = LivenessTaskReplaced
+-		receipt.priorXML = append([]byte(nil), prior...)
+-		if !livenessTaskReadable(prior) {
+-			return receipt, fmt.Errorf("liveness task definition is corrupt")
+-		}
+-		if livenessTaskDifference(prior, canonicalExe, workingDir, principalSID, userName) == nil {
+-			receipt.Result = LivenessTaskUnchanged
+-			receipt.settledXML = append([]byte(nil), prior...)
+-			return receipt, nil
++		if difference := livenessTaskDifference(prior, canonicalExe, workingDir, principalSID, userName); difference != nil {
++			return receipt, errors.Join(difference, refuseSchedulerTaskReplacement(LivenessTaskName, prior))
+ 		}
++		receipt.Result = LivenessTaskUnchanged
++		return receipt, nil
++	}
++	creator, ok := sch.(scheduler.XMLCreator)
++	if !ok {
++		return receipt, fmt.Errorf("create liveness task XML: %w", scheduler.ErrNotImplemented)
+ 	}
+ 	xmlBytes := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(canonicalExe, workingDir, principalSID, userName))
+-	if err := sch.ImportXML(LivenessTaskName, xmlBytes); err != nil {
+-		return receipt, fmt.Errorf("import liveness task: %w", err)
++	if err := creator.CreateXMLIfAbsent(LivenessTaskName, xmlBytes); err != nil {
++		return receipt, errors.Join(fmt.Errorf("create liveness task: %w", err), rollbackInstallTaskCreation(sch, LivenessTaskName))
+ 	}
++	receipt.Result = LivenessTaskCreated
+ 	settled, err := sch.ExportXML(LivenessTaskName)
+ 	if err != nil {
+ 		return receipt, livenessTaskPostImportFailure(sch, receipt, LivenessTaskPostImportReadback, fmt.Errorf("read back liveness task: %w", err))
+ 	}
+-	receipt.settledXML = append([]byte(nil), settled...)
+ 	if difference := livenessTaskDifference(settled, canonicalExe, workingDir, principalSID, userName); difference != nil {
+-		return receipt, livenessTaskPostImportFailure(sch, receipt, LivenessTaskPostImportSemanticDrift, fmt.Errorf("liveness task definition drifted after import: %w", difference))
++		return receipt, livenessTaskPostImportFailure(sch, receipt, LivenessTaskPostImportSemanticDrift, fmt.Errorf("liveness task definition drifted after creation: %w", difference))
+ 	}
+ 	return receipt, nil
+ }
+@@ -237,48 +238,30 @@ func livenessTaskPostImportFailure(sch scheduler.Scheduler, receipt LivenessTask
+ 	}
+ }
+ 
+-// RestoreLivenessTask restores only the exact pre-state captured in receipt.
++// RestoreLivenessTask confirms prior absence or retains and refuses the current
++// occupant. A creation receipt cannot authorize deletion or replacement by name.
+ func (a *API) RestoreLivenessTask(receipt LivenessTaskReceipt) error {
+ 	if receipt.Result == LivenessTaskUnchanged {
+ 		return nil
+ 	}
+-	if len(receipt.settledXML) == 0 {
+-		return fmt.Errorf("%w: receipt has no settled liveness XML", ErrLivenessTaskRollbackConflict)
+-	}
+ 	sch, err := newScheduler()
+ 	if err != nil {
+ 		return err
+ 	}
+-	current, err := sch.ExportXML(LivenessTaskName)
+-	if err != nil || !bytes.Equal(current, receipt.settledXML) {
+-		return fmt.Errorf("%w: liveness task changed after settlement", ErrLivenessTaskRollbackConflict)
+-	}
+ 	return restoreLivenessTaskSnapshot(sch, receipt)
+ }
+ 
+-// restoreLivenessTaskSnapshot restores the exact state captured before a
+-// replacement. Callers that run after settlement must establish their own
+-// ownership fence first; the immediate post-import failure path owns the same
+-// scheduler transaction and must always attempt this recovery.
++// restoreLivenessTaskSnapshot uses the existing absence-only rollback owner.
++// It never turns an XML observation into authority over a task generation.
+ func restoreLivenessTaskSnapshot(sch scheduler.Scheduler, receipt LivenessTaskReceipt) error {
+ 	switch receipt.Result {
+ 	case LivenessTaskCreated:
+-		if err := sch.Delete(LivenessTaskName); err != nil {
+-			return fmt.Errorf("delete created liveness task: %w", err)
+-		}
+-		if _, err := sch.ExportXML(LivenessTaskName); !errors.Is(err, scheduler.ErrTaskNotFound) {
+-			return fmt.Errorf("%w: created liveness task remains after deletion: %v", ErrLivenessTaskRollbackConflict, err)
++		if err := rollbackInstallTaskCreation(sch, LivenessTaskName); err != nil {
++			return errors.Join(ErrLivenessTaskRollbackConflict, err)
+ 		}
+ 		return nil
+ 	case LivenessTaskReplaced:
+-		if err := sch.ImportXML(LivenessTaskName, receipt.priorXML); err != nil {
+-			return fmt.Errorf("restore liveness task XML: %w", err)
+-		}
+-		restored, err := sch.ExportXML(LivenessTaskName)
+-		if err != nil || !bytes.Equal(restored, receipt.priorXML) {
+-			return fmt.Errorf("%w: liveness XML readback differs from captured pre-state", ErrLivenessTaskRollbackConflict)
+-		}
+-		return nil
++		return fmt.Errorf("%w: old replacement receipt has no generation authority: %w", ErrLivenessTaskRollbackConflict, ErrSchedulerReplacementUnowned)
+ 	default:
+ 		return fmt.Errorf("%w: receipt has no replaceable liveness task state", ErrLivenessTaskRollbackConflict)
+ 	}
+@@ -293,6 +276,8 @@ const (
+ 	livenessTaskFieldPrincipalLogonType              LivenessTaskDifferenceField = "principal.logon_type"
+ 	livenessTaskFieldPrincipalRunLevel               LivenessTaskDifferenceField = "principal.run_level"
+ 	livenessTaskFieldCalendarTriggerCount            LivenessTaskDifferenceField = "trigger.calendar.count"
++	livenessTaskFieldCalendarStartBoundary           LivenessTaskDifferenceField = "trigger.calendar.start_boundary"
++	livenessTaskFieldCalendarEnabled                 LivenessTaskDifferenceField = "trigger.calendar.enabled"
+ 	livenessTaskFieldCalendarRepetitionInterval      LivenessTaskDifferenceField = "trigger.calendar.repetition.interval"
+ 	livenessTaskFieldCalendarDaysInterval            LivenessTaskDifferenceField = "trigger.calendar.schedule_by_day.days_interval"
+ 	livenessTaskFieldCalendarStopAtDurationEnd       LivenessTaskDifferenceField = "trigger.calendar.repetition.stop_at_duration_end"
+@@ -330,7 +315,9 @@ type livenessPrincipalXML struct {
+ }
+ 
+ type livenessCalendarTriggerXML struct {
+-	Repetition struct {
++	StartBoundary string `xml:"StartBoundary"`
++	Enabled       string `xml:"Enabled"`
++	Repetition    struct {
+ 		Interval          string `xml:"Interval"`
+ 		StopAtDurationEnd string `xml:"StopAtDurationEnd"`
+ 	} `xml:"Repetition"`
+@@ -394,6 +381,12 @@ func livenessTaskDifference(xmlBlob []byte, canonicalExe, workingDir, principalS
+ 		return difference(livenessTaskFieldCalendarTriggerCount)
+ 	}
+ 	calendar, expectedCalendar := actual.CalendarTrigger[0], expected.CalendarTrigger[0]
++	if calendar.StartBoundary != expectedCalendar.StartBoundary {
++		return difference(livenessTaskFieldCalendarStartBoundary)
++	}
++	if !sameLivenessTriggerEnabled(calendar.Enabled, expectedCalendar.Enabled) {
++		return difference(livenessTaskFieldCalendarEnabled)
++	}
+ 	if calendar.Repetition.Interval != expectedCalendar.Repetition.Interval {
+ 		return difference(livenessTaskFieldCalendarRepetitionInterval)
+ 	}
+@@ -410,7 +403,7 @@ func livenessTaskDifference(xmlBlob []byte, canonicalExe, workingDir, principalS
+ 	if !scheduler.WindowsUsersEquivalent(logon.UserID, expectedLogon.UserID) {
+ 		return difference(livenessTaskFieldLogonTriggerUser)
+ 	}
+-	if !sameLivenessLogonEnabled(logon.Enabled, expectedLogon.Enabled) {
++	if !sameLivenessTriggerEnabled(logon.Enabled, expectedLogon.Enabled) {
+ 		return difference(livenessTaskFieldLogonTriggerEnabled)
+ 	}
+ 	if !sameLivenessSettingsEnabled(actual.Settings.Enabled, expected.Settings.Enabled) {
+@@ -451,9 +444,9 @@ func sameLivenessStopAtDurationEnd(actual, canonical string) bool {
+ 	return canonical == "false" && (actual == "false" || actual == "0" || actual == "")
+ }
+ 
+-func sameLivenessLogonEnabled(actual, canonical string) bool {
++func sameLivenessTriggerEnabled(actual, canonical string) bool {
+ 	actual, canonical = strings.TrimSpace(actual), strings.TrimSpace(canonical)
+-	return canonical == "true" && (actual == "true" || actual == "1" || actual == "")
++	return (canonical == "true" || canonical == "") && (actual == "true" || actual == "1" || actual == "")
+ }
+ 
+ func sameLivenessSettingsEnabled(actual, canonical string) bool {
+@@ -461,11 +454,6 @@ func sameLivenessSettingsEnabled(actual, canonical string) bool {
+ 	return canonical == "true" && (actual == "true" || actual == "1" || actual == "")
+ }
+ 
+-func livenessTaskReadable(xmlBlob []byte) bool {
+-	_, ok := parseLivenessTaskXML(xmlBlob)
+-	return ok
+-}
+-
+ func parseLivenessTaskXML(xmlBlob []byte) (livenessTaskXML, bool) {
+ 	type taskRoot struct {
+ 		Triggers struct {
+diff --git a/internal/api/liveness_task_test.go b/internal/api/liveness_task_test.go
+index d1452e90aea536762e0589632f8a86b196e81ccf..c9ac7dbd7f3f561cb192177cfa9158c13126a38d 100644
+--- a/internal/api/liveness_task_test.go
++++ b/internal/api/liveness_task_test.go
+@@ -32,14 +32,15 @@ func installTestCanonicalMcphubPath(t *testing.T, path string) {
+ }
+ 
+ type livenessTaskScheduler struct {
+-	tasks            map[string][]byte
+-	imports          []importXMLCall
+-	deletes          []string
+-	importErr        error
+-	importErrForCall func(int) error
+-	exportErrForCall func(int) error
+-	exportCalls      int
+-	normalizeImport  func([]byte) []byte
++	tasks              map[string][]byte
++	creates            []importXMLCall
++	imports            []importXMLCall
++	deletes            []string
++	createErrForCall   func(int) error
++	exportErrForCall   func(int) error
++	exportBytesOnError []byte
++	exportCalls        int
++	normalizeCreate    func([]byte) []byte
+ }
+ 
+ func newLivenessTaskScheduler() *livenessTaskScheduler {
+@@ -59,7 +60,7 @@ func (f *livenessTaskScheduler) ExportXML(name string) ([]byte, error) {
+ 	f.exportCalls++
+ 	if f.exportErrForCall != nil {
+ 		if err := f.exportErrForCall(f.exportCalls); err != nil {
+-			return nil, err
++			return bytes.Clone(f.exportBytesOnError), err
+ 		}
+ 	}
+ 	xml, ok := f.tasks[name]
+@@ -68,30 +69,34 @@ func (f *livenessTaskScheduler) ExportXML(name string) ([]byte, error) {
+ 	}
+ 	return append([]byte(nil), xml...), nil
+ }
+-func (f *livenessTaskScheduler) ImportXML(name string, xml []byte) error {
+-	f.imports = append(f.imports, importXMLCall{name: name, xml: append([]byte(nil), xml...)})
+-	if f.importErrForCall != nil {
+-		if err := f.importErrForCall(len(f.imports)); err != nil {
++func (f *livenessTaskScheduler) CreateXMLIfAbsent(name string, xml []byte) error {
++	f.creates = append(f.creates, importXMLCall{name: name, xml: append([]byte(nil), xml...)})
++	if f.createErrForCall != nil {
++		if err := f.createErrForCall(len(f.creates)); err != nil {
+ 			return err
+ 		}
+ 	}
+-	if f.importErr != nil {
+-		return f.importErr
++	if _, exists := f.tasks[name]; exists {
++		return scheduler.ErrTaskAlreadyExists
+ 	}
+ 	settled := append([]byte(nil), xml...)
+-	if f.normalizeImport != nil {
+-		settled = f.normalizeImport(settled)
++	if f.normalizeCreate != nil {
++		settled = f.normalizeCreate(settled)
+ 	}
+ 	f.tasks[name] = settled
+ 	return nil
+ }
++func (f *livenessTaskScheduler) ImportXML(name string, xml []byte) error {
++	f.imports = append(f.imports, importXMLCall{name: name, xml: bytes.Clone(xml)})
++	return errNotImplementedForTest
++}
+ func (f *livenessTaskScheduler) Delete(name string) error {
+ 	f.deletes = append(f.deletes, name)
+ 	delete(f.tasks, name)
+ 	return nil
+ }
+-func (f *livenessTaskScheduler) importCalls() []importXMLCall {
+-	return append([]importXMLCall(nil), f.imports...)
++func (f *livenessTaskScheduler) createCalls() []importXMLCall {
++	return append([]importXMLCall(nil), f.creates...)
+ }
+ func (f *livenessTaskScheduler) calls() []string { return append([]string(nil), f.deletes...) }
+ 
+@@ -133,6 +138,10 @@ func TestLivenessTaskDifferenceNativeDefaultsAndIdentityMatrix(t *testing.T) {
+ 	} {
+ 		check("omit-"+tc.name, strings.Replace(canonical, tc.old, "", 1), "")
+ 	}
++	check("calendar-enabled", strings.Replace(canonical, "<CalendarTrigger>", "<CalendarTrigger><Enabled>true</Enabled>", 1), "")
++	check("calendar-enabled-one", strings.Replace(canonical, "<CalendarTrigger>", "<CalendarTrigger><Enabled>1</Enabled>", 1), "")
++	check("calendar-disabled", strings.Replace(canonical, "<CalendarTrigger>", "<CalendarTrigger><Enabled>false</Enabled>", 1), livenessTaskFieldCalendarEnabled)
++	check("calendar-future", strings.Replace(canonical, "2026-06-10T00:00:00", "2099-06-10T00:00:00", 1), livenessTaskFieldCalendarStartBoundary)
+ 	check("wrong-sid", strings.Replace(canonical, sid, "S-1-5-21-wrong", 1), livenessTaskFieldPrincipalUser)
+ 	check("wrong-account", strings.Replace(canonical, ">"+account+"<", ">wrong<", 1), livenessTaskFieldLogonTriggerUser)
+ 	check("highest", strings.Replace(canonical, "LeastPrivilege", "HighestAvailable", 1), livenessTaskFieldPrincipalRunLevel)
+@@ -144,7 +153,7 @@ func TestLivenessTaskDifferenceNativeDefaultsAndIdentityMatrix(t *testing.T) {
+ func TestEnsureLivenessTaskResolved_AcceptsNativeDefaultOmissionsAndIsIdempotent(t *testing.T) {
+ 	const sid, account = "S-1-5-21-101-202-303-404", "account-canary"
+ 	f := newLivenessTaskScheduler()
+-	f.normalizeImport = func(raw []byte) []byte {
++	f.normalizeCreate = func(raw []byte) []byte {
+ 		xml := decodeUTF16LEBOMForTest(t, raw)
+ 		principalStart := strings.Index(xml, "    <Principal id=\"Author\">\n")
+ 		principalEnd := strings.Index(xml, "    </Principal>\n")
+@@ -173,8 +182,8 @@ func TestEnsureLivenessTaskResolved_AcceptsNativeDefaultOmissionsAndIsIdempotent
+ 	if receipt.Result != LivenessTaskCreated {
+ 		t.Fatalf("first result=%q, want %q", receipt.Result, LivenessTaskCreated)
+ 	}
+-	if got := len(f.importCalls()); got != 1 {
+-		t.Fatalf("first ensure ImportXML calls=%d, want 1", got)
++	if got := len(f.createCalls()); got != 1 {
++		t.Fatalf("first ensure CreateXMLIfAbsent calls=%d, want 1", got)
+ 	}
+ 
+ 	receipt, err = ensureLivenessTaskResolved(livenessFixtureExe, livenessFixtureWorkingDir, sid, account, f)
+@@ -184,57 +193,45 @@ func TestEnsureLivenessTaskResolved_AcceptsNativeDefaultOmissionsAndIsIdempotent
+ 	if receipt.Result != LivenessTaskUnchanged {
+ 		t.Fatalf("second result=%q, want %q", receipt.Result, LivenessTaskUnchanged)
+ 	}
+-	if got := len(f.importCalls()); got != 1 {
+-		t.Fatalf("second ensure re-imported normalized task: calls=%d, want 1", got)
++	if got := len(f.createCalls()); got != 1 {
++		t.Fatalf("second ensure recreated normalized task: calls=%d, want 1", got)
+ 	}
+ }
+ 
+-func TestEnsureLivenessTaskResolved_StrictOppositeReadbackRestoresExactPriorXML(t *testing.T) {
++func TestEnsureLivenessTaskResolved_RetainsStrictOppositeReadback(t *testing.T) {
+ 	const sid, account = "S-1-5-21-101-202-303-404", "account-canary"
++	root := hardenedTempDir(t)
++	t.Cleanup(SetDaemonStateRootForTest(root))
+ 	f := newLivenessTaskScheduler()
+-	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
+-		livenessPriorFixtureExe, livenessPriorFixtureDir, "S-1-5-21-prior", "prior-account"))
+-	f.tasks[LivenessTaskName] = prior
+-	f.normalizeImport = func(raw []byte) []byte {
+-		if len(f.importCalls()) != 1 {
+-			return raw
+-		}
++	f.normalizeCreate = func(raw []byte) []byte {
+ 		return scheduler.EncodeXMLUTF16LEBOM(strings.Replace(
+ 			decodeUTF16LEBOMForTest(t, raw),
+ 			"<RunLevel>LeastPrivilege</RunLevel>",
+-			"<RunLevel>HighestAvailable</RunLevel>",
+-			1,
+-		))
++			"<RunLevel>HighestAvailable</RunLevel>", 1))
+ 	}
+-
+ 	_, err := ensureLivenessTaskResolved(livenessFixtureExe, livenessFixtureWorkingDir, sid, account, f)
+-	if err == nil {
+-		t.Fatal("strict opposite run level was accepted after import")
+-	}
+ 	var failure livenessTaskPostImportFailureReporter
+-	if !errors.As(err, &failure) {
+-		t.Fatalf("post-import error is not typed: %v", err)
+-	}
+-	if got := failure.LivenessTaskPostImportStage(); got != string(LivenessTaskPostImportSemanticDrift) {
+-		t.Fatalf("post-import stage=%q, want %q", got, LivenessTaskPostImportSemanticDrift)
++	if !errors.As(err, &failure) || failure.LivenessTaskPostImportStage() != string(LivenessTaskPostImportSemanticDrift) {
++		t.Fatalf("post-create error is not the typed semantic drift: %v", err)
+ 	}
+ 	var difference livenessTaskDifferenceReporter
+ 	if !errors.As(err, &difference) || difference.LivenessTaskDifferenceField() != string(livenessTaskFieldPrincipalRunLevel) {
+ 		t.Fatalf("strict opposite difference=%v, want %s", err, livenessTaskFieldPrincipalRunLevel)
+ 	}
+-	if got := f.tasks[LivenessTaskName]; !bytes.Equal(got, prior) {
+-		t.Fatalf("strict opposite readback left XML %q, want exact prior %q", got, prior)
++	if !errors.Is(failure.LivenessTaskRollbackError(), ErrLivenessTaskRollbackConflict) {
++		t.Fatalf("rollback error=%v, want generation refusal", failure.LivenessTaskRollbackError())
+ 	}
+-	if got := len(f.importCalls()); got != 2 {
+-		t.Fatalf("strict opposite ImportXML calls=%d, want replacement plus restoration", got)
++	if len(f.creates) != 1 || len(f.imports) != 0 || len(f.deletes) != 0 {
++		t.Fatalf("post-create failure mutated again: creates=%d imports=%d deletes=%v", len(f.creates), len(f.imports), f.deletes)
+ 	}
++	readInstallRecoverySnapshot(t, root, LivenessTaskName, f.tasks[LivenessTaskName])
+ }
+ 
+ // TestInstallLivenessTask_HappyPath asserts the supervisor-liveness install
+ // (v0.6 spec §15 P1-b / §5.x Phase 3a) resolves the canonical mcphub path +
+-// current user via the seams, then ImportXML under LivenessTaskName with the
++// current user via the seams, then CreateXMLIfAbsent under LivenessTaskName with the
+ // liveness XML body (PT1M cadence + `supervise --ensure-alive` action). Reuses
+-// the apiSurfacesFakeScheduler + seam helpers from api_surfaces_test.go.
++// the recording liveness scheduler and explicit fixture identities.
+ func TestInstallLivenessTask_HappyPath(t *testing.T) {
+ 	f := newLivenessTaskScheduler()
+ 
+@@ -242,12 +239,12 @@ func TestInstallLivenessTask_HappyPath(t *testing.T) {
+ 		t.Fatalf("InstallLivenessTask: %v", err)
+ 	}
+ 
+-	imports := f.importCalls()
++	imports := f.createCalls()
+ 	if len(imports) != 1 {
+-		t.Fatalf("expected 1 ImportXML call, got %d", len(imports))
++		t.Fatalf("expected 1 CreateXMLIfAbsent call, got %d", len(imports))
+ 	}
+ 	if imports[0].name != LivenessTaskName {
+-		t.Errorf("ImportXML target name: got %q, want %q", imports[0].name, LivenessTaskName)
++		t.Errorf("CreateXMLIfAbsent target name: got %q, want %q", imports[0].name, LivenessTaskName)
+ 	}
+ 	body := decodeUTF16LEBOMForTest(t, imports[0].xml)
+ 	wantFragments := []string{
+@@ -261,28 +258,28 @@ func TestInstallLivenessTask_HappyPath(t *testing.T) {
+ 	}
+ 	for _, w := range wantFragments {
+ 		if !strings.Contains(body, w) {
+-			t.Errorf("ImportXML body missing %q; full body:\n%s", w, body)
++			t.Errorf("CreateXMLIfAbsent body missing %q; full body:\n%s", w, body)
+ 		}
+ 	}
+ 	// The liveness install must NOT forward the watchdog action — proving it
+ 	// is a distinct, additive task (the watchdog install is untouched).
+ 	if strings.Contains(body, "watchdog --once") {
+-		t.Errorf("liveness ImportXML body unexpectedly contains the watchdog action")
++		t.Errorf("liveness CreateXMLIfAbsent body unexpectedly contains the watchdog action")
+ 	}
+ }
+ 
+-func TestInstallLivenessTask_ImportXMLReceivesUTF16LEBOM(t *testing.T) {
++func TestInstallLivenessTask_CreateXMLReceivesUTF16LEBOM(t *testing.T) {
+ 	f := newLivenessTaskScheduler()
+ 
+ 	if _, err := ensureLivenessTaskFixtureResolved(f); err != nil {
+ 		t.Fatalf("InstallLivenessTask: %v", err)
+ 	}
+-	imports := f.importCalls()
++	imports := f.createCalls()
+ 	if len(imports) != 1 {
+-		t.Fatalf("expected 1 ImportXML call, got %d", len(imports))
++		t.Fatalf("expected 1 CreateXMLIfAbsent call, got %d", len(imports))
+ 	}
+ 	if len(imports[0].xml) < 2 || imports[0].xml[0] != 0xFF || imports[0].xml[1] != 0xFE {
+-		t.Fatalf("ImportXML bytes must start with UTF-16 LE BOM; first bytes=% x", imports[0].xml[:min(len(imports[0].xml), 8)])
++		t.Fatalf("CreateXMLIfAbsent bytes must start with UTF-16 LE BOM; first bytes=% x", imports[0].xml[:min(len(imports[0].xml), 8)])
+ 	}
+ 	decoded := decodeUTF16LEBOMForTest(t, imports[0].xml)
+ 	if !strings.HasPrefix(decoded, `<?xml version="1.0" encoding="UTF-16"?>`) {
+@@ -303,8 +300,8 @@ func TestInstallLivenessTask_Idempotent(t *testing.T) {
+ 	if _, err := ensureLivenessTaskFixtureResolved(f); err != nil {
+ 		t.Fatalf("second InstallLivenessTask (idempotent): %v", err)
+ 	}
+-	if got := len(f.importCalls()); got != 1 {
+-		t.Errorf("expected one initial ImportXML call, got %d", got)
++	if got := len(f.createCalls()); got != 1 {
++		t.Errorf("expected one initial CreateXMLIfAbsent call, got %d", got)
+ 	}
+ }
+ 
+@@ -332,8 +329,8 @@ func TestEnsureLivenessTask_SemanticNormalizationIsIdempotent(t *testing.T) {
+ 			if receipt.Result != LivenessTaskUnchanged {
+ 				t.Fatalf("result=%q, want %q", receipt.Result, LivenessTaskUnchanged)
+ 			}
+-			if got := len(f.importCalls()); got != 0 {
+-				t.Fatalf("semantic match re-imported task %d times", got)
++			if got := len(f.createCalls()); got != 0 {
++				t.Fatalf("semantic match recreated task %d times", got)
+ 			}
+ 		})
+ 	}
+@@ -368,6 +365,8 @@ func TestInstallLivenessTask_ReadbackDifferenceReportsField(t *testing.T) {
+ 		normalize func(string) string
+ 		wantField string
+ 	}{
++		{name: "calendar disabled", normalize: replace("<CalendarTrigger>", "<CalendarTrigger><Enabled>false</Enabled>"), wantField: "trigger.calendar.enabled"},
++		{name: "calendar future", normalize: replace("2026-06-10T00:00:00", "2099-06-10T00:00:00"), wantField: "trigger.calendar.start_boundary"},
+ 		{name: "cadence", normalize: replace("<Interval>PT1M</Interval>", "<Interval>PT5M</Interval>"), wantField: "trigger.calendar.repetition.interval"},
+ 		{name: "run level", normalize: replace("<RunLevel>LeastPrivilege</RunLevel>", "<RunLevel>HighestAvailable</RunLevel>"), wantField: "principal.run_level"},
+ 		{name: "logon type", normalize: replace("<LogonType>InteractiveToken</LogonType>", "<LogonType>Password</LogonType>"), wantField: "principal.logon_type"},
+@@ -380,8 +379,9 @@ func TestInstallLivenessTask_ReadbackDifferenceReportsField(t *testing.T) {
+ 	}
+ 	for _, tc := range cases {
+ 		t.Run(tc.name, func(t *testing.T) {
++			t.Cleanup(SetDaemonStateRootForTest(hardenedTempDir(t)))
+ 			f := newLivenessTaskScheduler()
+-			f.normalizeImport = func(raw []byte) []byte {
++			f.normalizeCreate = func(raw []byte) []byte {
+ 				decoded := decodeUTF16LEBOMForTest(t, raw)
+ 				return scheduler.EncodeXMLUTF16LEBOM(tc.normalize(decoded))
+ 			}
+@@ -401,121 +401,101 @@ func TestInstallLivenessTask_ReadbackDifferenceReportsField(t *testing.T) {
+ 	}
+ }
+ 
+-func TestEnsureLivenessTask_ReadbackDriftRestoresExactPriorXML(t *testing.T) {
+-	f := newLivenessTaskScheduler()
+-	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
+-		livenessPriorFixtureExe, livenessPriorFixtureDir, "S-1-5-21-test", "test"))
+-	f.tasks[LivenessTaskName] = prior
+-	f.normalizeImport = func(raw []byte) []byte {
+-		if len(f.imports) != 1 {
+-			return append([]byte(nil), raw...)
+-		}
+-		return scheduler.EncodeXMLUTF16LEBOM(strings.Replace(
+-			decodeUTF16LEBOMForTest(t, raw),
+-			"<Interval>PT1M</Interval>",
+-			"<Interval>PT5M</Interval>",
+-			1,
+-		))
+-	}
+-
+-	_, err := ensureLivenessTaskFixtureResolved(f)
+-	if err == nil {
+-		t.Fatal("EnsureLivenessTask accepted post-import semantic drift")
+-	}
+-	var failure livenessTaskPostImportFailureReporter
+-	if !errors.As(err, &failure) {
+-		t.Fatalf("post-import error is not typed: %v", err)
+-	}
+-	if got := failure.LivenessTaskPostImportStage(); got != "semantic-drift" {
+-		t.Fatalf("post-import stage=%q, want semantic-drift", got)
+-	}
+-	if rollbackErr := failure.LivenessTaskRollbackError(); rollbackErr != nil {
+-		t.Fatalf("rollback error = %v, want nil", rollbackErr)
+-	}
+-	if got := f.tasks[LivenessTaskName]; !bytes.Equal(got, prior) {
+-		t.Fatalf("post-import failure left replacement task: got %q, want exact prior XML %q", got, prior)
+-	}
+-	if got := len(f.importCalls()); got != 2 {
+-		t.Fatalf("ImportXML calls=%d, want replacement plus restoration", got)
++func TestEnsureLivenessTask_ObservedDriftIsRetainedAndRefused(t *testing.T) {
++	canonical := scheduler.BuildLivenessXML(livenessFixtureExe, livenessFixtureWorkingDir, "S-1-5-21-test", "test")
++	for _, tc := range []struct {
++		name  string
++		xml   string
++		field LivenessTaskDifferenceField
++	}{
++		{"prior command", scheduler.BuildLivenessXML(livenessPriorFixtureExe, livenessPriorFixtureDir, "S-1-5-21-test", "test"), livenessTaskFieldActionCommand},
++		{"disabled calendar", strings.Replace(canonical, "<CalendarTrigger>", "<CalendarTrigger><Enabled>false</Enabled>", 1), livenessTaskFieldCalendarEnabled},
++		{"future calendar", strings.Replace(canonical, "2026-06-10T00:00:00", "2099-06-10T00:00:00", 1), livenessTaskFieldCalendarStartBoundary},
++		{"corrupt", "<Task>corrupt", livenessTaskFieldDefinition},
++		{"empty success", "", livenessTaskFieldDefinition},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			root := hardenedTempDir(t)
++			t.Cleanup(SetDaemonStateRootForTest(root))
++			f := newLivenessTaskScheduler()
++			prior := []byte(tc.xml)
++			f.tasks[LivenessTaskName] = bytes.Clone(prior)
++			receipt, err := ensureLivenessTaskFixtureResolved(f)
++			var difference livenessTaskDifferenceReporter
++			if !errors.Is(err, ErrSchedulerReplacementUnowned) || !errors.As(err, &difference) || difference.LivenessTaskDifferenceField() != string(tc.field) {
++				t.Fatalf("observed difference=%v, want refusal and field %s", err, tc.field)
++			}
++			if receipt.Result != "" || len(f.creates) != 0 || len(f.imports) != 0 || len(f.deletes) != 0 || !bytes.Equal(f.tasks[LivenessTaskName], prior) {
++				t.Fatalf("refusal changed occupant or reported success: receipt=%+v creates=%d imports=%d deletes=%v", receipt, len(f.creates), len(f.imports), f.deletes)
++			}
++			var refusal *SchedulerReplacementRefusedError
++			if !errors.As(err, &refusal) {
++				t.Fatalf("missing typed retention result: %v", err)
++			}
++			if len(prior) == 0 {
++				if refusal.Cause == nil || refusal.SnapshotPath != "" {
++					t.Fatalf("empty observation invented snapshot: %+v", refusal)
++				}
++			} else {
++				if refusal.Cause != nil || refusal.SnapshotPath == "" {
++					t.Fatalf("observed definition not retained: %+v", refusal)
++				}
++				readInstallRecoverySnapshot(t, root, LivenessTaskName, prior)
++			}
++		})
+ 	}
+ }
+ 
+-func TestEnsureLivenessTask_PostImportRollbackFailureIsRecoveryRequired(t *testing.T) {
++func TestEnsureLivenessTask_PostCreateReadbackAndRecoveryErrorsSurvive(t *testing.T) {
++	t.Cleanup(SetDaemonStateRootForTest(hardenedTempDir(t)))
+ 	f := newLivenessTaskScheduler()
+-	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
+-		livenessPriorFixtureExe, livenessPriorFixtureDir, "S-1-5-21-test", "test"))
+-	f.tasks[LivenessTaskName] = prior
+-	restoreErr := errors.New("simulated restore failure")
+-	f.importErrForCall = func(call int) error {
++	readbackErr := errors.New("simulated post-create readback failure")
++	recoveryErr := errors.New("simulated recovery observation failure")
++	f.exportErrForCall = func(call int) error {
+ 		if call == 2 {
+-			return restoreErr
++			return readbackErr
+ 		}
+-		return nil
+-	}
+-	f.normalizeImport = func(raw []byte) []byte {
+-		if len(f.imports) != 1 {
+-			return append([]byte(nil), raw...)
++		if call == 3 {
++			return recoveryErr
+ 		}
+-		return scheduler.EncodeXMLUTF16LEBOM(strings.Replace(
+-			decodeUTF16LEBOMForTest(t, raw),
+-			"<Interval>PT1M</Interval>",
+-			"<Interval>PT5M</Interval>",
+-			1,
+-		))
++		return nil
+ 	}
+-
+ 	_, err := ensureLivenessTaskFixtureResolved(f)
+-	if err == nil {
+-		t.Fatal("EnsureLivenessTask accepted post-import semantic drift")
+-	}
+ 	var failure livenessTaskPostImportFailureReporter
+-	if !errors.As(err, &failure) {
+-		t.Fatalf("post-import error is not typed: %v", err)
+-	}
+-	if got := failure.LivenessTaskPostImportStage(); got != "semantic-drift" {
+-		t.Fatalf("post-import stage=%q, want semantic-drift", got)
++	if !errors.As(err, &failure) || failure.LivenessTaskPostImportStage() != "readback" || !errors.Is(err, readbackErr) {
++		t.Fatalf("primary readback failure was lost: %v", err)
+ 	}
+-	if !errors.Is(failure.LivenessTaskRollbackError(), restoreErr) {
+-		t.Fatalf("rollback error=%v, want errors.Is(..., %v)", failure.LivenessTaskRollbackError(), restoreErr)
++	if !errors.Is(failure.LivenessTaskRollbackError(), recoveryErr) || !errors.Is(err, ErrLivenessTaskRollbackConflict) {
++		t.Fatalf("recovery observation failure was lost: %v", err)
+ 	}
+-	if got := f.tasks[LivenessTaskName]; bytes.Equal(got, prior) {
+-		t.Fatal("restore failure unexpectedly reported the exact prior XML as restored")
++	if len(f.creates) != 1 || len(f.imports) != 0 || len(f.deletes) != 0 || !bytes.Equal(f.tasks[LivenessTaskName], f.creates[0].xml) {
++		t.Fatalf("failed observations mutated occupant: creates=%d imports=%d deletes=%v", len(f.creates), len(f.imports), f.deletes)
+ 	}
+ }
+ 
+-func TestEnsureLivenessTask_ReadbackFailureRestoresExactPriorXML(t *testing.T) {
++func TestEnsureLivenessTask_ReadbackFailureRetainsCreatedTask(t *testing.T) {
++	root := hardenedTempDir(t)
++	t.Cleanup(SetDaemonStateRootForTest(root))
+ 	f := newLivenessTaskScheduler()
+-	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
+-		livenessPriorFixtureExe, livenessPriorFixtureDir, "S-1-5-21-test", "test"))
+-	f.tasks[LivenessTaskName] = prior
+-	readbackErr := errors.New("simulated post-import readback failure")
++	readbackErr := errors.New("simulated post-create readback failure")
+ 	f.exportErrForCall = func(call int) error {
+ 		if call == 2 {
+ 			return readbackErr
+ 		}
+ 		return nil
+ 	}
+-
+-	_, err := ensureLivenessTaskFixtureResolved(f)
+-	if err == nil {
+-		t.Fatal("EnsureLivenessTask accepted a failed post-import readback")
+-	}
++	receipt, err := ensureLivenessTaskFixtureResolved(f)
+ 	var failure livenessTaskPostImportFailureReporter
+-	if !errors.As(err, &failure) {
+-		t.Fatalf("post-import error is not typed: %v", err)
++	if !errors.As(err, &failure) || failure.LivenessTaskPostImportStage() != "readback" || !errors.Is(err, readbackErr) {
++		t.Fatalf("post-create error did not preserve readback failure: %v", err)
+ 	}
+-	if got := failure.LivenessTaskPostImportStage(); got != "readback" {
+-		t.Fatalf("post-import stage=%q, want readback", got)
++	if receipt.Result != LivenessTaskCreated || !errors.Is(failure.LivenessTaskRollbackError(), ErrLivenessTaskRollbackConflict) {
++		t.Fatalf("creation/recovery result=%+v / %v", receipt, err)
+ 	}
+-	if !errors.Is(err, readbackErr) {
+-		t.Fatalf("post-import error=%v, want errors.Is(..., %v)", err, readbackErr)
+-	}
+-	if rollbackErr := failure.LivenessTaskRollbackError(); rollbackErr != nil {
+-		t.Fatalf("rollback error=%v, want nil", rollbackErr)
+-	}
+-	if got := f.tasks[LivenessTaskName]; !bytes.Equal(got, prior) {
+-		t.Fatalf("post-import readback failure left replacement task: got %q, want exact prior XML %q", got, prior)
++	if len(f.creates) != 1 || len(f.imports) != 0 || len(f.deletes) != 0 || !bytes.Equal(f.tasks[LivenessTaskName], f.creates[0].xml) {
++		t.Fatalf("readback failure mutated occupant: creates=%d imports=%d deletes=%v", len(f.creates), len(f.imports), f.deletes)
+ 	}
++	readInstallRecoverySnapshot(t, root, LivenessTaskName, f.tasks[LivenessTaskName])
+ }
+ 
+ func reverseLivenessTriggerOrderForTest(taskXML string) string {
+@@ -533,64 +513,114 @@ func reverseLivenessTriggerOrderForTest(taskXML string) string {
+ 	return taskXML[:calendarStart] + logon + calendar + taskXML[logonEnd:]
+ }
+ 
+-// TestInstallLivenessTask_PropagatesImportXMLError asserts a scheduler failure
+-// is surfaced verbatim — the install path does not swallow errors.
+-func TestInstallLivenessTask_PropagatesImportXMLError(t *testing.T) {
+-	want := errors.New("simulated schtasks failure")
+-	f := newLivenessTaskScheduler()
+-	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
+-		livenessPriorFixtureExe, livenessPriorFixtureDir, "S-1-5-21-test", "test"))
+-	f.tasks[LivenessTaskName] = prior
+-	f.importErr = want
++func TestEnsureLivenessTask_CreateFailureNeverRetriesOrRemoves(t *testing.T) {
++	noEffectErr := errors.New("simulated creation failure")
++	unknownErr := errors.Join(scheduler.ErrUnavailable, scheduler.ErrMutationOutcomeUnknown)
++	for _, tc := range []struct {
++		name     string
++		want     error
++		effect   bool
++		conflict bool
++	}{
++		{name: "no effect", want: noEffectErr},
++		{name: "conflicting occupant", want: scheduler.ErrTaskAlreadyExists, effect: true, conflict: true},
++		{name: "unknown effect with matching definition", want: unknownErr, effect: true},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			root := hardenedTempDir(t)
++			t.Cleanup(SetDaemonStateRootForTest(root))
++			f := newLivenessTaskScheduler()
++			f.createErrForCall = func(call int) error {
++				if tc.effect {
++					f.tasks[LivenessTaskName] = bytes.Clone(f.creates[call-1].xml)
++					if tc.conflict {
++						f.tasks[LivenessTaskName] = []byte("<Task>competing registration</Task>")
++						return nil // CreateXMLIfAbsent itself rejects the now occupied name.
++					}
++				}
++				return tc.want
++			}
++			receipt, err := ensureLivenessTaskFixtureResolved(f)
++			if !errors.Is(err, tc.want) || receipt.Result != "" {
++				t.Fatalf("creation failure became success: receipt=%+v err=%v want=%v", receipt, err, tc.want)
++			}
++			if len(f.creates) != 1 || len(f.imports) != 0 || len(f.deletes) != 0 {
++				t.Fatalf("creation failure retried or compensated: creates=%d imports=%d deletes=%v", len(f.creates), len(f.imports), f.deletes)
++			}
++			if tc.effect {
++				current := f.creates[0].xml
++				if tc.conflict {
++					current = []byte("<Task>competing registration</Task>")
++				}
++				if !bytes.Equal(f.tasks[LivenessTaskName], current) || !errors.Is(err, ErrSchedulerReplacementUnowned) {
++					t.Fatalf("observed occupant was not preserved: %v", err)
++				}
++				readInstallRecoverySnapshot(t, root, LivenessTaskName, current)
++			} else if len(f.tasks) != 0 {
++				t.Fatalf("failed creation produced a task: %v", f.tasks)
++			}
++		})
++	}
++}
+ 
++func TestEnsureLivenessTask_AbsenceRequiresNoObservedBytes(t *testing.T) {
++	root := hardenedTempDir(t)
++	t.Cleanup(SetDaemonStateRootForTest(root))
++	f := newLivenessTaskScheduler()
++	prior := []byte(scheduler.BuildLivenessXML(livenessFixtureExe, livenessFixtureWorkingDir, "S-1-5-21-test", "test"))
++	f.tasks[LivenessTaskName] = bytes.Clone(prior)
++	f.exportErrForCall = func(int) error { return scheduler.ErrTaskNotFound }
++	f.exportBytesOnError = prior
+ 	_, err := ensureLivenessTaskFixtureResolved(f)
+-	if err == nil {
+-		t.Fatal("InstallLivenessTask: want error, got nil")
+-	}
+-	if !errors.Is(err, want) {
+-		t.Errorf("InstallLivenessTask: want errors.Is(err, want); got %v", err)
+-	}
+-	if got := f.tasks[LivenessTaskName]; !bytes.Equal(got, prior) {
+-		t.Fatalf("pre-import failure changed prior task: got %q, want %q", got, prior)
+-	}
+-	if got := len(f.importCalls()); got != 1 {
+-		t.Fatalf("pre-import failure attempted rollback: ImportXML calls=%d, want 1", got)
++	if !errors.Is(err, scheduler.ErrTaskNotFound) || !errors.Is(err, ErrSchedulerReplacementUnowned) || len(f.creates) != 0 || len(f.imports) != 0 || len(f.deletes) != 0 || !bytes.Equal(f.tasks[LivenessTaskName], prior) {
++		t.Fatalf("contradictory absence permitted mutation: err=%v creates=%d imports=%d deletes=%v", err, len(f.creates), len(f.imports), f.deletes)
+ 	}
++	readInstallRecoverySnapshot(t, root, LivenessTaskName, prior)
+ }
+ 
+-func TestLivenessTaskReceipt_RestoresExactPriorXMLAndPreservesForeignReplacement(t *testing.T) {
+-	a := NewAPI()
++func TestEnsureLivenessTask_RequiresXMLCreator(t *testing.T) {
+ 	f := newLivenessTaskScheduler()
+-	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
+-		livenessPriorFixtureExe, livenessPriorFixtureDir, "S-1-5-21-test", "test"))
+-	f.tasks[LivenessTaskName] = prior
+-	installTestScheduler(t, f)
+-
+-	receipt, err := ensureLivenessTaskFixtureResolved(f)
+-	if err != nil {
+-		t.Fatalf("EnsureLivenessTask: %v", err)
+-	}
+-	if receipt.Result != LivenessTaskReplaced {
+-		t.Fatalf("receipt result = %q, want %q", receipt.Result, LivenessTaskReplaced)
+-	}
+-	if err := a.RestoreLivenessTask(receipt); err != nil {
+-		t.Fatalf("RestoreLivenessTask: %v", err)
+-	}
+-	if got := f.tasks[LivenessTaskName]; !bytes.Equal(got, prior) {
+-		t.Fatalf("SchedulerRollbackExactXML: restored XML = %q, want %q", got, prior)
++	// Hide the optional capability while keeping the ordinary scheduler methods.
++	withoutXMLCreator := struct{ scheduler.Scheduler }{f}
++	_, err := ensureLivenessTaskFixtureResolved(withoutXMLCreator)
++	if !errors.Is(err, scheduler.ErrNotImplemented) || len(f.creates) != 0 || len(f.imports) != 0 || len(f.deletes) != 0 {
++		t.Fatalf("missing XMLCreator fell back to mutation: err=%v creates=%d imports=%d deletes=%v", err, len(f.creates), len(f.imports), f.deletes)
+ 	}
++}
+ 
+-	receipt, err = ensureLivenessTaskFixtureResolved(f)
+-	if err != nil {
+-		t.Fatalf("EnsureLivenessTask second: %v", err)
+-	}
+-	f.tasks[LivenessTaskName] = []byte("<Task>foreign</Task>")
+-	err = a.RestoreLivenessTask(receipt)
+-	if !errors.Is(err, ErrLivenessTaskRollbackConflict) {
+-		t.Fatalf("RestoreLivenessTask err = %v, want conflict", err)
+-	}
+-	if len(f.deletes) != 0 {
+-		t.Fatalf("foreign liveness task must not be deleted: %v", f.deletes)
++func TestLivenessTaskReceipt_ConfirmsAbsenceButNeverRemovesOccupant(t *testing.T) {
++	for _, occupant := range []string{"created", "foreign", "absent"} {
++		t.Run(occupant, func(t *testing.T) {
++			root := hardenedTempDir(t)
++			t.Cleanup(SetDaemonStateRootForTest(root))
++			f := newLivenessTaskScheduler()
++			installTestScheduler(t, f)
++			receipt, err := ensureLivenessTaskFixtureResolved(f)
++			if err != nil || receipt.Result != LivenessTaskCreated {
++				t.Fatalf("EnsureLivenessTask: receipt=%+v err=%v", receipt, err)
++			}
++			switch occupant {
++			case "foreign":
++				f.tasks[LivenessTaskName] = []byte("<Task>foreign</Task>")
++			case "absent":
++				delete(f.tasks, LivenessTaskName)
++			}
++			current := bytes.Clone(f.tasks[LivenessTaskName])
++			err = NewAPI().RestoreLivenessTask(receipt)
++			if occupant == "absent" {
++				if err != nil {
++					t.Fatalf("confirmed absence: %v", err)
++				}
++			} else {
++				if !errors.Is(err, ErrLivenessTaskRollbackConflict) || !errors.Is(err, ErrSchedulerReplacementUnowned) {
++					t.Fatalf("RestoreLivenessTask err=%v, want ownership conflict", err)
++				}
++				readInstallRecoverySnapshot(t, root, LivenessTaskName, current)
++			}
++			if len(f.imports) != 0 || len(f.deletes) != 0 || !bytes.Equal(f.tasks[LivenessTaskName], current) {
++				t.Fatalf("Restore mutated occupant: imports=%d deletes=%v", len(f.imports), f.deletes)
++			}
++		})
+ 	}
+ }
+ 
+diff --git a/internal/cli/setup_watchdog_test.go b/internal/cli/setup_watchdog_test.go
+index c735b55bf72873ce26ae288ea42ae4476594e227..1801bb7925ea115839ac72b1d8d8807ac5e59045 100644
+--- a/internal/cli/setup_watchdog_test.go
++++ b/internal/cli/setup_watchdog_test.go
+@@ -49,7 +49,7 @@ import (
+ 
+ var errNotImplementedForSetupTest = errors.New("setupFakeScheduler: not implemented")
+ 
+-type setupImportXMLCall struct {
++type setupXMLCall struct {
+ 	name string
+ 	xml  []byte
+ }
+@@ -58,10 +58,10 @@ type setupFakeScheduler struct {
+ 	mu                      sync.Mutex
+ 	tasks                   map[string][]byte
+ 	deleteCalls             []string
+-	importXMLCalls          []setupImportXMLCall
++	createXMLCalls          []setupXMLCall
++	importXMLCalls          []setupXMLCall
+ 	order                   []string
+-	importXMLErr            error
+-	normalizeImport         func([]byte) []byte
++	createXMLErr            error
+ 	legacyWatchdogExportErr error
+ 	listResult              []scheduler.TaskStatus
+ 	listErr                 error
+@@ -104,22 +104,29 @@ func (f *setupFakeScheduler) ExportXML(name string) ([]byte, error) {
+ 	}
+ 	return append([]byte(nil), xml...), nil
+ }
+-func (f *setupFakeScheduler) ImportXML(name string, xml []byte) error {
++func (f *setupFakeScheduler) CreateXMLIfAbsent(name string, xml []byte) error {
+ 	f.mu.Lock()
+ 	defer f.mu.Unlock()
+ 	cp := make([]byte, len(xml))
+ 	copy(cp, xml)
+-	f.importXMLCalls = append(f.importXMLCalls, setupImportXMLCall{name: name, xml: cp})
+-	f.order = append(f.order, "import:"+name)
+-	if f.importXMLErr != nil {
+-		return f.importXMLErr
++	f.createXMLCalls = append(f.createXMLCalls, setupXMLCall{name: name, xml: cp})
++	f.order = append(f.order, "create:"+name)
++	if _, exists := f.tasks[name]; exists {
++		return scheduler.ErrTaskAlreadyExists
+ 	}
+-	if f.normalizeImport != nil {
+-		cp = f.normalizeImport(cp)
++	if f.createXMLErr != nil {
++		return f.createXMLErr
+ 	}
+ 	f.tasks[name] = cp
+ 	return nil
+ }
++func (f *setupFakeScheduler) ImportXML(name string, xml []byte) error {
++	f.mu.Lock()
++	defer f.mu.Unlock()
++	f.importXMLCalls = append(f.importXMLCalls, setupXMLCall{name: name, xml: bytes.Clone(xml)})
++	f.order = append(f.order, "import:"+name)
++	return errNotImplementedForSetupTest
++}
+ func (f *setupFakeScheduler) deletes() []string {
+ 	f.mu.Lock()
+ 	defer f.mu.Unlock()
+@@ -136,12 +143,12 @@ func (f *setupFakeScheduler) operationOrder() []string {
+ 	return out
+ }
+ 
+-// importXMLByName returns how many ImportXML calls targeted the given name.
+-func (f *setupFakeScheduler) importXMLByName(name string) int {
++// createXMLByName returns how many CreateXMLIfAbsent calls targeted the given name.
++func (f *setupFakeScheduler) createXMLByName(name string) int {
+ 	f.mu.Lock()
+ 	defer f.mu.Unlock()
+ 	n := 0
+-	for _, c := range f.importXMLCalls {
++	for _, c := range f.createXMLCalls {
+ 		if c.name == name {
+ 			n++
+ 		}
+@@ -221,12 +228,12 @@ func TestSetup_DoesNotInstallWatchdog_InstallsLiveness(t *testing.T) {
+ 		t.Fatalf("runSetupWatchdog: %v", err)
+ 	}
+ 	// The legacy watchdog must NEVER be installed.
+-	if got := fakeSch.importXMLByName(api.LegacyWatchdogTaskName); got != 0 {
+-		t.Errorf("watchdog ImportXML calls = %d, want 0 (Phase C dropped the install)", got)
++	if got := fakeSch.createXMLByName(api.LegacyWatchdogTaskName); got != 0 {
++		t.Errorf("watchdog CreateXMLIfAbsent calls = %d, want 0 (Phase C dropped the install)", got)
+ 	}
+ 	// The liveness task IS installed (the sole maintenance-task install).
+-	if got := fakeSch.importXMLByName(api.LivenessTaskName); got != 1 {
+-		t.Errorf("liveness ImportXML calls = %d, want 1", got)
++	if got := fakeSch.createXMLByName(api.LivenessTaskName); got != 1 {
++		t.Errorf("liveness CreateXMLIfAbsent calls = %d, want 1", got)
+ 	}
+ 	if deletes := fakeSch.deletes(); len(deletes) != 0 || strings.Contains(out.String(), api.LegacyWatchdogTaskName) {
+ 		t.Errorf("absent watchdog was not a silent no-op: deletes=%v output=%q", deletes, out.String())
+@@ -238,7 +245,7 @@ func TestSetup_DoesNotInstallWatchdog_InstallsLiveness(t *testing.T) {
+ 
+ func TestSetup_LivenessInstallFailureFailsClosedAndKeepsLegacyWatchdog(t *testing.T) {
+ 	_, fakeSch := setupWatchdogTestHelper(t)
+-	fakeSch.importXMLErr = errors.New("schtasks /Create /XML rejected liveness")
++	fakeSch.createXMLErr = errors.New("schtasks /Create /XML rejected liveness")
+ 	prior := []byte("<Task>legacy watchdog</Task>")
+ 	fakeSch.tasks[api.LegacyWatchdogTaskName] = prior
+ 
+@@ -269,36 +276,28 @@ func TestSetup_LivenessInstallFailureFailsClosedAndKeepsLegacyWatchdog(t *testin
+ 	}
+ }
+ 
+-func TestSetup_LivenessReadbackDriftRestoresPriorTaskAndFailsClosed(t *testing.T) {
++func TestSetup_ObservedLivenessDriftIsRetainedAndFailsClosed(t *testing.T) {
+ 	_, fakeSch := setupWatchdogTestHelper(t)
++	t.Cleanup(api.SetDaemonStateRootForTest(apitest.HardenedTempDir(t)))
+ 	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
+ 		`C:\previous\mcphub.exe`, `C:\previous`, "S-1-5-21-test", "test-user"))
+ 	fakeSch.tasks[api.LivenessTaskName] = prior
+-	firstImport := true
+-	fakeSch.normalizeImport = func(raw []byte) []byte {
+-		if !firstImport {
+-			return raw
+-		}
+-		firstImport = false
+-		return scheduler.EncodeXMLUTF16LEBOM(strings.Replace(
+-			scheduler.BuildLivenessXML(`C:\fake\mcphub.exe`, `C:\fake`, "S-1-5-21-test", "test-user"),
+-			"<Interval>PT1M</Interval>", "<Interval>PT5M</Interval>", 1))
+-	}
+-
++	registerCalls := 0
++	setupRegisterEventLogFn = func() error { registerCalls++; return nil }
+ 	out := &bytes.Buffer{}
+ 	err := runSetupWatchdog(out, false)
+-	if err == nil {
+-		t.Fatal("runSetupWatchdog: want liveness readback failure")
+-	}
+ 	var fe interface{ ExitCode() int }
+ 	if !errors.As(err, &fe) || fe.ExitCode() != 12 {
+ 		t.Fatalf("setup exit=%v, want force exit 12", err)
+ 	}
+-	if got := fakeSch.tasks[api.LivenessTaskName]; !bytes.Equal(got, prior) {
+-		t.Fatalf("setup left drifted liveness task: got %q, want exact prior XML %q", got, prior)
++	if !bytes.Equal(fakeSch.tasks[api.LivenessTaskName], prior) || len(fakeSch.createXMLCalls) != 0 || len(fakeSch.importXMLCalls) != 0 || len(fakeSch.deletes()) != 0 {
++		t.Fatalf("setup mutated observed liveness task: operations=%v", fakeSch.operationOrder())
++	}
++	if registerCalls != 0 || slices.Contains(fakeSch.operationOrder(), "export:"+api.LegacyWatchdogTaskName) {
++		t.Fatalf("setup continued past required liveness refusal: EventLog=%d operations=%v", registerCalls, fakeSch.operationOrder())
+ 	}
+-	if got := fakeSch.importXMLByName(api.LivenessTaskName); got != 2 {
+-		t.Fatalf("liveness ImportXML calls=%d, want replacement plus restoration", got)
++	if !strings.Contains(out.String(), "observed definition snapshot retained at") {
++		t.Fatalf("setup lost liveness retention diagnostic: %q", out.String())
+ 	}
+ }
+ 
+@@ -307,14 +306,14 @@ func TestSetup_NonWindowsLivenessNotImplementedContinues(t *testing.T) {
+ 		t.Skip("ErrNotImplemented liveness installs must fail closed on Windows")
+ 	}
+ 	_, fakeSch := setupWatchdogTestHelper(t)
+-	fakeSch.importXMLErr = fmt.Errorf("linux scheduler backend: %w", scheduler.ErrNotImplemented)
++	fakeSch.createXMLErr = fmt.Errorf("linux scheduler backend: %w", scheduler.ErrNotImplemented)
+ 
+ 	out := &bytes.Buffer{}
+ 	if err := runSetupWatchdog(out, false); err != nil {
+ 		t.Fatalf("runSetupWatchdog: %v", err)
+ 	}
+-	if got := fakeSch.importXMLByName(api.LivenessTaskName); got != 1 {
+-		t.Errorf("liveness ImportXML calls = %d, want 1", got)
++	if got := fakeSch.createXMLByName(api.LivenessTaskName); got != 1 {
++		t.Errorf("liveness CreateXMLIfAbsent calls = %d, want 1", got)
+ 	}
+ 	if calls := fakeSch.operationOrder(); !slices.Contains(calls, "export:"+api.LegacyWatchdogTaskName) || len(fakeSch.deletes()) != 0 {
+ 		t.Errorf("expected read-only legacy watchdog observation after POSIX liveness skip; got %v", calls)
+@@ -336,7 +335,7 @@ func TestSetup_InstallsLivenessBeforeObservingLegacyWatchdog(t *testing.T) {
+ 	}
+ 	want := []string{
+ 		"export:" + api.LivenessTaskName,
+-		"import:" + api.LivenessTaskName,
++		"create:" + api.LivenessTaskName,
+ 		"export:" + api.LivenessTaskName,
+ 		"export:" + api.LegacyWatchdogTaskName,
+ 	}
+@@ -346,7 +345,7 @@ func TestSetup_InstallsLivenessBeforeObservingLegacyWatchdog(t *testing.T) {
+ }
+ 
+ // TestSetup_RunsTwice_Idempotent asserts re-running setup does not error and
+-// the settled liveness task is verified without a second ImportXML call.
++// the settled liveness task is verified without a second CreateXMLIfAbsent call.
+ func TestSetup_RunsTwice_Idempotent(t *testing.T) {
+ 	_, fakeSch := setupWatchdogTestHelper(t)
+ 	t.Cleanup(api.SetDaemonStateRootForTest(apitest.HardenedTempDir(t)))
+@@ -362,11 +361,11 @@ func TestSetup_RunsTwice_Idempotent(t *testing.T) {
+ 	if err := runSetupWatchdog(out, false); err != nil {
+ 		t.Fatalf("second runSetupWatchdog: %v", err)
+ 	}
+-	if got := fakeSch.importXMLByName(api.LivenessTaskName); got != 1 {
+-		t.Errorf("liveness ImportXML calls = %d after two runs, want 1", got)
++	if got := fakeSch.createXMLByName(api.LivenessTaskName); got != 1 {
++		t.Errorf("liveness CreateXMLIfAbsent calls = %d after two runs, want 1", got)
+ 	}
+-	if got := fakeSch.importXMLByName(api.LegacyWatchdogTaskName); got != 0 {
+-		t.Errorf("watchdog ImportXML calls = %d, want 0 across both runs", got)
++	if got := fakeSch.createXMLByName(api.LegacyWatchdogTaskName); got != 0 {
++		t.Errorf("watchdog CreateXMLIfAbsent calls = %d, want 0 across both runs", got)
+ 	}
+ 	if deletes := fakeSch.deletes(); len(deletes) != 0 || !bytes.Equal(fakeSch.tasks[api.LegacyWatchdogTaskName], prior) {
+ 		t.Errorf("repeating setup mutated the watchdog: deletes=%v", deletes)
+@@ -418,8 +417,8 @@ func TestSetup_StateDirSanityFails_AbortsExit8(t *testing.T) {
+ 	if fe.ExitCode() != 8 {
+ 		t.Errorf("exit code = %d, want 8", fe.ExitCode())
+ 	}
+-	if len(fakeSch.importXMLCalls) != 0 {
+-		t.Errorf("ImportXML should NOT be called on state-dir failure; got %d calls", len(fakeSch.importXMLCalls))
++	if len(fakeSch.createXMLCalls)+len(fakeSch.importXMLCalls) != 0 {
++		t.Errorf("Scheduler registration should NOT be called on state-dir failure; got %d calls", len(fakeSch.createXMLCalls)+len(fakeSch.importXMLCalls))
+ 	}
+ 	if !strings.Contains(out.String(), "synthetic state-dir sanity failure") {
+ 		t.Errorf("stderr missing state-dir error context; got %q", out.String())
+@@ -442,8 +441,8 @@ func TestSetup_Elevated_NoFlag_Refuses(t *testing.T) {
+ 	if !strings.Contains(err.Error(), "--allow-elevated") {
+ 		t.Errorf("error must mention --allow-elevated; got %q", err.Error())
+ 	}
+-	if len(fakeSch.importXMLCalls) != 0 {
+-		t.Errorf("ImportXML should NOT be called when refusing elevation; got %d calls", len(fakeSch.importXMLCalls))
++	if len(fakeSch.createXMLCalls)+len(fakeSch.importXMLCalls) != 0 {
++		t.Errorf("Scheduler registration should NOT be called when refusing elevation; got %d calls", len(fakeSch.createXMLCalls)+len(fakeSch.importXMLCalls))
+ 	}
+ }
+ 
+@@ -464,8 +463,8 @@ func TestSetup_Elevated_WithAllowElevated_HappyPath_AuditWritten(t *testing.T) {
+ 	if err := runSetupWatchdog(out, true); err != nil {
+ 		t.Fatalf("runSetupWatchdog with allowElevated=true: %v", err)
+ 	}
+-	if got := fakeSch.importXMLByName(api.LivenessTaskName); got != 1 {
+-		t.Errorf("liveness ImportXML calls = %d, want 1", got)
++	if got := fakeSch.createXMLByName(api.LivenessTaskName); got != 1 {
++		t.Errorf("liveness CreateXMLIfAbsent calls = %d, want 1", got)
+ 	}
+ 
+ 	found := false
+@@ -513,8 +512,8 @@ func TestSetup_Elevated_WithAllowElevated_AuditFails_Exit11(t *testing.T) {
+ 	if fe.ExitCode() != 11 {
+ 		t.Errorf("exit code = %d, want 11", fe.ExitCode())
+ 	}
+-	if len(fakeSch.importXMLCalls) != 0 {
+-		t.Errorf("ImportXML should NOT be called when audit fails; got %d calls", len(fakeSch.importXMLCalls))
++	if len(fakeSch.createXMLCalls)+len(fakeSch.importXMLCalls) != 0 {
++		t.Errorf("Scheduler registration should NOT be called when audit fails; got %d calls", len(fakeSch.createXMLCalls)+len(fakeSch.importXMLCalls))
+ 	}
+ }
+ 
+@@ -541,8 +540,8 @@ func TestSetup_EventLogRegistrationFails_NonFatal(t *testing.T) {
+ 	if atomic.LoadInt32(&regCalls) != 1 {
+ 		t.Errorf("RegisterEventLog calls = %d, want 1", atomic.LoadInt32(&regCalls))
+ 	}
+-	if got := fakeSch.importXMLByName(api.LivenessTaskName); got != 1 {
+-		t.Errorf("liveness should still install when EventLog reg fails; got %d liveness ImportXML calls", got)
++	if got := fakeSch.createXMLByName(api.LivenessTaskName); got != 1 {
++		t.Errorf("liveness should still install when EventLog reg fails; got %d liveness CreateXMLIfAbsent calls", got)
+ 	}
+ 	if !strings.Contains(out.String(), "EventLog source registration failed") {
+ 		t.Errorf("stdout missing non-fatal EventLog warning; got %q", out.String())
+diff --git a/internal/cli/supervise_status.go b/internal/cli/supervise_status.go
+index 81412548e82d81fee31c9902fe5590906cab82a0..51400b4337b5f74be9cf87189336006b6329efb7 100644
+--- a/internal/cli/supervise_status.go
++++ b/internal/cli/supervise_status.go
+@@ -190,40 +190,42 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker, coa
+ 	daemonStates := tracker.Snapshot()
+ 	statusNow := time.Now().UTC()
+ 
+-	// Perf: take ONE OS port-owner snapshot for the whole refresh and resolve
+-	// every daemon against it, instead of letting each daemon's liveness check
+-	// spawn its own `netstat -ano` (15 running daemons → 15 spawns → ~730ms
+-	// cold /api/status; same anti-pattern scan.go already fixed). Only when the
+-	// global liveness probe HAS an OS-level port-owner lookup (Windows/Linux);
+-	// when it is nil (macOS / other POSIX) we keep today's PortLive TCP fallback
+-	// unchanged — no snapshot, no behavior change.
++	// Resolve every needed port from one snapshot per refresh. Inactive rows
++	// need no port observation and must not wait for a cold netstat query.
++	// Running liveness and pending-stop diagnostics share the same snapshot.
+ 	livenessProbe := supervisorLivenessProbeFns
+ 	var portOwnerSnapshot map[int]int
++	var loadPortOwners func()
+ 	if livenessProbe.PortOwnerPID != nil {
+-		var snapshot map[int]int
+ 		var snapErr error
+-		if coalescer != nil {
+-			snapshot, snapErr = coalescer.Get()
+-		} else {
+-			// nil coalescer -> direct non-ctx probe, byte-identical to pre-fix
+-			// (keeps the existing direct-call status tests valid).
+-			snapshot, snapErr = loopbackPortOwnersSnapshotFn()
++		snapshotLoaded := false
++		loadPortOwners = func() {
++			if snapshotLoaded {
++				return
++			}
++			snapshotLoaded = true
++			if coalescer != nil {
++				portOwnerSnapshot, snapErr = coalescer.Get()
++			} else {
++				// Keep the existing direct-call seam when no coalescer is supplied.
++				portOwnerSnapshot, snapErr = loopbackPortOwnersSnapshotFn()
++			}
+ 		}
+-		portOwnerSnapshot = snapshot
+ 		// Replace the per-port netstat lookup with a closure that resolves from
+ 		// the single shared snapshot. Semantics match the per-port path EXACTLY:
+ 		//   - snapshot error → every port returns that err → the daemon is
+ 		//     classified port_owner_unverified (within bind grace → live), the
+ 		//     same fail-closed outcome as a per-port netstat failure;
+-		//   - port in map → its owner PID (== tracked PID → live; != → mismatch;
+-		//     == supervisor self → port_owner_self);
++		//   - port in map → (owner PID, true, nil), classified by the existing
++		//     liveness predicate against the tracked daemon and supervisor;
+ 		//   - port NOT in map → (0, false, nil) = port_unbound, exactly what a
+ 		//     per-port netstat finding nothing returns.
+ 		livenessProbe.PortOwnerPID = func(port int) (int, bool, error) {
++			loadPortOwners()
+ 			if snapErr != nil {
+ 				return 0, false, snapErr
+ 			}
+-			if pid, ok := snapshot[port]; ok {
++			if pid, ok := portOwnerSnapshot[port]; ok {
+ 				return pid, true, nil
+ 			}
+ 			return 0, false, nil
+@@ -324,6 +326,11 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker, coa
+ 		var pidStatusErr error
+ 		usedPIDStatus := false
+ 		if ok && !stopPending && runtimeState.State == daemonRuntimeStateRunning {
++			// Keep the port snapshot before a potentially blocking process query.
++			// Inactive requests still avoid it entirely.
++			if loadPortOwners != nil {
++				loadPortOwners()
++			}
+ 			rowProbe := livenessProbe
+ 			if observe := rowProbe.PIDStatus; observe != nil {
+ 				usedPIDStatus = true
+@@ -422,6 +429,9 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker, coa
+ 			if stopReceipt.FailureDetail != "" {
+ 				diagnostic["failure_detail"] = stopReceipt.FailureDetail
+ 			}
++			if loadPortOwners != nil {
++				loadPortOwners()
++			}
+ 			if ownerPID, ownerKnown := portOwnerSnapshot[port]; ownerKnown && ownerPID > 0 {
+ 				diagnostic["observed_port_owner_pid"] = ownerPID
+ 			}
+diff --git a/internal/cli/supervise_status_process_test.go b/internal/cli/supervise_status_process_test.go
+index 5d739d3e0b5fcc4ca880b432d5a3c8c5e4a2d18f..511d48417f2bfc823dacfb1e7c5c6c8a1ad748fe 100644
+--- a/internal/cli/supervise_status_process_test.go
++++ b/internal/cli/supervise_status_process_test.go
+@@ -110,6 +110,7 @@ func TestSupervisorStatusPIDObservationProjectsResults(t *testing.T) {
+ 				"command": d.Command, "args": d.Args, "workspace": d.Workspace,
+ 				"port": d.Port, "state": tt.wantState, "current_pid": statusObservationPID,
+ 				"started_at": daemonRuntimeStartedAt(startedAt), "is_maintenance": false, "crashes_in_window": 0,
++				"pid_generation": 1,
+ 			}
+ 			if tt.wantState == "Restarting" {
+ 				want["current_pid"] = 0
+diff --git a/internal/cli/supervise_status_snapshot_test.go b/internal/cli/supervise_status_snapshot_test.go
+index 31472aa8bc73de0312efb717277ce5983114cf87..63657630d1c9a1c5a78fc8c2acad629ea45dad93 100644
+--- a/internal/cli/supervise_status_snapshot_test.go
++++ b/internal/cli/supervise_status_snapshot_test.go
+@@ -1,748 +1,836 @@
+-package cli
+-
+-import (
+-	"context"
+-	"errors"
+-	"fmt"
+-	"os"
+-	"path/filepath"
+-	"sync"
+-	"sync/atomic"
+-	"testing"
+-	"time"
+-
+-	"mcp-local-hub/internal/api"
+-	"mcp-local-hub/internal/api/apitest"
+-)
+-
+-// withFakePortOwnersSnapshot swaps the package-level
+-// loopbackPortOwnersSnapshotFn for the duration of a test and returns a pointer
+-// to a call counter so the test can assert the snapshot is taken EXACTLY ONCE
+-// per supervisorStatusDaemons refresh (the core perf guarantee — N daemons,
+-// ONE OS port-owner query, not N).
+-func withFakePortOwnersSnapshot(t *testing.T, fn func() (map[int]int, error)) *int {
+-	t.Helper()
+-	var calls int
+-	prev := loopbackPortOwnersSnapshotFn
+-	loopbackPortOwnersSnapshotFn = func() (map[int]int, error) {
+-		calls++
+-		return fn()
+-	}
+-	t.Cleanup(func() { loopbackPortOwnersSnapshotFn = prev })
+-	return &calls
+-}
+-
+-// seedRunningDaemons writes a state-safe supervisor-intent.json with n Running
+-// daemons (ports preset so the status producer's port resolver short-circuits on
+-// Port>0 and never reaches the manifest / the registry) and returns the stateDir,
+-// the populated tracker, and a task -> (pid, port) map for assertions. StartedAt is
+-// set well past the bind grace so a not-live classification is not masked by
+-// the grace window.
+-func seedRunningDaemons(t *testing.T, n int) (string, *DaemonRuntimeTracker, map[string]struct{ pid, port int }) {
+-	t.Helper()
+-	stateDir := apitest.HardenedTempDir(t)
+-	intent := &api.SupervisorIntentFile{Version: 1}
+-	meta := map[string]struct{ pid, port int }{}
+-	tracker := NewDaemonRuntimeTracker()
+-	startedAt := time.Now().UTC().Add(-1 * time.Hour) // far past the 5s bind grace
+-	for i := 0; i < n; i++ {
+-		task := fmt.Sprintf(`\mcp-local-hub-srv%d-default`, i)
+-		pid := 500000 + i
+-		port := 9300 + i
+-		intent.Daemons = append(intent.Daemons, api.SupervisorDaemon{
+-			TaskName: task,
+-			Server:   fmt.Sprintf("srv%d", i),
+-			Daemon:   "default",
+-			Port:     port,
+-		})
+-		tracker.MarkSpawned(task, pid, startedAt)
+-		meta[task] = struct{ pid, port int }{pid, port}
+-	}
+-	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
+-		t.Fatalf("seed supervisor-intent.json: %v", err)
+-	}
+-	return stateDir, tracker, meta
+-}
+-
+-// installOwnsPortProbe sets the GLOBAL liveness probe so the status path takes
+-// the snapshot branch (PortOwnerPID must be non-nil to enable it) with
+-// PIDAlive=true and NO PIDIdentity proof (so the per-daemon liveness reduces to
+-// the port-owner check resolved from the injected snapshot). The PortOwnerPID
+-// installed here is never actually called by the status path — it is replaced
+-// by the snapshot-backed closure inside supervisorStatusDaemons — but it must
+-// be non-nil to gate the snapshot branch on.
+-func installOwnsPortProbe(t *testing.T) {
+-	t.Helper()
+-	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+-		PIDAlive:     func(pid int) bool { return true },
+-		PortLive:     func(port int) bool { return true },
+-		PortOwnerPID: func(port int) (int, bool, error) { return 0, false, errors.New("must not be called directly") },
+-	})
+-	t.Cleanup(restore)
+-}
+-
+-// TestSupervisorStatusTakesPortOwnerSnapshotExactlyOnce is the core perf
+-// guarantee: resolving N(>=3) running daemons takes ONE OS port-owner snapshot,
+-// not N per-port netstat spawns. It also asserts every daemon resolves Running
+-// against the shared snapshot (each port maps to its own tracked PID).
+-func TestSupervisorStatusTakesPortOwnerSnapshotExactlyOnce(t *testing.T) {
+-	const n = 4
+-	stateDir, tracker, meta := seedRunningDaemons(t, n)
+-	installOwnsPortProbe(t)
+-
+-	// Build the snapshot: every daemon's port maps to its OWN tracked PID, so
+-	// every row resolves live (port_owner == current_pid).
+-	snap := map[int]int{}
+-	for _, m := range meta {
+-		snap[m.port] = m.pid
+-	}
+-	calls := withFakePortOwnersSnapshot(t, func() (map[int]int, error) { return snap, nil })
+-
+-	rows, err := supervisorStatusDaemons(stateDir, tracker, nil)
+-	if err != nil {
+-		t.Fatalf("supervisorStatusDaemons: %v", err)
+-	}
+-	if *calls != 1 {
+-		t.Fatalf("port-owner snapshot taken %d times, want EXACTLY 1 (one query for all %d daemons)", *calls, n)
+-	}
+-	if len(rows) != n {
+-		t.Fatalf("rows len = %d, want %d", len(rows), n)
+-	}
+-	for _, row := range rows {
+-		if row["state"] != "Running" {
+-			t.Fatalf("daemon %v resolved %q, want Running (port owner == tracked pid): %+v", row["task_name"], row["state"], row)
+-		}
+-		if _, hasStale := row["stale_pid"]; hasStale {
+-			t.Fatalf("daemon %v should not carry stale_pid when owned by its tracked pid: %+v", row["task_name"], row)
+-		}
+-	}
+-}
+-
+-// TestSupervisorStatusSnapshotErrorStaysRunning asserts a snapshot ERROR is
+-// treated exactly like a per-port netstat failure: the daemon classifies
+-// port_owner_unverified, which the status producer keeps as Running (not
+-// Restarting). A probe error must NEVER flip the row to a restart state.
+-func TestSupervisorStatusSnapshotErrorStaysRunning(t *testing.T) {
+-	const n = 3
+-	stateDir, tracker, _ := seedRunningDaemons(t, n)
+-	installOwnsPortProbe(t)
+-
+-	calls := withFakePortOwnersSnapshot(t, func() (map[int]int, error) {
+-		return nil, errors.New("netstat policy-blocked")
+-	})
+-
+-	rows, err := supervisorStatusDaemons(stateDir, tracker, nil)
+-	if err != nil {
+-		t.Fatalf("supervisorStatusDaemons: %v", err)
+-	}
+-	if *calls != 1 {
+-		t.Fatalf("snapshot taken %d times on error path, want 1", *calls)
+-	}
+-	if len(rows) != n {
+-		t.Fatalf("rows len = %d, want %d", len(rows), n)
+-	}
+-	for _, row := range rows {
+-		if row["state"] != "Running" {
+-			t.Fatalf("daemon %v resolved %q on snapshot error, want Running (port_owner_unverified is observe-only): %+v", row["task_name"], row["state"], row)
+-		}
+-		if _, hasStale := row["stale_pid"]; hasStale {
+-			t.Fatalf("daemon %v carried stale_pid on a probe error, want none: %+v", row["task_name"], row)
+-		}
+-	}
+-}
+-
+-// TestSupervisorStatusSnapshotOwnerMismatchFlipsRestarting asserts a daemon
+-// whose port is owned by a DIFFERENT live PID in the shared snapshot flips to
+-// Restarting and surfaces stale_pid — the port_owner_mismatch path. Other
+-// daemons whose ports map to their own tracked PID stay Running. Still ONE
+-// snapshot for the whole refresh.
+-func TestSupervisorStatusSnapshotOwnerMismatchFlipsRestarting(t *testing.T) {
+-	const n = 3
+-	stateDir, tracker, meta := seedRunningDaemons(t, n)
+-	installOwnsPortProbe(t)
+-
+-	// Pin the supervisor self-PID to a value that cannot collide with any
+-	// tracked daemon PID (500000+) or the foreign owner (pid+999999) so the
+-	// squatted port resolves port_owner_mismatch deterministically, never the
+-	// port_owner_self branch.
+-	prevSelf := supervisorSelfPIDFn
+-	supervisorSelfPIDFn = func() int { return 1 }
+-	t.Cleanup(func() { supervisorSelfPIDFn = prevSelf })
+-
+-	// Pick one daemon to be squatted: its port maps to a FOREIGN pid in the
+-	// snapshot; the rest map to their own tracked pid.
+-	var squattedTask string
+-	var squattedPID, squattedPort int
+-	snap := map[int]int{}
+-	for task, m := range meta {
+-		if squattedTask == "" {
+-			squattedTask = task
+-			squattedPID = m.pid
+-			squattedPort = m.port
+-			snap[m.port] = m.pid + 999999 // foreign owner
+-			continue
+-		}
+-		snap[m.port] = m.pid
+-	}
+-	calls := withFakePortOwnersSnapshot(t, func() (map[int]int, error) { return snap, nil })
+-
+-	rows, err := supervisorStatusDaemons(stateDir, tracker, nil)
+-	if err != nil {
+-		t.Fatalf("supervisorStatusDaemons: %v", err)
+-	}
+-	if *calls != 1 {
+-		t.Fatalf("snapshot taken %d times, want 1", *calls)
+-	}
+-
+-	var sawSquatted bool
+-	for _, row := range rows {
+-		canonTask := row["task_name"].(string)
+-		if canonTask == squattedTask {
+-			sawSquatted = true
+-			if row["state"] != "Restarting" {
+-				t.Fatalf("squatted daemon %q (port %d owned by foreign pid) resolved %q, want Restarting: %+v", squattedTask, squattedPort, row["state"], row)
+-			}
+-			if got := row["stale_pid"]; got != squattedPID {
+-				t.Fatalf("squatted daemon stale_pid = %v, want tracked pid %d: %+v", got, squattedPID, row)
+-			}
+-			if row["current_pid"] != 0 {
+-				t.Fatalf("squatted daemon current_pid = %v, want 0 (zeroed on Restarting): %+v", row["current_pid"], row)
+-			}
+-			continue
+-		}
+-		if row["state"] != "Running" {
+-			t.Fatalf("non-squatted daemon %q resolved %q, want Running: %+v", canonTask, row["state"], row)
+-		}
+-	}
+-	if !sawSquatted {
+-		t.Fatalf("squatted task %q not found in rows", squattedTask)
+-	}
+-}
+-
+-func waitForCoalescerCalls(t *testing.T, calls *int32, want int32) {
+-	t.Helper()
+-	deadline := time.Now().Add(2 * time.Second)
+-	for time.Now().Before(deadline) {
+-		if got := atomic.LoadInt32(calls); got >= want {
+-			return
+-		}
+-		time.Sleep(time.Millisecond)
+-	}
+-	t.Fatalf("snapshotFn calls = %d, want at least %d", atomic.LoadInt32(calls), want)
+-}
+-
+-func waitForCoalescerSnapshotValue(t *testing.T, c *statusPortOwnersCoalescer, port, want int) {
+-	t.Helper()
+-	deadline := time.Now().Add(2 * time.Second)
+-	for time.Now().Before(deadline) {
+-		snap, err := c.Get()
+-		if err != nil {
+-			t.Fatalf("Get while waiting for refreshed snapshot: %v", err)
+-		}
+-		if snap[port] == want {
+-			return
+-		}
+-		time.Sleep(time.Millisecond)
+-	}
+-	snap, err := c.Get()
+-	t.Fatalf("refreshed snapshot value for port %d = %v, err=%v, want %d", port, snap[port], err, want)
+-}
+-
+-func TestStatusPortOwnersCoalescerCoalescesWithinTTL(t *testing.T) {
+-	var calls int32
+-	var gen atomic.Uint64
+-	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+-	c := &statusPortOwnersCoalescer{
+-		snapshotFn: func(context.Context) (map[int]int, error) {
+-			atomic.AddInt32(&calls, 1)
+-			return map[int]int{9123: 1234}, nil
+-		},
+-		genFn:   gen.Load,
+-		nowFn:   func() time.Time { return now },
+-		timeout: time.Second,
+-	}
+-
+-	for i := 0; i < 5; i++ {
+-		snap, err := c.Get()
+-		if err != nil {
+-			t.Fatalf("Get #%d: %v", i, err)
+-		}
+-		if snap[9123] != 1234 {
+-			t.Fatalf("Get #%d snapshot = %+v, want port 9123 owner 1234", i, snap)
+-		}
+-	}
+-	if got := atomic.LoadInt32(&calls); got != 1 {
+-		t.Fatalf("snapshotFn calls = %d, want 1 within TTL", got)
+-	}
+-}
+-
+-func TestStatusPortOwnersCoalescerServesStaleDuringSlowRefresh(t *testing.T) {
+-	const callers = 12
+-	var calls int32
+-	var gen atomic.Uint64
+-	base := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+-	now := base
+-	started := make(chan struct{}, 1)
+-	release := make(chan struct{})
+-	var releaseOnce sync.Once
+-	closeRelease := func() { releaseOnce.Do(func() { close(release) }) }
+-	defer closeRelease()
+-
+-	c := &statusPortOwnersCoalescer{
+-		snapshotFn: func(context.Context) (map[int]int, error) {
+-			call := atomic.AddInt32(&calls, 1)
+-			if call == 1 {
+-				return map[int]int{9123: 1}, nil
+-			}
+-			select {
+-			case started <- struct{}{}:
+-			default:
+-			}
+-			<-release
+-			return map[int]int{9123: 2}, nil
+-		},
+-		genFn:   gen.Load,
+-		nowFn:   func() time.Time { return now },
+-		timeout: time.Second,
+-	}
+-
+-	if snap, err := c.Get(); err != nil || snap[9123] != 1 {
+-		t.Fatalf("warm-up Get = (%+v, %v), want stale marker 1", snap, err)
+-	}
+-	now = base.Add(statusPortOwnersTTL + time.Nanosecond)
+-
+-	startLine := make(chan struct{})
+-	done := make(chan error, callers)
+-	for i := 0; i < callers; i++ {
+-		go func() {
+-			<-startLine
+-			start := time.Now()
+-			snap, err := c.Get()
+-			elapsed := time.Since(start)
+-			if err != nil {
+-				done <- err
+-				return
+-			}
+-			if snap[9123] != 1 {
+-				done <- fmt.Errorf("stale Get snapshot = %+v, want cached marker 1", snap)
+-				return
+-			}
+-			if elapsed >= 100*time.Millisecond {
+-				done <- fmt.Errorf("stale Get took %s, want <100ms", elapsed)
+-				return
+-			}
+-			done <- nil
+-		}()
+-	}
+-	close(startLine)
+-
+-	select {
+-	case <-started:
+-	case <-time.After(time.Second):
+-		t.Fatal("background refresh did not start")
+-	}
+-	if got := atomic.LoadInt32(&calls); got != 2 {
+-		t.Fatalf("snapshotFn calls during slow refresh = %d, want exactly 2 (warm-up + one refresh)", got)
+-	}
+-
+-	for i := 0; i < callers; i++ {
+-		select {
+-		case err := <-done:
+-			if err != nil {
+-				closeRelease()
+-				t.Fatal(err)
+-			}
+-		case <-time.After(100 * time.Millisecond):
+-			closeRelease()
+-			t.Fatalf("stale Get caller %d did not return within 100ms while refresh was in flight", i)
+-		}
+-	}
+-
+-	closeRelease()
+-	waitForCoalescerSnapshotValue(t, c, 9123, 2)
+-	if got := atomic.LoadInt32(&calls); got != 2 {
+-		t.Fatalf("snapshotFn calls after refresh completion = %d, want 2", got)
+-	}
+-}
+-
+-func TestStatusPortOwnersCoalescerSingleflightsConcurrentMiss(t *testing.T) {
+-	const callers = 16
+-	var calls int32
+-	var gen atomic.Uint64
+-	started := make(chan struct{}, 1)
+-	release := make(chan struct{})
+-	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+-	want := map[int]int{9123: 1234}
+-	c := &statusPortOwnersCoalescer{
+-		snapshotFn: func(context.Context) (map[int]int, error) {
+-			atomic.AddInt32(&calls, 1)
+-			select {
+-			case started <- struct{}{}:
+-			default:
+-			}
+-			<-release
+-			return want, nil
+-		},
+-		genFn:   gen.Load,
+-		nowFn:   func() time.Time { return now },
+-		timeout: time.Second,
+-	}
+-
+-	var wg sync.WaitGroup
+-	errs := make(chan error, callers)
+-	for i := 0; i < callers; i++ {
+-		wg.Add(1)
+-		go func() {
+-			defer wg.Done()
+-			snap, err := c.Get()
+-			if err != nil {
+-				errs <- err
+-				return
+-			}
+-			if snap[9123] != 1234 {
+-				errs <- fmt.Errorf("snapshot = %+v, want port 9123 owner 1234", snap)
+-			}
+-		}()
+-	}
+-	<-started
+-	close(release)
+-	wg.Wait()
+-	close(errs)
+-	for err := range errs {
+-		if err != nil {
+-			t.Fatal(err)
+-		}
+-	}
+-	if got := atomic.LoadInt32(&calls); got != 1 {
+-		t.Fatalf("snapshotFn calls = %d, want 1 for concurrent miss", got)
+-	}
+-}
+-
+-func TestStatusPortOwnersCoalescerRepeatedWarmStaleGetsDoNotBlockOnSlowRefresh(t *testing.T) {
+-	var calls int32
+-	var gen atomic.Uint64
+-	base := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+-	var nowUnix atomic.Int64
+-	nowUnix.Store(base.UnixNano())
+-	c := &statusPortOwnersCoalescer{
+-		snapshotFn: func(context.Context) (map[int]int, error) {
+-			call := int(atomic.AddInt32(&calls, 1))
+-			time.Sleep(75 * time.Millisecond)
+-			return map[int]int{9123: call}, nil
+-		},
+-		genFn:   gen.Load,
+-		nowFn:   func() time.Time { return time.Unix(0, nowUnix.Load()).UTC() },
+-		timeout: time.Second,
+-	}
+-
+-	if snap, err := c.Get(); err != nil || snap[9123] != 1 {
+-		t.Fatalf("cold warm-up Get = (%+v, %v), want marker 1", snap, err)
+-	}
+-
+-	for i := 0; i < 8; i++ {
+-		next := time.Unix(0, nowUnix.Load()).UTC().Add(statusPortOwnersTTL + time.Nanosecond)
+-		nowUnix.Store(next.UnixNano())
+-		start := time.Now()
+-		snap, err := c.Get()
+-		elapsed := time.Since(start)
+-		if err != nil {
+-			t.Fatalf("warm stale Get #%d: %v", i, err)
+-		}
+-		if len(snap) == 0 {
+-			t.Fatalf("warm stale Get #%d returned empty snapshot", i)
+-		}
+-		if elapsed >= 40*time.Millisecond {
+-			t.Fatalf("warm stale Get #%d took %s, want <40ms despite slow refresh", i, elapsed)
+-		}
+-		time.Sleep(10 * time.Millisecond)
+-	}
+-	time.Sleep(100 * time.Millisecond)
+-}
+-
+-func TestStatusPortOwnersCoalescerSlowProbeCachesAtCompletionForWaiters(t *testing.T) {
+-	const callers = 8
+-	var calls int32
+-	var gen atomic.Uint64
+-	var nowCalls int32
+-	started := make(chan struct{}, 1)
+-	release := make(chan struct{})
+-	base := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+-	c := &statusPortOwnersCoalescer{
+-		snapshotFn: func(context.Context) (map[int]int, error) {
+-			atomic.AddInt32(&calls, 1)
+-			select {
+-			case started <- struct{}{}:
+-			default:
+-			}
+-			<-release
+-			return map[int]int{9123: 1234}, nil
+-		},
+-		genFn: gen.Load,
+-		nowFn: func() time.Time {
+-			if atomic.AddInt32(&nowCalls, 1) == 1 {
+-				return base
+-			}
+-			return base.Add(statusPortOwnersTTL + time.Second)
+-		},
+-		timeout: time.Second,
+-	}
+-
+-	var wg sync.WaitGroup
+-	for i := 0; i < callers; i++ {
+-		wg.Add(1)
+-		go func() {
+-			defer wg.Done()
+-			snap, err := c.Get()
+-			if err != nil {
+-				t.Errorf("Get: %v", err)
+-				return
+-			}
+-			if snap[9123] != 1234 {
+-				t.Errorf("snapshot = %+v, want port 9123 owner 1234", snap)
+-			}
+-		}()
+-	}
+-	<-started
+-	close(release)
+-	wg.Wait()
+-
+-	if got := atomic.LoadInt32(&calls); got != 1 {
+-		t.Fatalf("snapshotFn calls = %d, want 1 even when the first probe spans the TTL", got)
+-	}
+-}
+-
+-func TestStatusPortOwnersCoalescerRefreshesAfterTTL(t *testing.T) {
+-	var calls int32
+-	var gen atomic.Uint64
+-	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+-	c := &statusPortOwnersCoalescer{
+-		snapshotFn: func(context.Context) (map[int]int, error) {
+-			call := int(atomic.AddInt32(&calls, 1))
+-			return map[int]int{9123: call}, nil
+-		},
+-		genFn:   gen.Load,
+-		nowFn:   func() time.Time { return now },
+-		timeout: time.Second,
+-	}
+-
+-	snap, err := c.Get()
+-	if err != nil {
+-		t.Fatalf("first Get: %v", err)
+-	}
+-	if snap[9123] != 1 {
+-		t.Fatalf("first snapshot = %+v, want call marker 1", snap)
+-	}
+-	now = now.Add(statusPortOwnersTTL + time.Nanosecond)
+-	snap, err = c.Get()
+-	if err != nil {
+-		t.Fatalf("second Get: %v", err)
+-	}
+-	if snap[9123] != 1 {
+-		t.Fatalf("second snapshot = %+v, want cached marker 1 while refresh runs", snap)
+-	}
+-	waitForCoalescerCalls(t, &calls, 2)
+-	waitForCoalescerSnapshotValue(t, c, 9123, 2)
+-	if got := atomic.LoadInt32(&calls); got != 2 {
+-		t.Fatalf("snapshotFn calls = %d, want 2 after TTL", got)
+-	}
+-}
+-
+-// A fleet-generation change must force the very next Get to re-probe even WITHIN
+-// the TTL — the read-your-writes guarantee for any respawn path (manual or
+-// automatic): status must not combine fresh tracker state with a pre-respawn
+-// owner map.
+-func TestStatusPortOwnersCoalescerRefreshesWithinTTLWhenGenerationChanges(t *testing.T) {
+-	var calls int32
+-	var gen atomic.Uint64
+-	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+-	c := &statusPortOwnersCoalescer{
+-		snapshotFn: func(context.Context) (map[int]int, error) {
+-			call := int(atomic.AddInt32(&calls, 1))
+-			return map[int]int{9123: call}, nil
+-		},
+-		genFn:   gen.Load,
+-		nowFn:   func() time.Time { return now },
+-		timeout: time.Second,
+-	}
+-
+-	if snap, err := c.Get(); err != nil || snap[9123] != 1 {
+-		t.Fatalf("first Get = (%+v, %v), want call marker 1", snap, err)
+-	}
+-	// Still within the TTL (now unchanged): the generation bump means the FLEET
+-	// changed — the caller must NOT be served the pre-change owner map (Codex
+-	// #514 r2 read-your-writes: a just-respawned daemon classified against the
+-	// stale map reads as Restarting/stale_pid). Get JOINS the probe and returns
+-	// the FRESH result synchronously.
+-	gen.Add(1)
+-	snap, err := c.Get()
+-	if err != nil {
+-		t.Fatalf("post-generation-bump Get: %v", err)
+-	}
+-	if snap[9123] != 2 {
+-		t.Fatalf("post-generation-bump snapshot = %+v, want FRESH marker 2 (generation change must not serve stale)", snap)
+-	}
+-	if got := atomic.LoadInt32(&calls); got != 2 {
+-		t.Fatalf("snapshotFn calls = %d, want 2 (generation bump forced a joined re-probe within TTL)", got)
+-	}
+-}
+-
+-func TestStatusPortOwnersCoalescerRefreshesWithinTTLWhenGenerationChangesDuringProbe(t *testing.T) {
+-	var calls int32
+-	var gen atomic.Uint64
+-	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+-	c := &statusPortOwnersCoalescer{
+-		snapshotFn: func(context.Context) (map[int]int, error) {
+-			call := int(atomic.AddInt32(&calls, 1))
+-			if call == 1 {
+-				gen.Add(1)
+-			}
+-			return map[int]int{9123: call}, nil
+-		},
+-		genFn:   gen.Load,
+-		nowFn:   func() time.Time { return now },
+-		timeout: time.Second,
+-	}
+-
+-	// The cold Get's own probe bumps the generation mid-flight. The wait is
+-	// capped at ONE probe (3s+3s would exceed the 5s IPC deadline — Codex #514
+-	// r3), so the cold caller receives the freshest COMPLETED result (marker 1)
+-	// and a background re-probe is kicked for the next caller.
+-	if snap, err := c.Get(); err != nil || snap[9123] != 1 {
+-		t.Fatalf("first Get = (%+v, %v), want capped single-wait marker 1", snap, err)
+-	}
+-	// Still within the TTL (now unchanged): the first probe's mid-flight
+-	// generation bump invalidates the cache stamped with the pre-probe
+-	// generation; the background re-probe settles the cache to the FRESH map,
+-	// and a subsequent Get returns it (generation staleness never leaves the
+-	// pre-change map in place).
+-	waitForCoalescerCalls(t, &calls, 2)
+-	waitForCoalescerSnapshotValue(t, c, 9123, 2)
+-	snap, err := c.Get()
+-	if err != nil {
+-		t.Fatalf("post-mid-probe-generation-bump Get: %v", err)
+-	}
+-	if snap[9123] != 2 {
+-		t.Fatalf("post-mid-probe-generation-bump snapshot = %+v, want FRESH marker 2", snap)
+-	}
+-	if got := atomic.LoadInt32(&calls); got != 2 {
+-		t.Fatalf("snapshotFn calls = %d, want 2 (one joined + one background re-probe)", got)
+-	}
+-}
+-
+-func TestStatusPortOwnersCoalescerCachesErrorAndReprobesAfterTTL(t *testing.T) {
+-	var calls int32
+-	var gen atomic.Uint64
+-	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+-	c := &statusPortOwnersCoalescer{
+-		snapshotFn: func(context.Context) (map[int]int, error) {
+-			call := atomic.AddInt32(&calls, 1)
+-			return nil, fmt.Errorf("netstat failed %d", call)
+-		},
+-		genFn:   gen.Load,
+-		nowFn:   func() time.Time { return now },
+-		timeout: time.Second,
+-	}
+-
+-	_, err1 := c.Get()
+-	_, err2 := c.Get()
+-	if err1 == nil || err2 == nil {
+-		t.Fatalf("cached error path returned err1=%v err2=%v, want errors", err1, err2)
+-	}
+-	if err1.Error() != err2.Error() {
+-		t.Fatalf("within-TTL errors differ: %q vs %q", err1, err2)
+-	}
+-	if got := atomic.LoadInt32(&calls); got != 1 {
+-		t.Fatalf("snapshotFn calls within TTL = %d, want 1", got)
+-	}
+-
+-	now = now.Add(statusPortOwnersTTL + time.Nanosecond)
+-	_, err3 := c.Get()
+-	if err3 == nil || err3.Error() != err1.Error() {
+-		t.Fatalf("after TTL immediate error = %v, want cached error %v while refresh runs", err3, err1)
+-	}
+-	waitForCoalescerCalls(t, &calls, 2)
+-	deadline := time.Now().Add(2 * time.Second)
+-	for time.Now().Before(deadline) {
+-		_, refreshedErr := c.Get()
+-		if refreshedErr != nil && refreshedErr.Error() != err1.Error() {
+-			err3 = refreshedErr
+-			break
+-		}
+-		time.Sleep(time.Millisecond)
+-	}
+-	if err3 == nil || err3.Error() == err1.Error() {
+-		t.Fatalf("after TTL refreshed error = %v, want fresh reprobe error distinct from %v", err3, err1)
+-	}
+-	if got := atomic.LoadInt32(&calls); got != 2 {
+-		t.Fatalf("snapshotFn calls after TTL = %d, want 2", got)
+-	}
+-}
+-
+-func TestStatusPortOwnersCoalescerBoundsSnapshotWithContext(t *testing.T) {
+-	c := &statusPortOwnersCoalescer{
+-		snapshotFn: func(ctx context.Context) (map[int]int, error) {
+-			<-ctx.Done()
+-			return nil, fmt.Errorf("snapshot stopped: %w", ctx.Err())
+-		},
+-		nowFn:   func() time.Time { return time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC) },
+-		timeout: 20 * time.Millisecond,
+-	}
+-
+-	start := time.Now()
+-	_, err := c.Get()
+-	elapsed := time.Since(start)
+-	if !errors.Is(err, context.DeadlineExceeded) {
+-		t.Fatalf("Get err = %v, want context deadline exceeded", err)
+-	}
+-	if elapsed > time.Second {
+-		t.Fatalf("Get took %s, want bounded by coalescer timeout", elapsed)
+-	}
+-}
+-
+-func TestSupervisorStatusDaemonsFailLoudAndSnapshotErrorWithCoalescer(t *testing.T) {
+-	t.Run("intent read failure is still top-level error", func(t *testing.T) {
+-		stateDir := apitest.HardenedTempDir(t)
+-		if err := os.Mkdir(filepath.Join(stateDir, "supervisor-intent.json"), 0o700); err != nil {
+-			t.Fatalf("mkdir supervisor-intent.json directory: %v", err)
+-		}
+-		c := &statusPortOwnersCoalescer{
+-			snapshotFn: func(context.Context) (map[int]int, error) {
+-				t.Fatal("snapshotFn must not run when intent read fails")
+-				return nil, nil
+-			},
+-			nowFn:   func() time.Time { return time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC) },
+-			timeout: time.Second,
+-		}
+-
+-		rows, err := supervisorStatusDaemons(stateDir, NewDaemonRuntimeTracker(), c)
+-		if err == nil {
+-			t.Fatalf("supervisorStatusDaemons rows=%+v err=nil, want intent read error", rows)
+-		}
+-	})
+-
+-	t.Run("snapshot error keeps rows and no top-level error", func(t *testing.T) {
+-		stateDir, tracker, _ := seedRunningDaemons(t, 1)
+-		installOwnsPortProbe(t)
+-		c := &statusPortOwnersCoalescer{
+-			snapshotFn: func(context.Context) (map[int]int, error) {
+-				return nil, errors.New("netstat deadline exceeded")
+-			},
+-			nowFn:   func() time.Time { return time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC) },
+-			timeout: time.Second,
+-		}
+-
+-		rows, err := supervisorStatusDaemons(stateDir, tracker, c)
+-		if err != nil {
+-			t.Fatalf("supervisorStatusDaemons returned top-level err on snapshot failure: %v", err)
+-		}
+-		if len(rows) != 1 {
+-			t.Fatalf("rows len = %d, want 1", len(rows))
+-		}
+-		if rows[0]["state"] != "Running" {
+-			t.Fatalf("snapshot error row state = %v, want Running via port_owner_unverified: %+v", rows[0]["state"], rows[0])
+-		}
+-		if _, hasStale := rows[0]["stale_pid"]; hasStale {
+-			t.Fatalf("snapshot error row carried stale_pid, want none: %+v", rows[0])
+-		}
+-	})
+-}
++package cli
++
++import (
++	"context"
++	"errors"
++	"fmt"
++	"os"
++	"path/filepath"
++	"sync"
++	"sync/atomic"
++	"testing"
++	"time"
++
++	"mcp-local-hub/internal/api"
++	"mcp-local-hub/internal/api/apitest"
++)
++
++// withFakePortOwnersSnapshot swaps the package-level
++// loopbackPortOwnersSnapshotFn for the duration of a test and returns a pointer
++// to a call counter so the test can assert the snapshot is taken EXACTLY ONCE
++// per supervisorStatusDaemons refresh (the core perf guarantee — N daemons,
++// ONE OS port-owner query, not N).
++func withFakePortOwnersSnapshot(t *testing.T, fn func() (map[int]int, error)) *int {
++	t.Helper()
++	var calls int
++	prev := loopbackPortOwnersSnapshotFn
++	loopbackPortOwnersSnapshotFn = func() (map[int]int, error) {
++		calls++
++		return fn()
++	}
++	t.Cleanup(func() { loopbackPortOwnersSnapshotFn = prev })
++	return &calls
++}
++
++// seedRunningDaemons writes a state-safe supervisor-intent.json with n Running
++// daemons (ports preset so the status producer's port resolver short-circuits on
++// Port>0 and never reaches the manifest / the registry) and returns the stateDir,
++// the populated tracker, and a task -> (pid, port) map for assertions. StartedAt is
++// set well past the bind grace so a not-live classification is not masked by
++// the grace window.
++func seedRunningDaemons(t *testing.T, n int) (string, *DaemonRuntimeTracker, map[string]struct{ pid, port int }) {
++	t.Helper()
++	stateDir := apitest.HardenedTempDir(t)
++	intent := &api.SupervisorIntentFile{Version: 1}
++	meta := map[string]struct{ pid, port int }{}
++	tracker := NewDaemonRuntimeTracker()
++	startedAt := time.Now().UTC().Add(-1 * time.Hour) // far past the 5s bind grace
++	for i := 0; i < n; i++ {
++		task := fmt.Sprintf(`\mcp-local-hub-srv%d-default`, i)
++		pid := 500000 + i
++		port := 9300 + i
++		intent.Daemons = append(intent.Daemons, api.SupervisorDaemon{
++			TaskName: task,
++			Server:   fmt.Sprintf("srv%d", i),
++			Daemon:   "default",
++			Port:     port,
++		})
++		tracker.MarkSpawned(task, pid, startedAt)
++		meta[task] = struct{ pid, port int }{pid, port}
++	}
++	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
++		t.Fatalf("seed supervisor-intent.json: %v", err)
++	}
++	return stateDir, tracker, meta
++}
++
++// installOwnsPortProbe sets the GLOBAL liveness probe so the status path takes
++// the snapshot branch (PortOwnerPID must be non-nil to enable it) with
++// PIDAlive=true and NO PIDIdentity proof (so the per-daemon liveness reduces to
++// the port-owner check resolved from the injected snapshot). The PortOwnerPID
++// installed here is never actually called by the status path — it is replaced
++// by the snapshot-backed closure inside supervisorStatusDaemons — but it must
++// be non-nil to gate the snapshot branch on.
++func installOwnsPortProbe(t *testing.T) {
++	t.Helper()
++	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
++		PIDAlive:     func(pid int) bool { return true },
++		PortLive:     func(port int) bool { return true },
++		PortOwnerPID: func(port int) (int, bool, error) { return 0, false, errors.New("must not be called directly") },
++	})
++	t.Cleanup(restore)
++}
++
++// TestSupervisorStatusTakesPortOwnerSnapshotExactlyOnce is the core perf
++// guarantee: resolving N(>=3) running daemons takes ONE OS port-owner snapshot,
++// not N per-port netstat spawns. It also asserts every daemon resolves Running
++// against the shared snapshot (each port maps to its own tracked PID).
++func TestSupervisorStatusTakesPortOwnerSnapshotExactlyOnce(t *testing.T) {
++	const n = 4
++	stateDir, tracker, meta := seedRunningDaemons(t, n)
++	installOwnsPortProbe(t)
++
++	// Build the snapshot: every daemon's port maps to its OWN tracked PID, so
++	// every row resolves live (port_owner == current_pid).
++	snap := map[int]int{}
++	for _, m := range meta {
++		snap[m.port] = m.pid
++	}
++	calls := withFakePortOwnersSnapshot(t, func() (map[int]int, error) { return snap, nil })
++
++	rows, err := supervisorStatusDaemons(stateDir, tracker, nil)
++	if err != nil {
++		t.Fatalf("supervisorStatusDaemons: %v", err)
++	}
++	if *calls != 1 {
++		t.Fatalf("port-owner snapshot taken %d times, want EXACTLY 1 (one query for all %d daemons)", *calls, n)
++	}
++	if len(rows) != n {
++		t.Fatalf("rows len = %d, want %d", len(rows), n)
++	}
++	for _, row := range rows {
++		if row["state"] != "Running" {
++			t.Fatalf("daemon %v resolved %q, want Running (port owner == tracked pid): %+v", row["task_name"], row["state"], row)
++		}
++		if _, hasStale := row["stale_pid"]; hasStale {
++			t.Fatalf("daemon %v should not carry stale_pid when owned by its tracked pid: %+v", row["task_name"], row)
++		}
++	}
++}
++
++// TestSupervisorStatusSnapshotErrorStaysRunning asserts a snapshot ERROR is
++// treated exactly like a per-port netstat failure: the daemon classifies
++// port_owner_unverified, which the status producer keeps as Running (not
++// Restarting). A probe error must NEVER flip the row to a restart state.
++func TestSupervisorStatusSnapshotErrorStaysRunning(t *testing.T) {
++	const n = 3
++	stateDir, tracker, _ := seedRunningDaemons(t, n)
++	installOwnsPortProbe(t)
++
++	calls := withFakePortOwnersSnapshot(t, func() (map[int]int, error) {
++		return nil, errors.New("netstat policy-blocked")
++	})
++
++	rows, err := supervisorStatusDaemons(stateDir, tracker, nil)
++	if err != nil {
++		t.Fatalf("supervisorStatusDaemons: %v", err)
++	}
++	if *calls != 1 {
++		t.Fatalf("snapshot taken %d times on error path, want 1", *calls)
++	}
++	if len(rows) != n {
++		t.Fatalf("rows len = %d, want %d", len(rows), n)
++	}
++	for _, row := range rows {
++		if row["state"] != "Running" {
++			t.Fatalf("daemon %v resolved %q on snapshot error, want Running (port_owner_unverified is observe-only): %+v", row["task_name"], row["state"], row)
++		}
++		if _, hasStale := row["stale_pid"]; hasStale {
++			t.Fatalf("daemon %v carried stale_pid on a probe error, want none: %+v", row["task_name"], row)
++		}
++	}
++}
++
++// TestSupervisorStatusSnapshotOwnerMismatchFlipsRestarting asserts a daemon
++// whose port is owned by a DIFFERENT live PID in the shared snapshot flips to
++// Restarting and surfaces stale_pid — the port_owner_mismatch path. Other
++// daemons whose ports map to their own tracked PID stay Running. Still ONE
++// snapshot for the whole refresh.
++func TestSupervisorStatusSnapshotOwnerMismatchFlipsRestarting(t *testing.T) {
++	const n = 3
++	stateDir, tracker, meta := seedRunningDaemons(t, n)
++	installOwnsPortProbe(t)
++
++	// Pin the supervisor self-PID to a value that cannot collide with any
++	// tracked daemon PID (500000+) or the foreign owner (pid+999999) so the
++	// squatted port resolves port_owner_mismatch deterministically, never the
++	// port_owner_self branch.
++	prevSelf := supervisorSelfPIDFn
++	supervisorSelfPIDFn = func() int { return 1 }
++	t.Cleanup(func() { supervisorSelfPIDFn = prevSelf })
++
++	// Pick one daemon to be squatted: its port maps to a FOREIGN pid in the
++	// snapshot; the rest map to their own tracked pid.
++	var squattedTask string
++	var squattedPID, squattedPort int
++	snap := map[int]int{}
++	for task, m := range meta {
++		if squattedTask == "" {
++			squattedTask = task
++			squattedPID = m.pid
++			squattedPort = m.port
++			snap[m.port] = m.pid + 999999 // foreign owner
++			continue
++		}
++		snap[m.port] = m.pid
++	}
++	calls := withFakePortOwnersSnapshot(t, func() (map[int]int, error) { return snap, nil })
++
++	rows, err := supervisorStatusDaemons(stateDir, tracker, nil)
++	if err != nil {
++		t.Fatalf("supervisorStatusDaemons: %v", err)
++	}
++	if *calls != 1 {
++		t.Fatalf("snapshot taken %d times, want 1", *calls)
++	}
++
++	var sawSquatted bool
++	for _, row := range rows {
++		canonTask := row["task_name"].(string)
++		if canonTask == squattedTask {
++			sawSquatted = true
++			if row["state"] != "Restarting" {
++				t.Fatalf("squatted daemon %q (port %d owned by foreign pid) resolved %q, want Restarting: %+v", squattedTask, squattedPort, row["state"], row)
++			}
++			if got := row["stale_pid"]; got != squattedPID {
++				t.Fatalf("squatted daemon stale_pid = %v, want tracked pid %d: %+v", got, squattedPID, row)
++			}
++			if row["current_pid"] != 0 {
++				t.Fatalf("squatted daemon current_pid = %v, want 0 (zeroed on Restarting): %+v", row["current_pid"], row)
++			}
++			continue
++		}
++		if row["state"] != "Running" {
++			t.Fatalf("non-squatted daemon %q resolved %q, want Running: %+v", canonTask, row["state"], row)
++		}
++	}
++	if !sawSquatted {
++		t.Fatalf("squatted task %q not found in rows", squattedTask)
++	}
++}
++
++func waitForCoalescerCalls(t *testing.T, calls *int32, want int32) {
++	t.Helper()
++	deadline := time.Now().Add(2 * time.Second)
++	for time.Now().Before(deadline) {
++		if got := atomic.LoadInt32(calls); got >= want {
++			return
++		}
++		time.Sleep(time.Millisecond)
++	}
++	t.Fatalf("snapshotFn calls = %d, want at least %d", atomic.LoadInt32(calls), want)
++}
++
++func waitForCoalescerSnapshotValue(t *testing.T, c *statusPortOwnersCoalescer, port, want int) {
++	t.Helper()
++	deadline := time.Now().Add(2 * time.Second)
++	for time.Now().Before(deadline) {
++		snap, err := c.Get()
++		if err != nil {
++			t.Fatalf("Get while waiting for refreshed snapshot: %v", err)
++		}
++		if snap[port] == want {
++			return
++		}
++		time.Sleep(time.Millisecond)
++	}
++	snap, err := c.Get()
++	t.Fatalf("refreshed snapshot value for port %d = %v, err=%v, want %d", port, snap[port], err, want)
++}
++
++func TestStatusPortOwnersCoalescerCoalescesWithinTTL(t *testing.T) {
++	var calls int32
++	var gen atomic.Uint64
++	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
++	c := &statusPortOwnersCoalescer{
++		snapshotFn: func(context.Context) (map[int]int, error) {
++			atomic.AddInt32(&calls, 1)
++			return map[int]int{9123: 1234}, nil
++		},
++		genFn:   gen.Load,
++		nowFn:   func() time.Time { return now },
++		timeout: time.Second,
++	}
++
++	for i := 0; i < 5; i++ {
++		snap, err := c.Get()
++		if err != nil {
++			t.Fatalf("Get #%d: %v", i, err)
++		}
++		if snap[9123] != 1234 {
++			t.Fatalf("Get #%d snapshot = %+v, want port 9123 owner 1234", i, snap)
++		}
++	}
++	if got := atomic.LoadInt32(&calls); got != 1 {
++		t.Fatalf("snapshotFn calls = %d, want 1 within TTL", got)
++	}
++}
++
++func TestStatusPortOwnersCoalescerServesStaleDuringSlowRefresh(t *testing.T) {
++	const callers = 12
++	var calls int32
++	var gen atomic.Uint64
++	base := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
++	now := base
++	started := make(chan struct{}, 1)
++	release := make(chan struct{})
++	var releaseOnce sync.Once
++	closeRelease := func() { releaseOnce.Do(func() { close(release) }) }
++	defer closeRelease()
++
++	c := &statusPortOwnersCoalescer{
++		snapshotFn: func(context.Context) (map[int]int, error) {
++			call := atomic.AddInt32(&calls, 1)
++			if call == 1 {
++				return map[int]int{9123: 1}, nil
++			}
++			select {
++			case started <- struct{}{}:
++			default:
++			}
++			<-release
++			return map[int]int{9123: 2}, nil
++		},
++		genFn:   gen.Load,
++		nowFn:   func() time.Time { return now },
++		timeout: time.Second,
++	}
++
++	if snap, err := c.Get(); err != nil || snap[9123] != 1 {
++		t.Fatalf("warm-up Get = (%+v, %v), want stale marker 1", snap, err)
++	}
++	now = base.Add(statusPortOwnersTTL + time.Nanosecond)
++
++	startLine := make(chan struct{})
++	done := make(chan error, callers)
++	for i := 0; i < callers; i++ {
++		go func() {
++			<-startLine
++			start := time.Now()
++			snap, err := c.Get()
++			elapsed := time.Since(start)
++			if err != nil {
++				done <- err
++				return
++			}
++			if snap[9123] != 1 {
++				done <- fmt.Errorf("stale Get snapshot = %+v, want cached marker 1", snap)
++				return
++			}
++			if elapsed >= 100*time.Millisecond {
++				done <- fmt.Errorf("stale Get took %s, want <100ms", elapsed)
++				return
++			}
++			done <- nil
++		}()
++	}
++	close(startLine)
++
++	select {
++	case <-started:
++	case <-time.After(time.Second):
++		t.Fatal("background refresh did not start")
++	}
++	if got := atomic.LoadInt32(&calls); got != 2 {
++		t.Fatalf("snapshotFn calls during slow refresh = %d, want exactly 2 (warm-up + one refresh)", got)
++	}
++
++	for i := 0; i < callers; i++ {
++		select {
++		case err := <-done:
++			if err != nil {
++				closeRelease()
++				t.Fatal(err)
++			}
++		case <-time.After(100 * time.Millisecond):
++			closeRelease()
++			t.Fatalf("stale Get caller %d did not return within 100ms while refresh was in flight", i)
++		}
++	}
++
++	closeRelease()
++	waitForCoalescerSnapshotValue(t, c, 9123, 2)
++	if got := atomic.LoadInt32(&calls); got != 2 {
++		t.Fatalf("snapshotFn calls after refresh completion = %d, want 2", got)
++	}
++}
++
++func TestStatusPortOwnersCoalescerSingleflightsConcurrentMiss(t *testing.T) {
++	const callers = 16
++	var calls int32
++	var gen atomic.Uint64
++	started := make(chan struct{}, 1)
++	release := make(chan struct{})
++	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
++	want := map[int]int{9123: 1234}
++	c := &statusPortOwnersCoalescer{
++		snapshotFn: func(context.Context) (map[int]int, error) {
++			atomic.AddInt32(&calls, 1)
++			select {
++			case started <- struct{}{}:
++			default:
++			}
++			<-release
++			return want, nil
++		},
++		genFn:   gen.Load,
++		nowFn:   func() time.Time { return now },
++		timeout: time.Second,
++	}
++
++	var wg sync.WaitGroup
++	errs := make(chan error, callers)
++	for i := 0; i < callers; i++ {
++		wg.Add(1)
++		go func() {
++			defer wg.Done()
++			snap, err := c.Get()
++			if err != nil {
++				errs <- err
++				return
++			}
++			if snap[9123] != 1234 {
++				errs <- fmt.Errorf("snapshot = %+v, want port 9123 owner 1234", snap)
++			}
++		}()
++	}
++	<-started
++	close(release)
++	wg.Wait()
++	close(errs)
++	for err := range errs {
++		if err != nil {
++			t.Fatal(err)
++		}
++	}
++	if got := atomic.LoadInt32(&calls); got != 1 {
++		t.Fatalf("snapshotFn calls = %d, want 1 for concurrent miss", got)
++	}
++}
++
++func TestStatusPortOwnersCoalescerRepeatedWarmStaleGetsDoNotBlockOnSlowRefresh(t *testing.T) {
++	var calls int32
++	var gen atomic.Uint64
++	base := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
++	var nowUnix atomic.Int64
++	nowUnix.Store(base.UnixNano())
++	c := &statusPortOwnersCoalescer{
++		snapshotFn: func(context.Context) (map[int]int, error) {
++			call := int(atomic.AddInt32(&calls, 1))
++			time.Sleep(75 * time.Millisecond)
++			return map[int]int{9123: call}, nil
++		},
++		genFn:   gen.Load,
++		nowFn:   func() time.Time { return time.Unix(0, nowUnix.Load()).UTC() },
++		timeout: time.Second,
++	}
++
++	if snap, err := c.Get(); err != nil || snap[9123] != 1 {
++		t.Fatalf("cold warm-up Get = (%+v, %v), want marker 1", snap, err)
++	}
++
++	for i := 0; i < 8; i++ {
++		next := time.Unix(0, nowUnix.Load()).UTC().Add(statusPortOwnersTTL + time.Nanosecond)
++		nowUnix.Store(next.UnixNano())
++		start := time.Now()
++		snap, err := c.Get()
++		elapsed := time.Since(start)
++		if err != nil {
++			t.Fatalf("warm stale Get #%d: %v", i, err)
++		}
++		if len(snap) == 0 {
++			t.Fatalf("warm stale Get #%d returned empty snapshot", i)
++		}
++		if elapsed >= 40*time.Millisecond {
++			t.Fatalf("warm stale Get #%d took %s, want <40ms despite slow refresh", i, elapsed)
++		}
++		time.Sleep(10 * time.Millisecond)
++	}
++	time.Sleep(100 * time.Millisecond)
++}
++
++func TestStatusPortOwnersCoalescerSlowProbeCachesAtCompletionForWaiters(t *testing.T) {
++	const callers = 8
++	var calls int32
++	var gen atomic.Uint64
++	var nowCalls int32
++	started := make(chan struct{}, 1)
++	release := make(chan struct{})
++	base := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
++	c := &statusPortOwnersCoalescer{
++		snapshotFn: func(context.Context) (map[int]int, error) {
++			atomic.AddInt32(&calls, 1)
++			select {
++			case started <- struct{}{}:
++			default:
++			}
++			<-release
++			return map[int]int{9123: 1234}, nil
++		},
++		genFn: gen.Load,
++		nowFn: func() time.Time {
++			if atomic.AddInt32(&nowCalls, 1) == 1 {
++				return base
++			}
++			return base.Add(statusPortOwnersTTL + time.Second)
++		},
++		timeout: time.Second,
++	}
++
++	var wg sync.WaitGroup
++	for i := 0; i < callers; i++ {
++		wg.Add(1)
++		go func() {
++			defer wg.Done()
++			snap, err := c.Get()
++			if err != nil {
++				t.Errorf("Get: %v", err)
++				return
++			}
++			if snap[9123] != 1234 {
++				t.Errorf("snapshot = %+v, want port 9123 owner 1234", snap)
++			}
++		}()
++	}
++	<-started
++	close(release)
++	wg.Wait()
++
++	if got := atomic.LoadInt32(&calls); got != 1 {
++		t.Fatalf("snapshotFn calls = %d, want 1 even when the first probe spans the TTL", got)
++	}
++}
++
++func TestStatusPortOwnersCoalescerRefreshesAfterTTL(t *testing.T) {
++	var calls int32
++	var gen atomic.Uint64
++	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
++	c := &statusPortOwnersCoalescer{
++		snapshotFn: func(context.Context) (map[int]int, error) {
++			call := int(atomic.AddInt32(&calls, 1))
++			return map[int]int{9123: call}, nil
++		},
++		genFn:   gen.Load,
++		nowFn:   func() time.Time { return now },
++		timeout: time.Second,
++	}
++
++	snap, err := c.Get()
++	if err != nil {
++		t.Fatalf("first Get: %v", err)
++	}
++	if snap[9123] != 1 {
++		t.Fatalf("first snapshot = %+v, want call marker 1", snap)
++	}
++	now = now.Add(statusPortOwnersTTL + time.Nanosecond)
++	snap, err = c.Get()
++	if err != nil {
++		t.Fatalf("second Get: %v", err)
++	}
++	if snap[9123] != 1 {
++		t.Fatalf("second snapshot = %+v, want cached marker 1 while refresh runs", snap)
++	}
++	waitForCoalescerCalls(t, &calls, 2)
++	waitForCoalescerSnapshotValue(t, c, 9123, 2)
++	if got := atomic.LoadInt32(&calls); got != 2 {
++		t.Fatalf("snapshotFn calls = %d, want 2 after TTL", got)
++	}
++}
++
++// A fleet-generation change must force the very next Get to re-probe even WITHIN
++// the TTL — the read-your-writes guarantee for any respawn path (manual or
++// automatic): status must not combine fresh tracker state with a pre-respawn
++// owner map.
++func TestStatusPortOwnersCoalescerRefreshesWithinTTLWhenGenerationChanges(t *testing.T) {
++	var calls int32
++	var gen atomic.Uint64
++	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
++	c := &statusPortOwnersCoalescer{
++		snapshotFn: func(context.Context) (map[int]int, error) {
++			call := int(atomic.AddInt32(&calls, 1))
++			return map[int]int{9123: call}, nil
++		},
++		genFn:   gen.Load,
++		nowFn:   func() time.Time { return now },
++		timeout: time.Second,
++	}
++
++	if snap, err := c.Get(); err != nil || snap[9123] != 1 {
++		t.Fatalf("first Get = (%+v, %v), want call marker 1", snap, err)
++	}
++	// Still within the TTL (now unchanged): the generation bump means the FLEET
++	// changed — the caller must NOT be served the pre-change owner map (Codex
++	// #514 r2 read-your-writes: a just-respawned daemon classified against the
++	// stale map reads as Restarting/stale_pid). Get JOINS the probe and returns
++	// the FRESH result synchronously.
++	gen.Add(1)
++	snap, err := c.Get()
++	if err != nil {
++		t.Fatalf("post-generation-bump Get: %v", err)
++	}
++	if snap[9123] != 2 {
++		t.Fatalf("post-generation-bump snapshot = %+v, want FRESH marker 2 (generation change must not serve stale)", snap)
++	}
++	if got := atomic.LoadInt32(&calls); got != 2 {
++		t.Fatalf("snapshotFn calls = %d, want 2 (generation bump forced a joined re-probe within TTL)", got)
++	}
++}
++
++func TestStatusPortOwnersCoalescerRefreshesWithinTTLWhenGenerationChangesDuringProbe(t *testing.T) {
++	var calls int32
++	var gen atomic.Uint64
++	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
++	c := &statusPortOwnersCoalescer{
++		snapshotFn: func(context.Context) (map[int]int, error) {
++			call := int(atomic.AddInt32(&calls, 1))
++			if call == 1 {
++				gen.Add(1)
++			}
++			return map[int]int{9123: call}, nil
++		},
++		genFn:   gen.Load,
++		nowFn:   func() time.Time { return now },
++		timeout: time.Second,
++	}
++
++	// The cold Get's own probe bumps the generation mid-flight. The wait is
++	// capped at ONE probe (3s+3s would exceed the 5s IPC deadline — Codex #514
++	// r3), so the cold caller receives the freshest COMPLETED result (marker 1)
++	// and a background re-probe is kicked for the next caller.
++	if snap, err := c.Get(); err != nil || snap[9123] != 1 {
++		t.Fatalf("first Get = (%+v, %v), want capped single-wait marker 1", snap, err)
++	}
++	// Still within the TTL (now unchanged): the first probe's mid-flight
++	// generation bump invalidates the cache stamped with the pre-probe
++	// generation; the background re-probe settles the cache to the FRESH map,
++	// and a subsequent Get returns it (generation staleness never leaves the
++	// pre-change map in place).
++	waitForCoalescerCalls(t, &calls, 2)
++	waitForCoalescerSnapshotValue(t, c, 9123, 2)
++	snap, err := c.Get()
++	if err != nil {
++		t.Fatalf("post-mid-probe-generation-bump Get: %v", err)
++	}
++	if snap[9123] != 2 {
++		t.Fatalf("post-mid-probe-generation-bump snapshot = %+v, want FRESH marker 2", snap)
++	}
++	if got := atomic.LoadInt32(&calls); got != 2 {
++		t.Fatalf("snapshotFn calls = %d, want 2 (one joined + one background re-probe)", got)
++	}
++}
++
++func TestStatusPortOwnersCoalescerCachesErrorAndReprobesAfterTTL(t *testing.T) {
++	var calls int32
++	var gen atomic.Uint64
++	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
++	c := &statusPortOwnersCoalescer{
++		snapshotFn: func(context.Context) (map[int]int, error) {
++			call := atomic.AddInt32(&calls, 1)
++			return nil, fmt.Errorf("netstat failed %d", call)
++		},
++		genFn:   gen.Load,
++		nowFn:   func() time.Time { return now },
++		timeout: time.Second,
++	}
++
++	_, err1 := c.Get()
++	_, err2 := c.Get()
++	if err1 == nil || err2 == nil {
++		t.Fatalf("cached error path returned err1=%v err2=%v, want errors", err1, err2)
++	}
++	if err1.Error() != err2.Error() {
++		t.Fatalf("within-TTL errors differ: %q vs %q", err1, err2)
++	}
++	if got := atomic.LoadInt32(&calls); got != 1 {
++		t.Fatalf("snapshotFn calls within TTL = %d, want 1", got)
++	}
++
++	now = now.Add(statusPortOwnersTTL + time.Nanosecond)
++	_, err3 := c.Get()
++	if err3 == nil || err3.Error() != err1.Error() {
++		t.Fatalf("after TTL immediate error = %v, want cached error %v while refresh runs", err3, err1)
++	}
++	waitForCoalescerCalls(t, &calls, 2)
++	deadline := time.Now().Add(2 * time.Second)
++	for time.Now().Before(deadline) {
++		_, refreshedErr := c.Get()
++		if refreshedErr != nil && refreshedErr.Error() != err1.Error() {
++			err3 = refreshedErr
++			break
++		}
++		time.Sleep(time.Millisecond)
++	}
++	if err3 == nil || err3.Error() == err1.Error() {
++		t.Fatalf("after TTL refreshed error = %v, want fresh reprobe error distinct from %v", err3, err1)
++	}
++	if got := atomic.LoadInt32(&calls); got != 2 {
++		t.Fatalf("snapshotFn calls after TTL = %d, want 2", got)
++	}
++}
++
++func TestStatusPortOwnersCoalescerBoundsSnapshotWithContext(t *testing.T) {
++	c := &statusPortOwnersCoalescer{
++		snapshotFn: func(ctx context.Context) (map[int]int, error) {
++			<-ctx.Done()
++			return nil, fmt.Errorf("snapshot stopped: %w", ctx.Err())
++		},
++		nowFn:   func() time.Time { return time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC) },
++		timeout: 20 * time.Millisecond,
++	}
++
++	start := time.Now()
++	_, err := c.Get()
++	elapsed := time.Since(start)
++	if !errors.Is(err, context.DeadlineExceeded) {
++		t.Fatalf("Get err = %v, want context deadline exceeded", err)
++	}
++	if elapsed > time.Second {
++		t.Fatalf("Get took %s, want bounded by coalescer timeout", elapsed)
++	}
++}
++
++func TestSupervisorStatusDaemonsFailLoudAndSnapshotErrorWithCoalescer(t *testing.T) {
++	t.Run("intent read failure is still top-level error", func(t *testing.T) {
++		stateDir := apitest.HardenedTempDir(t)
++		if err := os.Mkdir(filepath.Join(stateDir, "supervisor-intent.json"), 0o700); err != nil {
++			t.Fatalf("mkdir supervisor-intent.json directory: %v", err)
++		}
++		c := &statusPortOwnersCoalescer{
++			snapshotFn: func(context.Context) (map[int]int, error) {
++				t.Fatal("snapshotFn must not run when intent read fails")
++				return nil, nil
++			},
++			nowFn:   func() time.Time { return time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC) },
++			timeout: time.Second,
++		}
++
++		rows, err := supervisorStatusDaemons(stateDir, NewDaemonRuntimeTracker(), c)
++		if err == nil {
++			t.Fatalf("supervisorStatusDaemons rows=%+v err=nil, want intent read error", rows)
++		}
++	})
++
++	t.Run("snapshot error keeps rows and no top-level error", func(t *testing.T) {
++		stateDir, tracker, _ := seedRunningDaemons(t, 1)
++		installOwnsPortProbe(t)
++		c := &statusPortOwnersCoalescer{
++			snapshotFn: func(context.Context) (map[int]int, error) {
++				return nil, errors.New("netstat deadline exceeded")
++			},
++			nowFn:   func() time.Time { return time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC) },
++			timeout: time.Second,
++		}
++
++		rows, err := supervisorStatusDaemons(stateDir, tracker, c)
++		if err != nil {
++			t.Fatalf("supervisorStatusDaemons returned top-level err on snapshot failure: %v", err)
++		}
++		if len(rows) != 1 {
++			t.Fatalf("rows len = %d, want 1", len(rows))
++		}
++		if rows[0]["state"] != "Running" {
++			t.Fatalf("snapshot error row state = %v, want Running via port_owner_unverified: %+v", rows[0]["state"], rows[0])
++		}
++		if _, hasStale := rows[0]["stale_pid"]; hasStale {
++			t.Fatalf("snapshot error row carried stale_pid, want none: %+v", rows[0])
++		}
++	})
++}
++
++func TestSupervisorStatusInactiveRowsDoNotProbePorts(t *testing.T) {
++	for _, state := range []string{"idle", "stopped"} {
++		for _, withCoalescer := range []bool{false, true} {
++			t.Run(fmt.Sprintf("%s/coalescer=%t", state, withCoalescer), func(t *testing.T) {
++				stateDir, tracker, meta := seedRunningDaemons(t, 2)
++				wantState := "Idle"
++				if state == "idle" {
++					tracker = NewDaemonRuntimeTracker()
++				} else {
++					wantState = "Stopped"
++					for task := range meta {
++						tracker.MarkExited(task)
++					}
++				}
++				installOwnsPortProbe(t)
++				calls := withFakePortOwnersSnapshot(t, func() (map[int]int, error) {
++					return nil, errors.New("inactive status must not query port owners")
++				})
++				var coalescer *statusPortOwnersCoalescer
++				if withCoalescer {
++					coalescer = newStatusPortOwnersCoalescer(tracker)
++					coalescer.snapshotFn = func(context.Context) (map[int]int, error) {
++						return loopbackPortOwnersSnapshotFn()
++					}
++				}
++				rows, err := supervisorStatusDaemons(stateDir, tracker, coalescer)
++				if err != nil || len(rows) != len(meta) {
++					t.Fatalf("inactive status: rows=%+v err=%v", rows, err)
++				}
++				if *calls != 0 {
++					t.Fatalf("inactive status took %d port snapshots, want none", *calls)
++				}
++				for _, row := range rows {
++					m, known := meta[row["task_name"].(string)]
++					if !known || row["state"] != wantState || row["current_pid"] != 0 || row["port"] != m.port {
++						t.Errorf("inactive row changed: %+v, want state=%s with original port and no pid", row, wantState)
++					}
++					if _, stale := row["stale_pid"]; stale {
++						t.Errorf("inactive row gained stale_pid: %+v", row)
++					}
++				}
++			})
++		}
++	}
++}
++
++func TestSupervisorStatusPendingStopSharesPortOwnerSnapshot(t *testing.T) {
++	for _, withCoalescer := range []bool{false, true} {
++		t.Run(fmt.Sprintf("coalescer=%t", withCoalescer), func(t *testing.T) {
++			stateDir, tracker, meta := seedRunningDaemons(t, 2)
++			const pendingTask = "\\mcp-local-hub-srv0-default"
++			pending := meta[pendingTask]
++			receipt := beginStopSettlementForTest(t, tracker, filepath.Join(stateDir, "supervisor-state.json"), pendingTask)
++			installOwnsPortProbe(t)
++			snapshot := map[int]int{}
++			for _, m := range meta {
++				snapshot[m.port] = m.pid
++			}
++			calls := withFakePortOwnersSnapshot(t, func() (map[int]int, error) { return snapshot, nil })
++			var coalescer *statusPortOwnersCoalescer
++			if withCoalescer {
++				coalescer = newStatusPortOwnersCoalescer(tracker)
++				coalescer.snapshotFn = func(context.Context) (map[int]int, error) {
++					return loopbackPortOwnersSnapshotFn()
++				}
++			}
++			rows, err := supervisorStatusDaemons(stateDir, tracker, coalescer)
++			if err != nil || len(rows) != len(meta) {
++				t.Fatalf("pending and running status: rows=%+v err=%v", rows, err)
++			}
++			if *calls != 1 {
++				t.Fatalf("pending and running status took %d port snapshots, want one", *calls)
++			}
++			for _, row := range rows {
++				if row["task_name"] == pendingTask {
++					diagnostic, ok := row["stop_settlement"].(map[string]any)
++					if row["state"] != "Stopping" || !ok ||
++						diagnostic["phase"] != string(receipt.Phase) || diagnostic["observed_port_owner_pid"] != pending.pid {
++						t.Errorf("pending-stop diagnostic changed: %+v", row)
++					}
++				} else if row["state"] != "Running" {
++					t.Errorf("running row changed: %+v", row)
++				}
++			}
++		})
++	}
++}
+diff --git a/internal/cli/supervisor_controller_orphan_reap_test.go b/internal/cli/supervisor_controller_orphan_reap_test.go
+index 14abb540847502c65473ed2a75446e34a73d16d3..fd6a9e2e0c4b1b80ebc60143408559ae2208fef0 100644
+--- a/internal/cli/supervisor_controller_orphan_reap_test.go
++++ b/internal/cli/supervisor_controller_orphan_reap_test.go
+@@ -4,7 +4,9 @@ import (
+ 	"context"
+ 	"errors"
+ 	"fmt"
++	"os"
+ 	"path/filepath"
++	"runtime"
+ 	"strings"
+ 	"sync"
+ 	"sync/atomic"
+@@ -91,7 +93,6 @@ func newReapTestHarness(t *testing.T) *reapTestHarness {
+ 	terminatedPIDs := make(chan int, 8)
+ 
+ 	ctx, cancel := context.WithCancel(context.Background())
+-	t.Cleanup(cancel)
+ 
+ 	loop := api.NewEventLoop(64)
+ 	h := &reapTestHarness{
+@@ -163,7 +164,17 @@ func newReapTestHarness(t *testing.T) *reapTestHarness {
+ 	}
+ 	// Register the controller handler and start the real loop.
+ 	loop.RegisterHandler(h.ctrl.handleLoopEvent)
+-	go loop.Run(ctx)
++	loopDone := make(chan struct{})
++	go func() {
++		defer close(loopDone)
++		loop.Run(ctx)
++	}()
++	// Cancellation cannot interrupt an in-flight handler. Join this original
++	// loop before the earlier event-log and TempDir cleanup callbacks run.
++	t.Cleanup(func() {
++		cancel()
++		<-loopDone
++	})
+ 	return h
+ }
+ 
+@@ -187,6 +198,10 @@ func (h *reapTestHarness) sync() {
+ 	select {
+ 	case <-done:
+ 	case <-time.After(5 * time.Second):
++		// Record the original handler stacks before cleanup joins the loop.
++		stacks := make([]byte, 1<<20)
++		n := runtime.Stack(stacks, true)
++		fmt.Fprintf(os.Stderr, "reap test harness barrier timeout before cleanup (goroutine stacks truncated=%t):\n%s", n == len(stacks), stacks[:n])
+ 		panic("reap test harness sync timed out (loop wedged?)")
+ 	}
+ }
+diff --git a/internal/cli/supervisor_launch_windows.go b/internal/cli/supervisor_launch_windows.go
+index b268dd4f3b557fbeeae076503cfec5a9d71aead3..feed8526b12e65b11faf715a5c837e712902c4f3 100644
+--- a/internal/cli/supervisor_launch_windows.go
++++ b/internal/cli/supervisor_launch_windows.go
+@@ -283,8 +283,19 @@ func (l *ownedSupervisorLaunch) Abort(ctx context.Context) error {
+ 			errs = append(errs, errSupervisorPeerIPCSenderRequired)
+ 		} else if !graceful && l.proof != nil {
+ 			limit, cancel := context.WithTimeout(ctx, time.Duration(defaultExitTimeoutMs)*time.Millisecond)
+-			owner, err := l.observeControl(limit, l.proof.expected)
+-			if err == nil && owner == l.proof.owner {
++			// BindControl already accepted this original creator and native peer.
++			// Reuse its private proof; strict peer IPC still refuses a replacement
++			// listener without repeating role discovery during the exit budget.
++			proof := l.proof
++			owner := api.SupervisorLockOwner{PID: l.original.PID, StartedAt: l.original.StartedAt.UTC().Format(time.RFC3339Nano)}
++			var err error
++			if proof.issuer != l || l.cmd == nil || proof.creator != l.cmd.Process ||
++				proof.owner != owner || proof.peer != l.peer {
++				err = errSupervisorControlBinding
++			} else {
++				err = l.validateControlExpectation(proof.expected)
++			}
++			if err == nil {
+ 				select {
+ 				case <-l.waitDone:
+ 					graceful = true // Retained original outcome: do not contact a replacement.
+@@ -407,7 +418,7 @@ func observeOriginalSupervisorRuntime(ctx context.Context, binaryPath, expectedS
+ 		return peer, fmt.Errorf("verify original supervisor generation: %w", err)
+ 	}
+ 	// Query the role while this exact generation is held. The operation's
+-	// context also bounds the underlying WMI lookup during Abort cleanup.
++	// context also bounds the underlying WMI lookup during control admission.
+ 	identity, err := process.LookupProcessIdentityContext(ctx, owner.PID)
+ 	if err != nil {
+ 		return peer, fmt.Errorf("probe original supervisor role: %w", err)
+diff --git a/internal/cli/supervisor_launch_windows_test.go b/internal/cli/supervisor_launch_windows_test.go
+index 367cc534b73f43ecaed1c3d634754016e56ad2c7..1857ca9fb83c6ad1353bd3c67ab18514342c30a9 100644
+--- a/internal/cli/supervisor_launch_windows_test.go
++++ b/internal/cli/supervisor_launch_windows_test.go
+@@ -391,7 +391,7 @@ func TestSupervisorLaunchStalledCreatorCleanup(t *testing.T) {
+ 	}
+ 	// Creator mechanics are contained by QA's existing Job; breakaway policy is
+ 	// independently covered by the unchanged producer/native Product oracle.
+-	for _, scenario := range []string{"complete-dependencies", "missing-captured-reader"} {
++	for _, scenario := range []string{"complete-dependencies", "missing-captured-reader", "accepted-control"} {
+ 		t.Run(scenario, func(t *testing.T) {
+ 			stateDir := t.TempDir()
+ 			deps, err := buildV5UpgradeDeps(exe, stateDir).supervisorLaunchDependencies()
+@@ -432,7 +432,7 @@ func TestSupervisorLaunchStalledCreatorCleanup(t *testing.T) {
+ 			if scenario == "missing-captured-reader" && err == nil {
+ 				t.Fatal("post-creation dependency omission accepted")
+ 			}
+-			if scenario == "complete-dependencies" && err != nil {
++			if scenario != "missing-captured-reader" && err != nil {
+ 				t.Fatal(err)
+ 			}
+ 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+@@ -445,6 +445,31 @@ func TestSupervisorLaunchStalledCreatorCleanup(t *testing.T) {
+ 			if err := api.WriteStateFileAtomic(filepath.Join(stateDir, "supervisor.lock.owner.json"), foreign); err != nil {
+ 				t.Fatal(err)
+ 			}
++			controlCalls := 0
++			if scenario == "accepted-control" {
++				// Model the already accepted private binding. The command below
++				// is a stalled fixture, so this is not native supervisor admission.
++				accepted := api.SupervisorLockOwner{PID: launch.original.PID, StartedAt: launch.original.StartedAt.UTC().Format(time.RFC3339Nano)}
++				launch.proof = &supervisorControlProof{
++					issuer: launch, creator: cmd.Process, owner: accepted, peer: launch.peer,
++					expected: supervisorExpectation(stateDir, exe, strings.Repeat("a", 64)),
++				}
++				launch.deps.readOwner = func(string) (api.SupervisorLockOwner, error) {
++					return api.SupervisorLockOwner{}, errors.New("accepted creator must not reacquire control from the current sidecar")
++				}
++				launch.deps.sendIPCPeer = func(_ context.Context, pipe string, owner api.SupervisorLockOwner, peer api.SupervisorProcessIdentityV1, command string, _ map[string]any, _ time.Duration) (api.IPCResponse, error) {
++					controlCalls++
++					if pipe != deps.pipePath || owner != accepted || peer != launch.peer || command != "exit" {
++						return api.IPCResponse{}, errors.New("accepted original peer operands changed")
++					}
++					// The strict sender's successful exit is modeled by stopping only
++					// the retained original fixture; Abort still owns its sole Wait.
++					if err := cmd.Process.Kill(); err != nil {
++						return api.IPCResponse{}, err
++					}
++					return api.IPCResponse{OK: true, Final: true}, nil
++				}
++			}
+ 			var callers sync.WaitGroup
+ 			results := make(chan error, 3)
+ 			for i := 0; i < 3; i++ {
+@@ -458,6 +483,9 @@ func TestSupervisorLaunchStalledCreatorCleanup(t *testing.T) {
+ 					t.Fatal(err)
+ 				}
+ 			}
++			if scenario == "accepted-control" && controlCalls != 1 {
++				t.Fatalf("accepted original exit requests = %d, want one", controlCalls)
++			}
+ 			if cmd.ProcessState == nil || !cmd.ProcessState.Exited() {
+ 				t.Fatalf("original creator was not reaped: %v", cmd.ProcessState)
+ 			}

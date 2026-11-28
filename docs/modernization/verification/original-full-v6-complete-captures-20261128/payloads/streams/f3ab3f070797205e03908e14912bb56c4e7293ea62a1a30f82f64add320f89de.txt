@@ -1,0 +1,13 @@
+=== RUN   TestDiscover_FoundInFirstHint
+--- PASS: TestDiscover_FoundInFirstHint (0.00s)
+=== NAME  
+=== RUN   TestDiscover_Missing
+--- PASS: TestDiscover_Missing (0.00s)
+=== NAME  
+=== RUN   TestDiscover_WalksInOrder
+--- PASS: TestDiscover_WalksInOrder (0.00s)
+=== NAME  
+=== RUN   TestDefaultHints_NonEmpty
+--- PASS: TestDefaultHints_NonEmpty (0.00s)
+=== NAME  
+PASS

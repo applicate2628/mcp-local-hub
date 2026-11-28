@@ -1,0 +1,185 @@
+# Source267f product/helper producer — candidate v1
+
+## Содержание
+
+1. [Область и запрет исполнения](#1-область-и-запрет-исполнения)
+2. [Точный Source и projections](#2-точный-source-и-projections)
+3. [Переиспользование и дельты](#3-переиспользование-и-дельты)
+4. [Будущая последовательность](#4-будущая-последовательность)
+5. [Физическое владение и cache handoff](#5-физическое-владение-и-cache-handoff)
+6. [Сохранённые критерии полного прогона](#6-сохранённые-критерии-полного-прогона)
+7. [Что проверено](#7-что-проверено)
+
+## 1. Область и запрет исполнения
+
+Подготовлены DATA inputs нового product/helper producer. Status NOT_BOUND.
+Cache donor — baseline-v2 private caches; последний APIv2 consumer ещё должен
+получить original physical closure. Cache копирование, runtime, native builds,
+API/CLI тесты этим пакетом не запускались.
+
+successor267f-product-helper-inputs-v1-plan.pending.json имеет отдельную
+неисполняемую schema successor267f-producer-plan-pending-v1, reviewed=false,
+null argv у cache step и null actual closure/copier pins. Existing
+run_owned_commands.py отвергает такую schema. Это не runnable plan; перевода
+reviewed=true недостаточно. После actual cache receiving нужна новая конкретная
+plan file со всеми проверенными argv/input pins, schema fresh-owned-commands-v1
+и root review. Замена null на придуманное значение недопустима.
+
+Launcher заранее ссылается на будущий
+successor267f-product-helper-inputs-v1-plan.json, которого в этом пакете нет.
+До его появления launcher откажет перед Process.Start.
+
+## 2. Точный Source и projections
+
+Таблица 1. Источник новой сборки.
+
+| Поле | Значение |
+|---|---|
+| Worktree | @@RECOVERY_APPROVED_WORK_AREA@@\pub666-cli-fixtures-20261128 |
+| Commit | 267f076500b982475b57be45e8a7d8a03edcc2a6 |
+| Tree | d9636aa81dbcb995934a5ee1e51331b0a10af55f |
+| Tracked files / bytes | 3369 / 69342009 |
+| Root Source map SHA256 | 41c4d0a1ac1eb1919e3ece91df43722770f9e184abcff770eecb1b35414979cc |
+| Root Git map SHA256 | bde89c9df4b93c1e1082711f4a25986431bae6d02c973f8da6cea87a4707dd10 |
+| Root freeze SHA256 | ec56fbd6526b3f7f36d2818fca0ab4d7c000d493ce065d02044bdc7fa7d22bdd |
+| Runtime snapshot SHA256 | 09476d477b96d8232407dd1749d34cbac3f05505625737f2ac3e8ba6a6b43b95 |
+| Publisher snapshot SHA256 | 2da73b9edd326a1d76dc2d920d1143ac19e06cb0c36b2d3d0acbeb6eccf2cb6c |
+
+Автор прочёл полные root maps и freeze и восстановил их exact bytes/SHA,
+сопоставил все 3369 relative SHA rows. Только три CLI тестовых файла отличаются
+от59f; 3366 rows прежние. source-projection-delta.json содержит точные три
+SHA/blob/byte изменения и ссылки на root originals. Фактическую Git/Source
+проверку root выполнил ранее; автор не запускал Git и не перечитывал рабочий
+Source целиком.
+
+runtime-source-snapshot.json — полный {head,files}; publisher-source-snapshot.json
+— полный reused-graphify-source-snapshot-v1 с теми же файлами.
+Source epoch не придуман и не перенесён с59f: его рассчитает неизменённый
+build.ps1 при настоящем marked Product build из нового snapshot.
+До этой сборки actual epoch и Products остаются NOT_BUILT.
+
+## 3. Переиспользование и дельты
+
+producer-source-delta.patch сравнивает новые stage/scope/config/bindings с
+существующими версиями закрытого workflow. Изменения:
+
+- Source267f/output/config paths и exact maps;
+- два literals private scope RUNS/ARTIFACTS;
+- соответствие фактическим root map schemas и blob_sha1 field;
+- обязательный cross-binding нового root freeze к обоим map SHA;
+- прежняя проверка каждого actual tracked byte/Git blob плюс соответствие
+  SHA/length rows нового Git map;
+- timing-only namespace afterimages вместо прежних двух afterimages;
+- actual new Product metadata/config/snapshot pins.
+
+Все прочие stage/receiving/private-scope операции сохраняются.
+Stage создаёт private .scratch и qualified-* scopes только если их ещё нет,
+экспортирует все3369 tracked files, проверяет точный inventory и before/after
+bytes. Existing fresh-source export и native Product scope semantics прежние.
+git status остаётся чистым относительно tracked files; .scratch игнорируется.
+
+build_successor_products_v2.ps1 используется по существующему readonly path:
+@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\inputs-successor33-v1\product-continuation-v2\build_successor_products_v2.ps1
+SHA6230aaa4474526e9d8ccf864e35d363669605e0560c784f7df36753cc5e35b06.
+Его default Get-Command resolver и DateKind String уже входят в эту точную
+версию. Wrapper не переписывается. Он проверяет current source bytes и actual
+Git commit/tree, выпускает actual plans/fixtures/observations через исходный builder.
+
+Job whole-suite source74c4cebb… пересобирается внутри новой worktree
+.scratch/qualified-successor-job без trimpath. Поэтому runtime.Caller совпадёт
+с новым internal/process Source. Старый compiled-checkout binary не переименовывается.
+
+Namespace timing sources41e7cda8…/60556af6… будут скомпилированы для267f.
+Предыдущий59f diagnostic — отдельная история; его runtime PASS не предполагается.
+Предельные5s/5m/+10s, Sync, original pins/native/IO predicates и schema остаются.
+Contained59fa2cc4…, foreground77949871… и его parser tests9712a445… прежние.
+
+Оба Products новые:
+marked CLI Product получает полный Source267f snapshot/epoch/resource;
+native Product остаётся отдельной unmarked tagged V1 ролью без publisher epoch.
+Полный bundle каждой роли содержит прежние три файла; DLL/private727 inputs не вводятся.
+
+## 4. Будущая последовательность
+
+Таблица 2. Прежние12 producer steps; step1 пока НЕ СВЯЗАН.
+
+| № | Шаг | Work budget |
+|---:|---|---:|
+| 1 | Independent closed baseline cache copy | 600s, NOT_BOUND |
+| 2 | Exact source export + private helper scopes | 120s |
+| 3 | Build validator | 300s |
+| 4 | Build Go test2json | 120s |
+| 5 | Build original whole-suite Job helper | 300s |
+| 6 | Build contained helper | 300s |
+| 7 | Build namespace timing helper | 300s |
+| 8 | Build foreground CLI helper | 300s |
+| 9 | Existing framed-parser auxiliary check | 60s |
+| 10 | Marked Product build | 600s |
+| 11 | Unmarked tagged native Product build | 600s |
+| 12 | Compiled-input DATA receiving | 120s |
+
+Work budgets3720s +12×10s original cleanup +30s parent margin =3870s,
+parent remains4100s. Это producer budgets, не изменение Go suite timeout.
+Все известные argv/env приведены в producer-plan-projection.json;
+pending full plan хранит3369 Source pins +24 concrete non-Source pins.
+Cache copier/closure inputs будут добавлены только после фактического receiving.
+
+Output: @@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\successor267f-product-helper-inputs-v1.
+Source export: output/source; helpers/marked bundle/receipts — в этом новом root.
+Native bundle: @@RECOVERY_APPROVED_WORK_AREA@@\pub666-cli-fixtures-20261128\.scratch\qualified-successor-native-product\bundle.
+Producer environment private directories остаются под output/private —
+таков неизменённый original runner contract. Native builders работают с
+GOENV/GOWORK=off, GOTOOLCHAIN=local, GOOS=windows, GOARCH=amd64,
+CGO_ENABLED=1 и прежними pinned tools. GIT_ALLOW_PROTOCOL не задан.
+
+Для следующего full runtime предложены отдельные короткие
+@@RECOVERY_APPROVED_WORK_AREA@@\r8\full267f и @@RECOVERY_APPROVED_WORK_AREA@@\o8. Parents r8/o8 были NOT_FOUND
+при DATA metadata check; они не создавались и не являются результатом producer.
+
+## 5. Физическое владение и cache handoff
+
+run_owned_commands.py6d16652d…, guard e7c663f4… и windows_job d9458300…
+переиспользуются без изменений. New outer — прежний64-line original .NET
+Start/WaitForExit/Dispose lifecycle с четырьмя path/schema substitutions.
+Его exact delta находится в outer-binding-delta.patch.
+
+До caller launch root получает реальный APIv2 closure и разрешённую передачу
+baseline-v2 caches. Proposed donor paths не являются разрешением читать cache.
+NOT_BOUND план и manifest не выдают native/IO authority. После запуска
+compiled-inputs.json остаётся COMPILED_DATA_ONLY; native builds/reader closure
+принимаются отдельно по original command/parent receipts. Если producer завершится
+на раннем шаге, FAIL сохраняется, physical receiving не требует12 completed
+commands ради признания фактического закрытия уже начатых owners.
+
+Старые UNKNOWN full59f/CLI/Source/cache не читаются и не меняются.
+Существующие closed workflow source files читаются как immutable DATA;
+никакие ранние PASS не переносятся на267f.
+
+## 6. Сохранённые критерии полного прогона
+
+Producer не выполняет обе обязательные repository команды. Для будущего runtime
+они остаются точно прежними:
+
+```text
+go build ./... && go vet ./... && go test -count=1 -timeout 5m ./...
+go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/
+```
+
+Обязательные14migration+2canonical controls, API stderr3 и дополнительныеCLI
+stderr3 в обоих режимах не меняются. Точные имена остаются в frozen
+runtime-candidate/driver_successor.py.in:27–51. Migration —13 реальных preparation
+путей плюс существующий inert seam CallsInstallParsedManifest_NotDiskWrite.
+Нет новых mocks, selection/sharding, skip или изменения5m.
+
+## 7. Что проверено
+
+DATA/source review: полный root map hash/cross-map identity, трёхфайловая дельта,
+точность snapshots, все известные argv/env/budgets, fixed Source/output and
+Product roles, schema adaptation и original owner reuse. Candidate/output/.scratch
+были absent при metadata lookup; создан только candidate directory.
+Native build/cache copy/runtime/тесты автором не исполнялись.
+Python/PowerShell syntax probes остаются root DATA receiving, не предполагаются.
+
+В пакете есть рабочие machine paths. Перед PR используется уже принятая
+transparent-template проекция и точные original hashes. Native binaries/cache
+не публикуются как sources; все ценные drafts/results сохраняются для следующего checkpoint.

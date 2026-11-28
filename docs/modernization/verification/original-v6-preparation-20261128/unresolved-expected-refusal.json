@@ -1,0 +1,203 @@
+{
+  "schema": "remaining-expected-refusal-bounded-search-v1",
+  "control_identity_status": "UNRESOLVED",
+  "execution_status": "NOT_RUN",
+  "exact_test_name": null,
+  "exact_argv": null,
+  "result": "No exact originally remaining control name or argv was recovered within the bounded inspected sources. This is a bounded absence finding, not proof that no other historical record exists.",
+  "searched_primary_metadata": [
+    {
+      "role_path": "original-acceptance-20261126/run_acceptance.py",
+      "bytes": 9184,
+      "sha256": "856b0b085a49c552a8bcae76ee3754f0db63ea65ac6ad5e7b1327853fe806b6d"
+    },
+    {
+      "role_path": "original-acceptance-20261126/run_acceptance_cli.py",
+      "bytes": 11005,
+      "sha256": "7b214d4e13fadfeed4f07c3e0f9298d3d4a38a01379a77bee36be955991f7808"
+    },
+    {
+      "role_path": "original-acceptance-20261126/baseline-plan.json",
+      "bytes": 2236,
+      "sha256": "c8343e8ae7e1dd01d6b2aeaac6bab82305caa6db75f7ede991e44b3a8d2a61bc"
+    },
+    {
+      "role_path": "original-acceptance-20261126/fixed-v1-plan.json",
+      "bytes": 2629,
+      "sha256": "9de94afc1817bc54b401b1bae50b6a9459363966fe3f1ede507ebc19454b68ec"
+    },
+    {
+      "role_path": "original-acceptance-20261126/fixed-v2-plan.json",
+      "bytes": 3920,
+      "sha256": "5be45f90fc5ccb46cff9c0e723801af4e99b32741b90b6a4bacbe78bb7f351cc"
+    },
+    {
+      "role_path": "original-acceptance-20261126/prepare-plan.json",
+      "bytes": 2251,
+      "sha256": "884ba7f763032ca29be089e52be705636098c92e41f3af3f20f21e1334fbc44e"
+    },
+    {
+      "role_path": "original-acceptance-20261126/full-inputs-v2/acceptance_inputs.py",
+      "bytes": 68876,
+      "sha256": "993d85def649558ae524ba687df81f72cb497faad12c8816aed1b7215052f9e3"
+    },
+    {
+      "role_path": "original-acceptance-20261126/full-inputs-v2/full-config.json",
+      "bytes": 5360,
+      "sha256": "9e59c4729534865b50c2c39ce0e7dc3d79a8222425556516bcfeafcdb795e146"
+    },
+    {
+      "role_path": "original-acceptance-20261126/full-inputs-v2/launch_full.py",
+      "bytes": 8883,
+      "sha256": "61714fe28d2f35a8a9b212c9487f42c08dda299f57c4a57c2f6ecb4fcbe91324"
+    },
+    {
+      "role_path": "original-acceptance-20261126/full-inputs-v2/literal_go_exec_adapter_ready_v1.py",
+      "bytes": 63705,
+      "sha256": "1ed05c6e584c24c3772be1ab88c5c680c792af066e80210a6b67ccb20b53536c"
+    },
+    {
+      "role_path": "original-acceptance-20261126/full-inputs-v2/literal_migration_receiving_seed_v1.py",
+      "bytes": 50128,
+      "sha256": "28dd0ab4cc3fcb7ccf0eb5ecb5ba24f37ee8e60d1517c58df2822d850a59963c"
+    },
+    {
+      "role_path": "original-acceptance-20261126/full-inputs-v2/private_run_scope.py",
+      "bytes": 12531,
+      "sha256": "75625602eb72749ac6d4127f1beeebf65c239f39cc4992b1af6d04f6e8d328ec"
+    },
+    {
+      "role_path": "original-acceptance-20261126/full-inputs-v2/qualified_windows_products_consumer_v1.py",
+      "bytes": 146445,
+      "sha256": "c4d2794abad5bc9a6d6a9610587336c0bb4772c540b090d21bc144200e1c2492"
+    },
+    {
+      "role_path": "original-acceptance-20261126/full-inputs-v2/run_literal_go_gate_ready_v1.py",
+      "bytes": 55739,
+      "sha256": "0d46afd045dca51e83e0050afbcb9b94d3d023de0a0d0ae2a4653eeb61e77e67"
+    },
+    {
+      "role_path": "original-acceptance-20261126/full-inputs-v2/run_partitioned_go_gate_full_v1.py",
+      "bytes": 36603,
+      "sha256": "535112e1061fd4b1e6e0cf765ee6f1251ac61499367f1de1cf178ae84a5372e2"
+    },
+    {
+      "role_path": "original-namespace-20261127/full-inputs-v1/acceptance_inputs.py",
+      "bytes": 80430,
+      "sha256": "c7dce8bc650bccd6e74cff829078b138888065832d84dee4ed54bfa390eab0f3"
+    },
+    {
+      "role_path": "original-namespace-20261127/full-inputs-v1/full-config.json",
+      "bytes": 6361,
+      "sha256": "ff6cdd6e631a2b32267956c30ff2c225956b8d0598edd27cd2e33aa96c335a8e"
+    },
+    {
+      "role_path": "original-namespace-20261127/full-inputs-v1/launch_full.py",
+      "bytes": 8899,
+      "sha256": "356c2da532718de2dcf92b41029628161e9afb2b688b01594f824e06e181b89c"
+    },
+    {
+      "role_path": "original-namespace-20261127/full-inputs-v1/literal_go_exec_adapter_ready_v1.py",
+      "bytes": 68563,
+      "sha256": "45c4a897f3c2f392972ca293eec56d1c8ff90956f413dd1cca6fd982d639ad8c"
+    },
+    {
+      "role_path": "original-namespace-20261127/full-inputs-v1/literal_migration_receiving_seed_v1.py",
+      "bytes": 50128,
+      "sha256": "28dd0ab4cc3fcb7ccf0eb5ecb5ba24f37ee8e60d1517c58df2822d850a59963c"
+    },
+    {
+      "role_path": "original-namespace-20261127/full-inputs-v1/private_run_scope.py",
+      "bytes": 12539,
+      "sha256": "62bd85182f22bf358f4487b20891ec73cec0e396492a03560ebfacd68c604f36"
+    },
+    {
+      "role_path": "original-namespace-20261127/full-inputs-v1/qualified_windows_products_consumer_v1.py",
+      "bytes": 147829,
+      "sha256": "177373c6ce4fffb7f9d82093c20fc7a8d19655966bf79eaf1b309ae4ef2f4f76"
+    },
+    {
+      "role_path": "original-namespace-20261127/full-inputs-v1/run_literal_go_gate_ready_v1.py",
+      "bytes": 56557,
+      "sha256": "58a678a8c6c2d9bfdf6fbc30ee5e8b8cd2c847f4f460143e45eea4a7a72b6ce6"
+    },
+    {
+      "role_path": "original-namespace-20261127/full-inputs-v1/run_partitioned_go_gate_full_v1.py",
+      "bytes": 36611,
+      "sha256": "ba6a9b7be6d68893334adc862568c745c3434c1a6e7d419bd6a429d94d26737e"
+    },
+    {
+      "role_path": "original-namespace-20261127/full-inputs-v1/bundle-manifest.json",
+      "bytes": 4779,
+      "sha256": "7d5b14639acedd46a4d1ff47e206fc3b6aa3cc5ce6720cd4499493636400daa7"
+    }
+  ],
+  "public_context": [
+    {
+      "url": "https://github.com/applicate2628/mcp-local-hub/blob/5e95aab6d9765701ec6c49ddcecc6cde3293eb65/.plans/2026-11/open-pr-integration-20261117.md",
+      "sha256": "e2d9f2f404168d4e1bf95d15b44d6b3ee6e2cebd5c90d57cbdc5e58fd0a292e9",
+      "kind": "canonical report and preserved historical sections"
+    },
+    {
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/637",
+      "kind": "PR body snapshot inspected during the recovery search; mutable public context"
+    },
+    {
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/664",
+      "kind": "PR body snapshot inspected during the recovery search; mutable public context"
+    },
+    {
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/665",
+      "kind": "PR body snapshot inspected during the recovery search; mutable public context"
+    },
+    {
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/666",
+      "kind": "PR body snapshot inspected during the recovery search; mutable public context"
+    }
+  ],
+  "decisive_reading": [
+    {
+      "role_path": "original-namespace-20261127/full-inputs-v1/run_literal_go_gate_ready_v1.py",
+      "sha256": "58a678a8c6c2d9bfdf6fbc30ee5e8b8cd2c847f4f460143e45eea4a7a72b6ce6",
+      "function": "execute_gate",
+      "inspected_lines": [
+        559,
+        848
+      ],
+      "observation": "The recovered sequence performs build, vet, default tests, state-path-env tests and finalization. It contains no separate post-PASS negative command identifying the remaining control."
+    },
+    {
+      "role_path": "original-namespace-20261127/full-inputs-v1/run_literal_go_gate_ready_v1.py",
+      "marker": "literal-prior-build-refusal-v1",
+      "observation": "This is a refusal branch for unaccepted prior completion before a new scope, not an independently specified remaining test invocation."
+    }
+  ],
+  "distinct_controls_not_substituted": [
+    {
+      "control": "DWORD high-bit prestart refusal",
+      "reason": "A newly corrected controller scenario; its completion does not establish the original outstanding control identity."
+    },
+    {
+      "control": "Original Source727d namespace/prechild refusal tests",
+      "reason": "Known recovered source tests; no primary evidence ties them to the separately requested remaining check."
+    },
+    {
+      "control": "Earlier PR666 helper-dispatch negative oracle",
+      "reason": "Already recorded as completed with expected Go exit 1 and root/package FAIL; it does not identify an outstanding invocation."
+    },
+    {
+      "control": "Frozen ResourcesFinalized=false / native failed-owner late receive",
+      "reason": "Preserved unresolved observations are not an exact recovered test name or argv. No new PASS is inferred."
+    }
+  ],
+  "search_boundaries": {
+    "known_primary_input_files": 25,
+    "old_unknown_capture_contents_read": false,
+    "old_worktrees_read": false,
+    "old_cache_payload_read": false,
+    "host_wide_search": false,
+    "new_refusal_test_invented": false,
+    "new_runtime_commands_launched": false
+  },
+  "required_evidence_to_resolve": "Recover a contemporaneous exact test name or argv plus expected outcome and acceptance scope, or obtain an explicitly reviewed replacement requirement. Keep the original item open until then."
+}

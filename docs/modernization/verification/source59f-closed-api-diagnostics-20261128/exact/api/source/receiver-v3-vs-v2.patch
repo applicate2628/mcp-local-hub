@@ -1,0 +1,29 @@
+--- receive_closed_api59f_v2.py
++++ receive_closed_api59f_v3.py
+@@ -399,6 +399,26 @@
+              "closed namespace execution copy differs from same incoming image")
+         result["closed_execution_copy"]={"path":str(execution),"sha256":r["incoming_sha256"]}
+     converted=[c for c in COMMANDS if Path(c["stdout"]).name=="suite-events.stdout.txt"]
++    if owner["terminal"]=="prechild-refusal":
++        need(not converted and not r.get("coverage") and r["status"]=="FAIL"
++             and r.get("namespace_prechild_refusal") is True
++             and owner["proof"]["contained_stage_entered"] is False,
++             "verified pre-child refusal conflicts with a suite/conversion claim")
++        ledger=event_ledger("literal-default",{API:inventory},[],r["adapter_exit_code"],[(API,t) for t in MANDATORY])
++        result.update(inventory_count=len(inventory),full_inventory_ledger=ledger,
++            ledger_origin="derived NOT_RUN inventory after verified pre-child refusal; no original suite ledger",
++            top_level_counts={"NOT_RUN":len(inventory)},all_terminal_counts={},failed_tests=[],
++            contained_full_suite_entered=False,original_suite_coverage_received=False,
++            mandatory_api_stderr=[{"test":t,"runs":0,"outcome":"NOT_RUN"} for t in API_STDERR],
++            mandatory_api_all=[{"test":t,"runs":0,"outcome":"NOT_RUN"} for t in MANDATORY])
++        stderr=CASE/"suite-owner.stderr.txt"
++        need(str(stderr) in measured,"original pre-child API owner stderr was not received")
++        with stderr.open("rb") as stream:raw_stderr=stream.read(65537)
++        result["owner_stderr"]={"text":raw_stderr[:65536].decode("utf-8",errors="replace"),
++                               "truncated":len(raw_stderr)>65536,"path":str(stderr)}
++        for path,sha in CONTROL_PINS.items():
++            need(digest(path)==sha,"original API control changed during receiving: "+path)
++        return False
+     need(len(converted)==1 and converted[0]["argv"]==[cfg["controllers"]["test2json"]["path"],"-p",API]
+          and converted[0]["exit_code"]==0 and converted[0]["stdout"] in measured,
+          "original closed test2json conversion absent or differs")

@@ -1,0 +1,1462 @@
+{
+  "schema": "literal-go-exec-invocation-v1",
+  "run": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa",
+  "commands": [
+    {
+      "argv": [
+        "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe",
+        "version",
+        "-m",
+        "-json",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\d\\go-build3568661218\\b477\\lldb.test.exe"
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2",
+      "stdout": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\incoming-build-info.stdout.txt",
+      "stderr": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\incoming-build-info.stderr.txt",
+      "captures_measured": true,
+      "command_success": true,
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 1515,
+          "bytes_stored": 1515,
+          "limit_bytes": 1048576,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 581305.8868758
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "limit_bytes": 1048576,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 581305.8868498
+        }
+      },
+      "work_seconds": 5,
+      "cleanup_seconds": 10,
+      "native_owner": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-error-dword-v4\\windows_job.py",
+        "sha256": "d94583001a33ef34adb67feec34b4f4b0bf3626df9f63da3c7a7c85bf3e0b552"
+      },
+      "console": {
+        "attached": true,
+        "visible": false
+      },
+      "stdin_mode": "null",
+      "before_resume_entered": true,
+      "before_resume_returned": true,
+      "before_resume_deadline_exceeded": false,
+      "phases_elapsed_seconds": {
+        "initial_save_started": 2.8499984182417393e-05,
+        "initial_save_finished": 0.0038115999195724726,
+        "launch_entered": 0.003814699943177402,
+        "before_resume_entered": 0.00843769998755306,
+        "before_resume_returned": 0.008439600002020597,
+        "launch_returned": 0.008461899938993156,
+        "launch_exception": null,
+        "external_settle_end": 0.12222219991963357
+      },
+      "quiescence_state": "complete",
+      "original_pid": 156348,
+      "original_owner_binding": {
+        "schema": "ordinary-original-native-owner-binding-v1",
+        "object_id": 2820379974224,
+        "pid": 156348,
+        "process": 840,
+        "job": 668
+      },
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "work_elapsed_seconds": 0.12205160001758486,
+      "cleanup_interval_seconds": 10.0,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "exit_code": 0,
+      "worker_join_observations": [
+        {
+          "name": "incoming-build-info-stdout",
+          "ident": 287788,
+          "native_id": 287788,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.1222445999737829,
+          "remaining_seconds": 9.999807000043802,
+          "last_entered_seconds": 0.1222445999737829,
+          "last_remaining_seconds": 9.999807000043802,
+          "returned_seconds": 0.12225030001718551,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.1211700999410823
+        },
+        {
+          "name": "incoming-build-info-stderr",
+          "ident": 402504,
+          "native_id": 402504,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.12225339992437512,
+          "remaining_seconds": 9.99979820009321,
+          "last_entered_seconds": 0.12225339992437512,
+          "last_remaining_seconds": 9.99979820009321,
+          "returned_seconds": 0.12225449993275106,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.12114409997593611
+        }
+      ],
+      "seconds": 0.12226440000813454,
+      "cleanup_deadline_exceeded": false,
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "original_input_writers_retained": true,
+      "original_input_writer_joined": false,
+      "completion_receiving": {
+        "schema": "ordinary-original-native-io-completion-v1",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "io": {
+          "stdout": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 1515,
+            "bytes_stored": 1515,
+            "limit_bytes": 1048576,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 581305.8868758
+          },
+          "stderr": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 0,
+            "bytes_stored": 0,
+            "limit_bytes": 1048576,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 581305.8868498
+          }
+        },
+        "stdin_mode": "null",
+        "stdin": {},
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "original_input_writer_joined": false,
+        "lifecycle_state": "CLOSED"
+      },
+      "stdout_sha256": "29295292dcd1fd644acb4b8982c75d384226113bc452e372e6c22c6e10eb9418",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-external-helper-inputs-v6\\literal-contained.exe",
+        "--test-binary",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\d\\go-build3568661218\\b477\\lldb.test.exe",
+        "--expected-sha256",
+        "a24577dc3d9a285aaa26b8880413eb04a103607f8f114d889b80cb8e112c726b",
+        "--source-dir",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2\\internal\\lldb",
+        "--run-root",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\inventory",
+        "--inventory",
+        "--timeout",
+        "90s",
+        "--",
+        "-test.list=."
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2\\internal\\lldb",
+      "stdout": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\inventory-owner.stdout.txt",
+      "stderr": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\inventory-owner.stderr.txt",
+      "captures_measured": true,
+      "phases_elapsed_seconds": {
+        "launch_entered": 0.004042100044898689,
+        "launch_returned": 0.007579199969768524,
+        "wait_entered": 0.007580899982713163,
+        "wait_returned": 0.46340430004056543
+      },
+      "quiescence_state": "complete",
+      "original_pid": 377444,
+      "original_pid_is_authority": false,
+      "exit_code": 0,
+      "seconds": 0.463,
+      "completion_receiving": {
+        "custody_retained": false,
+        "binary_after_measured": true,
+        "schema": "literal-contained-test-run-v1",
+        "binary": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\d\\go-build3568661218\\b477\\lldb.test.exe",
+        "binary_sha256": "a24577dc3d9a285aaa26b8880413eb04a103607f8f114d889b80cb8e112c726b",
+        "source_dir": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2\\internal\\lldb",
+        "args": [
+          "-test.list=."
+        ],
+        "started_utc": "2026-11-28T12:05:28.1935426Z",
+        "finished_utc": "2026-11-28T12:05:28.3825369Z",
+        "root": {
+          "Known": true,
+          "PID": 20036,
+          "StartedAt": "2026-11-28T12:05:28.1987688Z",
+          "NativeBirthFILETIME": 134403411281987688
+        },
+        "native": {
+          "RootIdentity": {
+            "Known": true,
+            "PID": 20036,
+            "StartedAt": "2026-11-28T12:05:28.1987688Z",
+            "NativeBirthFILETIME": 134403411281987688
+          },
+          "NoChildKnown": false,
+          "RootWaitKnown": true,
+          "RootExitCode": 0,
+          "TerminalAction": "not-requested",
+          "MembersExited": true,
+          "AccountingKnown": true,
+          "InitialTotal": 1,
+          "FinalActive": 0,
+          "CapturedMemberPIDs": null,
+          "HandlesClosed": true,
+          "Error": null
+        },
+        "io": {
+          "Stdin": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "StdoutRead": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "StdoutWrite": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "StderrRead": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "StderrWrite": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "Stdout": {
+            "WorkerStarted": true,
+            "WorkerComplete": true,
+            "EOF": true,
+            "Bytes": 37,
+            "Limit": 16777216,
+            "LimitExceeded": false,
+            "Error": null
+          },
+          "Stderr": {
+            "WorkerStarted": true,
+            "WorkerComplete": true,
+            "EOF": true,
+            "Bytes": 0,
+            "Limit": 16777216,
+            "LimitExceeded": false,
+            "Error": null
+          }
+        },
+        "stage": "",
+        "root_wait_known": true,
+        "root_exit_code": 0,
+        "settlement_complete": true,
+        "inventory": true,
+        "work_deadline": "2026-11-28T12:07:03.1935426Z",
+        "cleanup_deadline": "2026-11-28T12:07:13.1935426Z",
+        "test_timeout": "1m30s",
+        "bootstrap_budget": "5s",
+        "binary_unchanged": true
+      },
+      "stdout_sha256": "edc84a3c955f6379259db36aee063adf921e0f2f8eb0feb525ed3ecf55209c0a",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-external-helper-inputs-v6\\literal-contained.exe",
+        "--test-binary",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\d\\go-build3568661218\\b477\\lldb.test.exe",
+        "--expected-sha256",
+        "a24577dc3d9a285aaa26b8880413eb04a103607f8f114d889b80cb8e112c726b",
+        "--source-dir",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2\\internal\\lldb",
+        "--run-root",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\suite",
+        "--timeout",
+        "5m",
+        "--",
+        "-test.paniconexit0",
+        "-test.v=test2json",
+        "-test.count=1",
+        "-test.timeout=5m0s"
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2\\internal\\lldb",
+      "stdout": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\suite-owner.stdout.txt",
+      "stderr": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\suite-owner.stderr.txt",
+      "captures_measured": true,
+      "phases_elapsed_seconds": {
+        "launch_entered": 0.005335699999704957,
+        "launch_returned": 0.008643899927847087,
+        "wait_entered": 0.00864509993698448,
+        "wait_returned": 0.2683080999413505
+      },
+      "quiescence_state": "complete",
+      "original_pid": 524388,
+      "original_pid_is_authority": false,
+      "exit_code": 0,
+      "seconds": 0.268,
+      "completion_receiving": {
+        "custody_retained": false,
+        "binary_after_measured": true,
+        "schema": "literal-contained-test-run-v1",
+        "binary": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\d\\go-build3568661218\\b477\\lldb.test.exe",
+        "binary_sha256": "a24577dc3d9a285aaa26b8880413eb04a103607f8f114d889b80cb8e112c726b",
+        "source_dir": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2\\internal\\lldb",
+        "args": [
+          "-test.paniconexit0",
+          "-test.v=test2json",
+          "-test.count=1",
+          "-test.timeout=5m0s"
+        ],
+        "started_utc": "2026-11-28T12:05:28.6747598Z",
+        "finished_utc": "2026-11-28T12:05:28.8063085Z",
+        "root": {
+          "Known": true,
+          "PID": 465364,
+          "StartedAt": "2026-11-28T12:05:28.6781122Z",
+          "NativeBirthFILETIME": 134403411286781122
+        },
+        "native": {
+          "RootIdentity": {
+            "Known": true,
+            "PID": 465364,
+            "StartedAt": "2026-11-28T12:05:28.6781122Z",
+            "NativeBirthFILETIME": 134403411286781122
+          },
+          "NoChildKnown": false,
+          "RootWaitKnown": true,
+          "RootExitCode": 0,
+          "TerminalAction": "not-requested",
+          "MembersExited": true,
+          "AccountingKnown": true,
+          "InitialTotal": 1,
+          "FinalActive": 0,
+          "CapturedMemberPIDs": null,
+          "HandlesClosed": true,
+          "Error": null
+        },
+        "io": {
+          "Stdin": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "StdoutRead": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "StdoutWrite": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "StderrRead": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "StderrWrite": {
+            "Acquired": true,
+            "CloseAttempted": true,
+            "Closed": true,
+            "CloseError": null
+          },
+          "Stdout": {
+            "WorkerStarted": true,
+            "WorkerComplete": true,
+            "EOF": true,
+            "Bytes": 218,
+            "Limit": 16777216,
+            "LimitExceeded": false,
+            "Error": null
+          },
+          "Stderr": {
+            "WorkerStarted": true,
+            "WorkerComplete": true,
+            "EOF": true,
+            "Bytes": 0,
+            "Limit": 16777216,
+            "LimitExceeded": false,
+            "Error": null
+          }
+        },
+        "stage": "",
+        "root_wait_known": true,
+        "root_exit_code": 0,
+        "settlement_complete": true,
+        "inventory": false,
+        "work_deadline": "2026-11-28T12:10:33.6747598Z",
+        "cleanup_deadline": "2026-11-28T12:10:43.6747598Z",
+        "test_timeout": "5m0s",
+        "bootstrap_budget": "5s",
+        "binary_unchanged": true
+      },
+      "stdout_sha256": "823f282bd647b53e848d78162720b250336fcf5553d5463e5661c67e3be003cf",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-helper-inputs-v6\\test2json.exe",
+        "-p",
+        "mcp-local-hub/internal/lldb"
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2\\internal\\lldb",
+      "stdout": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\suite-events.stdout.txt",
+      "stderr": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\suite-events.stderr.txt",
+      "captures_measured": true,
+      "command_success": true,
+      "io": {
+        "stdout": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 1388,
+          "bytes_stored": 1388,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 581307.6759218
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "limit_bytes": null,
+          "limit_exceeded": false,
+          "worker_complete_monotonic": 581307.6758957
+        }
+      },
+      "work_seconds": 5,
+      "cleanup_seconds": 10,
+      "native_owner": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-error-dword-v4\\windows_job.py",
+        "sha256": "d94583001a33ef34adb67feec34b4f4b0bf3626df9f63da3c7a7c85bf3e0b552"
+      },
+      "console": {
+        "attached": true,
+        "visible": false
+      },
+      "stdin_mode": "pipe",
+      "before_resume_entered": true,
+      "before_resume_returned": true,
+      "before_resume_deadline_exceeded": false,
+      "phases_elapsed_seconds": {
+        "initial_save_started": 2.1699932403862476e-05,
+        "initial_save_finished": 0.0036687999963760376,
+        "launch_entered": 0.0036709000123664737,
+        "before_resume_entered": 0.0069963999558240175,
+        "before_resume_returned": 0.006997799966484308,
+        "launch_returned": 0.0070102999452501535,
+        "launch_exception": null,
+        "external_settle_end": 0.12535129999741912
+      },
+      "quiescence_state": "complete",
+      "original_pid": 386184,
+      "original_owner_binding": {
+        "schema": "ordinary-original-native-owner-binding-v1",
+        "object_id": 2820379979424,
+        "pid": 386184,
+        "process": 884,
+        "job": 828
+      },
+      "stdin": {
+        "acquired": true,
+        "worker_started": true,
+        "worker_complete": true,
+        "input_eof": true,
+        "pipe_close_returned": true,
+        "input_close_returned": true,
+        "error": null,
+        "bytes_read": 218,
+        "bytes_written": 218,
+        "worker_complete_monotonic": 581307.5591696
+      },
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "work_elapsed_seconds": 0.12522689998149872,
+      "cleanup_interval_seconds": 10.0,
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "exit_code": 0,
+      "worker_join_observations": [
+        {
+          "name": "suite-events-stdout",
+          "ident": 20792,
+          "native_id": 20792,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.12537989998236299,
+          "remaining_seconds": 9.999846999999136,
+          "last_entered_seconds": 0.12537989998236299,
+          "last_remaining_seconds": 9.999846999999136,
+          "returned_seconds": 0.1253856000257656,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.12428799993358552
+        },
+        {
+          "name": "suite-events-stderr",
+          "ident": 337556,
+          "native_id": 337556,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.12538799992762506,
+          "remaining_seconds": 9.999838900053874,
+          "last_entered_seconds": 0.12538799992762506,
+          "last_remaining_seconds": 9.999838900053874,
+          "returned_seconds": 0.12538899993523955,
+          "stream_after": {
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true
+          },
+          "worker_complete_seconds": 0.12426189996767789
+        },
+        {
+          "name": "suite-events-stdin",
+          "ident": 316504,
+          "native_id": 316504,
+          "alive_before": false,
+          "alive_after": false,
+          "stream_before": {
+            "worker_complete": true,
+            "input_eof": true,
+            "pipe_close_returned": true,
+            "input_close_returned": true
+          },
+          "join_attempted": true,
+          "join_attempt_count": 1,
+          "join_error_count": 0,
+          "join_timeout_seconds": 0,
+          "joined": true,
+          "entered_seconds": 0.12539119995199144,
+          "remaining_seconds": 9.999835700029507,
+          "last_entered_seconds": 0.12539119995199144,
+          "last_remaining_seconds": 9.999835700029507,
+          "returned_seconds": 0.12539179995656013,
+          "stream_after": {
+            "worker_complete": true,
+            "input_eof": true,
+            "pipe_close_returned": true,
+            "input_close_returned": true
+          },
+          "worker_complete_seconds": 0.007535799988545477
+        }
+      ],
+      "seconds": 0.1254028999246657,
+      "cleanup_deadline_exceeded": false,
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "original_input_writers_retained": true,
+      "original_input_writer_joined": true,
+      "completion_receiving": {
+        "schema": "ordinary-original-native-io-completion-v1",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "io": {
+          "stdout": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 1388,
+            "bytes_stored": 1388,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 581307.6759218
+          },
+          "stderr": {
+            "acquired": true,
+            "worker_started": true,
+            "worker_complete": true,
+            "eof": true,
+            "pipe_close_returned": true,
+            "capture_close_returned": true,
+            "error": null,
+            "bytes_seen": 0,
+            "bytes_stored": 0,
+            "limit_bytes": null,
+            "limit_exceeded": false,
+            "worker_complete_monotonic": 581307.6758957
+          }
+        },
+        "stdin_mode": "pipe",
+        "stdin": {
+          "acquired": true,
+          "worker_started": true,
+          "worker_complete": true,
+          "input_eof": true,
+          "pipe_close_returned": true,
+          "input_close_returned": true,
+          "error": null,
+          "bytes_read": 218,
+          "bytes_written": 218,
+          "worker_complete_monotonic": 581307.5591696
+        },
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "original_input_writer_joined": true,
+        "lifecycle_state": "CLOSED"
+      },
+      "stdout_sha256": "31fb8275aa396dd6010f7e4f79dcfb2a96757cfb9686b73402c25e1318d1c378",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "status": "PASS",
+  "started_utc": "2026-11-28T12:05:27Z",
+  "read_only_tool_aliases": {
+    "gcc": {
+      "path": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\bin\\gcc.exe",
+      "sha256": "f6ff9378c1edb591131304518eac6456708d28720284105930d0d687136bcdd3",
+      "configured": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\bin\\gcc.exe",
+      "resolved": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\bin\\gcc.exe"
+    },
+    "git": {
+      "path": "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+      "sha256": "177bc8a9af84fa3a400c694c975fda731d048279c074e1a93947ce8b067ebb48",
+      "configured": "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+      "resolved": "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe"
+    },
+    "go": {
+      "path": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe",
+      "sha256": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113",
+      "configured": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe",
+      "resolved": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe"
+    },
+    "pwsh": {
+      "path": "@@RECOVERY_NATIVE_POWERSHELL_WORK_AREA_JSON@@\\bns26\\pwsh7\\pwsh.exe",
+      "sha256": "f2833e07a5a7d59153ffc63db83bd6b62f6c63ffd8b5b5099a2feadf6b605336",
+      "configured": "@@RECOVERY_NATIVE_POWERSHELL_WORK_AREA_JSON@@\\bns26\\pwsh7\\pwsh.exe",
+      "resolved": "@@RECOVERY_NATIVE_POWERSHELL_WORK_AREA_JSON@@\\bns26\\pwsh7\\pwsh.exe"
+    },
+    "python": {
+      "path": "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+      "sha256": "d4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd",
+      "configured": "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+      "resolved": "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe"
+    }
+  },
+  "phase": "default",
+  "package": "mcp-local-hub/internal/lldb",
+  "plan": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\plan-default.json",
+  "plan_sha256": "05a21b3be7cc6650db538b87c35ce238f271421857033bbebf4f06fd231273b3",
+  "incoming": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\d\\go-build3568661218\\b477\\lldb.test.exe",
+  "incoming_sha256": "a24577dc3d9a285aaa26b8880413eb04a103607f8f114d889b80cb8e112c726b",
+  "original_argv": [
+    "-test.paniconexit0",
+    "-test.v=test2json",
+    "-test.count=1",
+    "-test.timeout=5m0s"
+  ],
+  "original_cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2\\internal\\lldb",
+  "input_files": {
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\runtime-original-v6\\runtime-inputs.json": "037d4ad93bc93dcf531669eaaa90be32154c1ba34af6f50528eaa03e9f9ef4a2",
+    "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\bin\\gcc.exe": "f6ff9378c1edb591131304518eac6456708d28720284105930d0d687136bcdd3",
+    "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe": "177bc8a9af84fa3a400c694c975fda731d048279c074e1a93947ce8b067ebb48",
+    "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113",
+    "@@RECOVERY_NATIVE_POWERSHELL_WORK_AREA_JSON@@\\bns26\\pwsh7\\pwsh.exe": "f2833e07a5a7d59153ffc63db83bd6b62f6c63ffd8b5b5099a2feadf6b605336",
+    "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe": "d4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-external-helper-inputs-v6\\literal-canonical.exe": "cc06ab8aeca193473acf341e1c201c69a02f1588f84325cdc245deccc73ea6b5",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-external-helper-inputs-v6\\literal-contained.exe": "5b26fefbda8c7925562431acfcf1b058c0f95ac24dca624640bfb6ad877ff100",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-helper-inputs-v6\\test-job-entry.exe": "dbf87e6acc38df0b6ebde89ce6b0db05290dbf2a5802cf5a8e22d620db1d33f7",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-helper-inputs-v6\\test-recovery-namespace.exe": "70c9b42edce01839b5afc3e302f85663fb48a543d40546bdeb766824c4622bf0",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-helper-inputs-v6\\test2json.exe": "ce7091b85741dd4b5ab1f2f278670e4f2ea0485faddaaed36967409a9ddf2c85",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-helper-inputs-v6\\windows-product-validate.exe": "fe21d04537c56fd3a7ad0a13189d339d38c9de9fcc83528aaa36d39ef5cf5a98",
+    "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\conhost.exe": "c699d1728b8e8839d35eea234a7205065893b23b89a6201b4faca6cd98a3ea33",
+    "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\netsh.exe": "0255ea10a7ea7ce0634874095fd1397f3114290c3809a6c0f36476b87a5b9112",
+    "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\netstat.exe": "3fae986d34175890bb576bfeec3145e0ee99ed51117444d179c144cc367e70e2",
+    "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\WindowsPowerShell\\v1.0\\powershell.exe": "75f490d70f821afbbbb28d8ae45fa712c0ef39f73832af5ff0df284beb22a9fc",
+    "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\wbem\\WMIC.exe": "9c439179991319d1c6be5ecd50c01738f9de6b5ee9e8702fee612e725c086f9f",
+    "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\AppData\\Roaming\\uv\\python\\cpython-3.14.9-windows-x86_64-none\\python.exe": "204d51f19707da17766bccecce2ceececadab350663a8190420d1377bac1150d",
+    "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\.local\\bin\\uv.exe": "81ea623608f8c17720c62efd0a380a8ead380c4d365ba6968e9d279a2319c674",
+    "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\.local\\bin\\uvx.exe": "836554a2ec223159df425d8c71292fef20ef7659469dd83bab840e80af81f5cc",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-source-restore-v2\\parent.json": "665099615fc911e5db3eef74de7c28e06ea35fcece33d290f5d0439fb3268f20",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-helper-inputs-v6\\parent.json": "a32ddbdea1de36963d3c9b333543e9c79629034c68a5717b051620ef2ae08377",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\passive-uv-seed-copy-v1\\parent.json": "c7c80e0e7577a1d1118d3e17ea98721e2a8f68f39d842bcacc02c532851bee59",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\parent.json": "584ff6d8f816fb07c63ae78e0d299d67fb90ba083c6b1678c8a24ab5ba1946c1",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-external-helper-inputs-v6\\parent.json": "2c04ece4441ec83193a98d6f0179f01dfab4679eeb7df1e765de703e98960ee7",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\serena-product-inputs-v2\\parent.json": "4a11f613e91c10121bacf9438eb7849962e880277a9e7f4c0809491bc453d440",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\runtime-readback-v2\\parent.json": "5ebe2877936e27f89a2e28c5a50518fcbd84c2780e7366482fc55fe1e95666a5",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-private-compile-v7\\parent.json": "0cb7e027c9ed6f5e17662e6adedebb4f3c669b93e81feff730a6153f50bce7e3",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\product-source-compatibility.json": "4b33af00603c81c290abe1e4871b4ad1b6009d9e0a56f97bd1c228e198882d50",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\product3ebe-source-snapshot.json": "5f59bbe051cbd6e160e3e84e67180d96940b13191988b7e41eb760d3eea1ac6f",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\original-selected-go-inputs.json": "77f1aa84d4bcea91e6a6c153095995dd165449e93d90edeffd19ba564f14b1c7",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\test727d-source-snapshot.json": "b37a149da3a88b7b87eec0f0ed0ace83178cf7a2add88e97a906989073f1a096",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\native3ebe-build-plan.json": "52ba50f7e5702bb94ff059aea8769bc82b01c2808a63ddcbdac7cbdeccfc75ce",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\native-actor-fixture-v6.json": "4d92e007d57c09b412eb4b6f04d810a7e0f49beb1350c73eccb1fbd1857f8a15",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\marked727d-inputs.json": "b716a16b9cbe69d67c3a2adc15b24576d1121e32ff6080c7eefc460fe64bafc0",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\marked727d-versioninfo.syso": "959b6ac719cf65a93e4fa63aa015e783b62497daaa0e0e72d288c43527e5a11b",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\marked727d-build-plan.json": "63ed22049a25de657157e4d3d49d4e2a615239e66f26bf2ffba7b8c8de8b98b3",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-source-restore-v2\\original727d-receiving.json": "a3483e469b606fa297a4b33698cd22db7bf25493023f3117feeafb52bb9db5f1",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-error-dword-v4\\guard-custody.py": "e7c663f4ba2fd558005bc110173609cb19465ff33d3f4678aeb53b5ba00e0924",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-error-dword-v4\\windows_job.py": "d94583001a33ef34adb67feec34b4f4b0bf3626df9f63da3c7a7c85bf3e0b552",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\copy_closed_caches_v6.py": "2577deae637071dbc9eb2dae6e6f64946379a30b093b6bc3fa120f687b365a16",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\migration-default-input.json": "bd0ad3fcf51941c7bf98e7a3c0e3d877ff298e6d17e24e50eb2e58aee4c5a47e",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\migration-state-input.json": "9455c97de4bcf709a392f2909ddba977e2a914bcf94465009a52038bd6d994a9",
+    "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\WindowsPowerShell\\v1.0\\Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1": "c09df190addc67f7c6c38e7ea1dca719fd87807107f688c3f60ed8816e1c48a6",
+    "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\WindowsPowerShell\\v1.0\\Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psm1": "f9232f3de3c94dd03caf40f54b22876c9d810c657c41e54ab2d10469b45f26b5",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-error-dword-v4\\serena-product-inputs-v2-plan.json": "e756d9109c96670a135224b47d0aed3b56379a43854b41738816832d06ef1254",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\build_private_inputs_v7.ps1": "f4abd18efc767ca6bcaba4e8b8363f0ddf08459052b135a543eec7662fa68ac3",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\invoke_fixed_build_utf8.ps1": "4cb35eb80e029269732eeaf0409de92ff00a58b59070abd3ebff2cb9281ad79b",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\original-artifact-copy-manifest.json": "180fedc50bb0a3de8790ba01fc83c88216f21f580274fbcd524bc7e47782a08e",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\original-private-compile-v7-plan.json": "6d6cb0233685566894d4e5ef426dedc07daa13948dfeeab2a446064af79382eb",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\original-product-build-bindings-v7.json": "1a4fa1f84632e73005919cbb0aa4dfda299fb96ec793b0ac2a74cce4fc052381",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\private_migration_scope_v6.py": "a56e6730bc39307374d811222ee164213f6a73a1513b360688d2e0b925ee36c0",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\receive_private_graph_v6.py": "1d6895719d79d1b53edaab13d6aa8bd7d19e2efe2c87b0003e543f44cd64fe01",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-external-helper-inputs-v6\\commands\\execution.json": "788e55531f52d64516664f65043c9130c0cd90cf89c96cdd13d0af362f21a255",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-external-helper-inputs-v6\\external-helper-inputs.json": "9c7c519e90d6c1ebc64020e11eba983f540c7204fdc6462a9747758ab21da1a5",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-external-helper-inputs-v6\\external-source-preparation.json": "72d6b8ba65a116ac5bf0d7f06c11def7d080db8bd66550d68811dbd1d22991c0",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-helper-inputs-v6\\commands\\execution.json": "bf3fb41e16c11fecabd923749b4b43a76e085cd085f093ef786c860c14ea7d2c",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-private-compile-v7\\commands\\execution.json": "b1c4a3d3f5e4ca1a65227f05bb648487cad8dfd43af49927e1cd3e6d1f0e780a",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-private-compile-v7\\date-parser-probe.json": "dc025c02802d36a48e9eb8c2a0413cbb3c5119856fc93d1c2787a2cd41d91241",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\commands\\execution.json": "0d62de08b4493ffc1a707f939f85355fffb1b08d03bf690439263d5022b04ca6",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\compiler-inputs-default\\cli-publisher-test-inputs.json": "8bcf922364b2e162e6c20425300344a483678461379f721ed352080da4eeaa98",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\compiler-inputs-test_state_path_env\\cli-publisher-test-inputs.json": "0a3b69f75cc547865e85adab30bdcf5402a080cf3534aefc2ebc95cf6fc9aada",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\default-closure-before.json": "c1f35cd70ac735ff8da8c23f90f8220909f1c44e121dabc7bbd75e908a4d7faa",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\default-closure-staged.json": "d537dc4d673bd86ddbb3c335fd1254f303319bd0a4de727482f964cbdc2e9f93",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\default-generated-testmain.go": "8e7be415bbeef2c11e0f3b0204a2dd3fb3afae46e12ca4bcb74cc336365af2b7",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\evidence-parent-default.json": "0ad0c9460d12e313e9e96d33693b07df8f0f39d0349685aa98031228484595e9",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\evidence-parent-state.json": "08cce646e929c26f546eaea3317e3f9265a214ec4f5dbad0261236bcc7ce5888",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\private-publisher-inputs.json": "92b40e7edfbf21fd74ffee6a35dee122a310192dfb2e818f3a00c872866409a9",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\publisher-default-go-build-info.json": "9612239b134bd245086bdbc2bd0f0d64edc18c37a380a8d58825aa13ec9dbc07",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\publisher-state-go-build-info.json": "69a5d8a56b9c0254587dc9bac664b4aaca68bd3bd934fae3052f5b7278b4c8d4",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\publisher-test-images\\cli-publisher-default.test.exe": "5c5cfc94af370194bb047a433912b4cda50bcd4827633aa4c5185d6736364e7c",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\publisher-test-images\\cli-publisher-state.test.exe": "0bd8fd3bc4deeadec72a6659056d23d4f47928214456ed6637a62731ee3d8911",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\copy-receipt.json": "13fa3cae6f68fbe9ece69af9265b779dec579cf2c96dda21c131a0cae6f50169",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\marked727d-bundle\\mcphub-product\\mcphub-owner-identity.json": "856c4ac90d29e0bbfd4b1174731c6c53a7e561dcd1c83af66e887e65a78ff8ba",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\marked727d-bundle\\mcphub-product\\mcphub-owner.dll": "dfa87a10a39e9110cda735ae6a987bfa64b03446529072710723e9b6ea0dca56",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\marked727d-bundle\\mcphub-product\\mcphub.exe": "33a0e0c21bd625f9b674621846f227f1a1785873ed3bb3aaddb52a445702c70a",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\marked727d-bundle\\mcphub.exe": "bc402317a2bb6f64dbc1b83086bf46b52ee31d3a49c98227a011c60e0f5f8e04",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\marked727d-bundle\\windows-product-identity.json": "67e1ac76746c196aa09baefac3c5a7a205716229ffc12cc86c961aab13d92162",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\native3ebe-bundle\\mcphub-product\\mcphub-owner-identity.json": "64d7fe1bb4b9bd9ae4e837ef2d7926a90304cd9ccf5a5f1a6a9f4942d9be6d3c",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\native3ebe-bundle\\mcphub-product\\mcphub-owner.dll": "dfa87a10a39e9110cda735ae6a987bfa64b03446529072710723e9b6ea0dca56",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\native3ebe-bundle\\mcphub-product\\mcphub.exe": "91b5ad8b1f402e3c96662adeadc81d9ca50046b4f2b1ee954ca43597e5508326",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\native3ebe-bundle\\mcphub.exe": "21d9716c5924bc10bd071d098bcb125f563a3667e3ce595f8f3a22b93eb32eb6",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\native3ebe-bundle\\windows-product-identity.json": "bd2c999f12ac316167ddbdfaf942a9d2690867903b0d53159df2704604011a7a",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\native3ebe-original-entry.json": "05232ad2749c24497d934dcdc7766bcd4790e0e1c5ccad6e7704456932bd05c7",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\source-snapshot.json": "5f59bbe051cbd6e160e3e84e67180d96940b13191988b7e41eb760d3eea1ac6f",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\source\\servers\\serena\\manifest.yaml": "3a6549e2edb169e6f2f88843f46a0de8fec426b86cb8c741420c3e110514ad17",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\state-closure-before.json": "fab7b537e6a5d05259d6b8c55c651e9bce7dad93a94d76b2be38485e7a2d21e4",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\state-closure-staged.json": "e401c612bea3bd49e544c6dff95634a04086ae8a1685b9dff45323ba7d72346e",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\state-generated-testmain.go": "c638ea7c9ab03a083ef404b022d7986959e6f1a9e4a93b6f55e720cc6dc71a91",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-source-restore-v2\\commands\\execution.json": "890fecd2b2a4e7a1acf36b0d5f3fb7135518d7eeb32498c8610bd7f0965ac4e5",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-source-restore-v2\\original3ebe-receiving.json": "c63d8b13331a752c85c5e62f4c4ce0a2ee19cc0c129c83b4dd6ed99fbd944b46",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\passive-uv-seed-copy-v1\\seed\\cache-manifest.json": "e84302720cc6edd0482983a00b7823d3bd7a1671f8de327152119748382ed42d",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\passive-uv-seed-copy-v1\\seed\\cache.tar": "8ff0f576ea9323db15c2659142eb612600ba37bb3abca09955493a5cae316f9b",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\passive-uv-seed-copy-v1\\seed\\seed-descriptor.json": "0285a1be7101fe62c3c60f4375772dc3b791488594c686a931f0d3e72eb007cd",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\runtime-readback-v2\\commands\\execution.json": "5ea18b28ca3f52f2d1ad13f0680320bb83ff938ec6369383bcc932e66cb4a43e",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\runtime-readback-v2\\runtime-current-inventory.json": "0518fd112ec8d386564a01ac74824624c5c5076159510bbc4aaa943247bdb00a",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\serena-product-inputs-v2\\commands\\execution.json": "f1ae3cd770c7a4cc6437735c97cc6e87c7cf6344a1d65f153aded23c9674a8c0",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\runtime-original-v6\\run_partitioned_go_gate_v6.py": "46c484aaaf55014af026a8fa3c4e96c88de441d8d9f9f2fe0f1a2fe738541587",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\runtime-original-v6\\qualified_windows_products_consumer_v6.py": "8c98ac9d1ab5cdd5126c6b21d5e9cd53f471b838745f45e493daff53111c8a12",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\runtime-original-v6\\private_run_scope.py": "1b4b5d4e796d11cf9dc596d783e0522c6ece175025bc323824599bd53f6fb89b",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\runtime-original-v6\\literal_go_exec_adapter_v6.py": "c59d9e2ddc4be51ddb05523079942117411d48ae1e248f86c16eb0eaec504bd2",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\runtime-original-v6\\literal_migration_receiving_v6.py": "6a95ae02fe24245a293ffd0f0e6083baf0754df2a13ce2ee2daedf43cf6e4526",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\runtime-original-v6\\canonical_receiving_v4.py": "6ad13e7c57e604111552fd553f10a66a174c9ba9b96dc37484dfba071a9bf2a0",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\runtime-original-v6\\run_literal_go_gate_v6.py": "cd8218b8a56768d3158b6389b7c30c8df437f1e25ebc373f7a10ab15cb3ecc52",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\source-before.json": "a0774eee7ebc1bdaf3e14e90b0f47065c47631702acd69d5139609ec8c9d2d19",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\product\\mcphub-product\\mcphub-owner-identity.json": "64d7fe1bb4b9bd9ae4e837ef2d7926a90304cd9ccf5a5f1a6a9f4942d9be6d3c",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\product\\mcphub-product\\mcphub-owner.dll": "dfa87a10a39e9110cda735ae6a987bfa64b03446529072710723e9b6ea0dca56",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\product\\mcphub-product\\mcphub.exe": "91b5ad8b1f402e3c96662adeadc81d9ca50046b4f2b1ee954ca43597e5508326",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\product\\mcphub.exe": "21d9716c5924bc10bd071d098bcb125f563a3667e3ce595f8f3a22b93eb32eb6",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\product\\windows-product-identity.json": "bd2c999f12ac316167ddbdfaf942a9d2690867903b0d53159df2704604011a7a",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\owned-product-fixture.json": "39a47c6ab3215a047f8cad781dd7452e386c47edfabd9464f68a3346d07c7529",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\native-actor-fixture.json": "dbf722d557cc033be99236b59256a53e919b4fa92ecd9ab2ceee57da13c0efd5",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\product-inputs.json": "286aa0cf9e76d639f75b108a97c188f0b642797443b64230af35720c5316dcc3",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2\\internal\\api\\zz_qualified_api_versioninfo_windows_amd64.syso": "959b6ac719cf65a93e4fa63aa015e783b62497daaa0e0e72d288c43527e5a11b",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\short-temp-security.json": "9224fc203be4b2ac0e210ee62d6e820495cafbdcb27b4af139abe15faa15cc85",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\short-temp-parent-security.json": "7d9eee83cdf0ce276b34f19d1945349696c48ad87b477b2f0176bdc54a6760d8"
+  },
+  "test_source_commit": "727d66753814dc218e26d699e57402db2d13190a",
+  "product_source_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+  "custody_owner": "original root issuer",
+  "request_sha256": "5d9836e628425aaa651ed835c2ee6301ed32fe509ce84b34197f04386a10aa49",
+  "request_nonce": "5adaebf2d8d545f780c9b45a7775792f",
+  "client_started_monotonic_ns": 581305160294000,
+  "command_guard_helper": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-error-dword-v4\\guard-custody.py",
+    "sha256": "e7c663f4ba2fd558005bc110173609cb19465ff33d3f4678aeb53b5ba00e0924"
+  },
+  "native_custody_settled": true,
+  "replay": "owner output once; child bytes only after original native/IO settlement; no cross-stream ordering claim",
+  "budgets_seconds": {
+    "adapter_preparation": 30,
+    "owner_logical": 315,
+    "owner_host_watchdog": 320,
+    "final_measurement_conversion_replay": 10,
+    "adapter_total_checked": 355,
+    "cmd_go_hard_kill": 360
+  },
+  "receiver_environment_overrides": {
+    "GOFLAGS": "-mod=readonly -ldflags=-H=windowsgui",
+    "GOMODCACHE": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\private\\go-mod",
+    "PATH": "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\mingw64\\bin;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\usr\\bin;@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin;@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\bin;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\WindowsPowerShell\\v1.0;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\wbem"
+  },
+  "short_temp": {
+    "schema": "full-run-short-temp-v1",
+    "owner": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6",
+    "consumer": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa",
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\x5cc06821faaa",
+    "environment_keys": [
+      "TEMP",
+      "TMP",
+      "TMPDIR",
+      "GOTMPDIR"
+    ],
+    "parent_creation": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\short-temp-parent-security.json",
+      "sha256": "7d9eee83cdf0ce276b34f19d1945349696c48ad87b477b2f0176bdc54a6760d8"
+    },
+    "creation": {
+      "token": {
+        "user_sid": "@@RECOVERY_ORIGINAL_OWNER_SID@@",
+        "default_owner_sid": "@@RECOVERY_ORIGINAL_OWNER_SID@@"
+      },
+      "scope": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\x5cc06821faaa",
+      "directories": [
+        {
+          "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\x5cc06821faaa",
+          "created_exclusively": true,
+          "volume_serial": 275429471,
+          "file_index": 1125899911599978,
+          "owner_sid": "@@RECOVERY_ORIGINAL_OWNER_SID@@",
+          "dacl_protected": true,
+          "rules": [
+            {
+              "sid": "@@RECOVERY_ORIGINAL_OWNER_SID@@",
+              "mask": 2032127,
+              "flags": 3
+            },
+            {
+              "sid": "S-1-5-18",
+              "mask": 2032127,
+              "flags": 3
+            },
+            {
+              "sid": "S-1-5-32-544",
+              "mask": 2032127,
+              "flags": 3
+            }
+          ],
+          "sddl": "O:@@RECOVERY_ORIGINAL_OWNER_SID@@D:P(A;OICI;FA;;;@@RECOVERY_ORIGINAL_OWNER_SID@@)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
+        }
+      ],
+      "existing_objects_mutated": false,
+      "recursive_acl_operations": false
+    },
+    "workspace_generation_cwd_max_characters": 247,
+    "path_bound_scope": "current Go TempDir name64, suffix<=10, child001, hardened-parent and generation ID; later executable/qualification paths not covered"
+  },
+  "command_quiescence": {
+    "complete": true,
+    "commands": [
+      {
+        "name": "incoming-build-info",
+        "state": "complete",
+        "reason": "",
+        "direct_exit_known": true
+      },
+      {
+        "name": "inventory-owner",
+        "state": "complete",
+        "reason": "",
+        "direct_exit_known": true
+      },
+      {
+        "name": "suite-owner",
+        "state": "complete",
+        "reason": "",
+        "direct_exit_known": true
+      },
+      {
+        "name": "suite-events",
+        "state": "complete",
+        "reason": "",
+        "direct_exit_known": true
+      }
+    ]
+  },
+  "marked_receiver_source": {
+    "publisher_inputs": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-product-inputs-v6\\received\\marked727d-inputs.json",
+      "sha256": "b716a16b9cbe69d67c3a2adc15b24576d1121e32ff6080c7eefc460fe64bafc0"
+    },
+    "product_source_commit": "727d66753814dc218e26d699e57402db2d13190a",
+    "publisher_source": {
+      "source_epoch": "5c3f54e2359b33266afb0dd52488c01ab0114af1370376492b8186e6ae74cf89",
+      "source_snapshot_sha256": "b37a149da3a88b7b87eec0f0ed0ace83178cf7a2add88e97a906989073f1a096",
+      "file_count": 3509
+    },
+    "receiver_linker_flags": [
+      "-s",
+      "-w"
+    ],
+    "new_product_qualification": false
+  },
+  "executed_binary": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\d\\go-build3568661218\\b477\\lldb.test.exe",
+  "executed_sha256": "a24577dc3d9a285aaa26b8880413eb04a103607f8f114d889b80cb8e112c726b",
+  "build_info": {
+    "GoVersion": "go1.27.4",
+    "Path": "mcp-local-hub/internal/lldb.test",
+    "Main": {
+      "Path": "mcp-local-hub",
+      "Version": "(devel)"
+    },
+    "Deps": [
+      {
+        "Path": "github.com/inconshreveable/mousetrap",
+        "Version": "v1.1.0",
+        "Sum": "h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8="
+      },
+      {
+        "Path": "github.com/spf13/cobra",
+        "Version": "v1.10.2",
+        "Sum": "h1:DMTTonx5m65Ic0GOoRY2c16WCbHxOOw6xxezuLaBpcU="
+      },
+      {
+        "Path": "github.com/spf13/pflag",
+        "Version": "v1.0.10",
+        "Sum": "h1:4EBh2KAYBwaONj6b2Ye1GiHfwjqyROoF4RwYO+vPwFk="
+      }
+    ],
+    "Settings": [
+      {
+        "Key": "-buildmode",
+        "Value": "exe"
+      },
+      {
+        "Key": "-compiler",
+        "Value": "gc"
+      },
+      {
+        "Key": "-ldflags",
+        "Value": "mcp-local-hub/internal/cli=-H=windowsgui -s -w -X=mcp-local-hub/internal/buildinfo.version=0.4.60 -X=mcp-local-hub/internal/buildinfo.commit=727d66753814dc218e26d699e57402db2d13190a -X=mcp-local-hub/internal/buildinfo.date=2026-11-27T02:27:42Z -X=mcp-local-hub/internal/buildinfo.publisherSourceEpoch=5c3f54e2359b33266afb0dd52488c01ab0114af1370376492b8186e6ae74cf89"
+      },
+      {
+        "Key": "DefaultGODEBUG",
+        "Value": "tracebacklabels=0,x509sslcertoverrideplatform=0"
+      },
+      {
+        "Key": "CGO_ENABLED",
+        "Value": "1"
+      },
+      {
+        "Key": "CGO_CFLAGS"
+      },
+      {
+        "Key": "CGO_CPPFLAGS"
+      },
+      {
+        "Key": "CGO_CXXFLAGS"
+      },
+      {
+        "Key": "CGO_LDFLAGS"
+      },
+      {
+        "Key": "GOARCH",
+        "Value": "amd64"
+      },
+      {
+        "Key": "GOOS",
+        "Value": "windows"
+      },
+      {
+        "Key": "GOAMD64",
+        "Value": "v1"
+      }
+    ]
+  },
+  "qualified_bundle": null,
+  "receiver_environment": {
+    "GOPROXY": "https://proxy.golang.org,direct",
+    "GOSUMDB": "sum.golang.org",
+    "PATH": "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\mingw64\\bin;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\usr\\bin;@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin;@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\bin;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\WindowsPowerShell\\v1.0;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\wbem",
+    "TEMP": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\x5cc06821faaa",
+    "TMP": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\x5cc06821faaa",
+    "GOTMPDIR": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\x5cc06821faaa",
+    "USERPROFILE": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\profile",
+    "APPDATA": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\appdata",
+    "LOCALAPPDATA": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\localappdata",
+    "GOPATH": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\go-path",
+    "GOCACHE": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\private\\go-build",
+    "GOMODCACHE": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\private\\go-mod",
+    "GOROOT": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go",
+    "GOENV": "off",
+    "GOWORK": "off",
+    "GOTOOLCHAIN": "local",
+    "GOFLAGS": "-mod=readonly -ldflags=-H=windowsgui",
+    "GOOS": "windows",
+    "GOARCH": "amd64",
+    "CGO_ENABLED": "1",
+    "GOTELEMETRY": "off",
+    "SERENA_HOME": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\profile"
+  },
+  "inventory_owner": {
+    "receipt": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\inventory\\result.json",
+    "proof": {
+      "custody_retained": false,
+      "binary_after_measured": true,
+      "schema": "literal-contained-test-run-v1",
+      "binary": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\d\\go-build3568661218\\b477\\lldb.test.exe",
+      "binary_sha256": "a24577dc3d9a285aaa26b8880413eb04a103607f8f114d889b80cb8e112c726b",
+      "source_dir": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2\\internal\\lldb",
+      "args": [
+        "-test.list=."
+      ],
+      "started_utc": "2026-11-28T12:05:28.1935426Z",
+      "finished_utc": "2026-11-28T12:05:28.3825369Z",
+      "root": {
+        "Known": true,
+        "PID": 20036,
+        "StartedAt": "2026-11-28T12:05:28.1987688Z",
+        "NativeBirthFILETIME": 134403411281987688
+      },
+      "native": {
+        "RootIdentity": {
+          "Known": true,
+          "PID": 20036,
+          "StartedAt": "2026-11-28T12:05:28.1987688Z",
+          "NativeBirthFILETIME": 134403411281987688
+        },
+        "NoChildKnown": false,
+        "RootWaitKnown": true,
+        "RootExitCode": 0,
+        "TerminalAction": "not-requested",
+        "MembersExited": true,
+        "AccountingKnown": true,
+        "InitialTotal": 1,
+        "FinalActive": 0,
+        "CapturedMemberPIDs": null,
+        "HandlesClosed": true,
+        "Error": null
+      },
+      "io": {
+        "Stdin": {
+          "Acquired": true,
+          "CloseAttempted": true,
+          "Closed": true,
+          "CloseError": null
+        },
+        "StdoutRead": {
+          "Acquired": true,
+          "CloseAttempted": true,
+          "Closed": true,
+          "CloseError": null
+        },
+        "StdoutWrite": {
+          "Acquired": true,
+          "CloseAttempted": true,
+          "Closed": true,
+          "CloseError": null
+        },
+        "StderrRead": {
+          "Acquired": true,
+          "CloseAttempted": true,
+          "Closed": true,
+          "CloseError": null
+        },
+        "StderrWrite": {
+          "Acquired": true,
+          "CloseAttempted": true,
+          "Closed": true,
+          "CloseError": null
+        },
+        "Stdout": {
+          "WorkerStarted": true,
+          "WorkerComplete": true,
+          "EOF": true,
+          "Bytes": 37,
+          "Limit": 16777216,
+          "LimitExceeded": false,
+          "Error": null
+        },
+        "Stderr": {
+          "WorkerStarted": true,
+          "WorkerComplete": true,
+          "EOF": true,
+          "Bytes": 0,
+          "Limit": 16777216,
+          "LimitExceeded": false,
+          "Error": null
+        }
+      },
+      "stage": "",
+      "root_wait_known": true,
+      "root_exit_code": 0,
+      "settlement_complete": true,
+      "inventory": true,
+      "work_deadline": "2026-11-28T12:07:03.1935426Z",
+      "cleanup_deadline": "2026-11-28T12:07:13.1935426Z",
+      "test_timeout": "1m30s",
+      "bootstrap_budget": "5s",
+      "binary_unchanged": true
+    },
+    "sha256": "71310024f5434326c6d067f003b89d7f3c7d8d8febc3f6367eb26c532bbe57a9"
+  },
+  "inventory": {
+    "tests": {
+      "mcp-local-hub/internal/lldb": [
+        "TestBridgeSignalReturnsWhenStdinIdle"
+      ]
+    },
+    "benchmarks": {
+      "mcp-local-hub/internal/lldb": []
+    }
+  },
+  "preparation_seconds": 2.1060712001053616,
+  "headless_configuration": {
+    "schema": "serena-private-headless-config-v1",
+    "seed": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\headless-config-input.yml",
+      "sha256": "96f52df38eddbfd3bef53d29ca5f445099a2c63e292b06be8c63616172ec1484",
+      "bytes": 92
+    },
+    "mutable_config": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\profile\\serena_config.yml",
+    "settings": {
+      "gui_log_window": false,
+      "web_dashboard": false,
+      "web_dashboard_open_on_launch": false
+    },
+    "initial_projects_empty": true,
+    "before": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\profile\\serena_config.yml",
+      "bytes": 92,
+      "sha256": "96f52df38eddbfd3bef53d29ca5f445099a2c63e292b06be8c63616172ec1484",
+      "settings": {
+        "gui_log_window": false,
+        "web_dashboard": false,
+        "web_dashboard_open_on_launch": false
+      },
+      "projects_are_mutable_output": true
+    },
+    "before_launch_verified": true,
+    "scope": "supported private headless configuration; default GUI behavior is not qualified",
+    "after": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\profile\\serena_config.yml",
+      "bytes": 92,
+      "sha256": "96f52df38eddbfd3bef53d29ca5f445099a2c63e292b06be8c63616172ec1484",
+      "settings": {
+        "gui_log_window": false,
+        "web_dashboard": false,
+        "web_dashboard_open_on_launch": false
+      },
+      "projects_are_mutable_output": true
+    }
+  },
+  "owner": {
+    "receipt": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\suite\\result.json",
+    "proof": {
+      "custody_retained": false,
+      "binary_after_measured": true,
+      "schema": "literal-contained-test-run-v1",
+      "binary": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\o6\\d\\go-build3568661218\\b477\\lldb.test.exe",
+      "binary_sha256": "a24577dc3d9a285aaa26b8880413eb04a103607f8f114d889b80cb8e112c726b",
+      "source_dir": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\source-original727d-v2\\internal\\lldb",
+      "args": [
+        "-test.paniconexit0",
+        "-test.v=test2json",
+        "-test.count=1",
+        "-test.timeout=5m0s"
+      ],
+      "started_utc": "2026-11-28T12:05:28.6747598Z",
+      "finished_utc": "2026-11-28T12:05:28.8063085Z",
+      "root": {
+        "Known": true,
+        "PID": 465364,
+        "StartedAt": "2026-11-28T12:05:28.6781122Z",
+        "NativeBirthFILETIME": 134403411286781122
+      },
+      "native": {
+        "RootIdentity": {
+          "Known": true,
+          "PID": 465364,
+          "StartedAt": "2026-11-28T12:05:28.6781122Z",
+          "NativeBirthFILETIME": 134403411286781122
+        },
+        "NoChildKnown": false,
+        "RootWaitKnown": true,
+        "RootExitCode": 0,
+        "TerminalAction": "not-requested",
+        "MembersExited": true,
+        "AccountingKnown": true,
+        "InitialTotal": 1,
+        "FinalActive": 0,
+        "CapturedMemberPIDs": null,
+        "HandlesClosed": true,
+        "Error": null
+      },
+      "io": {
+        "Stdin": {
+          "Acquired": true,
+          "CloseAttempted": true,
+          "Closed": true,
+          "CloseError": null
+        },
+        "StdoutRead": {
+          "Acquired": true,
+          "CloseAttempted": true,
+          "Closed": true,
+          "CloseError": null
+        },
+        "StdoutWrite": {
+          "Acquired": true,
+          "CloseAttempted": true,
+          "Closed": true,
+          "CloseError": null
+        },
+        "StderrRead": {
+          "Acquired": true,
+          "CloseAttempted": true,
+          "Closed": true,
+          "CloseError": null
+        },
+        "StderrWrite": {
+          "Acquired": true,
+          "CloseAttempted": true,
+          "Closed": true,
+          "CloseError": null
+        },
+        "Stdout": {
+          "WorkerStarted": true,
+          "WorkerComplete": true,
+          "EOF": true,
+          "Bytes": 218,
+          "Limit": 16777216,
+          "LimitExceeded": false,
+          "Error": null
+        },
+        "Stderr": {
+          "WorkerStarted": true,
+          "WorkerComplete": true,
+          "EOF": true,
+          "Bytes": 0,
+          "Limit": 16777216,
+          "LimitExceeded": false,
+          "Error": null
+        }
+      },
+      "stage": "",
+      "root_wait_known": true,
+      "root_exit_code": 0,
+      "settlement_complete": true,
+      "inventory": false,
+      "work_deadline": "2026-11-28T12:10:33.6747598Z",
+      "cleanup_deadline": "2026-11-28T12:10:43.6747598Z",
+      "test_timeout": "5m0s",
+      "bootstrap_budget": "5s",
+      "binary_unchanged": true
+    },
+    "kind": "contained",
+    "sha256": "8c917b7b7cfd6795d8fab47b2c60c02e94618fa64ad81255f5bdc62bbd7510fc"
+  },
+  "raw_output_binding": {
+    "stdout": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\suite\\stdout.raw",
+    "stderr": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\suite\\stderr.txt",
+    "stdout_sha256": "823f282bd647b53e848d78162720b250336fcf5553d5463e5661c67e3be003cf",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stdout_forwarded_identical": true,
+    "stderr_forwarded_identical": true,
+    "stderr_forwarding_verified": true
+  },
+  "coverage": [
+    {
+      "lane": "literal-default",
+      "expected": {
+        "mcp-local-hub/internal/lldb": [
+          "TestBridgeSignalReturnsWhenStdinIdle"
+        ]
+      },
+      "exit_code": 0,
+      "passed": true,
+      "top_level": [
+        {
+          "package": "mcp-local-hub/internal/lldb",
+          "test": "TestBridgeSignalReturnsWhenStdinIdle",
+          "outcome": "pass"
+        }
+      ],
+      "all_terminal": [
+        {
+          "package": "mcp-local-hub/internal/lldb",
+          "test": "TestBridgeSignalReturnsWhenStdinIdle",
+          "outcome": "pass"
+        }
+      ],
+      "started_without_terminal": [],
+      "missing_top_level": [],
+      "unexpected_top_level": [],
+      "duplicate_terminal": [],
+      "duplicate_start": [],
+      "terminal_without_start": [],
+      "missing_package_terminal": [],
+      "unexpected_package_terminal": [],
+      "unexpected_test_roots": [],
+      "package_terminal": {
+        "mcp-local-hub/internal/lldb": "pass"
+      },
+      "package_terminal_counts": {
+        "mcp-local-hub/internal/lldb": 1
+      },
+      "duplicate_package_terminal": [],
+      "mandatory_passes": [],
+      "mandatory_passes_satisfied": true
+    }
+  ],
+  "image_unchanged": true,
+  "bundle_unchanged": true,
+  "headless_configuration_received": true,
+  "original_inputs_unchanged": true,
+  "commands_quiescent": true,
+  "raw_replay": {
+    "stdout": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\suite-owner.stdout.txt",
+      "sha256": "823f282bd647b53e848d78162720b250336fcf5553d5463e5661c67e3be003cf"
+    },
+    "stderr": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\x5cc06821faaa\\suite-owner.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "replay_deadline_monotonic_ns": 581317540914300,
+  "seconds": 3.082016700063832,
+  "adapter_exit_code": 0
+}

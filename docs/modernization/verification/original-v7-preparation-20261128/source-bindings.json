@@ -1,0 +1,1307 @@
+{
+  "schema": "original-v6-source-preservation-bindings-v1",
+  "purpose": "Preserve original closed preparation inputs, operational wrappers, results and lossless execution projections as DATA.",
+  "original_source_bytes": 1682137,
+  "source_file_count": 51,
+  "exact_byte_files": 14,
+  "transparent_template_files": 37,
+  "total_role_substitutions": 7906,
+  "required_roles": {
+    "approved_work_area": {
+      "description": "Explicit original operator operand for approved work area. No value or default is embedded.",
+      "value_kind": "literal Windows directory path"
+    },
+    "controller_python_home": {
+      "description": "Explicit original operator operand for controller python home. No value or default is embedded.",
+      "value_kind": "literal Windows directory path"
+    },
+    "git_home": {
+      "description": "Explicit original operator operand for git home. No value or default is embedded.",
+      "value_kind": "literal Windows directory path"
+    },
+    "historical_artifact_home": {
+      "description": "Explicit original operator operand for historical artifact home. No value or default is embedded.",
+      "value_kind": "literal Windows directory path"
+    },
+    "msys2_home": {
+      "description": "Explicit original operator operand for msys2 home. No value or default is embedded.",
+      "value_kind": "literal Windows directory path"
+    },
+    "operator_user_sid": {
+      "description": "Explicit original operator operand for operator user sid. No value or default is embedded.",
+      "value_kind": "Windows principal SID"
+    },
+    "preserved_runtime_home": {
+      "description": "Explicit original operator operand for preserved runtime home. No value or default is embedded.",
+      "value_kind": "literal Windows directory path"
+    },
+    "serena_python_home": {
+      "description": "Explicit original operator operand for serena python home. No value or default is embedded.",
+      "value_kind": "literal Windows directory path"
+    },
+    "serena_uv_home": {
+      "description": "Explicit original operator operand for serena uv home. No value or default is embedded.",
+      "value_kind": "literal Windows directory path"
+    },
+    "windows_home": {
+      "description": "Explicit original operator operand for windows home. No value or default is embedded.",
+      "value_kind": "literal Windows directory path"
+    }
+  },
+  "transformations": {
+    "literal": "Use the supplied UTF-8 operand unchanged.",
+    "double_backslashes": "Double backslashes to reproduce the original JSON/string-literal representation."
+  },
+  "source_qualification_inherited": false,
+  "existing_source_files_changed": false,
+  "operational_plans_and_runtime_bindings_included": true,
+  "public_exact_inputs_manifest": "existing-public-inputs.json",
+  "files": [
+    {
+      "original_role_path": "execution-projections/original-product-inputs-v6.json",
+      "original_bytes": 27135,
+      "original_sha256": "d2d4e1f2aa32b116ddfc64c0e9923aeaeee1895427878c4c17bc3d55b5ad9b25",
+      "original_git_blob": "8c2cec3a1a743984733a8812d75e5397519f71f7",
+      "published_path": "templates/execution-projections/original-product-inputs-v6.json.template",
+      "published_bytes": 27602,
+      "published_sha256": "a1a8a128d52bbf8f651f36f8295a364b245b41f14acfacf24819ddd3f306f830",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_CONTROLLER_PYTHON_HOME_ESCAPED@@",
+          "role": "controller_python_home",
+          "transform": "double_backslashes",
+          "occurrences": 2
+        },
+        {
+          "marker": "@@RECOVERY_PRESERVED_RUNTIME_HOME_ESCAPED@@",
+          "role": "preserved_runtime_home",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        },
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 21
+        }
+      ]
+    },
+    {
+      "original_role_path": "original-product-inputs-v6/parent.json",
+      "original_bytes": 1472,
+      "original_sha256": "584ff6d8f816fb07c63ae78e0d299d67fb90ba083c6b1678c8a24ab5ba1946c1",
+      "original_git_blob": "abe144c678636d8a26641c6ed280066c0f368df0",
+      "published_path": "templates/original-product-inputs-v6/parent.json.template",
+      "published_bytes": 1501,
+      "published_sha256": "ccfc5a5bdaad02aecff141bdd56ef6cd03bb36a159831bcae0ef70b5d1e20a6d",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_CONTROLLER_PYTHON_HOME_ESCAPED@@",
+          "role": "controller_python_home",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        },
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 2
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/original-product-inputs-v6-plan.json",
+      "original_bytes": 717436,
+      "original_sha256": "c463086b4f88c7995a681e8d7b670561870acf437d68e07685f36428a859f035",
+      "original_git_blob": "054bc363840093bc762b17e600e8410f111d3198",
+      "published_path": "templates/inputs-original-v6/original-product-inputs-v6-plan.json.template",
+      "published_bytes": 799551,
+      "published_sha256": "2263ae63d4892ec4be7d2307a6d190ad6a8949309e1fda09986c9ceb64348674",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_SERENA_PYTHON_HOME_ESCAPED@@",
+          "role": "serena_python_home",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        },
+        {
+          "marker": "@@RECOVERY_CONTROLLER_PYTHON_HOME_ESCAPED@@",
+          "role": "controller_python_home",
+          "transform": "double_backslashes",
+          "occurrences": 3
+        },
+        {
+          "marker": "@@RECOVERY_SERENA_UV_HOME_ESCAPED@@",
+          "role": "serena_uv_home",
+          "transform": "double_backslashes",
+          "occurrences": 2
+        },
+        {
+          "marker": "@@RECOVERY_PRESERVED_RUNTIME_HOME_ESCAPED@@",
+          "role": "preserved_runtime_home",
+          "transform": "double_backslashes",
+          "occurrences": 2
+        },
+        {
+          "marker": "@@RECOVERY_GIT_HOME_ESCAPED@@",
+          "role": "git_home",
+          "transform": "double_backslashes",
+          "occurrences": 4
+        },
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 3551
+        },
+        {
+          "marker": "@@RECOVERY_HISTORICAL_ARTIFACT_HOME_ESCAPED@@",
+          "role": "historical_artifact_home",
+          "transform": "double_backslashes",
+          "occurrences": 4
+        },
+        {
+          "marker": "@@RECOVERY_WINDOWS_HOME_ESCAPED@@",
+          "role": "windows_home",
+          "transform": "double_backslashes",
+          "occurrences": 9
+        },
+        {
+          "marker": "@@RECOVERY_MSYS2_HOME_ESCAPED@@",
+          "role": "msys2_home",
+          "transform": "double_backslashes",
+          "occurrences": 6
+        }
+      ]
+    },
+    {
+      "original_role_path": "original-product-inputs-v6/commands/copy-current-closed-build-caches.stdout.txt",
+      "original_bytes": 675,
+      "original_sha256": "75b62d60e914e0f6bee2515e33f847a03e03014e624c2b2b47d23a4584a38595",
+      "original_git_blob": "18798af7dc4460b1f8dd64d21dda4e9edcdcf337",
+      "published_path": "templates/original-product-inputs-v6/commands/copy-current-closed-build-caches.stdout.txt.template",
+      "published_bytes": 767,
+      "published_sha256": "5e689a85939b5409b6eefc1218140f64744e9244a7aa5aa9c2134483680d975a",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 4
+        }
+      ]
+    },
+    {
+      "original_role_path": "original-product-inputs-v6/commands/copy-current-closed-build-caches.stderr.txt",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "original_git_blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "published_path": "sources/original-product-inputs-v6/commands/copy-current-closed-build-caches.stderr.txt",
+      "published_bytes": 0,
+      "published_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "kind": "exact_bytes",
+      "substitutions": []
+    },
+    {
+      "original_role_path": "original-product-inputs-v6/commands/copy-original-immutable-artifacts.stdout.txt",
+      "original_bytes": 159,
+      "original_sha256": "c0ef3ccd7434b3c75d3a4bf0c4788b3cda99eaf1f88b75b62a9a44b54da65cbc",
+      "original_git_blob": "9023d06b6042d31d5dec9a35cb2be8f0ea46dd67",
+      "published_path": "templates/original-product-inputs-v6/commands/copy-original-immutable-artifacts.stdout.txt.template",
+      "published_bytes": 182,
+      "published_sha256": "c2a1a4e88468c3efc34aef0033c47f2cdb08d968d75ca9f3f5a5554599db8e38",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        }
+      ]
+    },
+    {
+      "original_role_path": "original-product-inputs-v6/commands/copy-original-immutable-artifacts.stderr.txt",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "original_git_blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "published_path": "sources/original-product-inputs-v6/commands/copy-original-immutable-artifacts.stderr.txt",
+      "published_bytes": 0,
+      "published_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "kind": "exact_bytes",
+      "substitutions": []
+    },
+    {
+      "original_role_path": "original-product-inputs-v6/commands/issue-and-compile-original-private-inputs.stdout.txt",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "original_git_blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "published_path": "sources/original-product-inputs-v6/commands/issue-and-compile-original-private-inputs.stdout.txt",
+      "published_bytes": 0,
+      "published_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "kind": "exact_bytes",
+      "substitutions": []
+    },
+    {
+      "original_role_path": "original-product-inputs-v6/commands/issue-and-compile-original-private-inputs.stderr.txt",
+      "original_bytes": 463,
+      "original_sha256": "61675179865119af12ddce7c3d84ddc6461d94ccea00b9d0ebd9fedcd4fc5cb8",
+      "original_git_blob": "4607ff14d5ab60feece5aab0ccf99c1e6e323e5a",
+      "published_path": "templates/original-product-inputs-v6/commands/issue-and-compile-original-private-inputs.stderr.txt.template",
+      "published_bytes": 484,
+      "published_sha256": "0f7670346e6a18a41e68b65a4366bec6745035914ce2e522c8fa7a8758922a09",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_RAW@@",
+          "role": "approved_work_area",
+          "transform": "literal",
+          "occurrences": 1
+        }
+      ]
+    },
+    {
+      "original_role_path": "execution-projections/original-private-compile-v7.json",
+      "original_bytes": 26822,
+      "original_sha256": "b703ce8ea2253311b41ee6efe12d4bbb314e00f28759ab5a782176a5d61f0e85",
+      "original_git_blob": "8cd9e3f4b9ff79e8f3fb11f2ac5ad264bfd33b6c",
+      "published_path": "templates/execution-projections/original-private-compile-v7.json.template",
+      "published_bytes": 27301,
+      "published_sha256": "71688b3a7576ce7bf4d296afa6e4a1e54eee7a98686614e3ad6586f491d71c52",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_CONTROLLER_PYTHON_HOME_ESCAPED@@",
+          "role": "controller_python_home",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        },
+        {
+          "marker": "@@RECOVERY_PRESERVED_RUNTIME_HOME_ESCAPED@@",
+          "role": "preserved_runtime_home",
+          "transform": "double_backslashes",
+          "occurrences": 2
+        },
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 20
+        }
+      ]
+    },
+    {
+      "original_role_path": "original-private-compile-v7/parent.json",
+      "original_bytes": 1472,
+      "original_sha256": "0cb7e027c9ed6f5e17662e6adedebb4f3c669b93e81feff730a6153f50bce7e3",
+      "original_git_blob": "76bb4841f964f0258d5aaed7e451821a12e8003e",
+      "published_path": "templates/original-private-compile-v7/parent.json.template",
+      "published_bytes": 1501,
+      "published_sha256": "fbb7938efe46c3bc0d0e76dda6fa7841138ac3a0322aff5bc84552d0b15722a8",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_CONTROLLER_PYTHON_HOME_ESCAPED@@",
+          "role": "controller_python_home",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        },
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 2
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/original-private-compile-v7-plan.json",
+      "original_bytes": 721147,
+      "original_sha256": "6d6cb0233685566894d4e5ef426dedc07daa13948dfeeab2a446064af79382eb",
+      "original_git_blob": "eccc8856602274f7d7b93fcb2ea5dfd23c29b129",
+      "published_path": "templates/inputs-original-v6/original-private-compile-v7-plan.json.template",
+      "published_bytes": 803667,
+      "published_sha256": "a54100ad8577328217128176a3c190eabc02889539e6059455fdca97bf4a4374",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_SERENA_PYTHON_HOME_ESCAPED@@",
+          "role": "serena_python_home",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        },
+        {
+          "marker": "@@RECOVERY_CONTROLLER_PYTHON_HOME_ESCAPED@@",
+          "role": "controller_python_home",
+          "transform": "double_backslashes",
+          "occurrences": 2
+        },
+        {
+          "marker": "@@RECOVERY_SERENA_UV_HOME_ESCAPED@@",
+          "role": "serena_uv_home",
+          "transform": "double_backslashes",
+          "occurrences": 2
+        },
+        {
+          "marker": "@@RECOVERY_PRESERVED_RUNTIME_HOME_ESCAPED@@",
+          "role": "preserved_runtime_home",
+          "transform": "double_backslashes",
+          "occurrences": 3
+        },
+        {
+          "marker": "@@RECOVERY_GIT_HOME_ESCAPED@@",
+          "role": "git_home",
+          "transform": "double_backslashes",
+          "occurrences": 4
+        },
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 3573
+        },
+        {
+          "marker": "@@RECOVERY_WINDOWS_HOME_ESCAPED@@",
+          "role": "windows_home",
+          "transform": "double_backslashes",
+          "occurrences": 9
+        },
+        {
+          "marker": "@@RECOVERY_MSYS2_HOME_ESCAPED@@",
+          "role": "msys2_home",
+          "transform": "double_backslashes",
+          "occurrences": 6
+        }
+      ]
+    },
+    {
+      "original_role_path": "original-private-compile-v7/commands/receive-private-date-parser-defect.stdout.txt",
+      "original_bytes": 541,
+      "original_sha256": "950ebc37f29a83e0b8275791e8c11b5158644472964008311fa99e024a1bdba5",
+      "original_git_blob": "f158fdb7fa616cf9c1c535ee6bcf74b0a4f75854",
+      "published_path": "sources/original-private-compile-v7/commands/receive-private-date-parser-defect.stdout.txt",
+      "published_bytes": 541,
+      "published_sha256": "950ebc37f29a83e0b8275791e8c11b5158644472964008311fa99e024a1bdba5",
+      "kind": "exact_bytes",
+      "substitutions": []
+    },
+    {
+      "original_role_path": "original-private-compile-v7/commands/receive-private-date-parser-defect.stderr.txt",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "original_git_blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "published_path": "sources/original-private-compile-v7/commands/receive-private-date-parser-defect.stderr.txt",
+      "published_bytes": 0,
+      "published_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "kind": "exact_bytes",
+      "substitutions": []
+    },
+    {
+      "original_role_path": "original-private-compile-v7/commands/copy-current-closed-build-caches.stdout.txt",
+      "original_bytes": 677,
+      "original_sha256": "ca19dfa91f86a1ad3d890befb9d7ba9ac36ecb35f8b89fcc339b10ab9d6756b0",
+      "original_git_blob": "22fef375dbac06b19cd0f1df5e27f8825f93bea5",
+      "published_path": "templates/original-private-compile-v7/commands/copy-current-closed-build-caches.stdout.txt.template",
+      "published_bytes": 769,
+      "published_sha256": "26dfaaeabe568632dde888af6dc086e0cb4f3a674fc05f0cca4fc0b8b201428b",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 4
+        }
+      ]
+    },
+    {
+      "original_role_path": "original-private-compile-v7/commands/copy-current-closed-build-caches.stderr.txt",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "original_git_blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "published_path": "sources/original-private-compile-v7/commands/copy-current-closed-build-caches.stderr.txt",
+      "published_bytes": 0,
+      "published_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "kind": "exact_bytes",
+      "substitutions": []
+    },
+    {
+      "original_role_path": "original-private-compile-v7/commands/issue-and-compile-original-private-inputs.stdout.txt",
+      "original_bytes": 5727,
+      "original_sha256": "abc90a4e91ae2c1f6d4212d70c13cab2ea886b928a6a19fb537b986f713aab1a",
+      "original_git_blob": "ab2b0cacea8231cc3ec72edf46011a9f34d05dca",
+      "published_path": "templates/original-private-compile-v7/commands/issue-and-compile-original-private-inputs.stdout.txt.template",
+      "published_bytes": 5911,
+      "published_sha256": "5186218d04dc698a6a916d4f019cca9b54a6787edd626a74bd7600290aa82bc0",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 8
+        }
+      ]
+    },
+    {
+      "original_role_path": "original-private-compile-v7/commands/issue-and-compile-original-private-inputs.stderr.txt",
+      "original_bytes": 53,
+      "original_sha256": "6a19eaf3a9431d6d8e0fa675a44df0df271ebc655f9a9f5eb6aec89e9d1b316d",
+      "original_git_blob": "304e81765854da99b742441d72d5031ff6a8e5d7",
+      "published_path": "sources/original-private-compile-v7/commands/issue-and-compile-original-private-inputs.stderr.txt",
+      "published_bytes": 53,
+      "published_sha256": "6a19eaf3a9431d6d8e0fa675a44df0df271ebc655f9a9f5eb6aec89e9d1b316d",
+      "kind": "exact_bytes",
+      "substitutions": []
+    },
+    {
+      "original_role_path": "execution-projections/original-runtime-compose-v6.json",
+      "original_bytes": 9917,
+      "original_sha256": "0f2447b3b9f1df86f9f03bc0a28e14b1685fe9fb1c77144936727145bcb99dc2",
+      "original_git_blob": "ad011465a7866812fbff93bd15d36c53eb61ac70",
+      "published_path": "templates/execution-projections/original-runtime-compose-v6.json.template",
+      "published_bytes": 10061,
+      "published_sha256": "84f2ce21c4bc491593da86a25cc327c1a9dcc120920c2e317a1c3ead009399d0",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_CONTROLLER_PYTHON_HOME_ESCAPED@@",
+          "role": "controller_python_home",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        },
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 7
+        }
+      ]
+    },
+    {
+      "original_role_path": "original-runtime-compose-v6/parent.json",
+      "original_bytes": 1473,
+      "original_sha256": "bbe51cb1fad1415f24c997dd7fdc3510f3b11853635da1d11359d6acb7f01019",
+      "original_git_blob": "eb45ecfbd081adb23105a6a150ca078af309c977",
+      "published_path": "templates/original-runtime-compose-v6/parent.json.template",
+      "published_bytes": 1502,
+      "published_sha256": "571326ba089181681443bc8e46c5a2040dd570941f33c8880d29811507996709",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_CONTROLLER_PYTHON_HOME_ESCAPED@@",
+          "role": "controller_python_home",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        },
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 2
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/original-runtime-compose-v6-plan.json",
+      "original_bytes": 26708,
+      "original_sha256": "1f16a94cbf4c9e98c35a170395596f2feabc1b313bc6b9dc29c0894d35a9eb89",
+      "original_git_blob": "f1c71f11d6bf3b0b3dd16234ef94d8785cdb0c4b",
+      "published_path": "templates/inputs-original-v6/original-runtime-compose-v6-plan.json.template",
+      "published_bytes": 29562,
+      "published_sha256": "79d9ffc1c6ce42926f49f4f7f578eda288e2792956df5bdcaec768f451e236a8",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_SERENA_PYTHON_HOME_ESCAPED@@",
+          "role": "serena_python_home",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        },
+        {
+          "marker": "@@RECOVERY_CONTROLLER_PYTHON_HOME_ESCAPED@@",
+          "role": "controller_python_home",
+          "transform": "double_backslashes",
+          "occurrences": 2
+        },
+        {
+          "marker": "@@RECOVERY_SERENA_UV_HOME_ESCAPED@@",
+          "role": "serena_uv_home",
+          "transform": "double_backslashes",
+          "occurrences": 2
+        },
+        {
+          "marker": "@@RECOVERY_PRESERVED_RUNTIME_HOME_ESCAPED@@",
+          "role": "preserved_runtime_home",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        },
+        {
+          "marker": "@@RECOVERY_GIT_HOME_ESCAPED@@",
+          "role": "git_home",
+          "transform": "double_backslashes",
+          "occurrences": 4
+        },
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 107
+        },
+        {
+          "marker": "@@RECOVERY_WINDOWS_HOME_ESCAPED@@",
+          "role": "windows_home",
+          "transform": "double_backslashes",
+          "occurrences": 13
+        },
+        {
+          "marker": "@@RECOVERY_MSYS2_HOME_ESCAPED@@",
+          "role": "msys2_home",
+          "transform": "double_backslashes",
+          "occurrences": 6
+        }
+      ]
+    },
+    {
+      "original_role_path": "original-runtime-compose-v6/commands/compose-reviewed-original-literal-runtime.stdout.txt",
+      "original_bytes": 940,
+      "original_sha256": "ec671059824a34bdb83f7c7d245a4d88f08540fc6dc3a615199cc09a5738eb52",
+      "original_git_blob": "5649ca519d12369b3b1606210371ce88913d0089",
+      "published_path": "templates/original-runtime-compose-v6/commands/compose-reviewed-original-literal-runtime.stdout.txt.template",
+      "published_bytes": 992,
+      "published_sha256": "b7e96de7cbd2b8030c3e75cb8ceaf2a89c992d9d5e2697e44f5a2eebe56ab183",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_CONTROLLER_PYTHON_HOME_ESCAPED@@",
+          "role": "controller_python_home",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        },
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 3
+        }
+      ]
+    },
+    {
+      "original_role_path": "original-runtime-compose-v6/commands/compose-reviewed-original-literal-runtime.stderr.txt",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "original_git_blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "published_path": "sources/original-runtime-compose-v6/commands/compose-reviewed-original-literal-runtime.stderr.txt",
+      "published_bytes": 0,
+      "published_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "kind": "exact_bytes",
+      "substitutions": []
+    },
+    {
+      "original_role_path": "inputs-original-v6/literal-original-v6-bindings.candidate.json",
+      "original_bytes": 24323,
+      "original_sha256": "b5a15b47e09a4c3476205778b85c1d83a22275ddf664cf0bdcde377e896136ce",
+      "original_git_blob": "523c7a1ffc305b3ffc368ae1439f39f3a6b465da",
+      "published_path": "templates/inputs-original-v6/literal-original-v6-bindings.candidate.json.template",
+      "published_bytes": 27028,
+      "published_sha256": "0eea09acaa053574452db2d62a197e84bc2473376474ba87755926f14c8d1a03",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_SERENA_PYTHON_HOME_ESCAPED@@",
+          "role": "serena_python_home",
+          "transform": "double_backslashes",
+          "occurrences": 2
+        },
+        {
+          "marker": "@@RECOVERY_CONTROLLER_PYTHON_HOME_ESCAPED@@",
+          "role": "controller_python_home",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        },
+        {
+          "marker": "@@RECOVERY_SERENA_UV_HOME_ESCAPED@@",
+          "role": "serena_uv_home",
+          "transform": "double_backslashes",
+          "occurrences": 4
+        },
+        {
+          "marker": "@@RECOVERY_PRESERVED_RUNTIME_HOME_ESCAPED@@",
+          "role": "preserved_runtime_home",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        },
+        {
+          "marker": "@@RECOVERY_GIT_HOME_ESCAPED@@",
+          "role": "git_home",
+          "transform": "double_backslashes",
+          "occurrences": 4
+        },
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 102
+        },
+        {
+          "marker": "@@RECOVERY_WINDOWS_HOME_ESCAPED@@",
+          "role": "windows_home",
+          "transform": "double_backslashes",
+          "occurrences": 14
+        },
+        {
+          "marker": "@@RECOVERY_MSYS2_HOME_ESCAPED@@",
+          "role": "msys2_home",
+          "transform": "double_backslashes",
+          "occurrences": 4
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/runtime-original-v6/runtime-inputs.json",
+      "original_bytes": 24323,
+      "original_sha256": "037d4ad93bc93dcf531669eaaa90be32154c1ba34af6f50528eaa03e9f9ef4a2",
+      "original_git_blob": "2cdfc7a3e7b582b7a4cbf9b12b8ace2826168bcd",
+      "published_path": "templates/inputs-original-v6/runtime-original-v6/runtime-inputs.json.template",
+      "published_bytes": 27028,
+      "published_sha256": "c91870356885490bd070ce834a54f7a37786618f314fe8fe3f609f2ecdf81db6",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_SERENA_PYTHON_HOME_ESCAPED@@",
+          "role": "serena_python_home",
+          "transform": "double_backslashes",
+          "occurrences": 2
+        },
+        {
+          "marker": "@@RECOVERY_CONTROLLER_PYTHON_HOME_ESCAPED@@",
+          "role": "controller_python_home",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        },
+        {
+          "marker": "@@RECOVERY_SERENA_UV_HOME_ESCAPED@@",
+          "role": "serena_uv_home",
+          "transform": "double_backslashes",
+          "occurrences": 4
+        },
+        {
+          "marker": "@@RECOVERY_PRESERVED_RUNTIME_HOME_ESCAPED@@",
+          "role": "preserved_runtime_home",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        },
+        {
+          "marker": "@@RECOVERY_GIT_HOME_ESCAPED@@",
+          "role": "git_home",
+          "transform": "double_backslashes",
+          "occurrences": 4
+        },
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 102
+        },
+        {
+          "marker": "@@RECOVERY_WINDOWS_HOME_ESCAPED@@",
+          "role": "windows_home",
+          "transform": "double_backslashes",
+          "occurrences": 14
+        },
+        {
+          "marker": "@@RECOVERY_MSYS2_HOME_ESCAPED@@",
+          "role": "msys2_home",
+          "transform": "double_backslashes",
+          "occurrences": 4
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/runtime-original-v6/runtime-manifest.json",
+      "original_bytes": 4037,
+      "original_sha256": "cdce3127e6237f5157500acbf206d0fced239ef60b208744278a0059758e692d",
+      "original_git_blob": "9cad077aa8dce8d8a415c5ed5641c21cf18a125a",
+      "published_path": "templates/inputs-original-v6/runtime-original-v6/runtime-manifest.json.template",
+      "published_bytes": 4060,
+      "published_sha256": "7cc0776fe2befa3bb4c3a22ec41e366a2749775fd03e578f6af7ac7b1e3b6b4d",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/runtime-original-v6/preparation.json",
+      "original_bytes": 918,
+      "original_sha256": "4257c5d8fea7347d96e8c0a3bb77296071237ea39e867b6efb3c279b21d50da7",
+      "original_git_blob": "a1078e5329ed2fcba3df0e78103acfc78eb82ee8",
+      "published_path": "templates/inputs-original-v6/runtime-original-v6/preparation.json.template",
+      "published_bytes": 970,
+      "published_sha256": "1e5459e45c45815ae778410998c831ee9a52ef0f4a33ebdb7fc62f1c0e36d70b",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_CONTROLLER_PYTHON_HOME_ESCAPED@@",
+          "role": "controller_python_home",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        },
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 3
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/original-product-build-bindings.json",
+      "original_bytes": 4734,
+      "original_sha256": "1bf14e302d5fefdff191cf141551226408e31937de122cc53aa2387c8e0af0fc",
+      "original_git_blob": "975a7a769760e72af1fe15af2143a291e4f54d69",
+      "published_path": "templates/inputs-original-v6/original-product-build-bindings.json.template",
+      "published_bytes": 5118,
+      "published_sha256": "0a57c07d833c34a520d95e00ea36f908227d7955b07b4ff83becb28fbc41b67a",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_SERENA_PYTHON_HOME_ESCAPED@@",
+          "role": "serena_python_home",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        },
+        {
+          "marker": "@@RECOVERY_CONTROLLER_PYTHON_HOME_ESCAPED@@",
+          "role": "controller_python_home",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        },
+        {
+          "marker": "@@RECOVERY_SERENA_UV_HOME_ESCAPED@@",
+          "role": "serena_uv_home",
+          "transform": "double_backslashes",
+          "occurrences": 2
+        },
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 15
+        },
+        {
+          "marker": "@@RECOVERY_WINDOWS_HOME_ESCAPED@@",
+          "role": "windows_home",
+          "transform": "double_backslashes",
+          "occurrences": 3
+        },
+        {
+          "marker": "@@RECOVERY_MSYS2_HOME_ESCAPED@@",
+          "role": "msys2_home",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/original-product-build-bindings-v7.json",
+      "original_bytes": 10023,
+      "original_sha256": "1a4fa1f84632e73005919cbb0aa4dfda299fb96ec793b0ac2a74cce4fc052381",
+      "original_git_blob": "f23096334fd7653ce38f314a1d279c22b12285ec",
+      "published_path": "templates/inputs-original-v6/original-product-build-bindings-v7.json.template",
+      "published_bytes": 10913,
+      "published_sha256": "7129f850333780323216491bbe83f9f4e0bab764e051d5671f76efdb744d4445",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_SERENA_PYTHON_HOME_ESCAPED@@",
+          "role": "serena_python_home",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        },
+        {
+          "marker": "@@RECOVERY_CONTROLLER_PYTHON_HOME_ESCAPED@@",
+          "role": "controller_python_home",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        },
+        {
+          "marker": "@@RECOVERY_SERENA_UV_HOME_ESCAPED@@",
+          "role": "serena_uv_home",
+          "transform": "double_backslashes",
+          "occurrences": 2
+        },
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 37
+        },
+        {
+          "marker": "@@RECOVERY_WINDOWS_HOME_ESCAPED@@",
+          "role": "windows_home",
+          "transform": "double_backslashes",
+          "occurrences": 3
+        },
+        {
+          "marker": "@@RECOVERY_MSYS2_HOME_ESCAPED@@",
+          "role": "msys2_home",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/launch-original-helper-inputs-v6.ps1",
+      "original_bytes": 3665,
+      "original_sha256": "4316e90bda7db08e0db31179a5582860535299b78dcbd853027982fcc96889fb",
+      "original_git_blob": "8f4ada01ed1aa99fcc43f956e0a27f8d0c518673",
+      "published_path": "templates/inputs-original-v6/launch-original-helper-inputs-v6.ps1.template",
+      "published_bytes": 3656,
+      "published_sha256": "1095b2e0142050ddb0d5f85483b0d0de4871607ab56d0058db7a8ae77dc1788f",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_CONTROLLER_PYTHON_HOME_RAW@@",
+          "role": "controller_python_home",
+          "transform": "literal",
+          "occurrences": 2
+        },
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_RAW@@",
+          "role": "approved_work_area",
+          "transform": "literal",
+          "occurrences": 1
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/launch-original-product-inputs-v6.ps1",
+      "original_bytes": 3687,
+      "original_sha256": "130a535c9a651a13fdfa70fe6cacea3862c22eb72e9b1ff51b608020eafb68a4",
+      "original_git_blob": "dd8b514bea012cec72a6e15dad124e5469f4d577",
+      "published_path": "templates/inputs-original-v6/launch-original-product-inputs-v6.ps1.template",
+      "published_bytes": 3678,
+      "published_sha256": "fc40bac157b0b613c510b1f01ba2f5cf312fc654b0df4395ba0f7f048f413828",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_CONTROLLER_PYTHON_HOME_RAW@@",
+          "role": "controller_python_home",
+          "transform": "literal",
+          "occurrences": 2
+        },
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_RAW@@",
+          "role": "approved_work_area",
+          "transform": "literal",
+          "occurrences": 1
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/launch-original-private-compile-v7.ps1",
+      "original_bytes": 3696,
+      "original_sha256": "cf1b5a051ea9a2cc1691751e3a28c5d6001bb91c7cc6ecb42f5591470555b8cc",
+      "original_git_blob": "b9e8022f1c5bf0261ee6e4dc4209daef987a2236",
+      "published_path": "templates/inputs-original-v6/launch-original-private-compile-v7.ps1.template",
+      "published_bytes": 3687,
+      "published_sha256": "62eb3b364e309d549bdda12cf7e77b0c165fdab19aa3ac9ad6aa90e8ffc294c7",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_CONTROLLER_PYTHON_HOME_RAW@@",
+          "role": "controller_python_home",
+          "transform": "literal",
+          "occurrences": 2
+        },
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_RAW@@",
+          "role": "approved_work_area",
+          "transform": "literal",
+          "occurrences": 1
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/launch-original-external-helper-inputs-v6.ps1",
+      "original_bytes": 3746,
+      "original_sha256": "396190976bcb730e03e4439c2521f0871d5df1b2308cbebeec7bebf2e923bdb1",
+      "original_git_blob": "7247704b8505ca8a16d4b12541307e3a24612c68",
+      "published_path": "templates/inputs-original-v6/launch-original-external-helper-inputs-v6.ps1.template",
+      "published_bytes": 3737,
+      "published_sha256": "bb09ec430316c54d2de8daa34ff89c037a06208fd44d8d5c47852f7d877532b2",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_CONTROLLER_PYTHON_HOME_RAW@@",
+          "role": "controller_python_home",
+          "transform": "literal",
+          "occurrences": 2
+        },
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_RAW@@",
+          "role": "approved_work_area",
+          "transform": "literal",
+          "occurrences": 1
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/launch-original-runtime-compose-v6.ps1",
+      "original_bytes": 3692,
+      "original_sha256": "aad7d6446c9eb528bfb9dd120c56f133c3b577272c5b2d5d33b0ca6e4b7d45c5",
+      "original_git_blob": "c1aa73ad12aa3775fef7e4622e742a13ce1ef18d",
+      "published_path": "templates/inputs-original-v6/launch-original-runtime-compose-v6.ps1.template",
+      "published_bytes": 3683,
+      "published_sha256": "f629d96a6c4c00f0e3fe29d4ebf06b8b02e9877ae2378c891ccb1de1556cffd4",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_CONTROLLER_PYTHON_HOME_RAW@@",
+          "role": "controller_python_home",
+          "transform": "literal",
+          "occurrences": 2
+        },
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_RAW@@",
+          "role": "approved_work_area",
+          "transform": "literal",
+          "occurrences": 1
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/launch-original-literal-full-v6.ps1",
+      "original_bytes": 3816,
+      "original_sha256": "a03aa3c550eca33e5ded876c631b3dfc98d3592508b23fcf2818ae018f55fa8f",
+      "original_git_blob": "ef1f369b2b201b9589f34355ea8c1ad1c3c04579",
+      "published_path": "templates/inputs-original-v6/launch-original-literal-full-v6.ps1.template",
+      "published_bytes": 3822,
+      "published_sha256": "10feca415332a37371bcefc12c66ac2dbe461538bab56aa0e0a4dbbb6614951f",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_CONTROLLER_PYTHON_HOME_RAW@@",
+          "role": "controller_python_home",
+          "transform": "literal",
+          "occurrences": 1
+        },
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_RAW@@",
+          "role": "approved_work_area",
+          "transform": "literal",
+          "occurrences": 1
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/original-product-inputs-v6-outer-original.json",
+      "original_bytes": 442,
+      "original_sha256": "95c4b5bc319906a53e730b088a5c8777046360995a2f798a667c671848a68f78",
+      "original_git_blob": "4a607bfbcb875e3fda2e4490685223b98c2e8aca",
+      "published_path": "sources/inputs-original-v6/original-product-inputs-v6-outer-original.json",
+      "published_bytes": 442,
+      "published_sha256": "95c4b5bc319906a53e730b088a5c8777046360995a2f798a667c671848a68f78",
+      "kind": "exact_bytes",
+      "substitutions": []
+    },
+    {
+      "original_role_path": "inputs-original-v6/original-private-compile-v7-outer-original.json",
+      "original_bytes": 444,
+      "original_sha256": "71983bb516cc582619243e0984a5cacd5690d1c1f2a70a9c8ced33d64224b94c",
+      "original_git_blob": "3a4fa517395063658ecc6753988e802df55a283a",
+      "published_path": "sources/inputs-original-v6/original-private-compile-v7-outer-original.json",
+      "published_bytes": 444,
+      "published_sha256": "71983bb516cc582619243e0984a5cacd5690d1c1f2a70a9c8ced33d64224b94c",
+      "kind": "exact_bytes",
+      "substitutions": []
+    },
+    {
+      "original_role_path": "inputs-original-v6/original-runtime-compose-v6-outer-original.json",
+      "original_bytes": 448,
+      "original_sha256": "94402a1a4d030db04e7270bff975d14986f7a7be9ff16921bd121950afc657c4",
+      "original_git_blob": "85b1e9254d6a9e54e958016adc2b1241834fd480",
+      "published_path": "sources/inputs-original-v6/original-runtime-compose-v6-outer-original.json",
+      "published_bytes": 448,
+      "published_sha256": "94402a1a4d030db04e7270bff975d14986f7a7be9ff16921bd121950afc657c4",
+      "kind": "exact_bytes",
+      "substitutions": []
+    },
+    {
+      "original_role_path": "original-private-compile-v7/date-parser-probe.json",
+      "original_bytes": 540,
+      "original_sha256": "dc025c02802d36a48e9eb8c2a0413cbb3c5119856fc93d1c2787a2cd41d91241",
+      "original_git_blob": "695ad95373ea3e275596a9d70bd316690decab3d",
+      "published_path": "sources/original-private-compile-v7/date-parser-probe.json",
+      "published_bytes": 540,
+      "published_sha256": "dc025c02802d36a48e9eb8c2a0413cbb3c5119856fc93d1c2787a2cd41d91241",
+      "kind": "exact_bytes",
+      "substitutions": []
+    },
+    {
+      "original_role_path": "original-product-inputs-v6/received/copy-receipt.json",
+      "original_bytes": 10138,
+      "original_sha256": "13fa3cae6f68fbe9ece69af9265b779dec579cf2c96dda21c131a0cae6f50169",
+      "original_git_blob": "4151663132e3ee118028e6738accc57442c170f3",
+      "published_path": "templates/original-product-inputs-v6/received/copy-receipt.json.template",
+      "published_bytes": 11426,
+      "published_sha256": "2af4b6b7dda0fb840ccff1d0f42ed0df81951e3fdd6571a4c40101b5d05e6140",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 22
+        },
+        {
+          "marker": "@@RECOVERY_HISTORICAL_ARTIFACT_HOME_ESCAPED@@",
+          "role": "historical_artifact_home",
+          "transform": "double_backslashes",
+          "occurrences": 23
+        }
+      ]
+    },
+    {
+      "original_role_path": "original-product-inputs-v6/cache-copy-receipt.json",
+      "original_bytes": 2002,
+      "original_sha256": "69b397ce1c4fa508a73c5cd02bf0d4cbf5d5df9c29d83174b7b110830fccaf04",
+      "original_git_blob": "01e853b305e2efd02394d07fdb977e6b6dd47d46",
+      "published_path": "templates/original-product-inputs-v6/cache-copy-receipt.json.template",
+      "published_bytes": 2232,
+      "published_sha256": "67ea1a00418f2d901cb2544fc60303836d29c0e1103c04aa54f3cb6405c13b32",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 10
+        }
+      ]
+    },
+    {
+      "original_role_path": "original-private-compile-v7/cache-copy-receipt.json",
+      "original_bytes": 2005,
+      "original_sha256": "db7468b3d8c13328819fe067d3b90d4a932edc5b49647a946236e5b8ac993652",
+      "original_git_blob": "eaa57aa2c9a08aba366cba041ea20b2318d4696e",
+      "published_path": "templates/original-private-compile-v7/cache-copy-receipt.json.template",
+      "published_bytes": 2235,
+      "published_sha256": "5e57e0f37589e44d3750cb42fc94d23d92eeebc66125300b6d407b82bb884eb3",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 10
+        }
+      ]
+    },
+    {
+      "original_role_path": "original-product-inputs-v6/private-publisher-inputs.json",
+      "original_bytes": 10685,
+      "original_sha256": "92b40e7edfbf21fd74ffee6a35dee122a310192dfb2e818f3a00c872866409a9",
+      "original_git_blob": "5146b9c3a4cbff12910c0fc4a3bdbde9d2fdd0b9",
+      "published_path": "templates/original-product-inputs-v6/private-publisher-inputs.json.template",
+      "published_bytes": 11576,
+      "published_sha256": "33f20b9e78448b49619abc64ce690379a7a6107b1a5b78492354f51bfec9f313",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 35
+        },
+        {
+          "marker": "@@RECOVERY_WINDOWS_HOME_ESCAPED@@",
+          "role": "windows_home",
+          "transform": "double_backslashes",
+          "occurrences": 2
+        },
+        {
+          "marker": "@@RECOVERY_MSYS2_HOME_ESCAPED@@",
+          "role": "msys2_home",
+          "transform": "double_backslashes",
+          "occurrences": 2
+        }
+      ]
+    },
+    {
+      "original_role_path": "original-product-inputs-v6/migration-default-input.json",
+      "original_bytes": 2195,
+      "original_sha256": "bd0ad3fcf51941c7bf98e7a3c0e3d877ff298e6d17e24e50eb2e58aee4c5a47e",
+      "original_git_blob": "abf374968fbf752de59b1f256a1505fb58e6c44d",
+      "published_path": "templates/original-product-inputs-v6/migration-default-input.json.template",
+      "published_bytes": 2325,
+      "published_sha256": "2dae5e71e20b0813752ad05ef9cd1baeb9c11dbda31cd05d9ff888f078686d03",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_SERENA_PYTHON_HOME_ESCAPED@@",
+          "role": "serena_python_home",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        },
+        {
+          "marker": "@@RECOVERY_SERENA_UV_HOME_ESCAPED@@",
+          "role": "serena_uv_home",
+          "transform": "double_backslashes",
+          "occurrences": 2
+        },
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 7
+        }
+      ]
+    },
+    {
+      "original_role_path": "original-product-inputs-v6/migration-state-input.json",
+      "original_bytes": 2204,
+      "original_sha256": "9455c97de4bcf709a392f2909ddba977e2a914bcf94465009a52038bd6d994a9",
+      "original_git_blob": "b875e3e7254be202d7b8e968f9a27b4be853ddc0",
+      "published_path": "templates/original-product-inputs-v6/migration-state-input.json.template",
+      "published_bytes": 2334,
+      "published_sha256": "454781003342b97035165fe98be4ba6cfa7c747a0bb63b40008eca1ad0e64c52",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_SERENA_PYTHON_HOME_ESCAPED@@",
+          "role": "serena_python_home",
+          "transform": "double_backslashes",
+          "occurrences": 1
+        },
+        {
+          "marker": "@@RECOVERY_SERENA_UV_HOME_ESCAPED@@",
+          "role": "serena_uv_home",
+          "transform": "double_backslashes",
+          "occurrences": 2
+        },
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 7
+        }
+      ]
+    },
+    {
+      "original_role_path": "original-product-inputs-v6/compiler-inputs-default/cli-publisher-test-inputs.json",
+      "original_bytes": 2829,
+      "original_sha256": "8bcf922364b2e162e6c20425300344a483678461379f721ed352080da4eeaa98",
+      "original_git_blob": "0dc044d6c82bc45bb25fb52cab2ac0a9d8d73148",
+      "published_path": "templates/original-product-inputs-v6/compiler-inputs-default/cli-publisher-test-inputs.json.template",
+      "published_bytes": 2921,
+      "published_sha256": "c3d8fa80c866086e2ff5dfb6ff09442affadf937726d2f78d0db8b51dffce976",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 4
+        }
+      ]
+    },
+    {
+      "original_role_path": "original-product-inputs-v6/compiler-inputs-test_state_path_env/cli-publisher-test-inputs.json",
+      "original_bytes": 2896,
+      "original_sha256": "0a3b69f75cc547865e85adab30bdcf5402a080cf3534aefc2ebc95cf6fc9aada",
+      "original_git_blob": "382ed1f59c31e296714d571c38419c998b6a3c73",
+      "published_path": "templates/original-product-inputs-v6/compiler-inputs-test_state_path_env/cli-publisher-test-inputs.json.template",
+      "published_bytes": 2988,
+      "published_sha256": "f3ade1a32a4af7383ba565be824b6da12c5324812750af261f7118205fdfe3f2",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 4
+        }
+      ]
+    },
+    {
+      "original_role_path": "original-product-inputs-v6/publisher-default-go-build-info.json",
+      "original_bytes": 4765,
+      "original_sha256": "9612239b134bd245086bdbc2bd0f0d64edc18c37a380a8d58825aa13ec9dbc07",
+      "original_git_blob": "6a2cb13a852d314b71a0d5f4d0920d5215c8ed4d",
+      "published_path": "sources/original-product-inputs-v6/publisher-default-go-build-info.json",
+      "published_bytes": 4765,
+      "published_sha256": "9612239b134bd245086bdbc2bd0f0d64edc18c37a380a8d58825aa13ec9dbc07",
+      "kind": "exact_bytes",
+      "substitutions": []
+    },
+    {
+      "original_role_path": "original-product-inputs-v6/publisher-state-go-build-info.json",
+      "original_bytes": 4841,
+      "original_sha256": "69a5d8a56b9c0254587dc9bac664b4aaca68bd3bd934fae3052f5b7278b4c8d4",
+      "original_git_blob": "ce1d4f8e64320ccb406981651184e6ad2714ecef",
+      "published_path": "sources/original-product-inputs-v6/publisher-state-go-build-info.json",
+      "published_bytes": 4841,
+      "published_sha256": "69a5d8a56b9c0254587dc9bac664b4aaca68bd3bd934fae3052f5b7278b4c8d4",
+      "kind": "exact_bytes",
+      "substitutions": []
+    },
+    {
+      "original_role_path": "original-product-inputs-v6/evidence-parent-default.json",
+      "original_bytes": 1113,
+      "original_sha256": "0ad0c9460d12e313e9e96d33693b07df8f0f39d0349685aa98031228484595e9",
+      "original_git_blob": "d9266c94204ccb88bd178106a22a4e50396f273d",
+      "published_path": "templates/original-product-inputs-v6/evidence-parent-default.json.template",
+      "published_bytes": 1087,
+      "published_sha256": "df086fbcf680c9bb5884bf0eddf05998eea0abe3615d04fe5c5d56dece094baf",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_OPERATOR_USER_SID_RAW@@",
+          "role": "operator_user_sid",
+          "transform": "literal",
+          "occurrences": 6
+        },
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 2
+        }
+      ]
+    },
+    {
+      "original_role_path": "original-product-inputs-v6/evidence-parent-state.json",
+      "original_bytes": 1113,
+      "original_sha256": "08cce646e929c26f546eaea3317e3f9265a214ec4f5dbad0261236bcc7ce5888",
+      "original_git_blob": "5fe1ec9b57b782c28b190e23c668b0c74a37f818",
+      "published_path": "templates/original-product-inputs-v6/evidence-parent-state.json.template",
+      "published_bytes": 1087,
+      "published_sha256": "06e89da6da05a747e2757a891db5b8fe2b7ab1efead52e0c817c9827589c7010",
+      "kind": "transparent_template",
+      "substitutions": [
+        {
+          "marker": "@@RECOVERY_OPERATOR_USER_SID_RAW@@",
+          "role": "operator_user_sid",
+          "transform": "literal",
+          "occurrences": 6
+        },
+        {
+          "marker": "@@RECOVERY_APPROVED_WORK_AREA_ESCAPED@@",
+          "role": "approved_work_area",
+          "transform": "double_backslashes",
+          "occurrences": 2
+        }
+      ]
+    }
+  ]
+}

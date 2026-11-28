@@ -1,0 +1,77 @@
+{
+    "schema":  "publication-original-root-data-audit-v1",
+    "status":  "PASS",
+    "physical_complete":  true,
+    "scope":  "cache-acceptance-stage-20261128-v26",
+    "config_sha256":  "45985cd9463dd50980643876b6cac334140b03f6c8c7d9852f70400037e8f905",
+    "receipt_sha256":  "980b40d340a8ed19fd4fc3ff167819e1a9c553029a4db2bf9a44298cb1bd3e4a",
+    "root_sha256":  "1ce4b50aa6ffdf4e5601b1ea0f0730bc3d88ccce7a824fdb367108c9985700d3",
+    "outer_sha256":  "ee4682beb24d7bb7093e38a1c502ad48b1ba76b9c1eb2137a4d0e99e33de5059",
+    "commands_verified":  4,
+    "captures_verified":  8,
+    "results":  [
+                    {
+                        "name":  "head.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rev-parse",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.07883969997055829,
+                        "exit_code":  0,
+                        "stdout_sha256":  "fe69bf89766a772b8e2c0910d80842e23bd30ae77fd518c0ffa9240c0f12083d",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8\n"
+                    },
+                    {
+                        "name":  "create-cli-fixture-candidate-worktree.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "worktree",
+                                     "add",
+                                     "-b",
+                                     "work/cli-fixture-reuse-20261128-v1",
+                                     "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-cli-fixtures-20261128",
+                                     "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8"
+                                 ],
+                        "seconds":  5.277785099926405,
+                        "exit_code":  0,
+                        "stdout_sha256":  "2b90687ac648df0f86023dd07c61c469067f025638ca03a0b87e8c538a64d035",
+                        "stderr_sha256":  "b0ec8eaac8c2c4960afd55f2226ea31734aed847138493c203e1ed2f44746c9f",
+                        "stdout_preview":  "HEAD is now at 59f618eb test: receive the original breakaway process wait error\n"
+                    },
+                    {
+                        "name":  "new-cli-source-head.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "-C",
+                                     "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-cli-fixtures-20261128",
+                                     "rev-parse",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.0679467999143526,
+                        "exit_code":  0,
+                        "stdout_sha256":  "fe69bf89766a772b8e2c0910d80842e23bd30ae77fd518c0ffa9240c0f12083d",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8\n"
+                    },
+                    {
+                        "name":  "new-cli-source-clean.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "-C",
+                                     "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-cli-fixtures-20261128",
+                                     "status",
+                                     "--porcelain=v1",
+                                     "--untracked-files=all"
+                                 ],
+                        "seconds":  0.15065900003537536,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    }
+                ],
+    "tests_executed":  false,
+    "reviewed_utc":  "2026-11-28T16:36:11.2816801Z"
+}

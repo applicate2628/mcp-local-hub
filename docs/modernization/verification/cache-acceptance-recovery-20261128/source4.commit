@@ -1,0 +1,6 @@
+tree 5b24c5f32541316bb8d24ad75a306c250b14b0b3
+parent e66f5c6fab7da2a2eff16ff1f0891991ca1a839c
+author ChatGPT <chatgpt@openai.com> 1795795692 +0300
+committer ChatGPT <chatgpt@openai.com> 1795795692 +0300
+
+Fix composed test helper dispatch and controller fixture lifetimes

@@ -1,0 +1,2 @@
+[detached HEAD 59f618eb] test: receive the original breakaway process wait error
+ 1 file changed, 5 insertions(+), 1 deletion(-)

@@ -1,0 +1,190 @@
+{
+  "schema": "composed-functional-source6d-v2-text",
+  "source_commit": "6d4fa7b8f9b86079020af125b030a26350cb5bb0",
+  "source_tree": "277dad42f9e9080d66955fa7469fbc68bc8618e4",
+  "parent_commit": "5ed87ff759405efa739229b7307b5c2f9579c8fc",
+  "parent_tree": "75c703052e518b8f286f3aa4f079f630de951441",
+  "inherited_composition_commit": "e66f5c6fab7da2a2eff16ff1f0891991ca1a839c",
+  "inherited_composition_tree": "4df69e99dca3f808b26e6a5bf7721bdd0ba3a91c",
+  "inherited_pr660_head": "25508f8bfe5950daca3df1b0faf338d77913640a",
+  "inherited_pr669_head": "ec2248643d875390c41b519b85424a5ca0ce90d1",
+  "changed_paths": [
+    {
+      "path": "internal/api/liveness_task.go",
+      "base_blob": "dfb417d4f0f51eee221f0f42cd115cb066ddf4db",
+      "source_blob": "6c852d6eb172b51708f2d5618163b8ebc4138ff2",
+      "working_file_sha256": "7423c2a7fa8e20b117a5db72349e7840fa7adcbdc396ee26adf9caa5c0d09d61",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/api/liveness_task_test.go",
+      "base_blob": "d1452e90aea536762e0589632f8a86b196e81ccf",
+      "source_blob": "c9ac7dbd7f3f561cb192177cfa9158c13126a38d",
+      "working_file_sha256": "f4ee80c59c92fa87b81671d8063682322fb1c6cf665acb7161122c43131d0039",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/setup_watchdog_test.go",
+      "base_blob": "c735b55bf72873ce26ae288ea42ae4476594e227",
+      "source_blob": "1801bb7925ea115839ac72b1d8d8807ac5e59045",
+      "working_file_sha256": "1205eaa4edf0f779acfd595be22ca8c1abf90d12cc78932dc7501918fafc51c2",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/supervise_status.go",
+      "base_blob": "81412548e82d81fee31c9902fe5590906cab82a0",
+      "source_blob": "51400b4337b5f74be9cf87189336006b6329efb7",
+      "working_file_sha256": "ae7edf6482e849f2fe025427ad46dc1ccef91c6051883a3e0f6ad4975df20bb9",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/supervise_status_process_test.go",
+      "base_blob": "5d739d3e0b5fcc4ca880b432d5a3c8c5e4a2d18f",
+      "source_blob": "511d48417f2bfc823dacfb1e7c5c6c8a1ad748fe",
+      "working_file_sha256": "f378ea01b58ff2767b5261d176bd09eb618823a6bb13c7eed9d23e6f71b951bd",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/supervise_status_snapshot_test.go",
+      "base_blob": "31472aa8bc73de0312efb717277ce5983114cf87",
+      "source_blob": "63657630d1c9a1c5a78fc8c2acad629ea45dad93",
+      "working_file_sha256": "a95b26f2eb3564f3bcefb247064189f9533bb8bfa31e10738f310ef7d5f86298",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/supervisor_controller_orphan_reap_test.go",
+      "base_blob": "14abb540847502c65473ed2a75446e34a73d16d3",
+      "source_blob": "fd6a9e2e0c4b1b80ebc60143408559ae2208fef0",
+      "working_file_sha256": "034e4baf23c5f87ceb9a141449b64f94e59f6045d3da80e7a017ca073b97a420",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/supervisor_launch_windows.go",
+      "base_blob": "b268dd4f3b557fbeeae076503cfec5a9d71aead3",
+      "source_blob": "feed8526b12e65b11faf715a5c837e712902c4f3",
+      "working_file_sha256": "7bf94a86bad55749e7df6136788732963e5d5da8c619ed169bd52544b7e668e8",
+      "mode": "100644"
+    },
+    {
+      "path": "internal/cli/supervisor_launch_windows_test.go",
+      "base_blob": "367cc534b73f43ecaed1c3d634754016e56ad2c7",
+      "source_blob": "1857ca9fb83c6ad1353bd3c67ab18514342c30a9",
+      "working_file_sha256": "5cd79d4d25573c06e5a5d77173062fb7a26ef947ca0e40c65258ae2fae79b6b2",
+      "mode": "100644"
+    }
+  ],
+  "go_module_pins": {
+    "go.mod": "6d61e480d392b8ff20530467851e45d92c01bbde65468796f013d7eb30315392",
+    "go.sum": "61f4a30f006f3bc99b1d2500646d9fd381c3c8d72050ca76dce2f9321c3ecae2"
+  },
+  "native_source_commit_receipt_sha256": "f75c328af2d5d072fc538619d41593d63a8b62e8480ba2660481ae8f1eaa99ea",
+  "native_export_receipt_sha256": "72936aae5ebac8ba7ef5f6d6cbc4a6235956202a23d464ed2aa3f6b75df91864",
+  "native_export": {
+    "status": "PASS",
+    "command_count": 11,
+    "original_reader_count": 22,
+    "all_original_commands_closed": true,
+    "parent_exit_code": 0,
+    "parent_reaped": true,
+    "parent_captures_closed": true
+  },
+  "source_identity_is_not_test_acceptance": true,
+  "old_results_reclassified": false,
+  "files": {
+    "e66-to-source6d.patch": {
+      "bytes": 123556,
+      "sha256": "1d61bea7589954d1328858f3ee98ae1a3dbd7830281ced7d91ec7f797aad7a6a"
+    },
+    "commit-5ed.raw": {
+      "bytes": 286,
+      "sha256": "f3eeb55a99c420f2589e6dd5c7c5fb3a6295503ec20e0999d9d3df74f5c5cce6"
+    },
+    "commit-6d.raw": {
+      "bytes": 278,
+      "sha256": "7cbcc521ba1350e7d1455205a72190c74ef4e976dde6f2e9e2cdc84e42438442"
+    },
+    "source6d-files.txt": {
+      "bytes": 848,
+      "sha256": "8186865405843e9d5aee40e2f093ba5896f2ae67eb3fd1477e8e5ad9cf4b2ed0"
+    },
+    "source-e66-files.txt": {
+      "bytes": 848,
+      "sha256": "294f588ce36383d647646991d84daec9813682acda29dc6f7f54f0caf74b38fa"
+    },
+    "source6d-identity.txt": {
+      "bytes": 123,
+      "sha256": "56c8809102acd96bb71f1fe0b12fa3ae4d9fb7dea2cfeb9d946960ae29e55985"
+    },
+    "bundle-verification.txt": {
+      "bytes": 190,
+      "sha256": "6b1ec3467fe37f9cc7fbdf4d3bc1ee969b6f9ee2d14c37545290a771513fd70b"
+    },
+    "bundle-heads.txt": {
+      "bytes": 46,
+      "sha256": "ee38e4388bf7966e9b549de608afa4894459271f964e8d53cdaf3f8cd03555da"
+    },
+    "status5ed-to6d.patch": {
+      "bytes": 524,
+      "sha256": "426f88d19f5f375667634b24467b7333c87e0315eb55f817d4b1f0eb294d9b37"
+    }
+  },
+  "historical_binary_export": {
+    "file": "source6d.bundle",
+    "bytes": 12115,
+    "sha256": "71b3a9d700ca47f2005bcd36d340b420fb6f261f1aca8b3255cdeeec25b86d28",
+    "included_in_text_capsule": false,
+    "original_bytes_preserved_locally": true,
+    "export_receipt_sha256": "72936aae5ebac8ba7ef5f6d6cbc4a6235956202a23d464ed2aa3f6b75df91864",
+    "verification_outputs_retained_as_historical_text": true,
+    "superseded_as_active_reconstruction_input": true
+  },
+  "native_text_reconstruction": {
+    "receipt_sha256": "f059068dcfefe637e8048bfa6f8bc7b77157c8818b2a038a74cb38d4334a90fd",
+    "evidence": "../text-source-reconstruction-363b/evidence.json",
+    "instructions": "../text-source-reconstruction-363b/README.md",
+    "status": "PASS/CLOSED",
+    "complete_git_index_tree_identity": true,
+    "path_count_each": 3867,
+    "original_command_count": 14,
+    "original_reader_count": 28,
+    "full_checkout_created": false,
+    "unchanged_blob_content_reread": false,
+    "new_public_cold_bootstrap": false,
+    "git_ancestry_walk": false,
+    "native_tests_run": false,
+    "old_results_reclassified": false
+  },
+  "complete_base_inventory": {
+    "path": "../text-source-reconstruction-363b/e66-tree-files.tsv",
+    "bytes": 368899,
+    "sha256": "bf51dd7dd3008c34b918ca5785c288aa4c49dcc0c206e32362469bda100de84f",
+    "base_tree": "4df69e99dca3f808b26e6a5bf7721bdd0ba3a91c",
+    "paths": 3867,
+    "target_derivation": "Apply exact changed_paths mode/blob replacements to this complete public e66 inventory; Source52 first applies Source6d changes."
+  },
+  "intermediate5ed": {
+    "tree": "75c703052e518b8f286f3aa4f079f630de951441",
+    "derived_tree_model_verified": true,
+    "native_intermediate_blob_reread": false,
+    "native_intermediate_patch_application": false,
+    "offline_status_patch_forward_and_reverse_verified": true,
+    "status_blob": "018b4d9ad0648f0c54b3d2d1835cf87eb465cb90",
+    "status_blob_bytes": 23149,
+    "status_blob_sha256": "f40e3a5c0059c773efba429a9ebab095067d9c23f15754f86e6c7f8cc8622e99",
+    "replacements_from_source6d": [
+      {
+        "path": "internal/cli/supervise_status.go",
+        "after": "018b4d9ad0648f0c54b3d2d1835cf87eb465cb90"
+      },
+      {
+        "path": "internal/cli/supervise_status_process_test.go",
+        "after": "5d739d3e0b5fcc4ca880b432d5a3c8c5e4a2d18f"
+      },
+      {
+        "path": "internal/cli/supervisor_controller_orphan_reap_test.go",
+        "after": "14abb540847502c65473ed2a75446e34a73d16d3"
+      }
+    ],
+    "restore_recipe_scope": "Optional exact intermediate recipe; not claimed as a separately executed native restoration."
+  }
+}

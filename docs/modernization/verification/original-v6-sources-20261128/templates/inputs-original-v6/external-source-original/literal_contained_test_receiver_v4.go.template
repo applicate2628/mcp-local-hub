@@ -1,0 +1,453 @@
+//go:build windows
+
+// This WORK controller receives a current Go test image and exact test argv.
+// It uses the existing contained owner; it creates no replacement lifecycle.
+// Inventory and the full literal suite are distinct, explicitly bounded modes.
+package main
+
+import (
+	"context"
+	"crypto/sha256"
+	"debug/pe"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"golang.org/x/sys/windows"
+
+	"mcp-local-hub/internal/process"
+)
+
+const allowedRoot = `@@RECOVERY_WORK_AREA_RAW@@`
+
+// One controller invocation owns at most one unresolved original result.
+// Keep its sinks and actual error/owner reachable until controller exit; do not
+// finalize or replay a stream whose worker may still hold the borrowed writer.
+var retainedIncompleteReceiver *receiverCustody
+
+type receiverCustody struct {
+	Observed       process.ContainedStreamReceiptV1
+	Cause          error
+	Stdout, Stderr *os.File
+}
+
+// Each failed reader or metadata-writer Close retains its actual file. These
+// failures can occur before a result record exists, so they have independent
+// process-lifetime custody; no retry or finalizer is used as receiving.
+var retainedReceiverFileFailures []*receiverFileCloseError
+
+type receiverFileCloseError struct {
+	File  *os.File
+	Cause error
+}
+
+func (e *receiverFileCloseError) Error() string {
+	return fmt.Sprintf("original file close unreceived (%q): %v", e.File.Name(), e.Cause)
+}
+
+func (e *receiverFileCloseError) Unwrap() error { return e.Cause }
+
+func closeReceiverFile(file *os.File, cause error) error {
+	closeErr := file.Close()
+	if closeErr == nil {
+		return cause
+	}
+	failure := &receiverFileCloseError{File: file, Cause: errors.Join(cause, closeErr)}
+	retainedReceiverFileFailures = append(retainedReceiverFileFailures, failure)
+	return failure
+}
+
+func hasRetainedReceiverFile(err error) bool {
+	var retained *receiverFileCloseError
+	return errors.As(err, &retained)
+}
+
+type result struct {
+	CustodyRetained     bool                            `json:"custody_retained"`
+	BinaryAfterMeasured bool                            `json:"binary_after_measured"`
+	Schema              string                          `json:"schema"`
+	Binary              string                          `json:"binary"`
+	BinarySHA256        string                          `json:"binary_sha256"`
+	SourceDir           string                          `json:"source_dir"`
+	Args                []string                        `json:"args"`
+	Started             string                          `json:"started_utc"`
+	Finished            string                          `json:"finished_utc"`
+	Root                process.ContainedRootIdentity   `json:"root"`
+	Native              process.ContainedNativeSnapshot `json:"native"`
+	IO                  process.ContainedIOSettlement   `json:"io"`
+	Stage               process.ContainedRunStage       `json:"stage"`
+	PrimaryError        string                          `json:"primary_error,omitempty"`
+	CleanupError        string                          `json:"cleanup_error,omitempty"`
+	RootExitError       string                          `json:"root_exit_error,omitempty"`
+	NativeError         string                          `json:"native_error,omitempty"`
+	RootWaitKnown       bool                            `json:"root_wait_known"`
+	RootExitCode        int                             `json:"root_exit_code"`
+	SettlementComplete  bool                            `json:"settlement_complete"`
+	Inventory           bool                            `json:"inventory"`
+	WorkDeadline        string                          `json:"work_deadline"`
+	CleanupDeadline     string                          `json:"cleanup_deadline"`
+	Timeout             string                          `json:"test_timeout"`
+	BootstrapBudget     string                          `json:"bootstrap_budget"`
+	BinaryUnchanged     bool                            `json:"binary_unchanged"`
+	Failure             string                          `json:"failure,omitempty"`
+}
+
+func main() {
+	defer retainUnknownReceiver()
+	binary := flag.String("test-binary", "", "absolute incoming GUI Go test executable")
+	expected := flag.String("expected-sha256", "", "exact incoming binary SHA-256")
+	source := flag.String("source-dir", "", "actual Go package working directory")
+	root := flag.String("run-root", "", "new directory under an already private D-only parent")
+	timeout := flag.Duration("timeout", 5*time.Minute, "full suite timeout is 5m; inventory is 90s")
+	inventory := flag.Bool("inventory", false, "list this same image without executing tests")
+	flag.Parse()
+	args := append([]string(nil), flag.Args()...)
+	if err := validateArgs(args, *inventory, *timeout); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	code, err := run(*binary, *expected, *source, *root, args, *timeout, *inventory)
+	retainUnknownReceiver()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		if code != 0 {
+			os.Exit(code)
+		}
+		os.Exit(1)
+	}
+}
+
+// Retention only; the original UNKNOWN result and deadlines stay immutable.
+// This does not establish late physical closure or release an UNKNOWN owner.
+func retainUnknownReceiver() {
+	if retainedIncompleteReceiver == nil && len(retainedReceiverFileFailures) == 0 {
+		return
+	}
+	for {
+		time.Sleep(time.Second)
+	}
+}
+
+func validateArgs(args []string, inventory bool, timeout time.Duration) error {
+	if inventory {
+		if timeout != 90*time.Second || len(args) != 1 || args[0] != "-test.list=." {
+			return errors.New("inventory requires its exact list-only argv and 90s deadline")
+		}
+		return nil
+	}
+	// The focused default CLI path uses the same owner and unchanged deadline.
+	// Only this exact fifth selector is admitted; run receives the original args.
+	if len(args) == 5 && args[4] == "-test.run=^TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite$" {
+		args = args[:4]
+	}
+	if timeout != 5*time.Minute || len(args) != 4 {
+		return errors.New("literal suite requires its original four Go flags and 5m timeout")
+	}
+	seen := map[string]bool{}
+	for _, arg := range args {
+		key, value, hasValue := strings.Cut(arg, "=")
+		if seen[key] {
+			return errors.New("duplicate literal test flag")
+		}
+		seen[key] = true
+		switch key {
+		case "-test.paniconexit0":
+			if hasValue {
+				return errors.New("paniconexit0 differs from the Go driver")
+			}
+		case "-test.v":
+			if value != "test2json" {
+				return errors.New("test2json framing required")
+			}
+		case "-test.count":
+			if value != "1" {
+				return errors.New("exactly one test execution required")
+			}
+		case "-test.timeout":
+			d, err := time.ParseDuration(value)
+			if err != nil || d != timeout {
+				return errors.New("test timeout differs from the Go driver")
+			}
+		default:
+			return fmt.Errorf("unsupported literal test argument: %q", arg)
+		}
+	}
+	return nil
+}
+
+func checkedPath(path string, directory bool) error {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return errors.New("an absolute clean path is required")
+	}
+	rel, err := filepath.Rel(allowedRoot, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return errors.New("path is outside the D-only work area")
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || info.IsDir() != directory || (!directory && !info.Mode().IsRegular()) {
+		return errors.New("ordinary source or private directory required")
+	}
+	return nil
+}
+
+func fileHash(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	h := sha256.New()
+	_, readErr := io.Copy(h, file)
+	if err := closeReceiverFile(file, readErr); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func readReceiverCapture(path string) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	raw, readErr := io.ReadAll(io.LimitReader(file, (16<<20)+1))
+	if len(raw) > 16<<20 {
+		readErr = errors.Join(readErr, errors.New("retained raw stream exceeds original bound"))
+	}
+	if err := closeReceiverFile(file, readErr); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+func publishReceiverResult(root string, raw []byte) error {
+	pending := filepath.Join(root, "result.json.pending")
+	file, err := os.OpenFile(pending, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	payload := append(raw, '\n')
+	n, writeErr := file.Write(payload)
+	if n != len(payload) {
+		writeErr = errors.Join(writeErr, io.ErrShortWrite)
+	}
+	syncErr := file.Sync()
+	if err := closeReceiverFile(file, errors.Join(writeErr, syncErr)); err != nil {
+		return err
+	}
+	from, err := windows.UTF16PtrFromString(pending)
+	if err != nil {
+		return err
+	}
+	to, err := windows.UTF16PtrFromString(filepath.Join(root, "result.json"))
+	if err != nil {
+		return err
+	}
+	// Flags zero forbids replacement. The pending file is not a receipt and
+	// remains in place on any failure; it is never retried or removed here.
+	return windows.MoveFileEx(from, to, 0)
+}
+
+func run(binary, expected, source, root string, args []string, timeout time.Duration, inventory bool) (exitCode int, returned error) {
+	started := time.Now()
+	bootstrapDeadline := started.Add(5 * time.Second)
+	if err := checkedPath(binary, false); err != nil {
+		return 0, err
+	}
+	if err := checkedPath(source, true); err != nil {
+		return 0, err
+	}
+	if !filepath.IsAbs(root) || filepath.Clean(root) != root {
+		return 0, errors.New("run-root must be an absolute clean path")
+	}
+	if err := checkedPath(filepath.Dir(root), true); err != nil {
+		return 0, err
+	}
+	imageFile, err := os.Open(binary)
+	if err != nil {
+		return 0, err
+	}
+	image, imageErr := pe.NewFile(imageFile)
+	validImage := false
+	if imageErr == nil {
+		header, ok := image.OptionalHeader.(*pe.OptionalHeader64)
+		validImage = ok && image.Machine == pe.IMAGE_FILE_MACHINE_AMD64 && header.Subsystem == pe.IMAGE_SUBSYSTEM_WINDOWS_GUI
+	}
+	if err := closeReceiverFile(imageFile, imageErr); err != nil {
+		return 0, err
+	}
+	if !validImage {
+		return 0, errors.New("the incoming actor must be a Windows AMD64 GUI test executable")
+	}
+	before, err := fileHash(binary)
+	if err != nil {
+		return 0, err
+	}
+	if len(expected) != 64 || expected != before {
+		return 0, errors.New("incoming binary SHA-256 does not match the original Go image")
+	}
+	if err := os.Mkdir(root, 0700); err != nil {
+		return 0, err
+	}
+	record := result{Schema: "literal-contained-test-run-v1", Inventory: inventory, Args: append([]string(nil), args...), Timeout: timeout.String(), BootstrapBudget: (5 * time.Second).String(), Binary: binary, BinarySHA256: before,
+		SourceDir: source, Started: started.UTC().Format(time.RFC3339Nano)}
+	var observed process.ContainedStreamReceiptV1
+	var runErr error
+	defer func() {
+		// The original native owner and sinks must already be received. Read
+		// and close BOTH bounded readers before replaying either stream.
+		// Cross-stream ordering is not reconstructed or claimed.
+		if !record.CustodyRetained {
+			streams := []struct {
+				name   string
+				output io.Writer
+				raw    []byte
+			}{{name: "stdout.raw", output: os.Stdout}, {name: "stderr.txt", output: os.Stderr}}
+			readersClosed := true
+			for i := range streams {
+				raw, readErr := readReceiverCapture(filepath.Join(root, streams[i].name))
+				if hasRetainedReceiverFile(readErr) {
+					record.CustodyRetained = true
+					returned = errors.Join(returned, readErr)
+					retainedIncompleteReceiver = &receiverCustody{Observed: observed, Cause: returned}
+					readersClosed = false
+					break
+				}
+				if errors.Is(readErr, os.ErrNotExist) && !record.SettlementComplete {
+					continue // Preserve the original pre-create missing-sink path.
+				}
+				if readErr != nil {
+					returned = errors.Join(returned, readErr)
+					readersClosed = false
+					break
+				}
+				streams[i].raw = raw
+			}
+			if readersClosed {
+				for _, stream := range streams {
+					n, writeErr := stream.output.Write(stream.raw)
+					if n != len(stream.raw) {
+						writeErr = errors.Join(writeErr, io.ErrShortWrite)
+					}
+					if writeErr != nil {
+						returned = errors.Join(returned, writeErr)
+						break
+					}
+				}
+			}
+		}
+		if record.RootWaitKnown && record.RootExitCode != 0 {
+			exitCode = record.RootExitCode
+		}
+		record.Finished = time.Now().UTC().Format(time.RFC3339Nano)
+		if returned != nil {
+			record.Failure = returned.Error()
+		}
+		raw, marshalErr := json.MarshalIndent(record, "", "  ")
+		if marshalErr != nil {
+			returned = errors.Join(returned, marshalErr)
+			return
+		}
+		publishErr := publishReceiverResult(root, raw)
+		returned = errors.Join(returned, publishErr)
+		if hasRetainedReceiverFile(publishErr) {
+			record.CustodyRetained = true
+			if retainedIncompleteReceiver == nil {
+				retainedIncompleteReceiver = &receiverCustody{Observed: observed, Cause: returned}
+			} else {
+				retainedIncompleteReceiver.Cause = errors.Join(retainedIncompleteReceiver.Cause, publishErr)
+			}
+		}
+	}()
+	stdout, err := os.OpenFile(filepath.Join(root, "stdout.raw"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return 0, err
+	}
+	stderr, err := os.OpenFile(filepath.Join(root, "stderr.txt"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		closeErr := stdout.Close()
+		cause := errors.Join(err, closeErr)
+		if closeErr != nil {
+			record.CustodyRetained = true
+			retainedIncompleteReceiver = &receiverCustody{Cause: cause, Stdout: stdout}
+			return 0, errors.Join(cause, errors.New("infrastructure failure: original capture sink close unreceived; no replay or retry"))
+		}
+		return 0, cause
+	}
+	cmd := exec.Command(binary, record.Args...)
+	cmd.Dir, cmd.Env = source, os.Environ()
+	process.NoConsole(cmd)
+	// A single bootstrap allowance covers process creation/TestMain; the
+	// incoming test timeout is unchanged. Cleanup retains a separate bound.
+	deadline := bootstrapDeadline.Add(timeout)
+	record.WorkDeadline = deadline.UTC().Format(time.RFC3339Nano)
+	record.CleanupDeadline = deadline.Add(10 * time.Second).UTC().Format(time.RFC3339Nano)
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+	if !time.Now().Before(bootstrapDeadline) {
+		closeErr := errors.Join(stdout.Close(), stderr.Close())
+		cause := errors.Join(errors.New("receiver bootstrap expired before original creation"), closeErr)
+		if closeErr != nil {
+			record.CustodyRetained = true
+			retainedIncompleteReceiver = &receiverCustody{Cause: cause, Stdout: stdout, Stderr: stderr}
+			return 0, errors.Join(cause, errors.New("infrastructure failure: original capture sink close unreceived; no replay or retry"))
+		}
+		return 0, cause
+	}
+	observed, runErr = process.RunContainedStreamObserved(ctx, cmd, process.ContainedStreamOptions{
+		CleanupTimeout: 10 * time.Second, AbsoluteCleanupDeadline: deadline.Add(10 * time.Second),
+		StdoutByteLimit: 16 << 20, StderrByteLimit: 16 << 20, Stderr: stderr,
+	}, func(reader io.Reader) error { _, err := io.Copy(stdout, reader); return err })
+	record.Root, record.IO = observed.RootIdentity, observed.IOSettlement
+	record.Stage = observed.Stage
+	record.PrimaryError, record.CleanupError = errorDescription(observed.PrimaryError), errorDescription(observed.CleanupError)
+	record.RootExitError = errorDescription(observed.RootExitError)
+	record.RootWaitKnown, record.RootExitCode = observed.RootWaitKnown, observed.RootExitCode
+	if observed.NativeSettlement != nil {
+		record.Native = observed.NativeSettlement.Snapshot()
+		record.NativeError = errorDescription(record.Native.Error)
+	}
+	record.SettlementComplete = observed.NativeSettlement != nil && observed.NativeSettlement.Complete() && observed.IOSettlement.Complete()
+	if !record.SettlementComplete {
+		record.CustodyRetained = true
+		retainedIncompleteReceiver = &receiverCustody{Observed: observed, Cause: runErr, Stdout: stdout, Stderr: stderr}
+		return 0, errors.Join(runErr, errors.New("infrastructure failure: original custody/sinks retained until controller exit; no sink finalize, replay, or retry"))
+	}
+	sinkErr := errors.Join(stdout.Sync(), stderr.Sync(), stdout.Close(), stderr.Close())
+	if sinkErr != nil {
+		record.CustodyRetained = true
+		cause := errors.Join(runErr, sinkErr)
+		retainedIncompleteReceiver = &receiverCustody{Observed: observed, Cause: cause, Stdout: stdout, Stderr: stderr}
+		return 0, errors.Join(cause, errors.New("infrastructure failure: original capture sink finalization unreceived; custody retained"))
+	}
+	after, hashErr := fileHash(binary)
+	if hasRetainedReceiverFile(hashErr) {
+		record.CustodyRetained = true
+		cause := errors.Join(runErr, hashErr)
+		retainedIncompleteReceiver = &receiverCustody{Observed: observed, Cause: cause, Stdout: stdout, Stderr: stderr}
+		return 0, errors.Join(cause, errors.New("infrastructure failure: original post-measurement reader close unreceived; no replay or next read"))
+	}
+	record.BinaryAfterMeasured = hashErr == nil
+	record.BinaryUnchanged = hashErr == nil && after == before
+	cause := errors.Join(runErr, sinkErr, hashErr)
+	if !record.Root.Known || !record.RootWaitKnown || record.RootExitCode != 0 || !record.SettlementComplete || !record.BinaryUnchanged {
+		cause = errors.Join(cause, errors.New("original test, binary measurement, or process/IO settlement is incomplete"))
+	}
+	return 0, cause
+}
+
+func errorDescription(err error) string {
+	if err == nil {
+		return ""
+	}
+	return fmt.Sprintf("%T: %v", err, err)
+}

@@ -1,0 +1,40 @@
+=== RUN   TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce
+=== RUN   TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/busy
+--- PASS: TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/busy (0.00s)
+=== NAME  TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce
+=== RUN   TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/fence-error
+--- PASS: TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/fence-error (0.00s)
+=== NAME  TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce
+=== RUN   TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/partial-set
+--- PASS: TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/partial-set (0.00s)
+=== NAME  TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce
+=== RUN   TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/snapshot
+--- PASS: TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/snapshot (0.00s)
+=== NAME  TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce
+=== RUN   TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/projection
+--- PASS: TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce/projection (0.00s)
+=== NAME  TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce
+--- PASS: TestLauncherAcquisitionFailureClosesOriginalSetThenFenceOnce (0.00s)
+=== NAME  
+=== RUN   TestLauncherUsesHeldProductAndBorrowedStandards
+--- PASS: TestLauncherUsesHeldProductAndBorrowedStandards (0.00s)
+=== NAME  
+=== RUN   TestLauncherMissingBuildAndCancellationAcquireNothing
+--- PASS: TestLauncherMissingBuildAndCancellationAcquireNothing (0.00s)
+=== NAME  
+=== RUN   TestForegroundReceivingPreservesRootOutcomeAndSinkFailure
+--- PASS: TestForegroundReceivingPreservesRootOutcomeAndSinkFailure (0.00s)
+=== NAME  
+=== RUN   TestForegroundReceivingUnknownAndCancellationStayFailures
+--- PASS: TestForegroundReceivingUnknownAndCancellationStayFailures (0.00s)
+=== NAME  
+=== RUN   TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts
+=== RUN   TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts/closed
+--- PASS: TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts/closed (0.00s)
+=== NAME  TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts
+=== RUN   TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts/close-failed
+--- PASS: TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts/close-failed (0.00s)
+=== NAME  TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts
+--- PASS: TestForegroundReceivingPreservesRustJobExitAndLibraryCloseFacts (0.00s)
+=== NAME  
+PASS

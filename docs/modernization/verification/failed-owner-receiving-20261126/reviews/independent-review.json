@@ -1,0 +1,45 @@
+{
+  "schema": "failed-owner-independent-source-review-v1",
+  "reviewer_role": "independent Go/Python lifecycle reviewer",
+  "scope": [
+    "original-owner custody",
+    "normal and late receiving metadata readers",
+    "Go original completion channels",
+    "one-shot process/thread/image-pin closes",
+    "immutable original qualification and deadlines",
+    "preservation of ordinary receiver"
+  ],
+  "finding": {
+    "status": "FIXED_AND_REVIEWED",
+    "file": "candidate/literal_go_exec_adapter_ready_v1.py",
+    "condition": "A normal result.json reader close failed; late path previously opened another reader and could claim CLOSED without receiving the original reader.",
+    "correction": "One prebound read_original_result accessor owns original handle, cached bytes/value and first I/O failure for both paths; normal SHA reuses the same bytes. No reopen/second close after failure.",
+    "regression": "test_normal_reader_close_failure_permanently_holds_late_receiving",
+    "observations": [
+      "actual normal finalize_owner_capture and candidate guard",
+      "two late attempts remain UNKNOWN",
+      "one original open and one close",
+      "original parent files retained",
+      "no capture measurement or grants"
+    ]
+  },
+  "additional_confirmed_defects_found": false,
+  "native_runtime_review_claimed": false,
+  "formal_external_model_review_used": false,
+  "current_model_test_sha256": "4f57ed751014f2fdafd11cb4304be12077c702603602089708a4c22d0112be31",
+  "historical_actual_core_test_sha256": "a470ef3d93f4b90b6b93d9b8c61ba862481c7f9f2342f5d72cc7fa18706ba156",
+  "public_core_fixture_change": "Only input filename, full input SHA and method AST assertion changed; runtime candidate sources unchanged.",
+  "current_python_tests": {
+    "log": "checks/public-core-python-tests.log",
+    "tests": 9,
+    "status": "PASS",
+    "executions_after_fixture_change": 1
+  },
+  "historical_python_tests": {
+    "log": "checks/final-python-tests.log",
+    "tests": 9,
+    "status": "PASS",
+    "core_sha256": "b679aadd8455cb70c8a445e3abf99484edaf76208fffc0f8347100d12c5976c8"
+  },
+  "native_go_readback": "native-go-v1/receiving-review.json"
+}

@@ -1,0 +1,15 @@
+{"Action":"start","Package":"mcp-local-hub/internal/api/apitest"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/apitest","Test":"TestRemoveTestMainRootWith_RejectsSilentResidue"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/apitest","Test":"TestRemoveTestMainRootWith_RejectsSilentResidue","Output":"=== RUN   TestRemoveTestMainRootWith_RejectsSilentResidue\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/apitest","Test":"TestRemoveTestMainRootWith_RejectsSilentResidue","Output":"--- PASS: TestRemoveTestMainRootWith_RejectsSilentResidue (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/apitest","Test":"TestRemoveTestMainRootWith_RejectsSilentResidue"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/apitest","Test":"TestRemoveTestMainRootWith_RetriesTransientResidueAndVerifiesAbsence"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/apitest","Test":"TestRemoveTestMainRootWith_RetriesTransientResidueAndVerifiesAbsence","Output":"=== RUN   TestRemoveTestMainRootWith_RetriesTransientResidueAndVerifiesAbsence\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/apitest","Test":"TestRemoveTestMainRootWith_RetriesTransientResidueAndVerifiesAbsence","Output":"--- PASS: TestRemoveTestMainRootWith_RetriesTransientResidueAndVerifiesAbsence (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/apitest","Test":"TestRemoveTestMainRootWith_RetriesTransientResidueAndVerifiesAbsence"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/apitest","Test":"TestRemoveTestMainRootWith_ReturnsRemovalCause"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/apitest","Test":"TestRemoveTestMainRootWith_ReturnsRemovalCause","Output":"=== RUN   TestRemoveTestMainRootWith_ReturnsRemovalCause\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/apitest","Test":"TestRemoveTestMainRootWith_ReturnsRemovalCause","Output":"--- PASS: TestRemoveTestMainRootWith_ReturnsRemovalCause (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/apitest","Test":"TestRemoveTestMainRootWith_ReturnsRemovalCause"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/apitest","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/apitest"}

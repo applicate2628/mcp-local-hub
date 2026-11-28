@@ -1,0 +1,1 @@
+{"schema":"windows-product-identity-v1","role":"product","filename":"mcphub.exe","subsystem":2,"machine":34404,"version":"0.4.60","commit":"727d66753814dc218e26d699e57402db2d13190a","build_date":"2026-11-27T02:27:42Z","sha256":"c23946fc480494976ccbdd0f5738cf6279e3e2b6de2037943c76cd0b6c64a560"}

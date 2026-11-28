@@ -1,0 +1,295 @@
+{
+    "schema":  "namespace-diagnostic-independent-root-data-v1",
+    "scope":  "namespace-admission-diagnostic-v2",
+    "status":  "PASS",
+    "data_verification":  "PASS",
+    "classification":  "FAIL/CLOSED",
+    "original_test_status":  "FAIL",
+    "original_test_exit_code":  2,
+    "physical_complete":  true,
+    "commands_verified":  1,
+    "captures_verified":  4,
+    "diagnostic_capture_access":  true,
+    "source_files_verified":  3369,
+    "source_commit":  "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+    "source_tree":  "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+    "cache_handoff_eligible":  true,
+    "cache_handoff_scope":  "closed diagnostic consumer only, not final CLI acceptance",
+    "literal_repository_gate_passed":  false,
+    "full_api_inventory_qualified":  false,
+    "config_sha256":  "80ec6a8bca0c0a7a8ff75ca5e1d9b8ddef1876289fb458b3cb3c7fa7e591ac2c",
+    "execution_sha256":  "b467e2448d0f5e165492562551d575355fd3281412ffd6f088a40a7ddf2c2043",
+    "outer_sha256":  "01c613ae536916f947c8b0e9119ad85e67e8511731f9b625fa990e16960a77cc",
+    "owner_proof_sha256":  "096931575c367a1d388911f233ab560047172347a65c00f460305dcf215a792a",
+    "request_sha256":  "d7489cbb4f280898edbcdbc42e458fb221003e246e5175d99316e96a03709e54",
+    "capture_measurements":  [
+                                 {
+                                     "path":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\namespace-admission-diagnostic-run-v2\\namespace-owner.stdout.txt",
+                                     "bytes":  431087,
+                                     "sha256":  "8bbcfd601e1d1e0f4ea688fe3e11dc5b6bed4a6a0a89a5da6100d181c8b1437c"
+                                 },
+                                 {
+                                     "path":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api2\\n\\r\\proof\\tests.stdout.log",
+                                     "bytes":  431087,
+                                     "sha256":  "8bbcfd601e1d1e0f4ea688fe3e11dc5b6bed4a6a0a89a5da6100d181c8b1437c"
+                                 },
+                                 {
+                                     "path":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\namespace-admission-diagnostic-run-v2\\namespace-owner.stderr.txt",
+                                     "bytes":  6601,
+                                     "sha256":  "74afef41e583d5140b5f21c0c34d2719d827710cf3426139393290bd84225416"
+                                 },
+                                 {
+                                     "path":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api2\\n\\r\\proof\\tests.stderr.log",
+                                     "bytes":  6209,
+                                     "sha256":  "59f2df15f9df2f335dbde92b98071f30faec05db6f0f5881da9c112438488204"
+                                 }
+                             ],
+    "admission_marks":  [
+                            {
+                                "stage":  "arguments:parsed",
+                                "elapsed_ns":  0
+                            },
+                            {
+                                "stage":  "tool-path-pins:begin",
+                                "elapsed_ns":  0
+                            },
+                            {
+                                "stage":  "tool-path-pins:end",
+                                "elapsed_ns":  519600
+                            },
+                            {
+                                "stage":  "input-path-pins:begin",
+                                "elapsed_ns":  519600
+                            },
+                            {
+                                "stage":  "input-path-pins:end",
+                                "elapsed_ns":  1034400
+                            },
+                            {
+                                "stage":  "input-format:begin",
+                                "elapsed_ns":  1034400
+                            },
+                            {
+                                "stage":  "input-format:end",
+                                "elapsed_ns":  1550300
+                            },
+                            {
+                                "stage":  "input-sha256:begin",
+                                "elapsed_ns":  1550300
+                            },
+                            {
+                                "stage":  "input-sha256:end",
+                                "elapsed_ns":  24694900
+                            },
+                            {
+                                "stage":  "input-build-info:begin",
+                                "elapsed_ns":  24694900
+                            },
+                            {
+                                "stage":  "input-build-info:end",
+                                "elapsed_ns":  24694900
+                            },
+                            {
+                                "stage":  "private-directories:begin",
+                                "elapsed_ns":  24694900
+                            },
+                            {
+                                "stage":  "private-directories:end",
+                                "elapsed_ns":  32904400
+                            },
+                            {
+                                "stage":  "source-leaf:go.mod:begin",
+                                "elapsed_ns":  32904400
+                            },
+                            {
+                                "stage":  "source-leaf:go.mod:end",
+                                "elapsed_ns":  33903800
+                            },
+                            {
+                                "stage":  "source-leaf:go.sum:begin",
+                                "elapsed_ns":  33903800
+                            },
+                            {
+                                "stage":  "source-leaf:go.sum:end",
+                                "elapsed_ns":  33903800
+                            },
+                            {
+                                "stage":  "source-leaf:internal/api/secrets_init_recovery_test.go:begin",
+                                "elapsed_ns":  33903800
+                            },
+                            {
+                                "stage":  "source-leaf:internal/api/secrets_init_recovery_test.go:end",
+                                "elapsed_ns":  33903800
+                            },
+                            {
+                                "stage":  "source-leaf:internal/api/secrets_init_recovery_directory_windows.go:begin",
+                                "elapsed_ns":  33903800
+                            },
+                            {
+                                "stage":  "source-leaf:internal/api/secrets_init_recovery_directory_windows.go:end",
+                                "elapsed_ns":  33903800
+                            },
+                            {
+                                "stage":  "source-leaf:tools/test-recovery-namespace/main_windows.go:begin",
+                                "elapsed_ns":  33903800
+                            },
+                            {
+                                "stage":  "source-leaf:tools/test-recovery-namespace/main_windows.go:end",
+                                "elapsed_ns":  33903800
+                            },
+                            {
+                                "stage":  "source-leaf:scripts/test-recovery-namespace/helper.ps1:begin",
+                                "elapsed_ns":  33903800
+                            },
+                            {
+                                "stage":  "source-leaf:scripts/test-recovery-namespace/helper.ps1:end",
+                                "elapsed_ns":  33903800
+                            },
+                            {
+                                "stage":  "source-leaf:internal/api/main_test.go:begin",
+                                "elapsed_ns":  33903800
+                            },
+                            {
+                                "stage":  "source-leaf:internal/api/main_test.go:end",
+                                "elapsed_ns":  33903800
+                            },
+                            {
+                                "stage":  "source-leaf:internal/api/supervisor_ipc_peer_transport_windows_test.go:begin",
+                                "elapsed_ns":  33903800
+                            },
+                            {
+                                "stage":  "source-leaf:internal/api/supervisor_ipc_peer_transport_windows_test.go:end",
+                                "elapsed_ns":  33903800
+                            },
+                            {
+                                "stage":  "source-leaf:internal/api/attach_client_public_cli_receiving_windows_test.go:begin",
+                                "elapsed_ns":  33903800
+                            },
+                            {
+                                "stage":  "source-leaf:internal/api/attach_client_public_cli_receiving_windows_test.go:end",
+                                "elapsed_ns":  33903800
+                            },
+                            {
+                                "stage":  "source-leaf:internal/api/supervisor_stderr_sink_test.go:begin",
+                                "elapsed_ns":  33903800
+                            },
+                            {
+                                "stage":  "source-leaf:internal/api/supervisor_stderr_sink_test.go:end",
+                                "elapsed_ns":  33903800
+                            },
+                            {
+                                "stage":  "helper-copy:begin",
+                                "elapsed_ns":  33903800
+                            },
+                            {
+                                "stage":  "helper-copy:end",
+                                "elapsed_ns":  195259500
+                            },
+                            {
+                                "stage":  "helper-pin:begin",
+                                "elapsed_ns":  195259500
+                            },
+                            {
+                                "stage":  "helper-pin:end",
+                                "elapsed_ns":  195259500
+                            },
+                            {
+                                "stage":  "execution-copy:begin",
+                                "elapsed_ns":  195259500
+                            },
+                            {
+                                "stage":  "execution-copy:end",
+                                "elapsed_ns":  3291349700
+                            },
+                            {
+                                "stage":  "inputs-proof:begin",
+                                "elapsed_ns":  3291349700
+                            },
+                            {
+                                "stage":  "inputs-proof:end",
+                                "elapsed_ns":  3294474300
+                            },
+                            {
+                                "stage":  "environment:begin",
+                                "elapsed_ns":  3294474300
+                            },
+                            {
+                                "stage":  "environment:end",
+                                "elapsed_ns":  3294474300
+                            },
+                            {
+                                "stage":  "execution-pin:begin",
+                                "elapsed_ns":  3294474300
+                            },
+                            {
+                                "stage":  "execution-pin:end",
+                                "elapsed_ns":  3294474300
+                            },
+                            {
+                                "stage":  "execution-readback:begin",
+                                "elapsed_ns":  3294474300
+                            },
+                            {
+                                "stage":  "execution-readback:end",
+                                "elapsed_ns":  3318262100
+                            },
+                            {
+                                "stage":  "binary-proof:begin",
+                                "elapsed_ns":  3318262100
+                            },
+                            {
+                                "stage":  "binary-proof:end",
+                                "elapsed_ns":  3339529800
+                            },
+                            {
+                                "stage":  "admission-ready",
+                                "elapsed_ns":  3339529800
+                            }
+                        ],
+    "mandatory_tests":  {
+                            "TestRotateSupervisorStderrSinkIfOversize_AtBoundary":  {
+                                                                                        "Runs":  0,
+                                                                                        "Passes":  0,
+                                                                                        "Fails":  0,
+                                                                                        "Skips":  0
+                                                                                    },
+                            "TestRotateSupervisorStderrSinkIfOversize_ReplacesExistingBackup":  {
+                                                                                                    "Runs":  0,
+                                                                                                    "Passes":  0,
+                                                                                                    "Fails":  0,
+                                                                                                    "Skips":  0
+                                                                                                },
+                            "TestSecretsInit_RecoveryNamespaceBoundary":  {
+                                                                              "Runs":  0,
+                                                                              "Passes":  0,
+                                                                              "Fails":  0,
+                                                                              "Skips":  0
+                                                                          },
+                            "TestSecretsInit_RecoveryNamespaceFailurePaths":  {
+                                                                                  "Runs":  0,
+                                                                                  "Passes":  0,
+                                                                                  "Fails":  0,
+                                                                                  "Skips":  0
+                                                                              },
+                            "TestSecretsInit_RecoveryNamespaceRetainedDirectory":  {
+                                                                                       "Runs":  0,
+                                                                                       "Passes":  0,
+                                                                                       "Fails":  0,
+                                                                                       "Skips":  0
+                                                                                   },
+                            "TestSupervisorPeerStrictControlConnections":  {
+                                                                               "Runs":  0,
+                                                                               "Passes":  0,
+                                                                               "Fails":  0,
+                                                                               "Skips":  0
+                                                                           },
+                            "TestSupervisorStderrSinkOversize_MatchesRotationThreshold":  {
+                                                                                              "Runs":  0,
+                                                                                              "Passes":  0,
+                                                                                              "Fails":  0,
+                                                                                              "Skips":  0
+                                                                                          }
+                        },
+    "original_failure":  "contained process exit failed\nexpected four real handle observations from two test boundaries, received 0\nmandatory original API test did not run and pass exactly once: TestSecretsInit_RecoveryNamespaceBoundary {Runs:0 Passes:0 Fails:0 Skips:0}\nfull API receiver identity, wait, image or settlement is incomplete",
+    "reviewed_utc":  "2026-11-28T17:24:49.1351031Z"
+}

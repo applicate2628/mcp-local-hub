@@ -1,0 +1,88 @@
+{
+    "schema":  "closed-replay-duplicate-trash-receipt-v1",
+    "status":  "MOVED_AND_VERIFIED",
+    "observed_at_utc":  "2026-11-28T17:39:46.6344511Z",
+    "preflight_sha256":  "7d7df92a5cd7e5898c3eca400199884528f017a940e6b7efb2aedc610d15beaf",
+    "moves":  [
+                  {
+                      "source":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\root-fixture-v2-replay-v1",
+                      "destination":  "@@RECOVERY_REPLAY_TRASH_BASE_JSON@@\\mcp-acceptance-e2c0785b-replay-duplicates-20261128\\root-fixture-v2-replay-v1",
+                      "source_absent":  true,
+                      "file_count":  334,
+                      "bytes":  49486077,
+                      "all_bytes_verified":  true
+                  },
+                  {
+                      "source":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\source59f-closed-api-diagnostics-root-replay-v1",
+                      "destination":  "@@RECOVERY_REPLAY_TRASH_BASE_JSON@@\\mcp-acceptance-e2c0785b-replay-duplicates-20261128\\source59f-closed-api-diagnostics-root-replay-v1",
+                      "source_absent":  true,
+                      "file_count":  137,
+                      "bytes":  2317213,
+                      "all_bytes_verified":  true
+                  },
+                  {
+                      "source":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\root-checkpoint-data-20261128-v1",
+                      "destination":  "@@RECOVERY_REPLAY_TRASH_BASE_JSON@@\\mcp-acceptance-e2c0785b-replay-duplicates-20261128\\root-checkpoint-data-20261128-v1",
+                      "source_absent":  true,
+                      "file_count":  501,
+                      "bytes":  89919280,
+                      "all_bytes_verified":  true
+                  }
+              ],
+    "total_files":  972,
+    "total_bytes":  141722570,
+    "unique_receipts_preserved":  6,
+    "preserved_receipts":  [
+                               {
+                                   "source":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\root-fixture-v2-replay-v1\\reconstruction-receipt.json",
+                                   "retained_copy":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\root-replay-receipts-e2c0785b-20261128\\fixture-v2-reconstruction.json",
+                                   "bytes":  68335,
+                                   "sha256":  "d37e7adc007d9fbe5ae2f5c7f89457455c33e9bb7684bcda35ddcb560ea21656",
+                                   "copied_with_create_new":  true
+                               },
+                               {
+                                   "source":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\source59f-closed-api-diagnostics-root-replay-v1\\reconstruction-receipt.json",
+                                   "retained_copy":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\root-replay-receipts-e2c0785b-20261128\\api59f-reconstruction.json",
+                                   "bytes":  23910,
+                                   "sha256":  "1ffbd50ce9d4d10242e85ff1dae70fb6f5554dd4fa670af3b286b6009639fb64",
+                                   "copied_with_create_new":  true
+                               },
+                               {
+                                   "source":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\root-checkpoint-data-20261128-v1\\captures333\\reconstruction-receipt.json",
+                                   "retained_copy":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\root-replay-receipts-e2c0785b-20261128\\checkpoint-captures333-reconstruction.json",
+                                   "bytes":  68335,
+                                   "sha256":  "a657f015cdfda3afbd772af98bf08b996b6ea3c84621631da2455ea8721432fa",
+                                   "copied_with_create_new":  true
+                               },
+                               {
+                                   "source":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\root-checkpoint-data-20261128-v1\\preparation133\\reconstruction-receipt.json",
+                                   "retained_copy":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\root-replay-receipts-e2c0785b-20261128\\checkpoint-preparation133-reconstruction.json",
+                                   "bytes":  24195,
+                                   "sha256":  "f4ca1cab1726d0ac776984388e86ab2d6ed025b5aa1b27210e77d8d113b11ac6",
+                                   "copied_with_create_new":  true
+                               },
+                               {
+                                   "source":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\root-checkpoint-data-20261128-v1\\prior-api4\\reconstruction-receipt.json",
+                                   "retained_copy":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\root-replay-receipts-e2c0785b-20261128\\checkpoint-prior-api4-reconstruction.json",
+                                   "bytes":  1038,
+                                   "sha256":  "2978d79109a49175cb9a41c6fe1bed1c1301daf814d7f82c64a201deebb468b6",
+                                   "copied_with_create_new":  true
+                               },
+                               {
+                                   "source":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\root-checkpoint-data-20261128-v1\\prior-full20\\reconstruction-receipt.json",
+                                   "retained_copy":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\root-replay-receipts-e2c0785b-20261128\\checkpoint-prior-full20-reconstruction.json",
+                                   "bytes":  3689,
+                                   "sha256":  "febdf001692bbe4b815f2544ca39f622a7bfbda3014126457a40d72f2aabe36d",
+                                   "copied_with_create_new":  true
+                               }
+                           ],
+    "purpose_built_move_tool_used":  true,
+    "trash":  "@@RECOVERY_REPLAY_TRASH_BASE_JSON@@\\mcp-acceptance-e2c0785b-replay-duplicates-20261128",
+    "native_or_test_execution":  false,
+    "permanent_deletion_performed":  false,
+    "trash_emptied":  false,
+    "UNKNOWN_source_or_cache_touched":  false,
+    "remote_publication_proven":  false,
+    "local_capsule_counterparts_verified_by_preflight":  true,
+    "note":  "Only unused reconstructed duplicates moved; original closed evidence, public capsule candidates and six unique reconstruction receipts remain outside trash."
+}

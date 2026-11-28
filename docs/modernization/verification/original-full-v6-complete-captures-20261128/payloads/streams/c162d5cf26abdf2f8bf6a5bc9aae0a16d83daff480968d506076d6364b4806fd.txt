@@ -1,0 +1,343 @@
+{"Action":"start","Package":"mcp-local-hub/internal/vtune"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestErrVTuneNotFound_MessageNamesSearchLocations"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestErrVTuneNotFound_MessageNamesSearchLocations","Output":"=== RUN   TestErrVTuneNotFound_MessageNamesSearchLocations\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestErrVTuneNotFound_MessageNamesSearchLocations","Output":"--- PASS: TestErrVTuneNotFound_MessageNamesSearchLocations (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestErrVTuneNotFound_MessageNamesSearchLocations"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestFindVTune_ProfilerDirHit"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestFindVTune_ProfilerDirHit","Output":"=== RUN   TestFindVTune_ProfilerDirHit\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestFindVTune_ProfilerDirHit","Output":"--- PASS: TestFindVTune_ProfilerDirHit (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestFindVTune_ProfilerDirHit"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestFindVTune_ProfilerDirMiss"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestFindVTune_ProfilerDirMiss","Output":"=== RUN   TestFindVTune_ProfilerDirMiss\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestFindVTune_ProfilerDirMiss","Output":"--- PASS: TestFindVTune_ProfilerDirMiss (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestFindVTune_ProfilerDirMiss"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVersionedSubdirs"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVersionedSubdirs","Output":"=== RUN   TestVersionedSubdirs\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVersionedSubdirs","Output":"--- PASS: TestVersionedSubdirs (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVersionedSubdirs"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestIsExecutableFile"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestIsExecutableFile","Output":"=== RUN   TestIsExecutableFile\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestIsExecutableFile","Output":"--- PASS: TestIsExecutableFile (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestIsExecutableFile"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_ParsesInjectedReport"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_ParsesInjectedReport","Output":"=== RUN   TestProfileTool_ParsesInjectedReport\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_ParsesInjectedReport","Output":"--- PASS: TestProfileTool_ParsesInjectedReport (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_ParsesInjectedReport"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_DefaultsAnalysisHotspots"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_DefaultsAnalysisHotspots","Output":"=== RUN   TestProfileTool_DefaultsAnalysisHotspots\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_DefaultsAnalysisHotspots","Output":"--- PASS: TestProfileTool_DefaultsAnalysisHotspots (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_DefaultsAnalysisHotspots"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_SynchronousNegativeTimeoutKeepsDefaultCompatibility"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_SynchronousNegativeTimeoutKeepsDefaultCompatibility","Output":"=== RUN   TestProfileTool_SynchronousNegativeTimeoutKeepsDefaultCompatibility\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_SynchronousNegativeTimeoutKeepsDefaultCompatibility","Output":"--- PASS: TestProfileTool_SynchronousNegativeTimeoutKeepsDefaultCompatibility (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_SynchronousNegativeTimeoutKeepsDefaultCompatibility"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_StartReturnsDurableRunAndStatusDoesNotNeedCallerContext"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_StartReturnsDurableRunAndStatusDoesNotNeedCallerContext","Output":"=== RUN   TestProfileTool_StartReturnsDurableRunAndStatusDoesNotNeedCallerContext\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_StartReturnsDurableRunAndStatusDoesNotNeedCallerContext","Output":"--- PASS: TestProfileTool_StartReturnsDurableRunAndStatusDoesNotNeedCallerContext (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_StartReturnsDurableRunAndStatusDoesNotNeedCallerContext"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_RejectsUnknownAnalysisType"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_RejectsUnknownAnalysisType","Output":"=== RUN   TestProfileTool_RejectsUnknownAnalysisType\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_RejectsUnknownAnalysisType","Output":"--- PASS: TestProfileTool_RejectsUnknownAnalysisType (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_RejectsUnknownAnalysisType"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_VTuneNotFound"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_VTuneNotFound","Output":"=== RUN   TestProfileTool_VTuneNotFound\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_VTuneNotFound","Output":"--- PASS: TestProfileTool_VTuneNotFound (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_VTuneNotFound"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_MissingExe"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_MissingExe","Output":"=== RUN   TestProfileTool_MissingExe\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_MissingExe","Output":"--- PASS: TestProfileTool_MissingExe (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_MissingExe"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_RunnerFailureSurfaces"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_RunnerFailureSurfaces","Output":"=== RUN   TestProfileTool_RunnerFailureSurfaces\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_RunnerFailureSurfaces","Output":"--- PASS: TestProfileTool_RunnerFailureSurfaces (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_RunnerFailureSurfaces"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_TimeoutSurfaces"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_TimeoutSurfaces","Output":"=== RUN   TestProfileTool_TimeoutSurfaces\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_TimeoutSurfaces","Output":"--- PASS: TestProfileTool_TimeoutSurfaces (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_TimeoutSurfaces"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_PanicRecoveredToStructuredError"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_PanicRecoveredToStructuredError","Output":"=== RUN   TestProfileTool_PanicRecoveredToStructuredError\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_PanicRecoveredToStructuredError","Output":"--- PASS: TestProfileTool_PanicRecoveredToStructuredError (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_PanicRecoveredToStructuredError"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_NoReportSurfacesError"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_NoReportSurfacesError","Output":"=== RUN   TestProfileTool_NoReportSurfacesError\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_NoReportSurfacesError","Output":"--- PASS: TestProfileTool_NoReportSurfacesError (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_NoReportSurfacesError"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_KeepResultForwardedAndSurfaced"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_KeepResultForwardedAndSurfaced","Output":"=== RUN   TestProfileTool_KeepResultForwardedAndSurfaced\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_KeepResultForwardedAndSurfaced","Output":"--- PASS: TestProfileTool_KeepResultForwardedAndSurfaced (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_KeepResultForwardedAndSurfaced"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestStatusTool_Available"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestStatusTool_Available","Output":"=== RUN   TestStatusTool_Available\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestStatusTool_Available","Output":"--- PASS: TestStatusTool_Available (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestStatusTool_Available"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestStatusTool_Unavailable"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestStatusTool_Unavailable","Output":"=== RUN   TestStatusTool_Unavailable\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestStatusTool_Unavailable","Output":"--- PASS: TestStatusTool_Unavailable (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestStatusTool_Unavailable"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestStatusTool_PanicRecovered"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestStatusTool_PanicRecovered","Output":"=== RUN   TestStatusTool_PanicRecovered\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestStatusTool_PanicRecovered","Output":"--- PASS: TestStatusTool_PanicRecovered (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestStatusTool_PanicRecovered"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestListAnalysesTool"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestListAnalysesTool","Output":"=== RUN   TestListAnalysesTool\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestListAnalysesTool","Output":"--- PASS: TestListAnalysesTool (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestListAnalysesTool"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestListAnalysesTool_UnavailableNormalizesNilList"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestListAnalysesTool_UnavailableNormalizesNilList","Output":"=== RUN   TestListAnalysesTool_UnavailableNormalizesNilList\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestListAnalysesTool_UnavailableNormalizesNilList","Output":"--- PASS: TestListAnalysesTool_UnavailableNormalizesNilList (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestListAnalysesTool_UnavailableNormalizesNilList"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestReportTool_ReReportsExistingDir"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestReportTool_ReReportsExistingDir","Output":"=== RUN   TestReportTool_ReReportsExistingDir\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestReportTool_ReReportsExistingDir","Output":"--- PASS: TestReportTool_ReReportsExistingDir (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestReportTool_ReReportsExistingDir"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestReportTool_DefaultsAnalysisHotspots"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestReportTool_DefaultsAnalysisHotspots","Output":"=== RUN   TestReportTool_DefaultsAnalysisHotspots\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestReportTool_DefaultsAnalysisHotspots","Output":"--- PASS: TestReportTool_DefaultsAnalysisHotspots (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestReportTool_DefaultsAnalysisHotspots"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestReportTool_MissingResultDir"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestReportTool_MissingResultDir","Output":"=== RUN   TestReportTool_MissingResultDir\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestReportTool_MissingResultDir","Output":"--- PASS: TestReportTool_MissingResultDir (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestReportTool_MissingResultDir"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestReportTool_RejectsUnknownAnalysisType"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestReportTool_RejectsUnknownAnalysisType","Output":"=== RUN   TestReportTool_RejectsUnknownAnalysisType\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestReportTool_RejectsUnknownAnalysisType","Output":"--- PASS: TestReportTool_RejectsUnknownAnalysisType (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestReportTool_RejectsUnknownAnalysisType"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestReportTool_FailureSurfaces"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestReportTool_FailureSurfaces","Output":"=== RUN   TestReportTool_FailureSurfaces\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestReportTool_FailureSurfaces","Output":"--- PASS: TestReportTool_FailureSurfaces (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestReportTool_FailureSurfaces"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestReportTool_PanicRecovered"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestReportTool_PanicRecovered","Output":"=== RUN   TestReportTool_PanicRecovered\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestReportTool_PanicRecovered","Output":"--- PASS: TestReportTool_PanicRecovered (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestReportTool_PanicRecovered"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestParseReport_HotspotsTabDelimited"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestParseReport_HotspotsTabDelimited","Output":"=== RUN   TestParseReport_HotspotsTabDelimited\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestParseReport_HotspotsTabDelimited","Output":"--- PASS: TestParseReport_HotspotsTabDelimited (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestParseReport_HotspotsTabDelimited"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestParseReport_ColumnOrderIndependent"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestParseReport_ColumnOrderIndependent","Output":"=== RUN   TestParseReport_ColumnOrderIndependent\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestParseReport_ColumnOrderIndependent","Output":"--- PASS: TestParseReport_ColumnOrderIndependent (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestParseReport_ColumnOrderIndependent"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestParseReport_Empty"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestParseReport_Empty","Output":"=== RUN   TestParseReport_Empty\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestParseReport_Empty","Output":"--- PASS: TestParseReport_Empty (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestParseReport_Empty"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestParseFloat"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestParseFloat","Output":"=== RUN   TestParseFloat\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestParseFloat","Output":"--- PASS: TestParseFloat (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestParseFloat"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestParseCollectList"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestParseCollectList","Output":"=== RUN   TestParseCollectList\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestParseCollectList","Output":"--- PASS: TestParseCollectList (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestParseCollectList"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestParseCollectList_TolerantOnGarbage"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestParseCollectList_TolerantOnGarbage","Output":"=== RUN   TestParseCollectList_TolerantOnGarbage\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestParseCollectList_TolerantOnGarbage","Output":"--- PASS: TestParseCollectList_TolerantOnGarbage (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestParseCollectList_TolerantOnGarbage"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestLooksLikeAnalysisID"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestLooksLikeAnalysisID","Output":"=== RUN   TestLooksLikeAnalysisID\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestLooksLikeAnalysisID","Output":"--- PASS: TestLooksLikeAnalysisID (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestLooksLikeAnalysisID"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestSepDriverNote"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestSepDriverNote","Output":"=== RUN   TestSepDriverNote\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestSepDriverNote","Output":"--- PASS: TestSepDriverNote (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestSepDriverNote"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestFirstNonEmptyLine"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestFirstNonEmptyLine","Output":"=== RUN   TestFirstNonEmptyLine\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestFirstNonEmptyLine","Output":"--- PASS: TestFirstNonEmptyLine (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestFirstNonEmptyLine"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_StartRejectsNegativeDurableTimeout"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_StartRejectsNegativeDurableTimeout","Output":"=== RUN   TestProfileTool_StartRejectsNegativeDurableTimeout\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_StartRejectsNegativeDurableTimeout","Output":"--- PASS: TestProfileTool_StartRejectsNegativeDurableTimeout (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_StartRejectsNegativeDurableTimeout"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_StartRejectsFreshTooLongDurableTimeout"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_StartRejectsFreshTooLongDurableTimeout","Output":"=== RUN   TestProfileTool_StartRejectsFreshTooLongDurableTimeout\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_StartRejectsFreshTooLongDurableTimeout","Output":"--- PASS: TestProfileTool_StartRejectsFreshTooLongDurableTimeout (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestProfileTool_StartRejectsFreshTooLongDurableTimeout"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_RejectsThirdUnsettledDurableRun"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_RejectsThirdUnsettledDurableRun","Output":"=== RUN   TestVTuneRunOwner_RejectsThirdUnsettledDurableRun\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_RejectsThirdUnsettledDurableRun","Output":"--- PASS: TestVTuneRunOwner_RejectsThirdUnsettledDurableRun (0.12s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_RejectsThirdUnsettledDurableRun"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_ReplaysPreviouslyAcceptedLongRun"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_ReplaysPreviouslyAcceptedLongRun","Output":"=== RUN   TestVTuneRunOwner_ReplaysPreviouslyAcceptedLongRun\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_ReplaysPreviouslyAcceptedLongRun","Output":"--- PASS: TestVTuneRunOwner_ReplaysPreviouslyAcceptedLongRun (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_ReplaysPreviouslyAcceptedLongRun"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_TimeoutIsPersistedAndSurfaced"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_TimeoutIsPersistedAndSurfaced","Output":"=== RUN   TestVTuneRunOwner_TimeoutIsPersistedAndSurfaced\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_TimeoutIsPersistedAndSurfaced","Output":"--- PASS: TestVTuneRunOwner_TimeoutIsPersistedAndSurfaced (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_TimeoutIsPersistedAndSurfaced"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_ContainedTimeoutWithExitCodeIsNotNormalNonzero"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_ContainedTimeoutWithExitCodeIsNotNormalNonzero","Output":"=== RUN   TestVTuneRunOwner_ContainedTimeoutWithExitCodeIsNotNormalNonzero\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_ContainedTimeoutWithExitCodeIsNotNormalNonzero","Output":"--- PASS: TestVTuneRunOwner_ContainedTimeoutWithExitCodeIsNotNormalNonzero (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_ContainedTimeoutWithExitCodeIsNotNormalNonzero"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_CollectDeadlineLeavesVTuneDurationGrace"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_CollectDeadlineLeavesVTuneDurationGrace","Output":"=== RUN   TestVTuneRunOwner_CollectDeadlineLeavesVTuneDurationGrace\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_CollectDeadlineLeavesVTuneDurationGrace","Output":"--- PASS: TestVTuneRunOwner_CollectDeadlineLeavesVTuneDurationGrace (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_CollectDeadlineLeavesVTuneDurationGrace"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_WorkerExitCancelsCollectDeadline"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_WorkerExitCancelsCollectDeadline","Output":"=== RUN   TestVTuneRunOwner_WorkerExitCancelsCollectDeadline\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_WorkerExitCancelsCollectDeadline","Output":"--- PASS: TestVTuneRunOwner_WorkerExitCancelsCollectDeadline (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_WorkerExitCancelsCollectDeadline"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StartStopFinalizesAndPublishesReceipt"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StartStopFinalizesAndPublishesReceipt","Output":"=== RUN   TestVTuneRunOwner_StartStopFinalizesAndPublishesReceipt\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StartStopFinalizesAndPublishesReceipt","Output":"--- PASS: TestVTuneRunOwner_StartStopFinalizesAndPublishesReceipt (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StartStopFinalizesAndPublishesReceipt"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StopReplayReturnsSameSettledReceipt"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StopReplayReturnsSameSettledReceipt","Output":"=== RUN   TestVTuneRunOwner_StopReplayReturnsSameSettledReceipt\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StopReplayReturnsSameSettledReceipt","Output":"--- PASS: TestVTuneRunOwner_StopReplayReturnsSameSettledReceipt (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StopReplayReturnsSameSettledReceipt"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StopFallbackReceiptReplaysBeforeAndAfterTerminalSettlement"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StopFallbackReceiptReplaysBeforeAndAfterTerminalSettlement","Output":"=== RUN   TestVTuneRunOwner_StopFallbackReceiptReplaysBeforeAndAfterTerminalSettlement\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StopFallbackReceiptReplaysBeforeAndAfterTerminalSettlement","Output":"--- PASS: TestVTuneRunOwner_StopFallbackReceiptReplaysBeforeAndAfterTerminalSettlement (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StopFallbackReceiptReplaysBeforeAndAfterTerminalSettlement"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure","Output":"=== RUN   TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure/finalize"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure/finalize","Output":"=== RUN   TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure/finalize\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure/finalize","Output":"--- PASS: TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure/finalize (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure/finalize"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure/report"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure/report","Output":"=== RUN   TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure/report\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure/report","Output":"--- PASS: TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure/report (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure/report"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure","Output":"--- PASS: TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure (0.05s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StopReturnsPersistedFailureAfterFinalizeOrReportFailure"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StopPreparedPreventsCollectLaunch"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StopPreparedPreventsCollectLaunch","Output":"=== RUN   TestVTuneRunOwner_StopPreparedPreventsCollectLaunch\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StopPreparedPreventsCollectLaunch","Output":"--- PASS: TestVTuneRunOwner_StopPreparedPreventsCollectLaunch (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_StopPreparedPreventsCollectLaunch"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_ContainedCollectNonzeroSettlesAsCompletedNonzero"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_ContainedCollectNonzeroSettlesAsCompletedNonzero","Output":"=== RUN   TestVTuneRunOwner_ContainedCollectNonzeroSettlesAsCompletedNonzero\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_ContainedCollectNonzeroSettlesAsCompletedNonzero","Output":"--- PASS: TestVTuneRunOwner_ContainedCollectNonzeroSettlesAsCompletedNonzero (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_ContainedCollectNonzeroSettlesAsCompletedNonzero"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_ContainedCollectCleanupFailureIsNotReportable"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_ContainedCollectCleanupFailureIsNotReportable","Output":"=== RUN   TestVTuneRunOwner_ContainedCollectCleanupFailureIsNotReportable\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_ContainedCollectCleanupFailureIsNotReportable","Output":"--- PASS: TestVTuneRunOwner_ContainedCollectCleanupFailureIsNotReportable (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_ContainedCollectCleanupFailureIsNotReportable"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_TerminalRecordCannotClaimLaterPhase"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_TerminalRecordCannotClaimLaterPhase","Output":"=== RUN   TestVTuneRunOwner_TerminalRecordCannotClaimLaterPhase\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_TerminalRecordCannotClaimLaterPhase","Output":"--- PASS: TestVTuneRunOwner_TerminalRecordCannotClaimLaterPhase (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_TerminalRecordCannotClaimLaterPhase"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_InvalidReceiptPersistenceFailureIsFailClosedForCurrentStatus"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_InvalidReceiptPersistenceFailureIsFailClosedForCurrentStatus","Output":"=== RUN   TestVTuneRunOwner_InvalidReceiptPersistenceFailureIsFailClosedForCurrentStatus\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_InvalidReceiptPersistenceFailureIsFailClosedForCurrentStatus","Output":"--- PASS: TestVTuneRunOwner_InvalidReceiptPersistenceFailureIsFailClosedForCurrentStatus (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_InvalidReceiptPersistenceFailureIsFailClosedForCurrentStatus"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_CloseDeadlineRetainsLeaseUntilWorkerSettlement"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_CloseDeadlineRetainsLeaseUntilWorkerSettlement","Output":"=== RUN   TestVTuneRunOwner_CloseDeadlineRetainsLeaseUntilWorkerSettlement\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_CloseDeadlineRetainsLeaseUntilWorkerSettlement","Output":"--- PASS: TestVTuneRunOwner_CloseDeadlineRetainsLeaseUntilWorkerSettlement (0.15s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_CloseDeadlineRetainsLeaseUntilWorkerSettlement"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_CloseSharesCancelledBudgetAcrossRunsAndRetainsLease"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_CloseSharesCancelledBudgetAcrossRunsAndRetainsLease","Output":"=== RUN   TestVTuneRunOwner_CloseSharesCancelledBudgetAcrossRunsAndRetainsLease\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_CloseSharesCancelledBudgetAcrossRunsAndRetainsLease","Output":"--- PASS: TestVTuneRunOwner_CloseSharesCancelledBudgetAcrossRunsAndRetainsLease (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_CloseSharesCancelledBudgetAcrossRunsAndRetainsLease"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_UnlockFailureBlocksHandoffUntilRecoveryRetry"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_UnlockFailureBlocksHandoffUntilRecoveryRetry","Output":"=== RUN   TestVTuneRunOwner_UnlockFailureBlocksHandoffUntilRecoveryRetry\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_UnlockFailureBlocksHandoffUntilRecoveryRetry","Output":"--- PASS: TestVTuneRunOwner_UnlockFailureBlocksHandoffUntilRecoveryRetry (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_UnlockFailureBlocksHandoffUntilRecoveryRetry"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_RetainedReceiptRequiresLiveArtifacts"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_RetainedReceiptRequiresLiveArtifacts","Output":"=== RUN   TestVTuneRunOwner_RetainedReceiptRequiresLiveArtifacts\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_RetainedReceiptRequiresLiveArtifacts","Output":"--- PASS: TestVTuneRunOwner_RetainedReceiptRequiresLiveArtifacts (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_RetainedReceiptRequiresLiveArtifacts"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_LoadIgnoresReceiptAsSnapshot"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_LoadIgnoresReceiptAsSnapshot","Output":"=== RUN   TestVTuneRunOwner_LoadIgnoresReceiptAsSnapshot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_LoadIgnoresReceiptAsSnapshot","Output":"--- PASS: TestVTuneRunOwner_LoadIgnoresReceiptAsSnapshot (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_LoadIgnoresReceiptAsSnapshot"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_FailureRemovesUnretainedRawDirectory"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_FailureRemovesUnretainedRawDirectory","Output":"=== RUN   TestVTuneRunOwner_FailureRemovesUnretainedRawDirectory\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_FailureRemovesUnretainedRawDirectory","Output":"--- PASS: TestVTuneRunOwner_FailureRemovesUnretainedRawDirectory (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_FailureRemovesUnretainedRawDirectory"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_NativeStopWaitsThenFallsBackWhenCollectDoesNotSettle"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_NativeStopWaitsThenFallsBackWhenCollectDoesNotSettle","Output":"=== RUN   TestVTuneRunOwner_NativeStopWaitsThenFallsBackWhenCollectDoesNotSettle\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_NativeStopWaitsThenFallsBackWhenCollectDoesNotSettle","Output":"--- PASS: TestVTuneRunOwner_NativeStopWaitsThenFallsBackWhenCollectDoesNotSettle (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_NativeStopWaitsThenFallsBackWhenCollectDoesNotSettle"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_IdempotencyConflictDoesNotStartSecondWorker"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_IdempotencyConflictDoesNotStartSecondWorker","Output":"=== RUN   TestVTuneRunOwner_IdempotencyConflictDoesNotStartSecondWorker\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_IdempotencyConflictDoesNotStartSecondWorker","Output":"--- PASS: TestVTuneRunOwner_IdempotencyConflictDoesNotStartSecondWorker (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_IdempotencyConflictDoesNotStartSecondWorker"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_ReceiptRemovalMakesTerminalResultNonreportable"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_ReceiptRemovalMakesTerminalResultNonreportable","Output":"=== RUN   TestVTuneRunOwner_ReceiptRemovalMakesTerminalResultNonreportable\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_ReceiptRemovalMakesTerminalResultNonreportable","Output":"--- PASS: TestVTuneRunOwner_ReceiptRemovalMakesTerminalResultNonreportable (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_ReceiptRemovalMakesTerminalResultNonreportable"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_RejectsSecondStoreOwner"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_RejectsSecondStoreOwner","Output":"=== RUN   TestVTuneRunOwner_RejectsSecondStoreOwner\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_RejectsSecondStoreOwner","Output":"--- PASS: TestVTuneRunOwner_RejectsSecondStoreOwner (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_RejectsSecondStoreOwner"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_TerminalPersistenceFailureNeverPublishesResult"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_TerminalPersistenceFailureNeverPublishesResult","Output":"=== RUN   TestVTuneRunOwner_TerminalPersistenceFailureNeverPublishesResult\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_TerminalPersistenceFailureNeverPublishesResult","Output":"--- PASS: TestVTuneRunOwner_TerminalPersistenceFailureNeverPublishesResult (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_TerminalPersistenceFailureNeverPublishesResult"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_ReportFailureIsNonReportableAndNonzero"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_ReportFailureIsNonReportableAndNonzero","Output":"=== RUN   TestVTuneRunOwner_ReportFailureIsNonReportableAndNonzero\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_ReportFailureIsNonReportableAndNonzero","Output":"--- PASS: TestVTuneRunOwner_ReportFailureIsNonReportableAndNonzero (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneRunOwner_ReportFailureIsNonReportableAndNonzero"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestRunVTunePhase_ContainedCommandStarts"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestRunVTunePhase_ContainedCommandStarts","Output":"=== RUN   TestRunVTunePhase_ContainedCommandStarts\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestRunVTunePhase_ContainedCommandStarts","Output":"--- PASS: TestRunVTunePhase_ContainedCommandStarts (0.12s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestRunVTunePhase_ContainedCommandStarts"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestBuildCollectArgs"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestBuildCollectArgs","Output":"=== RUN   TestBuildCollectArgs\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestBuildCollectArgs/hotspots-no-args"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestBuildCollectArgs/hotspots-no-args","Output":"=== RUN   TestBuildCollectArgs/hotspots-no-args\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestBuildCollectArgs/hotspots-no-args","Output":"--- PASS: TestBuildCollectArgs/hotspots-no-args (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestBuildCollectArgs/hotspots-no-args"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestBuildCollectArgs/threading-with-args"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestBuildCollectArgs/threading-with-args","Output":"=== RUN   TestBuildCollectArgs/threading-with-args\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestBuildCollectArgs/threading-with-args","Output":"--- PASS: TestBuildCollectArgs/threading-with-args (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestBuildCollectArgs/threading-with-args"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestBuildCollectArgs/memory-access"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestBuildCollectArgs/memory-access","Output":"=== RUN   TestBuildCollectArgs/memory-access\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestBuildCollectArgs/memory-access","Output":"--- PASS: TestBuildCollectArgs/memory-access (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestBuildCollectArgs/memory-access"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestBuildCollectArgs","Output":"--- PASS: TestBuildCollectArgs (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestBuildCollectArgs"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestBuildDurableCollectArgs_DelegatesDurationAndFinalization"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestBuildDurableCollectArgs_DelegatesDurationAndFinalization","Output":"=== RUN   TestBuildDurableCollectArgs_DelegatesDurationAndFinalization\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestBuildDurableCollectArgs_DelegatesDurationAndFinalization","Output":"--- PASS: TestBuildDurableCollectArgs_DelegatesDurationAndFinalization (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestBuildDurableCollectArgs_DelegatesDurationAndFinalization"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestBuildReportArgs"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestBuildReportArgs","Output":"=== RUN   TestBuildReportArgs\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestBuildReportArgs","Output":"--- PASS: TestBuildReportArgs (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestBuildReportArgs"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestKnownAnalysisTypes"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestKnownAnalysisTypes","Output":"=== RUN   TestKnownAnalysisTypes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestKnownAnalysisTypes","Output":"--- PASS: TestKnownAnalysisTypes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestKnownAnalysisTypes"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneEnv_FallsBackToOSEnvWhenNoOneAPI"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneEnv_FallsBackToOSEnvWhenNoOneAPI","Output":"=== RUN   TestVTuneEnv_FallsBackToOSEnvWhenNoOneAPI\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneEnv_FallsBackToOSEnvWhenNoOneAPI","Output":"--- PASS: TestVTuneEnv_FallsBackToOSEnvWhenNoOneAPI (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVTuneEnv_FallsBackToOSEnvWhenNoOneAPI"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestReadReportFile"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestReadReportFile","Output":"=== RUN   TestReadReportFile\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestReadReportFile","Output":"--- PASS: TestReadReportFile (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestReadReportFile"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestReportPathIfPresent"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestReportPathIfPresent","Output":"=== RUN   TestReportPathIfPresent\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestReportPathIfPresent","Output":"--- PASS: TestReportPathIfPresent (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestReportPathIfPresent"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestFormatCommandLine"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestFormatCommandLine","Output":"=== RUN   TestFormatCommandLine\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestFormatCommandLine","Output":"--- PASS: TestFormatCommandLine (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestFormatCommandLine"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestTruncate"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestTruncate","Output":"=== RUN   TestTruncate\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestTruncate","Output":"--- PASS: TestTruncate (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestTruncate"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestDefaultReport_RejectsMissingResultDir"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestDefaultReport_RejectsMissingResultDir","Output":"=== RUN   TestDefaultReport_RejectsMissingResultDir\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestDefaultReport_RejectsMissingResultDir","Output":"--- PASS: TestDefaultReport_RejectsMissingResultDir (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestDefaultReport_RejectsMissingResultDir"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestDefaultReport_RejectsFileAsResultDir"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestDefaultReport_RejectsFileAsResultDir","Output":"=== RUN   TestDefaultReport_RejectsFileAsResultDir\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestDefaultReport_RejectsFileAsResultDir","Output":"--- PASS: TestDefaultReport_RejectsFileAsResultDir (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestDefaultReport_RejectsFileAsResultDir"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestVtuneEnabledRequiresExplicitOptIn"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVtuneEnabledRequiresExplicitOptIn","Output":"=== RUN   TestVtuneEnabledRequiresExplicitOptIn\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestVtuneEnabledRequiresExplicitOptIn","Output":"--- PASS: TestVtuneEnabledRequiresExplicitOptIn (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestVtuneEnabledRequiresExplicitOptIn"}
+{"Action":"run","Package":"mcp-local-hub/internal/vtune","Test":"TestCappedBufferBoundsInFlightStderr"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestCappedBufferBoundsInFlightStderr","Output":"=== RUN   TestCappedBufferBoundsInFlightStderr\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Test":"TestCappedBufferBoundsInFlightStderr","Output":"--- PASS: TestCappedBufferBoundsInFlightStderr (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune","Test":"TestCappedBufferBoundsInFlightStderr"}
+{"Action":"output","Package":"mcp-local-hub/internal/vtune","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vtune"}

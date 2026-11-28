@@ -1,0 +1,287 @@
+[
+  {
+    "relative": "inputs/go-fixtures/canonical/candidate_main_test.go",
+    "before_bytes": 1245,
+    "before_sha256": "339d6a9f775ad3453f2a56dc244a55ea9b2c9ac8253a5f16b93c8b6ab9c7a71e",
+    "after_bytes": 1821,
+    "after_sha256": "1f8d5bf440f0764a39303cb633552279ce76ec824b5d431b41354f7f40c9978c",
+    "edits": [
+      [
+        29,
+        97,
+        "// Exact current main and physical HOLD functions; fixture-only package.\n"
+      ],
+      [
+        141,
+        141,
+        "\t\"runtime\"\n"
+      ],
+      [
+        166,
+        199,
+        ""
+      ],
+      [
+        824,
+        824,
+        "\tgate := flag.String(\"test-only-late-gate\", \"\", \"qualification only: run-return or stdout-reader\")\n"
+      ],
+      [
+        919,
+        970,
+        "\t\tappend([]string(nil), flag.Args()...), *timeout, *gate)\n"
+      ],
+      [
+        1054,
+        1081,
+        "\tif retainedController != nil && retainedController.unknown {\n\t\tretainedController.receiveFailedPhysical(code, err)\n\t}\n\tif retainedController != nil {\n\t\tif err := retainedController.publishTestOnlyLateGate(\"fixture-gate.json\", code); err != nil {\n\t\t\tholdFailedPhysical(err)\n\t\t}\n\t}\n"
+      ],
+      [
+        1099,
+        1207,
+        "func holdFailedPhysical(cause any) {\n\tfmt.Fprintln(os.Stderr, \"original failed physical receiving remains HOLD:\", cause)\n"
+      ],
+      [
+        1240,
+        1240,
+        "\t\t// Retain the actual failure, including a possible FileCustodyError, and\n\t\t// every original controller resource. The timer avoids a Go deadlock exit.\n\t\truntime.KeepAlive(cause)\n\t\truntime.KeepAlive(retainedController)\n"
+      ]
+    ]
+  },
+  {
+    "relative": "inputs/go-fixtures/canonical/fixture_test.go",
+    "before_bytes": 2607,
+    "before_sha256": "d1e46f773bb7f526f34aa66e3476e23e4fca01a929048174aaaf406d8f4e00ea",
+    "after_bytes": 3354,
+    "after_sha256": "6de7f5df2c8dee483ef71d354430c4a477e914ce6feedc7f410a214f54568002",
+    "edits": [
+      [
+        763,
+        892,
+        "func run(binary, expected, source, root, planPath, planSHA, profile string, args []string, timeout time.Duration, gateMode string) (int, error) {\n"
+      ],
+      [
+        1069,
+        1148,
+        "\t\tprofile != \"full\" || timeout != 5*time.Minute || gateMode != \"\" || !requireLiteralArgs(args) {\n"
+      ],
+      [
+        1706,
+        1706,
+        "// Inert seams for the current main call surface. These do not execute the\n// production physical receiver, open a path, or create any native resource.\nfunc (s *session) receiveFailedPhysical(code int, cause error) {\n\tif s != retainedController || !s.unknown || currentCase != \"canonical-unknown\" || code != 1 || cause == nil {\n\t\tpanic(\"current main did not preserve the inert UNKNOWN call binding\")\n\t}\n\tholdFailedPhysical(cause)\n}\n\nfunc (s *session) publishTestOnlyLateGate(name string, code int) error {\n\tif s != retainedController || s.unknown || currentCase != \"canonical-clear\" || name != \"fixture-gate.json\" || code != 0 {\n\t\tpanic(\"current main did not preserve the inert clear call binding\")\n\t}\n\treturn nil\n}\n\n"
+      ],
+      [
+        2280,
+        2321,
+        "\tobserveHold(t, holdFailedPhysical)\n"
+      ],
+      [
+        2356,
+        2607,
+        "const sourceSHA = \"5e0768342e22728205ee2e6f7ab052d005bb278377c985240579ec499212e53c\"\nconst mainSHA = \"e1d5cc268beab9ab84749bf8a2d6948d1dcf5f59ecd7f1658d450ea7ebcfd305\"\nconst holdSHA = \"8171b66405d80785d4c5f11ce58d29265a6c2902e0d4fbd55e01a79c1aa8262d\"\n"
+      ]
+    ]
+  },
+  {
+    "relative": "inputs/go-fixtures/canonical/support_test.go",
+    "before_bytes": 5624,
+    "before_sha256": "9646201207b97f421059f47d8b5a9f4830ab398bb77a24ca663c48e0a6bbd82a",
+    "after_bytes": 5621,
+    "after_sha256": "d1924b4f43d67359d347bc4a20eeef458ca1e1e68304c7677e9f4b0b424d6fde",
+    "edits": [
+      [
+        3757,
+        3803,
+        "func observeHold(t *testing.T, hold any) {\n"
+      ]
+    ]
+  },
+  {
+    "relative": "inputs/go-fixtures/contained/candidate_main_test.go",
+    "before_bytes": 2810,
+    "before_sha256": "9e75b7560a8208c4e151fe789413ae48c52b380047520cc24bf17d829799daa1",
+    "after_bytes": 2810,
+    "after_sha256": "9e75b7560a8208c4e151fe789413ae48c52b380047520cc24bf17d829799daa1",
+    "edits": []
+  },
+  {
+    "relative": "inputs/go-fixtures/contained/fixture_test.go",
+    "before_bytes": 2553,
+    "before_sha256": "03a68d19f29070de2102032f991767277cf9b40efc64236e6a80f3ffe4ee8c44",
+    "after_bytes": 2553,
+    "after_sha256": "03a68d19f29070de2102032f991767277cf9b40efc64236e6a80f3ffe4ee8c44",
+    "edits": []
+  },
+  {
+    "relative": "inputs/go-fixtures/contained/support_test.go",
+    "before_bytes": 5624,
+    "before_sha256": "9646201207b97f421059f47d8b5a9f4830ab398bb77a24ca663c48e0a6bbd82a",
+    "after_bytes": 5624,
+    "after_sha256": "9646201207b97f421059f47d8b5a9f4830ab398bb77a24ca663c48e0a6bbd82a",
+    "edits": []
+  },
+  {
+    "relative": "inputs/go-fixtures/go.mod",
+    "before_bytes": 53,
+    "before_sha256": "ba5f34f69597f132a96d09e811c23706c666e7220ddc4b0c4f1072775ec8acf4",
+    "after_bytes": 53,
+    "after_sha256": "ba5f34f69597f132a96d09e811c23706c666e7220ddc4b0c4f1072775ec8acf4",
+    "edits": []
+  },
+  {
+    "relative": "inputs/go-fixtures/issuer-local/go-qualification-plan.json",
+    "before_bytes": 5527,
+    "before_sha256": "3fabbfccd59230c27ae960bfa0f3edfb441bff0f03dca55079c03122ed37656c",
+    "after_bytes": 5588,
+    "after_sha256": "44d273487806e44c91c9a1bf11aa6449956377b77792119e73c959edd7571e70",
+    "edits": [
+      [
+        81,
+        417,
+        "  \"native_execution\": \"ROOT_REVIEWED_NOT_RUN\",\n  \"run\": \"{TASK_ROOT}\\\\functional-route-20261126\\\\b-go-main-hold-current5e-v1\\\\run-go\",\n  \"binary_root\": \"{TASK_ROOT}\\\\functional-route-20261126\\\\b-go-main-hold-current5e-v1\\\\inputs\\\\bin\",\n  \"approved_fixture_manifest_sha256\": \"079e7c6f035c9708115d46b11e0f16de77a232c39df36c08823dfc531cb18a3b\",\n"
+      ],
+      [
+        535,
+        676,
+        "  \"scope\": \"two standard-library-only Windows/amd64 fixture builds and five exact current main/HOLD branch cases with inert synthetic run/method outcomes\",\n"
+      ],
+      [
+        838,
+        1068,
+        "      \"path\": \"{TASK_ROOT}\\\\functional-route-20261126\\\\b-go-main-hold-current5e-v1\\\\inputs\\\\go-fixtures\\\\issuer-local\\\\run_go_branch_qualification.py\",\n      \"sha256\": \"a6ed2a68a4fa03ac44f355cd47f0ef696d7b8d108389b2787214bc0081b372df\"\n"
+      ],
+      [
+        1101,
+        1300,
+        "      \"path\": \"{TASK_ROOT}\\\\functional-route-20261126\\\\b-go-main-hold-current5e-v1\\\\inputs\\\\go-fixtures\\\\manifest.json\",\n      \"sha256\": \"079e7c6f035c9708115d46b11e0f16de77a232c39df36c08823dfc531cb18a3b\"\n"
+      ],
+      [
+        4641,
+        4741,
+        "  \"cache_and_temp_scope\": \"{TASK_ROOT}\\\\functional-route-20261126\\\\b-go-main-hold-current5e-v1\\\\run-go\",\n"
+      ]
+    ]
+  },
+  {
+    "relative": "inputs/go-fixtures/issuer-local/launch_go_branch_qualification.py",
+    "before_bytes": 10906,
+    "before_sha256": "5343f04104b8f3d6533e6cbe3db4e6c7e4d6f5329bd0775bd4d8edf0e153ca8a",
+    "after_bytes": 10915,
+    "after_sha256": "262e618e366b24101a3ec56f6028ae44a4558994a8c108db1fe0c183926f81b3",
+    "edits": [
+      [
+        270,
+        348,
+        "NATIVE = Path(r\"{TASK_ROOT}\\functional-route-20261126\\b-go-main-hold-current5e-v1\")\n"
+      ],
+      [
+        993,
+        1151,
+        "RUNNER_SHA = \"a6ed2a68a4fa03ac44f355cd47f0ef696d7b8d108389b2787214bc0081b372df\"\nPLAN_SHA = \"44d273487806e44c91c9a1bf11aa6449956377b77792119e73c959edd7571e70\"\n"
+      ]
+    ]
+  },
+  {
+    "relative": "inputs/go-fixtures/issuer-local/run_go_branch_qualification.py",
+    "before_bytes": 21636,
+    "before_sha256": "414dec579e9154c4c6f67cb870c36a5784ba8c23b31fe4ed8f93300b9720a850",
+    "after_bytes": 21645,
+    "after_sha256": "a6ed2a68a4fa03ac44f355cd47f0ef696d7b8d108389b2787214bc0081b372df",
+    "edits": [
+      [
+        352,
+        430,
+        "NATIVE = Path(r\"{TASK_ROOT}\\functional-route-20261126\\b-go-main-hold-current5e-v1\")\n"
+      ],
+      [
+        737,
+        819,
+        "MANIFEST_SHA = \"079e7c6f035c9708115d46b11e0f16de77a232c39df36c08823dfc531cb18a3b\"\n"
+      ]
+    ]
+  },
+  {
+    "relative": "inputs/go-fixtures/manifest.json",
+    "before_bytes": 13163,
+    "before_sha256": "77ab1fac563e733f86e5e9d4f80a399270d43aaafcf645e07e7a7f18c6bd9fc3",
+    "after_bytes": 13691,
+    "after_sha256": "079e7c6f035c9708115d46b11e0f16de77a232c39df36c08823dfc531cb18a3b",
+    "edits": [
+      [
+        140,
+        458,
+        "  \"scope\": \"exact current main and HOLD control flow with inert synthetic run/method outcomes; no native owner recovery\",\n  \"remote_fixture_root\": \"{TASK_ROOT}\\\\functional-route-20261126\\\\b-go-main-hold-current5e-v1\\\\inputs\\\\go-fixtures\",\n  \"remote_binary_root\": \"{TASK_ROOT}\\\\functional-route-20261126\\\\b-go-main-hold-current5e-v1\\\\inputs\\\\bin\",\n"
+      ],
+      [
+        1964,
+        2068,
+        "      \"sha256\": \"1f8d5bf440f0764a39303cb633552279ce76ec824b5d431b41354f7f40c9978c\",\n      \"bytes\": 1821\n"
+      ],
+      [
+        2110,
+        2214,
+        "      \"sha256\": \"6de7f5df2c8dee483ef71d354430c4a477e914ce6feedc7f410a214f54568002\",\n      \"bytes\": 3354\n"
+      ],
+      [
+        2256,
+        2360,
+        "      \"sha256\": \"d1924b4f43d67359d347bc4a20eeef458ca1e1e68304c7677e9f4b0b424d6fde\",\n      \"bytes\": 5621\n"
+      ],
+      [
+        3088,
+        3296,
+        "        \"path\": \"{DONOR_WORKSPACE}/b-full-route-successor-candidate-v1/candidate/canonical-source/controller/main_windows.go\",\n        \"sha256\": \"5e0768342e22728205ee2e6f7ab052d005bb278377c985240579ec499212e53c\"\n"
+      ],
+      [
+        3346,
+        3560,
+        "          \"function_sha256\": \"e1d5cc268beab9ab84749bf8a2d6948d1dcf5f59ecd7f1658d450ea7ebcfd305\",\n          \"body_sha256\": \"45b383ac4eea12c34a3b13d3fdf1627a7798c9a453ed73ebf18c72f58a0c288c\",\n          \"bytes\": 1273,\n"
+      ],
+      [
+        3610,
+        3861,
+        "        \"holdFailedPhysical\": {\n          \"function_sha256\": \"8171b66405d80785d4c5f11ce58d29265a6c2902e0d4fbd55e01a79c1aa8262d\",\n          \"body_sha256\": \"2257732a8960f75d361ac971999a4d048691ffeca0ee8d587ff89a71101e411e\",\n          \"bytes\": 379,\n"
+      ],
+      [
+        4078,
+        4192,
+        "        \"{TASK_ROOT}\\\\functional-route-20261126\\\\b-go-main-hold-current5e-v1\\\\inputs\\\\bin\\\\canonical-main-branch.exe\",\n"
+      ],
+      [
+        4223,
+        4329,
+        "      \"build_cwd\": \"{TASK_ROOT}\\\\functional-route-20261126\\\\b-go-main-hold-current5e-v1\\\\inputs\\\\go-fixtures\",\n"
+      ],
+      [
+        4924,
+        5221,
+        "            \"candidate_source_sha256\": \"5e0768342e22728205ee2e6f7ab052d005bb278377c985240579ec499212e53c\",\n            \"main_sha256\": \"e1d5cc268beab9ab84749bf8a2d6948d1dcf5f59ecd7f1658d450ea7ebcfd305\",\n            \"hold_sha256\": \"8171b66405d80785d4c5f11ce58d29265a6c2902e0d4fbd55e01a79c1aa8262d\",\n"
+      ],
+      [
+        6281,
+        6578,
+        "            \"candidate_source_sha256\": \"5e0768342e22728205ee2e6f7ab052d005bb278377c985240579ec499212e53c\",\n            \"main_sha256\": \"e1d5cc268beab9ab84749bf8a2d6948d1dcf5f59ecd7f1658d450ea7ebcfd305\",\n            \"hold_sha256\": \"8171b66405d80785d4c5f11ce58d29265a6c2902e0d4fbd55e01a79c1aa8262d\",\n"
+      ],
+      [
+        7083,
+        7091,
+        "      ],\n      \"candidate_hold_source\": {\n        \"path\": \"{DONOR_WORKSPACE}/b-full-route-successor-candidate-v1/candidate/canonical-source/controller/physical_windows.go\",\n        \"sha256\": \"2b36397be3d45ebf0bb378eb89ba8a8086ff8d17b4c76d58b474f78fb5d63429\"\n      }\n"
+      ],
+      [
+        8520,
+        8634,
+        "        \"{TASK_ROOT}\\\\functional-route-20261126\\\\b-go-main-hold-current5e-v1\\\\inputs\\\\bin\\\\contained-main-branch.exe\",\n"
+      ],
+      [
+        8665,
+        8771,
+        "      \"build_cwd\": \"{TASK_ROOT}\\\\functional-route-20261126\\\\b-go-main-hold-current5e-v1\\\\inputs\\\\go-fixtures\",\n"
+      ],
+      [
+        13126,
+        13161,
+        "  \"explicit_time_shim_used\": false,\n  \"synthetic_current_methods\": [\n    \"session.receiveFailedPhysical\",\n    \"session.publishTestOnlyLateGate\"\n  ],\n  \"production_physical_receiver_executed\": false\n"
+      ]
+    ]
+  }
+]

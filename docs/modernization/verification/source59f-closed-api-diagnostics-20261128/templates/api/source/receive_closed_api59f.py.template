@@ -1,0 +1,479 @@
+"""Receive only the original CLOSED default API subtree as DATA.
+No runtime imports, processes, native waits, replay, cleanup, Source or cache reads.
+Whole-run and CLI closure remain unreceived regardless of this subtree result.
+"""
+import sys
+sys.dont_write_bytecode=True
+import argparse,collections,hashlib,json,os,re,stat
+from pathlib import Path
+TASK=Path(r"@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1")
+TOP=TASK/"inputs-successor33-v1"
+RUNTIME=TOP/"runtime-prepared-v1"
+RUNS=Path(r"@@RECOVERY_APPROVED_WORK_AREA@@\r7")
+RUN=RUNS/"full59f"
+CASE=RUNS/"x149e4a76727c"
+SOURCE=Path(r"@@RECOVERY_APPROVED_WORK_AREA@@\pub666-recovered-20261128")
+API="mcp-local-hub/internal/api"
+PHASE="default"
+COMMIT="59f618ebfbf6d9f52c6994d68586e3c2ebc202a8"
+TREE="03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1"
+MANIFEST_SHA="bb532e4fec38ea60cad8a105ed2fad7495ee76440f9546a5100802f604fd0f7d"
+CONFIG_SHA="53c5e8d351c70a184a851b7da4170e0bafdccfdedc262fe931030ffaf83f65d2"
+KEY=hashlib.sha256(API.encode()).hexdigest()
+REGISTRY=RUN/"invocations-default"
+ACK_SCHEMA="literal-original-owner-replay-v1"
+TERMINAL=("pass","fail","skip")
+NAME=re.compile(r"^(Test|Example|Fuzz|Benchmark)\w*$")
+API_STDERR=(
+    "TestRotateSupervisorStderrSinkIfOversize_AtBoundary",
+    "TestRotateSupervisorStderrSinkIfOversize_ReplacesExistingBackup",
+    "TestSupervisorStderrSinkOversize_MatchesRotationThreshold")
+MANDATORY=(
+    "TestSecretsInit_RecoveryNamespaceBoundary",
+    "TestSecretsInit_RecoveryNamespaceRetainedDirectory",
+    "TestSecretsInit_RecoveryNamespaceFailurePaths",
+    "TestSupervisorPeerStrictControlConnections",*API_STDERR)
+CONTROL_PINS={}
+CAPTURES={}
+COMMANDS=[]
+PAYLOAD_ROOTS=[CASE]
+def need(ok,message):
+    if not ok:raise RuntimeError(message)
+def ordinary(path,directory=False):
+    path=Path(path)
+    need(path.is_absolute() and ".." not in path.parts,"absolute clean path required")
+    for item in (*reversed(path.parents),path):
+        st=item.lstat()
+        need(not stat.S_ISLNK(st.st_mode) and not getattr(st,"st_file_attributes",0)&0x400,"reparse path refused")
+    need(path.is_dir() if directory else path.is_file(),"ordinary path kind differs")
+    return path
+def digest(path):
+    with ordinary(path).open("rb") as stream:return hashlib.file_digest(stream,"sha256").hexdigest()
+def unique(pairs):
+    result={}
+    for key,value in pairs:
+        need(key not in result,"duplicate JSON field")
+        result[key]=value
+    return result
+def control(path,expected=None,limit=32<<20):
+    path=ordinary(path)
+    with path.open("rb") as stream:raw=stream.read(limit+1)
+    need(len(raw)<=limit,"original control exceeds its existing bound")
+    actual=hashlib.sha256(raw).hexdigest()
+    need(expected is None or actual==expected,"original control hash differs: "+str(path))
+    need(str(path) not in CONTROL_PINS or CONTROL_PINS[str(path)]==actual,"original control changed during receiving")
+    CONTROL_PINS[str(path)]=actual
+    return json.loads(raw.decode("utf-8-sig"),object_pairs_hook=unique)
+def queue_capture(path,sha):
+    path=Path(path)
+    need(any(path.is_relative_to(root) for root in PAYLOAD_ROOTS)
+         and re.fullmatch("[0-9a-f]{64}",sha or "") is not None,"capture escaped the exact API subtree")
+    need(str(path) not in CAPTURES or CAPTURES[str(path)]==sha,"conflicting original API capture pins")
+    CAPTURES[str(path)]=sha
+def native_closed(n):
+    need(isinstance(n,dict) and all(n.get(k) is True for k in
+         ("RootWaitKnown","MembersExited","AccountingKnown","HandlesClosed"))
+         and type(n.get("FinalActive")) is int and n["FinalActive"]==0 and not n.get("Error"),
+         "original native settlement incomplete")
+def native_io_closed(io):
+    need(isinstance(io,dict),"original IO receipt missing")
+    for key in ("Stdin","StdoutRead","StdoutWrite","StderrRead","StderrWrite"):
+        row=io.get(key,{})
+        need(type(row.get("Acquired")) is bool and (not row["Acquired"] or
+             row.get("CloseAttempted") is True and row.get("Closed") is True and not row.get("CloseError")),
+             "original pipe close incomplete: "+key)
+    for key in ("Stdout","Stderr"):
+        row=io.get(key,{})
+        need(all(row.get(k) is True for k in ("WorkerStarted","WorkerComplete","EOF"))
+             and not row.get("LimitExceeded") and not row.get("Error"),"original reader incomplete: "+key)
+def command_closed(row):
+    need(row.get("quiescence_state")=="complete" and row.get("captures_measured") is True
+         and type(row.get("exit_code")) is int,"API command original completion is unreceived")
+    for side in ("stdout","stderr"):
+        need(Path(row[side]).parent==CASE,"API command capture escaped its original owner")
+        queue_capture(row[side],row.get(side+"_sha256"))
+    if row.get("native"):
+        n=row["native"]
+        need(all(n.get(k) is True for k in ("direct_reaped","active_zero","handles_closed"))
+             and not n.get("issues") and row.get("original_readers_joined") is True,"ordinary original owner incomplete")
+        for side in ("stdout","stderr"):
+            io=row.get("io",{}).get(side,{})
+            need(all(io.get(k) is True for k in ("worker_complete","eof","pipe_close_returned","capture_close_returned"))
+                 and not io.get("error"),"ordinary original reader close incomplete")
+    else:
+        need(isinstance(row.get("completion_receiving"),dict) and row["completion_receiving"]
+             and type(row.get("original_pid")) is int and row["original_pid"]>0
+             and "wait_returned" in row.get("phases_elapsed_seconds",{})
+             and Path(row["stdout"]).name in ("inventory-owner.stdout.txt","suite-owner.stdout.txt"),
+             "unreceived or unreviewed external API owner")
+    COMMANDS.append(row)
+# Pure functions copied unchanged from the reviewed full59f receiver v2.
+def flags_are_literal(args):
+    if len(args) != 4 or args.count("-test.paniconexit0") != 1:
+        return False
+    values = {}
+    for arg in args:
+        key, sep, value = arg.partition("=")
+        if key in values:
+            return False
+        values[key] = value
+    return (set(values)=={"-test.paniconexit0","-test.v","-test.count","-test.timeout"}
+            and values["-test.v"]=="test2json" and values["-test.count"]=="1"
+            and values["-test.timeout"] in ("5m","5m0s"))
+
+def native_settled(kind, proof):
+    if kind == "job":
+        return (proof.get("originalWaitKnown") is True and proof.get("settlementComplete") is True
+                and proof.get("streamsJoined") is True and proof.get("controlWriterJoined") is True
+                and proof.get("stdoutEOF") is True and proof.get("stderrEOF") is True
+                and proof.get("custodyRetained",False) is False)
+    return (kind in ("namespace", "contained")
+            and proof.get("root_wait_known") is True and proof.get("settlement_complete") is True
+            and proof.get("custody_retained") is False
+            and (kind!="namespace" or (proof.get("native_complete") is True and proof.get("io_complete") is True)))
+
+def validate_namespace_terminal(proof, binding):
+    """Classify original terminal data; this function owns no process or files."""
+    keys = {"request_sha256", "request_nonce", "binary", "expected_sha256", "source_dir",
+            "parent", "args", "controller_argv", "test_state_path_env"}
+    if (not isinstance(proof, dict) or not isinstance(binding, dict) or set(binding) != keys
+            or any(not isinstance(binding.get(key), str) or not binding[key]
+                   for key in ("request_sha256", "request_nonce", "binary", "expected_sha256", "source_dir", "parent"))
+            or not re.fullmatch("[0-9a-f]{64}", binding.get("request_sha256", ""))
+            or not re.fullmatch("[0-9a-f]{32}", binding.get("request_nonce", ""))
+            or not re.fullmatch("[0-9a-f]{64}", binding.get("expected_sha256", ""))
+            or type(binding.get("test_state_path_env")) is not bool
+            or not isinstance(binding.get("args"), list)
+            or any(not isinstance(value, str) for value in binding["args"])
+            or not flags_are_literal(binding["args"])
+            or not isinstance(binding.get("controller_argv"), list) or not binding["controller_argv"]
+            or any(not isinstance(value, str) or not value for value in binding["controller_argv"])):
+        raise RuntimeError("namespace terminal request binding is incomplete")
+    if proof.get("schema") == "api-namespace-prechild-refusal-v1":
+        if (set(proof) != {"schema", "binding", "contained_stage_entered", "failure"}
+                or not isinstance(proof.get("binding"), dict)
+                or proof.get("binding") != binding
+                or type(proof["binding"].get("test_state_path_env")) is not bool
+                or proof.get("contained_stage_entered") is not False
+                or not isinstance(proof.get("failure"), str) or not proof["failure"]):
+            raise RuntimeError("namespace pre-child refusal differs from the original request")
+        return "prechild-refusal"
+    if (proof.get("schema") != "api-namespace-full-suite-v2"
+            or proof.get("mode") != "incoming-go-image-copy"
+            or proof.get("binary") != binding["binary"]
+            or proof.get("expected_sha256") != binding["expected_sha256"]
+            or proof.get("binary_sha256") != binding["expected_sha256"]
+            or proof.get("evidence_root") != str(Path(binding["parent"])/"r")
+            or proof.get("execution_binary") != str(Path(binding["parent"])/"r"/"bin"/"api.test.exe")
+            or proof.get("execution_sha256") != binding["expected_sha256"]
+            or proof.get("source_dir") != binding["source_dir"] or proof.get("args") != binding["args"]
+            or proof.get("compiled_tags") != (["test_state_path_env"] if binding["test_state_path_env"] else [])
+            or not native_settled("namespace", proof)):
+        raise RuntimeError("original namespace native/IO settlement remains unverified")
+    return "suite"
+
+def validate_replay_ack(request, response, response_sha256, ack):
+    expected = {"schema": ACK_SCHEMA, "request_nonce": request["nonce"],
+                "request_sha256": response["request_sha256"], "response_sha256": response_sha256,
+                "run": response["run"], "receipt_sha256": response["receipt_sha256"],
+                "exit_code": response["exit_code"], "streams": response["replay"],
+                "replayed_identical": True}
+    finished = ack.get("finished_monotonic_ns")
+    if (set(ack) != set(expected) | {"finished_monotonic_ns"}
+            or any(ack[key] != value for key, value in expected.items())
+            or type(finished) is not int
+            or not request["started_ns"] <= finished <= response["replay_deadline_monotonic_ns"]):
+        raise RuntimeError("original raw replay acknowledgment is missing, late or unbound")
+
+def event_ledger(lane, expected, rows, exit_code, mandatory=()):
+    selected = {(p,t) for p,names in expected.items() for t in names}
+    outcomes,started,package_ends = {},collections.Counter(),{}
+    package_terminal_counts = collections.Counter()
+    duplicates = []
+    for event in rows:
+        package,test,action = event.get("Package"),event.get("Test"),event.get("Action")
+        if test:
+            key = (package,test)
+            if action == "run":
+                started[key] += 1
+            if action in TERMINAL:
+                if key in outcomes:
+                    duplicates.append(key)
+                outcomes[key] = action
+        elif action in TERMINAL:
+            package_terminal_counts[package] += 1
+            package_ends[package] = action
+    top = {key:action for key,action in outcomes.items() if "/" not in key[1]}
+    missing = sorted(selected-set(top))
+    unexpected = sorted(set(top)-selected)
+    unsettled = sorted(set(started)-set(outcomes))
+    terminal_without_start = sorted(set(outcomes)-set(started))
+    duplicate_start = sorted(key for key,count in started.items() if count!=1)
+    duplicate_package_terminal = sorted(p for p,n in package_terminal_counts.items() if n!=1)
+    missing_packages = sorted(set(expected)-set(package_ends))
+    unexpected_packages = sorted(set(package_ends)-set(expected))
+    unexpected_roots = sorted(key for key in outcomes if (key[0],key[1].split("/",1)[0]) not in selected)
+    required_passes = all(outcomes.get(key) == "pass" for key in mandatory)
+    passed = (exit_code == 0 and not missing and not unexpected and not duplicates and not unsettled
+              and not missing_packages and not unexpected_packages and not unexpected_roots and not duplicate_package_terminal
+              and not terminal_without_start and not duplicate_start and required_passes and "fail" not in outcomes.values()
+              and "fail" not in package_ends.values())
+    result = {"lane":lane,"expected":expected,"exit_code":exit_code,"passed":passed,
+              "top_level":[{"package":p,"test":t,"outcome":top.get((p,t),"NOT_RUN")} for p,t in sorted(selected)],
+              "all_terminal":[{"package":p,"test":t,"outcome":action} for (p,t),action in sorted(outcomes.items())],
+              "started_without_terminal":unsettled,"missing_top_level":missing,"unexpected_top_level":unexpected,
+              "duplicate_terminal":duplicates,"duplicate_start":duplicate_start,"terminal_without_start":terminal_without_start,
+              "missing_package_terminal":missing_packages,"unexpected_package_terminal":unexpected_packages,"unexpected_test_roots":unexpected_roots,
+              "package_terminal":package_ends,"package_terminal_counts":dict(package_terminal_counts),
+              "duplicate_package_terminal":duplicate_package_terminal,"mandatory_passes":[list(x) for x in mandatory],
+              "mandatory_passes_satisfied":required_passes}
+    return result
+
+
+
+def receive_physical(receipt_sha):
+    manifest=control(RUNTIME/"runtime-manifest.json",MANIFEST_SHA)
+    cfg=control(RUNTIME/"runtime-inputs.json",CONFIG_SHA)
+    need(manifest["configuration"]=={"path":str(RUNTIME/"runtime-inputs.json"),"sha256":CONFIG_SHA}
+         and cfg["source_commit"]==COMMIT and cfg["source_tree"]==TREE
+         and cfg["source_dir"]==str(SOURCE) and cfg["runs_root"]==str(RUNS) and cfg["run_name"]=="full59f"
+         and cfg["acceptance"]["api_stderr_roots"]==list(API_STDERR),"immutable API run configuration differs")
+    r=control(CASE/"receipt.json",receipt_sha)
+    need(r.get("schema")=="literal-go-exec-invocation-v1" and r.get("phase")==PHASE and r.get("package")==API
+         and r.get("status") in ("PASS","FAIL") and type(r.get("adapter_exit_code")) is int
+         and r.get("native_custody_settled") is True and r.get("commands_quiescent") is True
+         and r.get("command_quiescence",{}).get("complete") is True
+         and r.get("custody_owner")=="original root issuer"
+         and r.get("test_source_commit")==COMMIT and r.get("product_source_commit")==COMMIT
+         and r.get("original_cwd")==str(SOURCE/"internal/api") and flags_are_literal(r.get("original_argv",[])),
+         "original API invocation is not physically closed or belongs to a different request")
+    plan_path=RUN/"plan-default.json"
+    need(r["plan"]==str(plan_path),"API original plan path differs")
+    plan=control(plan_path,r["plan_sha256"])
+    need(plan.get("schema")=="literal-go-test-plan-v1" and plan.get("phase")==PHASE and plan.get("commit")==COMMIT
+         and plan.get("driver_root")==str(RUN) and plan.get("invocations")==str(REGISTRY)
+         and plan.get("test_source_commit")==plan.get("product_source_commit")==COMMIT
+         and plan["packages"][API]["directory"]==r["original_cwd"]
+         and plan["original_issuer"]["requests"]==str(REGISTRY/"requests")
+         and plan.get("source_snapshot")==str(RUN/"source-before.json")
+         and r["input_files"].get(plan["source_snapshot"])==plan["source_snapshot_sha256"]
+         and all(r["input_files"].get(p)==sha for p,sha in plan["input_files"].items()),
+         "original API plan/source/issuer binding differs")
+    for role in ("namespace","contained","test2json"):
+        need(plan["tools"][role]==cfg["controllers"][role]["path"]
+             and plan["input_files"].get(cfg["controllers"][role]["path"])==cfg["controllers"][role]["sha256"],
+             "original API helper role differs: "+role)
+    start=control(REGISTRY/(KEY+".started.json"))
+    end=control(REGISTRY/(KEY+".completed.json"))
+    need(start["run"]==end["run"]==str(CASE) and start["package"]==end["package"]==API
+         and end["receipt_sha256"]==receipt_sha and end["exit_code"]==r["adapter_exit_code"]
+         and end["native_custody_settled"] is True and end["commands_quiescent"] is True
+         and start["request_sha256"]==end["request_sha256"]==r["request_sha256"]
+         and start["request_nonce"]==end["request_nonce"]==r["request_nonce"]
+         and start["input"]==r["incoming"] and start["input_sha256"]==r["incoming_sha256"]
+         and start["args"]==r["original_argv"] and start["cwd"]==r["original_cwd"],
+         "API original start/completion identity differs")
+    channel=REGISTRY/"requests"
+    request=control(channel/(KEY+".request.json"),r["request_sha256"],8<<20)
+    response_path=channel/(KEY+".response.json")
+    response=control(response_path,limit=8<<20)
+    ack=control(channel/(KEY+".replayed.json"),limit=8<<20)
+    need(request["schema"]=="literal-original-owner-request-v1" and request["issuer_nonce"]==plan["original_issuer"]["nonce"]
+         and request["nonce"]==r["request_nonce"] and request["phase"]==PHASE and request["package"]==API
+         and request["commit"]==COMMIT and request["plan"]==str(plan_path) and request["plan_sha256"]==r["plan_sha256"]
+         and request["source_snapshot_sha256"]==plan["source_snapshot_sha256"]
+         and request["binary"]==r["incoming"] and request["binary_sha256"]==r["incoming_sha256"]
+         and request["argv"]==r["original_argv"] and request["cwd"]==r["original_cwd"]
+         and Path(request["binary"]).is_relative_to(Path(plan["temporary_directory"]))
+         and type(request["started_ns"]) is int and type(request["deadline_ns"]) is int
+         and request["started_ns"]>=plan["original_issuer"]["started_monotonic_ns"]
+         and request["deadline_ns"]==request["started_ns"]+355_000_000_000,
+         "historical original API consumer identity/deadline differs")
+    need(response["schema"]=="literal-original-owner-response-v1" and response["request_sha256"]==r["request_sha256"]
+         and response["request_nonce"]==r["request_nonce"] and response["issuer_nonce"]==request["issuer_nonce"]
+         and response["package"]==API and response["phase"]==PHASE and response["plan_sha256"]==r["plan_sha256"]
+         and response["run"]==str(CASE) and response["receipt_sha256"]==receipt_sha
+         and response["exit_code"]==r["adapter_exit_code"] and response["status"]==r["status"]
+         and response["original_custody_complete"] is True and response["qualification_deadlines_extended"] is False
+         and response["replay"]==r.get("raw_replay") and type(response["replay_deadline_monotonic_ns"]) is int
+         and response["replay_deadline_monotonic_ns"]<=request["deadline_ns"],"original API response differs")
+    validate_replay_ack(request,response,CONTROL_PINS[str(response_path)],ack)
+    need(isinstance(r["commands"],list) and r["commands"],"API original command inventory absent")
+    for row in r["commands"]:command_closed(row)
+    need(len({c["stdout"] for c in COMMANDS})==len(COMMANDS),"duplicate original API command capture")
+    binary,sha,cwd=r["executed_binary"],r["executed_sha256"],r["original_cwd"]
+    need(sha==r["incoming_sha256"] and binary==r["incoming"],"API must execute the same incoming image")
+    originals={}
+    for label,key in (("inventory-owner","inventory_owner"),("suite-owner","owner")):
+        rows=[c for c in COMMANDS if Path(c["stdout"]).name==label+".stdout.txt"]
+        need(len(rows)==1,"expected exactly one API "+label)
+        row=rows[0];record=r[key]
+        path=Path(record["receipt"])
+        if label=="inventory-owner":
+            need(path==CASE/"inventory/result.json","API inventory control path escaped its owner")
+        else:
+            parent=Path(r["namespace_private_scope"]["parent"])
+            need(path==parent/"namespace-suite-receipt.json" and parent.name=="n"
+                 and parent.parent.parent==RUNS and re.fullmatch("n[0-9a-f]{12}",parent.parent.name)
+                 and r["namespace_private_scope"]["path"]==str(parent.parent),"API namespace control path escaped its owner")
+        proof=control(path,record["sha256"],16<<20)
+        need(proof==record["proof"]==row["completion_receiving"],"original API owner proof differs")
+        if label=="inventory-owner":
+            need(record["kind"]=="contained" and path==CASE/"inventory/result.json"
+                 and proof.get("schema")=="literal-contained-test-run-v1" and proof.get("inventory") is True
+                 and proof.get("binary")==binary and proof.get("binary_sha256")==sha
+                 and proof.get("source_dir")==cwd and proof.get("args")==["-test.list=."]
+                 and proof.get("root_wait_known") is True and proof.get("settlement_complete") is True
+                 and proof.get("custody_retained") is False and row["exit_code"]==0
+                 and row["argv"]==[cfg["controllers"]["contained"]["path"],"--test-binary",binary,"--expected-sha256",sha,
+                    "--source-dir",cwd,"--run-root",str(CASE/"inventory"),"--inventory","--timeout","90s","--","-test.list=."],
+                 "same-image original API inventory owner differs or is unclosed")
+            native_closed(proof["native"]);native_io_closed(proof["io"])
+        else:
+            parent=Path(r["namespace_private_scope"]["parent"])
+            need(record["kind"]=="namespace" and path==parent/"namespace-suite-receipt.json"
+                 and parent.name=="n" and parent.parent.parent==RUNS
+                 and re.fullmatch("n[0-9a-f]{12}",parent.parent.name)
+                 and r["namespace_private_scope"]["path"]==str(parent.parent),"API namespace scope differs")
+            binding={"request_sha256":r["request_sha256"],"request_nonce":r["request_nonce"],
+                     "binary":binary,"expected_sha256":sha,"source_dir":cwd,"parent":str(parent),
+                     "args":r["original_argv"],"controller_argv":row["argv"],"test_state_path_env":False}
+            argv=[cfg["controllers"]["namespace"]["path"],"--test-binary",binary,"--expected-sha256",sha,
+                  "--source-dir",cwd,"--repo",str(SOURCE),"--go",cfg["tools"]["go"]["path"],
+                  "--pwsh",cfg["tools"]["pwsh"]["path"],"--parent",str(parent),"--test-timeout","5m",
+                  "--request-sha256",r["request_sha256"],"--request-nonce",r["request_nonce"],"--",*r["original_argv"]]
+            need(r["namespace_request"]==binding and row["argv"]==argv,"original API namespace request differs")
+            terminal=validate_namespace_terminal(proof,binding)
+            if terminal=="prechild-refusal":
+                need(row["exit_code"]!=0 and r["status"]=="FAIL" and r.get("namespace_prechild_refusal") is True,
+                     "pre-child refusal cannot qualify PASS")
+            else:
+                native_closed(proof["native"]);native_io_closed(proof["io"])
+                PAYLOAD_ROOTS.append(parent/"r")
+                for side in ("stdout","stderr"):queue_capture(proof[side+"_path"],proof[side+"_sha256"])
+            originals[key]={"path":str(path),"sha256":record["sha256"],"proof":proof,"terminal":terminal}
+            continue
+        originals[key]={"path":str(path),"sha256":record["sha256"],"proof":proof}
+    for stream in (ack["streams"] or {}).values():queue_capture(stream["path"],stream["sha256"])
+    raw=r.get("raw_output_binding",{})
+    for side in ("stdout","stderr"):
+        if side in raw:queue_capture(raw[side],raw[side+"_sha256"])
+    need(r["command_quiescence"]["complete"] is True,"API original final command registry remains unclosed")
+    return cfg,r,plan,originals,ack
+
+def after_closure(cfg,r,originals,result):
+    errors=result["receiving_issues"]
+    measured={}
+    for path,expected in CAPTURES.items():
+        ordinary(path);before=Path(path).stat();actual=digest(path);after=Path(path).stat()
+        need(actual==expected and (before.st_dev,before.st_ino,before.st_size,before.st_mtime_ns)
+             ==(after.st_dev,after.st_ino,after.st_size,after.st_mtime_ns),"closed API capture changed: "+path)
+        measured[path]={"bytes":after.st_size,"sha256":actual}
+    result["capture_measurements"]=measured
+    result["capture_files_checked"]=len(measured)
+    result["command_count"]=len(COMMANDS)
+    result["original_status"]=r["status"]
+    result["adapter_exit_code"]=r["adapter_exit_code"]
+    result["original_error"]=r.get("error")
+    result["original_replay_error"]=r.get("replay_error")
+    result["owner_failure"]=originals["owner"]["proof"].get("failure")
+    result["owner_root_exit_code"]=originals["owner"]["proof"].get("root_exit_code")
+    result["original_owner_receipts"]={key:{"path":value["path"],"sha256":value["sha256"]} for key,value in originals.items()}
+    result["recorded_receiver_environment"]=r.get("receiver_environment")
+    result["original_qualification_flags"]={key:r.get(key) for key in
+        ("image_unchanged","bundle_unchanged","original_inputs_unchanged","headless_configuration_received")}
+    inventory=r.get("inventory",{}).get("tests",{}).get(API)
+    need(isinstance(inventory,list) and inventory==sorted(set(inventory)),"original API full inventory is missing or duplicate")
+    inventory_path=CASE/"inventory-owner.stdout.txt"
+    need(str(inventory_path) in measured,"inventory payload was not received")
+    names=[line.strip() for line in inventory_path.read_text(encoding="utf-8").splitlines() if NAME.fullmatch(line.strip())]
+    need(len(names)==len(set(names)) and sorted(n for n in names if not n.startswith("Benchmark"))==inventory,
+         "actual same-image inventory differs from original receiving")
+    original_copy=CASE/"incoming-original.exe"
+    need(digest(original_copy)==r["incoming_sha256"],"preserved original API image differs")
+    result["preserved_incoming"]={"path":str(original_copy),"sha256":r["incoming_sha256"]}
+    owner=originals["owner"]
+    if owner["terminal"]=="suite":
+        execution=Path(owner["proof"]["execution_binary"])
+        need(execution.is_relative_to(PAYLOAD_ROOTS[-1]) and digest(execution)==r["incoming_sha256"],
+             "closed namespace execution copy differs from same incoming image")
+        result["closed_execution_copy"]={"path":str(execution),"sha256":r["incoming_sha256"]}
+    converted=[c for c in COMMANDS if Path(c["stdout"]).name=="suite-events.stdout.txt"]
+    need(len(converted)==1 and converted[0]["argv"]==[cfg["controllers"]["test2json"]["path"],"-p",API]
+         and converted[0]["exit_code"]==0 and converted[0]["stdout"] in measured,
+         "original closed test2json conversion absent or differs")
+    with Path(converted[0]["stdout"]).open("r",encoding="utf-8-sig") as stream:
+        rows=[json.loads(line,object_pairs_hook=unique) for line in stream if line.strip()]
+    need(len(r.get("coverage",[]))==1,"original API coverage ledger absent")
+    recorded=r["coverage"][0]
+    ledger=event_ledger("literal-default",{API:inventory},rows,recorded["exit_code"],[(API,t) for t in MANDATORY])
+    need(json.loads(json.dumps(ledger))==recorded,"recomputed original API full event ledger differs")
+    result["inventory_count"]=len(inventory)
+    result["full_inventory_ledger"]=ledger
+    result["top_level_counts"]=dict(collections.Counter(x["outcome"] for x in ledger["top_level"]))
+    result["all_terminal_counts"]=dict(collections.Counter(x["outcome"] for x in ledger["all_terminal"]))
+    outcomes={x["test"]:x["outcome"] for x in ledger["all_terminal"] if x["package"]==API}
+    counts=collections.Counter(x.get("Test") for x in rows if x.get("Package")==API and x.get("Action")=="run")
+    result["mandatory_api_stderr"]=[{"test":t,"runs":counts[t],"outcome":outcomes.get(t,"NOT_RUN")} for t in API_STDERR]
+    failed=sorted(name for name,outcome in outcomes.items() if outcome=="fail")
+    result["failed_tests"]=[{"test":name,"original_output":"".join(row.get("Output","") for row in rows
+                             if row.get("Package")==API and row.get("Test")==name and row.get("Action")=="output")}
+                            for name in failed]
+    result["package_output_without_test"]="".join(row.get("Output","") for row in rows
+                            if row.get("Package")==API and not row.get("Test") and row.get("Action")=="output")
+    stderr=CASE/"suite-owner.stderr.txt"
+    need(str(stderr) in measured,"original API owner stderr was not received")
+    with stderr.open("rb") as stream:raw_stderr=stream.read(65537)
+    result["owner_stderr"]={"text":raw_stderr[:65536].decode("utf-8",errors="replace"),
+                            "truncated":len(raw_stderr)>65536,"path":str(stderr)}
+    result["namespace_qualification_recorded"]={key:owner["proof"].get(key) for key in
+        ("observations_verified","mandatory_tests_passed","mandatory_tests","binary_unchanged",
+         "execution_binary_unchanged","failure","cleanup_error","native_error")}
+    for path,sha in CONTROL_PINS.items():
+        need(digest(path)==sha,"original API control changed during receiving: "+path)
+    required_passed=all(outcomes.get(name)=="pass" and counts[name]==1 for name in MANDATORY)
+    return bool(r["status"]=="PASS" and r["adapter_exit_code"]==0 and ledger["passed"] and required_passed
+                and not errors and not r.get("error") and not r.get("replay_error"))
+
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--receipt-sha256",required=True)
+    parser.add_argument("--output",required=True,type=Path)
+    args=parser.parse_args()
+    need(re.fullmatch("[0-9a-f]{64}",args.receipt_sha256),"exact original API receipt SHA256 required")
+    here=Path(__file__).absolute().parent
+    need(args.output.parent==here and args.output.suffix==".json" and not os.path.lexists(args.output),
+         "receiving output must be a fresh JSON sibling of this script")
+    ordinary(here,True)
+    result={"schema":"successor-closed-api-subtree-receiving-v1","source_commit":COMMIT,"source_tree":TREE,
+        "package":API,"phase":PHASE,"case":str(CASE),"original_receipt_sha256":args.receipt_sha256,
+        "classification":"UNKNOWN","physical_complete":False,"diagnostic_payload_access":False,
+        "api_qualification_passed":False,"data_verification":"NOT_RECEIVED","receiving_issues":[],
+        "full_run_qualification_claimed":False,"full_run_physical_closure_claimed":False,
+        "cli_physical_closure_claimed":False,"other_package_payload_access":False,
+        "source_payload_access":False,"cache_payload_access":False,"cache_handoff_eligible":False,
+        "new_native_or_test_execution":False,"deadline_extension":False}
+    code=1
+    try:
+        cfg,r,plan,originals,ack=receive_physical(args.receipt_sha256)
+        result.update(physical_complete=True,diagnostic_payload_access=True,
+                      exact_payload_roots=[str(path) for path in PAYLOAD_ROOTS],
+                      original_replay=ack,original_status=r["status"],adapter_exit_code=r["adapter_exit_code"])
+        passed=after_closure(cfg,r,originals,result)
+        result.update(classification="PASS/CLOSED" if passed else "FAIL/CLOSED",
+                      api_qualification_passed=passed,data_verification="PASS")
+        code=0
+    except Exception as error:
+        result["receiving_issues"].append(type(error).__name__+": "+str(error))
+        if result["physical_complete"]:
+            result.update(classification="FAIL/CLOSED",data_verification="FAIL")
+    result["control_pins"]=dict(CONTROL_PINS)
+    result["allowed_capture_pins"]=dict(CAPTURES)
+    with args.output.open("xb") as stream:
+        stream.write((json.dumps(result,indent=2,ensure_ascii=False)+"\n").encode("utf-8"))
+        stream.flush();os.fsync(stream.fileno())
+    print(json.dumps({key:result[key] for key in
+        ("classification","physical_complete","diagnostic_payload_access","api_qualification_passed",
+         "data_verification","receiving_issues")},ensure_ascii=False))
+    return code
+if __name__=="__main__":raise SystemExit(main())

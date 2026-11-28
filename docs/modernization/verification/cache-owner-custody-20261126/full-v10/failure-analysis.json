@@ -1,0 +1,455 @@
+{
+  "schema": "full-v10-independent-failure-analysis-v1",
+  "status": "CLOSED_FAILED_FULL_GATE_OPEN",
+  "source_commit": "aca81a1743ccfbf3e10902769a9b071eb911919e",
+  "product_source_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+  "parent": {
+    "path": "<RECOVERY>/recovery/full-v10/parent.json",
+    "sha256": "3812d74a5a4b9d02eabae0a05a67ba7bb3dd79a729b40d91d29e05d0fbf6e7cb"
+  },
+  "original_receipt": {
+    "path": "<RECOVERY>/recovery/full-v10/receipt.json",
+    "sha256": "555263b0add9ceec75e35967bc62e84c68c5e820e2e9bf5ba48be8bf551a225b"
+  },
+  "parent_native_received_exit_code": 1,
+  "outer_command_count": 19,
+  "phase_counts_from_pinned_original": {
+    "default": {
+      "expected": 64,
+      "received": 64,
+      "pass": 62,
+      "fail": 2
+    },
+    "state": {
+      "expected": 2,
+      "received": 2,
+      "pass": 0,
+      "fail": 2
+    }
+  },
+  "literal_commands": [
+    "go build ./... && go vet ./... && go test -count=1 -timeout 5m ./...",
+    "go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/"
+  ],
+  "literal_build_exit_code": 0,
+  "literal_vet_exit_code": 0,
+  "all_tests_passed": false,
+  "four_failures": [
+    {
+      "run": "x4ec66191aa9c",
+      "phase": "default",
+      "package": "mcp-local-hub/internal/api",
+      "adapter": {
+        "path": "<RECOVERY>/recovery/full-v10/adapters/x4ec66191aa9c.json",
+        "sha256": "5af9610a2d6d8f8cde62f01122675b72c8a58c3f1f71e135856815a6df9b4bbd"
+      },
+      "status": "FAIL",
+      "adapter_exit_code": 1,
+      "error": "RuntimeError: adapter preparation exceeded its fixed budget; full suite was not started",
+      "preparation_seconds": 40.89309450000292,
+      "preparation_budget_seconds": 30,
+      "adapter_seconds": 40.8931155000173,
+      "command_count": 6,
+      "command_durations_seconds": [
+        0.06745269999373704,
+        0.0885990000097081,
+        0.09519880000152625,
+        0.1416138999920804,
+        0.06642359998659231,
+        29.73
+      ],
+      "preparation_explicit_command_sum_seconds": 30.189287999983645,
+      "preparation_other_elapsed_seconds": 10.703806500019272,
+      "native_custody_settled": true,
+      "commands_quiescent": true,
+      "expected_test_roots": 3523,
+      "inventory_owner": {
+        "original": {
+          "path": "<RECOVERY>/recovery/full-v10/owners/x4ec66191aa9c__inventory__result.json",
+          "sha256": "89764a005371bfdc345ff935bcf27a61c105ef479d94b1e1c6a1a959bcffbf9b"
+        },
+        "started_utc": "2026-11-24T17:59:06.93366Z",
+        "root_birth_utc": "2026-11-24T17:59:34.9001843Z",
+        "finished_utc": "2026-11-24T17:59:36.3779824Z",
+        "root_pid": 267176,
+        "root_birth_filetime_decimal": "134400167749001843",
+        "before_child_birth_seconds": "27.9665243",
+        "child_birth_to_owner_finish_seconds": "1.4777981",
+        "owner_total_seconds": "29.4443224",
+        "native_accounting_initial_total": 1,
+        "native_accounting_final_active": 0,
+        "root_exit_code": 0
+      },
+      "suite_status": "NOT_STARTED",
+      "completed_root_count": 0,
+      "observed_failure": "preparation exceeded fixed 30-second budget"
+    },
+    {
+      "run": "xe7b6d03d7f69",
+      "phase": "default",
+      "package": "mcp-local-hub/internal/cli",
+      "adapter": {
+        "path": "<RECOVERY>/recovery/full-v10/adapters/xe7b6d03d7f69.json",
+        "sha256": "3002aab883b49931de5282d97ecb5e2c80495efac582527a561f5f8c519a42cb"
+      },
+      "status": "FAIL",
+      "adapter_exit_code": 1,
+      "error": "RuntimeError: adapter preparation exceeded its fixed budget; full suite was not started",
+      "preparation_seconds": 48.9291685000062,
+      "preparation_budget_seconds": 30,
+      "adapter_seconds": 48.92921229999047,
+      "command_count": 6,
+      "command_durations_seconds": [
+        0.971486399997957,
+        0.09443320002174005,
+        0.10648419999051839,
+        0.094739699998172,
+        0.06125729999621399,
+        41.725
+      ],
+      "preparation_explicit_command_sum_seconds": 43.0534008000046,
+      "preparation_other_elapsed_seconds": 5.875767700001596,
+      "native_custody_settled": true,
+      "commands_quiescent": true,
+      "expected_test_roots": 1988,
+      "inventory_owner": {
+        "original": {
+          "path": "<RECOVERY>/recovery/full-v10/owners/xe7b6d03d7f69__inventory__result.json",
+          "sha256": "04106826ae5c9bc3bbd737d7e4746e6874540c8e63d90ebb959739d506243fc0"
+        },
+        "started_utc": "2026-11-24T18:02:02.6331175Z",
+        "root_birth_utc": "2026-11-24T18:02:24.4486893Z",
+        "finished_utc": "2026-11-24T18:02:44.0045823Z",
+        "root_pid": 246788,
+        "root_birth_filetime_decimal": "134400169444486893",
+        "before_child_birth_seconds": "21.8155718",
+        "child_birth_to_owner_finish_seconds": "19.5558930",
+        "owner_total_seconds": "41.3714648",
+        "native_accounting_initial_total": 1,
+        "native_accounting_final_active": 0,
+        "root_exit_code": 0
+      },
+      "suite_status": "NOT_STARTED",
+      "completed_root_count": 0,
+      "observed_failure": "preparation exceeded fixed 30-second budget"
+    },
+    {
+      "run": "x46bc4c776039",
+      "phase": "state",
+      "package": "mcp-local-hub/internal/api",
+      "adapter": {
+        "path": "<RECOVERY>/recovery/full-v10/adapters/x46bc4c776039.json",
+        "sha256": "a78fd365dc81daaafcf0d190a869fc9411a4cd137851c492cd7d3955303046b9"
+      },
+      "status": "FAIL",
+      "adapter_exit_code": 2,
+      "error": "RuntimeError: original suite, inventory ledger, image, or custody proof failed",
+      "preparation_seconds": 12.103593699983321,
+      "preparation_budget_seconds": 30,
+      "adapter_seconds": 314.9276625000057,
+      "command_count": 8,
+      "command_durations_seconds": [
+        0.07554869999876246,
+        0.14418979999027215,
+        0.18652429999201559,
+        0.1814742999849841,
+        0.06600910000270233,
+        5.901,
+        302.286,
+        0.12779779999982566
+      ],
+      "preparation_explicit_command_sum_seconds": 6.554746199968736,
+      "preparation_other_elapsed_seconds": 5.548847500014585,
+      "native_custody_settled": true,
+      "commands_quiescent": true,
+      "expected_test_roots": 3529,
+      "inventory_owner": {
+        "original": {
+          "path": "<RECOVERY>/recovery/full-v10/owners/x46bc4c776039__inventory__result.json",
+          "sha256": "7ddb51ba59fb6c475699eb2debd36fe8d3b0f9f2c5c1c16d8d81af75e6a36ab1"
+        },
+        "started_utc": "2026-11-24T18:17:30.8103987Z",
+        "root_birth_utc": "2026-11-24T18:17:35.4361666Z",
+        "finished_utc": "2026-11-24T18:17:36.50911Z",
+        "root_pid": 243292,
+        "root_birth_filetime_decimal": "134400178554361666",
+        "before_child_birth_seconds": "4.6257679",
+        "child_birth_to_owner_finish_seconds": "1.0729434",
+        "owner_total_seconds": "5.6987113",
+        "native_accounting_initial_total": 1,
+        "native_accounting_final_active": 0,
+        "root_exit_code": 0
+      },
+      "suite_status": "GLOBAL_5_MINUTE_TIMEOUT",
+      "suite_native_owner": {
+        "original": {
+          "path": "<RECOVERY>/recovery/full-v10/owners/n3ebd4df8a058__n__namespace-suite-receipt.json",
+          "sha256": "84ce18fc8d015ab3bf853be678ad0593ebc45ad6190e52658fb3bf5514c6e2e9"
+        },
+        "started_utc": "2026-11-24T18:17:36.8113953Z",
+        "root_birth_utc": "2026-11-24T18:17:38.2482254Z",
+        "finished_utc": "2026-11-24T18:22:38.8399112Z",
+        "root_pid": 238012,
+        "root_birth_filetime_decimal": "134400178582482254",
+        "before_child_birth_seconds": "1.4368301",
+        "child_birth_to_owner_finish_seconds": "300.5916858",
+        "owner_total_seconds": "302.0285159",
+        "native_accounting_initial_total": 213,
+        "native_accounting_final_active": 0,
+        "root_exit_code": 2
+      },
+      "terminal_root_counts": {
+        "PASS": 266,
+        "FAIL": 0,
+        "SKIP": 1
+      },
+      "started_root_count": 268,
+      "never_started_root_count": 3261,
+      "started_without_terminal": [
+        {
+          "test": "TestBuildAdoptPlanWithExplicitPortIgnoresExhaustedLegacyDraftRange",
+          "state": "RUNNING_AT_DEADLINE"
+        }
+      ],
+      "root_missing_terminal_count": 3262,
+      "mandatory_tests": [
+        {
+          "test": "TestSecretsInit_RecoveryNamespaceBoundary",
+          "state": "NOT_RUN"
+        },
+        {
+          "test": "TestSecretsInit_RecoveryNamespaceRetainedDirectory",
+          "state": "NOT_RUN"
+        },
+        {
+          "test": "TestSecretsInit_RecoveryNamespaceFailurePaths",
+          "state": "NOT_RUN"
+        },
+        {
+          "test": "TestSupervisorPeerStrictControlConnections",
+          "state": "NOT_RUN"
+        },
+        {
+          "test": "TestAttachExisting_PublicCLIReceiving",
+          "state": "NOT_RUN"
+        }
+      ],
+      "missing_package_terminal": [
+        "mcp-local-hub/internal/api"
+      ],
+      "inventory_ledger_cross_check": "MATCH",
+      "observed_failure": "Go panic: test timed out after 5m0s; active test reported 0s"
+    },
+    {
+      "run": "x06928e6b162c",
+      "phase": "state",
+      "package": "mcp-local-hub/internal/cli",
+      "adapter": {
+        "path": "<RECOVERY>/recovery/full-v10/adapters/x06928e6b162c.json",
+        "sha256": "fea5c6ee601794f625a6fa496a79b7d44e4d3d04fba35cbf3ac0b6ccdfeceb55"
+      },
+      "status": "FAIL",
+      "adapter_exit_code": 2,
+      "error": "RuntimeError: original suite, inventory ledger, image, or custody proof failed",
+      "preparation_seconds": 18.686208600003738,
+      "preparation_budget_seconds": 30,
+      "adapter_seconds": 321.31112779999967,
+      "command_count": 8,
+      "command_durations_seconds": [
+        0.4470500999887008,
+        0.2631024000002071,
+        0.09851740000885911,
+        0.1020550999965053,
+        0.06615289999172091,
+        15.192,
+        301.72,
+        0.14224020001711324
+      ],
+      "preparation_explicit_command_sum_seconds": 16.168877899985993,
+      "preparation_other_elapsed_seconds": 2.5173307000177445,
+      "native_custody_settled": true,
+      "commands_quiescent": true,
+      "expected_test_roots": 1991,
+      "inventory_owner": {
+        "original": {
+          "path": "<RECOVERY>/recovery/full-v10/owners/x06928e6b162c__inventory__result.json",
+          "sha256": "ac0e8f162c0b90fdc2bce0852ccdd6c4b0583e0d79499780878eeebf6e531704"
+        },
+        "started_utc": "2026-11-24T18:23:32.9930347Z",
+        "root_birth_utc": "2026-11-24T18:23:45.3899694Z",
+        "finished_utc": "2026-11-24T18:23:47.0405828Z",
+        "root_pid": 265024,
+        "root_birth_filetime_decimal": "134400182253899694",
+        "before_child_birth_seconds": "12.3969347",
+        "child_birth_to_owner_finish_seconds": "1.6506134",
+        "owner_total_seconds": "14.0475481",
+        "native_accounting_initial_total": 1,
+        "native_accounting_final_active": 0,
+        "root_exit_code": 0
+      },
+      "suite_status": "GLOBAL_5_MINUTE_TIMEOUT",
+      "suite_native_owner": {
+        "original": {
+          "path": "<RECOVERY>/recovery/full-v10/owners/x06928e6b162c__suite__result.json",
+          "sha256": "edd692c5e03487b3c041e3931895c4875353745bf90e67a42ce53d4080fb5fd3"
+        },
+        "started_utc": "2026-11-24T18:23:48.1892634Z",
+        "root_birth_utc": "2026-11-24T18:23:48.891439Z",
+        "finished_utc": "2026-11-24T18:28:49.2307121Z",
+        "root_pid": 233820,
+        "root_birth_filetime_decimal": "134400182288914390",
+        "before_child_birth_seconds": "0.7021756",
+        "child_birth_to_owner_finish_seconds": "300.3392731",
+        "owner_total_seconds": "301.0414487",
+        "native_accounting_initial_total": 122,
+        "native_accounting_final_active": 0,
+        "root_exit_code": 2
+      },
+      "terminal_root_counts": {
+        "PASS": 980,
+        "FAIL": 0,
+        "SKIP": 11
+      },
+      "started_root_count": 1006,
+      "never_started_root_count": 985,
+      "started_without_terminal": [
+        {
+          "test": "TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_DrivesSupervisorRestart",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_NilSpecRowsHealedBeforeSpawn",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_LiveSupervisor_ReapClearsTheGateBeforeWrite",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_PostCommitReconcileReadyTimeout_ExitsZeroWithWarning",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_ConcurrentRegisterInWindow_AppearsInCommittedIntent",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_EmptyFirstSnapshot_WorkspaceRegisteredInWindow_RecomputesStart",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_EmptyFirstSnapshot_SupervisorRunning_LateReapClearsGate",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow",
+          "state": "PAUSED_NOT_CONTINUED"
+        },
+        {
+          "test": "TestRunSupervise_IPCShutdownJoinsAcceptExitOnTestExit",
+          "state": "RUNNING_AT_DEADLINE"
+        }
+      ],
+      "root_missing_terminal_count": 1000,
+      "mandatory_tests": [
+        {
+          "test": "TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade",
+          "state": "PASS"
+        },
+        {
+          "test": "TestWindowsProductPreflightOriginalEntrySet",
+          "state": "NOT_RUN"
+        },
+        {
+          "test": "TestCanonicalGUIRuntimeRecoveryNativeIndependentReplay",
+          "state": "NOT_RUN"
+        },
+        {
+          "test": "TestCanonicalSuccessorNativeControlRetainsOriginalFiles",
+          "state": "NOT_RUN"
+        }
+      ],
+      "missing_package_terminal": [
+        "mcp-local-hub/internal/cli"
+      ],
+      "inventory_ledger_cross_check": "MATCH",
+      "observed_failure": "Go panic: test timed out after 5m0s; active test reported 0s"
+    }
+  ],
+  "private_migration_receiving": {
+    "default": {
+      "schema": "literal-private-migration-receiving-v1",
+      "passed": false,
+      "failure": "RuntimeError: actual CLI receiver did not receive this exact private lane"
+    },
+    "state": {
+      "schema": "literal-private-migration-receiving-v1",
+      "passed": false,
+      "failure": "RuntimeError: exact original fresh, unreused migration directory count required"
+    }
+  },
+  "invariants_reported_by_exact_original": {
+    "source_unchanged": true,
+    "private_migration_exports_unchanged": true,
+    "original_inputs_unchanged": true,
+    "actual_product_unchanged": true
+  },
+  "failure_scope_closure": {
+    "path": "<RECOVERY>/recovery/full-v10/failure-scopes-closure.json",
+    "sha256": "7ef88825eb92af05870e0d36285e535c858fc210fb331a76b8979a8ff4666095"
+  },
+  "capture_receiving": {
+    "path": "<RECOVERY>/recovery/full-v10/capture-receiving.json",
+    "sha256": "a6d3b83791f8a3a6a89342becb4f8d2788a9147b7093f5bc9219d6ca983b5ccf"
+  },
+  "timing_profile": {
+    "path": "<RECOVERY>/recovery/full-v10/event-timing-profile.json",
+    "sha256": "115ff437f5e780095d1d35c7d17e64cc3bf4c7bfaf20d48cce9e69ec6c4b9229"
+  },
+  "completed_test_ledger": {
+    "path": "<RECOVERY>/recovery/full-v10/completed-test-ledger.json",
+    "sha256": "31d183a866145f07ab645cbf7b034949d68987b6b67e962f56af67ab63cdde8e"
+  },
+  "changed_38_test_mapping": {
+    "path": "<RECOVERY>/recovery/full-v10/changed-test-status.json",
+    "sha256": "76bba0ce646626fccd1ca9e620a99d5df6d0afea71452686f275dd9c973dd854"
+  },
+  "independent_receiving_limits": [
+    "Four failed adapters, 28 commands and six original native owner receipts independently received before reading their captures.",
+    "Other 62 successful adapters are accepted here only as claims bound by the exact aggregate/phase settlement; their other 124 original native owner files were not reloaded by this review.",
+    "No old held-v7/x6d9108ff9d42/source-v1 or held cache contents were read.",
+    "Physical closure is distinct from regression PASS, source reuse or disposition authority.",
+    "No native reruns, runtime mutations or GitHub/CI actions by this reviewer."
+  ],
+  "interpretation": [
+    "Default API and CLI did not enter their suites; their preparation failures are independent of the tagged suite timeouts.",
+    "Tagged API and CLI exhausted the unchanged package-wide five-minute limit after many completed tests; no individual terminal FAIL event was emitted.",
+    "API active-at-deadline YAML parse and CLI active-at-deadline FlushFileBuffers are snapshots, not causal latency measurements.",
+    "All 14 private Serena migration tests reached t.Parallel pause and emitted no CONT; the private migration receiving did not pass. Prior separately qualified KT-1 is not reclassified.",
+    "ACA source results do not transfer PASS from or to a separate c730cae fixture composition or any later public branch."
+  ]
+}

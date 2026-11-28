@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "repository": "applicate2628/mcp-local-hub",
+  "pr": 664,
+  "branch": "fix/p0-test-entry-preserve-20261121",
+  "head": "7afeefca988945b8a75355f89a9ab16dfaa7376d",
+  "parent_expected": "58670482426cd60aee35bf09b8d945a9809eb854",
+  "tree": "1fac3cc6cb6218385e0ce66eb4214c60baeb7da2",
+  "files": [
+    {
+      "path": ".plans/2026-11/open-pr-integration-20261117.md",
+      "local_path": "/workspace/scratch/e51f442c712e/continuation-closeout/open-pr-integration-20261117.md",
+      "bytes": 122951,
+      "sha256": "29759304e45fb4f6a59f5f35b60b2557bc694df0dec2be2c682bdf2418adea55",
+      "git_blob": "835a7c9c4d3c80ee8e9cf167f3c740161695726f",
+      "readback_bytes_equal": true
+    },
+    {
+      "path": ".plans/2026-11/continuation-scope-audit-20261122.md",
+      "local_path": "/workspace/scratch/e51f442c712e/continuation-closeout/continuation-scope-audit-20261122.md",
+      "bytes": 14349,
+      "sha256": "1adfb0d04bcf5cabd31fc61bca4532ea74cd18c5061fd0f8d5c5469d53143acc",
+      "git_blob": "d605fe7430f0f808a9cf7d0a1d5ea6bff3f883a1",
+      "readback_bytes_equal": true
+    },
+    {
+      "path": ".plans/2026-11/p0-continuation-closeout-20261122.json",
+      "local_path": "/workspace/scratch/e51f442c712e/continuation-closeout/p0-continuation-closeout-20261122.json",
+      "bytes": 95384,
+      "sha256": "7552fc6824d0d24ec3f6fca4960703ecf80ed1c17b1c15f3565d59d61c044e70",
+      "git_blob": "c7f1b4717279f5e437b59f08053b6550fdc3b2fc",
+      "readback_bytes_equal": true
+    },
+    {
+      "path": ".plans/2026-11/p0-continuation-evidence-20261122.zip",
+      "local_path": "/workspace/scratch/e51f442c712e/continuation-closeout/p0-continuation-evidence-20261122.zip",
+      "bytes": 1004421,
+      "sha256": "44b13007507ae4cac5b0e6631f171a9d950a420c77e1c4258f597dba0e9338ac",
+      "git_blob": "b9788f200a706e607d6dfa5e8b64ca83fbd1e172",
+      "readback_bytes_equal": true
+    }
+  ],
+  "draft": true,
+  "merged": false,
+  "force": false,
+  "external_review": "PENDING",
+  "readback_complete": true,
+  "git_object_fetch_verified": true,
+  "parent_observed": "58670482426cd60aee35bf09b8d945a9809eb854",
+  "parents_count": 1,
+  "tree_observed": "1fac3cc6cb6218385e0ce66eb4214c60baeb7da2",
+  "checked_utc": "2026-11-22T15:18:05.972052+00:00"
+}

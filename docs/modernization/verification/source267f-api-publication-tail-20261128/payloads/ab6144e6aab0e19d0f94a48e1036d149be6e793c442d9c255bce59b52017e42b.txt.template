@@ -1,0 +1,170 @@
+{
+  "schema": "namespace-single-invocation-inputs-v1",
+  "status": "PREPARED_NOT_EXECUTED",
+  "scope": "diagnostic replay of the exact preserved default API image; not a new repository literal gate",
+  "source_dir": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-acceptance-20261128-v2",
+  "source_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+  "source_tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+  "source_map": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\source-binding\\source59f-input-sha256.json",
+    "sha256": "e8c3fc2f577a130f92ba4eee7f8eee7153afc032dee909557cf1156890917c06"
+  },
+  "origin_receiving": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\closed-api-receiving-v1\\root-api-receiving-v3.json",
+    "sha256": "703394309664fda84d940eeb2b0a3c091f2355453836d9907f38d0dad91aa494"
+  },
+  "origin_receipt": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\receipt.json",
+    "sha256": "e1cba7d99294f4e18816ebc91a8fd137c3533be5d9ed433071de4c89b66fc709"
+  },
+  "origin_image": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\r7\\x149e4a76727c\\incoming-original.exe",
+    "sha256": "d237704913484fe2931860793badbfdaadb3bb216f5c436b8d01bdf2301d3e60"
+  },
+  "image": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\namespace-admission-diagnostic-inputs-v1\\incoming-original.exe",
+  "image_bytes": 38868992,
+  "helper": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\namespace-admission-diagnostic-build-v1\\namespace-timing-owner.exe",
+    "sha256": "1d4e95dbd3fbfeb5f35ff43151bf00e71d237d0acf64e6d97e181ed52cffe0ce",
+    "bytes": 6558720
+  },
+  "compile_receiving": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v27\\independent-root-data-audit.json",
+    "sha256": "5e94cb3e1697c4bdfc0a4c0b71601bbbb54749d9656223ccadc7d88037b5d9d8"
+  },
+  "overlay": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-admission-diagnostic-driver-v1\\namespace-timing-overlay.json",
+    "sha256": "3a8eb56d4f22609eabdd36c50a17987c4bbee2ccd06caba11c00a4ad4e127188"
+  },
+  "timing_sources": [
+    {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-admission-timing-candidate-v1\\main_windows.go",
+      "sha256": "41e7cda8cf174a27a0380a93ad3c89881692d9055d771dae872793f6726ef96d"
+    },
+    {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-admission-timing-candidate-v1\\prebuilt_windows.go",
+      "sha256": "60556af6afce055f7ab3aaea3819d919abeafc6d11b5a88e0fb06a94eedc83a6"
+    }
+  ],
+  "output": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\namespace-admission-diagnostic-run-v1",
+  "namespace_scope": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api",
+  "namespace_parent": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api\\n",
+  "private_runs_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9",
+  "args": [
+    "-test.paniconexit0",
+    "-test.v=test2json",
+    "-test.count=1",
+    "-test.timeout=5m0s"
+  ],
+  "tools": {
+    "python": {
+      "path": "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+      "sha256": "d4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd"
+    },
+    "go": {
+      "path": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe",
+      "sha256": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113"
+    },
+    "pwsh": {
+      "path": "@@RECOVERY_NATIVE_POWERSHELL_WORK_AREA_JSON@@\\bns26\\pwsh7\\pwsh.exe",
+      "sha256": "f2833e07a5a7d59153ffc63db83bd6b62f6c63ffd8b5b5099a2feadf6b605336"
+    }
+  },
+  "references": {
+    "runner": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-error-dword-v4\\run_owned_commands.py",
+      "sha256": "6d16652d4893273b7e9d584920892ce5f5917622e7e242a62eb78ec824bcfb93"
+    },
+    "guard": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-error-dword-v4\\guard-custody.py",
+      "sha256": "e7c663f4ba2fd558005bc110173609cb19465ff33d3f4678aeb53b5ba00e0924"
+    },
+    "windows_job": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-error-dword-v4\\windows_job.py",
+      "sha256": "d94583001a33ef34adb67feec34b4f4b0bf3626df9f63da3c7a7c85bf3e0b552"
+    },
+    "adapter": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-candidate\\adapter_successor.py.in",
+      "sha256": "48c5d6af30d62c1e63c1455689a19c1ce0b67ab761fc9b1683e5a522494b98bd"
+    },
+    "owner_receiving": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-candidate\\owner_receiving.fragment.py",
+      "sha256": "fa8c35962f31ab576242dba4fbb76c23131dec06db1a429e710d724d343e1b7b"
+    },
+    "namespace_receiving": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-candidate\\namespace_receiving_v2.fragment.py",
+      "sha256": "818c287d4b10755b52c95765d4d54c9a7e652981cef8ecd97f19caf4e21b9be7"
+    },
+    "namespace_qualification": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-candidate\\namespace_qualification.fragment.py",
+      "sha256": "adbcd381e6f11620154a5db7afc755d865748924047c4917a5f41cd5f21b6216"
+    },
+    "private_scope": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-admission-diagnostic-driver-v1\\private_scope.py",
+      "sha256": "c08ab1d5106a514054a7d55a77a1fbd9ff3aa21010b84b90633293325037dda3"
+    }
+  },
+  "flags_function_sha256": "96bd52faae2a107b929170b7884b3211f0d7df1fbd66a4fdc1375e8eba60b601",
+  "request_policy": {
+    "creation": "fresh secrets.token_hex(16), exclusive request.json close/fsync, actual byte SHA before controller Popen",
+    "old_nonce_reused": false
+  },
+  "environment": {
+    "APPDATA": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api\\appdata",
+    "CC": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\bin\\gcc.exe",
+    "CGO_ENABLED": "1",
+    "COMSPEC": "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\cmd.exe",
+    "GCM_INTERACTIVE": "Never",
+    "GIT_CONFIG_GLOBAL": "NUL",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_NO_LAZY_FETCH": "1",
+    "GIT_NO_REPLACE_OBJECTS": "1",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GOCACHE": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\cli-focused59f-baseline-v2\\private\\go-build",
+    "GOFLAGS": "-mod=readonly -ldflags=-H=windowsgui",
+    "GOMODCACHE": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\cli-focused59f-baseline-v2\\private\\go-mod",
+    "GOPROXY": "off",
+    "GOROOT": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go",
+    "GOSUMDB": "sum.golang.org",
+    "GOTMPDIR": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api\\tmp",
+    "GOTOOLCHAIN": "local",
+    "GOWORK": "off",
+    "HOME": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api\\profile",
+    "LOCALAPPDATA": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api\\localappdata",
+    "PATH": "@@RECOVERY_NATIVE_POWERSHELL_WORK_AREA_JSON@@\\bns26\\pwsh7;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\mingw64\\bin;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\usr\\bin;@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin;@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\bin;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\WindowsPowerShell\\v1.0;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\wbem",
+    "PATHEXT": ".COM;.EXE;.BAT;.CMD",
+    "POWERSHELL_TELEMETRY_OPTOUT": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONUTF8": "1",
+    "SystemRoot": "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@",
+    "TEMP": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api\\tmp",
+    "TMP": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api\\tmp",
+    "TMPDIR": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api\\tmp",
+    "USERPROFILE": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api\\profile",
+    "WINDIR": "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@",
+    "GOENV": "off",
+    "GOOS": "windows",
+    "GOARCH": "amd64",
+    "ProgramFiles": "@@RECOVERY_PROGRAM_FILES_64_JSON@@",
+    "ProgramFiles(x86)": "@@RECOVERY_PROGRAM_FILES_32_JSON@@",
+    "OS": "Windows_NT",
+    "GIT_OPTIONAL_LOCKS": "0",
+    "GOPATH": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api\\go-path",
+    "SERENA_HOME": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\nt9\\api\\profile"
+  },
+  "preserved_deadlines": {
+    "admission_seconds": 5,
+    "suite_minutes": 5,
+    "native_cleanup_seconds": 10,
+    "direct_owner_wait_seconds": 320
+  },
+  "qualification_limit": {
+    "full_api_inventory_qualified": false,
+    "literal_repository_gate_passed": false
+  },
+  "cache_handoff_scope": "cache-acceptance-stage-20261128-v28",
+  "cache_receiving": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\functional-route-20261126\\runs\\cache-acceptance-stage-20261128-v28\\independent-root-data-audit.json",
+    "sha256": "159301c3c5b9018ee05894e859b3a1fb3ef33f4c0947672898b26c5eeb4adc8c"
+  }
+}

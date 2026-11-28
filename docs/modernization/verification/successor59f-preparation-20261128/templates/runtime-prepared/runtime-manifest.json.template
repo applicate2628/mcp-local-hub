@@ -1,0 +1,72 @@
+{
+  "schema": "literal-successor-runtime-v1",
+  "reviewed": true,
+  "source_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+  "source_tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+  "configuration": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-prepared-v1\\runtime-inputs.json",
+    "sha256": "53c5e8d351c70a184a851b7da4170e0bafdccfdedc262fe931030ffaf83f65d2"
+  },
+  "files": {
+    "runtime-inputs.json": "53c5e8d351c70a184a851b7da4170e0bafdccfdedc262fe931030ffaf83f65d2",
+    "private_run_scope.py": "d8323aed325dbce50d4f7cb429c5c966b4a5877396df2844518940ff992fdaaa",
+    "core_successor.py": "b1139de92f5d216737a1fd14e68a42b91979e3c924a72f6a7d9a6d9b6002ee3d",
+    "primitives_successor.py": "b462499a54c8a22ee63913169b8654072bace536d8d8449834bf78d20741ac7c",
+    "adapter_successor.py": "2e1ec0c9caabff9ff12787a1edb9b4269a75a95cc5118b7fee3a4a0ffd4788d8",
+    "driver_successor.py": "b33e5fcfb18cd0ee7ecdc5d679536cf48bc812a16db781bc6635d8c4bf5b9327",
+    "launch_successor.py": "a074eb0b9e1c704602c16cdb50b4ba67ac1acb0ae94c3536f9509b0cafbb46e8"
+  },
+  "template_manifest": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-review-v1\\templates-manifest.reviewed.json",
+    "sha256": "03800ce5a383c993372dd40dc84079d5af5add24163978f9fbab7bd513e6d8b6"
+  },
+  "template_inputs": {
+    "scope": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\private_run_scope.py.in",
+      "sha256": "ce16701c0c8951d73a9e002c0447fe108ee2bcaa31437bde63bc184e509ec654"
+    },
+    "core": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-candidate\\core_successor.py.in",
+      "sha256": "fcd8fadd43744d94426f59780028cef98d7b3c968dc42df200f9130b1e589991"
+    },
+    "primitives": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-candidate\\primitives_successor.py.in",
+      "sha256": "4dd6ea68986a8cda1da65373dad3077340a7483be15128f443d2657ca5a0483a"
+    },
+    "adapter": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-candidate\\adapter_successor.py.in",
+      "sha256": "48c5d6af30d62c1e63c1455689a19c1ce0b67ab761fc9b1683e5a522494b98bd"
+    },
+    "driver": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-candidate\\driver_successor.py.in",
+      "sha256": "c29938a6c6570aa417c933bc7ce92ef44ced42e37727999ae46a115d758b6787"
+    },
+    "launcher": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\launch_literal_v6.py.in",
+      "sha256": "adf9f26a647aa6e869bc3dc25a6c13b5b913b2295f2629e77d10f36058e7493f"
+    }
+  },
+  "deterministic_launcher_changes": {
+    "launch_successor.py": [
+      {
+        "before": "literal-original-runtime-v6",
+        "after": "literal-successor-runtime-v1"
+      },
+      {
+        "before": "run_literal_go_gate_v6.py",
+        "after": "driver_successor.py"
+      },
+      {
+        "before": "original-literal-original-parent-v6",
+        "after": "original-literal-successor-parent-v1"
+      },
+      {
+        "before": "runs.mkdir(exist_ok=True)",
+        "after": "runs.mkdir(exist_ok=False)"
+      }
+    ]
+  },
+  "cli_owner_protocol": "literal-foreground-cli-run-v1",
+  "qualification": "NOT_RUN",
+  "native_or_test_commands_started": false
+}

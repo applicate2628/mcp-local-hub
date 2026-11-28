@@ -1,0 +1,223 @@
+//go:build windows && amd64
+
+package main
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"mcp-local-hub/internal/process"
+)
+
+func TestRiffFreshNativeOuterReceiving(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		readerError bool
+		closeHold   bool
+		lateChild   bool
+	}{
+		{name: "late_reader_then_close"},
+		{name: "late_original_child_then_reader", lateChild: true},
+		{name: "native_eof_then_consumer_error", readerError: true},
+		{name: "recorded_close_refusal", closeHold: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			out, err := os.Create(filepath.Join(dir, "stdout"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = out.Close() })
+			stderr, err := os.Create(filepath.Join(dir, "stderr"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = stderr.Close() })
+
+			reached := make(chan error, 1)
+			childDrained := make(chan error, 1)
+			gatePath := filepath.Join(dir, "release-child")
+			release := make(chan struct{})
+			joined := make(chan struct{})
+			var releaseOnce sync.Once
+			unblock := func() { releaseOnce.Do(func() { close(release) }) }
+			sentinel := errors.New("fixture consumer reports an error after native EOF")
+			deadline := time.Now().Add(20 * time.Second)
+			ctx, cancel := context.WithDeadline(context.Background(), deadline)
+			defer cancel()
+			defer func() {
+				unblock()
+				select {
+				case <-joined:
+				case <-time.After(25 * time.Second):
+					t.Error("the fixture did not join its own reader")
+				}
+			}()
+
+			s := &session{outerDone: make(chan outerOutcome, 1), stdout: out, stderr: stderr}
+			s.record.Failure = "fixture-recorded qualification failure"
+			if tc.closeHold {
+				s.record.Outer.StdoutSink.CloseAttempted = true
+			}
+			cmd := exec.Command(filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe"), "/d", "/q", "/c", "echo riff-fresh-native-receiving")
+			if tc.lateChild {
+				self, err := os.Executable()
+				if err != nil {
+					t.Fatal(err)
+				}
+				cmd = exec.Command(self, "-test.run=^TestRiffNativeChildFixture$")
+				cmd.Env = append(os.Environ(), "RIFF_NATIVE_RECEIVING_CHILD_GATE="+gatePath)
+			}
+			cmd.Dir = dir
+			go func() {
+				defer close(joined)
+				receipt, runErr := process.RunContainedStreamObserved(ctx, cmd, process.ContainedStreamOptions{
+					CleanupTimeout: 4 * time.Second, AbsoluteCleanupDeadline: deadline.Add(4 * time.Second),
+					StdoutByteLimit: 4096, StderrByteLimit: 4096, Stderr: stderr,
+				}, func(r io.Reader) error {
+					var actual []byte
+					var readErr error
+					if tc.lateChild {
+						reader := bufio.NewReader(r)
+						line, err := reader.ReadString('\n')
+						if err == nil && strings.TrimSpace(line) != "riff-native-child-ready" {
+							err = errors.New("unexpected child readiness")
+						}
+						reached <- err
+						if err != nil {
+							return err
+						}
+						actual, readErr = io.ReadAll(reader)
+						if readErr == nil && !strings.Contains(string(actual), "riff-fresh-native-receiving") {
+							readErr = errors.New("released child did not print its marker")
+						}
+					} else {
+						actual, readErr = io.ReadAll(r)
+					}
+					if !tc.lateChild && readErr == nil && strings.TrimSpace(string(actual)) != "riff-fresh-native-receiving" {
+						readErr = errors.New("unexpected dedicated child output")
+					}
+					if readErr == nil {
+						_, readErr = out.Write(actual)
+					}
+					if tc.lateChild {
+						childDrained <- readErr
+					} else {
+						reached <- readErr
+					}
+					if readErr != nil {
+						return readErr
+					}
+					<-release
+					if tc.readerError {
+						return sentinel
+					}
+					return nil
+				})
+				s.outerDone <- outerOutcome{Observed: receipt, Cause: runErr, Returned: true}
+			}()
+
+			select {
+			case err := <-reached:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-joined:
+				t.Fatal("original process returned before the controlled reader was reached")
+			case <-ctx.Done():
+				t.Fatal("the original child did not reach the fixture reader")
+			}
+			r := &failedPhysicalResult{ControlStopped: true, ControlJoined: true}
+			if pending, err := s.pollFailedPhysical(r); !pending || err != nil || r.OuterReturnReceived || r.StdoutSinkClosed || r.StderrSinkClosed {
+				t.Fatalf("waiting original worker was treated as complete: pending=%v err=%v", pending, err)
+			}
+			if tc.lateChild {
+				if err := os.WriteFile(gatePath, nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+				select {
+				case err := <-childDrained:
+					if err != nil {
+						t.Fatal(err)
+					}
+				case <-ctx.Done():
+					t.Fatal("original child did not complete after the test-owned release")
+				}
+				if pending, err := s.pollFailedPhysical(r); !pending || err != nil || r.OuterReturnReceived {
+					t.Fatalf("drained-but-unreturned reader was treated as final: pending=%v err=%v", pending, err)
+				}
+			}
+			unblock()
+			select {
+			case <-joined:
+			case <-ctx.Done():
+				t.Fatal("original worker did not return after release")
+			}
+			pending, recvErr := s.pollFailedPhysical(r)
+			if pending || !r.OuterReturnReceived || !r.OuterRootIdentity.Known || !r.RootWaitKnown || r.RootExitCode != 0 ||
+				!r.OuterIOSettlement.Stdout.WorkerComplete || !r.OuterIOSettlement.Stdout.EOF || !r.OuterResourcesFinalized || !r.StderrSinkClosed {
+				t.Fatalf("native receipt/settlement incomplete: pending=%v err=%v result=%+v", pending, recvErr, r)
+			}
+			if tc.readerError {
+				if !errors.Is(s.outer.Cause, sentinel) || r.OuterIOSettlement.Complete() {
+					t.Fatalf("consumer error was not preserved separately from physical finalization: %v", s.outer.Cause)
+				}
+			} else if s.outer.Cause != nil {
+				t.Fatalf("ordinary child failed: %v", s.outer.Cause)
+			}
+			if tc.closeHold {
+				if recvErr == nil || !strings.Contains(recvErr.Error(), "must not retry") || r.StdoutSinkClosed {
+					t.Fatalf("previous close refusal unexpectedly retried: %v", recvErr)
+				}
+				if _, err := out.WriteString("fixture confirms original sink remains open"); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if recvErr != nil || !r.StdoutSinkClosed {
+					t.Fatalf("original sinks did not close: %v", recvErr)
+				}
+				if _, err := out.WriteString("closed"); !errors.Is(err, os.ErrClosed) {
+					t.Fatalf("original sink still open: %v", err)
+				}
+			}
+			againPending, againErr := s.pollFailedPhysical(r)
+			if againPending || (againErr != nil) != tc.closeHold || r.QualificationPassed || r.NewCommandsPermitted ||
+				r.CaptureAccessIssued || r.SourceOrCacheAccessIssued || r.QualificationDeadlinesExtended ||
+				s.record.Failure != "fixture-recorded qualification failure" {
+				t.Fatalf("second poll changed the outcome or granted new work: %v", againErr)
+			}
+		})
+	}
+}
+
+func TestRiffNativeChildFixture(t *testing.T) {
+	gate := os.Getenv("RIFF_NATIVE_RECEIVING_CHILD_GATE")
+	if gate == "" {
+		t.Skip("helper only")
+	}
+	if !filepath.IsAbs(gate) || filepath.Base(gate) != "release-child" {
+		t.Fatal("invalid fixture gate")
+	}
+	fmt.Println("riff-native-child-ready")
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(gate); err == nil {
+			fmt.Println("riff-fresh-native-receiving")
+			return
+		} else if !errors.Is(err, os.ErrNotExist) {
+			t.Fatal(err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("controlled release not observed")
+}

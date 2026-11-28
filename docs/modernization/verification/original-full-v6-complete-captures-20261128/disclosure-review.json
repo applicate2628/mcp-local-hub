@@ -1,0 +1,28 @@
+{
+  "schema": "closed-full-v6-all-captures-disclosure-review-v2",
+  "payload_files_scanned": 333,
+  "absolute_host_path_pattern_findings_after_substitution": 0,
+  "original_native_owner_SID_pattern_findings_after_substitution": 0,
+  "github_token_pattern_findings": 0,
+  "openai_token_pattern_findings": 0,
+  "authorization_token_pattern_findings": 0,
+  "hidden_or_encoded_role_values": false,
+  "embedded_default_role_values": false,
+  "native_PIDs_and_handle_values_preserved": true,
+  "sentinel_basis": "exact source-defined test data; see source-fixture-provenance.json",
+  "role_count": 24,
+  "byte_reconstruction_requires_explicit_original_operator_values": true,
+  "scope": "The checks describe the reviewed published payload bytes, not a general scanner guarantee.",
+  "synthetic_fixture_roles": [
+    "synthetic_gui_password_assignment",
+    "synthetic_gui_posix_home_prefix"
+  ],
+  "canonical_v1_findings": {
+    "machine-path-prefix-v1": 4,
+    "value-password-v1": 5
+  },
+  "canonical_locations_sha256": "89ee95d6088435f1c21174fb1319c8d38eefc9b6104a0539693a9307612995da",
+  "source_provenance": "fixture-template-v2-plan.json",
+  "new_scanner_qualification_claimed": false,
+  "prior_pattern_checks_scope": "Historical author checks; canonical v1 findings are preserved separately."
+}

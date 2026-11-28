@@ -1,0 +1,618 @@
+"""Literal user Go gates on the reviewed successor, preserving original issuer custody.
+The incoming CLI image receives the actual marked Product resource and epoch.
+Native actors use a separate tagged Product; no private migration replacement.
+"""
+import sys
+sys.dont_write_bytecode=True
+import argparse,ctypes,hashlib,importlib.util,json,os,re,subprocess,time
+from pathlib import Path
+PART=Path('@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-prepared-v1\\primitives_successor.py')
+PART_SHA='b462499a54c8a22ee63913169b8654072bace536d8d8449834bf78d20741ac7c'
+ADAPTER=Path('@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-prepared-v1\\adapter_successor.py')
+ADAPTER_SHA='2e1ec0c9caabff9ff12787a1edb9b4269a75a95cc5118b7fee3a4a0ffd4788d8'
+
+def sha(path): return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+def load_module(name,path,digest):
+    raw=path.read_bytes()
+    if hashlib.sha256(raw).hexdigest()!=digest:
+        raise RuntimeError("current runtime module changed: "+str(path))
+    spec=importlib.util.spec_from_file_location(name,path)
+    module=importlib.util.module_from_spec(spec)
+    exec(compile(raw,str(path),"exec"),module.__dict__)
+    return module
+
+part=load_module("literal_current_primitives",PART,PART_SHA)
+core=part.core
+RESOURCE=part.RESOURCES[part.CLI]
+MIGRATION_ROOTS = [
+    "TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds",
+    "TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite",
+    "TestMigrateSerena_DrivesSupervisorRestart",
+    "TestMigrateSerena_NilSpecRowsHealedBeforeSpawn",
+    "TestMigrateSerena_LiveSupervisor_ReapClearsTheGateBeforeWrite",
+    "TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry",
+    "TestMigrateSerena_PostCommitReconcileReadyTimeout_ExitsZeroWithWarning",
+    "TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud",
+    "TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts",
+    "TestMigrateSerena_ConcurrentRegisterInWindow_AppearsInCommittedIntent",
+    "TestMigrateSerena_EmptyFirstSnapshot_WorkspaceRegisteredInWindow_RecomputesStart",
+    "TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut",
+    "TestMigrateSerena_EmptyFirstSnapshot_SupervisorRunning_LateReapClearsGate",
+    "TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow",
+]
+CANONICAL_ROOTS = ["TestCanonicalGUIRuntimeRecoveryNativeIndependentReplay",
+                   "TestCanonicalSuccessorNativeControlRetainsOriginalFiles"]
+LITERAL_DEFAULT="go build ./... && go vet ./... && go test -count=1 -timeout 5m ./..."
+LITERAL_STATE="go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/"
+API_STDERR_TESTS=["TestRotateSupervisorStderrSinkIfOversize_AtBoundary",
+    "TestRotateSupervisorStderrSinkIfOversize_ReplacesExistingBackup",
+    "TestSupervisorStderrSinkOversize_MatchesRotationThreshold"]
+CLI_STDERR_EXTRA_TESTS=["TestSupervisorStderrSink_CapturesRuntimePanic",
+    "TestSupervisorStderrSink_CapturesMainGoroutinePanic","TestSupervisorStderrSink_RecordsErrorExit"]
+
+def go_word(value):
+    # The pinned Go quoted.Split has quoting, not shell substitution. The
+    # current fixed paths/metadata need no escape syntax; reject ambiguous text.
+    value=str(value)
+    if any(c in value for c in "\r\n\0'\""):
+        raise RuntimeError("unsupported quote/control byte in explicit Go flag")
+    return "'"+value+"'" if any(c.isspace() for c in value) else value
+
+def product_linker_flags(build_plan):
+    source = build_plan.get("publisherSource", {})
+    if (build_plan.get("commit") != core.CACHE_COMMIT or source.get("file_count") != core.CFG["source_file_count"]
+            or not re.fullmatch(r"[0-9a-f]{64}", source.get("source_epoch", ""))):
+        raise RuntimeError("full receiver flags require its admitted complete current-source Product plan")
+    return " ".join(("-H=windowsgui", "-s", "-w",
+        "-X=mcp-local-hub/internal/buildinfo.version="+build_plan["version"],
+        "-X=mcp-local-hub/internal/buildinfo.commit="+build_plan["commit"],
+        "-X=mcp-local-hub/internal/buildinfo.date="+build_plan["buildDate"],
+        "-X=mcp-local-hub/internal/buildinfo.publisherSourceEpoch="+source["source_epoch"]))
+
+def driver_flags(build_plan, plan_path, plan_sha):
+    words=["-mod=readonly","-p=1","-ldflags=all=-H=windowsgui"]
+    for package in (part.CLI,):
+        words.append("-ldflags="+package+"="+product_linker_flags(build_plan))
+    if plan_path is None:
+        return " ".join(go_word(v) for v in words)
+    words.insert(2,"-json")
+    execution=" ".join(go_word(v) for v in (core.PYTHON,"-I","-S","-B",ADAPTER,"--plan",plan_path,"--plan-sha256",plan_sha))
+    # Nested quoting is unnecessary for this fixed D/Python layout and is
+    # refused, rather than reinterpreting or normalizing a different argv.
+    words.append("-exec="+execution)
+    return " ".join(go_word(v) for v in words)
+
+
+def load_issuer_module():
+    raw = core.ordinary(ADAPTER, False).read_bytes()
+    if hashlib.sha256(raw).hexdigest() != ADAPTER_SHA:
+        raise RuntimeError("reviewed root issuer changed")
+    spec = importlib.util.spec_from_file_location("literal_root_original_issuer", ADAPTER)
+    module = importlib.util.module_from_spec(spec)
+    exec(compile(raw, str(ADAPTER), "exec"), module.__dict__)
+    return module
+
+def verify_inputs(run, restored=False, resource=RESOURCE):
+    for path,digest in run.receipt["input_files"].items():
+        if restored and path==str(resource):
+            rows=[r for r in run.receipt.get("resource_cleanup",[]) if r["source"]==path]
+            if len(rows)!=1 or rows[0]["sha256"]!=digest or resource.exists():
+                raise RuntimeError("owned resource restoration proof is incomplete")
+            # The original mover checked trash immediately; only retained evidence is required later.
+            for preserved in ("preserved",):
+                if sha(core.ordinary(rows[0][preserved],False))!=digest:
+                    raise RuntimeError("restored resource bytes changed")
+            continue
+        if sha(core.ordinary(path,False))!=digest:
+            raise RuntimeError("original literal input changed: "+path)
+
+
+def manifests(run):
+    result={}
+    for phase,packages,tagged in (("default",["./..."],False),("state",[part.API,part.CLI],True)):
+        result[phase]=part.package_manifest(run,packages,"literal-"+phase,tagged)
+        rows=part.objects((run.root/("packages-literal-"+phase+".stdout.txt")).read_text(encoding="utf-8"))
+        if any(row.get("SysoFiles") for row in rows):
+            raise RuntimeError("another source COFF object is present before the single Product resource")
+    if not {part.API,part.CLI,part.PROCESS}.issubset(result["default"]) or set(result["state"])!={part.API,part.CLI}:
+        raise RuntimeError("literal package manifest is incomplete")
+    return result
+
+def original_native_settlement(record, case, receipt, kind, inventory=False, parent_plan=None, issuer=None):
+    """Read only original settlement metadata before any command capture/input hash."""
+    path=core.ordinary(record["receipt"],False)
+    if not path.is_relative_to(core.RUNS):
+        raise RuntimeError("original owner receipt is outside private runs")
+    proof=json.loads(path.read_text(encoding="utf-8"))
+    if proof!=record.get("proof"):
+        raise RuntimeError("original owner receipt differs from adapter's received metadata")
+    binary=receipt["executed_binary"]; digest=receipt["executed_sha256"]
+    argv=["-test.list=."] if inventory else receipt["original_argv"]
+    cwd=receipt["original_cwd"]
+    if kind=="job":
+        if path!=case/"job/result.json":
+            raise RuntimeError("original Job receipt path differs")
+        complete=(proof.get("schema")=="job-fixture-controller-result-v1" and proof.get("fullSuite") is True and proof.get("originalWaitKnown") is True
+            and proof.get("settlementComplete") is True and proof.get("custodyRetained",False) is False
+            and all(proof.get(k) is True for k in ("streamsJoined","controlWriterJoined","stdoutEOF","stderrEOF")))
+        packet_path=path.parent/"packet.json"
+        packet=json.loads(packet_path.read_text(encoding="utf-8"))
+        complete=complete and (packet.get("fullSuite") is True and packet.get("args")==argv
+            and packet.get("binary")==binary and packet.get("sourceDir")==cwd and packet.get("binarySha256")==digest)
+        complete=complete and sha(packet_path)==proof.get("bind",{}).get("packet")
+    elif kind=="foreground":
+        commands=[row for row in receipt["commands"] if Path(row.get("stdout","")).name=="suite-owner.stdout.txt"]
+        if inventory or issuer is None or len(commands)!=1 or path!=case/"suite/result.json":
+            raise RuntimeError("original foreground terminal scope differs")
+        binding={"request_sha256":receipt["request_sha256"],"request_nonce":receipt["request_nonce"],
+            "binary":binary,"expected_sha256":digest,"source_dir":cwd,"run_root":str(case/"suite"),
+            "args":argv,"controller_argv":commands[0]["argv"]}
+        if receipt.get("foreground_request")!=binding:
+            raise RuntimeError("original foreground issuer request differs")
+        terminal=issuer.validate_foreground_terminal(proof,binding)
+        if terminal=="no-child" and (receipt.get("status")!="FAIL"
+                or receipt.get("foreground_no_child") is not True
+                or type(commands[0].get("exit_code")) is not int or commands[0]["exit_code"]==0):
+            raise RuntimeError("closed foreground creation failure cannot qualify a successful suite")
+        complete=True
+    else:
+        namespace=kind=="namespace"
+        if kind not in ("namespace","contained"):
+            raise RuntimeError("unknown original owner kind")
+        if not namespace and path!=case/("inventory/result.json" if inventory else "suite/result.json"):
+            raise RuntimeError("original contained receipt path differs")
+        if namespace:
+            expected_parent=Path(receipt["namespace_private_scope"]["parent"])
+            commands=[row for row in receipt["commands"] if Path(row.get("stdout","")).name=="suite-owner.stdout.txt"]
+            if inventory or issuer is None or len(commands)!=1 or path!=expected_parent/"namespace-suite-receipt.json":
+                raise RuntimeError("original namespace terminal scope differs")
+            binding={"request_sha256":receipt["request_sha256"],"request_nonce":receipt["request_nonce"],
+                "binary":binary,"expected_sha256":digest,"source_dir":cwd,"parent":str(expected_parent),
+                "args":argv,"controller_argv":commands[0]["argv"],"test_state_path_env":receipt["phase"]=="state"}
+            if receipt.get("namespace_request")!=binding:
+                raise RuntimeError("original namespace issuer request differs")
+            terminal=issuer.validate_namespace_terminal(proof,binding)
+            if terminal=="prechild-refusal" and (receipt.get("status")!="FAIL"
+                    or receipt.get("namespace_prechild_refusal") is not True
+                    or type(commands[0].get("exit_code")) is not int or commands[0]["exit_code"]==0):
+                raise RuntimeError("closed namespace refusal cannot qualify as a successful suite")
+            complete=True
+        else:
+            complete=(proof.get("schema")=="literal-contained-test-run-v1"
+                and proof.get("binary")==binary and proof.get("binary_sha256")==digest
+                and proof.get("source_dir")==cwd and proof.get("args")==argv
+                and proof.get("root_wait_known") is True and proof.get("settlement_complete") is True
+                and proof.get("custody_retained") is False and proof.get("inventory") is inventory)
+    if not complete:
+        raise RuntimeError("original native/IO settlement remains unverified")
+    if sha(path)!=record.get("sha256"):
+        raise RuntimeError("settled original owner receipt hash differs")
+    return {"kind":kind,"receipt":str(path),"receipt_sha256":record["sha256"]}
+
+def phase_command_args(plan):
+    return ([str(core.GO),"test","-count=1","-timeout","5m","./..."] if plan["phase"]=="default" else
+            [str(core.GO),"test","-tags=test_state_path_env","-count=1","-timeout","5m","./internal/api/","./internal/cli/"])
+
+def phase_physical_closure(run, issuer, command, direct_exit_code):
+    """Receive only closure from this stopped issuer and its retained Invocations."""
+    if (run.original_invocation_issuer is not issuer or issuer.root != run.root
+            or type(direct_exit_code) is not int
+            or type(command.get("original_pid")) is not int or command["original_pid"]<=0):
+        raise RuntimeError("whole-Go physical receiving requires its original issuer")
+    phases=[phase for phase,plan in issuer.plans.items()
+            if command.get("argv")==phase_command_args(plan)
+            and command.get("cwd")==str(core.REPO)]
+    if len(phases)!=1:
+        raise RuntimeError("whole-Go physical receiving operands differ")
+    proof=issuer.receive_phase_physical_closure(phases[0])
+    return {"schema":"literal-phase-original-physical-closure-v1", "status":"CLOSED",
+            "physical_complete":True,"original_controller_pid":command["original_pid"],
+            "original_direct_exit_code":direct_exit_code,
+            "phase":phases[0], "original_issuer":proof, "qualification_passed":False,
+            "source_or_cache_access_issued":False,"qualification_deadlines_extended":False,
+            "capture_access_issued":False, "new_commands_permitted":False}
+
+def phase_capture_guard(run, plan, command):
+    """Original child observations gate receipt of the whole Go command's captures."""
+    phase=plan["phase"]
+    if command.get("argv")!=phase_command_args(plan) or command.get("cwd")!=str(core.REPO):
+        raise RuntimeError("whole-Go capture guard received different original operands")
+    if (run.root/"unsafe-stop.json").exists():
+        raise RuntimeError("an original receiver retained unknown custody")
+    registry=core.ordinary(plan["invocations"],True)
+    if registry!=run.root/("invocations-"+phase):
+        raise RuntimeError("original invocation registry differs")
+    starts,ends={},{}
+    for suffix,target in (("started",starts),("completed",ends)):
+        for path in sorted(registry.glob("*."+suffix+".json")):
+            row=json.loads(path.read_text(encoding="utf-8"))
+            package=row["package"]
+            if (package not in plan["packages"] or package in target or
+                    path.name!=hashlib.sha256(package.encode()).hexdigest()+"."+suffix+".json"):
+                raise RuntimeError("unbound or duplicate original invocation metadata")
+            target[package]=row
+    if set(starts)!=set(ends):
+        raise RuntimeError("original receiver invocation lacks its terminal observation")
+    received=[]
+    for package,end in ends.items():
+        if end["run"]!=starts[package]["run"]:
+            raise RuntimeError("original receiver root changed")
+        case=core.ordinary(end["run"],True)
+        if case.parent!=core.RUNS:
+            raise RuntimeError("original receiver is outside private runs")
+        receipt_path=case/"receipt.json"
+        receipt=json.loads(receipt_path.read_text(encoding="utf-8"))
+        if (receipt.get("package")!=package or
+                receipt.get("phase")!=phase or receipt.get("plan_sha256")!=plan["plan_sha256"] or
+                receipt.get("native_custody_settled") is not True or receipt.get("commands_quiescent") is not True):
+            raise RuntimeError("original receiver command/native settlement is not complete")
+        proofs=[]
+        commands=receipt.get("commands",[])
+        for name,key,kind,inventory in (("inventory-owner","inventory_owner","contained",True),
+                                       ("suite-owner","owner",receipt.get("owner",{}).get("kind"),False)):
+            attempted=any(Path(row.get("stdout","")).name==name+".stdout.txt" for row in commands)
+            if attempted:
+                proofs.append(original_native_settlement(receipt[key],case,receipt,kind,inventory,plan,run.original_invocation_issuer))
+        if sha(receipt_path)!=end["receipt_sha256"]:
+            raise RuntimeError("settled original receiver receipt hash differs")
+        replay_ack = run.original_invocation_issuer.receive_replay(phase, package, end)
+        received.append({"package":package,"receipt":str(receipt_path),"original_replay":replay_ack,
+                         "receipt_sha256":end["receipt_sha256"],"original_owners":proofs})
+    # Missing unstarted packages are a coverage failure, not fabricated process activity.
+    return {"schema":"literal-phase-original-settlement-v1","phase":phase,"received":received}
+
+
+def collect_phase(run, plan, code, stdout_path):
+    expected={p:[] for p in plan["packages"]}
+    expected_invocations={p for p,row in plan["packages"].items() if row["test_go_files"] or row["external_test_go_files"]}
+    registry=Path(plan["invocations"])
+    starts,ends={},{}
+    for suffix,target in (("started",starts),("completed",ends)):
+        for path in sorted(registry.glob("*."+suffix+".json")):
+            row=json.loads(path.read_text(encoding="utf-8"))
+            package=row["package"]
+            key=hashlib.sha256(package.encode()).hexdigest()
+            if package in target or path.name!=key+"."+suffix+".json":
+                raise RuntimeError("duplicate or unbound Go invocation marker")
+            target[package]=row
+    invocation_ok=set(starts)==set(ends)==expected_invocations
+    custody_safe=set(starts)==set(ends)
+    records={}
+    for package,row in ends.items():
+        if package not in expected_invocations or row["run"]!=starts[package]["run"]:
+            raise RuntimeError("unexpected literal receiver")
+        root=core.ordinary(row["run"],True)
+        if root.parent!=core.RUNS:
+            raise RuntimeError("receiver evidence is not an original private run")
+        receipt_path=root/"receipt.json"
+        if sha(receipt_path)!=row["receipt_sha256"]:
+            raise RuntimeError("completed receiver receipt changed")
+        receipt=json.loads(receipt_path.read_text(encoding="utf-8"))
+        if receipt.get("package")!=package or receipt.get("phase")!=plan["phase"] or receipt.get("plan_sha256")!=plan["plan_sha256"]:
+            raise RuntimeError("receiver receipt is not bound to this literal phase")
+        tests=receipt.get("inventory",{}).get("tests",{}).get(package)
+        if tests is not None:
+            expected[package]=tests
+        else:
+            invocation_ok=False
+        passed=(receipt.get("status")=="PASS" and row["exit_code"]==0
+                and receipt.get("adapter_exit_code")==0 and receipt.get("native_custody_settled") is True
+                and receipt.get("image_unchanged") is True and receipt.get("bundle_unchanged") is True
+                and receipt.get("original_inputs_unchanged") is True
+                and len(receipt.get("coverage",[]))==1 and receipt["coverage"][0]["passed"])
+        passed=passed and receipt.get("headless_configuration_received") is True and receipt.get("receiver_environment",{}).get("SERENA_HOME")==str(root/"profile")
+        invocation_ok=invocation_ok and passed
+        custody_safe=custody_safe and receipt.get("native_custody_settled") is True
+        records[package]={"run":str(root),"receipt_sha256":sha(receipt_path),"passed":passed,
+                          "native_custody_settled":receipt.get("native_custody_settled")}
+    mandatory=[]
+    for package in plan["packages"]:
+        if package==part.PROCESS:
+            mandatory += [(package,t) for t in part.JOB_TESTS]+[(package,part.JOB_TESTS[1]+"/real-native-typed-gc-and-creator")]
+        if package==part.API:
+            mandatory += [(package,t) for t in (*part.NAMESPACE_TESTS,*part.PEER_TESTS,*API_STDERR_TESTS)]
+            if plan["phase"]=="state":
+                mandatory.append((package,"TestAttachExisting_PublicCLIReceiving"))
+        if package==part.CLI:
+            mandatory += [(package,t) for t in (
+                "TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade","TestWindowsProductPreflightOriginalEntrySet",
+                *CANONICAL_ROOTS,*CLI_STDERR_EXTRA_TESTS,*MIGRATION_ROOTS)]
+    passed=part.ledger(run,"literal-"+plan["phase"],expected,part.events(Path(stdout_path).read_text(encoding="utf-8")),
+                       code,mandatory)
+    phase={"command_exit_code":code,"passed":passed and invocation_ok,"native_custody_settled":custody_safe,
+           "expected_invocations":sorted(expected_invocations),"started_invocations":sorted(starts),
+           "completed_invocations":sorted(ends),"missing_invocations":sorted(expected_invocations-set(ends)),
+           "receiver_records":records,"no_test_file_packages":sorted(set(plan["packages"])-expected_invocations)}
+    run.receipt.setdefault("literal_phases",{})[plan["phase"]]=phase
+    run.save()
+    return phase
+
+
+
+
+
+
+def stage_product_copy(run, original, build_plan, role):
+    """Copy three original Product files; change only the fixture product_root."""
+    if role not in ("product","native-product"):
+        raise RuntimeError("explicit Product copy role required")
+    source=core.ordinary(original["path"],True)
+    destination=run.root/role
+    copied=core.copy_tree(source,destination)
+    if copied!=original["files"] or core.tree(destination)!=original["files"]:
+        raise RuntimeError("owned Product copy differs from the exact admitted bundle")
+    fixture_source=core.ordinary(original["fixture"],False)
+    fixture=json.loads(fixture_source.read_text(encoding="utf-8"))
+    files=original["files"]
+    epoch=(build_plan.get("publisherSource") or {}).get("source_epoch","")
+    expected={"product_root":str(source),"source_epoch":epoch,"product_version":build_plan["version"],
+              "build_id":build_plan["entrySetBuildID"],"reverse_projection":"../mcphub.exe",
+              "canonical_entry_sha256":files["mcphub.exe"]["sha256"],
+              "product_sha256":files["mcphub-product/mcphub.exe"]["sha256"],
+              "identity_sha256":files["windows-product-identity.json"]["sha256"]}
+    if fixture!=expected:
+        raise RuntimeError("original Product fixture fields differ from its three-file bundle")
+    target=run.root/("owned-"+role+"-fixture.json")
+    core.new_json(target,dict(fixture,product_root=str(destination)))
+    run.receipt.setdefault("owned_product_copies",{})[role]={
+        "source_root":str(source),"path":str(destination),"files":copied,"bundle_bytes_identical":True,
+        "original_fixture":{"path":str(fixture_source),"sha256":sha(fixture_source)},
+        "fixture":{"path":str(target),"sha256":sha(target)},"fixture_changed_fields":["product_root"]}
+    for relative,measurement in copied.items():
+        run.receipt["input_files"][str(destination/relative)]=measurement["sha256"]
+    run.receipt["input_files"][str(target)]=sha(target)
+    return dict(original,path=str(destination),fixture=str(target))
+
+def execute(args):
+    issuers=[]
+    runs=[]
+    try:
+        return execute_gate(args,issuers,runs)
+    finally:
+        # Covers failures in source finalization, receipt publication and finish
+        # itself. These same owners outlive the Go command and every consumer.
+        try:
+            for issuer in issuers:
+                issuer.retain_failed_invocations()
+        finally:
+            for run in runs:
+                if getattr(run,"_failed_full_physical_closed",False):
+                    continue
+                owned_failure=any(item["state"]!="complete" and any(
+                    custody.get("run") is run and custody["row"] is item["row"]
+                    for custody in core._guard.RETAINED_COMMANDS)
+                    for item in run._command_receiving.values())
+                if owned_failure:
+                    while True:
+                        try:
+                            run.retain_failed_full_workers(getattr(run,"_failure_receipt_published",False))
+                            break
+                        except BaseException:
+                            if getattr(run,"_failed_full_physical_closed",False):
+                                raise
+                            # Keep the same actual Run if metadata publication or
+                            # an interrupted finalizer fails before physical closure.
+                            continue
+
+
+
+def execute_gate(args,issuers,runs):
+    if args.name!=core.FULL_RUN.name or args.commit!=core.CACHE_COMMIT:
+        raise RuntimeError("fixed current driver and source required")
+    run=part.begin(args,"literal-exact",retain=runs.append)
+    resource_digest=None
+    restoration_safe=True
+    source_products={}
+    owned_products={}
+    passed=False
+    issuer=None
+    try:
+        run.receipt.update({"schema":"literal-go-prepush-gate-v1",
+            "literal_pre_push_gate_status":"running original current-source commands",
+            "literal_commands":[LITERAL_DEFAULT,LITERAL_STATE],"literal_pre_push_commands_passed":False,
+            "acceptance_roots":{"migration":MIGRATION_ROOTS,
+                "canonical":CANONICAL_ROOTS,"api_stderr":API_STDERR_TESTS,
+                "cli_stderr_additional":CLI_STDERR_EXTRA_TESTS,
+                "original_required_count":19,
+                "scope":"actual original full-stream roots in both modes; no private replacement image"}})
+        for path,digest in ((PART,PART_SHA),(ADAPTER,ADAPTER_SHA)):
+            if sha(core.ordinary(path,False))!=digest: raise RuntimeError("current literal helper changed")
+            run.receipt["input_files"][str(path)]=digest
+        run.receipt["input_files"][str(Path(__file__).absolute())]=sha(Path(__file__))
+        run.receipt["input_files"][str(run.root/"source-before.json")]=sha(run.root/"source-before.json")
+        expected_acceptance={"migration_roots":MIGRATION_ROOTS,"canonical_roots":CANONICAL_ROOTS,
+            "api_stderr_roots":API_STDERR_TESTS,"cli_stderr_extra":CLI_STDERR_EXTRA_TESTS}
+        if any(core.CFG["acceptance"].get(key)!=value for key,value in expected_acceptance.items()):
+            raise RuntimeError("declared mandatory root inventory differs from the original agreement")
+        for role,label in (("product","product"),("native_product","native-product")):
+            source_products[role]=core.receive_product_inputs(role)
+            original=source_products[role]["actual_product"]
+            for relative,row in original["files"].items():
+                run.receipt["input_files"][str(Path(original["path"])/relative)]=row["sha256"]
+            owned_products[role]=stage_product_copy(run,original,source_products[role]["build_plan"],label)
+        built=dict(source_products["product"],actual_product=owned_products["product"])
+        receiver_build_plan=built["build_plan"]
+        native=owned_products["native_product"]
+        actor_fixture=Path(native["fixture"])
+        run.receipt["marked_receiver_source"]={"binding":core.CFG["product"]["inputs"],
+            "product_source_commit":core.CACHE_COMMIT,"publisher_source":built["publisher_source"],
+            "resource":built["resource"],"receiver_linker_flags":["-s","-w"],
+            "historical_runtime_qualification_inherited":False}
+        run.receipt["native_actor_source"]={"binding":core.CFG["native_product"]["inputs"],
+            "product_source_commit":core.CACHE_COMMIT,"isolated_tag":"test_state_path_env",
+            "source_epoch":"","private_copy":native}
+        core.new_json(run.root/"product-inputs.json",built)
+        run.receipt["input_files"][str(run.root/"product-inputs.json")]=sha(run.root/"product-inputs.json")
+        package_manifests=manifests(run)
+        tools={key:row["path"] for key,row in core.CFG["controllers"].items()}
+        resource=core.checked_input(core.CFG["product"]["compiler_resource"])
+        if RESOURCE.exists(): raise RuntimeError("single compiler resource target already exists")
+        resource_digest=core.copy_file(resource,RESOURCE)
+        run.receipt["input_files"][str(RESOURCE)]=resource_digest
+        plans={}
+        issuer_module=load_issuer_module()
+        plan_inputs=dict(run.receipt["input_files"])
+        for phase in ("default","state"):
+            registry=run.root/("invocations-"+phase);registry.mkdir()
+            plan={"schema":"literal-go-test-plan-v1","phase":phase,"driver_root":str(run.root),
+                  "commit":args.commit,"test_source_commit":args.commit,
+                  "product_source_commit":core.PRODUCT_SOURCE_COMMIT,
+                  "cli_owner_protocol":core.CFG["cli_owner_protocol"],
+                  "receiver_product_source_commit":core.CACHE_COMMIT,
+                  "receiver_publisher_source":built["publisher_source"],"receiver_linker_flags":["-s","-w"],
+                  "marked_product_inputs":core.CFG["product"]["inputs"],
+                  "serena_preparation_tools":core.CFG["serena_preparation_tools"],
+                  "source_snapshot":str(run.root/"source-before.json"),
+                  "source_snapshot_sha256":sha(run.root/"source-before.json"),
+                  "packages":package_manifests[phase],"temporary_directory":run.env["GOTMPDIR"],
+                  "invocations":str(registry),"original_issuer":issuer_module.issuer_plan(registry),"tools":tools,"build_receipt":str(run.root/"product-inputs.json"),
+                  "native_actor_fixture":str(actor_fixture),"native_product":native,
+                  "acceptance":dict(core.CFG["acceptance"]),
+                  "attach_environment":{"MCPHUB_ATTACH_TEST_BIN":str(Path(native["path"])/"mcphub-product/mcphub.exe"),
+                                        "MCPHUB_ATTACH_TEST_BIN_SHA256":native["files"]["mcphub-product/mcphub.exe"]["sha256"]},
+                  "receiver_overrides":{"GOFLAGS":"-mod=readonly -ldflags=-H=windowsgui",
+                                        "GOMODCACHE":run.env["GOMODCACHE"],"PATH":run.env["PATH"]},
+                  "recorded_linker_flags":part.CLI+"="+product_linker_flags(receiver_build_plan),
+                  "input_files":dict(plan_inputs),"cache_bootstrap":run.receipt["cache_bootstrap"]}
+            path=run.root/("plan-"+phase+".json");core.new_json(path,plan)
+            digest=sha(path);plans[phase]=dict(plan,plan_sha256=digest)
+            run.receipt.setdefault("plans",{})[phase]={"path":str(path),"sha256":digest,
+               "GOFLAGS":driver_flags(receiver_build_plan,path,digest)}
+        for row in run.receipt["plans"].values():
+            run.receipt["input_files"][row["path"]]=row["sha256"]
+        run.save()
+        issuer=issuer_module.OriginalInvocationIssuer(run.root,plans)
+        issuers.append(issuer)
+        run.original_invocation_issuer=issuer
+        for phase in ("default","state"):
+            run.command_guards["literal-"+phase]=lambda row, phase=phase: phase_capture_guard(run,plans[phase],row)
+        baseline_flags=run.env["GOFLAGS"]
+        run.env["GOFLAGS"]=driver_flags(receiver_build_plan,None,None)
+        run.receipt["build_vet_GOFLAGS"]=run.env["GOFLAGS"]
+        run.save()
+        for phase in ("build","vet"):
+            _,code=part.command(run,[core.GO,phase,"./..."],"literal-"+phase,timeout=900)
+            run.receipt.setdefault("literal_build_chain",{})[phase]=code
+            if code:
+                break
+        if run.receipt.get("literal_build_chain")=={"build":0,"vet":0}:
+            run.env["GOFLAGS"]=run.receipt["plans"]["default"]["GOFLAGS"]
+            issuer.start_phase("default")
+            try:
+                _,code=part.command(run,[core.GO,"test","-count=1","-timeout","5m","./..."],"literal-default",
+                                   timeout=max(900,360*len(package_manifests["default"])),
+                                   physical_receiver=lambda row,code,original=run,owner=issuer: phase_physical_closure(original,owner,row,code))
+            finally:
+                issuer.stop_phase()
+            phase=collect_phase(run,plans["default"],code,run.root/"literal-default.stdout.txt")
+            restoration_safe=restoration_safe and phase["native_custody_settled"]
+        if restoration_safe and run.commands_quiescent() and not (run.root/"unsafe-stop.json").exists():
+            run.env["GOFLAGS"]=run.receipt["plans"]["state"]["GOFLAGS"]
+            issuer.start_phase("state")
+            try:
+                _,code=part.command(run,[core.GO,"test","-tags=test_state_path_env","-count=1","-timeout","5m",
+                                         "./internal/api/","./internal/cli/"],"literal-state",timeout=900,
+                                   physical_receiver=lambda row,code,original=run,owner=issuer: phase_physical_closure(original,owner,row,code))
+            finally:
+                issuer.stop_phase()
+            phase=collect_phase(run,plans["state"],code,run.root/"literal-state.stdout.txt")
+            restoration_safe=restoration_safe and phase["native_custody_settled"]
+        run.env["GOFLAGS"]=baseline_flags
+        if not restoration_safe or not run.commands_quiescent() or (run.root/"unsafe-stop.json").exists():
+            raise RuntimeError("original settlement incomplete; no later source/input observation")
+        verify_inputs(run)
+        run.receipt["original_inputs_unchanged"]=True
+        run.receipt["actual_product_unchanged"]=all(
+            core.tree(Path(source_products[role]["actual_product"]["path"]))==source_products[role]["actual_product"]["files"]
+            and core.tree(Path(owned_products[role]["path"]))==owned_products[role]["files"]
+            for role in ("product","native_product"))
+        if not run.receipt["actual_product_unchanged"]:
+            raise RuntimeError("actual separate Product bundle changed")
+    except BaseException as exc:
+        run.receipt["failure"]=type(exc).__name__+": "+str(exc)
+        if isinstance(exc,subprocess.TimeoutExpired):
+            restoration_safe=False
+        if any(p.name.endswith(".started.json") and not p.with_name(p.name.replace(".started.json",".completed.json")).exists()
+               for folder in run.root.glob("invocations-*") for p in folder.glob("*.started.json")):
+            restoration_safe=False
+    finally:
+        final_errors=[]
+        restored=False
+        if issuer is not None:
+            issuer.stop_phase()
+            run.receipt["original_invocation_issuer"]={
+                "worker_joined":issuer.worker is None, "failure":issuer.failure,
+                "publication_errors":list(issuer.publication_errors),
+                "actual_invocations_retained":len(issuer.invocations),
+                "ownership_survives_cmd_go_consumer_exit":True}
+            if issuer.failure:
+                restoration_safe=False
+        invocations_closed=all(owner.worker is None and all(
+            original.commands_quiescent() and original.receipt.get("native_custody_settled") is True
+            for original in owner.invocations) for owner in issuers)
+        run.receipt["all_original_invocations_closed"]=invocations_closed
+        if not invocations_closed:
+            restoration_safe=False
+        if not run.commands_quiescent() or (run.root/"unsafe-stop.json").exists():
+            restoration_safe=False
+        run.receipt["command_quiescence"]=run.quiescence_snapshot()
+        run.receipt["commands_quiescent"]=run.commands_quiescent()
+        if restoration_safe:
+            try:
+                if resource_digest is not None and RESOURCE.exists():
+                    part.restore_resource(run,RESOURCE,resource_digest)
+                    restored=True
+                elif RESOURCE.exists():
+                    run.receipt["retained_source_resource"]={"path":str(RESOURCE),"reason":"staged-resource ownership is unverified"}
+            except BaseException as exc:
+                final_errors.append("resource restoration: "+type(exc).__name__+": "+str(exc))
+            run.env["GOFLAGS"]="-mod=readonly -ldflags=-H=windowsgui"
+            try:
+                after=core.source_snapshot(run,"after")
+                run.receipt["source_unchanged"]=(after==run.receipt["source_before"]
+                                                and not any(p.exists() for p in part.SOURCE_RESOURCES))
+            except BaseException as exc:
+                run.receipt["source_unchanged"]=False
+                final_errors.append("final source observation: "+type(exc).__name__+": "+str(exc))
+            # A timeout during source observation closes the gate for all later reads.
+            if run.commands_quiescent():
+                try:
+                    verify_inputs(run,restored)
+                    run.receipt["original_inputs_unchanged"]=True
+                except BaseException as exc:
+                    run.receipt["original_inputs_unchanged"]=False
+                    final_errors.append("final input observation: "+type(exc).__name__+": "+str(exc))
+            else:
+                restoration_safe=False
+                run.receipt["final_input_observation"]="NOT_PERFORMED: original command completion is unknown"
+        else:
+            run.receipt["retained_source_resource"]={"path":str(RESOURCE),
+                "reason":"original command/native/IO settlement is unverified; no automatic cleanup or retry"}
+            run.receipt["finalization_observations"]={
+                "resource_disposition":"NOT_PERFORMED","source_after":"NOT_PERFORMED","input_hashes":"NOT_PERFORMED",
+                "reason":"original command/native/IO settlement is unverified; retained metadata only"}
+        run.receipt["command_quiescence"]=run.quiescence_snapshot()
+        run.receipt["commands_quiescent"]=run.commands_quiescent()
+        if final_errors:
+            run.receipt["finalization_errors"]=final_errors
+        phases=run.receipt.get("literal_phases",{})
+        passed=(not run.receipt.get("failure") and not final_errors
+                and run.receipt.get("literal_build_chain")=={"build":0,"vet":0}
+                and set(phases)=={"default","state"} and all(p["passed"] for p in phases.values())
+                and run.receipt.get("source_unchanged") is True and run.receipt.get("original_inputs_unchanged") is True
+                and run.receipt.get("actual_product_unchanged") is True
+                and restoration_safe and run.commands_quiescent())
+        run.receipt["literal_pre_push_commands_passed"]=passed
+        run.receipt["literal_pre_push_gate_status"]="original commands passed; root independent review still required" if passed else "FAIL; literal gate remains open"
+        run.finish("PASS" if passed else "FAIL")
+    return 0 if passed else 1
+
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--name",required=True,type=core.scope_name)
+    parser.add_argument("--commit",required=True)
+    args=parser.parse_args()
+    core._guard.hidden_console()
+    return execute(args)
+if __name__=="__main__":
+    raise SystemExit(main())

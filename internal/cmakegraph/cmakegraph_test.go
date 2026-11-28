@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/process"
 )
 
 func writeFile(t *testing.T, dir, rel, content string) string {
@@ -1250,7 +1252,9 @@ func denyDirectoryListing(t *testing.T, dir string) {
 		// well-known Everyone SID literal (locale-proof; a display name
 		// varies by system language).
 		run := func(args ...string) error {
-			return exec.Command("icacls", args...).Run()
+			cmd := exec.Command("icacls", args...)
+			process.NoConsole(cmd)
+			return cmd.Run()
 		}
 		if err := run(dir, "/deny", "*S-1-1-0:(RX)"); err != nil {
 			t.Skipf("icacls deny unavailable on this host: %v", err)

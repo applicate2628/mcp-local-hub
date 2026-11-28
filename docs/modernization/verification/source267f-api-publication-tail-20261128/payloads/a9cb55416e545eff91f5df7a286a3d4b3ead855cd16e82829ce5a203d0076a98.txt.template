@@ -1,0 +1,129 @@
+{
+    "schema":  "publication-original-root-data-audit-v1",
+    "status":  "PASS",
+    "physical_complete":  true,
+    "scope":  "cache-acceptance-stage-20261128-v29",
+    "config_sha256":  "240624ac9e3dbee30722c037e45e029e982b5a39a31a5c5c8ad40be4a8214eb9",
+    "receipt_sha256":  "22addce02465bd8aefc76a0c4e270309ae381be382a85c4b8b9b5130625c2555",
+    "root_sha256":  "5bdf509c1df6b5b63c3a356882b32dfa911f24295b45af28f5eba4590d711472",
+    "outer_sha256":  "6ab939f565e9a72bcb406d3e4cbdc6beedb150aadaea9a6c4afbdb44dad36284",
+    "commands_verified":  7,
+    "captures_verified":  14,
+    "results":  [
+                    {
+                        "name":  "head.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rev-parse",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.042082699947059155,
+                        "exit_code":  0,
+                        "stdout_sha256":  "f665546f0d1211b43018ecd17c352657643c26cfea06b729ca0ac3bfac68a795",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "264a0601b7d027652c12ec88ae4debd6c3bfb69f\n"
+                    },
+                    {
+                        "name":  "retain-rejected-local-commit.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "branch",
+                                     "work/publication-rejected-264a-20261128-v1",
+                                     "264a0601b7d027652c12ec88ae4debd6c3bfb69f"
+                                 ],
+                        "seconds":  0.039821699960157275,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "rebuild-unpublished-history-from-public-parent.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "reset",
+                                     "--soft",
+                                     "27d90e626465dc9a3a012e50785d62785d4c5e7e"
+                                 ],
+                        "seconds":  0.42523549997713417,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "stage-corrected715-and-report.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "add",
+                                     "--",
+                                     "docs/modernization/verification/successor-publication-trail-20261128",
+                                     "docs/modernization/verification/successor59f-preparation-20261128",
+                                     "docs/modernization/verification/original-full-v6-complete-captures-20261128",
+                                     "docs/modernization/verification/original-full-v6-owner-replay-20261128",
+                                     "docs/modernization/verification/old-cli-budget-analysis-20261128",
+                                     "docs/modernization/verification/cli-shared-image-candidate-20261128",
+                                     "docs/modernization/verification/old-cli-budget-parser-v2-20261128",
+                                     "docs/modernization/verification/source59f-closed-api-diagnostics-20261128",
+                                     ".plans/2026-11/open-pr-integration-20261117.md"
+                                 ],
+                        "seconds":  0.2272811000002548,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "review-human-markdown-whitespace.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "diff",
+                                     "--cached",
+                                     "--check",
+                                     "--",
+                                     "docs/modernization/verification/successor-publication-trail-20261128/README.md",
+                                     "docs/modernization/verification/successor59f-preparation-20261128/README.md",
+                                     "docs/modernization/verification/original-full-v6-complete-captures-20261128/README.md",
+                                     "docs/modernization/verification/original-full-v6-owner-replay-20261128/README.md",
+                                     "docs/modernization/verification/old-cli-budget-analysis-20261128/README.md",
+                                     "docs/modernization/verification/cli-shared-image-candidate-20261128/README.md",
+                                     "docs/modernization/verification/old-cli-budget-parser-v2-20261128/README.md",
+                                     "docs/modernization/verification/source59f-closed-api-diagnostics-20261128/README.md",
+                                     ".plans/2026-11/open-pr-integration-20261117.md"
+                                 ],
+                        "seconds":  0.05411230004392564,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "exact716-staged-paths.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "diff",
+                                     "--cached",
+                                     "--name-only"
+                                 ],
+                        "seconds":  0.04478350002318621,
+                        "exit_code":  0,
+                        "stdout_sha256":  "fd27ff615cb8fca6b2f8b645be09afd153a113d626ef37f83fea37aeb221c64a",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ".plans/2026-11/open-pr-integration-20261117.md\ndocs/modernization/verification/cli-shared-image-candidate-20261128/.gitattributes\ndocs/modernization/verification/cli-shared-image-candidate-20261128/README.md\ndocs/modernization/verification/cli-shared-image-candidate-20261128/afterimages/internal/cli/process_identity_match_windows_test.go\ndocs/modernization/verification/cli-shared-image-candidate-20261128/afterimages/internal/cli/settings_registry_test.go\ndocs/modernization/verification/cli-shared-image-candidate-20261128/artifact-manifest.json\ndocs/modernization/verification/cli-shared-image-candidate-20261128/evidence.json\ndocs/modernization/verification/cli-shared-image-candidate-20261128/share-foreign-test-image.patch\ndocs/modernization/verification/old-cli-budget-analysis-20261128/.gitattributes\ndocs/modernization/verification/old-cli-budget-analysis-20261128/README.md\ndocs/modernization/verification/old-cli-budget-analysis-20261128/analysis.json\ndocs/modernization/verification/old-cli-budget-analysis-20261128/artifact-manifest.json\ndocs/modernization/verification/old-cli-budget-analysis-20261128/not-started-or-paused.json\ndocs/modernization/verification/old-cli-budget-analysis-20261128/parse_closed_cli_durations.py\ndocs/modernization/verification/old-cli-budget-analysis-20261128/source-correspondence.json\ndocs/modernization/verification/old-cli-budget-analysis-20261128/top-level-terminal-ledger.json\ndocs/modernization/verification/old-cli-budget-parser-v2-20261128/.gitattributes\ndocs/modernization/verification/old-cli-budget-parser-v2-20261128/README.md\ndocs/modernization/verification/old-cli-budget-parser-v2-20261128/artifact-manifest.json\ndocs/modernization/verification/old-cli-budget-parser-v2-20261128/ascii-to-utf8.patch\ndocs/modernization/verification/old-cli-budget-parser-v2-20261128/evidence.json\ndocs/modernization/verification/old-cli-budget-parser-v2-20261128/original-data-failure.json\ndocs/modernization/verification/old-cli-budget-parser-v2-20261128/parse_closed_cli_durations_v2.py\ndocs/modernization/verification/original-full-v6-complete-captures-20261128/.gitattributes\ndocs/modernization/verification/original-full-v6-complete-captures-20261128/README.md\ndocs/modernization/verification/original-full-v6-complete-captures-20261128/artifact-manifest.json\ndocs/modernization/verification/original-full-v6-complete-captures-20261128/canonical-finding-locations.json\ndocs/modernization/verification/original-full-v6-complete-captures-20261128/capture"
+                    },
+                    {
+                        "name":  "corrected-index-tree.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "write-tree"
+                                 ],
+                        "seconds":  0.08725929993670434,
+                        "exit_code":  0,
+                        "stdout_sha256":  "178d398bb9f1433de8e4840f53797e7c29dcbd2b6abc9dbc23a3cd1e2d7b39d0",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "56709af8fd8692028dc89ef743f3fb708a106e02\n"
+                    }
+                ],
+    "tests_executed":  false,
+    "reviewed_utc":  "2026-11-28T16:59:36.7313318Z"
+}

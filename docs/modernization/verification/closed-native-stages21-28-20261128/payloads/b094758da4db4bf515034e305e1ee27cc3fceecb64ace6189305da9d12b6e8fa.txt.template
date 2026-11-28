@@ -1,0 +1,46 @@
+# Focused Source59f baseline v2: independent cache transfer
+
+Status: **PREPARED / NOT EXECUTED**. Root owns the review and the existing original native route. This packet neither runs the transfer nor starts Go, tests, or a new controller.
+
+## Files and provenance
+
+| File | Bytes | SHA-256 |
+| --- | ---: | --- |
+| copy_closed_runtime_caches.original.py.txt | 11354 | 1a0314874d6141f56d960c431ca27e6ddef518b7b5b83878793f8fb0fb443d79 |
+| copy_closed_product_caches.py | 11431 | e4c26cd01068b145cb6117136f443fe8d12cd79aad2c7cbbc811b54a5fac9bb1 |
+| cache-transfer-vs-original.patch | 5054 | a3593b6e949d21acfbc7810ac792a6550a916bc56898c8bdfc4a8a054384b24e |
+| baseline-composition.json | 12208 | a16daba37834840d98f7fbf64ac773804bceaee8cc9a41bc6ef54dcf56ed2415 |
+
+The preserved original is exactly `@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\inputs-successor33-v1\runtime-candidate\copy_closed_runtime_caches.py`. The new 212-line helper differs by 17 literal replacements: donor/output/plan/execution/source-map/root-receiving identities and corresponding messages. No branch, loop, source-receiving predicate, deadline, native ownership rule, or copy operation was removed.
+
+The donor is `@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\successor-product-only-inputs-v2`, whose original parent, execution and root receiving are PASS/CLOSED. Its historical Source59f map is received as immutable metadata; the helper does not open the old Source checkout. The current UNKNOWN full-run output and caches are not inputs.
+
+## Exact execution sequence for root
+
+1. Review the five files and preserve the original stage21 FAIL/CLOSED with tests NOT_RUN.
+2. Recheck the new output `@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\cli-focused59f-baseline-v2` and temporary root `@@RECOVERY_APPROVED_WORK_AREA@@\c9` are absent and have ordinary non-reparse ancestors. During authoring both were observed absent by metadata only; neither was created.
+3. Through the existing native route, create the fresh output/private environment directories and empty `private\go-build` and `private\go-mod`, plus the separately approved c9. Apply the complete explicit environment in the composition; do not merge ambient Go settings.
+4. Expand the existing SHA-256 map's 3369 relative file entries against the isolated Source root in the composition. Check those same pins before and after every command. Preserve the original map and isolated-root receiving; do not rewrite their old path provenance.
+5. Run the exact `cache_transfer.argv` once under the retained original native owner. The helper first checks the pinned parent/plan/execution, original native/IO completion, root receiving and all historical Source bindings. Only then does it read donor cache payloads.
+6. Receive the transfer's original native/IO closure, exit code, `cache-copy-receipt.json` and `cache-copy-inventory.json`. Require COPIED, equal source/destination inventories and unchanged donor. Root then runs the two exact `commands` from the composition, each with the original 360-second native outer limit and unchanged Go 5-minute test limit.
+7. Receive default and tagged outcomes separately. Each of the three selected roots must actually run once without FAIL or SKIP. Preserve any failed or UNKNOWN original and partial fresh output; do not retry into the same output or claim Product/full acceptance.
+
+The helper retains the existing copying algorithm: ordinary non-reparse paths; nonoverlapping roots; empty destination caches; complete before/after hashes; `src.open("rb")` and exclusive `dst.open("xb")` copies; no hardlinks; original metadata pins checked again after copying. File closings, receipt/inventory writes and their flush/Sync behavior are unchanged.
+
+## Environment and test scope
+
+The donor's exact PATH is retained. GOENV=off, GOWORK=off, GOTOOLCHAIN=local, GOROOT=`@@RECOVERY_GO_DISTRIBUTION_ROOT@@\ucrt64\lib\go`, GOOS=windows, GOARCH=amd64, CGO_ENABLED=1 and the pinned GCC remain explicit. GOFLAGS is `-mod=readonly -p=1`. TEMP/TMP/TMPDIR/GOTMPDIR all use c9. GOPROXY=off is an explicit offline consumer override; the original producer used `https://proxy.golang.org,direct`. GOSUMDB remains `sum.golang.org`.
+
+Selected roots in both default and test_state_path_env modes:
+
+- TestPidMatchesMcphub_CurrentProcess
+- TestPidMatchesMcphub_RejectsForeignPathSameBasename
+- TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID
+
+These commands intentionally use the existing ordinary Job route, with no -exec or foreground auxiliary. They do not stand in for the mandatory full commands, migration/native fixtures, or Product qualification. A successful transfer proves copied cache data only.
+
+## Authoring checks and limits
+
+The original helper SHA-256 matched its reviewed pin. A local DATA check applied all 17 exact replacements and parsed both Python sources without importing or executing them. The JSON parsed and its explicit Go flags, exact producer PATH, two modes, three roots and limits were checked. This is not an execution or cache-content qualification.
+
+Only the five input files in this directory were written on the remote PC. No cache payload was read or copied; no Source file was changed; neither baseline output nor c9 was created; no Go/native process or test was started by this authoring work.

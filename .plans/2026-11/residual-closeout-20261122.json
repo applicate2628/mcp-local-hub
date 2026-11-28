@@ -1,0 +1,688 @@
+{
+  "schema": 1,
+  "checkpoint": "2026-11-22 residual A–D continuation",
+  "timezone": "Europe/Moscow",
+  "publication660": {
+    "commit": "203c7bacef98c0445549512a2b6cab61eca6dcd1",
+    "tree": "6724c0eb4c93f0fb3f231ed7e0e3ff668fbe1421",
+    "parents": [
+      "63ba3e771cb5a165e276bf7c481e10a3d3a19837"
+    ],
+    "archive_url": "https://raw.githubusercontent.com/applicate2628/mcp-local-hub/203c7bacef98c0445549512a2b6cab61eca6dcd1/docs/modernization/verification/scheduler-upgrade-recovery-20261122/raw-evidence.zip",
+    "archive_bytes": 1695231,
+    "archive_sha256": "858912769a69d45fd6fdd8e422ed169fd7bbc69c9a125e7fab8c2a0fe584bd29",
+    "exact_readback": true,
+    "files": [
+      {
+        "path": "internal/api/scheduler_mgmt.go",
+        "bytes": 16833,
+        "sha256": "9b7f545f179512f7e431d64c8820cc140c3ba410974fe0b961e1602f40ce9be1",
+        "git_blob": "72b0e41fd8a86f022c398ace7033bdc8c652369a"
+      },
+      {
+        "path": "internal/api/scheduler_upgrade_recovery_test.go",
+        "bytes": 8501,
+        "sha256": "3cf9c6f4192f0987845a397961b700732269ec127251896ceff449a963343eec",
+        "git_blob": "960af4081bba1a58789595a5c8c1c0b25d15d1a2"
+      },
+      {
+        "path": "internal/api/scheduler_upgrade_snapshot_test.go",
+        "bytes": 9596,
+        "sha256": "126214147fc2916287d5a8aa5e086a8f3f77db621f4be73a36a95ec40c5abe67",
+        "git_blob": "777d031b936da7f451fee918f9a3cccda4fc667b"
+      },
+      {
+        "path": "internal/api/register.go",
+        "bytes": 132551,
+        "sha256": "299793da32931d8354eb1dca315a3165cf4e64ac3e14a3333845ee55b1aaac4b",
+        "git_blob": "79cedceb128fdd77b1bc3be5dc759802fbd56cbd"
+      },
+      {
+        "path": "internal/api/scheduler_mgmt_validation_test.go",
+        "bytes": 3977,
+        "sha256": "6208737e61d2a304d016cac4fc46f2799628671b326e664256b4f2ef86f31fc5",
+        "git_blob": "68821ca6cc90328dd1b52efc8e6b84fcc2e67ac0"
+      },
+      {
+        "path": "internal/api/scheduler_swap.go",
+        "bytes": 2779,
+        "sha256": "c8f0584bb8398e3cde00c6337d4f60e453f288b66441672d8b4c5e7f947a244f",
+        "git_blob": "a385762f47e659cf9898f7a8af03956545ea398e"
+      },
+      {
+        "path": "internal/api/scheduler_swap_test.go",
+        "bytes": 4347,
+        "sha256": "8452244d050fd27cd35efe1bb66fe7d62342160e994041c8e5f6907fd43db835",
+        "git_blob": "737d101c0328648ed1886f4c4c60487b49dd0533"
+      },
+      {
+        "path": "internal/api/testhooks.go",
+        "bytes": 18363,
+        "sha256": "282fc70c59ea6026731518dfd607e7f22ccea54ca6cfbee8b88cb2b28c6b1e37",
+        "git_blob": "6dac4500fd4a59052531b96c4bb24a6526667d7f"
+      },
+      {
+        "path": "internal/api/weekly_refresh.go",
+        "bytes": 23016,
+        "sha256": "6170694a3adae109994cdae591236ac0755d1fd12e4f3c825677b00d2dd37239",
+        "git_blob": "aa75d296f7151f3d93bf6556d2fbf9e0b22ea888"
+      },
+      {
+        "path": "internal/api/weekly_refresh_atomic_test.go",
+        "bytes": 140805,
+        "sha256": "64c0731572009e8aedb691b6e36136195627103efa5d922f69020ae034e2eec8",
+        "git_blob": "24647c0c7b66921df0b77b5b0142cebd082337bb"
+      },
+      {
+        "path": "internal/api/weekly_refresh_recovery_test.go",
+        "bytes": 10883,
+        "sha256": "cb1aeeb75325a3834ca1d46992ec8a06830767f4a6155c3a83ae40dfbc72254b",
+        "git_blob": "ec595bf541f5234480c882f42ebe574b819204e5"
+      },
+      {
+        "path": "internal/api/weekly_refresh_test.go",
+        "bytes": 9910,
+        "sha256": "caa059947e22aa50cb50b981d262d9147a3291ce29b642a5db56f8c4aa39371a",
+        "git_blob": "90e605c8a4f26f305213c234731bd3fe60c80268"
+      },
+      {
+        "path": "docs/modernization/verification/scheduler-upgrade-recovery-20261122/README.md",
+        "bytes": 26838,
+        "sha256": "535aabbc247dc2163a2d5408393a733a0784730c5a9a6898fd1f917f64549a29",
+        "git_blob": "4f36ee6919b1c6f40b018938042d7aced6f74b7e"
+      },
+      {
+        "path": "docs/modernization/verification/scheduler-upgrade-recovery-20261122/evidence.json",
+        "bytes": 46164,
+        "sha256": "8bd0d715725aa00532097005a3079b93b2f892f75ef6157d4c96dd1182595b59",
+        "git_blob": "7421859da0b4c953d72880470d0e81bdf2b72bb3"
+      },
+      {
+        "path": "docs/modernization/verification/scheduler-upgrade-recovery-20261122/raw-evidence.zip",
+        "bytes": 1695231,
+        "sha256": "858912769a69d45fd6fdd8e422ed169fd7bbc69c9a125e7fab8c2a0fe584bd29",
+        "git_blob": "2367835a287017f226eea40972cb31a2a41bee8c"
+      }
+    ],
+    "all_15_files_byte_exact": true,
+    "readback_methods": [
+      "GitHub file API for 14 text files",
+      "raw.githubusercontent.com for archive; Git commit API for parent/tree"
+    ],
+    "draft": true
+  },
+  "gui663": {
+    "commit": "65fea0b567a80f8793ccd417e9503c674e340f72",
+    "new_changes_by_this_pass": false,
+    "source_and_archive_review": true,
+    "tests_rerun": false,
+    "archive_sha256": "d4a7a6196cad98e658c676adbb77c4d6bf3e3cf75cee9572cffff3c8d0abeb77",
+    "archive_payloads_verified": 111,
+    "gate": {
+      "status": "FAILED",
+      "new": 387,
+      "stale": 128,
+      "grown": 42,
+      "workers_within_new": 72
+    }
+  },
+  "publication664": {
+    "status": "primary_publication_verified",
+    "commit": "27e9dbc53f49e0c65e6eef85cae147d1dafb2c04",
+    "tree": "b748b2ad7e534d0e8a57e2e03de066b1ecbd74ae",
+    "parents": [
+      "19732eb7f58d1381a5cd042975a3ecfd32256669"
+    ],
+    "all_7_files_byte_exact": true,
+    "files": [
+      {
+        "path": ".plans/2026-11/open-pr-integration-20261117.md",
+        "bytes": 156856,
+        "sha256": "ee0a650d93b8c4ba731848edbbc0b4afe3ffc0b38839c0c7b4f4a60316fa0d33",
+        "git_blob": "9eace7c546d172aa41fe15ed1bc98477f096d540"
+      },
+      {
+        "path": ".plans/2026-11/residual-closeout-20261122.json",
+        "bytes": 24361,
+        "sha256": "bc69d41a699fabb3b2140f49441d3e853411c557ff4c7cf2cebe608124cefa5f",
+        "git_blob": "edb253fe6246d6146aaeb2dc7cecc57a170b5dbe"
+      },
+      {
+        "path": "docs/modernization/verification/serena-product-composition-20261122/README.md",
+        "bytes": 24388,
+        "sha256": "78ba1be258e6dd5132d9326b586ee9bf7ce3cbcd46a09acad129793808409974",
+        "git_blob": "732dc8624da7e5284cd14a9cedc124a21c9a4291"
+      },
+      {
+        "path": "docs/modernization/verification/serena-product-composition-20261122/candidate-inputs.zip",
+        "bytes": 367262,
+        "sha256": "9da4b677c1ed02af71bb949005c4c06411400530079ede5938d6b6a3c67c35fe",
+        "git_blob": "3c13230a665d7dac1d5717fa33602265cb51045a"
+      },
+      {
+        "path": "docs/modernization/verification/serena-product-composition-20261122/compose.py",
+        "bytes": 13083,
+        "sha256": "225f34c1ad448e2ac74fc473f82761957221b642a2f6879cd3f5fce71e7729f2",
+        "git_blob": "b223a83c300272c817d9bcacdb7bccf852089f80"
+      },
+      {
+        "path": "docs/modernization/verification/serena-product-composition-20261122/composition-evidence.json",
+        "bytes": 1351,
+        "sha256": "9101b0bcbf88e262b775ae186907596af36eaa3ebbd4975460179a59d34444b6",
+        "git_blob": "bc9154d73054133621884a035eb429601a9b868b"
+      },
+      {
+        "path": "docs/modernization/verification/serena-product-composition-20261122/manifest.json",
+        "bytes": 65015,
+        "sha256": "44df5301051dae725f3c32ebb62c186c5dfc8205b8c93863f4229a49766e4c32",
+        "git_blob": "1943a6cccc16c76b351f87149c49a4856be17ea3"
+      }
+    ],
+    "scope": "Canonical residual plan plus source-only Serena/Product candidates; no product issued",
+    "receipt_note": "This subsequent receipt records readback and cleanup after the primary publication."
+  },
+  "qualification": {
+    "upgrade_recovery": "PASS on listed composition",
+    "weekly_behavior": "PASS on listed tagged composition",
+    "weekly_lock_order": "FAIL; four secure writer cleanup() calls have unresolved typed origins",
+    "unexpected_or_unexplained_failures": 0,
+    "skips": 0,
+    "full_standard_go": "NOT_RUN",
+    "full_tagged_api_cli": "NOT_RUN",
+    "native_scheduler": "NOT_RUN",
+    "real_serena_product": "NOT_RUN",
+    "whole_native_process_tree": "NOT_RUN",
+    "all_test_direct_children_settled_without_timeout": true
+  },
+  "external_review": {
+    "new_exact_heads": "PENDING",
+    "review660_seen": "COMMENTED 2026-11-19; body explicitly reviews 1b870e04f58bbf60fde2d2339fcd4ae9b50b24c3",
+    "review655_seen": "COMMENTED 2026-11-18; body explicitly reviews 2defe618259f7db4144824d19927b032300d160d",
+    "review663_seen": [],
+    "external_model_runs_started": false,
+    "manual_ci_started": false
+  },
+  "queue": {
+    "observed_utc": "2026-11-22 19:06:44 UTC",
+    "open": 30,
+    "draft": 30,
+    "prs": [
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/668",
+        "number": 668,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "fix(api): retain reader close failures and consume handles once",
+        "base": "master",
+        "base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+        "head": "fix/go-reader-close-errors-20261122",
+        "head_sha": "1b7655ae9a0dec7d6821d8419087fd92ccadbb62",
+        "updated_at": "2026-11-22T11:09:24Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/667",
+        "number": 667,
+        "state": "open",
+        "mergeable": false,
+        "draft": true,
+        "title": "fix(perftools): bound discovery probes and isolate stdout fixture",
+        "base": "fix/p0-test-entry-preserve-20261121",
+        "base_sha": "f21728d6f3937187fea517c8ca5916b6f69ac7c5",
+        "head": "test/perftools-stdout-explicit-env-20261121",
+        "head_sha": "1eb934595d3c21954d0bddb934be57a3fe3138cf",
+        "updated_at": "2026-11-22T08:55:38Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/666",
+        "number": 666,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "test(cli): bind helper admission and caller state before package setup",
+        "base": "fix/p0-test-entry-preserve-20261121",
+        "base_sha": "f21728d6f3937187fea517c8ca5916b6f69ac7c5",
+        "head": "fix/cli-test-helper-dispatch-20261121",
+        "head_sha": "09de8e98d1aa6f122215dbe869bc6f7d0ce083f5",
+        "updated_at": "2026-11-21T21:17:58Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/665",
+        "number": 665,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "test(api): validate helper roles before creating package fixtures",
+        "base": "fix/p0-test-entry-preserve-20261121",
+        "base_sha": "f21728d6f3937187fea517c8ca5916b6f69ac7c5",
+        "head": "fix/api-test-helper-dispatch-20261121",
+        "head_sha": "b5cd530969b7089e7d7cbaf5308543be8c443f8c",
+        "updated_at": "2026-11-21T21:16:57Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/664",
+        "number": 664,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "test: preserve package isolation and qualify GUI helper ownership",
+        "base": "master",
+        "base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+        "head": "fix/p0-test-entry-preserve-20261121",
+        "head_sha": "19732eb7f58d1381a5cd042975a3ecfd32256669",
+        "updated_at": "2026-11-22T16:32:28Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/663",
+        "number": 663,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "fix(archguard): preserve baseline ownership after route extraction",
+        "base": "master",
+        "base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+        "head": "fix/archguard-mcproute-baseline-20261121",
+        "head_sha": "65fea0b567a80f8793ccd417e9503c674e340f72",
+        "updated_at": "2026-11-22T17:51:50Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/661",
+        "number": 661,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "test(cli): require semantic Serena conflict validation failures",
+        "base": "master",
+        "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+        "head": "test/serena-conflict-validation-oracle-20261121",
+        "head_sha": "23ed6b5c6a942812a72e345c5d886b3310e9017e",
+        "updated_at": "2026-11-21T18:30:26Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/660",
+        "number": 660,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "fix(scheduler): preserve task query results and hidden lookups",
+        "base": "master",
+        "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+        "head": "fix/scheduler-hidden-task-lookup-20261119",
+        "head_sha": "203c7bacef98c0445549512a2b6cab61eca6dcd1",
+        "updated_at": "2026-11-22T19:05:51Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/659",
+        "number": 659,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "fix(api): preserve unknown port observations in stop decisions",
+        "base": "master",
+        "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+        "head": "fix/api-port-pid-observation-20261118",
+        "head_sha": "a3568dfe3426afaca4176d57a2310097e5214e77",
+        "updated_at": "2026-11-21T18:30:22Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/657",
+        "number": 657,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "test(windows): issue a native canonical command Product fixture for RunV5",
+        "base": "master",
+        "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+        "head": "fix/canonical-command-test-product-20261116",
+        "head_sha": "f20bc4ae5a369e7c0be0f7ad4a0f0ba9ea758a57",
+        "updated_at": "2026-11-22T15:01:32Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/655",
+        "number": 655,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "fix(serena): settle preparation before canceling work context",
+        "base": "master",
+        "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+        "head": "fix/serena-finalize-context-20261115",
+        "head_sha": "1a5a7dd04fe732df5c539860dde813c8c703586d",
+        "updated_at": "2026-11-22T16:14:00Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/654",
+        "number": 654,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "fix(serena): receive Ready readback with its original byte bound",
+        "base": "master",
+        "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+        "head": "fix/serena-ready-readback-20261115",
+        "head_sha": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+        "updated_at": "2026-11-21T18:30:13Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/653",
+        "number": 653,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "fix(serena): validate TCP query budgets, Windows headers and IPv6 zones",
+        "base": "master",
+        "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+        "head": "fix/serena-tcp-query-budget-20261115",
+        "head_sha": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+        "updated_at": "2026-11-21T18:30:11Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/650",
+        "number": 650,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "fix(serena): preserve qualification bindings and request budgets",
+        "base": "master",
+        "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "head": "fix/serena-protocol-binding-20261114",
+        "head_sha": "2a273c10f6e5c0651e89860f88ef0b6a0e3748ef",
+        "updated_at": "2026-11-21T18:29:53Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/649",
+        "number": 649,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "fix(serena): bind qualification home to the owned directory",
+        "base": "master",
+        "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "head": "fix/serena-qualification-home-20261114",
+        "head_sha": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+        "updated_at": "2026-11-21T18:29:50Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/647",
+        "number": 647,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "fix(serena): own Windows Git subprocess environment",
+        "base": "master",
+        "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "head": "fix/serena-executable-discovery-20261114",
+        "head_sha": "dca92972e90c5280e6c217409acfc6fd0dfb38ea",
+        "updated_at": "2026-11-21T18:29:46Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/646",
+        "number": 646,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "fix(serena): prefer qualified system Python discovery",
+        "base": "master",
+        "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "head": "fix/serena-python-discovery-preference-20261114",
+        "head_sha": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+        "updated_at": "2026-11-21T18:29:44Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/644",
+        "number": 644,
+        "state": "open",
+        "mergeable": false,
+        "draft": true,
+        "title": "spike(rust): observe original process identity while retaining ownership",
+        "base": "spike/rx02-native-process-owner-20261112",
+        "base_sha": "c5672f49f65713c7555e8841e46de75b045da5f8",
+        "head": "spike/rx02-native-identity-20261114",
+        "head_sha": "1cf5754b81c850a3569be269642b49605895eeb2",
+        "updated_at": "2026-11-21T18:29:42Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/643",
+        "number": 643,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "fix(serena): retain original owners through install and cleanup",
+        "base": "master",
+        "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "head": "fix/serena-cleanup-parent-observation-20261114",
+        "head_sha": "daaa04c14bc3944babd4efbc3a125eaf495e6534",
+        "updated_at": "2026-11-21T21:46:52Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/637",
+        "number": 637,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "test(serena): run positive migration fixtures through real preparation",
+        "base": "fix/serena-qualification-publisher-20261114",
+        "base_sha": "f639b97ccc56eb18d314d52951d1b5d167d11e5f",
+        "head": "fix/serena-integration-qualification-20261114",
+        "head_sha": "1ebe00c5dbac448488d980072e689b1126875dde",
+        "updated_at": "2026-11-21T18:29:38Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/635",
+        "number": 635,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "test(serena): build a source-issued native qualification publisher",
+        "base": "fix/serena-qualified-uv-path-20261114",
+        "base_sha": "8cead428a6cee57c597e2bd3ed7b3877a6445d30",
+        "head": "fix/serena-qualification-publisher-20261114",
+        "head_sha": "f639b97ccc56eb18d314d52951d1b5d167d11e5f",
+        "updated_at": "2026-11-21T18:29:36Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/632",
+        "number": 632,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "fix(serena): discover UV from the qualified execution PATH",
+        "base": "master",
+        "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "head": "fix/serena-qualified-uv-path-20261114",
+        "head_sha": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+        "updated_at": "2026-11-21T18:29:34Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/631",
+        "number": 631,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "spike(ffi): qualify versioned original-process identity across Go and Rust",
+        "base": "spike/rx02-native-identity-20261114",
+        "base_sha": "71891067d0c24387ba873a3e4276b0462ae365ae",
+        "head": "spike/rx02-go-rust-boundary-20261113",
+        "head_sha": "701535e3439d74495080463976d610a42303e5cf",
+        "updated_at": "2026-11-21T18:29:32Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/629",
+        "number": 629,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "fix(relay): bound responses and preserve negotiated session ownership",
+        "base": "master",
+        "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "head": "fix/relay-output-failure-contract-20261113",
+        "head_sha": "4b6ec39930cb5a0498dba068b99dbf29ba7129b7",
+        "updated_at": "2026-11-22T11:14:11Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/628",
+        "number": 628,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "fix(status): observe Windows process identity and RSS through one handle",
+        "base": "master",
+        "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "head": "perf/rx16-native-observation-20261112",
+        "head_sha": "00f120a533f0e0e4bc7b6a56871528ff6dd9fde4",
+        "updated_at": "2026-11-21T18:29:27Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/627",
+        "number": 627,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "spike(rust): anchored verified file reader with native replacement and cap tests",
+        "base": "master",
+        "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "head": "spike/rx04-anchored-read-20261112",
+        "head_sha": "6615d239fe066eaa5fa78c22a5272d6602528274",
+        "updated_at": "2026-11-21T18:29:25Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/626",
+        "number": 626,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "test(perf): relay workload and executable-size control before Rust migration",
+        "base": "master",
+        "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "head": "perf/rx01-relay-baseline-20261112",
+        "head_sha": "279887a4ec79186672c331e075c70e0b4555daa8",
+        "updated_at": "2026-11-22T13:37:27Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/625",
+        "number": 625,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "spike(rust): qualify process-owner lifecycle, launch context and native failures",
+        "base": "master",
+        "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "head": "spike/rx02-native-process-owner-20261112",
+        "head_sha": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+        "updated_at": "2026-11-21T18:29:21Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/624",
+        "number": 624,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "perf(cmaketrace): retain bounded records and qualify terminal cancellation",
+        "base": "master",
+        "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "head": "perf/rx01-cmaketrace-benchmark-20261112",
+        "head_sha": "ee20f6009a8581c8141352cdbd261e1a97a0e805",
+        "updated_at": "2026-11-22T13:42:12Z"
+      },
+      {
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/623",
+        "number": 623,
+        "state": "open",
+        "mergeable": true,
+        "draft": true,
+        "title": "docs: cross-platform Rust roadmap, COM boundaries and targeted Python reduction",
+        "base": "master",
+        "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "head": "docs/rust-cross-platform-no-com-20261112",
+        "head_sha": "7a7263e7ff341496aeeb5431d53f6fed388a8ed0",
+        "updated_at": "2026-11-21T18:32:38Z"
+      }
+    ],
+    "new_prs": 0,
+    "closed_prs": 0,
+    "merged_prs": 0,
+    "force_pushes": 0,
+    "branches_deleted": 0,
+    "donor_absorption_claimed": false
+  },
+  "cleanup": {
+    "status": "moved_to_trash_and_read_back",
+    "observed_utc": "2026-11-22 19:16:21 UTC",
+    "source": "D:\\dev\\ChatGPT\\mcp-residual-20261122-dcb40fba",
+    "destination": "D:\\dev\\ChatGPT\\trash\\mcp-residual-20261122-dcb40fba",
+    "files_before_receipt": 6749,
+    "bytes_before_receipt": 114514818,
+    "reparse_points": 0,
+    "phases": {
+      "upgrade-recovery": {
+        "completed": true,
+        "direct_children_settled": true,
+        "commands": 3
+      },
+      "weekly-behavior": {
+        "completed": true,
+        "direct_children_settled": true,
+        "commands": 4
+      },
+      "weekly-lock-order": {
+        "completed": false,
+        "direct_children_settled": true,
+        "commands": 1
+      }
+    },
+    "scheduler_archive_published_and_read_back": true,
+    "source_and_shared_cache_owners_outside_root": true,
+    "trash_purged": false,
+    "source_absent_after_move": true,
+    "destination_preflight_and_pack_receipt_read_back": true,
+    "remote_active_sessions_reported": 0,
+    "required_results_preserved_in_publications": true,
+    "borrowed_source_and_shared_caches": "retained unchanged"
+  },
+  "affected_dependencies": {
+    "scope": "Twelve changed Go paths only; path intersection is not merge or behavioral qualification",
+    "rows": [
+      {
+        "pr": 643,
+        "head": "daaa04c14bc3944babd4efbc3a125eaf495e6534",
+        "candidate_path_overlap": []
+      },
+      {
+        "pr": 650,
+        "head": "2a273c10f6e5c0651e89860f88ef0b6a0e3748ef",
+        "candidate_path_overlap": []
+      },
+      {
+        "pr": 654,
+        "head": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+        "candidate_path_overlap": []
+      },
+      {
+        "pr": 655,
+        "head": "1a5a7dd04fe732df5c539860dde813c8c703586d",
+        "candidate_path_overlap": []
+      },
+      {
+        "pr": 657,
+        "head": "f20bc4ae5a369e7c0be0f7ad4a0f0ba9ea758a57",
+        "candidate_path_overlap": []
+      },
+      {
+        "pr": 663,
+        "head": "65fea0b567a80f8793ccd417e9503c674e340f72",
+        "candidate_path_overlap": []
+      },
+      {
+        "pr": 664,
+        "head": "19732eb7f58d1381a5cd042975a3ecfd32256669",
+        "candidate_path_overlap": []
+      }
+    ]
+  },
+  "document_review": {
+    "own_review": true,
+    "independent_review": true,
+    "new_findings": 0,
+    "full_readiness_claimed": false
+  }
+}

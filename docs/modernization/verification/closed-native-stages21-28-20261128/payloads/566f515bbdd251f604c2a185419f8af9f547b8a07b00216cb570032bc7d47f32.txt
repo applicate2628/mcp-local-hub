@@ -1,0 +1,50 @@
+go: downloading github.com/Microsoft/go-winio v0.6.2
+go: downloading golang.org/x/term v0.45.0
+go: downloading golang.org/x/sys v0.47.0
+go: downloading gopkg.in/yaml.v3 v3.0.1
+go: downloading github.com/spf13/cobra v1.10.2
+go: downloading github.com/atotto/clipboard v0.1.4
+go: downloading github.com/spf13/pflag v1.0.10
+go: downloading github.com/modelcontextprotocol/go-sdk v1.6.1
+go: downloading filippo.io/age v1.3.1
+go: downloading golang.org/x/sync v0.22.0
+go: downloading github.com/google/jsonschema-go v0.4.3
+go: downloading github.com/pelletier/go-toml/v2 v2.4.3
+go: downloading github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f
+go: downloading golang.org/x/net v0.57.0
+# mcp-local-hub/internal/cli
+internal\cli\install_migration_wiring_windows.go:37:2: module lookup disabled by GOPROXY=off
+# mcp-local-hub/internal/cli
+internal\cli\interactive.go:8:2: module lookup disabled by GOPROXY=off
+# mcp-local-hub/internal/cli
+third_party\gofrs-flock\flock_windows.go:13:2: module lookup disabled by GOPROXY=off
+# mcp-local-hub/internal/cli
+internal\cli\adopt.go:12:2: module lookup disabled by GOPROXY=off
+# mcp-local-hub/internal/cli
+internal\cli\gui_port.go:11:2: module lookup disabled by GOPROXY=off
+# mcp-local-hub/internal/cli
+internal\cli\setup_eventlog_windows.go:20:2: module lookup disabled by GOPROXY=off
+# mcp-local-hub/internal/cli
+internal\cli\setup_eventlog_windows.go:21:2: module lookup disabled by GOPROXY=off
+# mcp-local-hub/internal/cli
+internal\cli\supervise_cst_identity_windows.go:15:2: module lookup disabled by GOPROXY=off
+# mcp-local-hub/internal/cli
+internal\cli\gui.go:28:2: module lookup disabled by GOPROXY=off
+# mcp-local-hub/internal/cli
+internal\cli\install.go:27:2: module lookup disabled by GOPROXY=off
+# mcp-local-hub/internal/cli
+internal\api\legacy_detect.go:21:2: module lookup disabled by GOPROXY=off
+# mcp-local-hub/internal/cli
+internal\api\marketplace_safety.go:10:2: module lookup disabled by GOPROXY=off
+# mcp-local-hub/internal/cli
+internal\api\api.go:18:2: module lookup disabled by GOPROXY=off
+# mcp-local-hub/internal/cli
+internal\clients\entry_bytes.go:13:2: module lookup disabled by GOPROXY=off
+# mcp-local-hub/internal/cli
+internal\clients\claude_local_toggle.go:41:2: module lookup disabled by GOPROXY=off
+# mcp-local-hub/internal/cli
+internal\secrets\vault.go:15:2: module lookup disabled by GOPROXY=off
+# mcp-local-hub/internal/cli
+internal\drmemory\handlers.go:11:2: module lookup disabled by GOPROXY=off
+# mcp-local-hub/internal/cli
+internal\vcpkgmcp\vcpkgserver\tools.go:9:2: module lookup disabled by GOPROXY=off

@@ -1,0 +1,319 @@
+{"Action":"start","Package":"mcp-local-hub/internal/kimi"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestDecodeRunRequestDefaultsHighAndRejectsUnsafeShapes"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestDecodeRunRequestDefaultsHighAndRejectsUnsafeShapes","Output":"=== RUN   TestDecodeRunRequestDefaultsHighAndRejectsUnsafeShapes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestDecodeRunRequestDefaultsHighAndRejectsUnsafeShapes","Output":"--- PASS: TestDecodeRunRequestDefaultsHighAndRejectsUnsafeShapes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestDecodeRunRequestDefaultsHighAndRejectsUnsafeShapes"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestDecodeRunRequestAcceptsExplicitMaxAndAbsoluteCapabilityFile"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestDecodeRunRequestAcceptsExplicitMaxAndAbsoluteCapabilityFile","Output":"=== RUN   TestDecodeRunRequestAcceptsExplicitMaxAndAbsoluteCapabilityFile\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestDecodeRunRequestAcceptsExplicitMaxAndAbsoluteCapabilityFile","Output":"--- PASS: TestDecodeRunRequestAcceptsExplicitMaxAndAbsoluteCapabilityFile (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestDecodeRunRequestAcceptsExplicitMaxAndAbsoluteCapabilityFile"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestRunKimiInputSchemaIsClosed"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunKimiInputSchemaIsClosed","Output":"=== RUN   TestRunKimiInputSchemaIsClosed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunKimiInputSchemaIsClosed","Output":"--- PASS: TestRunKimiInputSchemaIsClosed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestRunKimiInputSchemaIsClosed"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestRunKimiCleanupFailureRoundTripsAcquiredReceiptAndCleanShape"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunKimiCleanupFailureRoundTripsAcquiredReceiptAndCleanShape","Output":"=== RUN   TestRunKimiCleanupFailureRoundTripsAcquiredReceiptAndCleanShape\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunKimiCleanupFailureRoundTripsAcquiredReceiptAndCleanShape","Output":"--- PASS: TestRunKimiCleanupFailureRoundTripsAcquiredReceiptAndCleanShape (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestRunKimiCleanupFailureRoundTripsAcquiredReceiptAndCleanShape"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestKimiManifestAndCanonicalPortRegistryAgree"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestKimiManifestAndCanonicalPortRegistryAgree","Output":"=== RUN   TestKimiManifestAndCanonicalPortRegistryAgree\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestKimiManifestAndCanonicalPortRegistryAgree","Output":"--- PASS: TestKimiManifestAndCanonicalPortRegistryAgree (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestKimiManifestAndCanonicalPortRegistryAgree"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome","Output":"=== RUN   TestProviderReceiptRequiresMatchingPrimaryOutcome\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/success/matching"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/success/matching","Output":"=== RUN   TestProviderReceiptRequiresMatchingPrimaryOutcome/success/matching\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/success/matching","Output":"--- PASS: TestProviderReceiptRequiresMatchingPrimaryOutcome/success/matching (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/success/matching"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/success/exitCode"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/success/exitCode","Output":"=== RUN   TestProviderReceiptRequiresMatchingPrimaryOutcome/success/exitCode\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/success/exitCode","Output":"--- PASS: TestProviderReceiptRequiresMatchingPrimaryOutcome/success/exitCode (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/success/exitCode"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/success/status"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/success/status","Output":"=== RUN   TestProviderReceiptRequiresMatchingPrimaryOutcome/success/status\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/success/status","Output":"--- PASS: TestProviderReceiptRequiresMatchingPrimaryOutcome/success/status (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/success/status"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/success/gate"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/success/gate","Output":"=== RUN   TestProviderReceiptRequiresMatchingPrimaryOutcome/success/gate\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/success/gate","Output":"--- PASS: TestProviderReceiptRequiresMatchingPrimaryOutcome/success/gate (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/success/gate"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/matching"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/matching","Output":"=== RUN   TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/matching\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/matching","Output":"--- PASS: TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/matching (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/matching"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/exitCode"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/exitCode","Output":"=== RUN   TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/exitCode\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/exitCode","Output":"--- PASS: TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/exitCode (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/exitCode"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/status"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/status","Output":"=== RUN   TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/status\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/status","Output":"--- PASS: TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/status (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/status"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/gate"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/gate","Output":"=== RUN   TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/gate\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/gate","Output":"--- PASS: TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/gate (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/gate"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome","Output":"--- PASS: TestProviderReceiptRequiresMatchingPrimaryOutcome (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptRequiresMatchingPrimaryOutcome"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit","Output":"=== RUN   TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/PASS"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/PASS","Output":"=== RUN   TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/PASS\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/PASS","Output":"--- PASS: TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/PASS (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/PASS"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/FAIL"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/FAIL","Output":"=== RUN   TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/FAIL\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/FAIL","Output":"--- PASS: TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/FAIL (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/FAIL"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/BLOCKED"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/BLOCKED","Output":"=== RUN   TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/BLOCKED\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/BLOCKED","Output":"--- PASS: TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/BLOCKED (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/BLOCKED"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/unknown"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/unknown","Output":"=== RUN   TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/unknown\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/unknown","Output":"--- PASS: TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/unknown (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/unknown"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit","Output":"--- PASS: TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane","Output":"=== RUN   TestProviderReceiptBindsRequestedRoleAndExecutionLane\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/legacy_direct_reviewer"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/legacy_direct_reviewer","Output":"=== RUN   TestProviderReceiptBindsRequestedRoleAndExecutionLane/legacy_direct_reviewer\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/legacy_direct_reviewer","Output":"--- PASS: TestProviderReceiptBindsRequestedRoleAndExecutionLane/legacy_direct_reviewer (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/legacy_direct_reviewer"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/reviewer"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/reviewer","Output":"=== RUN   TestProviderReceiptBindsRequestedRoleAndExecutionLane/reviewer\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/reviewer","Output":"--- PASS: TestProviderReceiptBindsRequestedRoleAndExecutionLane/reviewer (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/reviewer"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/worker"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/worker","Output":"=== RUN   TestProviderReceiptBindsRequestedRoleAndExecutionLane/worker\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/worker","Output":"--- PASS: TestProviderReceiptBindsRequestedRoleAndExecutionLane/worker (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/worker"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/consultant"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/consultant","Output":"=== RUN   TestProviderReceiptBindsRequestedRoleAndExecutionLane/consultant\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/consultant","Output":"--- PASS: TestProviderReceiptBindsRequestedRoleAndExecutionLane/consultant (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/consultant"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/wrong_assignment_same_lane"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/wrong_assignment_same_lane","Output":"=== RUN   TestProviderReceiptBindsRequestedRoleAndExecutionLane/wrong_assignment_same_lane\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/wrong_assignment_same_lane","Output":"--- PASS: TestProviderReceiptBindsRequestedRoleAndExecutionLane/wrong_assignment_same_lane (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/wrong_assignment_same_lane"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/wrong_lane"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/wrong_lane","Output":"=== RUN   TestProviderReceiptBindsRequestedRoleAndExecutionLane/wrong_lane\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/wrong_lane","Output":"--- PASS: TestProviderReceiptBindsRequestedRoleAndExecutionLane/wrong_lane (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/wrong_lane"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/worker_promoted_to_reviewer"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/worker_promoted_to_reviewer","Output":"=== RUN   TestProviderReceiptBindsRequestedRoleAndExecutionLane/worker_promoted_to_reviewer\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/worker_promoted_to_reviewer","Output":"--- PASS: TestProviderReceiptBindsRequestedRoleAndExecutionLane/worker_promoted_to_reviewer (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/worker_promoted_to_reviewer"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/unknown_role"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/unknown_role","Output":"=== RUN   TestProviderReceiptBindsRequestedRoleAndExecutionLane/unknown_role\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/unknown_role","Output":"--- PASS: TestProviderReceiptBindsRequestedRoleAndExecutionLane/unknown_role (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/unknown_role"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/missing_requested_role"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/missing_requested_role","Output":"=== RUN   TestProviderReceiptBindsRequestedRoleAndExecutionLane/missing_requested_role\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/missing_requested_role","Output":"--- PASS: TestProviderReceiptBindsRequestedRoleAndExecutionLane/missing_requested_role (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/missing_requested_role"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/unsupported_role"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/unsupported_role","Output":"=== RUN   TestProviderReceiptBindsRequestedRoleAndExecutionLane/unsupported_role\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/unsupported_role","Output":"--- PASS: TestProviderReceiptBindsRequestedRoleAndExecutionLane/unsupported_role (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane/unsupported_role"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane","Output":"--- PASS: TestProviderReceiptBindsRequestedRoleAndExecutionLane (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptBindsRequestedRoleAndExecutionLane"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptPreservesOwnerPayloadAndEffort"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptPreservesOwnerPayloadAndEffort","Output":"=== RUN   TestParseProviderReceiptPreservesOwnerPayloadAndEffort\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptPreservesOwnerPayloadAndEffort/high"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptPreservesOwnerPayloadAndEffort/high","Output":"=== RUN   TestParseProviderReceiptPreservesOwnerPayloadAndEffort/high\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptPreservesOwnerPayloadAndEffort/high","Output":"--- PASS: TestParseProviderReceiptPreservesOwnerPayloadAndEffort/high (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptPreservesOwnerPayloadAndEffort/high"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptPreservesOwnerPayloadAndEffort/max"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptPreservesOwnerPayloadAndEffort/max","Output":"=== RUN   TestParseProviderReceiptPreservesOwnerPayloadAndEffort/max\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptPreservesOwnerPayloadAndEffort/max","Output":"--- PASS: TestParseProviderReceiptPreservesOwnerPayloadAndEffort/max (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptPreservesOwnerPayloadAndEffort/max"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptPreservesOwnerPayloadAndEffort","Output":"--- PASS: TestParseProviderReceiptPreservesOwnerPayloadAndEffort (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptPreservesOwnerPayloadAndEffort"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance","Output":"=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/authorizing"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/authorizing","Output":"=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/authorizing\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/authorizing","Output":"--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/authorizing (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/authorizing"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/extra_line"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/extra_line","Output":"=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/extra_line\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/extra_line","Output":"--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/extra_line (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/extra_line"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_prefix"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_prefix","Output":"=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_prefix\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_prefix","Output":"--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_prefix (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_prefix"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_model"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_model","Output":"=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_model\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_model","Output":"--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_model (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_model"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_effort"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_effort","Output":"=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_effort\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_effort","Output":"--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_effort (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_effort"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/launch_flags"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/launch_flags","Output":"=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/launch_flags\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/launch_flags","Output":"--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/launch_flags (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/launch_flags"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/selected_extra"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/selected_extra","Output":"=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/selected_extra\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/selected_extra","Output":"--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/selected_extra (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/selected_extra"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/observed_invalid_status"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/observed_invalid_status","Output":"=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/observed_invalid_status\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/observed_invalid_status","Output":"--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/observed_invalid_status (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/observed_invalid_status"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/nonempty_none"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/nonempty_none","Output":"=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/nonempty_none\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/nonempty_none","Output":"--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/nonempty_none (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/nonempty_none"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/missing_newline"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/missing_newline","Output":"=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/missing_newline\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/missing_newline","Output":"--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/missing_newline (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/missing_newline"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/trailing_JSON_whitespace"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/trailing_JSON_whitespace","Output":"=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/trailing_JSON_whitespace\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/trailing_JSON_whitespace","Output":"--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/trailing_JSON_whitespace (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/trailing_JSON_whitespace"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_schema"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_schema","Output":"=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_schema\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_schema","Output":"--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_schema (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_schema"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_provider"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_provider","Output":"=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_provider\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_provider","Output":"--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_provider (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_provider"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance","Output":"--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptIsErrorUsesStructuralOutcomeNotResultText"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptIsErrorUsesStructuralOutcomeNotResultText","Output":"=== RUN   TestProviderReceiptIsErrorUsesStructuralOutcomeNotResultText\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptIsErrorUsesStructuralOutcomeNotResultText","Output":"--- PASS: TestProviderReceiptIsErrorUsesStructuralOutcomeNotResultText (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestProviderReceiptIsErrorUsesStructuralOutcomeNotResultText"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestBuildWrapperArgsExactDefaultHighAndExplicitMax"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestBuildWrapperArgsExactDefaultHighAndExplicitMax","Output":"=== RUN   TestBuildWrapperArgsExactDefaultHighAndExplicitMax\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestBuildWrapperArgsExactDefaultHighAndExplicitMax","Output":"--- PASS: TestBuildWrapperArgsExactDefaultHighAndExplicitMax (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestBuildWrapperArgsExactDefaultHighAndExplicitMax"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestResolveWrapperUsesOnlyGlobalPairAndRefusesIrregularGlobal"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestResolveWrapperUsesOnlyGlobalPairAndRefusesIrregularGlobal","Output":"=== RUN   TestResolveWrapperUsesOnlyGlobalPairAndRefusesIrregularGlobal\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestResolveWrapperUsesOnlyGlobalPairAndRefusesIrregularGlobal","Output":"--- PASS: TestResolveWrapperUsesOnlyGlobalPairAndRefusesIrregularGlobal (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestResolveWrapperUsesOnlyGlobalPairAndRefusesIrregularGlobal"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesReturnsReceiptAndExactArgv"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesReturnsReceiptAndExactArgv","Output":"=== RUN   TestRunWithDependenciesReturnsReceiptAndExactArgv\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesReturnsReceiptAndExactArgv","Output":"--- PASS: TestRunWithDependenciesReturnsReceiptAndExactArgv (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesReturnsReceiptAndExactArgv"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesPreservesCompletedOutcome"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesPreservesCompletedOutcome","Output":"=== RUN   TestRunWithDependenciesPreservesCompletedOutcome\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesPreservesCompletedOutcome/success_before_late_deadline"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesPreservesCompletedOutcome/success_before_late_deadline","Output":"=== RUN   TestRunWithDependenciesPreservesCompletedOutcome/success_before_late_deadline\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesPreservesCompletedOutcome/success_before_late_deadline","Output":"--- PASS: TestRunWithDependenciesPreservesCompletedOutcome/success_before_late_deadline (1.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesPreservesCompletedOutcome/success_before_late_deadline"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesPreservesCompletedOutcome/success_before_late_cancellation"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesPreservesCompletedOutcome/success_before_late_cancellation","Output":"=== RUN   TestRunWithDependenciesPreservesCompletedOutcome/success_before_late_cancellation\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesPreservesCompletedOutcome/success_before_late_cancellation","Output":"--- PASS: TestRunWithDependenciesPreservesCompletedOutcome/success_before_late_cancellation (0.33s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesPreservesCompletedOutcome/success_before_late_cancellation"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesPreservesCompletedOutcome","Output":"--- PASS: TestRunWithDependenciesPreservesCompletedOutcome (1.33s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesPreservesCompletedOutcome"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure","Output":"=== RUN   TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout","Output":"=== RUN   TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout","Output":"--- PASS: TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout (1.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/cancel"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/cancel","Output":"=== RUN   TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/cancel\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/cancel","Output":"--- PASS: TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/cancel (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/cancel"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/legacy_timeout_receipt"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/legacy_timeout_receipt","Output":"=== RUN   TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/legacy_timeout_receipt\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/legacy_timeout_receipt","Output":"--- PASS: TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/legacy_timeout_receipt (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/legacy_timeout_receipt"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/legacy_cancel_receipt"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/legacy_cancel_receipt","Output":"=== RUN   TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/legacy_cancel_receipt\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/legacy_cancel_receipt","Output":"--- PASS: TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/legacy_cancel_receipt (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/legacy_cancel_receipt"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/cleanup"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/cleanup","Output":"=== RUN   TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/cleanup\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/cleanup","Output":"--- PASS: TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/cleanup (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/cleanup"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/exit_before_late_cancellation/none"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/exit_before_late_cancellation/none","Output":"=== RUN   TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/exit_before_late_cancellation/none\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/exit_before_late_cancellation/none","Output":"--- PASS: TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/exit_before_late_cancellation/none (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/exit_before_late_cancellation/none"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/exit_before_late_cancellation/contained_process"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/exit_before_late_cancellation/contained_process","Output":"=== RUN   TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/exit_before_late_cancellation/contained_process\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/exit_before_late_cancellation/contained_process","Output":"--- PASS: TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/exit_before_late_cancellation/contained_process (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/exit_before_late_cancellation/contained_process"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/exit_before_late_cancellation/receipt_directory"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/exit_before_late_cancellation/receipt_directory","Output":"=== RUN   TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/exit_before_late_cancellation/receipt_directory\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/exit_before_late_cancellation/receipt_directory","Output":"--- PASS: TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/exit_before_late_cancellation/receipt_directory (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/exit_before_late_cancellation/receipt_directory"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout_before_late_cancellation/none"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout_before_late_cancellation/none","Output":"=== RUN   TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout_before_late_cancellation/none\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout_before_late_cancellation/none","Output":"--- PASS: TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout_before_late_cancellation/none (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout_before_late_cancellation/none"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout_before_late_cancellation/contained_process"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout_before_late_cancellation/contained_process","Output":"=== RUN   TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout_before_late_cancellation/contained_process\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout_before_late_cancellation/contained_process","Output":"--- PASS: TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout_before_late_cancellation/contained_process (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout_before_late_cancellation/contained_process"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout_before_late_cancellation/receipt_directory"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout_before_late_cancellation/receipt_directory","Output":"=== RUN   TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout_before_late_cancellation/receipt_directory\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout_before_late_cancellation/receipt_directory","Output":"--- PASS: TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout_before_late_cancellation/receipt_directory (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout_before_late_cancellation/receipt_directory"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure","Output":"--- PASS: TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure (1.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure","Output":"=== RUN   TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure/receipt_only_with_directory_cleanup_failure"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure/receipt_only_with_directory_cleanup_failure","Output":"=== RUN   TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure/receipt_only_with_directory_cleanup_failure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure/receipt_only_with_directory_cleanup_failure","Output":"--- PASS: TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure/receipt_only_with_directory_cleanup_failure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure/receipt_only_with_directory_cleanup_failure"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure/primary_plus_contained_cleanup_and_directory_cleanup"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure/primary_plus_contained_cleanup_and_directory_cleanup","Output":"=== RUN   TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure/primary_plus_contained_cleanup_and_directory_cleanup\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure/primary_plus_contained_cleanup_and_directory_cleanup","Output":"--- PASS: TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure/primary_plus_contained_cleanup_and_directory_cleanup (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure/primary_plus_contained_cleanup_and_directory_cleanup"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure/cleanup-only_stage_cause"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure/cleanup-only_stage_cause","Output":"=== RUN   TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure/cleanup-only_stage_cause\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure/cleanup-only_stage_cause","Output":"--- PASS: TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure/cleanup-only_stage_cause (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure/cleanup-only_stage_cause"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure","Output":"--- PASS: TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesRetainsParseRunAndCleanupCauses"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesRetainsParseRunAndCleanupCauses","Output":"=== RUN   TestRunWithDependenciesRetainsParseRunAndCleanupCauses\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesRetainsParseRunAndCleanupCauses","Output":"--- PASS: TestRunWithDependenciesRetainsParseRunAndCleanupCauses (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithDependenciesRetainsParseRunAndCleanupCauses"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestFailureJSONIsTypedAndDetailFree"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestFailureJSONIsTypedAndDetailFree","Output":"=== RUN   TestFailureJSONIsTypedAndDetailFree\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestFailureJSONIsTypedAndDetailFree","Output":"--- PASS: TestFailureJSONIsTypedAndDetailFree (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestFailureJSONIsTypedAndDetailFree"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithContainedStreamSettlesStubbornChild"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithContainedStreamSettlesStubbornChild","Output":"=== RUN   TestRunWithContainedStreamSettlesStubbornChild\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithContainedStreamSettlesStubbornChild","Output":"--- PASS: TestRunWithContainedStreamSettlesStubbornChild (1.25s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestRunWithContainedStreamSettlesStubbornChild"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestKimiFakeWrapperProcess"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestKimiFakeWrapperProcess","Output":"=== RUN   TestKimiFakeWrapperProcess\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestKimiFakeWrapperProcess","Output":"--- PASS: TestKimiFakeWrapperProcess (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestKimiFakeWrapperProcess"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestReadReceiptFileSizeBound"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestReadReceiptFileSizeBound","Output":"=== RUN   TestReadReceiptFileSizeBound\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestReadReceiptFileSizeBound/0"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestReadReceiptFileSizeBound/0","Output":"=== RUN   TestReadReceiptFileSizeBound/0\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestReadReceiptFileSizeBound/0","Output":"--- PASS: TestReadReceiptFileSizeBound/0 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestReadReceiptFileSizeBound/0"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestReadReceiptFileSizeBound/64"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestReadReceiptFileSizeBound/64","Output":"=== RUN   TestReadReceiptFileSizeBound/64\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestReadReceiptFileSizeBound/64","Output":"--- PASS: TestReadReceiptFileSizeBound/64 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestReadReceiptFileSizeBound/64"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestReadReceiptFileSizeBound/8388608"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestReadReceiptFileSizeBound/8388608","Output":"=== RUN   TestReadReceiptFileSizeBound/8388608\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestReadReceiptFileSizeBound/8388608","Output":"--- PASS: TestReadReceiptFileSizeBound/8388608 (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestReadReceiptFileSizeBound/8388608"}
+{"Action":"run","Package":"mcp-local-hub/internal/kimi","Test":"TestReadReceiptFileSizeBound/8388609"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestReadReceiptFileSizeBound/8388609","Output":"=== RUN   TestReadReceiptFileSizeBound/8388609\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestReadReceiptFileSizeBound/8388609","Output":"--- PASS: TestReadReceiptFileSizeBound/8388609 (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestReadReceiptFileSizeBound/8388609"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Test":"TestReadReceiptFileSizeBound","Output":"--- PASS: TestReadReceiptFileSizeBound (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi","Test":"TestReadReceiptFileSizeBound"}
+{"Action":"output","Package":"mcp-local-hub/internal/kimi","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/kimi"}

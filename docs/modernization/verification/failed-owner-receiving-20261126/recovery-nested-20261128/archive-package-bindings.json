@@ -1,0 +1,141 @@
+{
+  "schema": "nested-archive-public-data-package-v1",
+  "files": [
+    {
+      "path": "archive-report-v2.json.gz.base64.txt",
+      "bytes": 573079,
+      "sha256": "cd39c3186870bdfee51e48078de7411c286b05160297d30382ede59b9e402b9a",
+      "decoded_json_bytes": 10697697,
+      "decoded_json_sha256": "30e71601c1273ce571fc48ea5a933812b4670656c314794d7840cc5205e21aab",
+      "compressed_bytes": 424227,
+      "compressed_sha256": "42ab383bd592ac54dcc68c9c172b36506448c3638cab075d0c6426c4f3e153fd"
+    },
+    {
+      "path": "archive-coverage-v2.json",
+      "bytes": 21405,
+      "sha256": "bcc03a17a8e47aff9521ed5cd2d66bff63d3cba6fa4efaabe6979a65d0fbbf41"
+    },
+    {
+      "path": "archive-report-v3.json.gz.base64.txt",
+      "bytes": 257310,
+      "sha256": "462cbd67668e86d06e1059617678ac32b32a2b67c16e74ee162faef98cdc2c2f",
+      "decoded_json_bytes": 3705213,
+      "decoded_json_sha256": "c208636807101a63dcb6b160de37aee37571f57ab5162d6eda835565a3ab13a3",
+      "compressed_bytes": 190474,
+      "compressed_sha256": "03d800b3a90c8130543f79c167004d02a8b8345ec703f0a58c3148c56f4c0118"
+    },
+    {
+      "path": "archive-coverage-v3.json",
+      "bytes": 17171,
+      "sha256": "542232f05fed66133c3e8b256c55ad9d199a87423614c2b38a68b5ccf288cc0b"
+    }
+  ],
+  "runs": [
+    {
+      "version": "v2",
+      "original_report_bytes": 11608037,
+      "original_report_sha256": "549e94cb9a38128074a1afa6cedfecd7dfe1fa21fb4b2ef03e6cd0872d1d0f14",
+      "removed_header_hex_fields": 16796,
+      "role_prefix_replacements": 0,
+      "candidate_rows": 16793,
+      "exact_target_hits": 0,
+      "prefix_candidates": [
+        {
+          "bytes": 47,
+          "sha256": "9315f5fdd56a4f17f3946a5a1281bab1a5a6032be0d8687492f7ba3af84c0037",
+          "text": "evidence/gui-pure/observation-0009.receipt.json",
+          "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\gui-original-owner-2026-11-22\\gui-owner-evidence.zip::gui-final/received/gui-evidence.zip::MANIFEST.json::$[\"files\";pair=4][506][\"path\";pair=1]::utf8-string",
+          "qualification": "unqualified_hash_prefix_only"
+        }
+      ],
+      "declared_scope_complete": false
+    },
+    {
+      "version": "v3",
+      "original_report_bytes": 3964823,
+      "original_report_sha256": "5314754261d3b4036c1330fa7dad38d9a4ea3f05305165c689eef1d911e8b535",
+      "removed_header_hex_fields": 5393,
+      "role_prefix_replacements": 0,
+      "candidate_rows": 5384,
+      "exact_target_hits": 0,
+      "prefix_candidates": [
+        {
+          "bytes": 47,
+          "sha256": "9315f5fdd56a4f17f3946a5a1281bab1a5a6032be0d8687492f7ba3af84c0037",
+          "text": "evidence/gui-pure/observation-0009.receipt.json",
+          "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\gui-original-owner-2026-11-22\\gui-owner-evidence.zip::gui-final/received/gui-evidence.zip::MANIFEST.json::$[\"files\";pair=4][506][\"path\";pair=1]::utf8-string",
+          "qualification": "unqualified_hash_prefix_only"
+        },
+        {
+          "bytes": 32,
+          "sha256": "9315c0660a628387b7627477b4e21003c9babc9996c97bad7d344a0bedbb9197",
+          "text": "2026-11-21T20:38:07.367752+00:00",
+          "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\p0-safe-test-gates-2026-11-21\\p0-gates-evidence.zip::recorded-runs/canonical-evidence.zip::evidence/preserved/composed-build-vet/observation-0021.receipt.json::$[\"stderr\";pair=18][\"captured_utc\";pair=2]::utf8-string",
+          "qualification": "unqualified_hash_prefix_only"
+        },
+        {
+          "bytes": 32,
+          "sha256": "9315c0660a628387b7627477b4e21003c9babc9996c97bad7d344a0bedbb9197",
+          "text": "2026-11-21T20:38:07.367752+00:00",
+          "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\p0-safe-test-gates-2026-11-21\\p0-gates-evidence.zip::recorded-runs/canonical-evidence.zip::evidence/preserved/composed-build-vet/receipt.json::$[\"observations\";pair=14][20][\"stderr\";pair=18][\"captured_utc\";pair=2]::utf8-string",
+          "qualification": "unqualified_hash_prefix_only"
+        }
+      ],
+      "declared_scope_complete": false
+    }
+  ],
+  "transformations": [
+    "Delete header_hex fields from published data reports; exact input candidate byte counts and SHA-256 remain unchanged.",
+    "Replace only declared task/workspace path prefixes with role tokens.",
+    "Encode transformed full reports as deterministic gzip(mtime=0) then line-wrapped base64 for compact recoverable text transport."
+  ],
+  "combined": {
+    "candidate_rows": 22177,
+    "unique_candidate_sha256": 8251,
+    "unique_candidate_source_labels": 21148,
+    "selected_large_or_invalid_members": [
+      {
+        "bytes": 3882792,
+        "classification": "zip",
+        "prefix9315": false,
+        "sha256": "7ab38eb7fa472e10b013df68ba6fe477ccfaa2ec199cf170db96f36cfa3921f3",
+        "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-next-evidence-20261122.zip::windows-preserved-workspace.zip",
+        "targets": [],
+        "whole_bytes_checked": true
+      },
+      {
+        "bytes": 3515464,
+        "classification": "gif",
+        "gif_header": "GIF89a",
+        "gif_logical_screen_pixels": [
+          800,
+          500
+        ],
+        "gif_scope": "whole-byte hash and header only; no image decoding or generation",
+        "prefix9315": false,
+        "sha256": "51a4949a22198441440e113eb62ba8462844e8ec8c90b07708499f80d8c2240f",
+        "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr668-verify-141552fcc73c\\source.zip::docs/assets/hero-gui.gif",
+        "targets": [],
+        "whole_bytes_checked": true
+      },
+      {
+        "bytes": 11302778,
+        "classification": "jsonl",
+        "prefix9315": false,
+        "sha256": "a79b7793b5f384f885afb60fb513402d4523bcc0779546aa1e199e15a80fd286",
+        "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\cmake-sdk-consumer-profile-20261122\\raw-evidence.tar.gz::gzip-decoded::qualification/inputs/cmake-input/trace.jsonl",
+        "targets": [],
+        "whole_bytes_checked": true
+      },
+      {
+        "bytes": 786444,
+        "classification": "zip",
+        "prefix9315": false,
+        "sha256": "a63f32c994b1f6e301a3e78e24cc4e1bbee9e21b6cb91710724d9911843041a3",
+        "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\qualification\\known-folder-census-20261124\\census-qualification-20261124-57604a3a.zip",
+        "targets": [],
+        "whole_bytes_checked": true
+      }
+    ]
+  }
+}
