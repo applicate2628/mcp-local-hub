@@ -1,11 +1,20 @@
 package perftools
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"mcp-local-hub/internal/process"
+)
+
+const (
+	versionProbeTimeout     = 5 * time.Second
+	versionProbeWaitDelay   = time.Second
+	versionProbeOutputLimit = 64 << 10 // 64 KiB shared by stdout and stderr.
 )
 
 // ToolInfo describes whether a perf tool is available on this host,
@@ -61,9 +70,9 @@ func probe(bin string, versionExtract func(string) string) *ToolInfo {
 	if err != nil {
 		return &ToolInfo{Installed: false, Error: fmt.Sprintf("not on PATH: %v", err)}
 	}
-	cmd := exec.Command(bin, "--version")
-	process.NoConsole(cmd) // suppress console flash on windowsgui parent
-	out, err := cmd.CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), versionProbeTimeout)
+	defer cancel()
+	out, err := runVersionProbe(ctx, path, []string{"--version"})
 	if err != nil {
 		return &ToolInfo{
 			Installed: false,
@@ -76,6 +85,28 @@ func probe(bin string, versionExtract func(string) string) *ToolInfo {
 		Path:      path,
 		Version:   versionExtract(string(out)),
 	}
+}
+
+// runVersionProbe preserves CombinedOutput's shared stream while bounding its
+// retained bytes and the direct command's wait. It deliberately does not load
+// the oneAPI handler environment. WaitDelay bounds inherited pipe waits; it
+// does not establish that descendants have exited.
+func runVersionProbe(ctx context.Context, path string, args []string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, path, args...)
+	process.HideToolConsole(cmd)
+	cmd.WaitDelay = versionProbeWaitDelay
+	out := cappedBuffer{limit: versionProbeOutputLimit}
+	// os/exec serializes writes when both streams have this same comparable
+	// writer, as CombinedOutput does: https://pkg.go.dev/os/exec#Cmd.
+	cmd.Stdout, cmd.Stderr = &out, &out
+	err := cmd.Run()
+	if out.exceeded {
+		return nil, errOutputLimitExceeded
+	}
+	if err != nil {
+		return nil, errors.Join(err, ctx.Err())
+	}
+	return out.Bytes(), nil
 }
 
 // firstLine trims the tool's --version output to a single user-friendly

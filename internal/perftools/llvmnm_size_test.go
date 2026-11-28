@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"mcp-local-hub/internal/process"
 )
 
 // TestLLVMNMTool_NotInstalled asserts the symbol-table tool returns a
@@ -207,6 +209,7 @@ func TestLLVMNM_DumpsSymbols(t *testing.T) {
 	}
 	exe := filepath.Join(tmp, "hello.exe")
 	build := exec.Command("go", "build", "-o", exe, src)
+	process.HideToolConsole(build)
 	build.Env = append(os.Environ(), "GOFLAGS=")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v: %s", err, out)
@@ -254,6 +257,7 @@ func TestLLVMSize_DumpsSections(t *testing.T) {
 	}
 	exe := filepath.Join(tmp, "hello.exe")
 	build := exec.Command("go", "build", "-o", exe, src)
+	process.HideToolConsole(build)
 	build.Env = append(os.Environ(), "GOFLAGS=")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v: %s", err, out)
