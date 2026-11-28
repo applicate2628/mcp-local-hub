@@ -1,0 +1,166 @@
+{
+    "schema":  "publication-original-root-data-audit-v1",
+    "status":  "PASS",
+    "physical_complete":  true,
+    "scope":  "cache-acceptance-commit-20261128-v13",
+    "config_sha256":  "d5a7fc4b7bf1eda363e35dc00c37e75508ee58420a63d4a5e575bcca1b40612d",
+    "receipt_sha256":  "5b2e72e8c7b92b1727dd16341027e095ab651ff349f12d46de8219e9e67a1881",
+    "root_sha256":  "3b721b86cef9e85a3124d3630c4a00406f51592a320ac4d34b35858f146e9673",
+    "outer_sha256":  "f27d80cb69d365239c3106ec05d2fe09a81bfe330a3b4d0f09e277752a28ca17",
+    "commands_verified":  10,
+    "captures_verified":  20,
+    "results":  [
+                    {
+                        "name":  "head.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rev-parse",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.04464989993721247,
+                        "exit_code":  0,
+                        "stdout_sha256":  "fe69bf89766a772b8e2c0910d80842e23bd30ae77fd518c0ffa9240c0f12083d",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8\n"
+                    },
+                    {
+                        "name":  "review-working-state.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "status",
+                                     "--porcelain=v1",
+                                     "--untracked-files=all"
+                                 ],
+                        "seconds":  0.07905539998319,
+                        "exit_code":  0,
+                        "stdout_sha256":  "70148fabee8af310590210047eec280cafb9f805020c7168b85a4c05e4513b1b",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  " M internal/cli/process_identity_match_windows_test.go\n M internal/cli/settings_registry_test.go\n M internal/cli/supervise_prespawn_binary_gate_test.go\n"
+                    },
+                    {
+                        "name":  "require-empty-index.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "diff",
+                                     "--cached",
+                                     "--exit-code"
+                                 ],
+                        "seconds":  0.04857749992515892,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "review-three-file-whitespace.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "diff",
+                                     "--check",
+                                     "--",
+                                     "internal/cli/process_identity_match_windows_test.go",
+                                     "internal/cli/settings_registry_test.go",
+                                     "internal/cli/supervise_prespawn_binary_gate_test.go"
+                                 ],
+                        "seconds":  0.0502072999952361,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "commit-shared-foreign-image.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "commit",
+                                     "--only",
+                                     "-m",
+                                     "test(cli): reuse the foreign process fixture image",
+                                     "--",
+                                     "internal/cli/process_identity_match_windows_test.go",
+                                     "internal/cli/settings_registry_test.go"
+                                 ],
+                        "seconds":  0.5068954000016674,
+                        "exit_code":  0,
+                        "stdout_sha256":  "417e341a16b3f4b4e6e1d60b22ea62e1abad6a32075ec164b75be650592d35a4",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "[work/cli-fixture-reuse-20261128-v1 3c412291] test(cli): reuse the foreign process fixture image\n 2 files changed, 60 insertions(+), 24 deletions(-)\n"
+                    },
+                    {
+                        "name":  "shared-commit-identity.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "show",
+                                     "--format=raw",
+                                     "--no-patch",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.05012299993541092,
+                        "exit_code":  0,
+                        "stdout_sha256":  "dc47cd7de0e076f88645ce9694f0e9b0157a1c2804ad4278489936706b4d385e",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "commit 3c412291593ca962127b36338d464351d2052862\ntree 5be2e2ef1f006da03a8ff7ed993b5e649d619116\nparent 59f618ebfbf6d9f52c6994d68586e3c2ebc202a8\nauthor applicate2628 \u003cdima_den@inbox.ru\u003e 1795885756 +0300\ncommitter applicate2628 \u003cdima_den@inbox.ru\u003e 1795885756 +0300\n\n    test(cli): reuse the foreign process fixture image\n"
+                    },
+                    {
+                        "name":  "commit-prespawn-barrier.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "commit",
+                                     "--only",
+                                     "-m",
+                                     "test(cli): wait for prespawn event completion",
+                                     "--",
+                                     "internal/cli/supervise_prespawn_binary_gate_test.go"
+                                 ],
+                        "seconds":  0.10234119999222457,
+                        "exit_code":  0,
+                        "stdout_sha256":  "ae630a656eb9ee5ded982d45a022e90fe4f6ac9a60efc55aedf598ecdb90645d",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "[work/cli-fixture-reuse-20261128-v1 267f0765] test(cli): wait for prespawn event completion\n 1 file changed, 13 insertions(+), 6 deletions(-)\n"
+                    },
+                    {
+                        "name":  "final-source-identity.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "show",
+                                     "--format=raw",
+                                     "--no-patch",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.05882429995108396,
+                        "exit_code":  0,
+                        "stdout_sha256":  "5ed903cb121f72f412488ef36e4a9b1624ef61f2ed9e9537ee4a4844baf851ae",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "commit 267f076500b982475b57be45e8a7d8a03edcc2a6\ntree d9636aa81dbcb995934a5ee1e51331b0a10af55f\nparent 3c412291593ca962127b36338d464351d2052862\nauthor applicate2628 \u003cdima_den@inbox.ru\u003e 1795885758 +0300\ncommitter applicate2628 \u003cdima_den@inbox.ru\u003e 1795885758 +0300\n\n    test(cli): wait for prespawn event completion\n"
+                    },
+                    {
+                        "name":  "final-source-index.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "ls-files",
+                                     "--stage"
+                                 ],
+                        "seconds":  0.05549019994214177,
+                        "exit_code":  0,
+                        "stdout_sha256":  "d4249bff349de9ec7cd147c19e2d7041bb3532a5bb66c20593556d02dae4de12",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "100644 8ed260ad5036af6cdea455fb042580fdf7555e7a 0\t.github/workflows/npm-publish.yml\n100644 fb1584ca2e05e964341ea8cb03ae691d3f3b493b 0\t.gitignore\n100644 e37b24d9804de327b0ed64b6ca7b0dccc0bda9d9 0\t.plans/2026-11/archguard-source-binding-20261122.json\n100644 05ed734c9844a67855ddaacf89223a53180a4cb9 0\t.plans/2026-11/cmake-terminal-closeout-20261122.json\n100644 9ac2ddc4dfd3ea6c54e67f89bae9b0f45d5a5a02 0\t.plans/2026-11/continuation-closeout-20261122.json\n100644 d46294b4a2644f09e1d5b0cb90c23b37200856f7 0\t.plans/2026-11/continuation-closeout-evidence-20261122.tar.xz\n100644 7184d58ba300faeff1a443486af73c78fe9b1cc0 0\t.plans/2026-11/continuation-final-readback-20261122.json\n100644 d605fe7430f0f808a9cf7d0a1d5ea6bff3f883a1 0\t.plans/2026-11/continuation-scope-audit-20261122.md\n100644 4221de27b445026ce9d5aa4e01746cb76af2947f 0\t.plans/2026-11/open-pr-integration-20261117.md\n100644 c7f1b4717279f5e437b59f08053b6550fdc3b2fc 0\t.plans/2026-11/p0-continuation-closeout-20261122.json\n100644 b9788f200a706e607d6dfa5e8b64ca83fbd1e172 0\t.plans/2026-11/p0-continuation-evidence-20261122.zip\n100644 9c468318038878d6f2a56df8d97956cee79becf0 0\t.plans/2026-11/p0-continuation-local-cleanup-20261122/cleanup_local.py\n100644 f67f9602810863c27c247a5933881d09163cbbed 0\t.plans/2026-11/p0-continuation-local-cleanup-20261122/local-cleanup-inventory.jsonl.gz\n100644 4f01561932d89fd208469b57978d9e89d363fc7b 0\t.plans/2026-11/p0-continuation-local-cleanup-20261122/local-cleanup.json\n100644 8aa020c0d77af6b4d3dc576f2d3c97198ed97365 0\t.plans/2026-11/p0-continuation-local-cleanup-20261122/plan-publication-readback.json\n100644 48c4580bdf22e6bdc43158dea03ec4f0e3812722 0\t.plans/2026-11/p0-next-architecture-triage-20261122.json\n100644 ee67733db9eb35f9019f2d4159b0d78fd86c1426 0\t.plans/2026-11/p0-next-closeout-20261122.json\n100644 fff6b9354e0e34bdd55fcf7ab702daead8af61ef 0\t.plans/2026-11/p0-next-evidence-20261122.zip\n100644 59162e42cc9a86003cdb6ac801893c8456a3c786 0\t.plans/2026-11/p0-publication-closeout-20261122.json\n100644 10b832d1075016f556bf19ed912259be3c1b5db4 0\t.plans/2026-11/p0-publication-readback-20261122.json\n100644 3c4910409bf20192f4d0b20da16db183ec9e1677 0\t.plans/2026-11/pr616-carbon-remediation.md\n100644 10e9b3d9b0d2682e1b04de9b7da719bf58140710 0\t.plans/2026-11/pr616-qualification-20261114/caller-receipt.json\n100644 cd9ecb22510dd781a9a264614714313fdd98626b 0\t.plans/2026-11/pr616-qualification-20261114/consent.log\n100644 8d8479a23544577aca87b3d7a15c1c100752147d 0\t.plans/2026-11/pr616-qualification-2026"
+                    },
+                    {
+                        "name":  "final-source-status.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "status",
+                                     "--porcelain=v1",
+                                     "--untracked-files=all"
+                                 ],
+                        "seconds":  0.05908939999062568,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    }
+                ],
+    "tests_executed":  false,
+    "reviewed_utc":  "2026-11-28T17:10:02.2116781Z"
+}

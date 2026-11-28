@@ -1,0 +1,16 @@
+{
+  "schema": "source267f-independent-immutable-DATA-map-check-v1",
+  "tracked_files": 3369,
+  "directories": 201,
+  "computed_git_tree": "d9636aa81dbcb995934a5ee1e51331b0a10af55f",
+  "expected_git_tree": "d9636aa81dbcb995934a5ee1e51331b0a10af55f",
+  "git_tree_exact": true,
+  "index_map_exact": true,
+  "sha256_map_exact": true,
+  "git_map_original_sha256": "bde89c9df4b93c1e1082711f4a25986431bae6d02c973f8da6cea87a4707dd10",
+  "index_original_sha256": "d4249bff349de9ec7cd147c19e2d7041bb3532a5bb66c20593556d02dae4de12",
+  "sha256_map_original_sha256": "41c4d0a1ac1eb1919e3ece91df43722770f9e184abcff770eecb1b35414979cc",
+  "source_files_read": false,
+  "git_or_native_executed": false,
+  "full_qualification_inherited": false
+}

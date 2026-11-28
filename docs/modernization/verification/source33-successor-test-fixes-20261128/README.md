@@ -28,7 +28,7 @@ The proof-window v2 resolves the root review of v1: native accounting cannot con
 - `successor.patch`: complete seven-file patch with full Git before/after blobs.
 - `patches/strict-proof-window-v2.patch`: focused deterministic fixture change.
 - `patches/full-suite-entry.patch`: focused existing TestMain seam.
-- `afterimages/`: all seven complete proposed test files.
+- `afterimages/`: all seven complete proposed test files, stored as `afterimages/<evidence.files[].path>.txt`. The `.go.txt` publication suffix keeps evidence out of Go package discovery; original Source paths, patch paths, hashes and bytes are unchanged.
 - `evidence.json`: exact before/after hashes, expected whole tree, scope, and unperformed checks.
 - `artifact-manifest.json`: SHA-256 and byte size for every payload.
 - `.gitattributes`: preserves payload bytes.

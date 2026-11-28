@@ -1,0 +1,17 @@
+{
+    "schema":  "root-source59f-closed-api-diagnostics-data-v1",
+    "status":  "PASS",
+    "artifact_files":  96,
+    "artifact_bytes":  2446921,
+    "original_files":  136,
+    "original_bytes":  2293303,
+    "manifest_sha256":  "606fae7b90c1c18c37adff72aa73410e0c3668fb945ee21f44e196ce0aedeed6",
+    "bindings_sha256":  "6ddea5ed1c12036094b7d667e9c7868d5e0633384a9c02b2da2e6aa77bff2d47",
+    "renderer_sha256":  "acee9433439e4b261bb148dd9df05cc2bec781cc2d55294dcf70feeada68466a",
+    "reconstruction_sha256":  "1ffbd50ce9d4d10242e85ff1dae70fb6f5554dd4fa670af3b286b6009639fb64",
+    "api_qualification":  "FAIL/CLOSED_PRECHILD",
+    "api_suite_started":  false,
+    "full_or_CLI_qualification_claimed":  false,
+    "UNKNOWN_payload_read":  false,
+    "native_or_test_execution":  false
+}

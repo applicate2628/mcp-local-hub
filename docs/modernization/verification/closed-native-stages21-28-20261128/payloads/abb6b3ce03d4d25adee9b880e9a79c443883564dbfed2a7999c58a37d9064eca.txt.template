@@ -1,0 +1,42 @@
+$ErrorActionPreference='Stop'
+$R='@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1\recovery-inputs-v1'
+$Old=$R+'\original-full-v6-complete-captures-evidence-v1'
+$B=$R+'\original-full-v6-complete-captures-evidence-v2'
+$Out=$R+'\root-fixture-v2-replay-v1'
+$Python='@@RECOVERY_NATIVE_USER_PROFILE@@\AppData\Local\Python\pythoncore-3.15-64\python.exe'
+function SHA([string]$p){$h=[Security.Cryptography.SHA256]::Create();try{[BitConverter]::ToString($h.ComputeHash([IO.File]::ReadAllBytes($p))).Replace('-','').ToLowerInvariant()}finally{$h.Dispose()}}
+function Need($ok,[string]$why){if(-not$ok){throw $why}}
+$M=$B+'\artifact-manifest.json';Need ((SHA $M)-ceq'e6d697ad37b8bc9a892496d2dad6ad00759bfc367b4a3cd18a70ece88689d861') 'v2 manifest pin'
+$m=[IO.File]::ReadAllText($M)|ConvertFrom-Json
+$Seen=@{};$Bytes=(Get-Item -LiteralPath $M).Length
+foreach($f in $m.files){
+ Need ($f.path -and -not$f.path.Contains('..') -and -not$f.path.Contains(':') -and -not[IO.Path]::IsPathRooted($f.path)) 'safe artifact relative'
+ $p=$B+'\'+$f.path;$i=Get-Item -LiteralPath $p -Force
+ Need (-not($i-is[IO.DirectoryInfo]) -and -not($i.Attributes-band[IO.FileAttributes]::ReparsePoint)) 'ordinary artifact'
+ Need ($i.Length-eq$f.bytes -and (SHA $p)-ceq$f.sha256 -and -not$Seen.ContainsKey($f.path)) 'actual v2 artifact matches'
+ $Seen[$f.path]=$true;$Bytes+=$i.Length
+}
+$Actual=@(Get-ChildItem -LiteralPath $B -File -Force -Recurse)
+Need ($Actual.Count-eq350 -and @($m.files).Count-eq349) '350 complete artifacts'
+foreach($i in $Actual){$p=$i.FullName.Substring($B.Length+1).Replace('\','/');Need ($p-ceq'artifact-manifest.json'-or$Seen.ContainsKey($p)) 'all artifacts manifest-bound'}
+foreach($f in @('reconstruct_sources.py','materialize_from_closed_files.py')){
+ $Expected=[IO.File]::ReadAllText($Old+'\'+$f).Replace('19bd638d59031a7c8db0752135bd98075a2aa3cd96ff7ceaf4423187120ad6bd','d834d994d3091d0d3db1e027f4d0dc8eb81bac023b46be27f1b429209de8c3e0')
+ Need ($Expected-ceq[IO.File]::ReadAllText($B+'\'+$f)) 'renderer changes only binding literal'
+}
+$Roles=$R+'\original-full-v6-complete-captures-private-v2\roles.json'
+Need ((SHA $Roles)-ceq'5437fd6a6721aac13335cf6658447522f9a43f03b20051d0edea6e6d48985f39') '24 roles pin'
+Need ((SHA $Python)-ceq'd4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd') 'Python pin'
+Need (-not(Test-Path -LiteralPath $Out)) 'fresh output'
+& $Python -I -S -B ($B+'\reconstruct_sources.py') --roles-json $Roles --output $Out
+Need ($LASTEXITCODE-eq0) 'v2 exact DATA reconstruction'
+$Rec=[IO.File]::ReadAllText($Out+'\reconstruction-receipt.json')|ConvertFrom-Json
+Need (@($Rec.files).Count-eq333 -and $Rec.sources_imported_or_executed-eq$false -and $Rec.qualification_inherited-eq$false) '333 originals scope'
+foreach($f in $Rec.files){$p=$Out+'\'+$f.path;Need ((SHA $p)-ceq$f.sha256 -and (Get-Item -LiteralPath $p).Length-eq$f.bytes) 'all333 native byte readback'}
+$Verify=$B+'\verify_all_captures.py';Need ((SHA $Verify)-ceq'619833bad46f773887647cbee947b889344bc78d893b2a5138bc967359811836') 'unchanged566 verifier'
+& $Python -I -S -B $Verify --new-root $Out --prior-full-root ($R+'\root-checkpoint-data-20261128-v1\prior-full20') --prior-api-root ($R+'\root-checkpoint-data-20261128-v1\prior-api4') --receipt ($R+'\root-fixture-v2-all566.json')
+Need ($LASTEXITCODE-eq0) 'complete566 verification'
+$Result=[ordered]@{schema='root-fixture-v2-exact-data-verification-v1';status='PASS';artifacts=350;artifact_bytes=$Bytes;original_files=333;all_capture_paths=566;historical_qualification='FAIL/CLOSED';manifest_sha256=(SHA $M);bindings_sha256=(SHA ($B+'\source-bindings.json'));renderer_sha256=(SHA ($B+'\reconstruct_sources.py'));materializer_sha256=(SHA ($B+'\materialize_from_closed_files.py'));reconstruction_sha256=(SHA ($Out+'\reconstruction-receipt.json'));captures_receipt_sha256=(SHA ($R+'\root-fixture-v2-all566.json'));native_or_test_execution=$false;scanner_or_policy_modified=$false;publication_authority=$false}
+$Target=$R+'\root-fixture-v2-verification.json';Need (-not(Test-Path -LiteralPath $Target)) 'fresh audit'
+[IO.File]::WriteAllText($Target,($Result|ConvertTo-Json -Depth 6)+[char]10,[Text.UTF8Encoding]::new($false))
+$Result|ConvertTo-Json -Depth 6
+[ordered]@{root_audit_sha256=(SHA $Target)}|ConvertTo-Json

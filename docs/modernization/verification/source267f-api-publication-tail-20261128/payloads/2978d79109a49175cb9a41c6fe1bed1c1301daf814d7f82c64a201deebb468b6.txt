@@ -1,0 +1,31 @@
+{
+  "schema": "original-v6-exact-data-reconstruction-v1",
+  "status": "EXACT_DATA_RECONSTRUCTED",
+  "source_bindings_sha256": "88e603b74b24ac13d3f1462194c7ae4546b96a357b195730f89a5695988a6fb7",
+  "files": [
+    {
+      "path": "closed-api/receipt.json",
+      "bytes": 2338457,
+      "sha256": "2282b4b297e5d78f90da965383880674dd3f5529cfcfd6b9243cb56145927de8"
+    },
+    {
+      "path": "closed-api/namespace-suite-receipt.json",
+      "bytes": 5732,
+      "sha256": "2fe7149ad8fb358eba3aabae1d7d0d4e11a535b19622b0057f52ff7e034dd98b"
+    },
+    {
+      "path": "closed-api/suite-owner.stdout.txt",
+      "bytes": 1207113,
+      "sha256": "664ff94ef54d97d0088b74b0b669edc292589f1911b49798c71192aa79b17541"
+    },
+    {
+      "path": "closed-api/suite-owner.stderr.txt",
+      "bytes": 341,
+      "sha256": "0c954a4a1713930d9b849eaa415d7f195a799745a14df141f7cf71b81d614107"
+    }
+  ],
+  "role_values_included": false,
+  "sources_imported_or_executed": false,
+  "qualification_inherited": false,
+  "existing_public_inputs_manifest": null
+}

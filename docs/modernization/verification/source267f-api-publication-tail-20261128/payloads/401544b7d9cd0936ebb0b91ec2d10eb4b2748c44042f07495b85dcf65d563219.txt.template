@@ -1,0 +1,65 @@
+{
+  "schema": "source267f-snapshot-projection-v1",
+  "status": "DATA_ONLY",
+  "origin": {
+    "rootPair": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\source267f-binding\\root-source267f-freeze.json",
+      "sha256": "ec56fbd6526b3f7f36d2818fca0ab4d7c000d493ce065d02044bdc7fa7d22bdd"
+    },
+    "mapPair": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\source267f-binding\\source267f-input-sha256.json",
+      "sha256": "41c4d0a1ac1eb1919e3ece91df43722770f9e184abcff770eecb1b35414979cc"
+    },
+    "gitPair": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\source267f-binding\\source267f-git-map.json",
+      "sha256": "bde89c9df4b93c1e1082711f4a25986431bae6d02c973f8da6cea87a4707dd10"
+    },
+    "rtPair": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer267f-candidate-v1\\runtime-source-snapshot.json",
+      "sha256": "09476d477b96d8232407dd1749d34cbac3f05505625737f2ac3e8ba6a6b43b95"
+    },
+    "psPair": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer267f-candidate-v1\\publisher-source-snapshot.json",
+      "sha256": "2da73b9edd326a1d76dc2d920d1143ac19e06cb0c36b2d3d0acbeb6eccf2cb6c"
+    }
+  },
+  "source_file_count": 3369,
+  "total_bytes": 69342009,
+  "unchanged_files": 3366,
+  "changed_files": [
+    {
+      "path": "internal/cli/process_identity_match_windows_test.go",
+      "before_sha256": "64c5e6a5d499529c617ca32d0e8eb572c4f3d7e8b0f37a7397193f6095103936",
+      "sha256": "e97fd7cc9cc9d9dfe09643c8e03334bd6f7f3e663b07a7f0fe711f0ef974708f",
+      "bytes": 4645,
+      "git_blob_sha1": "059eec22dc7701ed8f1a1d2f2baac82962d815df"
+    },
+    {
+      "path": "internal/cli/settings_registry_test.go",
+      "before_sha256": "30e22d1588509cfe025126a7a5356253e6f7e4b4b6d1440c0b12377e29283e9e",
+      "sha256": "40de5fd188c8c94ec67e4fd852d89b0122aee602c3dde91fd8f8ceb2e4c7854a",
+      "bytes": 32273,
+      "git_blob_sha1": "563e80dff195deb1378e45431c0b374aa0a25012"
+    },
+    {
+      "path": "internal/cli/supervise_prespawn_binary_gate_test.go",
+      "before_sha256": "e6f4c4f1304f8d29064e034694155bf378cd248ce7ebc25f6be8e3707a777acc",
+      "sha256": "5e3a6517a9fed3a329cea60d12915965720b37c2bb6a865880d3c0c05ed48feb",
+      "bytes": 32663,
+      "git_blob_sha1": "ed0b512ba87a649edcbd05288ab73ed306ad32c7"
+    }
+  ],
+  "runtime_snapshot": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer267f-candidate-v1\\runtime-source-snapshot.json",
+    "sha256": "09476d477b96d8232407dd1749d34cbac3f05505625737f2ac3e8ba6a6b43b95"
+  },
+  "publisher_snapshot": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer267f-candidate-v1\\publisher-source-snapshot.json",
+    "sha256": "2da73b9edd326a1d76dc2d920d1143ac19e06cb0c36b2d3d0acbeb6eccf2cb6c"
+  },
+  "publisher_source_epoch": "PENDING_ACTUAL_PRODUCT_BUILD; computed by unchanged build.ps1 from the full new snapshot; no old epoch relabelled",
+  "source_files_read_by_author": false,
+  "root_maps_read_and_exact_hash_verified": true,
+  "source_worktree_mutated_by_author": false,
+  "products_built": false
+}

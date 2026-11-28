@@ -1,0 +1,87 @@
+{
+  "stage": "tests",
+  "root": {
+    "Known": true,
+    "PID": 374428,
+    "StartedAt": "2026-11-28T17:16:14.1130356Z",
+    "NativeBirthFILETIME": 134403597741130356
+  },
+  "native": {
+    "RootIdentity": {
+      "Known": true,
+      "PID": 374428,
+      "StartedAt": "2026-11-28T17:16:14.1130356Z",
+      "NativeBirthFILETIME": 134403597741130356
+    },
+    "NoChildKnown": false,
+    "RootWaitKnown": true,
+    "RootExitCode": 2,
+    "TerminalAction": "not-requested",
+    "MembersExited": true,
+    "AccountingKnown": true,
+    "InitialTotal": 867,
+    "FinalActive": 0,
+    "CapturedMemberPIDs": null,
+    "HandlesClosed": true,
+    "Error": null
+  },
+  "io": {
+    "Stdin": {
+      "Acquired": true,
+      "CloseAttempted": true,
+      "Closed": true,
+      "CloseError": null
+    },
+    "StdoutRead": {
+      "Acquired": true,
+      "CloseAttempted": true,
+      "Closed": true,
+      "CloseError": null
+    },
+    "StdoutWrite": {
+      "Acquired": true,
+      "CloseAttempted": true,
+      "Closed": true,
+      "CloseError": null
+    },
+    "StderrRead": {
+      "Acquired": true,
+      "CloseAttempted": true,
+      "Closed": true,
+      "CloseError": null
+    },
+    "StderrWrite": {
+      "Acquired": true,
+      "CloseAttempted": true,
+      "Closed": true,
+      "CloseError": null
+    },
+    "Stdout": {
+      "WorkerStarted": true,
+      "WorkerComplete": true,
+      "EOF": true,
+      "Bytes": 431087,
+      "Limit": 16777216,
+      "LimitExceeded": false,
+      "Error": null
+    },
+    "Stderr": {
+      "WorkerStarted": true,
+      "WorkerComplete": true,
+      "EOF": true,
+      "Bytes": 6209,
+      "Limit": 16777216,
+      "LimitExceeded": false,
+      "Error": null
+    }
+  },
+  "complete": true,
+  "native_complete": true,
+  "io_complete": true,
+  "failure": "contained process exit failed",
+  "work_deadline": "2026-11-28T20:21:15.7693148+03:00",
+  "absolute_cleanup_deadline": "2026-11-28T20:21:25.7693148+03:00",
+  "root_wait_known": true,
+  "root_exit_code": 2,
+  "custody_retained": false
+}

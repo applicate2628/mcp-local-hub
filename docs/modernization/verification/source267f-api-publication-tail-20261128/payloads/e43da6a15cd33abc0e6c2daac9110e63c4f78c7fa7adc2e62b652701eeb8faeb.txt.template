@@ -1,0 +1,100 @@
+"""DATA only: reproduce the pinned v1 parse refusal and inspect the v2 AST.
+No caller module, main, private scope, Run, native owner, or process is executed.
+The only output is a new exclusive JSON metadata record beside this script.
+"""
+import ast
+import hashlib
+import json
+import os
+from pathlib import Path
+import sys
+sys.dont_write_bytecode = True
+
+V1 = "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-admission-diagnostic-driver-v1\\run_namespace_diagnostic.py"
+V1_SHA = "bc21860fc9258de002a5e038b805f71e05ba7df1cb3dff6bcb899c88f14e20ac"
+V2 = "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-admission-diagnostic-driver-v2\\run_namespace_diagnostic.py"
+V2_SHA = "06ef67bdb08fde5630d2f6c4be0e130ec60e87bb688c7aca148e07797dcf6189"
+ADAPTER = "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-candidate\\adapter_successor.py.in"
+ADAPTER_SHA = "48c5d6af30d62c1e63c1455689a19c1ce0b67ab761fc9b1683e5a522494b98bd"
+FUNCTION_SHA = "96bd52faae2a107b929170b7884b3211f0d7df1fbd66a4fdc1375e8eba60b601"
+
+def need(value, message):
+    if not value:
+        raise RuntimeError(message)
+
+def read_pinned(path, digest):
+    raw = Path(path).read_bytes()
+    need(hashlib.sha256(raw).hexdigest() == digest, "pinned DATA input differs")
+    return raw.decode("utf-8")
+
+def named_function(tree, name):
+    rows = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == name]
+    need(len(rows) == 1, "one required source function expected")
+    return rows[0]
+
+def parse_arguments(node):
+    return [call.args[0].id for call in ast.walk(node)
+            if isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name) and call.func.value.id == "ast"
+            and call.func.attr == "parse" and call.args and isinstance(call.args[0], ast.Name)]
+
+def main():
+    need(len(sys.argv) == 1, "no runtime operands are accepted by this DATA probe")
+    before = read_pinned(V1, V1_SHA)
+    after = read_pinned(V2, V2_SHA)
+    template = read_pinned(ADAPTER, ADAPTER_SHA)
+    before_tree, after_tree = ast.parse(before, filename=V1), ast.parse(after, filename=V2)
+    need(parse_arguments(named_function(before_tree, "receiving_functions")) == ["source"],
+         "v1 does not contain the reviewed whole-template parse")
+    try:
+        ast.parse(template, filename=ADAPTER)
+    except SyntaxError as error:
+        need(error.filename == ADAPTER and error.lineno == 12
+             and "@@TASK_PATH_REPR@@" in (error.text or ""),
+             "the expected original template SyntaxError was not reproduced")
+        original = {"exception_type": type(error).__name__, "message": error.msg,
+                    "filename": error.filename, "line": error.lineno,
+                    "offset": error.offset, "source_line": (error.text or "").rstrip("\r\n")}
+    else:
+        raise RuntimeError("unexpectedly parsed the uncomposed original template")
+    segment = "".join(template.splitlines(keepends=True)[99:111])
+    need(hashlib.sha256(segment.encode("utf-8")).hexdigest() == FUNCTION_SHA,
+         "the original function slice bytes differ")
+    selected = ast.parse(segment, filename=ADAPTER)
+    need(len(selected.body) == 1 and isinstance(selected.body[0], ast.FunctionDef)
+         and selected.body[0].name == "flags_are_literal", "exact single predicate AST required")
+    need(parse_arguments(named_function(after_tree, "receiving_functions")) == ["segment"],
+         "v2 must parse only the exact function slice")
+    original_main = named_function(after_tree, "main")
+    body = original_main.body
+    receiving_index = next(i for i, node in enumerate(body)
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name) and node.value.func.id == "receiving_functions")
+    source_index = next(i for i, node in enumerate(body)
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name) and node.value.func.id == "receive_source")
+    scope_index = next(i for i, node in enumerate(body)
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Attribute) and node.value.func.attr == "create_private_run_scope")
+    need(receiving_index < source_index < scope_index, "composition must precede Source reads and scope creation")
+    result = {"schema": "namespace-diagnostic-slice-data-check-v1", "status": "PASS",
+        "scope": "syntax and source structure only; no diagnostic runtime or API test execution",
+        "v1": {"path": V1, "sha256": V1_SHA, "original_parse_refusal": original},
+        "adapter": {"path": ADAPTER, "sha256": ADAPTER_SHA},
+        "v2": {"path": V2, "sha256": V2_SHA, "ast_parsed": True,
+               "slice_lines": [100, 111], "slice_sha256": FUNCTION_SHA,
+               "one_function": "flags_are_literal", "composition_precedes_source_and_scope": True},
+        "caller_modules_imported": False, "caller_main_calls": 0, "popen_calls": 0,
+        "scope_or_image_created": False, "runtime_or_test_commands_started": False}
+    output = Path(__file__).with_name("slice-composition-data.json")
+    raw = (json.dumps(result, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    with output.open("xb") as stream:
+        stream.write(raw)
+        stream.flush()
+        os.fsync(stream.fileno())
+    print(json.dumps({"status": "PASS", "scope": "DATA_ONLY", "result": str(output),
+                      "sha256": hashlib.sha256(raw).hexdigest()}))
+    return 0
+
+if __name__ == "__main__":
+    raise SystemExit(main())

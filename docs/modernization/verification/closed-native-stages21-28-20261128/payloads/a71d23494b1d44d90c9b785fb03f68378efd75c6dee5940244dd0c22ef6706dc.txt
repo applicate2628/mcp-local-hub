@@ -1,0 +1,10 @@
+{
+    "config_sha256":  "26aa3574a15f33ff8965c2d2b73541beae0feef60207826206b182b9e0d0ad75",
+    "source_files":  3369,
+    "observed_inputs":  3384,
+    "commands":  5,
+    "original_source_unchanged":  true,
+    "cache_transfer_started":  false,
+    "go_test_started":  false,
+    "ambient_inheritance":  "native original route retained; explicit difference documented"
+}

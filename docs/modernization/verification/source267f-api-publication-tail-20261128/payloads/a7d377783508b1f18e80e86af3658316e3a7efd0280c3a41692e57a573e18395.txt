@@ -1,0 +1,57 @@
+{
+  "schema": "namespace-diagnostic-driver-candidate-manifest-v1",
+  "status": "PREPARED_NOT_EXECUTED",
+  "source_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+  "source_tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+  "author_native_or_test_execution": false,
+  "root_helper_compilation_status": "PASS/CLOSED",
+  "latest_cache_handoff_status": "PASS/CLOSED",
+  "runtime_and_api_qualification": "NOT_RUN",
+  "files": [
+    {
+      "path": "namespace-timing-overlay.json",
+      "bytes": 512,
+      "sha256": "3a8eb56d4f22609eabdd36c50a17987c4bbee2ccd06caba11c00a4ad4e127188"
+    },
+    {
+      "path": "run_namespace_diagnostic.py",
+      "bytes": 14657,
+      "sha256": "bc21860fc9258de002a5e038b805f71e05ba7df1cb3dff6bcb899c88f14e20ac"
+    },
+    {
+      "path": "private_scope.py",
+      "bytes": 12499,
+      "sha256": "c08ab1d5106a514054a7d55a77a1fbd9ff3aa21010b84b90633293325037dda3"
+    },
+    {
+      "path": "runtime-inputs.json",
+      "bytes": 8471,
+      "sha256": "ab6144e6aab0e19d0f94a48e1036d149be6e793c442d9c255bce59b52017e42b"
+    },
+    {
+      "path": "launch_namespace_diagnostic_original.ps1",
+      "bytes": 3806,
+      "sha256": "5d5620539aad0dfd804263bb3604667c489629e9736ee84407b2378d2d25c01b"
+    },
+    {
+      "path": "source-reuse-delta.patch",
+      "bytes": 3979,
+      "sha256": "cdc1549cb08039b3bb154c4408840d21c6f7c85cb41972b71450255608eb9f7e"
+    },
+    {
+      "path": "new-caller.patch",
+      "bytes": 14978,
+      "sha256": "89fdc29706148106f81ec5ed7622deccfd8c58d2658f8a021139c2bcb04aaaf5"
+    },
+    {
+      "path": "source-reuse.json",
+      "bytes": 7383,
+      "sha256": "f5e1416c281526de944e236374172170b9131b5226a55497fe2a67a734a505ea"
+    },
+    {
+      "path": "README.md",
+      "bytes": 13052,
+      "sha256": "4d8d9b576e0a2735ea47ca5789dda28cf02810bd0da5089b339b2f120f58b055"
+    }
+  ]
+}

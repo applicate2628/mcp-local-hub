@@ -1,0 +1,143 @@
+{
+    "schema":  "publication-original-root-data-audit-v1",
+    "status":  "PASS",
+    "physical_complete":  true,
+    "scope":  "cache-acceptance-stage-20261128-v31",
+    "config_sha256":  "9283946441e814d8f876431f9c414ed68af41972317782c756590980172b4a70",
+    "receipt_sha256":  "85a33bf56687ce589f8e1aa1c631ae68d55800435d901e83d4b6dabbddb8c58f",
+    "root_sha256":  "00ea80dbe24f9365c8c3460ec4c76f77107f2a90a7725786f8a3f2bfab327b72",
+    "outer_sha256":  "209b67e3ff8727578b5a2846feffb67540b368c7c8197b4d18616eba8056f06d",
+    "commands_verified":  9,
+    "captures_verified":  18,
+    "results":  [
+                    {
+                        "name":  "head.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rev-parse",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.09383689996320754,
+                        "exit_code":  0,
+                        "stdout_sha256":  "94a7b15c7566e6e079c655109af8e947f8a0bbdea1b1eea8331b05b24f6c4e1e",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "e2c0785baad9620dcc3f8232dff452191b6cae4c\n"
+                    },
+                    {
+                        "name":  "retain-clean-unpublished-checkpoint.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "branch",
+                                     "work/publication-clean-e2c0785b-20261128-v1",
+                                     "e2c0785baad9620dcc3f8232dff452191b6cae4c"
+                                 ],
+                        "seconds":  0.04005840001627803,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "fetch-exact-current-public-parent.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "fetch",
+                                     "--no-tags",
+                                     "origin",
+                                     "5a15e4f4bbf64442677e3443054a1bdb277505bd"
+                                 ],
+                        "seconds":  0.5100027000298724,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "3635e87a05121281a08ce7ca96d008f717147e51d56cd2e4761ef609c411aff0",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "verify-fetched-public-parent.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rev-parse",
+                                     "FETCH_HEAD"
+                                 ],
+                        "seconds":  0.03615900001022965,
+                        "exit_code":  0,
+                        "stdout_sha256":  "df703b42e4c0c6b7f359b2ddfefc98bcf10f80e9bbcec21bfc6905223185760d",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "5a15e4f4bbf64442677e3443054a1bdb277505bd\n"
+                    },
+                    {
+                        "name":  "rebase-own-unpublished-checkpoint.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rebase",
+                                     "--onto",
+                                     "5a15e4f4bbf64442677e3443054a1bdb277505bd",
+                                     "27d90e626465dc9a3a012e50785d62785d4c5e7e"
+                                 ],
+                        "seconds":  75.43402980000246,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "1c1c72bda9c04a24e7621304e0dfcef603233ea2511a06fe58988629629d0f74",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "rebased-checkpoint-identity.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "show",
+                                     "--format=raw",
+                                     "--no-patch",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.05101559998001903,
+                        "exit_code":  0,
+                        "stdout_sha256":  "eb3c4bef6ac14deccdf19ea4dc27651ccf20ac9047d27f2118c25fdc31cb33be",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "commit fc62057bdede92452478a9c1a0496ec14e2290d4\ntree 5e2e9d5af6ba05bc01788ab28df4b9c814d74065\nparent 5a15e4f4bbf64442677e3443054a1bdb277505bd\nauthor applicate2628 \u003cdima_den@inbox.ru\u003e 1795885602 +0300\ncommitter applicate2628 \u003cdima_den@inbox.ru\u003e 1795886359 +0300\n\n    docs: preserve acceptance evidence and diagnosed blockers\n"
+                    },
+                    {
+                        "name":  "preserved-public-report.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "show",
+                                     "5a15e4f4bbf64442677e3443054a1bdb277505bd:.plans/2026-11/open-pr-integration-20261117.md"
+                                 ],
+                        "seconds":  0.07037139998283237,
+                        "exit_code":  0,
+                        "stdout_sha256":  "82c5236b4ed4d1d0313ec3529298aa80564a72fdbd618163bd3c8111ddded382",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "\u003c!-- full-v6-closure-and-preparation-20261128:start --\u003e\n## Текущее состояние приёмки: история сохранена, Source74e подготовлен\n\n**28 ноября 2026 года, МСК.** Восстановленный исторический Source `727d66753814dc218e26d699e57402db2d13190a` получил полный результат **FAIL/CLOSED**, сохранённый ниже. Для собственной приёмки PR №666 зафиксирован Source `74e7563db244ede5984834233ce8d59072e92c0a`, tree `bcf1bd3539a8ba5ab54cff123adbb4bc071276d3`, с чистым рабочим деревом. Он происходит от восстановленного `33eaf8af8fc46cb231f48c70f4775922393245b1` через `04e5b4eadd6407cbff4e04ba453546d278314bd7`. Обе полные команды на Source74e пока **NOT_RUN**; результатов других Source ему не присваиваем.\n\n### Содержание обновления\n\n1. [Завершение полного запуска](#завершение-полного-запуска)\n2. [Опубликованные материалы подготовки и API](#опубликованные-материалы-подготовки-и-api)\n3. [Исправления и подготовка Source74e](#исправления-и-подготовка-source74e)\n\n### Завершение полного запуска\n\n**Таблица 1. Исходные команды и действительная область результата.**\n\n| Проверка | Результат | Область |\n|---|---|---|\n| `go build ./...` | PASS | 116.711 с, Source727 |\n| `go vet ./...` | PASS | 123.389 с, Source727 |\n| `go test -count=1 -timeout 5m ./...` | FAIL / CLOSED | Все 64 запуска пакетов завершены; пять пакетов имеют ненулевой результат |\n| `go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/` | FAIL / CLOSED | API завершён с FAIL; CLI не скомпилирован и не запускался |\n| Обе обязательные полные команды | **FAIL** | Увеличения пяти минут, выбора части тестов или переименования результата не было |\n\nИсходный управляющий процесс завершён с кодом 1; первоначальный объект процесса дождался завершения и освобождён. Основной receipt завершён в `2026-11-28T12:15:09Z` (15:15:09 по Москве), SHA-256 `6cd606a5ec4e6e1a3e74d4b8324786cc98dffe8cd587f4a41c89a751ea7f0c4a`. Его физическое завершение не превращает FAIL в PASS.\n\nСобственная повторная проверка исходных записей и фактических файлов охватила **283 команды, 566 контрольных сумм командных захватов, 65 квитанций пакетов, 130 квитанций первоначальных владельцев, 3 509 файлов Source и 115 файлов входов**. Один временно внесённый ресурс `.syso` отсутствует после предусмотренного восстановления; это проверено отдельно. Квитанция этой проверки имеет SHA-256 `f02bf04c80d0e84a5989297f742662ea874bbf7743c78ab3da947305004849d5`. Отсутствующего tagged CLI среди выполненных пакетов нет.\n\nВ default-режиме ненулевые резуль"
+                    },
+                    {
+                        "name":  "rebased-change-summary.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "diff",
+                                     "--stat",
+                                     "5a15e4f4bbf64442677e3443054a1bdb277505bd",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.475414999993518,
+                        "exit_code":  0,
+                        "stdout_sha256":  "f5c1e1df40c0395589b1f8453a3a6794b7b137d4608657fee7258e34cf7029de",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  " .plans/2026-11/open-pr-integration-20261117.md     |   109 +-\n .../.gitattributes                                 |     1 +\n .../cli-shared-image-candidate-20261128/README.md  |    43 +\n .../cli/process_identity_match_windows_test.go     |   163 +\n .../internal/cli/settings_registry_test.go         |   685 +\n .../artifact-manifest.json                         |    30 +\n .../evidence.json                                  |    82 +\n .../share-foreign-test-image.patch                 |   139 +\n .../.gitattributes                                 |     1 +\n .../old-cli-budget-analysis-20261128/README.md     |   133 +\n .../old-cli-budget-analysis-20261128/analysis.json |   373 +\n .../artifact-manifest.json                         |    34 +\n .../not-started-or-paused.json                     |   399 +\n .../parse_closed_cli_durations.py                  |   193 +\n .../source-correspondence.json                     |   107 +\n .../top-level-terminal-ledger.json                 | 15997 ++++\n .../.gitattributes                                 |     1 +\n .../old-cli-budget-parser-v2-20261128/README.md    |    31 +\n .../artifact-manifest.json                         |    29 +\n .../ascii-to-utf8.patch                            |    22 +\n .../evidence.json                                  |    42 +\n .../original-data-failure.json                     |    12 +\n .../parse_closed_cli_durations_v2.py               |   193 +\n .../.gitattributes                                 |     1 +\n .../README.md                                      |   117 +\n .../artifact-manifest.json                         |  1760 +\n .../canonical-finding-locations.json               |   163 +\n .../capture-index.json                             | 10498 +++\n .../closed-source-map.json                         |   340 +\n .../data-reconstruction-proof.json                 |    48 +\n .../disclosure-review.json                         |    28 +\n .../fixture-template-v2-plan.json                  |   428 +\n .../fixture-template-v2-receipt.json               |   125 +\n .../materialize_from_closed_files.py               |   193 +\n .../receipts/x09eee20a643d/receipt.json.template   |  1469 +\n .../receipts/x0c62f40291d7/receipt.json.template   |  1737 +\n .../receipts/x0db327d6b7fe/receipt.json.template   |  2294 +\n .../receipts/x1004ff5c54b6/receipt.json.template   |  1504 +\n .../receipts/x1109af6646ad/receipt.json.template   | 20196 ++++++\n .../receipts/x116ebc9d191a/receipt.json.template   |  1737 +\n .../rece"
+                    },
+                    {
+                        "name":  "rebased-status.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "status",
+                                     "--porcelain=v1",
+                                     "--untracked-files=all"
+                                 ],
+                        "seconds":  0.1139365000417456,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    }
+                ],
+    "tests_executed":  false,
+    "reviewed_utc":  "2026-11-28T17:22:25.2447087Z"
+}

@@ -1,0 +1,87 @@
+<!-- full-v6-closure-and-preparation-20261128:start -->
+## Текущее состояние приёмки: Source59f FAIL / UNKNOWN; история восстановлена
+
+**28 ноября 2026 года, МСК. Обе обязательные полные команды пока не получили PASS; слияния нет.** Проверяемый Source — `59f618ebfbf6d9f52c6994d68586e3c2ebc202a8`, tree `03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1`. Все 3 369 отслеживаемых файлов, 69 340 536 байт, сверены с Git blobs и SHA-256. После UNKNOWN полного запуска получена отдельная чистая копия того же Source; старый Source, его runtime, captures и кеш не менялись.
+
+### Содержание текущей записи
+
+1. [Результат нового полного запуска](#результат-нового-полного-запуска)
+2. [Точный Source и подготовленное окружение](#точный-source-и-подготовленное-окружение)
+3. [Полное сохранение результатов](#полное-сохранение-результатов)
+4. [Диагностика и границы выводов](#диагностика-и-границы-выводов)
+5. [Кеш, ресурсы и остаток приёмки](#кеш-ресурсы-и-остаток-приёмки)
+
+### Результат нового полного запуска
+
+**Таблица 1. Новый Source59f; текущие статусы не наследуют результаты Source727.**
+
+| Проверка | Подтверждённый результат |
+|---|---|
+| `go build ./...` | Exit 0 |
+| `go vet ./...` | Exit 0 |
+| `go test -count=1 -timeout 5m ./...` | Основной receipt FAIL; исходный receiver сохранил UNKNOWN custody. Зафиксированы 14 начатых пакетов; наличие всех 14 completion markers не означает закрытия UNKNOWN CLI. |
+| Default API | **FAIL/CLOSED до запуска тестов.** Пятисекундный срок admission истёк после подготовки входов и копирования образа, перед окончательной проверкой execution image. API tests, включая stderr3, **NOT_RUN**. |
+| Default CLI | Исходный test root завершился примерно через 300,21 с с кодом 2 при заданном test timeout 5m. Native/IO completion известны, но семь обязательных наблюдений завершения escaped children имеют нулевые counts; `escaped_cleanup_proved=false`. Итог **UNKNOWN/HOLD**, `capture_access=false`. Raw CLI captures не читались. |
+| `go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/` | **NOT_RUN** |
+| Обе обязательные полные команды | **PASS не получен** |
+| Передача кеша этого полного запуска | **Не принята** |
+
+У main указан `RuntimeError: an original receiver retained unknown custody`. Последнее разрешённое чтение control metadata показало `parent_state=running`, `physical_complete=false`; это не выдаётся за завершённый полный run. Старый full-v8 сохраняет отдельный UNKNOWN и не смешивается с новым Source59f.
+
+Закрытая API-область принята отдельно: первоначальные владельцы и потоки закрыты; проверены шесть исходных command captures. Точный API receipt — `e1cba7d99294f4e18816ebc91a8fd137c3533be5d9ed433071de4c89b66fc709`. Root API receiving v3: `703394309664fda84d940eeb2b0a3c091f2355453836d9907f38d0dad91aa494`. Его DATA PASS подтверждает закрытое сохранение отказа, а не выполнение тестов и не права на CLI/Source/cache. Первые DATA-приёмники v1/v2 с ошибками схемы и ожидания отсутствующего converter сохранены отдельно.
+
+### Точный Source и подготовленное окружение
+
+Цепочка восстановленной ветки #666: `5ad → 06f77b38 → 33eaf8af → 04e5b4ea → 74e7563d → 59f618eb`. Два прежних неопубликованных commits восстановлены точно вместе с raw Git objects и patches в [исторической капсуле](../../docs/modernization/verification/recovered-cli-commits-20261128/README.md). Публичная кодовая вершина #666 пока `5ad374eb60cadb8ad56ea167e3fb06edb44bdc18`; материалы ревью последующих commits сохранены в #664, но не выдаются за публикацию code branch или полный тестовый PASS.
+
+В трёх новых commits относительно recovered33 изменены девять тестовых файлов; production-код не меняется. `04e` исправляет семь fixture-контрактов, включая четыре результата helper, разграничение command-v/native canonical ролей, исходный handshake process-набора и реальное завершение первоначальных process/Job перед тестовой clock seam. `74e` заменяет две Serena URL-заготовки точным revision из собственного каталога. `59f` получает ошибку уже существующего первоначального Process.Wait; нового Wait, kill или срока не добавляет.
+
+**Таблица 2. Подготовка Source59f и действительная область результата.**
+
+| Этап | Результат | Что подтверждено |
+|---|---|---|
+| Helper/Product producer v1 | FAIL/CLOSED | Первые девять команд закрыты успешно; шесть helpers скомпилированы, пять parser unit checks прошли. Десятый шаг остановился до Product builder из-за неверного сравнения двух PowerShell-resolved Go paths как одной строки. |
+| Product-only producer v2 | PASS/CLOSED | Четыре команды, 465,267 с: закрытый warm cache copy, точный Source export и два Product builds. Все 3 397 входов, command/parent captures и оба трёхфайловых Product сверены. |
+| Runtime preparation | Подготовлено и применено к полному Source59f запуску | Семь точных runtime files, manifest `bb532e4fec38ea60cad8a105ed2fad7495ee76440f9546a5100802f604fd0f7d`; неизменные пять минут и исходные командные интерфейсы. |
+| Новая изолированная копия Source59f | EXACT_SOURCE_BYTES_VERIFIED | 3 369 файлов совпали. Этот статус не переносит тестовую квалификацию. |
+
+Обязательные **14 migration + 2 canonical controls в каждом режиме** сохранены. В 13 migration roots выполняется реальная production preparation; `CallsInstallParsedManifest_NotDiskWrite` использует существующую inert seam. Новые mock-подмены не введены. Три исходных API stderr-сценария и три дополнительных CLI stderr-сценария учитываются отдельно.
+
+### Полное сохранение результатов
+
+**Таблица 3. Новые проверенные пакеты — 615 файлов семи капсул.**
+
+| Пакет | Состав и собственная проверка |
+|---|---|
+| [Публикационная цепочка](../../docs/modernization/verification/successor-publication-trail-20261128/README.md) | 120 файлов; 213 исходных artifacts точно восстановлены; 74 native commands, все 148 command captures, исходный stage11 FAIL и два выполненных переноса в trash. |
+| [Полная подготовка Source59f](../../docs/modernization/verification/successor59f-preparation-20261128/README.md) | 121 файл; независимо восстановлены 133 originals: полные producer execution JSON, maps/captures, helpers, provenance, Source59f/Wait patch, resolution failure и fix, runtime Source/diffs/manifest. |
+| [Все старые full-v6 captures](../../docs/modernization/verification/original-full-v6-complete-captures-20261128/README.md) | 346 файлов; 333 новых originals вместе с прежними 20 full и четырьмя API originals точно восстановлены. Проверены **283 команды, 566 captures, 65 package receipts**; 46 234 475 исходных capture bytes, 285 различных payloads. |
+| [Все 130 native-owner receipts](../../docs/modernization/verification/original-full-v6-owner-replay-20261128/README.md) | Шесть файлов; все **130 оригиналов / 348 272 байта** восстановлены из точных лексических proof-диапазонов 65 package receipts. Числа, включая FILETIME, не округлялись и не сериализовались заново. |
+| [Исторический бюджет CLI](../../docs/modernization/verification/old-cli-budget-analysis-20261128/README.md) | Восемь файлов; полный ledger 1 599 завершённых roots, raw offsets и соответствие Source. Исторический Source727 расходует 299,30 с напечатанной длительности до 374 не начавшихся roots и 14 paused migration roots. |
+| [Исправление DATA parser](../../docs/modernization/verification/old-cli-budget-parser-v2-20261128/README.md) | Семь файлов; исходный UnicodeDecodeError сохранён. Две замены ASCII на строгое UTF-8 только для имён tests; независимый replay точно совпал с авторским ledger, SHA-256 `6a687a7e45efcf069e46e0bbafd36edcf09247e8f09e49467c59278925c34ea8`. |
+| [Неприменённый CLI fixture draft](../../docs/modernization/verification/cli-shared-image-candidate-20261128/README.md) | Семь файлов; общий обычный image copy для двух negative identity tests. **DRAFT_NOT_APPLIED_NOT_EXECUTED**; отдельные процессы и assertions сохранены, ускорение не заявлено. |
+
+Root DATA replay шести исходных капсул подтвердил все 608 actual files и получил summary SHA-256 `d3c3ee6042e87c05d1cfb2ea0ce99186b409850c3f60b4bdf4b7cea0f329702b`. Отдельный replay седьмой капсулы — `e1cfd647a23b02da9a8a893027e6da645143bc0098a4cbbb8b0da4551f4d8e19`. Full566 receipt — `2297a5b987c60244bd1c2c82f7d4253c1301637ee7e4359c8e24a06e75c78a55`; owner130 receipt — `dc3659fbbafea76b3df8cb672d33b5323e19a37a399774a9da87e82e2de48f9c`. Эти квитанции относятся к проверке сохранности, не к новым Go tests.
+
+Исходный full-v6 Source727 остаётся **FAIL/CLOSED по обеим полным командам**. Default CLI: 1 585 PASS, 14 SKIP, 389 без терминального результата; tagged CLI не скомпилирован. Все исходные FAIL, неполные области и различие Source727/Source33 по 802 путям сохранены. Исторические **717 CLI roots = 712 PASS + 5 SKIP** относятся к нескольким исходным запускам и Source, а не к одному нынешнему полному PASS.
+
+### Диагностика и границы выводов
+
+Закрытое измерение API image copy обработало 38 868 992 байта: copy+Sync+readback — 0,314976 с, сам Sync — 0,255928 с; без Sync — 0,168792 с с другой длительностью readback. Оба файла совпали по размеру и полному SHA-256; образ не исполнялся. Одна проба на режим, фиксированный порядок и отсутствие воспроизведения всего namespace не позволяют приписать прежние пять секунд операции Sync. Предложение убрать Sync оставлено неприменённым.
+
+В старом CLI два negative identity tests суммарно напечатали 45,94 с. Эти интервалы включают копирование, запуск, проверки и завершение. Общая копия устраняет один повторный copy, но не обещает экономию 45,94 с или достаточность пяти минут. Production identity implementation между Source727 и Source59f отличается. Незавершённый heartbeat после 299,30 с сам по себе не доказывает deadlock.
+
+Дополнительный focused baseline на отдельном Source59f сначала получил **FAIL/CLOSED до тестов**: штатный общий runner использовал старую module-cache роль, где отсутствуют нужные версии, при GOPROXY=off. Это ошибка выбора подготовительного профиля, не результат трёх tests. Текущий полный UNKNOWN cache не используется для исправления; требуется правильная подтверждённо закрытая module-cache роль.
+
+### Кеш, ресурсы и остаток приёмки
+
+Донором полного запуска был подтверждённо закрытый warm PASS cache; его статус означает подготовку, а не полный тестовый PASS. Кеш нового full59f не принят. UNKNOWN владельцы, Source, runtime, captures и кеш сохраняются; позднее наблюдение нулевого числа членов Job или завершение внешней оболочки не заменяет доказательства escaped cleanup.
+
+На момент этой записи в данной линии подтверждены только **два прежних переноса / 22 файла** в trash; permanent delete и очистка trash не выполнялись. После неизменяемой публикации и обратного чтения пригодны к переносу только конкретные доказанно ненужные дубликаты. Всё дерево старого full-v6 пока не объявлено мусором: кроме сохранённых 566 captures / 65 package receipts / 130 owner receipts, остаются отдельно не учтённые побайтно invocation markers, channel/cleanup metadata и иные данные. Активные и сомнительные области не затрагиваются.
+
+Дальнейшая работа: установить причину стоимости API admission без изменения пяти секунд; получить текущий CLI baseline на правильном профиле и минимально исправить подтверждённые затраты; выполнить обе неизменённые полные команды с 14 migration + 2 canonical и обоими stderr3 наборами; принять кеш только после подтверждённого завершения использовавшего его CLI; закончить собственное ревью, code publication, проверку доступности всех материалов и безопасную очистку.
+
+Первоначальная оставшаяся **expected-refusal проверка всё ещё UNRESOLVED / NOT_RUN**. Повторная проверка 25 закреплённых исходных материалов не восстановила точное имя/argv; выполненный ранее helper-dispatch negative oracle, DWORD отказ, API prechild отказ и проверка отсутствия локальной ветки её не заменяют. Этот незакрытый пункт не скрывается новым отрицательным тестом.
+
+Ни один из указанных частичных PASS не означает готовность композиции. Предыдущие разделы ниже, включая независимую работу A–D, сохраняются побайтно; их собственные Source и статусы не присваиваются этой приёмке.
+<!-- full-v6-closure-and-preparation-20261128:end -->

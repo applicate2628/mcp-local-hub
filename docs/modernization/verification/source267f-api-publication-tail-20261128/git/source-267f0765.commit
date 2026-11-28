@@ -1,0 +1,6 @@
+tree d9636aa81dbcb995934a5ee1e51331b0a10af55f
+parent 3c412291593ca962127b36338d464351d2052862
+author applicate2628 <dima_den@inbox.ru> 1795885758 +0300
+committer applicate2628 <dima_den@inbox.ru> 1795885758 +0300
+
+test(cli): wait for prespawn event completion

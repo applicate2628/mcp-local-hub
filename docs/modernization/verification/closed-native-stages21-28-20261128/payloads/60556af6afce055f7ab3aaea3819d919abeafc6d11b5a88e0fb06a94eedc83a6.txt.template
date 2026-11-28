@@ -1,0 +1,488 @@
+//go:build windows
+
+package main
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"debug/buildinfo"
+	"debug/pe"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"runtime/debug"
+	"strings"
+	"time"
+
+	"golang.org/x/sys/windows"
+
+	"mcp-local-hub/internal/binaryadmission"
+	"mcp-local-hub/internal/process"
+)
+
+var namespaceSuiteRequiredTests = []string{
+	"TestSecretsInit_RecoveryNamespaceBoundary",
+	"TestSecretsInit_RecoveryNamespaceRetainedDirectory",
+	"TestSecretsInit_RecoveryNamespaceFailurePaths",
+	"TestSupervisorPeerStrictControlConnections",
+	"TestRotateSupervisorStderrSinkIfOversize_AtBoundary",
+	"TestRotateSupervisorStderrSinkIfOversize_ReplacesExistingBackup",
+	"TestSupervisorStderrSinkOversize_MatchesRotationThreshold",
+}
+
+// Monotonic elapsed times from the unchanged original admission start.
+// These observations never grant admission or native/IO closure.
+type namespaceAdmissionMark struct {
+	Stage     string `json:"stage"`
+	ElapsedNS int64  `json:"elapsed_ns"`
+}
+
+type namespaceSuiteInput struct {
+	Binary, ExpectedSHA256, BinarySHA256, SourceDir, GoVersion string
+	Args, CompiledTags                                         []string
+	Environment                                                map[string]string
+	ExecutionBinary, ExecutionSHA256                           string
+	AdmissionMarks                                            []namespaceAdmissionMark
+}
+
+type namespaceStageCustody struct {
+	receipt        process.ContainedStreamReceiptV1
+	runErr         error
+	stdout, stderr *os.File
+	pathPins       []windows.Handle
+	returned       error
+}
+
+// At most one sequential stage can retain unresolved original native/IO custody. No new
+// child is admitted after this slot is occupied by an incomplete return.
+var retainedNamespaceStage *namespaceStageCustody
+
+type namespaceSuiteOutcome struct {
+	Runs, Passes, Fails, Skips int
+}
+
+type namespaceSuiteReceipt struct {
+	Schema               string                           `json:"schema"`
+	Mode                 string                           `json:"mode"`
+	EvidenceRoot         string                           `json:"evidence_root"`
+	Binary               string                           `json:"binary"`
+	ExpectedSHA256       string                           `json:"expected_sha256"`
+	BinarySHA256         string                           `json:"binary_sha256"`
+	SourceDir            string                           `json:"source_dir"`
+	Args                 []string                         `json:"args"`
+	GoVersion            string                           `json:"go_version"`
+	CompiledTags         []string                         `json:"compiled_tags"`
+	Environment          map[string]string                `json:"fixture_environment"`
+	ExecutionBinary      string                           `json:"execution_binary"`
+	ExecutionSHA256      string                           `json:"execution_sha256"`
+	ExecutionUnchanged   bool                             `json:"execution_binary_unchanged"`
+	Started              string                           `json:"started_utc"`
+	Finished             string                           `json:"finished_utc"`
+	WorkDeadline         time.Time                        `json:"work_deadline"`
+	CleanupDeadline      time.Time                        `json:"absolute_cleanup_deadline"`
+	Root                 process.ContainedRootIdentity    `json:"root"`
+	Native               process.ContainedNativeSnapshot  `json:"native"`
+	IO                   process.ContainedIOSettlement    `json:"io"`
+	Stage                process.ContainedRunStage        `json:"stage"`
+	PrimaryError         string                           `json:"primary_error,omitempty"`
+	CleanupError         string                           `json:"cleanup_error,omitempty"`
+	RootExitError        string                           `json:"root_exit_error,omitempty"`
+	NativeError          string                           `json:"native_error,omitempty"`
+	RootWaitKnown        bool                             `json:"root_wait_known"`
+	RootExitCode         int                              `json:"root_exit_code"`
+	SettlementComplete   bool                             `json:"settlement_complete"`
+	NativeComplete       bool                             `json:"native_complete"`
+	IOComplete           bool                             `json:"io_complete"`
+	CustodyRetained      bool                             `json:"custody_retained"`
+	ObservationsVerified bool                             `json:"observations_verified"`
+	Mandatory            map[string]namespaceSuiteOutcome `json:"mandatory_tests"`
+	MandatoryPassed      bool                             `json:"mandatory_tests_passed"`
+	BinaryUnchanged      bool                             `json:"binary_unchanged"`
+	StdoutPath           string                           `json:"stdout_path"`
+	StderrPath           string                           `json:"stderr_path"`
+	StdoutSHA256         string                           `json:"stdout_sha256"`
+	StderrSHA256         string                           `json:"stderr_sha256"`
+	Forwarding           string                           `json:"forwarding"`
+	Failure              string                           `json:"failure,omitempty"`
+	AdmissionMarks       []namespaceAdmissionMark          `json:"admission_marks,omitempty"`
+}
+
+// The receipt never turns a known failing receiver into the tool's generic
+// failure code. Extra owner/verification failures remain in the joined cause.
+type namespaceSuiteFailure struct {
+	code  int
+	cause error
+}
+
+func (e *namespaceSuiteFailure) Error() string { return e.cause.Error() }
+func (e *namespaceSuiteFailure) Unwrap() error { return e.cause }
+
+// The exact Source33 helper measures root/bin/api.test.exe. The incoming Go
+// image stays separately pinned; a fresh ordinary copy changes no image bytes,
+// Go arguments, working directory, or five-minute test deadline.
+func copyNamespaceSuiteImage(input *namespaceSuiteInput, destination string) (returned error) {
+	source, err := os.Open(input.Binary)
+	if err != nil {
+		return err
+	}
+	defer func() { returned = errors.Join(returned, source.Close()) }()
+	target, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	defer func() { returned = errors.Join(returned, target.Close()) }()
+	digest := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(target, digest), source); err != nil {
+		return err
+	}
+	if hex.EncodeToString(digest.Sum(nil)) != input.ExpectedSHA256 {
+		return errors.New("incoming API bytes changed during exclusive namespace copy")
+	}
+	return target.Sync()
+}
+
+func namespaceSuiteExitCode(known bool, code int, failure error) int {
+	if known && code != 0 {
+		return code
+	}
+	if failure != nil || !known {
+		return 1
+	}
+	return 0
+}
+
+func validateNamespaceSuiteArgs(args []string, timeout time.Duration) error {
+	if timeout != 5*time.Minute || len(args) != 4 {
+		return errors.New("full API suite requires the original four Go arguments and five-minute timeout")
+	}
+	seen := map[string]bool{}
+	for _, arg := range args {
+		key, value, hasValue := strings.Cut(arg, "=")
+		if seen[key] {
+			return errors.New("duplicate whole-suite argument")
+		}
+		seen[key] = true
+		switch key {
+		case "-test.paniconexit0":
+			if hasValue {
+				return errors.New("Go paniconexit0 argument changed")
+			}
+		case "-test.v":
+			if !hasValue || value != "test2json" {
+				return errors.New("full API suite requires original test2json output")
+			}
+		case "-test.count":
+			if !hasValue || value != "1" {
+				return errors.New("full API suite must execute once")
+			}
+		case "-test.timeout":
+			actual, err := time.ParseDuration(value)
+			if !hasValue || err != nil || actual != timeout {
+				return errors.New("Go test timeout differs from the admitted suite timeout")
+			}
+		default:
+			return fmt.Errorf("whole-suite selector or unexpected argument refused: %q", key)
+		}
+	}
+	return nil
+}
+
+func namespaceCompiledTags(info *debug.BuildInfo, expectedPath string, state bool) ([]string, error) {
+	if info == nil || info.Path != expectedPath {
+		return nil, errors.New("supplied executable has a different Go entry point")
+	}
+	tags := []string{}
+	found := false
+	for _, setting := range info.Settings {
+		// This ordinary API image is the actual incoming Go test executable.
+		// Its source and compiler invocation are received by the original issuer.
+		if setting.Key == "-ldflags" && strings.Contains(setting.Value, "internal/buildinfo.rustOwnerSHA256") {
+			return nil, errors.New("whole-suite image must not acquire a Rust mark")
+		}
+		if setting.Key != "-tags" {
+			continue
+		}
+		if found {
+			return nil, errors.New("duplicate compiled tag metadata")
+		}
+		found = true
+		tags = strings.FieldsFunc(setting.Value, func(r rune) bool { return r == ',' || r == ' ' })
+	}
+	if state {
+		if len(tags) != 1 || tags[0] != "test_state_path_env" {
+			return nil, errors.New("compiled test tags differ from the state suite")
+		}
+	} else if len(tags) != 0 {
+		return nil, errors.New("default suite must have no extra compiled test tags")
+	}
+	return tags, nil
+}
+
+func namespaceSHA256(value string) bool {
+	if len(value) != sha256.Size*2 || strings.ToLower(value) != value {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
+}
+
+func namespaceDPath(path string) error {
+	clean, err := localPath(path)
+	if err != nil || clean != path {
+		return errors.Join(err, errors.New("whole-suite input must be an absolute clean local path"))
+	}
+	rel, err := filepath.Rel(`@@RECOVERY_APPROVED_WORK_AREA@@`, path)
+	if err != nil || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return errors.New("whole-suite input is outside the declared D workspace")
+	}
+	return nil
+}
+
+func namespaceFileHash(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	h := sha256.New()
+	_, copyErr := io.Copy(h, file)
+	if err := errors.Join(copyErr, file.Close()); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func prepareNamespaceSuite(ctx context.Context, repo, parent, binary, expected, source string, state bool, args []string, pins *[]windows.Handle, mark func(string)) (*namespaceSuiteInput, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !namespaceSHA256(expected) {
+		return nil, errors.New("full API suite requires its expected lowercase SHA-256")
+	}
+	mark("input-path-pins:begin")
+	for _, entry := range []struct {
+		path string
+		dir  bool
+	}{{parent, true}, {source, true}, {binary, false}} {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if err := namespaceDPath(entry.path); err != nil {
+			return nil, err
+		}
+		held, err := pinOrdinaryPath(entry.path, entry.dir)
+		if err != nil {
+			return nil, err
+		}
+		*pins = append(*pins, held...)
+	}
+	mark("input-path-pins:end")
+	mark("input-format:begin")
+	if !strings.EqualFold(source, filepath.Join(repo, "internal", "api")) {
+		return nil, errors.New("full API suite cwd must be the original repository internal/api directory")
+	}
+	entries, err := os.ReadDir(parent)
+	if err != nil || len(entries) != 0 {
+		return nil, errors.Join(err, errors.New("full API suite requires a fresh empty private parent"))
+	}
+	info, err := os.Stat(binary)
+	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > 128<<20 {
+		return nil, errors.Join(err, errors.New("bounded ordinary API executable required"))
+	}
+	if err := binaryadmission.ValidateWindowsNativeImage(binary); err != nil {
+		return nil, err
+	}
+	image, err := pe.Open(binary)
+	if err != nil {
+		return nil, err
+	}
+	machine := image.Machine
+	if err := image.Close(); err != nil {
+		return nil, err
+	}
+	if machine != pe.IMAGE_FILE_MACHINE_AMD64 {
+		return nil, errors.New("full API receiver must be the incoming Windows AMD64 Go test image")
+	}
+	mark("input-format:end")
+	mark("input-sha256:begin")
+	actual, err := namespaceFileHash(binary)
+	if err != nil || actual != expected {
+		return nil, errors.Join(err, errors.New("incoming API executable SHA-256 differs from its original request"))
+	}
+	mark("input-sha256:end")
+	mark("input-build-info:begin")
+	compiled, err := buildinfo.ReadFile(binary)
+	if err != nil {
+		return nil, err
+	}
+	tags, err := namespaceCompiledTags(compiled, "mcp-local-hub/internal/api.test", state)
+	if err != nil {
+		return nil, err
+	}
+	mark("input-build-info:end")
+	input := &namespaceSuiteInput{
+		Binary: binary, ExpectedSHA256: expected, BinarySHA256: actual, SourceDir: source, GoVersion: compiled.GoVersion,
+		Args: append([]string(nil), args...), CompiledTags: tags,
+		Environment: map[string]string{"MCPHUB_E2E_SCHEDULER": "none"},
+	}
+	attach, attachSHA := os.Getenv("MCPHUB_ATTACH_TEST_BIN"), os.Getenv("MCPHUB_ATTACH_TEST_BIN_SHA256")
+	if !state {
+		if attach != "" || attachSHA != "" {
+			return nil, errors.New("attach receiving inputs belong only to the compiled state suite")
+		}
+		return input, ctx.Err()
+	}
+	mark("tagged-product:begin")
+	if err := namespaceDPath(attach); err != nil || !namespaceSHA256(attachSHA) {
+		return nil, errors.Join(err, errors.New("tagged suite requires the actual isolated Product and exact digest"))
+	}
+	held, err := pinOrdinaryPath(attach, false)
+	if err != nil {
+		return nil, err
+	}
+	*pins = append(*pins, held...)
+	attached, err := binaryadmission.AdmitWindowsRole(binaryadmission.WindowsArtifact{
+		Path: attach, Role: binaryadmission.WindowsArtifactRoleProduct, SHA256: attachSHA,
+	})
+	if err != nil || attached.Machine != pe.IMAGE_FILE_MACHINE_AMD64 {
+		return nil, errors.Join(err, errors.New("tagged attach Product admission failed"))
+	}
+	attachInfo, err := buildinfo.ReadFile(attach)
+	if err != nil {
+		return nil, err
+	}
+	// The independent actual Product may carry its legitimate Rust build mark.
+	// Only this compiled tag check is shared with the unmarked test receiver.
+	if attachInfo.Path != "mcp-local-hub/cmd/mcphub" {
+		return nil, errors.New("tagged attach receiver must be the real Product entry point")
+	}
+	stateTag := false
+	for _, setting := range attachInfo.Settings {
+		if setting.Key == "-ldflags" && strings.Contains(setting.Value, "internal/buildinfo.publisherSourceEpoch") {
+			return nil, errors.New("isolated attach input must not carry a publisher source mark")
+		}
+		if setting.Key == "-tags" {
+			for _, tag := range strings.FieldsFunc(setting.Value, func(r rune) bool { return r == ',' || r == ' ' }) {
+				stateTag = stateTag || tag == "test_state_path_env"
+			}
+		}
+	}
+	if !stateTag {
+		return nil, errors.New("tagged attach Product lacks compiled state isolation")
+	}
+	input.Environment["MCPHUB_ATTACH_TEST_BIN"] = attach
+	input.Environment["MCPHUB_ATTACH_TEST_BIN_SHA256"] = attachSHA
+	mark("tagged-product:end")
+	return input, ctx.Err()
+}
+
+func namespaceMandatoryPasses(raw []byte) (map[string]namespaceSuiteOutcome, error) {
+	outcomes := make(map[string]namespaceSuiteOutcome, len(namespaceSuiteRequiredTests))
+	for _, name := range namespaceSuiteRequiredTests {
+		outcomes[name] = namespaceSuiteOutcome{}
+	}
+	// The actual Go -json invocation uses test2json framing. Parse only that
+	// framing; ordinary logs/helper output never become manufactured PASS data.
+	for _, frame := range bytes.Split(raw, []byte{0x16})[1:] {
+		line, _, _ := bytes.Cut(frame, []byte{'\n'})
+		fields := strings.Fields(string(line))
+		if len(fields) < 3 {
+			continue
+		}
+		value, required := outcomes[fields[2]]
+		if !required {
+			continue
+		}
+		switch {
+		case fields[0] == "===" && fields[1] == "RUN":
+			value.Runs++
+		case fields[0] == "---" && fields[1] == "PASS:":
+			value.Passes++
+		case fields[0] == "---" && fields[1] == "FAIL:":
+			value.Fails++
+		case fields[0] == "---" && fields[1] == "SKIP:":
+			value.Skips++
+		}
+		outcomes[fields[2]] = value
+	}
+	for _, name := range namespaceSuiteRequiredTests {
+		value := outcomes[name]
+		if value.Runs != 1 || value.Passes != 1 || value.Fails != 0 || value.Skips != 0 {
+			return outcomes, fmt.Errorf("mandatory original API test did not run and pass exactly once: %s %+v", name, value)
+		}
+	}
+	return outcomes, nil
+}
+
+func finishNamespaceSuite(parent, root string, input *namespaceSuiteInput, receipt process.ContainedStreamReceiptV1, runErr error, started, workDeadline time.Time) error {
+	record := namespaceSuiteReceipt{
+		Schema: "api-namespace-full-suite-v2", Mode: "incoming-go-image-copy", EvidenceRoot: root,
+		Binary: input.Binary, ExpectedSHA256: input.ExpectedSHA256, BinarySHA256: input.BinarySHA256, SourceDir: input.SourceDir,
+		Args: append([]string(nil), input.Args...), GoVersion: input.GoVersion, CompiledTags: input.CompiledTags,
+		AdmissionMarks: input.AdmissionMarks,
+		Environment: input.Environment, ExecutionBinary: input.ExecutionBinary, ExecutionSHA256: input.ExecutionSHA256,
+		Started: started.UTC().Format(time.RFC3339Nano), WorkDeadline: workDeadline, CleanupDeadline: workDeadline.Add(10 * time.Second), Root: receipt.RootIdentity, IO: receipt.IOSettlement,
+		Stage: receipt.Stage, PrimaryError: errorText(receipt.PrimaryError), CleanupError: errorText(receipt.CleanupError),
+		RootExitError: errorText(receipt.RootExitError), RootWaitKnown: receipt.RootWaitKnown, RootExitCode: receipt.RootExitCode,
+		StdoutPath: filepath.Join(root, "proof", "tests.stdout.log"), StderrPath: filepath.Join(root, "proof", "tests.stderr.log"),
+		Forwarding: "raw bytes replayed once after original settlement; no cross-stream ordering claim",
+	}
+	if receipt.NativeSettlement != nil {
+		record.Native = receipt.NativeSettlement.Snapshot()
+		record.NativeError = errorText(record.Native.Error)
+	}
+	record.NativeComplete = receipt.NativeSettlement != nil && receipt.NativeSettlement.Complete()
+	record.IOComplete = receipt.IOSettlement.Complete()
+	record.SettlementComplete = record.NativeComplete && record.IOComplete
+	cause := runErr
+	if record.SettlementComplete {
+		var observationErr error
+		if record.SettlementComplete && record.RootWaitKnown {
+			observationErr = verifyObservations(root, input.ExecutionBinary, receipt.RootIdentity, os.Stderr)
+		} else {
+			observationErr = errors.New("original actor is not settled; namespace observations were not accepted")
+		}
+		record.ObservationsVerified = observationErr == nil
+		after, hashErr := namespaceFileHash(input.Binary)
+		record.BinaryUnchanged = hashErr == nil && after == input.ExpectedSHA256
+		executionAfter, executionHashErr := namespaceFileHash(input.ExecutionBinary)
+		record.ExecutionUnchanged = executionHashErr == nil && executionAfter == input.ExpectedSHA256
+		stdout, stdoutErr := os.ReadFile(record.StdoutPath)
+		stderr, stderrErr := os.ReadFile(record.StderrPath)
+		if stdoutErr == nil {
+			digest := sha256.Sum256(stdout)
+			record.StdoutSHA256 = hex.EncodeToString(digest[:])
+		}
+		if stderrErr == nil {
+			digest := sha256.Sum256(stderr)
+			record.StderrSHA256 = hex.EncodeToString(digest[:])
+		}
+		var mandatoryErr error
+		record.Mandatory, mandatoryErr = namespaceMandatoryPasses(stdout)
+		record.MandatoryPassed = mandatoryErr == nil
+		cause = errors.Join(cause, observationErr, hashErr, executionHashErr, stdoutErr, stderrErr, mandatoryErr)
+		// runStage joined the original IO before closing these sinks. Forward
+		// captured bytes once even for an honest nonzero receiver exit.
+		_, stdoutForwardErr := os.Stdout.Write(stdout)
+		_, stderrForwardErr := os.Stderr.Write(stderr)
+		cause = errors.Join(cause, stdoutForwardErr, stderrForwardErr)
+	} else {
+		record.CustodyRetained = retainedNamespaceStage != nil
+		record.Forwarding = "not forwarded: original native or IO settlement incomplete; original owner, error and borrowed sinks retained"
+		cause = errors.Join(cause, errors.New("whole API suite did not settle original native and IO owners; no raw replay or observation acceptance"))
+	}
+	if !record.Root.Known || !record.RootWaitKnown || record.RootExitCode != 0 || !record.SettlementComplete || !record.BinaryUnchanged || !record.ExecutionUnchanged {
+		cause = errors.Join(cause, errors.New("full API receiver identity, wait, image or settlement is incomplete"))
+	}
+	record.Finished = time.Now().UTC().Format(time.RFC3339Nano)
+	record.Failure = errorText(cause)
+	proofErr := writeJSON(filepath.Join(parent, "namespace-suite-receipt.json"), record)
+	cause = errors.Join(cause, proofErr)
+	if cause != nil {
+		return &namespaceSuiteFailure{code: namespaceSuiteExitCode(record.RootWaitKnown, record.RootExitCode, cause), cause: cause}
+	}
+	return nil
+}

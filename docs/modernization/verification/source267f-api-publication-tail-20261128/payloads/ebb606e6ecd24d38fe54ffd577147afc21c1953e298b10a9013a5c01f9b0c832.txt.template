@@ -1,0 +1,109 @@
+{
+  "schema": "source267f-producer-candidate-manifest-v1",
+  "status": "PREPARED_NOT_EXECUTED_CACHE_NOT_BOUND",
+  "source": {
+    "root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-cli-fixtures-20261128",
+    "commit": "267f076500b982475b57be45e8a7d8a03edcc2a6",
+    "tree": "d9636aa81dbcb995934a5ee1e51331b0a10af55f",
+    "files": 3369,
+    "bytes": 69342009
+  },
+  "input_refs": {
+    "rootPair": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\source267f-binding\\root-source267f-freeze.json",
+      "sha256": "ec56fbd6526b3f7f36d2818fca0ab4d7c000d493ce065d02044bdc7fa7d22bdd"
+    },
+    "mapPair": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\source267f-binding\\source267f-input-sha256.json",
+      "sha256": "41c4d0a1ac1eb1919e3ece91df43722770f9e184abcff770eecb1b35414979cc"
+    },
+    "gitPair": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\source267f-binding\\source267f-git-map.json",
+      "sha256": "bde89c9df4b93c1e1082711f4a25986431bae6d02c973f8da6cea87a4707dd10"
+    },
+    "rtPair": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer267f-candidate-v1\\runtime-source-snapshot.json",
+      "sha256": "09476d477b96d8232407dd1749d34cbac3f05505625737f2ac3e8ba6a6b43b95"
+    },
+    "psPair": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer267f-candidate-v1\\publisher-source-snapshot.json",
+      "sha256": "2da73b9edd326a1d76dc2d920d1143ac19e06cb0c36b2d3d0acbeb6eccf2cb6c"
+    }
+  },
+  "known_input_pins": 3393,
+  "pending_cache_handoff": true,
+  "root_approval_and_api_diagnosis_required_before_execution": true,
+  "author_native_or_test_execution": false,
+  "source_worktree_writes": false,
+  "frozen59f_inputs_mutated": false,
+  "helper_and_products_built": false,
+  "source_epoch": "PENDING_ACTUAL_PRODUCT_BUILD",
+  "runtime_phase": "SEPARATE_NOT_PREPARED_HERE",
+  "files": [
+    {
+      "path": "runtime-source-snapshot.json",
+      "bytes": 405520,
+      "sha256": "09476d477b96d8232407dd1749d34cbac3f05505625737f2ac3e8ba6a6b43b95"
+    },
+    {
+      "path": "publisher-source-snapshot.json",
+      "bytes": 486372,
+      "sha256": "2da73b9edd326a1d76dc2d920d1143ac19e06cb0c36b2d3d0acbeb6eccf2cb6c"
+    },
+    {
+      "path": "private_producer_scope.py",
+      "bytes": 12575,
+      "sha256": "22aa8257d2445d0d9d0741cd3cc698e230765f63a85b90af142044072b76c295"
+    },
+    {
+      "path": "prepare_successor267f_inputs.py",
+      "bytes": 12810,
+      "sha256": "2bff32297d6b95825e78eab8539117ef918628f4557b0a62721e52f20052fec4"
+    },
+    {
+      "path": "product-build-config.json",
+      "bytes": 2075,
+      "sha256": "80d3d2b1872146b2fe025990b8bf4d7275a485c946ec47cb39c9195a82bf22b5"
+    },
+    {
+      "path": "helper-build-bindings.json",
+      "bytes": 5608,
+      "sha256": "8c7cb17e937b406efea94cde7c4df04e7b4cb6bb58394a44c56a21cbf6270069"
+    },
+    {
+      "path": "successor267f-product-helper-inputs-v1-plan.pending.json",
+      "bytes": 591082,
+      "sha256": "447b4be1e38a4d77c331912f3f21608dd312c43624eb33f432153753bc8f666a"
+    },
+    {
+      "path": "producer-plan-projection.json",
+      "bytes": 11556,
+      "sha256": "3320f9eaf2ddda25a8ba3d117e333d3cc643249ba801ff578b7027e209e4e96a"
+    },
+    {
+      "path": "source-projection-delta.json",
+      "bytes": 3311,
+      "sha256": "401544b7d9cd0936ebb0b91ec2d10eb4b2748c44042f07495b85dcf65d563219"
+    },
+    {
+      "path": "producer-source-delta.patch",
+      "bytes": 15397,
+      "sha256": "5a86191466e09675038abe7ce581aca0b76ee919ce0c32b2b787dac06efdac66"
+    },
+    {
+      "path": "launch_successor267f_product_helper.ps1",
+      "bytes": 3769,
+      "sha256": "6a69bcc559586c2c4bb0ec58f68d815f92485a725325ad68f7443ec4524c33d1"
+    },
+    {
+      "path": "outer-binding-delta.patch",
+      "bytes": 2066,
+      "sha256": "30873ddc4805f866690b480c01358768a0d3981a1445418842954f6fd119c478"
+    },
+    {
+      "path": "README.md",
+      "bytes": 12462,
+      "sha256": "95a4534b3aafb1a4f560da0b5afb0fb03c36171a6e66b091cbe3d9514b9343fa"
+    }
+  ]
+}

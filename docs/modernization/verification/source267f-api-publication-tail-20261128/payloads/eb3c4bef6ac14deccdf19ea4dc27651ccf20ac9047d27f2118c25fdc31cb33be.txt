@@ -1,0 +1,7 @@
+commit fc62057bdede92452478a9c1a0496ec14e2290d4
+tree 5e2e9d5af6ba05bc01788ab28df4b9c814d74065
+parent 5a15e4f4bbf64442677e3443054a1bdb277505bd
+author applicate2628 <dima_den@inbox.ru> 1795885602 +0300
+committer applicate2628 <dima_den@inbox.ru> 1795886359 +0300
+
+    docs: preserve acceptance evidence and diagnosed blockers

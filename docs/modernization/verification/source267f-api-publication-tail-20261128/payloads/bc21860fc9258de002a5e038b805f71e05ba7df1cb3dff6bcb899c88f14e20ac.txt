@@ -1,0 +1,257 @@
+"""One diagnostic replay of the preserved default API image; no full-core import.
+All process ownership and namespace receiving stay in the pinned existing owners.
+This source is prepared DATA. It is not an execution or acceptance receipt.
+"""
+import sys
+sys.dont_write_bytecode = True
+import ast, ctypes, hashlib, importlib.util, json, os, re, secrets, shutil, stat, subprocess, time
+from pathlib import Path
+from types import SimpleNamespace
+
+SOURCE_COMMIT = "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8"
+SOURCE_TREE = "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1"
+TEST_ARGS = ["-test.paniconexit0", "-test.v=test2json", "-test.count=1", "-test.timeout=5m0s"]
+RETAINED_INVOCATION = []
+
+def need(ok, message):
+    if not ok:
+        raise RuntimeError(message)
+
+def ordinary(path, directory=False):
+    path = Path(path)
+    need(path.is_absolute(), "absolute input required")
+    for entry in (*reversed(path.parents), path):
+        facts = entry.lstat()
+        need(not stat.S_ISLNK(facts.st_mode) and not getattr(facts, "st_file_attributes", 0) & 0x400,
+             "ordinary path required")
+    need(path.is_dir() if directory else path.is_file(), "input kind differs")
+    return path
+
+def sha(path):
+    with ordinary(path).open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+def pinned(row):
+    path = ordinary(row["path"])
+    raw = path.read_bytes()
+    need(hashlib.sha256(raw).hexdigest() == row["sha256"], "pinned input differs")
+    return raw
+
+def new_json(path, value):
+    raw = (json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    with Path(path).open("xb") as stream:
+        stream.write(raw)
+        stream.flush()
+        os.fsync(stream.fileno())
+    return hashlib.sha256(raw).hexdigest()
+
+def load_module(name, row):
+    raw = pinned(row)
+    spec = importlib.util.spec_from_file_location(name, row["path"])
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    exec(compile(raw, row["path"], "exec"), module.__dict__)
+    return module
+
+def outside_job():
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.GetCurrentProcess.restype = ctypes.c_void_p
+    kernel.IsProcessInJob.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_int)]
+    kernel.IsProcessInJob.restype = ctypes.c_int
+    value = ctypes.c_int()
+    need(kernel.IsProcessInJob(kernel.GetCurrentProcess(), None, ctypes.byref(value)) and value.value == 0,
+         "diagnostic original parent must be outside an enclosing Job")
+
+def receiving_functions(cfg):
+    namespace = dict(Path=Path, json=json, re=re, hashlib=hashlib, sha=sha)
+    source = pinned(cfg["references"]["adapter"]).decode("utf-8")
+    nodes = [node for node in ast.parse(source).body
+             if isinstance(node, ast.FunctionDef) and node.name == "flags_are_literal"]
+    need(len(nodes) == 1, "one original literal-argument predicate required")
+    segment = "".join(source.splitlines(keepends=True)[nodes[0].lineno-1:nodes[0].end_lineno])
+    need(hashlib.sha256(segment.encode("utf-8")).hexdigest() == cfg["flags_function_sha256"],
+         "original literal-argument predicate differs")
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), cfg["references"]["adapter"]["path"], "exec"), namespace)
+    for key in ("namespace_receiving", "namespace_qualification", "owner_receiving"):
+        row = cfg["references"][key]
+        exec(compile(pinned(row), row["path"], "exec"), namespace)
+    return SimpleNamespace(**namespace)
+
+def receive_source(cfg):
+    source_map = json.loads(pinned(cfg["source_map"]))
+    need(source_map["commit"] == SOURCE_COMMIT and source_map["tree"] == SOURCE_TREE
+         and source_map["tracked_files"] == 3369 and len(source_map["files"]) == 3369,
+         "exact Source59f map required")
+    root = ordinary(cfg["source_dir"], True)
+    for relative, expected in source_map["files"].items():
+        leaf = Path(relative)
+        need(not leaf.is_absolute() and ".." not in leaf.parts, "relative source path required")
+        need(sha(root / leaf) == expected, "current Source59f byte differs")
+    return {"count": 3369, "source_map_sha256": cfg["source_map"]["sha256"], "all_matched": True}
+
+def hold_original(run, error):
+    """Receive only the same retained objects; never retry work, kill, or read captures."""
+    states = run.quiescence_snapshot()
+    while True:
+        try:
+            proof = run.receive_failed_worker_closure(time.monotonic() + 30)
+            closed = (proof.get("status") == "CLOSED"
+                and proof.get("original_command_states_unchanged") is True
+                and proof.get("capture_access_issued") is False
+                and proof.get("new_commands_permitted") is False
+                and run.quiescence_snapshot() == states
+                and proof.get("commands")
+                and all(row.get("state") == "CLOSED" for row in proof["commands"]))
+            if closed:
+                break
+        except BaseException:
+            pass
+        try:
+            time.sleep(0.05)
+        except BaseException:
+            pass
+    # Closure is already actual here. A metadata-write error is not another wait
+    # or a retry of the failed invocation; the original gate remains failed.
+    new_json(run.root / "failed-original-physical-closure.json", {
+        "schema": "namespace-diagnostic-late-original-closure-v1",
+        "original_gate_status": "FAIL", "original_failure": str(error),
+        "status": "CLOSED", "physical_receiving": proof,
+        "capture_access_issued": False, "source_or_cache_access_issued": False,
+        "qualification_passed": False, "new_commands_permitted": False})
+
+def main():
+    need(len(sys.argv) == 3, "usage: caller INPUTS_JSON INPUTS_SHA256")
+    cfg = json.loads(pinned({"path": sys.argv[1], "sha256": sys.argv[2]}))
+    need(cfg["schema"] == "namespace-single-invocation-inputs-v1"
+         and cfg["source_commit"] == SOURCE_COMMIT and cfg["source_tree"] == SOURCE_TREE
+         and cfg["args"] == TEST_ARGS, "exact diagnostic scope required")
+    python = cfg["tools"]["python"]
+    need(os.name == "nt" and sys.flags.isolated and sys.flags.no_site and sys.dont_write_bytecode
+         and os.path.normcase(sys.executable) == os.path.normcase(python["path"])
+         and sha(sys.executable) == python["sha256"], "exact Python -I -S -B required")
+    outside_job()
+    for row in cfg["references"].values():
+        pinned(row)
+    for row in cfg["tools"].values():
+        pinned(row)
+    pinned(cfg["helper"])
+    pinned(cfg["overlay"])
+    for row in cfg["timing_sources"]:
+        pinned(row)
+    compile_audit = json.loads(pinned(cfg["compile_receiving"]))
+    need(compile_audit["scope"] == "cache-acceptance-stage-20261128-v27"
+         and compile_audit["status"] == "PASS" and compile_audit["physical_complete"] is True
+         and compile_audit["commands_verified"] == 3 and compile_audit["captures_verified"] == 6,
+         "original helper compilation closure required")
+    cache = json.loads(pinned(cfg["cache_receiving"]))
+    need(cache["scope"] == cfg["cache_handoff_scope"] and cache["status"] == "PASS"
+         and cache["physical_complete"] is True, "latest exclusive cache consumer must be closed")
+    origin = json.loads(pinned(cfg["origin_receiving"]))
+    need(origin["classification"] == "FAIL/CLOSED" and origin["physical_complete"] is True
+         and origin["diagnostic_payload_access"] is True and origin["data_verification"] == "PASS"
+         and origin["receiving_issues"] == [] and origin["source_commit"] == SOURCE_COMMIT
+         and origin["preserved_incoming"] == cfg["origin_image"],
+         "exact closed incoming API DATA origin required")
+    pinned(cfg["origin_receipt"])
+    source_before = receive_source(cfg)
+    output, image, parent = (Path(cfg[key]) for key in ("output", "image", "namespace_parent"))
+    scope = Path(cfg["namespace_scope"])
+    need(parent == scope / "n" and scope.parent == Path(cfg["private_runs_root"]), "fresh scope binding differs")
+    for absent in (output, image.parent, scope):
+        ordinary(absent.parent, True)
+        need(not absent.exists(), "diagnostic output is not fresh")
+    environment = dict(cfg["environment"])
+    need(all(isinstance(k, str) and isinstance(v, str) for k, v in environment.items())
+         and not any(k.upper().startswith("MCPHUB_") or k.upper() == "GIT_ALLOW_PROTOCOL" for k in environment),
+         "explicit diagnostic environment required")
+    private = load_module("namespace_diagnostic_private_scope", cfg["references"]["private_scope"])
+    need(private.RUNS == Path(cfg["private_runs_root"]) and private.ARTIFACTS == Path(cfg["source_dir"]) / ".scratch",
+         "private scope binding differs")
+    security = private.create_private_run_scope(scope)
+    parent.mkdir()
+    image.parent.mkdir()
+    need(sha(cfg["origin_image"]["path"]) == cfg["origin_image"]["sha256"], "closed incoming image changed")
+    with ordinary(cfg["origin_image"]["path"]).open("rb") as src, image.open("xb") as dst:
+        shutil.copyfileobj(src, dst)
+        dst.flush()
+        os.fsync(dst.fileno())
+    need(image.stat().st_size == cfg["image_bytes"] and sha(image) == cfg["origin_image"]["sha256"],
+         "fresh image copy differs")
+    runner = load_module("namespace_diagnostic_metadata_core", cfg["references"]["runner"])
+    guard = load_module("namespace_diagnostic_original_guard", cfg["references"]["guard"])
+    receive = receiving_functions(cfg)
+    run_class = guard.make_guarded_run_class(SimpleNamespace(
+        Run=runner.CoreRun, REPO=Path(cfg["source_dir"]), sha=sha, subprocess=subprocess))
+    run = run_class(output, environment)
+    RETAINED_INVOCATION.append((run, guard))
+    run.receipt.update(schema="namespace-single-invocation-result-v1",
+        scope="diagnostic replay of preserved default API image", inputs_sha256=sys.argv[2],
+        source_commit=SOURCE_COMMIT, source_tree=SOURCE_TREE, source_before=source_before,
+        outside_job=True, compile_receiving=cfg["compile_receiving"], origin_receiving=cfg["origin_receiving"],
+        full_api_inventory_qualified=False, literal_repository_gate_passed=False,
+        namespace_suite_contract_passed=False, native_custody_settled=False)
+    code = 1
+    try:
+        new_json(output / "scope-security.json", security)
+        request = {"schema": "namespace-diagnostic-original-request-v1", "nonce": secrets.token_hex(16),
+            "scope": "diagnostic replay of preserved default API image", "inputs_sha256": sys.argv[2],
+            "source_commit": SOURCE_COMMIT, "source_tree": SOURCE_TREE,
+            "binary": str(image), "binary_sha256": cfg["origin_image"]["sha256"],
+            "source_dir": str(Path(cfg["source_dir"]) / "internal" / "api"),
+            "args": TEST_ARGS, "controller": cfg["helper"], "parent": str(parent),
+            "origin_receipt_sha256": cfg["origin_receipt"]["sha256"]}
+        request_sha = new_json(output / "request.json", request)
+        cwd = request["source_dir"]
+        argv = [cfg["helper"]["path"], "--test-binary", str(image),
+            "--expected-sha256", request["binary_sha256"], "--source-dir", cwd,
+            "--repo", cfg["source_dir"], "--go", cfg["tools"]["go"]["path"],
+            "--pwsh", cfg["tools"]["pwsh"]["path"], "--parent", str(parent), "--test-timeout", "5m",
+            "--request-sha256", request_sha, "--request-nonce", request["nonce"], "--", *TEST_ARGS]
+        binding = {"request_sha256": request_sha, "request_nonce": request["nonce"],
+            "binary": str(image), "expected_sha256": request["binary_sha256"], "source_dir": cwd,
+            "parent": str(parent), "args": TEST_ARGS, "controller_argv": argv, "test_state_path_env": False}
+        proof_path = parent / "namespace-suite-receipt.json"
+        receiver = receive.namespace_failed_receiver(argv, cwd, proof_path, binding)
+        run.receipt.update(request_sha256=request_sha, request_nonce=request["nonce"],
+                           namespace_request=binding, environment=environment)
+        run.save()
+        run.command(argv, "namespace-owner", cwd=cwd, timeout=320, check=False,
+                    defer_output=True, physical_receiver=receiver)
+        command = run.receipt["commands"][-1]
+        proof = receive.finalize_owner_capture(run, command, "namespace", proof_path, "owner",
+            image, request["binary_sha256"], Path(cwd), TEST_ARGS, False,
+            owner_binding=binding, owner_receiver=receiver)
+        need(run.commands_quiescent() and run.receipt["native_custody_settled"] is True,
+             "original namespace custody remains unreceived")
+        terminal = receive.validate_namespace_terminal(proof, binding)
+        passed = terminal == "suite" and command["exit_code"] == 0 and receive.namespace_qualification(proof, binding)
+        run.receipt.update(terminal_kind=terminal, api_tests_started=(terminal == "suite"),
+                           namespace_suite_contract_passed=passed, physical_complete=True)
+        run.receipt["source_after"] = receive_source(cfg)
+        need(sha(image) == request["binary_sha256"], "diagnostic incoming copy changed")
+        run.receipt["input_image_unchanged"] = True
+        run.receipt["status"] = "PASS" if passed else "FAIL"
+        run.receipt["classification"] = "PASS/CLOSED" if passed else "FAIL/CLOSED"
+        code = 0 if passed else (command["exit_code"] or 1)
+    except BaseException as error:
+        run.receipt.update(status="FAIL", error=type(error).__name__ + ": " + str(error),
+                           classification=("FAIL/CLOSED" if run.receipt.get("native_custody_settled") is True
+                                           and run.commands_quiescent() else "FAIL/UNKNOWN"))
+        code = 1
+    finally:
+        quiet = run.commands_quiescent()
+        run.receipt.update(commands_quiescent=quiet, command_quiescence=run.quiescence_snapshot(),
+                           physical_complete=quiet and run.receipt.get("native_custody_settled") is True)
+        try:
+            run.save()
+        finally:
+            if not quiet:
+                hold_original(run, run.receipt.get("error", "original custody remains UNKNOWN"))
+                code = 1
+    print(json.dumps({"status": run.receipt["status"], "classification": run.receipt["classification"],
+                      "namespace_suite_contract_passed": run.receipt["namespace_suite_contract_passed"],
+                      "literal_repository_gate_passed": False, "receipt": str(output / "execution.json")}))
+    return code
+
+if __name__ == "__main__":
+    raise SystemExit(main())

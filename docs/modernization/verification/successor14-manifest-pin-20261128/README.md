@@ -43,6 +43,8 @@ Thirteen roots keep ordinary runtime Product selection. `TestMigrateSerena_Calls
 
 Pure DATA checks verified the exact base blob, two replacements, full afterimage and reconstructed whole tree. The patch is 710 bytes and contains two one-line changes. No Go compilation, native test, model, network package preparation, source mutation or Git operation was performed by this review.
 
+The [exact afterimage](afterimages/internal/cli/migrate_serena_test.go.txt) uses a `.go.txt` publication suffix so evidence is not discovered as a Go package. The original Source path in the patch and evidence, and all source bytes and hashes, are unchanged.
+
 The required commands remain:
 
 ```text

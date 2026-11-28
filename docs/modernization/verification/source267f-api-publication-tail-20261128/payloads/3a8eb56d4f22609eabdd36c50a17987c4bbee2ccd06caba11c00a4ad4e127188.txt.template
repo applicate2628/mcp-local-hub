@@ -1,0 +1,6 @@
+{
+  "Replace": {
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-acceptance-20261128-v2\\tools\\test-recovery-namespace\\main_windows.go": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-admission-timing-candidate-v1\\main_windows.go",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-acceptance-20261128-v2\\tools\\test-recovery-namespace\\prebuilt_windows.go": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-admission-timing-candidate-v1\\prebuilt_windows.go"
+  }
+}

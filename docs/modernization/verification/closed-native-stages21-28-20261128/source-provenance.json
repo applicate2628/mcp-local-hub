@@ -1,0 +1,156 @@
+{
+  "schema": "prespawn-barrier-public-base-data-provenance-v1",
+  "public_commit": "5ad374eb60cadb8ad56ea167e3fb06edb44bdc18",
+  "source_path": "internal/cli/supervise_prespawn_binary_gate_test.go",
+  "public_url": "https://github.com/applicate2628/mcp-local-hub/blob/5ad374eb60cadb8ad56ea167e3fb06edb44bdc18/internal/cli/supervise_prespawn_binary_gate_test.go",
+  "public_blob": "9d4a403e4d45794681a960ba357301506ef652eb",
+  "before": {
+    "bytes": 32425,
+    "sha256": "e6f4c4f1304f8d29064e034694155bf378cd248ce7ebc25f6be8e3707a777acc"
+  },
+  "patch": {
+    "bytes": 1040,
+    "sha256": "60b608c3e807daae25158334d347da5546c8587e4eccc608df0e7bfb03fb30b8"
+  },
+  "after": {
+    "bytes": 32663,
+    "sha256": "5e3a6517a9fed3a329cea60d12915965720b37c2bb6a865880d3c0c05ed48feb"
+  },
+  "single_hunk_data_replay_equal": true,
+  "source_fixture_path_occurrences": 16,
+  "all_source_fixture_occurrences_unchanged_by_patch": true,
+  "native_or_test_execution": false,
+  "publication_authority": false,
+  "fixture_literals": [
+    {
+      "kind": "windows_path",
+      "source_line": 26,
+      "afterimage_line": 26,
+      "bytes": 11,
+      "sha256": "309e5fa0afe8051d225a3d1a6dafe7b2d65d23b6d224cc39077ce5090efdfecd",
+      "source_lexical_fixture_match": true
+    },
+    {
+      "kind": "windows_path",
+      "source_line": 299,
+      "afterimage_line": 306,
+      "bytes": 6,
+      "sha256": "ac0a70592409e5883359e5b336ece9ae0895c9ec0e385fdedc79d38184600e6d",
+      "source_lexical_fixture_match": true
+    },
+    {
+      "kind": "windows_path",
+      "source_line": 313,
+      "afterimage_line": 320,
+      "bytes": 19,
+      "sha256": "80d91f1ce050b6584d2e6d0252c5e3b057596f7313a0d167d943543663a145cf",
+      "source_lexical_fixture_match": true
+    },
+    {
+      "kind": "windows_path",
+      "source_line": 313,
+      "afterimage_line": 337,
+      "bytes": 19,
+      "sha256": "80d91f1ce050b6584d2e6d0252c5e3b057596f7313a0d167d943543663a145cf",
+      "source_lexical_fixture_match": true
+    },
+    {
+      "kind": "windows_path",
+      "source_line": 342,
+      "afterimage_line": 349,
+      "bytes": 34,
+      "sha256": "01597905f39163c69296a1c714c7b96f9ea01a5f1cec1b3bd844189fbc9fc4bb",
+      "source_lexical_fixture_match": true
+    },
+    {
+      "kind": "windows_path",
+      "source_line": 350,
+      "afterimage_line": 357,
+      "bytes": 17,
+      "sha256": "3b418dbd178411003d9dff9a73c0cf238a57a37d296610c3b8d56ad1164d877a",
+      "source_lexical_fixture_match": true
+    },
+    {
+      "kind": "windows_path",
+      "source_line": 354,
+      "afterimage_line": 361,
+      "bytes": 17,
+      "sha256": "e261b8540fffa5904a9d799dffe9a06d05e78d8088920c8be3b03937681bf0fd",
+      "source_lexical_fixture_match": true
+    },
+    {
+      "kind": "windows_path",
+      "source_line": 342,
+      "afterimage_line": 426,
+      "bytes": 34,
+      "sha256": "01597905f39163c69296a1c714c7b96f9ea01a5f1cec1b3bd844189fbc9fc4bb",
+      "source_lexical_fixture_match": true
+    },
+    {
+      "kind": "windows_path",
+      "source_line": 439,
+      "afterimage_line": 446,
+      "bytes": 12,
+      "sha256": "1194160fd334c11f705384e75a8624e81950afdecf88981a60f8719e183af97f",
+      "source_lexical_fixture_match": true
+    },
+    {
+      "kind": "windows_path",
+      "source_line": 342,
+      "afterimage_line": 463,
+      "bytes": 34,
+      "sha256": "01597905f39163c69296a1c714c7b96f9ea01a5f1cec1b3bd844189fbc9fc4bb",
+      "source_lexical_fixture_match": true
+    },
+    {
+      "kind": "windows_path",
+      "source_line": 539,
+      "afterimage_line": 546,
+      "bytes": 19,
+      "sha256": "6a6bbc1bc43ca276e22701fd207e467ee7ad91d3a6af07a810683bb7541d5462",
+      "source_lexical_fixture_match": true
+    },
+    {
+      "kind": "windows_path",
+      "source_line": 539,
+      "afterimage_line": 552,
+      "bytes": 19,
+      "sha256": "6a6bbc1bc43ca276e22701fd207e467ee7ad91d3a6af07a810683bb7541d5462",
+      "source_lexical_fixture_match": true
+    },
+    {
+      "kind": "windows_path",
+      "source_line": 591,
+      "afterimage_line": 598,
+      "bytes": 18,
+      "sha256": "63f13170d278081ceedd6d3f2c30373617c2c86d3e7d943ac5a260dc60c34426",
+      "source_lexical_fixture_match": true
+    },
+    {
+      "kind": "windows_path",
+      "source_line": 591,
+      "afterimage_line": 620,
+      "bytes": 18,
+      "sha256": "63f13170d278081ceedd6d3f2c30373617c2c86d3e7d943ac5a260dc60c34426",
+      "source_lexical_fixture_match": true
+    },
+    {
+      "kind": "windows_path",
+      "source_line": 342,
+      "afterimage_line": 645,
+      "bytes": 34,
+      "sha256": "01597905f39163c69296a1c714c7b96f9ea01a5f1cec1b3bd844189fbc9fc4bb",
+      "source_lexical_fixture_match": true
+    },
+    {
+      "kind": "unix_home",
+      "source_line": 513,
+      "afterimage_line": 520,
+      "bytes": 30,
+      "sha256": "d85543097ab57e54c3e31a261f17b900710ce20d157d857f370d5f01b918a415",
+      "source_lexical_fixture_match": true
+    }
+  ],
+  "note": "All original path fixture/comment bytes remain reconstructible. The seven canonical machine-path findings are represented by explicit role markers in the public afterimage; their values can be recovered from exact lexical ranges in the pinned public base, without a unique private copy.",
+  "fixture_template_revision": "fixture-template-revision.json"
+}

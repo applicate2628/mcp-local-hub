@@ -1,0 +1,120 @@
+{
+    "schema":  "publication-original-root-data-audit-v1",
+    "status":  "PASS",
+    "physical_complete":  true,
+    "scope":  "cache-acceptance-commit-20261128-v11",
+    "config_sha256":  "87c0e19a23c3837273172f34db7e184b60b541be076955de33bf0269a86a6bc6",
+    "receipt_sha256":  "39198b81985988547bc6a4125dce5d1a1ced6ead2df12cc2b87f2b7852c85256",
+    "root_sha256":  "e5ce1731d99d5b7282cf3237fbd37a33257ff96d0ffac5c6e6f096c69317db16",
+    "outer_sha256":  "33b23dea291d96713470a6719e604dc2db6aaf4aea433b32e40d65c0c06000b5",
+    "commands_verified":  7,
+    "captures_verified":  14,
+    "results":  [
+                    {
+                        "name":  "head.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rev-parse",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.04494749999139458,
+                        "exit_code":  0,
+                        "stdout_sha256":  "73aa24f699b6c06ce27e215551c8b246f45f00183a079260aed1401b22a07bb0",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "27d90e626465dc9a3a012e50785d62785d4c5e7e\n"
+                    },
+                    {
+                        "name":  "bind-reviewed-index-blobs.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "ls-files",
+                                     "--stage",
+                                     "--",
+                                     ".plans/2026-11/open-pr-integration-20261117.md",
+                                     "docs/modernization/verification/successor-publication-trail-20261128",
+                                     "docs/modernization/verification/successor59f-preparation-20261128",
+                                     "docs/modernization/verification/original-full-v6-complete-captures-20261128",
+                                     "docs/modernization/verification/original-full-v6-owner-replay-20261128",
+                                     "docs/modernization/verification/old-cli-budget-analysis-20261128",
+                                     "docs/modernization/verification/cli-shared-image-candidate-20261128",
+                                     "docs/modernization/verification/old-cli-budget-parser-v2-20261128"
+                                 ],
+                        "seconds":  0.045820700004696846,
+                        "exit_code":  0,
+                        "stdout_sha256":  "44f104ea3c12067921dae21fa12f76629175265f5083727c87f76566bca8d22d",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "100644 80ae40810eaf08e981ad7e07dea514fbefd2f892 0\t.plans/2026-11/open-pr-integration-20261117.md\n100644 fa1385d99a319b43c06f5309d1aae9fdd3adea46 0\tdocs/modernization/verification/cli-shared-image-candidate-20261128/.gitattributes\n100644 ca66719468f908544dafac6f5cc35dcacd28d4f1 0\tdocs/modernization/verification/cli-shared-image-candidate-20261128/README.md\n100644 059eec22dc7701ed8f1a1d2f2baac82962d815df 0\tdocs/modernization/verification/cli-shared-image-candidate-20261128/afterimages/internal/cli/process_identity_match_windows_test.go\n100644 563e80dff195deb1378e45431c0b374aa0a25012 0\tdocs/modernization/verification/cli-shared-image-candidate-20261128/afterimages/internal/cli/settings_registry_test.go\n100644 2d4eb13a87e23a876b2d5048e797b7f31646858a 0\tdocs/modernization/verification/cli-shared-image-candidate-20261128/artifact-manifest.json\n100644 1ad1109f6bb291b59fe67088cff0c14aa9b92c54 0\tdocs/modernization/verification/cli-shared-image-candidate-20261128/evidence.json\n100644 df446a76edfc22545469af2db5f7c7e77365474d 0\tdocs/modernization/verification/cli-shared-image-candidate-20261128/share-foreign-test-image.patch\n100644 fa1385d99a319b43c06f5309d1aae9fdd3adea46 0\tdocs/modernization/verification/old-cli-budget-analysis-20261128/.gitattributes\n100644 83c17710515b4c5b123a341dbc19c40c2058d73a 0\tdocs/modernization/verification/old-cli-budget-analysis-20261128/README.md\n100644 5e39f298284637d826caa18f71652bb4de3673a1 0\tdocs/modernization/verification/old-cli-budget-analysis-20261128/analysis.json\n100644 d5424847ad067e9494e4857111d0ca5def8a0618 0\tdocs/modernization/verification/old-cli-budget-analysis-20261128/artifact-manifest.json\n100644 c09e3489fe332ffe9e844d680e981dd4f212b291 0\tdocs/modernization/verification/old-cli-budget-analysis-20261128/not-started-or-paused.json\n100644 4acf520446b3286eef01539549188982765762af 0\tdocs/modernization/verification/old-cli-budget-analysis-20261128/parse_closed_cli_durations.py\n100644 804c6debc40552b861fddb80448897f0fa1a62b0 0\tdocs/modernization/verification/old-cli-budget-analysis-20261128/source-correspondence.json\n100644 3bd8d42d477dc4d24b26e6ffc6322b9ae60f04be 0\tdocs/modernization/verification/old-cli-budget-analysis-20261128/top-level-terminal-ledger.json\n100644 fa1385d99a319b43c06f5309d1aae9fdd3adea46 0\tdocs/modernization/verification/old-cli-budget-parser-v2-20261128/.gitattributes\n100644 a2a5952ba929ff9b27f40d63836d004f1594985a 0\tdocs/modernization/verification/old-cli-budget-parser-v2-20261128/README.md\n100644 10f6cd9f"
+                    },
+                    {
+                        "name":  "commit-reviewed-complete-evidence.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "commit",
+                                     "-m",
+                                     "docs: preserve complete acceptance evidence and current blockers"
+                                 ],
+                        "seconds":  0.7187707000412047,
+                        "exit_code":  0,
+                        "stdout_sha256":  "9db2302235a3fb75cc86a0ad5da1603de5058bac65f91f8c82b79b6983c5c73b",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "[work/ab664-text-source-bd7-363b-v1 264a0601] docs: preserve complete acceptance evidence and current blockers\n 616 files changed, 658466 insertions(+), 39 deletions(-)\n create mode 100644 docs/modernization/verification/cli-shared-image-candidate-20261128/.gitattributes\n create mode 100644 docs/modernization/verification/cli-shared-image-candidate-20261128/README.md\n create mode 100644 docs/modernization/verification/cli-shared-image-candidate-20261128/afterimages/internal/cli/process_identity_match_windows_test.go\n create mode 100644 docs/modernization/verification/cli-shared-image-candidate-20261128/afterimages/internal/cli/settings_registry_test.go\n create mode 100644 docs/modernization/verification/cli-shared-image-candidate-20261128/artifact-manifest.json\n create mode 100644 docs/modernization/verification/cli-shared-image-candidate-20261128/evidence.json\n create mode 100644 docs/modernization/verification/cli-shared-image-candidate-20261128/share-foreign-test-image.patch\n create mode 100644 docs/modernization/verification/old-cli-budget-analysis-20261128/.gitattributes\n create mode 100644 docs/modernization/verification/old-cli-budget-analysis-20261128/README.md\n create mode 100644 docs/modernization/verification/old-cli-budget-analysis-20261128/analysis.json\n create mode 100644 docs/modernization/verification/old-cli-budget-analysis-20261128/artifact-manifest.json\n create mode 100644 docs/modernization/verification/old-cli-budget-analysis-20261128/not-started-or-paused.json\n create mode 100644 docs/modernization/verification/old-cli-budget-analysis-20261128/parse_closed_cli_durations.py\n create mode 100644 docs/modernization/verification/old-cli-budget-analysis-20261128/source-correspondence.json\n create mode 100644 docs/modernization/verification/old-cli-budget-analysis-20261128/top-level-terminal-ledger.json\n create mode 100644 docs/modernization/verification/old-cli-budget-parser-v2-20261128/.gitattributes\n create mode 100644 docs/modernization/verification/old-cli-budget-parser-v2-20261128/README.md\n create mode 100644 docs/modernization/verification/old-cli-budget-parser-v2-20261128/artifact-manifest.json\n create mode 100644 docs/modernization/verification/old-cli-budget-parser-v2-20261128/ascii-to-utf8.patch\n create mode 100644 docs/modernization/verification/old-cli-budget-parser-v2-20261128/evidence.json\n create mode 100644 docs/modernization/verification/old-cli-budget-parser-v2-20261128/original-data-failure.json\n create mode 100644 docs/"
+                    },
+                    {
+                        "name":  "committed-head.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rev-parse",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.03698229999281466,
+                        "exit_code":  0,
+                        "stdout_sha256":  "f665546f0d1211b43018ecd17c352657643c26cfea06b729ca0ac3bfac68a795",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "264a0601b7d027652c12ec88ae4debd6c3bfb69f\n"
+                    },
+                    {
+                        "name":  "committed-exact-tree.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rev-parse",
+                                     "HEAD^{tree}"
+                                 ],
+                        "seconds":  0.04030570003669709,
+                        "exit_code":  0,
+                        "stdout_sha256":  "65569e446f5eaa26793678f7e9955d88d71567750a2e84f18456ff635e2eab8b",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "f7fbccfb8cfc5d1c33b986591675d07847af929c\n"
+                    },
+                    {
+                        "name":  "committed-identity.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "show",
+                                     "--format=raw",
+                                     "--no-patch",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.04800080007407814,
+                        "exit_code":  0,
+                        "stdout_sha256":  "ea1a2ab68057909c6434f57a9db52557f0bce9a6b36a752dd3c8a5defc18a05d",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "commit 264a0601b7d027652c12ec88ae4debd6c3bfb69f\ntree f7fbccfb8cfc5d1c33b986591675d07847af929c\nparent 27d90e626465dc9a3a012e50785d62785d4c5e7e\nauthor applicate2628 \u003cdima_den@inbox.ru\u003e 1795881704 +0300\ncommitter applicate2628 \u003cdima_den@inbox.ru\u003e 1795881704 +0300\n\n    docs: preserve complete acceptance evidence and current blockers\n"
+                    },
+                    {
+                        "name":  "post-commit-status.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "status",
+                                     "--porcelain=v1",
+                                     "--untracked-files=all"
+                                 ],
+                        "seconds":  0.057258700020611286,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    }
+                ],
+    "tests_executed":  false,
+    "reviewed_utc":  "2026-11-28T16:03:19.8656429Z"
+}

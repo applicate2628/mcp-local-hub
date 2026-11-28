@@ -58,7 +58,7 @@
       "original_command_status": "PASS",
       "source": [
         {
-          "artifact": "sources/inputs/namespace/main_windows.go",
+          "artifact": "sources/inputs/namespace/main_windows.go.txt",
           "original_bytes": 24227,
           "original_sha256": "4e91b8ce877400a91a4f315b68a166ae3d2c7c19d4963d52ade521f03f2ac4b4"
         },

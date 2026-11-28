@@ -1,0 +1,59 @@
+"""Check only frozen source DATA and write new review manifests/patches."""
+import difflib,hashlib,json,os,re
+from pathlib import Path
+root=Path(__file__).absolute().parent
+base=root.parent/"namespace-candidate"
+draft=root.parent/"namespace-copy-sync-draft-v1"
+BLOCKS={"observer":"\tvar admissionMarks []namespaceAdmissionMark\n\tmark := func(stage string) {\n\t\tif wholeSuite {\n\t\t\tadmissionMarks = append(admissionMarks, namespaceAdmissionMark{Stage: stage, ElapsedNS: time.Since(started).Nanoseconds()})\n\t\t}\n\t}\n\tmark(\"arguments:parsed\")\n","refused":"\t// Registered after the existing refusal publisher: preserve its exact wire\n\t// and original cause, adding timing DATA only to an actual pre-child error.\n\tdefer func() {\n\t\tif wholeSuite && !stageEntered && returned != nil {\n\t\t\tmark(\"pre-child-refusal\")\n\t\t\tif raw, err := json.Marshal(admissionMarks); err == nil {\n\t\t\t\treturned = fmt.Errorf(\"namespace admission marks=%s: %w\", raw, returned)\n\t\t\t}\n\t\t}\n\t}()\n","typeblock":"// Monotonic elapsed times from the unchanged original admission start.\n// These observations never grant admission or native/IO closure.\ntype namespaceAdmissionMark struct {\n\tStage     string `json:\"stage\"`\n\tElapsedNS int64  `json:\"elapsed_ns\"`\n}\n\n"}
+def sha(raw):return hashlib.sha256(raw).hexdigest()
+def read(path):return path.read_bytes()
+def put(path,raw):
+    with path.open("xb") as stream:stream.write(raw);stream.flush();os.fsync(stream.fileno())
+old_main=read(base/"main_windows.go");old_pre=read(base/"prebuilt_windows.go")
+assert sha(old_main)=="4e91b8ce877400a91a4f315b68a166ae3d2c7c19d4963d52ade521f03f2ac4b4"
+assert sha(old_pre)=="2fc1016b4eff51c77a3c0e342de14d938b3f39b6a67c438b04ef262e09d8eeed"
+new_main=read(root/"main_windows.go");new_pre=read(root/"prebuilt_windows.go")
+normal=new_main.decode()
+for name in ("observer","refused"):
+    assert normal.count(BLOCKS[name])==1
+    normal=normal.replace(BLOCKS[name],"")
+normal="".join(line for line in normal.splitlines(True) if not re.match(r"\s*mark\(",line)
+               and "suite.AdmissionMarks = admissionMarks" not in line)
+normal=normal.replace("flag.Args(), &pins, mark)","flag.Args(), &pins)")
+assert normal.encode()==old_main,"main changed beyond in-memory timing/diagnostic DATA"
+normal=new_pre.decode()
+assert normal.count(BLOCKS["typeblock"])==1
+normal=normal.replace(BLOCKS["typeblock"],"")
+normal="".join(line for line in normal.splitlines(True) if not re.match(r"\s*mark\(",line)
+               and not re.match(r"\s*AdmissionMarks\b",line))
+normal=normal.replace("pins *[]windows.Handle, mark func(string)","pins *[]windows.Handle")
+assert normal.encode()==old_pre,"prebuilt changed beyond in-memory timing/diagnostic DATA"
+new_draft=read(draft/"prebuilt_windows.go")
+assert old_pre.count(b"\treturn target.Sync()\n")==1
+assert new_draft==old_pre.replace(b"\treturn target.Sync()\n",b"\treturn nil\n")
+patch=b""
+for name,before,after in (("main_windows.go",old_main,new_main),("prebuilt_windows.go",old_pre,new_pre)):
+    patch+="".join(difflib.unified_diff(before.decode().splitlines(True),after.decode().splitlines(True),
+        fromfile="namespace-candidate/"+name,tofile="namespace-admission-timing-candidate-v1/"+name)).encode()
+put(root/"source-delta.patch",patch)
+draft_patch="".join(difflib.unified_diff(old_pre.decode().splitlines(True),new_draft.decode().splitlines(True),
+    fromfile="namespace-candidate/prebuilt_windows.go",tofile="namespace-copy-sync-draft-v1/prebuilt_windows.go")).encode()
+put(draft/"source-delta.patch",draft_patch)
+def file_rows(directory,names):
+    return {name:{"bytes":len(raw),"lines":len(raw.splitlines()),"sha256":sha(raw)}
+            for name in names for raw in (read(directory/name),)}
+manifest={"schema":"namespace-admission-timing-candidate-v1","status":"FROZEN_FUTURE_ONLY_NOT_COMPILED",
+    "original_sources":{"main_windows.go":sha(old_main),"prebuilt_windows.go":sha(old_pre)},
+    "files":file_rows(root,("main_windows.go","prebuilt_windows.go","source-delta.patch","README.md")),
+    "removing_only_timing_additions_restores_original_bytes":True,
+    "original_copy_sync_retained":True,"source_files_written":False,"go_compiled":False,
+    "native_helper_or_test_executed":False,"deadline_or_predicate_changes":False}
+put(root/"candidate-manifest.json",(json.dumps(manifest,indent=2)+"\n").encode())
+draft_manifest={"schema":"namespace-copy-sync-unapplied-draft-v1","status":"UNAPPLIED_DRAFT_NOT_A_PROVEN_FIX",
+    "original_source_sha256":sha(old_pre),"single_statement_delta_verified":True,
+    "files":file_rows(draft,("prebuilt_windows.go","source-delta.patch","README.md")),
+    "source_files_written":False,"go_compiled":False,"native_helper_or_test_executed":False}
+put(draft/"candidate-manifest.json",(json.dumps(draft_manifest,indent=2)+"\n").encode())
+print(json.dumps({"timing":manifest,"timing_manifest_sha256":sha(read(root/"candidate-manifest.json")),
+    "unapplied_draft":draft_manifest,"draft_manifest_sha256":sha(read(draft/"candidate-manifest.json")),
+    "source_data_only":True},indent=2))

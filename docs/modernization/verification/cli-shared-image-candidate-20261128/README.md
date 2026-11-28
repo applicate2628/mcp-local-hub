@@ -4,7 +4,7 @@
 
 Это **draft, не применённый и не исполненный**. Он относится к точной Source `59f618ebfbf6d9f52c6994d68586e3c2ebc202a8`, tree `03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1`, и меняет два `_test.go` файла. Ожидаемый полный tree после ровно этого patch: `5be2e2ef1f006da03a8ff7ed993b5e649d619116`.
 
-[Точный patch](share-foreign-test-image.patch), [две afterimages](afterimages/internal/cli/) и [метаданные](evidence.json) готовы для собственного review и штатного применения root. Рабочие Source, Git, текущие inputs/cache и UNKNOWN владельцы не менялись.
+[Точный patch](share-foreign-test-image.patch), afterimages [identity](afterimages/internal/cli/process_identity_match_windows_test.go.txt) и [settings](afterimages/internal/cli/settings_registry_test.go.txt) и [метаданные](evidence.json) готовы для собственного review и штатного применения root. Рабочие Source, Git, текущие inputs/cache и UNKNOWN владельцы не менялись. Суффикс `.go.txt` относится только к опубликованным afterimages: исходные пути patch, Source hashes и bytes файлов сохранены; документация не добавляет пакеты в `go test ./...`.
 
 ## Причина и граница доказательства
 

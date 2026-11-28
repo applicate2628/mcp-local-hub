@@ -1,0 +1,30 @@
+{
+  "schema": "closed-native-supplement-resource-disposition-v1",
+  "moves_performed": 0,
+  "permanent_deletions_performed": 0,
+  "primary_closed_event_roots": {
+    "status": "KEEP",
+    "reason": "Preserve originals until independent reconstruction/public readback and separate unused proof. No directory-wide disposable conclusion."
+  },
+  "original_operator_role_values": {
+    "status": "KEEP_PRIVATE",
+    "roles": 12,
+    "reason": "Required for exact reconstruction; not part of public capsule.",
+    "public_fixture_roles": 3,
+    "public_fixture_values_recoverable_from_pinned_source": true
+  },
+  "active_or_UNKNOWN_roots": {
+    "status": "KEEP",
+    "read": false,
+    "closure_granted": false
+  },
+  "generated_binaries_and_cache": {
+    "status": "KEEP_PENDING_OWNER_DEPENDENCY_CHECK",
+    "archived_as": "source/build argv/hash provenance, not large binary/cache copies",
+    "reason": "Potential future diagnostic inputs are outside this supplement's cleanup authority."
+  },
+  "DATA_reconstruction_duplicates": {
+    "status": "KEEP_UNTIL_INDEPENDENTLY_VERIFIED_AND_PUBLIC",
+    "reason": "No move is authorized by a manifest alone."
+  }
+}

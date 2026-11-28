@@ -1,0 +1,7 @@
+{
+  "controller_exit_code": 0,
+  "original_controller_reaped": true,
+  "controller_capture_handles_closed": true,
+  "seconds": 488.03392769990023,
+  "receipt_sha256": "2555fbc338249c157f9326aafa22dd8a5b31a17c06baff72ce0182a1dcd5ae46"
+}
