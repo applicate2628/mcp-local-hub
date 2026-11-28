@@ -408,14 +408,6 @@ func (s *isolatedStdioSession) run() {
 			WritersJoined: true, WatcherJoined: true, LifetimeJoined: true, LogClosed: true,
 		}
 	}
-	terminalAction := "unreceived"
-	if s.receipt.NativeSettlement != nil {
-		terminalAction = s.receipt.NativeSettlement.Snapshot().TerminalAction
-	}
-	fmt.Fprintf(daemonDiagWriter(),
-		"stdio mode=private stage=settlement session=%d no_start=%t pending=%t native_action=%s exit_known=%t exit_code=%d stderr_bytes=%d stderr_eof=%t stderr_read_failed=%t stdout_read_failed=%t stdout_protocol_invalid=%t\n",
-		s.sequence, s.receipt.NoNativeAttempt, s.receipt.Pending, terminalAction, s.receipt.RootWait.Known, s.receipt.RootWait.ExitCode,
-		s.receipt.PrivateStderrBytes, s.receipt.PrivateStderrEOF, s.receipt.PrivateStderrReadFailed, s.receipt.StdoutReadFailed, s.receipt.StdoutProtocolInvalid)
 	p.mu.Lock()
 	close(s.receiptDone)
 	if s.receipt.Complete() {
@@ -425,6 +417,16 @@ func (s *isolatedStdioSession) run() {
 	close(p.changed)
 	p.changed = make(chan struct{})
 	p.mu.Unlock()
+
+	// Best-effort diagnostics must not delay the receipt or slot release.
+	terminalAction := "unreceived"
+	if s.receipt.NativeSettlement != nil {
+		terminalAction = s.receipt.NativeSettlement.Snapshot().TerminalAction
+	}
+	fmt.Fprintf(daemonDiagWriter(),
+		"stdio mode=private stage=settlement session=%d no_start=%t pending=%t native_action=%s exit_known=%t exit_code=%d stderr_bytes=%d stderr_eof=%t stderr_read_failed=%t stdout_read_failed=%t stdout_protocol_invalid=%t\n",
+		s.sequence, s.receipt.NoNativeAttempt, s.receipt.Pending, terminalAction, s.receipt.RootWait.Known, s.receipt.RootWait.ExitCode,
+		s.receipt.PrivateStderrBytes, s.receipt.PrivateStderrEOF, s.receipt.PrivateStderrReadFailed, s.receipt.StdoutReadFailed, s.receipt.StdoutProtocolInvalid)
 	if p.observe != nil {
 		p.observe(isolatedStdioSettlementDiagnostic(s.sequence, s.receipt))
 	}

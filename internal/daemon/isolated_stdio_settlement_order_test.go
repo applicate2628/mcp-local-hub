@@ -3,11 +3,19 @@ package daemon
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+type settlementDiagnosticGate func([]byte)
+
+func (f settlementDiagnosticGate) Write(p []byte) (int, error) {
+	f(p)
+	return len(p), nil
+}
 
 func TestIsolatedStdioSettlementObserverFollowsReceiptAndRelease(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -68,8 +76,60 @@ func TestIsolatedStdioSettlementObserverFollowsReceiptAndRelease(t *testing.T) {
 	if !firstDeadline.Equal(s.stopDeadline) || calls.Load() != 0 {
 		t.Fatal("duplicate retirement changed the original deadline or emitted early")
 	}
+	stderrReached := make(chan struct{})
+	releaseStderr := make(chan struct{})
+	var stderrReachedOnce, releaseStderrOnce sync.Once
+	unblockStderr := func() { releaseStderrOnce.Do(func() { close(releaseStderr) }) }
+	restore := SetDaemonDiagWriterForTest(settlementDiagnosticGate(func(p []byte) {
+		if !strings.HasPrefix(string(p), "stdio mode=private stage=settlement session=9 ") {
+			return
+		}
+		stderrReachedOnce.Do(func() { close(stderrReached) })
+		<-releaseStderr
+	}))
 	close(s.launchDone)
 	go func() { defer close(done); s.run() }()
+	defer func() {
+		unblockStderr()
+		release()
+		join := time.NewTimer(5 * time.Second)
+		defer join.Stop()
+		select {
+		case <-done:
+		case <-join.C:
+			t.Error("session worker did not join during diagnostic cleanup")
+		}
+		restore()
+	}()
+
+	select {
+	case <-stderrReached:
+	case <-ctx.Done():
+		t.Fatal("no settlement diagnostic write")
+	}
+	// At the exact point when the diagnostic writer is blocked, the outcome
+	// must already be observable and the original admission budget reusable.
+	select {
+	case <-s.receiptDone:
+	default:
+		t.Fatal("blocked settlement diagnostic delayed the receipt")
+	}
+	if !p.mu.TryLock() {
+		t.Fatal("blocked settlement diagnostic held the session mutex")
+	}
+	reserved, remaining := p.reserved, len(p.sessions)
+	p.mu.Unlock()
+	if reserved != 0 || remaining != 0 {
+		t.Fatalf("blocked settlement diagnostic retained capacity: reserved=%d sessions=%d", reserved, remaining)
+	}
+	stderrSettlement, err := receipt.Await(ctx)
+	if err != nil || !stderrSettlement.Complete() || !stderrSettlement.NoNativeAttempt {
+		t.Fatalf("blocked settlement diagnostic affected the receipt: complete=%t error=%v", stderrSettlement.Complete(), err)
+	}
+	if err := p.Close(ctx); err != nil {
+		t.Fatalf("blocked settlement diagnostic affected close: %v", err)
+	}
+	unblockStderr()
 	select {
 	case got := <-reached:
 		if !got.receiptAndReleaseReady || got.event != (IsolatedStdioSettlementDiagnostic{Sequence: 9, Complete: true}) {
