@@ -31,7 +31,7 @@
       "transport": "stdio",
       "command": "uvx",
       "args": [
-        "mcp-server-git==2026.11.18",
+        "mcp-server-git==2026.11.27",
         "--repository",
         "${workspaceFolder}"
       ],

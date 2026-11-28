@@ -23,7 +23,7 @@
       "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/git/README.md",
       "transport": "stdio",
       "command": "uvx",
-      "args": ["mcp-server-git", "--repository", "${workspaceFolder}"],
+      "args": ["mcp-server-git==2026.11.27", "--repository", "${workspaceFolder}"],
       "env": {},
       "categories": ["git", "vcs"],
       "license": "MIT"
