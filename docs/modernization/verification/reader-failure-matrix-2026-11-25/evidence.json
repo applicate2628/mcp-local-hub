@@ -1,0 +1,437 @@
+{
+  "schema": "reader-failure-matrix-readback-v1",
+  "record_kind": "normalized readback of already completed Windows qualification",
+  "repository": "applicate2628/mcp-local-hub",
+  "pull_request": 627,
+  "public_base": "6615d239fe066eaa5fa78c22a5272d6602528274",
+  "candidate_kind": "uncommitted eight-file crate at execution; exact source reproduced locally",
+  "crate": "experiments/rust-anchored-read",
+  "target": "x86_64-pc-windows-msvc",
+  "source_files": {
+    ".gitignore": {
+      "bytes": 9,
+      "sha256": "306fd52e74fca6746e12acc750f232de15e71da917756a1270d74c91f5eb7368",
+      "git_blob": "b83d22266ac8aa2f8df2edef68082c789727841d",
+      "changed_from_public_base": false
+    },
+    "Cargo.lock": {
+      "bytes": 3056,
+      "sha256": "6cd7b98899c6afe742b1ca177e947b360e78b2662c4b6b7778eb1e32e619e026",
+      "git_blob": "bf195e14a3b725f5a64c8e577de56e2b605018a3",
+      "changed_from_public_base": false
+    },
+    "Cargo.toml": {
+      "bytes": 392,
+      "sha256": "37b8d9e94146f8a889838b5e06bd6a9474549660331ccc475ebaabcccb85302c",
+      "git_blob": "b27bbbf5234e90ad7ce4d41e45cac5d26df3b139",
+      "changed_from_public_base": false
+    },
+    "README.md": {
+      "bytes": 12652,
+      "sha256": "15e9ffd3adcf2564633284ff0ea81e59e58d356fb8d1defcc30678e83c91ffb4",
+      "git_blob": "10827fb11d6c122a949c55812a0b356ef120d7a3",
+      "changed_from_public_base": false
+    },
+    "src/failure_tests.rs": {
+      "bytes": 11692,
+      "sha256": "5d26c2c818e18a1ceebada0ac00f82f9063498f4b1acfc4c46801f4aa43fb285",
+      "git_blob": "c6b27e350b504497d4ca45f155b3b38d43cbb5b4",
+      "changed_from_public_base": true
+    },
+    "src/lib.rs": {
+      "bytes": 1857,
+      "sha256": "7ab79fa5526e760c04f7326747f3fb09a1b713ce2b13a03925909f780b3a6672",
+      "git_blob": "92bcb84589029670505727856caa6ec831119001",
+      "changed_from_public_base": false
+    },
+    "src/read_tests.rs": {
+      "bytes": 14714,
+      "sha256": "7efddd07830aad471cb4903ff8c8346ac54568304241002db618e290c7b648fd",
+      "git_blob": "318edaa7bd56c564fadceffda8a454fa8079b936",
+      "changed_from_public_base": true
+    },
+    "src/windows.rs": {
+      "bytes": 13571,
+      "sha256": "d736e2e0723247d96cb7dc6c02b423adc5fd6761cf3179e9629859b902b8f33f",
+      "git_blob": "ca1c7557e0b9030b8e02829270acdc39f2d4fdc9",
+      "changed_from_public_base": true
+    }
+  },
+  "phases": {
+    "guard": {
+      "receipt_sha256": "c9fe2bef40a8fcfceba125cb920983ab841fd5e184f2932059e075b9444be56f",
+      "parent_receipt_sha256": "03737622a6c7ba68ccffaf4dd7518e3359cb782fa84de2df1f519a2eaa28808f",
+      "plan_sha256": "08eb0b8cb295b8e6db242490ecd6ed7c98515d655c613750b4c8e86e46b64c17",
+      "status": "PASS",
+      "started_utc": "2026-11-25T00:00:17.298127+00:00",
+      "finished_utc": "2026-11-25T00:00:19.842296+00:00",
+      "qualification_passed": false,
+      "focused_only": true,
+      "preparation_only": false,
+      "inputs_sha256": "55ecde2d5466dc0f803d7a3221e3abfda0a0e7309f977893a5669f5b6c85d684",
+      "runner_sha256": "25add0f20dfb8884a5cc2f961216eea99dfb63a19202e4363942790ae57c1ace",
+      "source_head": "6615d239fe066eaa5fa78c22a5272d6602528274",
+      "native_admission_sha256": "0ef114fc10cd19d803f9b70e5145fc3401db644f0c662a081214c0098f6dc960",
+      "native_metadata_or_close_failure_qualified": false,
+      "controller": {
+        "status": "PASS",
+        "controller_exit_code": 0,
+        "controller_direct_reaped": true,
+        "controller_capture_handles_closed": true,
+        "diagnostic_deadline_exceeded": false
+      },
+      "source_before": {
+        "files": 8,
+        "bytes": 57943,
+        "inventory_sha256": "302df4ccccb69d67e95f6a9917785b4457c0f65f45903304345dca21bb41dfa8"
+      },
+      "source_after": {
+        "files": 8,
+        "bytes": 57943,
+        "inventory_sha256": "302df4ccccb69d67e95f6a9917785b4457c0f65f45903304345dca21bb41dfa8"
+      },
+      "commands": [
+        {
+          "seconds": 0.4089535000384785,
+          "exit_code": 0,
+          "timed_out": false,
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "quiescence_state": "complete",
+          "original_owner_retained": true,
+          "original_readers_joined": true,
+          "executable_role": "python.exe",
+          "streams": {
+            "stdout": {
+              "sha256": "f38a01eb7442a1bfc59bb98e59327914730104b2d705ccd87f8b3cfb8bb929c4",
+              "bytes": 40,
+              "eof": true,
+              "capture_close_returned": true
+            },
+            "stderr": {
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "bytes": 0,
+              "eof": true,
+              "capture_close_returned": true
+            }
+          }
+        },
+        {
+          "seconds": 2.007102700008545,
+          "exit_code": 1,
+          "timed_out": true,
+          "native": {
+            "direct_exit_code": 1,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": true,
+            "handles_closed": true,
+            "issues": []
+          },
+          "quiescence_state": "complete",
+          "original_owner_retained": true,
+          "original_readers_joined": true,
+          "executable_role": "python.exe",
+          "streams": {
+            "stdout": {
+              "sha256": "dd62ee631ed85bc57a26a97f2abedd6133c80b26a02451af32a799ea894be2e2",
+              "bytes": 24,
+              "eof": true,
+              "capture_close_returned": true
+            },
+            "stderr": {
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "bytes": 0,
+              "eof": true,
+              "capture_close_returned": true
+            }
+          }
+        }
+      ]
+    },
+    "prepare": {
+      "receipt_sha256": "49d4f37e69e076bf66826973db0dbd3ad81e298b9f784bc51b5910c1c7fac6da",
+      "parent_receipt_sha256": "8905b1711b312ed7b105c7a0eea1de0fd3f37e4e5ad436d4d1929852294a2fd2",
+      "plan_sha256": "85a5eb02203fc4471d58b9e8d692639c1b18d17d223811d0d78189f3871223a2",
+      "status": "PASS",
+      "started_utc": "2026-11-25T00:02:54.090470+00:00",
+      "finished_utc": "2026-11-25T00:03:19.174480+00:00",
+      "qualification_passed": false,
+      "focused_only": true,
+      "preparation_only": true,
+      "inputs_sha256": "55ecde2d5466dc0f803d7a3221e3abfda0a0e7309f977893a5669f5b6c85d684",
+      "runner_sha256": "25add0f20dfb8884a5cc2f961216eea99dfb63a19202e4363942790ae57c1ace",
+      "source_head": "6615d239fe066eaa5fa78c22a5272d6602528274",
+      "native_admission_sha256": "0ef114fc10cd19d803f9b70e5145fc3401db644f0c662a081214c0098f6dc960",
+      "vendor_receipt_sha256": "66aaa763b217d2ffa595a33d1583354ab85abd31dae3c8d3f023583ed5fdbbbb",
+      "native_metadata_or_close_failure_qualified": false,
+      "controller": {
+        "status": "PASS",
+        "controller_exit_code": 0,
+        "controller_direct_reaped": true,
+        "controller_capture_handles_closed": true,
+        "diagnostic_deadline_exceeded": false
+      },
+      "source_before": {
+        "files": 8,
+        "bytes": 57943,
+        "inventory_sha256": "302df4ccccb69d67e95f6a9917785b4457c0f65f45903304345dca21bb41dfa8"
+      },
+      "source_after": {
+        "files": 8,
+        "bytes": 57943,
+        "inventory_sha256": "302df4ccccb69d67e95f6a9917785b4457c0f65f45903304345dca21bb41dfa8"
+      },
+      "commands": []
+    },
+    "standard": {
+      "receipt_sha256": "d022605ac8c09ed25baee0bff7799ded9c5b255122b6323e85accc5ff7aa9ca2",
+      "parent_receipt_sha256": "40942f54c6a27fad56904498b907dc9e3a8aea1041c4d4908e9f90aa42325709",
+      "plan_sha256": "b55cf9a7d32f0bbaf11faa1d41d16bdf10afd0b2674d03228777e933bf9ff872",
+      "status": "PASS",
+      "started_utc": "2026-11-25T00:04:55.343242+00:00",
+      "finished_utc": "2026-11-25T00:05:14.462892+00:00",
+      "qualification_passed": true,
+      "focused_only": true,
+      "preparation_only": false,
+      "inputs_sha256": "55ecde2d5466dc0f803d7a3221e3abfda0a0e7309f977893a5669f5b6c85d684",
+      "runner_sha256": "25add0f20dfb8884a5cc2f961216eea99dfb63a19202e4363942790ae57c1ace",
+      "source_head": "6615d239fe066eaa5fa78c22a5272d6602528274",
+      "native_admission_sha256": "0ef114fc10cd19d803f9b70e5145fc3401db644f0c662a081214c0098f6dc960",
+      "native_metadata_or_close_failure_qualified": false,
+      "controller": {
+        "status": "PASS",
+        "controller_exit_code": 0,
+        "controller_direct_reaped": true,
+        "controller_capture_handles_closed": true,
+        "diagnostic_deadline_exceeded": false
+      },
+      "source_before": {
+        "files": 8,
+        "bytes": 57943,
+        "inventory_sha256": "302df4ccccb69d67e95f6a9917785b4457c0f65f45903304345dca21bb41dfa8"
+      },
+      "source_after": {
+        "files": 8,
+        "bytes": 57943,
+        "inventory_sha256": "302df4ccccb69d67e95f6a9917785b4457c0f65f45903304345dca21bb41dfa8"
+      },
+      "commands": [
+        {
+          "seconds": 0.11456479999469593,
+          "exit_code": 0,
+          "timed_out": false,
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "quiescence_state": "complete",
+          "original_owner_retained": true,
+          "original_readers_joined": true,
+          "executable_role": "rustfmt.exe",
+          "argv": [
+            "--check",
+            "--edition",
+            "2021",
+            "src/lib.rs",
+            "src/windows.rs",
+            "src/read_tests.rs",
+            "src/failure_tests.rs"
+          ],
+          "streams": {
+            "stdout": {
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "bytes": 0,
+              "eof": true,
+              "capture_close_returned": true
+            },
+            "stderr": {
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "bytes": 0,
+              "eof": true,
+              "capture_close_returned": true
+            }
+          }
+        },
+        {
+          "seconds": 6.909327700035647,
+          "exit_code": 0,
+          "timed_out": false,
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "quiescence_state": "complete",
+          "original_owner_retained": true,
+          "original_readers_joined": true,
+          "executable_role": "cargo.exe",
+          "argv": [
+            "check",
+            "--offline",
+            "--locked",
+            "--all-targets",
+            "--target",
+            "x86_64-pc-windows-msvc"
+          ],
+          "streams": {
+            "stdout": {
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "bytes": 0,
+              "eof": true,
+              "capture_close_returned": true
+            },
+            "stderr": {
+              "sha256": "446731589be3653a4a3b2213ac6b2da364f4e313d790a1671a0b0776306fb5c6",
+              "bytes": 556,
+              "eof": true,
+              "capture_close_returned": true
+            }
+          }
+        },
+        {
+          "seconds": 10.965386600000784,
+          "exit_code": 0,
+          "timed_out": false,
+          "native": {
+            "direct_exit_code": 0,
+            "direct_reaped": true,
+            "active_zero": true,
+            "job_terminated": false,
+            "handles_closed": true,
+            "issues": []
+          },
+          "quiescence_state": "complete",
+          "original_owner_retained": true,
+          "original_readers_joined": true,
+          "executable_role": "cargo.exe",
+          "argv": [
+            "test",
+            "--offline",
+            "--locked",
+            "--lib",
+            "--target",
+            "x86_64-pc-windows-msvc",
+            "--",
+            "--test-threads=1"
+          ],
+          "streams": {
+            "stdout": {
+              "sha256": "7caa8832a15ea2ace4d896f7f1e1a020e96f9d1929036ed653eb1617ae9c5016",
+              "bytes": 1794,
+              "eof": true,
+              "capture_close_returned": true
+            },
+            "stderr": {
+              "sha256": "657d0f42ec61b1898100cd87ac0d98b625c99dd6aaf9d2d134e270e4af10f5df",
+              "bytes": 773,
+              "eof": true,
+              "capture_close_returned": true
+            }
+          }
+        }
+      ],
+      "test_names": [
+        "windows::tests::canceled_before_open_has_typed_result",
+        "windows::tests::checksum_mismatch_and_initial_size_limit_return_no_data",
+        "windows::tests::component_swapped_to_link_before_open_is_rejected",
+        "windows::tests::exact_cap_still_checks_eof_and_returns_complete_payload",
+        "windows::tests::failures::close_failure_never_returns_bytes_and_retains_later_cleanup_errors",
+        "windows::tests::failures::metadata_failure_keeps_primary_and_each_cleanup_combination",
+        "windows::tests::failures::native_success_keeps_original_handles_and_verified_bytes",
+        "windows::tests::failures::non_io_primary_failures_survive_both_cleanup_failures",
+        "windows::tests::final_directory_and_missing_file_preserve_native_failure",
+        "windows::tests::growth_after_stat_hits_one_byte_sentinel_without_returning_data",
+        "windows::tests::injected_native_phase_error_preserves_category_and_closes_handles",
+        "windows::tests::mid_read_cancellation_returns_no_partial_result",
+        "windows::tests::native_read_failure_after_partial_read_preserves_error_and_releases_lock",
+        "windows::tests::reads_exact_verified_bytes_empty_and_unicode",
+        "windows::tests::rejects_invalid_input_before_open",
+        "windows::tests::repeated_success_and_failure_do_not_leak_handles",
+        "windows::tests::retained_final_handle_reads_original_after_path_replacement",
+        "windows::tests::retained_parent_does_not_reopen_changed_path",
+        "windows::tests::root_ancestor_reparse_is_not_silently_followed",
+        "windows::tests::root_and_intermediate_and_final_reparse_are_rejected"
+      ]
+    }
+  },
+  "tool_sha256_and_size": {
+    "cargo": {
+      "bytes": 27367424,
+      "sha256": "f381bae27c59588eacf69208e115b2c001a2998afed83a2e9084ea93620737b1"
+    },
+    "rustc": {
+      "bytes": 110592,
+      "sha256": "d4f8a0283de2dba0dc458cd13c333337d2b76c3649eb39e91c4acce618e661a1"
+    },
+    "rustdoc": {
+      "bytes": 11201024,
+      "sha256": "229fce3f08eed2385f1b651d9d8f3362bbf41f348c6a8f44f88db0d301876140"
+    },
+    "rustfmt": {
+      "bytes": 4877824,
+      "sha256": "0f8531c2c0933ec64b795aa8b80d08e30fb23d72e929bc37cb0da527464e84e9"
+    },
+    "cargo-fmt": {
+      "bytes": 1270784,
+      "sha256": "6f97e07244d34f696f6f4adc9d1e1416ef5536a2a9f61af14061c46455083dd8"
+    },
+    "link": {
+      "bytes": 3592544,
+      "sha256": "6089fbb8ca5d7beb5a69e625bf614ef23ebe07100a987c8a32b121f906e3fb51"
+    },
+    "cl": {
+      "bytes": 784232,
+      "sha256": "87b094e4fb3c646247b8eb515b5daa4fd73f991fe7cc42e98c0c9e3d3805d6fb"
+    },
+    "libcmt": {
+      "bytes": 6516864,
+      "sha256": "3e31fc7708c00abdc5f3af055e09b56c846f703754ca85666a4d3493ed2434e8"
+    },
+    "kernel32": {
+      "bytes": 311908,
+      "sha256": "842f5ce7ad8cf5aab7491b791e7968d2be510ae93f4019d3311797289399d221"
+    },
+    "ucrt": {
+      "bytes": 285588,
+      "sha256": "7ef4eac926bf597d2f243f16cdfed7e0db22cb3ca34a1d7e088a84c994a03d66"
+    }
+  },
+  "test_counts": {
+    "passed": 20,
+    "failed": 0,
+    "ignored": 0,
+    "measured": 0,
+    "filtered_out": 0,
+    "new_roots": 4,
+    "new_subcases": 25
+  },
+  "matrix": {
+    "native_operation_success_control": 1,
+    "metadata_and_cleanup_combinations": 14,
+    "close_failure_combinations": 7,
+    "other_primary_with_both_cleanup_failures": 3
+  },
+  "interpretation": {
+    "deterministic_codes": "Win32 status values are substituted only after the real inspect or close on the fixture handle succeeds.",
+    "guard_negative_control": "native-owner timeout is the intentional exit 1, with original Job termination and closure. It is separate from cargo test.",
+    "capture_names": "Original captures are represented by stdin-independent command and stdout/stderr role, with byte count and SHA-256 retained.",
+    "native_metadata_or_close_failure_qualified": false,
+    "real_read_failure": "Prior published qualification verifies an actual ReadFile lock violation on a separately owned fixture.",
+    "product_adapter_present": false,
+    "fresh_execution_during_readback": false
+  }
+}

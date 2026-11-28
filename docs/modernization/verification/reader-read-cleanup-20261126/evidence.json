@@ -1,0 +1,602 @@
+{
+  "schema": "reader627-native-read-cleanup-v1",
+  "owner_pr": 627,
+  "repository": "applicate2628/mcp-local-hub",
+  "reviewed_base": "d910767902f7e1385b97e12afdc675b0c9d27b99",
+  "candidate_kind": "same eight-file Rust crate with only two test files changed; uncommitted isolated copy at execution",
+  "containing_checkout_head": "b6f82b3f531bb3eec197049167cdc5971b44e2b0",
+  "native_scope": "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02\\.scratch\\reader627-review-v1",
+  "run_scope": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\reader627-native-v1",
+  "completed_utc": "2026-11-26T11:18:05.7737945Z",
+  "target": "x86_64-pc-windows-msvc",
+  "status": "PASS",
+  "source_files": {
+    ".gitignore": {
+      "bytes": 9,
+      "sha256": "306fd52e74fca6746e12acc750f232de15e71da917756a1270d74c91f5eb7368",
+      "git_blob": "b83d22266ac8aa2f8df2edef68082c789727841d"
+    },
+    "Cargo.lock": {
+      "bytes": 3056,
+      "sha256": "6cd7b98899c6afe742b1ca177e947b360e78b2662c4b6b7778eb1e32e619e026",
+      "git_blob": "bf195e14a3b725f5a64c8e577de56e2b605018a3"
+    },
+    "Cargo.toml": {
+      "bytes": 392,
+      "sha256": "37b8d9e94146f8a889838b5e06bd6a9474549660331ccc475ebaabcccb85302c",
+      "git_blob": "b27bbbf5234e90ad7ce4d41e45cac5d26df3b139"
+    },
+    "README.md": {
+      "bytes": 12652,
+      "sha256": "15e9ffd3adcf2564633284ff0ea81e59e58d356fb8d1defcc30678e83c91ffb4",
+      "git_blob": "10827fb11d6c122a949c55812a0b356ef120d7a3"
+    },
+    "src/failure_tests.rs": {
+      "bytes": 13708,
+      "sha256": "11784cec6b346c35bfe06283aa2cbc6191e329e0aa02a9c7189b229e61099006",
+      "git_blob": "8ef6c1ebf263a280ed2523a1a1a83d892be1046d"
+    },
+    "src/lib.rs": {
+      "bytes": 1857,
+      "sha256": "7ab79fa5526e760c04f7326747f3fb09a1b713ce2b13a03925909f780b3a6672",
+      "git_blob": "92bcb84589029670505727856caa6ec831119001"
+    },
+    "src/read_tests.rs": {
+      "bytes": 14752,
+      "sha256": "7aa4a0344bc136c6f66e1e4eff0ff05361c98c5263f939cf72b7343a22dd7f21",
+      "git_blob": "1a540b6d362f3decbc5a4ea8cdba2eba33bef8a0"
+    },
+    "src/windows.rs": {
+      "bytes": 13571,
+      "sha256": "d736e2e0723247d96cb7dc6c02b423adc5fd6761cf3179e9629859b902b8f33f",
+      "git_blob": "ca1c7557e0b9030b8e02829270acdc39f2d4fdc9"
+    }
+  },
+  "source_unchanged_by_formatter": true,
+  "source_before_equals_source_after": true,
+  "production_changed": false,
+  "public_api_changed": false,
+  "dependencies_changed": false,
+  "coordinator_sha256": "0997ef9baef811f0748fe764488a23ff556f75cc36ca43dae3523ceb8aa91bbd",
+  "guard_sha256": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2",
+  "config_sha256": "30b85b71c13e5ae510ddb23721ef623e2680fdf4a3d5814a51ce14eb2b97ce07",
+  "data_only_admission_script_sha256": "11a9faf4fb287fd84faf6fc5000dbfd72f9366be131462e79adaf6983edcf43a",
+  "original_receipt_sha256": "ce8222af795db9ee9c6ac9102d59ba47a46dbf99c27cd636d770f68efcbdb40f",
+  "root_receiving_sha256": "29be556e00d635972f65b17a1ede6057ec0869ea3157c876334ddf9a3e49788c",
+  "original_receipts_line_endings": "CRLF preserved; native hashes verified",
+  "parent_receiving": {
+    "controller_exit_code": 0,
+    "original_controller_reaped": true,
+    "controller_capture_handles_closed": true,
+    "seconds": 61.19082920002984,
+    "receipt_sha256": "ce8222af795db9ee9c6ac9102d59ba47a46dbf99c27cd636d770f68efcbdb40f"
+  },
+  "controller_streams": {
+    "stdout": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "original_capture_closed": true
+    },
+    "stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "original_capture_closed": true
+    }
+  },
+  "commands": [
+    {
+      "argv": [
+        "C:\\Program Files\\Git\\cmd\\git.exe",
+        "rev-parse",
+        "HEAD"
+      ],
+      "cwd": "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02",
+      "exit_code": 0,
+      "seconds": 1.218739900039509,
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "cleanup_deadline_exceeded": false,
+      "quiescence_state": "complete",
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "completion_lifecycle_state": "CLOSED",
+      "streams": {
+        "stdout": {
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 41,
+          "bytes_stored": 41,
+          "sha256": "a7834ae454abe29733d4a15f2751f2dc0c5917f7dde06b3667ebaff7071e78f9"
+        },
+        "stderr": {
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "argv": [
+        "C:\\Users\\dima_\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+        "-I",
+        "-S",
+        "-B",
+        "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02\\.scratch\\reader627-review-v1\\native_snapshot.py",
+        "prepare"
+      ],
+      "cwd": "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02",
+      "exit_code": 0,
+      "seconds": 3.934023800014984,
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "cleanup_deadline_exceeded": false,
+      "quiescence_state": "complete",
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "completion_lifecycle_state": "CLOSED",
+      "streams": {
+        "stdout": {
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 26,
+          "bytes_stored": 26,
+          "sha256": "a6e4741fea78b7c1e97d5bd966d4e4186052083764b507c98fbaf72180b7a2e3"
+        },
+        "stderr": {
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "argv": [
+        "C:\\Users\\dima_\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\rustfmt.exe",
+        "--edition",
+        "2021",
+        "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02\\.scratch\\reader627-review-v1\\src\\lib.rs",
+        "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02\\.scratch\\reader627-review-v1\\src\\windows.rs",
+        "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02\\.scratch\\reader627-review-v1\\src\\read_tests.rs",
+        "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02\\.scratch\\reader627-review-v1\\src\\failure_tests.rs"
+      ],
+      "cwd": "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02",
+      "exit_code": 0,
+      "seconds": 0.09382329997606575,
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "cleanup_deadline_exceeded": false,
+      "quiescence_state": "complete",
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "completion_lifecycle_state": "CLOSED",
+      "streams": {
+        "stdout": {
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stderr": {
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "argv": [
+        "C:\\Users\\dima_\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\rustfmt.exe",
+        "--check",
+        "--edition",
+        "2021",
+        "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02\\.scratch\\reader627-review-v1\\src\\lib.rs",
+        "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02\\.scratch\\reader627-review-v1\\src\\windows.rs",
+        "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02\\.scratch\\reader627-review-v1\\src\\read_tests.rs",
+        "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02\\.scratch\\reader627-review-v1\\src\\failure_tests.rs"
+      ],
+      "cwd": "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02",
+      "exit_code": 0,
+      "seconds": 0.08171700005186722,
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "cleanup_deadline_exceeded": false,
+      "quiescence_state": "complete",
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "completion_lifecycle_state": "CLOSED",
+      "streams": {
+        "stdout": {
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stderr": {
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "argv": [
+        "C:\\Users\\dima_\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "check",
+        "--offline",
+        "--locked",
+        "--manifest-path",
+        "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02\\.scratch\\reader627-review-v1\\Cargo.toml",
+        "--target",
+        "x86_64-pc-windows-msvc",
+        "--all-targets"
+      ],
+      "cwd": "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02",
+      "exit_code": 0,
+      "seconds": 17.610017400002107,
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "cleanup_deadline_exceeded": false,
+      "quiescence_state": "complete",
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "completion_lifecycle_state": "CLOSED",
+      "streams": {
+        "stdout": {
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stderr": {
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 582,
+          "bytes_stored": 582,
+          "sha256": "947fc56b6c082cddc8eb8c34d111c59fd3891ddabf977d334684931d7f894489"
+        }
+      }
+    },
+    {
+      "argv": [
+        "C:\\Users\\dima_\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "test",
+        "--offline",
+        "--locked",
+        "--manifest-path",
+        "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02\\.scratch\\reader627-review-v1\\Cargo.toml",
+        "--target",
+        "x86_64-pc-windows-msvc",
+        "--lib",
+        "--",
+        "--test-threads=1"
+      ],
+      "cwd": "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02",
+      "exit_code": 0,
+      "seconds": 38.023946499975864,
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "cleanup_deadline_exceeded": false,
+      "quiescence_state": "complete",
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "completion_lifecycle_state": "CLOSED",
+      "streams": {
+        "stdout": {
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 1902,
+          "bytes_stored": 1902,
+          "sha256": "ea48cd595c513084689131fedd3f4eaeb6649d51a1299bc147faa20ca6db9a8c"
+        },
+        "stderr": {
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 797,
+          "bytes_stored": 797,
+          "sha256": "cfbe44933e4b6300fea286e9f61982a4870155e341d2fdf893357b7b29384102"
+        }
+      }
+    },
+    {
+      "argv": [
+        "C:\\Users\\dima_\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+        "-I",
+        "-S",
+        "-B",
+        "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02\\.scratch\\reader627-review-v1\\native_snapshot.py",
+        "after"
+      ],
+      "cwd": "D:\\dev\\ChatGPT\\functional-route-20261126\\composition-p02",
+      "exit_code": 0,
+      "seconds": 0.05971649999264628,
+      "timed_out": false,
+      "work_deadline_exceeded": false,
+      "cleanup_deadline_exceeded": false,
+      "quiescence_state": "complete",
+      "native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "original_owner_retained": true,
+      "original_readers_retained": true,
+      "original_readers_joined": true,
+      "completion_lifecycle_state": "CLOSED",
+      "streams": {
+        "stdout": {
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 29,
+          "bytes_stored": 29,
+          "sha256": "5b4f1395fe872033147ec9b7cc7c2dd35d591062760755c4e1fdd019d6913300"
+        },
+        "stderr": {
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null,
+          "bytes_seen": 0,
+          "bytes_stored": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    }
+  ],
+  "test_counts": {
+    "passed": 21,
+    "failed": 0,
+    "ignored": 0,
+    "measured": 0,
+    "filtered_out": 0,
+    "new_test_roots": 1,
+    "new_subcases": 3
+  },
+  "expected_test_names": [
+    "windows::tests::canceled_before_open_has_typed_result",
+    "windows::tests::checksum_mismatch_and_initial_size_limit_return_no_data",
+    "windows::tests::component_swapped_to_link_before_open_is_rejected",
+    "windows::tests::exact_cap_still_checks_eof_and_returns_complete_payload",
+    "windows::tests::failures::close_failure_never_returns_bytes_and_retains_later_cleanup_errors",
+    "windows::tests::failures::metadata_failure_keeps_primary_and_each_cleanup_combination",
+    "windows::tests::failures::native_partial_read_failure_survives_each_cleanup_failure_combination",
+    "windows::tests::failures::native_success_keeps_original_handles_and_verified_bytes",
+    "windows::tests::failures::non_io_primary_failures_survive_both_cleanup_failures",
+    "windows::tests::final_directory_and_missing_file_preserve_native_failure",
+    "windows::tests::growth_after_stat_hits_one_byte_sentinel_without_returning_data",
+    "windows::tests::injected_native_phase_error_preserves_category_and_closes_handles",
+    "windows::tests::mid_read_cancellation_returns_no_partial_result",
+    "windows::tests::native_read_failure_after_partial_read_preserves_error_and_releases_lock",
+    "windows::tests::reads_exact_verified_bytes_empty_and_unicode",
+    "windows::tests::rejects_invalid_input_before_open",
+    "windows::tests::repeated_success_and_failure_do_not_leak_handles",
+    "windows::tests::retained_final_handle_reads_original_after_path_replacement",
+    "windows::tests::retained_parent_does_not_reopen_changed_path",
+    "windows::tests::root_ancestor_reparse_is_not_silently_followed",
+    "windows::tests::root_and_intermediate_and_final_reparse_are_rejected"
+  ],
+  "new_subcases": [
+    "final_only_cleanup_status",
+    "parent_only_cleanup_status",
+    "both_cleanup_statuses"
+  ],
+  "new_test_name": "windows::tests::failures::native_partial_read_failure_survives_each_cleanup_failure_combination",
+  "matrix_subcases": {
+    "previous_published": 25,
+    "new_native_read_with_cleanup_statuses": 3,
+    "total": 28
+  },
+  "test_execution_seconds_reported_by_libtest": 0.35,
+  "old_vendor_reuse": {
+    "scope": "D:\\dev\\ChatGPT\\mcp-reader-matrix-v3-20261125-5bc9fbb9",
+    "original_scope_closed": true,
+    "read_only": true,
+    "packages": 13,
+    "manifest_and_content_hashes_rechecked": true,
+    "old_parent_sha256": "40942f54c6a27fad56904498b907dc9e3a8aea1041c4d4908e9f90aa42325709",
+    "old_receipt_sha256": "d022605ac8c09ed25baee0bff7799ded9c5b255122b6323e85accc5ff7aa9ca2"
+  },
+  "admission_sha256": "8b22370dd5418fe929dd59c25243be220fe0c3e676944113eb86e00b36366349",
+  "source_after_sha256": "535861d4f9c6833458ae78e1f07fd03b168df8b3a07d76c52d2363ae1a0f02d8",
+  "native_tools": {
+    "cargo": {
+      "path": "C:\\Users\\dima_\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+      "bytes": 27367424,
+      "sha256": "f381bae27c59588eacf69208e115b2c001a2998afed83a2e9084ea93620737b1"
+    },
+    "rustc": {
+      "path": "C:\\Users\\dima_\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\rustc.exe",
+      "bytes": 110592,
+      "sha256": "d4f8a0283de2dba0dc458cd13c333337d2b76c3649eb39e91c4acce618e661a1"
+    },
+    "rustdoc": {
+      "path": "C:\\Users\\dima_\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\rustdoc.exe",
+      "bytes": 11201024,
+      "sha256": "229fce3f08eed2385f1b651d9d8f3362bbf41f348c6a8f44f88db0d301876140"
+    },
+    "rustfmt": {
+      "path": "C:\\Users\\dima_\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\rustfmt.exe",
+      "bytes": 4877824,
+      "sha256": "0f8531c2c0933ec64b795aa8b80d08e30fb23d72e929bc37cb0da527464e84e9"
+    },
+    "cargo-fmt": {
+      "path": "C:\\Users\\dima_\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo-fmt.exe",
+      "bytes": 1270784,
+      "sha256": "6f97e07244d34f696f6f4adc9d1e1416ef5536a2a9f61af14061c46455083dd8"
+    },
+    "link": {
+      "path": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.52.37025\\bin\\Hostx64\\x64\\link.exe",
+      "bytes": 3592544,
+      "sha256": "6089fbb8ca5d7beb5a69e625bf614ef23ebe07100a987c8a32b121f906e3fb51"
+    },
+    "cl": {
+      "path": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.52.37025\\bin\\Hostx64\\x64\\cl.exe",
+      "bytes": 784232,
+      "sha256": "87b094e4fb3c646247b8eb515b5daa4fd73f991fe7cc42e98c0c9e3d3805d6fb"
+    },
+    "libcmt": {
+      "path": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.52.37025\\lib\\x64\\libcmt.lib",
+      "bytes": 6516864,
+      "sha256": "3e31fc7708c00abdc5f3af055e09b56c846f703754ca85666a4d3493ed2434e8"
+    },
+    "kernel32": {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\kernel32.lib",
+      "bytes": 311908,
+      "sha256": "842f5ce7ad8cf5aab7491b791e7968d2be510ae93f4019d3311797289399d221"
+    },
+    "ucrt": {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\ucrt\\x64\\ucrt.lib",
+      "bytes": 285588,
+      "sha256": "7ef4eac926bf597d2f243f16cdfed7e0db22cb3ca34a1d7e088a84c994a03d66"
+    },
+    "python": {
+      "path": "C:\\Users\\dima_\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+      "bytes": 105696,
+      "sha256": "d4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd"
+    },
+    "windows_job": {
+      "path": "C:\\Users\\.orche\\releases\\dad4875f\\app\\scripts\\process_supervision\\windows_job.py",
+      "bytes": 25529,
+      "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+    }
+  },
+  "new_temp_cache_and_fixtures_under_D": true,
+  "downloads": false,
+  "installations": false,
+  "new_vm_or_wsl": false,
+  "fixture_disposition": {
+    "moved_to_trash": true,
+    "destination": "D:\\dev\\ChatGPT\\trash\\reader627-native-v1-fixtures-20261126",
+    "deletion_performed": false,
+    "basis": "all original command and parent closures verified; own completed fixture data no longer needed"
+  },
+  "limits": {
+    "genuine_readfile_error": true,
+    "cleanup_errors_substituted_after_successful_native_close": true,
+    "native_metadata_or_close_failure_qualified": false,
+    "product_adapter_present": false,
+    "product_acceptance_claimed": false,
+    "old_held_scopes_accessed_or_reclassified": false
+  },
+  "capture_pins": {
+    "rust-test.stdout.txt": {
+      "bytes": 1902,
+      "sha256": "ea48cd595c513084689131fedd3f4eaeb6649d51a1299bc147faa20ca6db9a8c"
+    },
+    "rust-check.stderr.txt": {
+      "bytes": 582,
+      "sha256": "947fc56b6c082cddc8eb8c34d111c59fd3891ddabf977d334684931d7f894489"
+    },
+    "rust-test.stderr.txt": {
+      "bytes": 797,
+      "sha256": "cfbe44933e4b6300fea286e9f61982a4870155e341d2fdf893357b7b29384102"
+    }
+  }
+}

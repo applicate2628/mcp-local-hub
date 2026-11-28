@@ -1,0 +1,108 @@
+"""Data-only admission and source snapshots; run_wave_commands.py owns every process."""
+import hashlib
+import json
+import os
+import stat
+import sys
+from pathlib import Path
+
+ROOT = Path(r"D:\dev\ChatGPT\functional-route-20261126")
+OLD = Path(r"D:\dev\ChatGPT\mcp-reader-matrix-v3-20261125-5bc9fbb9")
+SOURCE = ROOT / "composition-p02/.scratch/reader627-review-v1"
+OUT = ROOT / "runs/reader627-native-v1"
+RUNTIME = OUT / "runtime"
+
+
+def digest(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def save(name, value):
+    with (OUT / name).open("x", encoding="utf-8", newline="\n") as stream:
+        json.dump(value, stream, indent=2)
+        stream.write("\n")
+
+
+def pinned_json(path, expected):
+    raw = path.read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == expected, str(path)
+    return json.loads(raw)
+
+
+def source_snapshot():
+    return {
+        row["path"]: {"bytes": (SOURCE / row["path"]).stat().st_size,
+                       "sha256": digest(SOURCE / row["path"])}
+        for row in json.loads((SOURCE / "native-source-pins.json").read_bytes())
+    }
+
+
+if sys.argv[1] == "prepare":
+    inputs = pinned_json(OLD / "inputs.json", "55ecde2d5466dc0f803d7a3221e3abfda0a0e7309f977893a5669f5b6c85d684")
+    parent = pinned_json(OLD / "runs/standard/parent-receipt.json", "40942f54c6a27fad56904498b907dc9e3a8aea1041c4d4908e9f90aa42325709")
+    closed = pinned_json(OLD / "runs/standard/receipt.json", "d022605ac8c09ed25baee0bff7799ded9c5b255122b6323e85accc5ff7aa9ca2")
+    prepared = pinned_json(OLD / "preparation/receipt.json", "66aaa763b217d2ffa595a33d1583354ab85abd31dae3c8d3f023583ed5fdbbbb")
+    assert parent["status"] == closed["status"] == prepared["status"] == "PASS"
+    assert parent["controller_direct_reaped"] and parent["controller_capture_handles_closed"]
+    assert parent["controller_exit_code"] == 0 and not parent["diagnostic_deadline_exceeded"]
+    for command in closed["commands"]:
+        assert command["quiescence_state"] == "complete" and command["original_owner_retained"]
+        assert command["original_readers_joined"] and command["completion_receiving"]["lifecycle_state"] == "CLOSED"
+        assert command["native"]["direct_reaped"] and command["native"]["active_zero"] and command["native"]["handles_closed"]
+        assert all(s["eof"] and s["pipe_close_returned"] and s["capture_close_returned"] and not s["error"]
+                   for s in command["io"].values())
+    tools = {}
+    for name, pin in {**inputs["tools"], "python": inputs["python"], "windows_job": inputs["installed_owner"]}.items():
+        path = Path(pin["path"])
+        assert path.stat().st_size == pin["bytes"] and digest(path) == pin["sha256"], name
+        tools[name] = pin
+    assert digest(ROOT / "run_wave_commands.py") == "0997ef9baef811f0748fe764488a23ff556f75cc36ca43dae3523ceb8aa91bbd"
+    vendor = OLD / "vendor"
+    assert {p.name for p in vendor.iterdir()} == {p["name"] + "-" + p["version"] for p in inputs["archives"]}
+    vendor_rows = {}
+    for row in inputs["archives"]:
+        name = row["name"] + "-" + row["version"]
+        root = vendor / name
+        checksum = root / ".cargo-checksum.json"
+        expected = pinned_json(checksum, row["vendor_manifest_sha256"])
+        actual = {}
+        for path in root.rglob("*"):
+            assert not getattr(path.lstat(), "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT, str(path)
+            if path.is_file() and path != checksum:
+                actual[path.relative_to(root).as_posix()] = digest(path)
+        assert expected["package"] == row["sha256"] and actual == expected["files"], name
+        vendor_rows[name] = {"manifest_sha256": row["vendor_manifest_sha256"], "files": len(actual)}
+    for parent in (SOURCE, *(SOURCE.parents)):
+        assert not any((parent / ".cargo" / n).exists() for n in ("config", "config.toml")), str(parent)
+    for key in ("RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER"):
+        assert not os.environ.get(key), key
+    RUNTIME.mkdir()
+    for leaf in ("cargo-home", "rustup-home", "profile", "appdata", "localappdata", "fixtures", "target"):
+        (RUNTIME / leaf).mkdir()
+    config = ('[source.crates-io]\nreplace-with = "qualified-vendor"\n'
+              '[source.qualified-vendor]\ndirectory = ' + json.dumps(vendor.as_posix()) + '\n[net]\noffline = true\n')
+    with (RUNTIME / "cargo-home/config.toml").open("x", encoding="utf-8", newline="\n") as stream:
+        stream.write(config)
+    for key in ("CARGO_HOME", "CARGO_TARGET_DIR", "RUSTUP_HOME", "TEMP", "TMP", "TMPDIR", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "MCPHUB_RX04_FIXTURES"):
+        assert Path(os.environ[key]).is_relative_to(OUT), key
+    snapshot = source_snapshot()
+    for row in json.loads((SOURCE / "native-source-pins.json").read_bytes()):
+        assert snapshot[row["path"]] == {"bytes": row["bytes"], "sha256": row["sha256"]}, row["path"]
+    save("admission.json", {"status": "PASS", "old_scope_closed": True, "vendor_read_only": str(vendor),
+                            "old_parent_sha256": digest(OLD / "runs/standard/parent-receipt.json"),
+                            "old_receipt_sha256": digest(OLD / "runs/standard/receipt.json"),
+                            "tools": tools, "vendor": vendor_rows, "source_before": snapshot,
+                            "environment": {key: os.environ.get(key) for key in (
+                                "PATH", "LIB", "INCLUDE", "CARGO_HOME", "CARGO_TARGET_DIR", "CARGO_NET_OFFLINE",
+                                "RUSTC", "RUSTDOC", "RUSTUP_HOME", "TEMP", "TMP", "TMPDIR", "MCPHUB_RX04_FIXTURES")},
+                            "downloads": False, "installations": False})
+    print("READER627_ADMISSION_PASS", flush=True)
+else:
+    assert sys.argv[1] == "after"
+    before = json.loads((OUT / "admission.json").read_bytes())["source_before"]
+    after = source_snapshot()
+    for path in before:
+        if path not in ("src/read_tests.rs", "src/failure_tests.rs"):
+            assert before[path] == after[path], path
+    save("source-after.json", after)
+    print("READER627_SOURCE_AFTER_PASS", flush=True)

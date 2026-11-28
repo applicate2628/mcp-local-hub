@@ -1,0 +1,34 @@
+{
+  ".gitignore": {
+    "bytes": 9,
+    "sha256": "306fd52e74fca6746e12acc750f232de15e71da917756a1270d74c91f5eb7368"
+  },
+  "Cargo.lock": {
+    "bytes": 3056,
+    "sha256": "6cd7b98899c6afe742b1ca177e947b360e78b2662c4b6b7778eb1e32e619e026"
+  },
+  "Cargo.toml": {
+    "bytes": 392,
+    "sha256": "37b8d9e94146f8a889838b5e06bd6a9474549660331ccc475ebaabcccb85302c"
+  },
+  "README.md": {
+    "bytes": 12652,
+    "sha256": "15e9ffd3adcf2564633284ff0ea81e59e58d356fb8d1defcc30678e83c91ffb4"
+  },
+  "src/failure_tests.rs": {
+    "bytes": 13708,
+    "sha256": "11784cec6b346c35bfe06283aa2cbc6191e329e0aa02a9c7189b229e61099006"
+  },
+  "src/lib.rs": {
+    "bytes": 1857,
+    "sha256": "7ab79fa5526e760c04f7326747f3fb09a1b713ce2b13a03925909f780b3a6672"
+  },
+  "src/read_tests.rs": {
+    "bytes": 14752,
+    "sha256": "7aa4a0344bc136c6f66e1e4eff0ff05361c98c5263f939cf72b7343a22dd7f21"
+  },
+  "src/windows.rs": {
+    "bytes": 13571,
+    "sha256": "d736e2e0723247d96cb7dc6c02b423adc5fd6761cf3179e9629859b902b8f33f"
+  }
+}

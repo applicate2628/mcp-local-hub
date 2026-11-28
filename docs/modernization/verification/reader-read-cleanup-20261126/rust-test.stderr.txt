@@ -1,0 +1,14 @@
+   Compiling typenum v1.20.1
+   Compiling cpufeatures v0.2.17
+   Compiling windows-link v0.2.1
+   Compiling cfg-if v1.0.4
+   Compiling generic-array v0.14.7
+   Compiling windows-sys v0.61.2
+   Compiling zeroize v1.9.0
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling digest v0.10.7
+   Compiling sha2 v0.10.9
+   Compiling mcphub-anchored-read-spike v0.0.0 (D:\dev\ChatGPT\functional-route-20261126\composition-p02\.scratch\reader627-review-v1)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 37.55s
+     Running unittests src\lib.rs (D:\dev\ChatGPT\functional-route-20261126\runs\reader627-native-v1\runtime\target\x86_64-pc-windows-msvc\debug\build\mcphub-anchored-read-spike/3456cac555d0380e\out\mcphub_anchored_read_spike-3456cac555d0380e.exe)

@@ -1,0 +1,174 @@
+{
+  "status": "PASS",
+  "old_scope_closed": true,
+  "vendor_read_only": "D:\\dev\\ChatGPT\\mcp-reader-matrix-v3-20261125-5bc9fbb9\\vendor",
+  "old_parent_sha256": "40942f54c6a27fad56904498b907dc9e3a8aea1041c4d4908e9f90aa42325709",
+  "old_receipt_sha256": "d022605ac8c09ed25baee0bff7799ded9c5b255122b6323e85accc5ff7aa9ca2",
+  "tools": {
+    "cargo": {
+      "path": "C:\\Users\\dima_\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+      "bytes": 27367424,
+      "sha256": "f381bae27c59588eacf69208e115b2c001a2998afed83a2e9084ea93620737b1"
+    },
+    "rustc": {
+      "path": "C:\\Users\\dima_\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\rustc.exe",
+      "bytes": 110592,
+      "sha256": "d4f8a0283de2dba0dc458cd13c333337d2b76c3649eb39e91c4acce618e661a1"
+    },
+    "rustdoc": {
+      "path": "C:\\Users\\dima_\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\rustdoc.exe",
+      "bytes": 11201024,
+      "sha256": "229fce3f08eed2385f1b651d9d8f3362bbf41f348c6a8f44f88db0d301876140"
+    },
+    "rustfmt": {
+      "path": "C:\\Users\\dima_\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\rustfmt.exe",
+      "bytes": 4877824,
+      "sha256": "0f8531c2c0933ec64b795aa8b80d08e30fb23d72e929bc37cb0da527464e84e9"
+    },
+    "cargo-fmt": {
+      "path": "C:\\Users\\dima_\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo-fmt.exe",
+      "bytes": 1270784,
+      "sha256": "6f97e07244d34f696f6f4adc9d1e1416ef5536a2a9f61af14061c46455083dd8"
+    },
+    "link": {
+      "path": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.52.37025\\bin\\Hostx64\\x64\\link.exe",
+      "bytes": 3592544,
+      "sha256": "6089fbb8ca5d7beb5a69e625bf614ef23ebe07100a987c8a32b121f906e3fb51"
+    },
+    "cl": {
+      "path": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.52.37025\\bin\\Hostx64\\x64\\cl.exe",
+      "bytes": 784232,
+      "sha256": "87b094e4fb3c646247b8eb515b5daa4fd73f991fe7cc42e98c0c9e3d3805d6fb"
+    },
+    "libcmt": {
+      "path": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.52.37025\\lib\\x64\\libcmt.lib",
+      "bytes": 6516864,
+      "sha256": "3e31fc7708c00abdc5f3af055e09b56c846f703754ca85666a4d3493ed2434e8"
+    },
+    "kernel32": {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\kernel32.lib",
+      "bytes": 311908,
+      "sha256": "842f5ce7ad8cf5aab7491b791e7968d2be510ae93f4019d3311797289399d221"
+    },
+    "ucrt": {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\ucrt\\x64\\ucrt.lib",
+      "bytes": 285588,
+      "sha256": "7ef4eac926bf597d2f243f16cdfed7e0db22cb3ca34a1d7e088a84c994a03d66"
+    },
+    "python": {
+      "path": "C:\\Users\\dima_\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+      "bytes": 105696,
+      "sha256": "d4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd"
+    },
+    "windows_job": {
+      "path": "C:\\Users\\.orche\\releases\\dad4875f\\app\\scripts\\process_supervision\\windows_job.py",
+      "bytes": 25529,
+      "sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+    }
+  },
+  "vendor": {
+    "block-buffer-0.10.4": {
+      "manifest_sha256": "1290bd0a14865e7a13f8768d4d5f99a1657dc2004d9e9ab033e0a00bcee12824",
+      "files": 10
+    },
+    "cfg-if-1.0.4": {
+      "manifest_sha256": "b2dfa09fc109caf8b171b81e8e3310e363d987683ee2e1cca44dd96a8461acc1",
+      "files": 14
+    },
+    "cpufeatures-0.2.17": {
+      "manifest_sha256": "a86761212575d29c5e3d418498c8e4ef01c12921ee72c3f5f96fdc9c942f14d0",
+      "files": 16
+    },
+    "crypto-common-0.1.7": {
+      "manifest_sha256": "a5abb742921d2a17c4226d2b55c7df10b7b46c1b483ce682395a18031bdd97e5",
+      "files": 9
+    },
+    "digest-0.10.7": {
+      "manifest_sha256": "36062c9855df5b14e7b37db10cc82b42ef897460e1763776f80a6e845e8008b2",
+      "files": 21
+    },
+    "generic-array-0.14.7": {
+      "manifest_sha256": "b708c048b53c3a97d7b84f97e5b7a29a1c4e8fb2af47026616a4561eb06c190c",
+      "files": 16
+    },
+    "libc-0.2.186": {
+      "manifest_sha256": "2eeb6307fb6c2ecd594ed758a5e48cbe037e9cf0f336bcacb7946a70f09da9a5",
+      "files": 360
+    },
+    "sha2-0.10.9": {
+      "manifest_sha256": "0fd3e89ad497414c42033590b2bff325258b1d4811883adc888c8f4949257050",
+      "files": 31
+    },
+    "typenum-1.20.1": {
+      "manifest_sha256": "e236cefcaae132387952f13a33eb27f6a05bc71a8de1932b9e04c590d007719a",
+      "files": 26
+    },
+    "version_check-0.9.5": {
+      "manifest_sha256": "ff6f6af791bef075794990ec3bb69ceff9eaee6a79f2c405ee7d819317846fd8",
+      "files": 13
+    },
+    "windows-link-0.2.1": {
+      "manifest_sha256": "96573abcf48e4fb82a2d5d2a7553594bd5bef3721da204e13b8a0b6020c74727",
+      "files": 8
+    },
+    "windows-sys-0.61.2": {
+      "manifest_sha256": "5fbe195a709e38ca454859bd30e4a24d594aba7b6e18b9b9703d67e75186367f",
+      "files": 257
+    },
+    "zeroize-1.9.0": {
+      "manifest_sha256": "c4d33e422f121efa818f5ff5387926f96b38649d05b7d50afba529fd181891b9",
+      "files": 16
+    }
+  },
+  "source_before": {
+    ".gitignore": {
+      "bytes": 9,
+      "sha256": "306fd52e74fca6746e12acc750f232de15e71da917756a1270d74c91f5eb7368"
+    },
+    "Cargo.lock": {
+      "bytes": 3056,
+      "sha256": "6cd7b98899c6afe742b1ca177e947b360e78b2662c4b6b7778eb1e32e619e026"
+    },
+    "Cargo.toml": {
+      "bytes": 392,
+      "sha256": "37b8d9e94146f8a889838b5e06bd6a9474549660331ccc475ebaabcccb85302c"
+    },
+    "README.md": {
+      "bytes": 12652,
+      "sha256": "15e9ffd3adcf2564633284ff0ea81e59e58d356fb8d1defcc30678e83c91ffb4"
+    },
+    "src/failure_tests.rs": {
+      "bytes": 13708,
+      "sha256": "11784cec6b346c35bfe06283aa2cbc6191e329e0aa02a9c7189b229e61099006"
+    },
+    "src/lib.rs": {
+      "bytes": 1857,
+      "sha256": "7ab79fa5526e760c04f7326747f3fb09a1b713ce2b13a03925909f780b3a6672"
+    },
+    "src/read_tests.rs": {
+      "bytes": 14752,
+      "sha256": "7aa4a0344bc136c6f66e1e4eff0ff05361c98c5263f939cf72b7343a22dd7f21"
+    },
+    "src/windows.rs": {
+      "bytes": 13571,
+      "sha256": "d736e2e0723247d96cb7dc6c02b423adc5fd6761cf3179e9629859b902b8f33f"
+    }
+  },
+  "environment": {
+    "PATH": "C:\\Users\\dima_\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin;C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.52.37025\\bin\\Hostx64\\x64;C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64;C:\\WINDOWS\\System32",
+    "LIB": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.52.37025\\lib\\x64;C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\ucrt\\x64;C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64",
+    "INCLUDE": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.52.37025\\include;C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt;C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared;C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um",
+    "CARGO_HOME": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\reader627-native-v1\\runtime\\cargo-home",
+    "CARGO_TARGET_DIR": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\reader627-native-v1\\runtime\\target",
+    "CARGO_NET_OFFLINE": "true",
+    "RUSTC": "C:\\Users\\dima_\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\rustc.exe",
+    "RUSTDOC": "C:\\Users\\dima_\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\rustdoc.exe",
+    "RUSTUP_HOME": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\reader627-native-v1\\runtime\\rustup-home",
+    "TEMP": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\reader627-native-v1\\tmp",
+    "TMP": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\reader627-native-v1\\tmp",
+    "TMPDIR": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\reader627-native-v1\\tmp",
+    "MCPHUB_RX04_FIXTURES": "D:\\dev\\ChatGPT\\functional-route-20261126\\runs\\reader627-native-v1\\runtime\\fixtures"
+  },
+  "downloads": false,
+  "installations": false
+}
