@@ -16,10 +16,14 @@ package gui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"mcp-local-hub/internal/api/apitest"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -29,12 +33,6 @@ import (
 
 	"mcp-local-hub/internal/api"
 )
-
-type fatalAcceptListener struct{}
-
-func (fatalAcceptListener) Accept() (net.Conn, error) { return nil, errors.New("fatal accept failure") }
-func (fatalAcceptListener) Close() error              { return nil }
-func (fatalAcceptListener) Addr() net.Addr            { return &net.TCPAddr{} }
 
 // setupGateOverrides routes LOCALAPPDATA/XDG_DATA_HOME at a per-test
 // temp dir so api.SettingsPath() returns a path under it. Returns
@@ -84,37 +82,6 @@ func TestHubListenerComponents_AliveFalseOnNilReceiver(t *testing.T) {
 	}
 }
 
-// TestHubListenerComponents_AliveTransitionsOnExit pins codex bot
-// r2 P2 closure on PR #168: the serve goroutine flips Alive() from
-// true to false when it exits. We construct a minimal bundle with
-// a closed listener so srv.Serve returns immediately, then poll
-// Alive() until it flips false.
-func TestHubListenerComponents_AliveTransitionsOnExit(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	// Close immediately so Serve returns http.ErrServerClosed.
-	_ = ln.Close()
-
-	srv := &http.Server{Handler: http.NewServeMux(), ReadHeaderTimeout: 1 * time.Second}
-	comp := &HubListenerComponents{srv: srv}
-	comp.alive.Store(true)
-	go func() {
-		defer comp.alive.Store(false)
-		_ = srv.Serve(ln)
-	}()
-
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if !comp.Alive() {
-			return // SUCCESS — alive flipped false post-Serve
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Errorf("Alive() stuck true 2s after Serve exited; the defer must clear it on any exit path")
-}
-
 func TestHubListenerFatalServeExitSetsHealthDownUnlessSuperseded(t *testing.T) {
 	for _, tc := range []struct {
 		name              string
@@ -135,17 +102,16 @@ func TestHubListenerFatalServeExitSetsHealthDownUnlessSuperseded(t *testing.T) {
 			s.hubHealth.markReconcilePending()
 			s.hubRestartDriverAlive.Store(tc.driverAlive)
 
-			srv := newHubMcpHTTPServer(http.NewServeMux())
-			exiting := &HubListenerComponents{srv: srv}
+			exiting := &HubListenerComponents{}
 			if !tc.nothingRegistered {
 				current := exiting
 				if !tc.exitingLive {
-					current = &HubListenerComponents{srv: newHubMcpHTTPServer(http.NewServeMux())}
+					current = &HubListenerComponents{}
 				}
 				s.hubMcpComp.Store(current)
 			}
 
-			serveHubMcpListener(s, exiting, srv, fatalAcceptListener{}, 0)
+			hubListenerServeFailed(s, exiting)
 			if got, action := s.hubHealth.snapshot(); got != tc.want || action != tc.wantAction {
 				t.Fatalf("fatal Serve exit = state %q action %q, want %q action %q", got, action, tc.want, tc.wantAction)
 			}
@@ -177,22 +143,6 @@ func TestHubListenerRecoveryCallbackRequiresCurrentComponent(t *testing.T) {
 	hubListenerComponentCallback(s, currentComp, s.onHubListenerRecovered)()
 	if got, action := s.hubHealth.snapshot(); got != HubHealthHealthy || action != "" {
 		t.Fatalf("current component recovery = state %q action %q, want healthy", got, action)
-	}
-}
-
-func TestHubMcpHTTPServerHasSlowClientTimeouts(t *testing.T) {
-	srv := newHubMcpHTTPServer(http.NewServeMux())
-	if srv.ReadHeaderTimeout != 10*time.Second {
-		t.Fatalf("ReadHeaderTimeout=%v want 10s", srv.ReadHeaderTimeout)
-	}
-	if srv.ReadTimeout <= 0 {
-		t.Fatalf("ReadTimeout must bound slow request bodies")
-	}
-	if srv.WriteTimeout != 0 {
-		t.Fatalf("WriteTimeout=%v want 0 so large fan-out compute is not capped by server write timeout", srv.WriteTimeout)
-	}
-	if srv.IdleTimeout != 120*time.Second {
-		t.Fatalf("IdleTimeout=%v want 120s", srv.IdleTimeout)
 	}
 }
 
@@ -413,4 +363,225 @@ func TestServerStartContinuesAfterHubBindFailure(t *testing.T) {
 	if err := <-errCh; err != nil && !strings.Contains(err.Error(), "context canceled") {
 		t.Errorf("Server.Start returned err: %v", err)
 	}
+}
+
+func TestHubListenerOrdinaryAggregateLifecycle(t *testing.T) {
+	state := apitest.HardenedTempDir(t)
+	t.Cleanup(api.SetDaemonStateRootForTest(state))
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", state)
+	resetResolverSnapshot(t)
+	t.Cleanup(func() { api.PublishResolverSnapshot(nil) })
+
+	received := make(chan string, 8)
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/mcp" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.Method == http.MethodDelete {
+			received <- "delete"
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		var req struct {
+			Method string
+			ID     json.RawMessage
+			Params struct{ Name string }
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		received <- req.Method + ":" + req.Params.Name
+		w.Header().Set("Content-Type", "application/json")
+		var result string
+		switch req.Method {
+		case "initialize":
+			w.Header().Set("Mcp-Session-Id", "fixture-downstream-session")
+			result = "{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"fixture\",\"version\":\"1\"}}"
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+			return
+		case "tools/list":
+			result = "{\"tools\":[{\"name\":\"echo\",\"description\":\"Fixture echo\"}]}"
+		case "tools/call":
+			if req.Params.Name != "echo" {
+				t.Errorf("downstream tool = %q", req.Params.Name)
+			}
+			result = "{\"content\":[{\"type\":\"text\",\"text\":\"did useful work\"}]}"
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		fmt.Fprintf(w, "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":%s}", req.ID, result)
+	}))
+	t.Cleanup(downstream.Close)
+	manifestRoot := t.TempDir()
+	serverRoot := filepath.Join(manifestRoot, "fixture")
+	if err := os.Mkdir(serverRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := fmt.Sprintf("name: fixture\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: %d\nclient_bindings:\n  - client: claude-code\n    daemon: default\n    url_path: /mcp\n", downstream.Listener.Addr().(*net.TCPAddr).Port)
+	if err := os.WriteFile(filepath.Join(serverRoot, "manifest.yaml"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", manifestRoot)
+
+	startReadySupervisorFixture(t, state, []api.SupervisorDaemon{{
+		TaskName: "fixture-status", Server: "fixture", Daemon: "default", Port: downstream.Listener.Addr().(*net.TCPAddr).Port,
+	}})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	// The production GUI wires its supervisor status source before
+	// activation. Use the real dial to this fixture's isolated peer,
+	// through the per-API seam, so the watcher stays within the fixture.
+	watcherStatus := make(chan error, 1)
+	a := api.NewAPI()
+	a.HealthStatusFn = func(api.StatusOpts) ([]api.DaemonStatus, error) {
+		statusCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		rows, err := api.DialSupervisorIPCStatus(statusCtx)
+		select {
+		case watcherStatus <- err:
+		default:
+		}
+		return rows, err
+	}
+	hub, err := startHubMcpListener(ctx, true, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hub.listener == nil {
+		t.Fatal("GUI assembly did not receive the shared aggregate lifecycle")
+	}
+	shutdown := func() { ShutdownHubListener(context.Background(), hub) }
+	defer shutdown()
+	select {
+	case err := <-watcherStatus:
+		if err != nil {
+			t.Fatalf("listener watcher did not receive isolated supervisor status: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("listener watcher did not dial isolated supervisor status")
+	}
+	endpoint := hub.listener.Endpoint()
+	if endpoint.Port == 0 || endpoint.InstanceID == "" || !hub.Alive() {
+		t.Fatal("live listener did not receive its bound endpoint and generation")
+	}
+	if durable, err := api.LoadHubEndpoint(); err != nil || durable != endpoint {
+		t.Fatalf("published endpoint differs from accepted bind: %v", err)
+	}
+	if snapshot := api.LoadResolverSnapshot(); snapshot == nil || len(snapshot.Bindings["claude-code"]) != 1 {
+		t.Fatal("listener startup did not publish its participating manifest")
+	}
+	tokens, err := api.ReloadHubTokens()
+	if err != nil {
+		t.Fatal(err)
+	}
+	control, err := api.ReadHubMcpControlToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	t.Cleanup(client.CloseIdleConnections)
+	baseURL := fmt.Sprintf("http://127.0.0.1:%d", endpoint.Port)
+	scope := api.HubClientPrefix + "claude-code/mcp"
+	var sid string
+	request := func(method, path, body, origin string, useControl bool, status int) (http.Header, string) {
+		t.Helper()
+		input, err := http.NewRequestWithContext(ctx, method, baseURL+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		input.Header.Set("X-Mcphub-Hub-Token", tokens.Tokens["claude-code"])
+		input.Header.Set("X-Mcphub-Instance-Id", endpoint.InstanceID)
+		input.Header.Set("MCP-Protocol-Version", "2025-11-25")
+		if sid != "" {
+			input.Header.Set("Mcp-Session-Id", sid)
+		}
+		if origin != "" {
+			input.Header.Set("Origin", origin)
+		}
+		if useControl {
+			input.Header.Set("X-Mcphub-Control-Token", control)
+		}
+		resp, err := client.Do(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, err := io.ReadAll(resp.Body)
+		if err := errors.Join(err, resp.Body.Close()); err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != status {
+			t.Fatalf("%s %s: status %d want %d", method, path, resp.StatusCode, status)
+		}
+		return resp.Header, string(payload)
+	}
+	for _, path := range []string{"/clients", "/g", "/clients//claude-code/mcp"} {
+		if h, body := request(http.MethodPost, path, "", "", false, http.StatusNotFound); h.Get("Location") != "" || body != "" {
+			t.Fatalf("malformed path %q returned a body or redirect", path)
+		}
+	}
+	init := "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\"}}"
+	request(http.MethodPost, scope, init, "http://example.invalid", false, http.StatusForbidden)
+	header, _ := request(http.MethodPost, scope, init, "", false, http.StatusOK)
+	sid = header.Get("Mcp-Session-Id")
+	if sid == "" {
+		t.Fatal("initialize did not issue a session")
+	}
+	request(http.MethodPost, scope, "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}", "", false, http.StatusAccepted)
+	_, list := request(http.MethodPost, scope, "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}", "", false, http.StatusOK)
+	if !strings.Contains(list, "\"name\":\"fixture__echo\"") {
+		t.Fatalf("tools/list missing fixture tool: %s", list)
+	}
+	_, call := request(http.MethodPost, scope, "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"fixture__echo\"}}", "", false, http.StatusOK)
+	if !strings.Contains(call, "did useful work") {
+		t.Fatalf("missing downstream result: %s", call)
+	}
+	request(http.MethodDelete, scope, "", "", false, http.StatusNoContent)
+	request(http.MethodPost, scope, "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"ping\"}", "", false, http.StatusNotFound)
+	want := []string{"initialize:", "notifications/initialized:", "tools/list:", "tools/call:echo", "delete"}
+	for _, next := range want {
+		select {
+		case got := <-received:
+			if got != next {
+				t.Fatalf("downstream method = %s, want %s", got, next)
+			}
+		default:
+			t.Fatalf("missing downstream method %s", next)
+		}
+	}
+	if len(received) != 0 {
+		t.Fatal("unexpected extra downstream dispatch")
+	}
+
+	request(http.MethodHead, "/internal/reload-tokens", "", "", false, http.StatusUnauthorized)
+	request(http.MethodHead, "/internal/reload-tokens", "", "", true, http.StatusNoContent)
+	request(http.MethodPost, "/internal/reload-tokens", "", "", true, http.StatusNoContent)
+	h, _ := request(http.MethodPost, "/internal/reload-tokens", "", "", true, http.StatusTooManyRequests)
+	if h.Get("Retry-After") != "5" {
+		t.Fatal("missing reload cooldown")
+	}
+
+	client.CloseIdleConnections()
+	shutdown()
+	deadline := time.Now().Add(2 * time.Second)
+	for hub.Alive() && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if hub.Alive() {
+		t.Fatal("listener reported alive after Shutdown")
+	}
+	if conn, err := (&net.Dialer{Timeout: time.Second}).DialContext(ctx, "tcp", fmt.Sprintf("127.0.0.1:%d", endpoint.Port)); err == nil {
+		_ = conn.Close()
+		t.Fatal("listener accepted a fresh connection after Shutdown")
+	}
+	if _, err := api.ReadHubMcpControlToken(); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("control token cleanup: %v", err)
+	}
+	t.Log("loopback lifecycle: initialize, initialized, tools/list, useful downstream tools/call, DELETE, reload 204/429, listener settled")
 }
