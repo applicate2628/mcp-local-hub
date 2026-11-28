@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/mcproute"
 )
 
 func registerScanRoutes(s *Server) {
@@ -87,15 +88,8 @@ func stripClientEntryRaw(in map[string]api.ClientEntry) map[string]api.ClientEnt
 	return out
 }
 
-// writeAPIError is the canonical error-envelope shape from spec §4.3.
-// Shared by all /api/* handlers added in Tasks 9–15.
 func writeAPIError(w http.ResponseWriter, err error, status int, code string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"error": err.Error(),
-		"code":  code,
-	})
+	mcproute.WriteAPIError(w, err, status, code)
 }
 
 // writeAPIErrorRedacted is the leak-safe sibling of writeAPIError for

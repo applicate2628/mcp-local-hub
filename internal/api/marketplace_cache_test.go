@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -254,3 +256,75 @@ func TestLoadMarketplaceCatalog_RejectsOversizePayload(t *testing.T) {
 // Suppress unused-import warning when this file is the only test
 // file referencing tls.
 var _ = tls.VersionTLS12
+
+// TestReadMarketplaceCache_ManagedRecipeCodec ensures cached catalogs use the selector validator.
+func TestReadMarketplaceCache_ManagedRecipeCodec(t *testing.T) {
+	_ = hubMcpStateTestHelper(t)
+	for _, tc := range []struct {
+		name    string
+		catalog string
+		wantErr bool
+	}{
+		{"valid selector", `{"schema_version":"3","entries":[{"id":"trail-code","name":"Trail","transport":"stdio","managed_recipe":"official-trail"}]}`, false},
+		{"present empty override", `{"schema_version":"3","entries":[{"id":"trail-code","name":"Trail","transport":"stdio","managed_recipe":"official-trail","env":{}}]}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := `{"schema_version":"3","catalog":` + tc.catalog + `}`
+			if err := writeHubMcpStateFile(marketplaceCacheFileLeaf, []byte(payload)); err != nil {
+				t.Fatalf("write cache fixture: %v", err)
+			}
+			cf, err := readMarketplaceCache()
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("readMarketplaceCache error = %v, wantErr %v", err, tc.wantErr)
+			}
+			if tc.wantErr && cf != nil {
+				t.Fatalf("invalid cache returned data: %+v", cf)
+			}
+			if !tc.wantErr && (cf == nil || cf.Catalog.Entries[0].ManagedRecipe != "official-trail") {
+				t.Fatalf("valid managed recipe not retained: %+v", cf)
+			}
+		})
+	}
+}
+
+// TestReadMarketplaceCache_RejectsDuplicateCatalogPresenceMismatch verifies
+// that a repeated catalog object merges with prior selector presence.
+func TestReadMarketplaceCache_RejectsDuplicateCatalogPresenceMismatch(t *testing.T) {
+	_ = hubMcpStateTestHelper(t)
+	payload := `{"schema_version":"3","catalog":{"schema_version":"3","entries":[{"id":"trail-code","name":"Trail","transport":"stdio","managed_recipe":null,"command":"candidate-command"}]},"catalog":{}}`
+	if err := writeHubMcpStateFile(marketplaceCacheFileLeaf, []byte(payload)); err != nil {
+		t.Fatalf("write duplicate cache fixture: %v", err)
+	}
+	cf, err := readMarketplaceCache()
+	if err == nil || cf != nil || !strings.Contains(err.Error(), "managed_recipe cannot be null") {
+		t.Fatalf("duplicate catalog member accepted: cache=%+v err=%v", cf, err)
+	}
+}
+
+func TestReadMarketplaceCache_OrdinaryDuplicateMemberSemantics(t *testing.T) {
+	_ = hubMcpStateTestHelper(t)
+	const valid = `{"schema_version":"1","schema_version":null,"source_url":"https://registry.example/catalog.json","source_url":null,"catalog":{"schema_version":"1","entries":[{"id":"x","name":"X","transport":"stdio","command":"npx"}]},"catalog":null,"catalog":{"entries":[{"command":null}]}}`
+	if err := writeHubMcpStateFile(marketplaceCacheFileLeaf, []byte(valid)); err != nil {
+		t.Fatalf("write valid cache fixture: %v", err)
+	}
+	cf, err := readMarketplaceCache()
+	if err != nil || cf == nil || cf.SchemaVersion != "1" || cf.SourceURL != "https://registry.example/catalog.json" ||
+		len(cf.Catalog.Entries) != 1 || cf.Catalog.Entries[0].Command != "npx" {
+		t.Fatalf("ordinary values lost in duplicate cache members: cache=%+v err=%v", cf, err)
+	}
+
+	const invalid = `{"schema_version":"1","catalog":{"schema_version":"1","entries":[{"id":"x","name":"X","transport":"stdio","command":{},"command":"npx"}]},"catalog":{}}`
+	var typed marketplaceCacheFile
+	var want *json.UnmarshalTypeError
+	if err := json.Unmarshal([]byte(invalid), &typed); !errors.As(err, &want) {
+		t.Fatalf("invalid fixture must produce a typed error: %v", err)
+	}
+	if err := writeHubMcpStateFile(marketplaceCacheFileLeaf, []byte(invalid)); err != nil {
+		t.Fatalf("write invalid cache fixture: %v", err)
+	}
+	cf, err = readMarketplaceCache()
+	var got *json.UnmarshalTypeError
+	if cf != nil || !errors.As(err, &got) || *got != *want || err.Error() != "parse cache: "+want.Error() {
+		t.Fatalf("cache=%+v error=%v typed error=%+v, want original typed error %+v", cf, err, got, want)
+	}
+}

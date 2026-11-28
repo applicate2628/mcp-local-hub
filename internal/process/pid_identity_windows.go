@@ -137,8 +137,12 @@ func (h *heldPIDObservation) Wait() (PIDWaitObservation, error) {
 	if h.handle == 0 || !h.verified {
 		return PIDWaitObservation{}, errors.New("process: held observation lacks verified identity")
 	}
-	result, err := h.wait(h.handle, 0)
-	if result == windows.WAIT_FAILED {
+	return observePIDZeroWait(h.handle, h.wait)
+}
+
+func observePIDZeroWait(handle windows.Handle, wait func(windows.Handle, uint32) (uint32, error)) (PIDWaitObservation, error) {
+	result, err := wait(handle, 0)
+	if result == windows.WAIT_FAILED || err != nil {
 		if err == nil {
 			err = errors.New("Windows wait failed without an immediate error")
 		}
@@ -573,28 +577,117 @@ func lookupPIDHandleIdentity(
 	openProcess func(uint32, bool, uint32) (windows.Handle, error),
 	identityFromHandle func(int, windows.Handle) (processHandleIdentity, error),
 	closeHandle func(windows.Handle) error,
-) (identity PIDHandleIdentity, retErr error) {
-	if pid <= 0 {
-		return PIDHandleIdentity{}, fmt.Errorf("process: invalid PID %d", pid)
+) (PIDHandleIdentity, error) {
+	observation, err := readPIDHandleObservation(context.Background(), pid, pidHandleObservationOps{
+		open: openProcess, identity: identityFromHandle, close: closeHandle,
+	})
+	return observation.Identity, err
+}
+
+// PIDHandleObservation reports one complete identity or confirmed absence.
+// An error carries no usable observation.
+type PIDHandleObservation struct {
+	Identity        PIDHandleIdentity
+	ConfirmedAbsent bool
+}
+
+// ObservePIDHandleIdentity reads the identity of an enumerated PID or confirms
+// its absence. It owns and settles all process handles before returning.
+func ObservePIDHandleIdentity(ctx context.Context, pid int) (PIDHandleObservation, error) {
+	return readPIDHandleObservation(ctx, pid, pidHandleObservationOps{
+		open: windows.OpenProcess, identity: identityFromHandle,
+		wait: windows.WaitForSingleObject, close: windows.CloseHandle,
+	})
+}
+
+type pidHandleObservationOps struct {
+	open     func(uint32, bool, uint32) (windows.Handle, error)
+	identity func(int, windows.Handle) (processHandleIdentity, error)
+	wait     func(windows.Handle, uint32) (uint32, error)
+	close    func(windows.Handle) error
+}
+
+func readPIDHandleObservation(ctx context.Context, pid int, ops pidHandleObservationOps) (observation PIDHandleObservation, retErr error) {
+	if ctx == nil {
+		return observation, errors.New("process: PID observation context required")
 	}
-	h, err := openProcess(uint32(windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.SYNCHRONIZE), false, uint32(pid))
+	if err := ctx.Err(); err != nil {
+		return observation, err
+	}
+	if pid <= 0 || (ops.wait != nil && pid != int(uint32(pid))) {
+		return observation, fmt.Errorf("process: invalid PID %d", pid)
+	}
+
+	var firstErr error
+	handle, err := ops.open(windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.SYNCHRONIZE, false, uint32(pid))
 	if err != nil {
-		return PIDHandleIdentity{}, fmt.Errorf("process: open PID %d for handle identity: %w", pid, err)
+		firstErr = fmt.Errorf("process: open PID %d for handle identity: %w", pid, err)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return observation, errors.Join(firstErr, ctxErr)
+		}
+		if ops.wait == nil || err != windows.ERROR_INVALID_PARAMETER || handle != 0 {
+			return observation, firstErr
+		}
+
+		// A second open tests for absence with only synchronize access.
+		handle, err = ops.open(windows.SYNCHRONIZE, false, uint32(pid))
+		if err != nil {
+			ctxErr := ctx.Err()
+			if err == windows.ERROR_INVALID_PARAMETER && handle == 0 && ctxErr == nil {
+				return PIDHandleObservation{ConfirmedAbsent: true}, nil
+			}
+			return observation, errors.Join(firstErr, fmt.Errorf("process: reopen PID %d for liveness: %w", pid, err), ctxErr)
+		}
+	}
+	if handle == 0 || handle == windows.InvalidHandle {
+		return observation, errors.Join(firstErr, fmt.Errorf("process: missing opened PID %d handle", pid), ctx.Err())
 	}
 	defer func() {
-		if err := closeHandle(h); err != nil {
-			identity = PIDHandleIdentity{}
-			retErr = errors.Join(retErr, fmt.Errorf("process: close PID %d handle identity: %w", pid, err))
+		closeErr := ops.close(handle)
+		if closeErr != nil {
+			closeErr = fmt.Errorf("process: close PID %d handle identity: %w", pid, closeErr)
+		}
+		ctxErr := ctx.Err()
+		if closeErr != nil || ctxErr != nil {
+			if retErr == nil {
+				retErr = firstErr
+			}
+			observation = PIDHandleObservation{}
+			retErr = errors.Join(retErr, closeErr, ctxErr)
 		}
 	}()
-	handleIdentity, err := identityFromHandle(pid, h)
-	if err != nil {
-		return PIDHandleIdentity{}, err
+
+	if ctx.Err() != nil {
+		return observation, firstErr // Settlement records cancellation after closing.
 	}
-	if handleIdentity.ExecutablePath == "" || handleIdentity.CreationTime.IsZero() {
-		return PIDHandleIdentity{}, fmt.Errorf("process: PID %d handle identity is incomplete", pid)
+	if firstErr == nil {
+		identity, identityErr := ops.identity(pid, handle)
+		if identityErr == nil {
+			if identity.ExecutablePath == "" || identity.CreationTime.IsZero() {
+				return observation, fmt.Errorf("process: PID %d handle identity is incomplete", pid)
+			}
+			return PIDHandleObservation{Identity: PIDHandleIdentity{
+				PID: pid, ExecutablePath: identity.ExecutablePath, StartedAt: identity.CreationTime.UTC(),
+			}}, nil
+		}
+		imageErr, atImageQuery := identityErr.(*pidImagePathQueryError)
+		if ops.wait == nil || !atImageQuery || imageErr.err != windows.ERROR_ACCESS_DENIED {
+			return observation, identityErr
+		}
+		firstErr = identityErr
 	}
-	return PIDHandleIdentity{PID: pid, ExecutablePath: handleIdentity.ExecutablePath, StartedAt: handleIdentity.CreationTime.UTC()}, nil
+
+	if ctx.Err() != nil {
+		return observation, firstErr // Settlement records cancellation after closing.
+	}
+	wait, waitErr := observePIDZeroWait(handle, ops.wait)
+	if waitErr != nil {
+		return observation, errors.Join(firstErr, waitErr)
+	}
+	if wait.Result != windows.WAIT_OBJECT_0 {
+		return observation, errors.Join(firstErr, fmt.Errorf("process: PID %d is still running", pid))
+	}
+	return PIDHandleObservation{ConfirmedAbsent: true}, nil
 }
 
 func VerifyPIDIdentity(proof PIDIdentityProof) error {
@@ -654,10 +747,21 @@ func verifyHandleIdentity(proof PIDIdentityProof, h windows.Handle) error {
 	return nil
 }
 
+type pidImagePathQueryError struct {
+	pid int
+	err error
+}
+
+func (e *pidImagePathQueryError) Error() string {
+	return fmt.Sprintf("process: query PID %d image path: %v", e.pid, e.err)
+}
+
+func (e *pidImagePathQueryError) Unwrap() error { return e.err }
+
 func identityFromHandle(pid int, h windows.Handle) (processHandleIdentity, error) {
 	exe, err := queryProcessImagePath(h)
 	if err != nil {
-		return processHandleIdentity{}, fmt.Errorf("process: query PID %d image path: %w", pid, err)
+		return processHandleIdentity{}, &pidImagePathQueryError{pid: pid, err: err}
 	}
 	var creation, exit, kernel, user windows.Filetime
 	if err := windows.GetProcessTimes(h, &creation, &exit, &kernel, &user); err != nil {
