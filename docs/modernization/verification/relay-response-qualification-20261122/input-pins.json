@@ -1,0 +1,530 @@
+{
+  "schema": "relay-response-input-pins-20261122-v1",
+  "variants": {
+    "candidate": {
+      "manifest_sha256": "c5ebbe5c118f8fd79ea1fa776ef53756ae8def31ed3c9e59506397753b940b4e",
+      "files": [
+        {
+          "path": "cmd/mcphub/main.go",
+          "source_sha256": "c2cf4fabef6db4275c5bc7e511e6ef1e5de7ff6abac85715f47781622c0377b8",
+          "source_git_blob": "10e7aaf4c614bc9f3bad5c1df404ac7471181f1a",
+          "candidate_sha256": "5b1d8d0c85606c82c897adf450c9e2e0d9fd520d71d11bff84d8dda6d76e1ae2",
+          "candidate_git_blob": "40a07531f2a0e747206ae528c0824841ed440b4e",
+          "candidate_bytes": 7404
+        },
+        {
+          "path": "cmd/mcphub/relay_input_windows_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "0bc0f5f34b44cadeff3c36eb7ec1ff3495bd670a450c0c1559a5f290aff8cbe3",
+          "candidate_git_blob": "19e85fee0c4acb30bd74612e18a3b4b6ffdffaf4",
+          "candidate_bytes": 5244
+        },
+        {
+          "path": "internal/cli/relay.go",
+          "source_sha256": "a233ba96990fcc436499f57464fe00f81826b07f46d780bba3e9aef8fa2fc8b8",
+          "source_git_blob": "134896522bf8465281a06ff59fe6e9bd2753d8da",
+          "candidate_sha256": "949a1cfc9d6e2a9bb925fac2456ad6c2e6b3b483e28b7f2b1bb38f63fa92b2f3",
+          "candidate_git_blob": "fb51291538112933b32ef443e82975d9ed6e53e3",
+          "candidate_bytes": 4475
+        },
+        {
+          "path": "internal/cli/relay_process_input.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "cf599abacafbe309fe812775b313c19513243dc30b83d75559b783f1aad54ec2",
+          "candidate_git_blob": "717f09b62afc8de68117f84edcead61a52cd99e4",
+          "candidate_bytes": 1279
+        },
+        {
+          "path": "internal/cli/relay_process_input_native_windows_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "c658e20c7538712267828b9f1b79de42439ae251d2532f9532cf2f0ebbe4d251",
+          "candidate_git_blob": "89c164f90d085939468e7bd8ffaa1baa3824cebc",
+          "candidate_bytes": 3872
+        },
+        {
+          "path": "internal/cli/relay_process_input_other.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "6fd717ec2aa39066c31648589bdb1866e84646fdcafe23564b6bcba901229a23",
+          "candidate_git_blob": "d8e9dae674bc67b9b8c187b3e8b33a4a1db65a94",
+          "candidate_bytes": 356
+        },
+        {
+          "path": "internal/cli/relay_process_input_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "b4c18cecb3432c3afbc8de3b7bc0f7dd0fbf643ab3c1279224f10d99caf4f005",
+          "candidate_git_blob": "b41ccc5cfb7f8079318eeff66a83fa7036ba0af1",
+          "candidate_bytes": 2631
+        },
+        {
+          "path": "internal/cli/relay_process_input_windows.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "35302df3af210f0f0c700f6260d5a90c1261419cd7f1f045123baa702c85334a",
+          "candidate_git_blob": "35b45ddaec2d09dac1cabe847a3c81fb2614f3df",
+          "candidate_bytes": 5187
+        },
+        {
+          "path": "internal/cli/relay_process_input_windows_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "bc4c05d73123bb28db74fdc1dcbe7e78b7cd38134153aea224959ac459667416",
+          "candidate_git_blob": "cf34655b8f3da584f1874e86fcca87965fd9a281",
+          "candidate_bytes": 9103
+        },
+        {
+          "path": "internal/daemon/main_dispatch_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "f70b81e92396d2d72b342c9ec8d76e29830c7359b2e54c7733c34871683a1dd1",
+          "candidate_git_blob": "2146ff844d14b19e65e08520dcea2efabf01b4c7",
+          "candidate_bytes": 8345
+        },
+        {
+          "path": "internal/daemon/main_test.go",
+          "source_sha256": "a125d32f771b7c39bda73d5d2bad3f3be4cf8d12c79a4e49be156bff45509183",
+          "source_git_blob": "2c435207b252d5efb263653d857fd13806704847",
+          "candidate_sha256": "85b12d32ab13bac46284586908b0d59eabf6d87bd50bac5123ca1ab61c447cc8",
+          "candidate_git_blob": "f9ce99733688bb630efe144f06a18ad5892d76a8",
+          "candidate_bytes": 4764
+        },
+        {
+          "path": "internal/daemon/relay.go",
+          "source_sha256": "3dbf08330e6fa8c6b329f69c717186f4efaa1bc33b6295ff771b4ad7d865e6e4",
+          "source_git_blob": "8f6840af738d31fd1271463e32a315a3694ae8b8",
+          "candidate_sha256": "4035863ec8ed9a4c39064a40205214adda8e4b742c5538dbd9286c39fee6e4b8",
+          "candidate_git_blob": "59ae24eb782749aa25760331b66c7a4876e94981",
+          "candidate_bytes": 25472
+        },
+        {
+          "path": "internal/daemon/relay_input_contract_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "de9004137aa31158faf541be0f0c257b3357a36835a99752a4a98a456dbaf9d9",
+          "candidate_git_blob": "de8531726f791a4d7eed685ac80e972c8ab5dc60",
+          "candidate_bytes": 15531
+        },
+        {
+          "path": "internal/daemon/relay_output_contract_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "9659845c0ed36d131a74e745bb18ab6dfccf5f68063f503cebfddac814382667",
+          "candidate_git_blob": "cfd4c07295416f59bd582f96c701235cfacdef76",
+          "candidate_bytes": 13494
+        },
+        {
+          "path": "internal/daemon/relay_response_contract_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "6350541c53e501402405a130bdbb704934a82facdf48149da30d33d81b5625d6",
+          "candidate_git_blob": "cce2f60cbe74b69d1bb9b8bb477620475de8293c",
+          "candidate_bytes": 39360
+        },
+        {
+          "path": "internal/daemon/relay_sse_session_retry_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "d5a22bcc2cc76df750a5b4b8105aa567036c6ffabea0c25be0ecd4a15c65c23f",
+          "candidate_git_blob": "fb47b1594936d8130836abd9afd09be907c9d8dc",
+          "candidate_bytes": 2425
+        }
+      ]
+    },
+    "control": {
+      "manifest_sha256": "5cbf7df8c3ae3ba72c59556fe72af682f8d6649d50a3f6c02e959605b5dbbaea",
+      "files": [
+        {
+          "path": "cmd/mcphub/main.go",
+          "source_sha256": "c2cf4fabef6db4275c5bc7e511e6ef1e5de7ff6abac85715f47781622c0377b8",
+          "source_git_blob": "10e7aaf4c614bc9f3bad5c1df404ac7471181f1a",
+          "candidate_sha256": "5b1d8d0c85606c82c897adf450c9e2e0d9fd520d71d11bff84d8dda6d76e1ae2",
+          "candidate_git_blob": "40a07531f2a0e747206ae528c0824841ed440b4e",
+          "candidate_bytes": 7404
+        },
+        {
+          "path": "cmd/mcphub/relay_input_windows_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "0bc0f5f34b44cadeff3c36eb7ec1ff3495bd670a450c0c1559a5f290aff8cbe3",
+          "candidate_git_blob": "19e85fee0c4acb30bd74612e18a3b4b6ffdffaf4",
+          "candidate_bytes": 5244
+        },
+        {
+          "path": "internal/cli/relay.go",
+          "source_sha256": "a233ba96990fcc436499f57464fe00f81826b07f46d780bba3e9aef8fa2fc8b8",
+          "source_git_blob": "134896522bf8465281a06ff59fe6e9bd2753d8da",
+          "candidate_sha256": "949a1cfc9d6e2a9bb925fac2456ad6c2e6b3b483e28b7f2b1bb38f63fa92b2f3",
+          "candidate_git_blob": "fb51291538112933b32ef443e82975d9ed6e53e3",
+          "candidate_bytes": 4475
+        },
+        {
+          "path": "internal/cli/relay_process_input.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "cf599abacafbe309fe812775b313c19513243dc30b83d75559b783f1aad54ec2",
+          "candidate_git_blob": "717f09b62afc8de68117f84edcead61a52cd99e4",
+          "candidate_bytes": 1279
+        },
+        {
+          "path": "internal/cli/relay_process_input_native_windows_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "c658e20c7538712267828b9f1b79de42439ae251d2532f9532cf2f0ebbe4d251",
+          "candidate_git_blob": "89c164f90d085939468e7bd8ffaa1baa3824cebc",
+          "candidate_bytes": 3872
+        },
+        {
+          "path": "internal/cli/relay_process_input_other.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "6fd717ec2aa39066c31648589bdb1866e84646fdcafe23564b6bcba901229a23",
+          "candidate_git_blob": "d8e9dae674bc67b9b8c187b3e8b33a4a1db65a94",
+          "candidate_bytes": 356
+        },
+        {
+          "path": "internal/cli/relay_process_input_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "b4c18cecb3432c3afbc8de3b7bc0f7dd0fbf643ab3c1279224f10d99caf4f005",
+          "candidate_git_blob": "b41ccc5cfb7f8079318eeff66a83fa7036ba0af1",
+          "candidate_bytes": 2631
+        },
+        {
+          "path": "internal/cli/relay_process_input_windows.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "35302df3af210f0f0c700f6260d5a90c1261419cd7f1f045123baa702c85334a",
+          "candidate_git_blob": "35b45ddaec2d09dac1cabe847a3c81fb2614f3df",
+          "candidate_bytes": 5187
+        },
+        {
+          "path": "internal/cli/relay_process_input_windows_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "bc4c05d73123bb28db74fdc1dcbe7e78b7cd38134153aea224959ac459667416",
+          "candidate_git_blob": "cf34655b8f3da584f1874e86fcca87965fd9a281",
+          "candidate_bytes": 9103
+        },
+        {
+          "path": "internal/daemon/main_dispatch_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "f70b81e92396d2d72b342c9ec8d76e29830c7359b2e54c7733c34871683a1dd1",
+          "candidate_git_blob": "2146ff844d14b19e65e08520dcea2efabf01b4c7",
+          "candidate_bytes": 8345
+        },
+        {
+          "path": "internal/daemon/main_test.go",
+          "source_sha256": "a125d32f771b7c39bda73d5d2bad3f3be4cf8d12c79a4e49be156bff45509183",
+          "source_git_blob": "2c435207b252d5efb263653d857fd13806704847",
+          "candidate_sha256": "85b12d32ab13bac46284586908b0d59eabf6d87bd50bac5123ca1ab61c447cc8",
+          "candidate_git_blob": "f9ce99733688bb630efe144f06a18ad5892d76a8",
+          "candidate_bytes": 4764
+        },
+        {
+          "path": "internal/daemon/relay.go",
+          "source_sha256": "3dbf08330e6fa8c6b329f69c717186f4efaa1bc33b6295ff771b4ad7d865e6e4",
+          "source_git_blob": "8f6840af738d31fd1271463e32a315a3694ae8b8",
+          "candidate_sha256": "81b39fb727199d17e64e18b5fef858f2d0a472256e2fd25b1583c451f478f513",
+          "candidate_git_blob": "52493e2c87c5e81a6a1f8861dd7f2469df64321c",
+          "candidate_bytes": 21494
+        },
+        {
+          "path": "internal/daemon/relay_input_contract_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "de9004137aa31158faf541be0f0c257b3357a36835a99752a4a98a456dbaf9d9",
+          "candidate_git_blob": "de8531726f791a4d7eed685ac80e972c8ab5dc60",
+          "candidate_bytes": 15531
+        },
+        {
+          "path": "internal/daemon/relay_output_contract_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "9659845c0ed36d131a74e745bb18ab6dfccf5f68063f503cebfddac814382667",
+          "candidate_git_blob": "cfd4c07295416f59bd582f96c701235cfacdef76",
+          "candidate_bytes": 13494
+        },
+        {
+          "path": "internal/daemon/relay_response_contract_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "6350541c53e501402405a130bdbb704934a82facdf48149da30d33d81b5625d6",
+          "candidate_git_blob": "cce2f60cbe74b69d1bb9b8bb477620475de8293c",
+          "candidate_bytes": 39360
+        },
+        {
+          "path": "internal/daemon/relay_sse_session_retry_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "d5a22bcc2cc76df750a5b4b8105aa567036c6ffabea0c25be0ecd4a15c65c23f",
+          "candidate_git_blob": "fb47b1594936d8130836abd9afd09be907c9d8dc",
+          "candidate_bytes": 2425
+        }
+      ]
+    },
+    "prime-control": {
+      "manifest_sha256": "2db10f175e29b5fdb29fae0e02ad36f784c6d333e6deb90ef51b734f3fcd1fc7",
+      "files": [
+        {
+          "path": "cmd/mcphub/main.go",
+          "source_sha256": "c2cf4fabef6db4275c5bc7e511e6ef1e5de7ff6abac85715f47781622c0377b8",
+          "source_git_blob": "10e7aaf4c614bc9f3bad5c1df404ac7471181f1a",
+          "candidate_sha256": "5b1d8d0c85606c82c897adf450c9e2e0d9fd520d71d11bff84d8dda6d76e1ae2",
+          "candidate_git_blob": "40a07531f2a0e747206ae528c0824841ed440b4e",
+          "candidate_bytes": 7404
+        },
+        {
+          "path": "cmd/mcphub/relay_input_windows_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "0bc0f5f34b44cadeff3c36eb7ec1ff3495bd670a450c0c1559a5f290aff8cbe3",
+          "candidate_git_blob": "19e85fee0c4acb30bd74612e18a3b4b6ffdffaf4",
+          "candidate_bytes": 5244
+        },
+        {
+          "path": "internal/cli/relay.go",
+          "source_sha256": "a233ba96990fcc436499f57464fe00f81826b07f46d780bba3e9aef8fa2fc8b8",
+          "source_git_blob": "134896522bf8465281a06ff59fe6e9bd2753d8da",
+          "candidate_sha256": "949a1cfc9d6e2a9bb925fac2456ad6c2e6b3b483e28b7f2b1bb38f63fa92b2f3",
+          "candidate_git_blob": "fb51291538112933b32ef443e82975d9ed6e53e3",
+          "candidate_bytes": 4475
+        },
+        {
+          "path": "internal/cli/relay_process_input.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "cf599abacafbe309fe812775b313c19513243dc30b83d75559b783f1aad54ec2",
+          "candidate_git_blob": "717f09b62afc8de68117f84edcead61a52cd99e4",
+          "candidate_bytes": 1279
+        },
+        {
+          "path": "internal/cli/relay_process_input_native_windows_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "c658e20c7538712267828b9f1b79de42439ae251d2532f9532cf2f0ebbe4d251",
+          "candidate_git_blob": "89c164f90d085939468e7bd8ffaa1baa3824cebc",
+          "candidate_bytes": 3872
+        },
+        {
+          "path": "internal/cli/relay_process_input_other.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "6fd717ec2aa39066c31648589bdb1866e84646fdcafe23564b6bcba901229a23",
+          "candidate_git_blob": "d8e9dae674bc67b9b8c187b3e8b33a4a1db65a94",
+          "candidate_bytes": 356
+        },
+        {
+          "path": "internal/cli/relay_process_input_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "b4c18cecb3432c3afbc8de3b7bc0f7dd0fbf643ab3c1279224f10d99caf4f005",
+          "candidate_git_blob": "b41ccc5cfb7f8079318eeff66a83fa7036ba0af1",
+          "candidate_bytes": 2631
+        },
+        {
+          "path": "internal/cli/relay_process_input_windows.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "35302df3af210f0f0c700f6260d5a90c1261419cd7f1f045123baa702c85334a",
+          "candidate_git_blob": "35b45ddaec2d09dac1cabe847a3c81fb2614f3df",
+          "candidate_bytes": 5187
+        },
+        {
+          "path": "internal/cli/relay_process_input_windows_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "bc4c05d73123bb28db74fdc1dcbe7e78b7cd38134153aea224959ac459667416",
+          "candidate_git_blob": "cf34655b8f3da584f1874e86fcca87965fd9a281",
+          "candidate_bytes": 9103
+        },
+        {
+          "path": "internal/daemon/main_dispatch_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "f70b81e92396d2d72b342c9ec8d76e29830c7359b2e54c7733c34871683a1dd1",
+          "candidate_git_blob": "2146ff844d14b19e65e08520dcea2efabf01b4c7",
+          "candidate_bytes": 8345
+        },
+        {
+          "path": "internal/daemon/main_test.go",
+          "source_sha256": "a125d32f771b7c39bda73d5d2bad3f3be4cf8d12c79a4e49be156bff45509183",
+          "source_git_blob": "2c435207b252d5efb263653d857fd13806704847",
+          "candidate_sha256": "85b12d32ab13bac46284586908b0d59eabf6d87bd50bac5123ca1ab61c447cc8",
+          "candidate_git_blob": "f9ce99733688bb630efe144f06a18ad5892d76a8",
+          "candidate_bytes": 4764
+        },
+        {
+          "path": "internal/daemon/relay.go",
+          "source_sha256": "3dbf08330e6fa8c6b329f69c717186f4efaa1bc33b6295ff771b4ad7d865e6e4",
+          "source_git_blob": "8f6840af738d31fd1271463e32a315a3694ae8b8",
+          "candidate_sha256": "d49b1ca3e7da793531f6d2cce1aace41d3df5318dfde99864e5fd92d9291b22a",
+          "candidate_git_blob": "3c10749e77389ca075078cbb7b9e4cac10d9e2a3",
+          "candidate_bytes": 25258
+        },
+        {
+          "path": "internal/daemon/relay_input_contract_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "de9004137aa31158faf541be0f0c257b3357a36835a99752a4a98a456dbaf9d9",
+          "candidate_git_blob": "de8531726f791a4d7eed685ac80e972c8ab5dc60",
+          "candidate_bytes": 15531
+        },
+        {
+          "path": "internal/daemon/relay_output_contract_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "9659845c0ed36d131a74e745bb18ab6dfccf5f68063f503cebfddac814382667",
+          "candidate_git_blob": "cfd4c07295416f59bd582f96c701235cfacdef76",
+          "candidate_bytes": 13494
+        },
+        {
+          "path": "internal/daemon/relay_response_contract_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "6350541c53e501402405a130bdbb704934a82facdf48149da30d33d81b5625d6",
+          "candidate_git_blob": "cce2f60cbe74b69d1bb9b8bb477620475de8293c",
+          "candidate_bytes": 39360
+        },
+        {
+          "path": "internal/daemon/relay_sse_session_retry_test.go",
+          "source_sha256": null,
+          "source_git_blob": null,
+          "candidate_sha256": "d5a22bcc2cc76df750a5b4b8105aa567036c6ffabea0c25be0ecd4a15c65c23f",
+          "candidate_git_blob": "fb47b1594936d8130836abd9afd09be907c9d8dc",
+          "candidate_bytes": 2425
+        }
+      ]
+    }
+  },
+  "new_runner_sha256": "b6a16eb3a0e281031b2db81f8d05c766bd685e0d2729b56323b4b4a7ae80192d",
+  "collector_sha256": "fa611d8635cc40b9be2bd85f01a4a525b11f2e7d67a01b628778dad27de6b397",
+  "new_environment_and_tools": {
+    "composition_sha256": "c3f0be2cd6fe0310cc7b951ebeacfc17e16629a32e98eed6af32f7fcc152fb28",
+    "environment": {
+      "SYSTEMROOT": "C:\\WINDOWS",
+      "WINDIR": "C:\\WINDOWS",
+      "COMSPEC": "C:\\WINDOWS\\System32\\cmd.exe",
+      "PATH": "C:\\msys64\\ucrt64\\bin;C:\\WINDOWS\\System32;C:\\Program Files\\Git\\cmd",
+      "GOROOT": "C:\\msys64\\ucrt64\\lib\\go",
+      "GOENV": "off",
+      "GOTOOLCHAIN": "local",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "GOVCS": "*:off",
+      "GOWORK": "off",
+      "GOFLAGS": "-mod=readonly",
+      "GOCACHE": "D:\\dev\\ChatGPT\\mcp-relay-20261122-e21a1792\\gocache",
+      "GOMODCACHE": "D:\\dev\\ChatGPT\\mcp-pr616-qualification-20261114\\gomodcache",
+      "GOPATH": "D:\\dev\\ChatGPT\\mcp-relay-20261122-e21a1792\\runtime\\neighbors\\gopath",
+      "CC": "C:\\msys64\\ucrt64\\bin\\gcc.exe",
+      "CGO_ENABLED": "1",
+      "GOMAXPROCS": "4",
+      "GOTELEMETRY": "off",
+      "TEST_TELEMETRY_DIR": "D:\\dev\\ChatGPT\\mcp-relay-20261122-e21a1792\\runtime\\neighbors\\telemetry",
+      "MCPHUB_NO_AUTO_GUI": "1",
+      "MCPHUB_E2E_SCHEDULER": "none",
+      "USERPROFILE": "D:\\dev\\ChatGPT\\mcp-relay-20261122-e21a1792\\runtime\\neighbors\\profile",
+      "APPDATA": "D:\\dev\\ChatGPT\\mcp-relay-20261122-e21a1792\\runtime\\neighbors\\appdata",
+      "LOCALAPPDATA": "D:\\dev\\ChatGPT\\mcp-relay-20261122-e21a1792\\runtime\\neighbors\\localappdata",
+      "GIT_OPTIONAL_LOCKS": "0",
+      "GIT_CONFIG_NOSYSTEM": "1",
+      "GIT_CONFIG_GLOBAL": "D:\\dev\\ChatGPT\\mcp-relay-20261122-e21a1792\\runtime\\neighbors\\no-config",
+      "GIT_TERMINAL_PROMPT": "0",
+      "GIT_NO_REPLACE_OBJECTS": "1",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "TEMP": "D:\\dev\\ChatGPT\\mcp-relay-20261122-e21a1792\\runtime\\neighbors\\tmp",
+      "TMP": "D:\\dev\\ChatGPT\\mcp-relay-20261122-e21a1792\\runtime\\neighbors\\tmp",
+      "TMPDIR": "D:\\dev\\ChatGPT\\mcp-relay-20261122-e21a1792\\runtime\\neighbors\\tmp",
+      "GOTMPDIR": "D:\\dev\\ChatGPT\\mcp-relay-20261122-e21a1792\\runtime\\neighbors\\tmp",
+      "XDG_CACHE_HOME": "D:\\dev\\ChatGPT\\mcp-relay-20261122-e21a1792\\runtime\\neighbors\\xdg",
+      "XDG_CONFIG_HOME": "D:\\dev\\ChatGPT\\mcp-relay-20261122-e21a1792\\runtime\\neighbors\\xdg",
+      "XDG_DATA_HOME": "D:\\dev\\ChatGPT\\mcp-relay-20261122-e21a1792\\runtime\\neighbors\\xdg"
+    },
+    "runner_sha256": "b6a16eb3a0e281031b2db81f8d05c766bd685e0d2729b56323b4b4a7ae80192d",
+    "tools": {
+      "C:\\msys64\\ucrt64\\bin\\go.exe": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113",
+      "C:\\msys64\\ucrt64\\bin\\gofmt.exe": "95368e4aafefa20f962a345ab02f53ffc035ed69349612abbf385b52f4fb25c5",
+      "C:\\msys64\\ucrt64\\bin\\gcc.exe": "f6ff9378c1edb591131304518eac6456708d28720284105930d0d687136bcdd3",
+      "C:\\Program Files\\Git\\cmd\\git.exe": "177bc8a9af84fa3a400c694c975fda731d048279c074e1a93947ce8b067ebb48"
+    }
+  },
+  "historical_receipts_byte_equal": [
+    {
+      "phase": "relay-compile-v2-candidate",
+      "original_sha256": "edb84da62512da7cce5be442f21ad950d9972486608e576fd296e6fb56e6f826",
+      "copied_sha256": "edb84da62512da7cce5be442f21ad950d9972486608e576fd296e6fb56e6f826",
+      "equal": true
+    },
+    {
+      "phase": "relay-compile-v2-control",
+      "original_sha256": "f777eb2bf2811ecf6ff5714b0fe86377968db1612a19f8fb55a0e1f4b8f26cd5",
+      "copied_sha256": "f777eb2bf2811ecf6ff5714b0fe86377968db1612a19f8fb55a0e1f4b8f26cd5",
+      "equal": true
+    },
+    {
+      "phase": "relay-compile-v2-prime",
+      "original_sha256": "ada6943b41c9edcfdfd6ad1599682b3d9f0f04d38cc05bad9f4637253943773e",
+      "copied_sha256": "ada6943b41c9edcfdfd6ad1599682b3d9f0f04d38cc05bad9f4637253943773e",
+      "equal": true
+    },
+    {
+      "phase": "relay-format-v2-candidate",
+      "original_sha256": "6871c7025a67b0393142910735dc123b31470650c1ca5d68f7c78709bbb9565f",
+      "copied_sha256": "6871c7025a67b0393142910735dc123b31470650c1ca5d68f7c78709bbb9565f",
+      "equal": true
+    },
+    {
+      "phase": "relay-format-v2-control",
+      "original_sha256": "d9975fcc41a9139214e6e8d2fb3dce4d7b39ea9bd5c4a5f7f1249e4b374e7596",
+      "copied_sha256": "d9975fcc41a9139214e6e8d2fb3dce4d7b39ea9bd5c4a5f7f1249e4b374e7596",
+      "equal": true
+    },
+    {
+      "phase": "relay-format-v2-prime",
+      "original_sha256": "40f9ac1d4eecc6b36284b2f7409adabc30ce606421960b1ee16b38ae39d8c4a8",
+      "copied_sha256": "40f9ac1d4eecc6b36284b2f7409adabc30ce606421960b1ee16b38ae39d8c4a8",
+      "equal": true
+    },
+    {
+      "phase": "relay-v2-contract",
+      "original_sha256": "d2a60e8d1fcf062c944e28d13ad0fa108d678f4da0aade7bd13c1600cbceff8f",
+      "copied_sha256": "d2a60e8d1fcf062c944e28d13ad0fa108d678f4da0aade7bd13c1600cbceff8f",
+      "equal": true
+    },
+    {
+      "phase": "relay-v2-control-body",
+      "original_sha256": "c641b577cc95a29249bc223c9672259c04ac120d3d8e55dfe9aaa3f9a4ed7faf",
+      "copied_sha256": "c641b577cc95a29249bc223c9672259c04ac120d3d8e55dfe9aaa3f9a4ed7faf",
+      "equal": true
+    },
+    {
+      "phase": "relay-v2-control-errors",
+      "original_sha256": "cedebec381ea59c39c7ffbf1735f35b401b2f1e2eec7bb490240ed9698a0d6f2",
+      "copied_sha256": "cedebec381ea59c39c7ffbf1735f35b401b2f1e2eec7bb490240ed9698a0d6f2",
+      "equal": true
+    },
+    {
+      "phase": "relay-v2-control-framing",
+      "original_sha256": "a62ea5dcc249b81e26eb64aff9823d79eb109f300f3b9615ef0f341fbc9858b7",
+      "copied_sha256": "a62ea5dcc249b81e26eb64aff9823d79eb109f300f3b9615ef0f341fbc9858b7",
+      "equal": true
+    },
+    {
+      "phase": "relay-v2-control-redirect",
+      "original_sha256": "6de61e48dc9d54b111c7e84da99935a8310a2b180b9082e61cb531554d0cf88e",
+      "copied_sha256": "6de61e48dc9d54b111c7e84da99935a8310a2b180b9082e61cb531554d0cf88e",
+      "equal": true
+    },
+    {
+      "phase": "relay-v2-prime-control",
+      "original_sha256": "71b1c21c6bd6d452b9d3501242779e0c1f295aa2e62a84ad65221e5dbf54956f",
+      "copied_sha256": "71b1c21c6bd6d452b9d3501242779e0c1f295aa2e62a84ad65221e5dbf54956f",
+      "equal": true
+    }
+  ]
+}

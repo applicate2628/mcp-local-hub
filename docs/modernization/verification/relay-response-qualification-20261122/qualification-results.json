@@ -1,0 +1,1919 @@
+{
+  "schema": "relay-response-qualification-20261122-v1",
+  "status": "SCOPED_QUALIFICATION_COMPLETE; publication and exact-published-SHA review belong to root",
+  "candidate": {
+    "base_pr": 629,
+    "base_head": "b3646f19706d795a8b0c0dafb2193d7dc6f4c584",
+    "files": [
+      {
+        "path": "internal/daemon/relay.go",
+        "bytes": 25472,
+        "sha256": "4035863ec8ed9a4c39064a40205214adda8e4b742c5538dbd9286c39fee6e4b8",
+        "git_blob": "59ae24eb782749aa25760331b66c7a4876e94981"
+      },
+      {
+        "path": "internal/daemon/relay_response_contract_test.go",
+        "bytes": 39360,
+        "sha256": "6350541c53e501402405a130bdbb704934a82facdf48149da30d33d81b5625d6",
+        "git_blob": "cce2f60cbe74b69d1bb9b8bb477620475de8293c"
+      }
+    ]
+  },
+  "source": {
+    "materialized_checkpoint": "858812988833a84368c60fba1540ae601155fa71",
+    "base_tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+    "composed_tree": "fcd2ad6bce89c71a180973c8f0a65b912899fdc5",
+    "composed_files": 3293,
+    "overlays": 16,
+    "composition_manifest_sha256": "c3f0be2cd6fe0310cc7b951ebeacfc17e16629a32e98eed6af32f7fcc152fb28",
+    "scope": "master-preserved composition plus complete donor paths, canonical daemon entry and candidate; not a standalone PR629 or current-master test"
+  },
+  "counts": {
+    "contract_root_tests": 25,
+    "contract_repetitions": 2,
+    "contract_test_and_subtest_pass_events": 204,
+    "contract_package_pass_events": 1,
+    "neighbors_root_tests": 17,
+    "neighbors_repetitions": 1,
+    "neighbors_test_and_subtest_pass_events": 36,
+    "neighbors_package_pass_events": 1
+  },
+  "raw_archive": {
+    "name": "relay-evidence.tar.xz",
+    "bytes": 347240,
+    "sha256": "58e91f427ed92e02dbbaca74d5fdca07eeed3e84a002da01f9934415d622fae3",
+    "indexed_data_files": 219,
+    "inventory_files": 1,
+    "total_regular_entries": 220
+  },
+  "whole_process_tree_deadline_enforced": false,
+  "process_tree_settlement_observed": false,
+  "full_go_test_gate": "NOT_RUN",
+  "native_cli_fixture_tests": "NOT_RUN (compile only)",
+  "real_get_sse_sdk_consumer_profile": "NOT_RUN",
+  "installed_hub_scheduler_credentials_operations": "NOT_RUN",
+  "phases": [
+    {
+      "phase": "relay-compile-v2-candidate",
+      "historical": true,
+      "receipt_sha256": "edb84da62512da7cce5be442f21ad950d9972486608e576fd296e6fb56e6f826",
+      "source": "858812988833a84368c60fba1540ae601155fa71",
+      "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+      "manifest_sha256": "c5ebbe5c118f8fd79ea1fa776ef53756ae8def31ed3c9e59506397753b940b4e",
+      "runner_sha256": "d8cb7090ddda09cb14a50759f56397a55ff03f3a6ce9bfc29f226788217ed17e",
+      "source_snapshot_sha256": "26cfa4b8725fa723ad4c48fc4daa3ecdbed425c0c578d69138f45b44bf8ff7f4",
+      "source_unchanged": true,
+      "tools_unchanged": true,
+      "commands": [
+        {
+          "label": "gofmt-check",
+          "exit_code": 0,
+          "seconds": 0.020470499992370605,
+          "started_utc": "2026-11-21T22:44:45.509803+00:00",
+          "finished_utc": "2026-11-21T22:44:45.530634+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:44:45.530808+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:44:45.530905+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\cmd\\mcphub\\main.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\cmd\\mcphub\\relay_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\cli\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\cli\\relay_process_input.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\cli\\relay_process_input_native_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\cli\\relay_process_input_other.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\cli\\relay_process_input_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\cli\\relay_process_input_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\cli\\relay_process_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\daemon\\main_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\daemon\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\daemon\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\daemon\\relay_input_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\daemon\\relay_output_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\daemon\\relay_response_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\daemon\\relay_sse_session_retry_test.go"
+          ],
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        },
+        {
+          "label": "candidate-daemon-compile",
+          "exit_code": 0,
+          "seconds": 8.07891749998089,
+          "started_utc": "2026-11-21T22:44:46.339572+00:00",
+          "finished_utc": "2026-11-21T22:44:54.419108+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:44:54.419278+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:44:54.419374+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\relay-compile-v2-candidate\\overlay.json",
+            "-mod=readonly",
+            "-tags=test_state_path_env",
+            "-race",
+            "-c",
+            "-o",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\relay-compile-v2-candidate\\candidate-daemon-compile.exe",
+            "./internal/daemon"
+          ],
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        },
+        {
+          "label": "candidate-cli-compile",
+          "exit_code": 0,
+          "seconds": 32.52283139992505,
+          "started_utc": "2026-11-21T22:44:55.352987+00:00",
+          "finished_utc": "2026-11-21T22:45:27.876033+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:45:27.876211+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:45:27.876305+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\relay-compile-v2-candidate\\overlay.json",
+            "-mod=readonly",
+            "-tags=test_state_path_env",
+            "-race",
+            "-c",
+            "-o",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\relay-compile-v2-candidate\\candidate-cli-compile.exe",
+            "./internal/cli"
+          ],
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        },
+        {
+          "label": "candidate-main-compile",
+          "exit_code": 0,
+          "seconds": 14.91887030005455,
+          "started_utc": "2026-11-21T22:45:28.952515+00:00",
+          "finished_utc": "2026-11-21T22:45:43.871848+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:45:43.872039+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:45:43.872136+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\relay-compile-v2-candidate\\overlay.json",
+            "-mod=readonly",
+            "-tags=test_state_path_env",
+            "-race",
+            "-c",
+            "-o",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\relay-compile-v2-candidate\\candidate-main-compile.exe",
+            "./cmd/mcphub"
+          ],
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        }
+      ]
+    },
+    {
+      "phase": "relay-compile-v2-control",
+      "historical": true,
+      "receipt_sha256": "f777eb2bf2811ecf6ff5714b0fe86377968db1612a19f8fb55a0e1f4b8f26cd5",
+      "source": "858812988833a84368c60fba1540ae601155fa71",
+      "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+      "manifest_sha256": "5cbf7df8c3ae3ba72c59556fe72af682f8d6649d50a3f6c02e959605b5dbbaea",
+      "runner_sha256": "d8cb7090ddda09cb14a50759f56397a55ff03f3a6ce9bfc29f226788217ed17e",
+      "source_snapshot_sha256": "26cfa4b8725fa723ad4c48fc4daa3ecdbed425c0c578d69138f45b44bf8ff7f4",
+      "source_unchanged": true,
+      "tools_unchanged": true,
+      "commands": [
+        {
+          "label": "gofmt-check",
+          "exit_code": 0,
+          "seconds": 0.022985300049185753,
+          "started_utc": "2026-11-21T22:37:54.325946+00:00",
+          "finished_utc": "2026-11-21T22:37:54.349313+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:37:54.349559+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:37:54.349706+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\cmd\\mcphub\\main.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\cmd\\mcphub\\relay_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_native_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_other.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\main_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay_input_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay_output_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay_response_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay_sse_session_retry_test.go"
+          ],
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        },
+        {
+          "label": "control-daemon-compile",
+          "exit_code": 0,
+          "seconds": 10.196344000054523,
+          "started_utc": "2026-11-21T22:37:55.390923+00:00",
+          "finished_utc": "2026-11-21T22:38:05.587569+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:38:05.587760+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:38:05.587859+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\relay-compile-v2-control\\overlay.json",
+            "-mod=readonly",
+            "-tags=test_state_path_env",
+            "-race",
+            "-c",
+            "-o",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\relay-compile-v2-control\\control-daemon-compile.exe",
+            "./internal/daemon"
+          ],
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        },
+        {
+          "label": "control-cli-compile",
+          "exit_code": 0,
+          "seconds": 36.090914299944416,
+          "started_utc": "2026-11-21T22:38:06.460544+00:00",
+          "finished_utc": "2026-11-21T22:38:42.551651+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:38:42.551847+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:38:42.551945+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\relay-compile-v2-control\\overlay.json",
+            "-mod=readonly",
+            "-tags=test_state_path_env",
+            "-race",
+            "-c",
+            "-o",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\relay-compile-v2-control\\control-cli-compile.exe",
+            "./internal/cli"
+          ],
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        },
+        {
+          "label": "control-main-compile",
+          "exit_code": 0,
+          "seconds": 14.349718399927951,
+          "started_utc": "2026-11-21T22:38:44.181537+00:00",
+          "finished_utc": "2026-11-21T22:38:58.531647+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:38:58.531838+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:38:58.531935+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\relay-compile-v2-control\\overlay.json",
+            "-mod=readonly",
+            "-tags=test_state_path_env",
+            "-race",
+            "-c",
+            "-o",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\relay-compile-v2-control\\control-main-compile.exe",
+            "./cmd/mcphub"
+          ],
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        }
+      ]
+    },
+    {
+      "phase": "relay-compile-v2-prime",
+      "historical": true,
+      "receipt_sha256": "ada6943b41c9edcfdfd6ad1599682b3d9f0f04d38cc05bad9f4637253943773e",
+      "source": "858812988833a84368c60fba1540ae601155fa71",
+      "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+      "manifest_sha256": "2db10f175e29b5fdb29fae0e02ad36f784c6d333e6deb90ef51b734f3fcd1fc7",
+      "runner_sha256": "d8cb7090ddda09cb14a50759f56397a55ff03f3a6ce9bfc29f226788217ed17e",
+      "source_snapshot_sha256": "26cfa4b8725fa723ad4c48fc4daa3ecdbed425c0c578d69138f45b44bf8ff7f4",
+      "source_unchanged": true,
+      "tools_unchanged": true,
+      "commands": [
+        {
+          "label": "gofmt-check",
+          "exit_code": 0,
+          "seconds": 0.019107700092718005,
+          "started_utc": "2026-11-21T22:43:34.392576+00:00",
+          "finished_utc": "2026-11-21T22:43:34.412086+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:43:34.412309+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:43:34.412414+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\cmd\\mcphub\\main.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\cmd\\mcphub\\relay_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\cli\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\cli\\relay_process_input.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\cli\\relay_process_input_native_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\cli\\relay_process_input_other.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\cli\\relay_process_input_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\cli\\relay_process_input_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\cli\\relay_process_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\daemon\\main_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\daemon\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\daemon\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\daemon\\relay_input_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\daemon\\relay_output_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\daemon\\relay_response_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\daemon\\relay_sse_session_retry_test.go"
+          ],
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        },
+        {
+          "label": "prime-daemon-compile",
+          "exit_code": 0,
+          "seconds": 6.789590699947439,
+          "started_utc": "2026-11-21T22:43:35.158085+00:00",
+          "finished_utc": "2026-11-21T22:43:41.947975+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:43:41.948188+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:43:41.948287+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\relay-compile-v2-prime\\overlay.json",
+            "-mod=readonly",
+            "-tags=test_state_path_env",
+            "-race",
+            "-c",
+            "-o",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\relay-compile-v2-prime\\prime-daemon-compile.exe",
+            "./internal/daemon"
+          ],
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        }
+      ]
+    },
+    {
+      "phase": "relay-format-v2-candidate",
+      "historical": true,
+      "receipt_sha256": "6871c7025a67b0393142910735dc123b31470650c1ca5d68f7c78709bbb9565f",
+      "source": "858812988833a84368c60fba1540ae601155fa71",
+      "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+      "manifest_sha256": "c5ebbe5c118f8fd79ea1fa776ef53756ae8def31ed3c9e59506397753b940b4e",
+      "runner_sha256": "d8cb7090ddda09cb14a50759f56397a55ff03f3a6ce9bfc29f226788217ed17e",
+      "source_snapshot_sha256": "26cfa4b8725fa723ad4c48fc4daa3ecdbed425c0c578d69138f45b44bf8ff7f4",
+      "source_unchanged": true,
+      "tools_unchanged": true,
+      "commands": [
+        {
+          "label": "go-version",
+          "exit_code": 0,
+          "seconds": 0.030822400003671646,
+          "started_utc": "2026-11-21T22:44:28.344261+00:00",
+          "finished_utc": "2026-11-21T22:44:28.375487+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 34,
+            "sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14",
+            "captured_utc": "2026-11-21T22:44:28.375761+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:44:28.375904+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "version"
+          ],
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        },
+        {
+          "label": "gofmt-check",
+          "exit_code": 0,
+          "seconds": 0.021555199986323714,
+          "started_utc": "2026-11-21T22:44:29.128502+00:00",
+          "finished_utc": "2026-11-21T22:44:29.150395+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:44:29.150673+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:44:29.150822+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\cmd\\mcphub\\main.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\cmd\\mcphub\\relay_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\cli\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\cli\\relay_process_input.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\cli\\relay_process_input_native_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\cli\\relay_process_input_other.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\cli\\relay_process_input_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\cli\\relay_process_input_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\cli\\relay_process_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\daemon\\main_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\daemon\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\daemon\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\daemon\\relay_input_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\daemon\\relay_output_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\daemon\\relay_response_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\daemon\\relay_sse_session_retry_test.go"
+          ],
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        }
+      ]
+    },
+    {
+      "phase": "relay-format-v2-control",
+      "historical": true,
+      "receipt_sha256": "d9975fcc41a9139214e6e8d2fb3dce4d7b39ea9bd5c4a5f7f1249e4b374e7596",
+      "source": "858812988833a84368c60fba1540ae601155fa71",
+      "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+      "manifest_sha256": "5cbf7df8c3ae3ba72c59556fe72af682f8d6649d50a3f6c02e959605b5dbbaea",
+      "runner_sha256": "d8cb7090ddda09cb14a50759f56397a55ff03f3a6ce9bfc29f226788217ed17e",
+      "source_snapshot_sha256": "26cfa4b8725fa723ad4c48fc4daa3ecdbed425c0c578d69138f45b44bf8ff7f4",
+      "source_unchanged": true,
+      "tools_unchanged": true,
+      "commands": [
+        {
+          "label": "go-version",
+          "exit_code": 0,
+          "seconds": 0.023823199910111725,
+          "started_utc": "2026-11-21T22:37:33.878680+00:00",
+          "finished_utc": "2026-11-21T22:37:33.902927+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 34,
+            "sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14",
+            "captured_utc": "2026-11-21T22:37:33.903119+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:37:33.903219+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "version"
+          ],
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        },
+        {
+          "label": "gofmt-check",
+          "exit_code": 0,
+          "seconds": 0.030769499950110912,
+          "started_utc": "2026-11-21T22:37:34.809612+00:00",
+          "finished_utc": "2026-11-21T22:37:34.840987+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:37:34.841337+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:37:34.841515+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\cmd\\mcphub\\main.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\cmd\\mcphub\\relay_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_native_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_other.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\main_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay_input_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay_output_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay_response_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay_sse_session_retry_test.go"
+          ],
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        }
+      ]
+    },
+    {
+      "phase": "relay-format-v2-prime",
+      "historical": true,
+      "receipt_sha256": "40f9ac1d4eecc6b36284b2f7409adabc30ce606421960b1ee16b38ae39d8c4a8",
+      "source": "858812988833a84368c60fba1540ae601155fa71",
+      "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+      "manifest_sha256": "2db10f175e29b5fdb29fae0e02ad36f784c6d333e6deb90ef51b734f3fcd1fc7",
+      "runner_sha256": "d8cb7090ddda09cb14a50759f56397a55ff03f3a6ce9bfc29f226788217ed17e",
+      "source_snapshot_sha256": "26cfa4b8725fa723ad4c48fc4daa3ecdbed425c0c578d69138f45b44bf8ff7f4",
+      "source_unchanged": true,
+      "tools_unchanged": true,
+      "commands": [
+        {
+          "label": "go-version",
+          "exit_code": 0,
+          "seconds": 0.02243610005825758,
+          "started_utc": "2026-11-21T22:43:11.729204+00:00",
+          "finished_utc": "2026-11-21T22:43:11.752228+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 34,
+            "sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14",
+            "captured_utc": "2026-11-21T22:43:11.752419+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:43:11.752517+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "version"
+          ],
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        },
+        {
+          "label": "gofmt-check",
+          "exit_code": 0,
+          "seconds": 0.019220299902372062,
+          "started_utc": "2026-11-21T22:43:12.483265+00:00",
+          "finished_utc": "2026-11-21T22:43:12.502883+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:43:12.503070+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:43:12.503167+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\cmd\\mcphub\\main.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\cmd\\mcphub\\relay_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\cli\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\cli\\relay_process_input.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\cli\\relay_process_input_native_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\cli\\relay_process_input_other.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\cli\\relay_process_input_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\cli\\relay_process_input_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\cli\\relay_process_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\daemon\\main_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\daemon\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\daemon\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\daemon\\relay_input_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\daemon\\relay_output_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\daemon\\relay_response_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\daemon\\relay_sse_session_retry_test.go"
+          ],
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        }
+      ]
+    },
+    {
+      "phase": "relay-v2-contract",
+      "historical": true,
+      "receipt_sha256": "d2a60e8d1fcf062c944e28d13ad0fa108d678f4da0aade7bd13c1600cbceff8f",
+      "source": "858812988833a84368c60fba1540ae601155fa71",
+      "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+      "manifest_sha256": "c5ebbe5c118f8fd79ea1fa776ef53756ae8def31ed3c9e59506397753b940b4e",
+      "runner_sha256": "d8cb7090ddda09cb14a50759f56397a55ff03f3a6ce9bfc29f226788217ed17e",
+      "source_snapshot_sha256": "26cfa4b8725fa723ad4c48fc4daa3ecdbed425c0c578d69138f45b44bf8ff7f4",
+      "source_unchanged": true,
+      "tools_unchanged": true,
+      "commands": [
+        {
+          "label": "gofmt-check",
+          "exit_code": 0,
+          "seconds": 0.21426700009033084,
+          "started_utc": "2026-11-21T22:46:04.054594+00:00",
+          "finished_utc": "2026-11-21T22:46:04.269210+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:46:04.269403+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:46:04.269501+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\cmd\\mcphub\\main.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\cmd\\mcphub\\relay_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\cli\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\cli\\relay_process_input.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\cli\\relay_process_input_native_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\cli\\relay_process_input_other.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\cli\\relay_process_input_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\cli\\relay_process_input_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\cli\\relay_process_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\daemon\\main_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\daemon\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\daemon\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\daemon\\relay_input_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\daemon\\relay_output_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\daemon\\relay_response_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-candidate\\candidate\\internal\\daemon\\relay_sse_session_retry_test.go"
+          ],
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        },
+        {
+          "label": "relay-v2-contract",
+          "exit_code": 0,
+          "seconds": 7.1126257999567315,
+          "started_utc": "2026-11-21T22:46:05.010593+00:00",
+          "finished_utc": "2026-11-21T22:46:12.123511+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 184492,
+            "sha256": "e1232858cd260aa9c04d58daa91fb421894a92fc458d6e078e7de8662cfdd694",
+            "captured_utc": "2026-11-21T22:46:12.124155+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:46:12.124261+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\relay-v2-contract\\overlay.json",
+            "-mod=readonly",
+            "-tags=test_state_path_env",
+            "-race",
+            "-json",
+            "-count=2",
+            "-timeout=5m",
+            "-parallel=1",
+            "-run",
+            "^(TestRelayResponseHTTPBodyLimit|TestRelayResponseSSEAggregateLimit|TestRelayResponseSSELineFailureIsReturned|TestRelayResponsePOSTReadFailureIsReturned|TestRelayResponseReadAndOutputFailuresRemainVisible|TestRelayResponsePOSTTransportFailureSurvivesCancellation|TestRelayResponsePOSTRedirectNeverResends|TestRelayResponseGETTransportFailureSurvivesCancellation|TestRelayResponseGETFailureStopsAndJoins|TestRelayResponseGETCleanEOFStillResumes|TestRelayResponseParserPreservesObservedCauses|TestRelayResponseParserFiniteReceiverContract|TestRelayResponseFramingFeedsOneStdioMessage|TestRelayResponseFramingRejectsMalformedJSON|TestRelayResponseFramingPreservesCompoundCauses|TestRelayResponseFramingEnforcesCommonByteCap|TestRelayResponseSSEUnterminatedEventDoesNotDispatch|TestRelayResponseSSESelectsMCPMessages|TestRelayResponseSSEControlCursorBoundaries|TestRelayResponseSSEControlSelectionPreservesFailures|TestRelayResponseSSEControlEventsRemainBounded|TestRelayResponsePOSTSSEPrimingReachesStdio|TestRelayResponseDefaultGETFollowsRunContextAcrossRuns|TestRelayResponseDefaultPOSTTimeoutRemainsBounded|TestRelayResponseExplicitClientTimeoutIsPreserved)$",
+            "./internal/daemon"
+          ],
+          "terminal_events": {
+            "pass": [
+              "TestRelayResponseHTTPBodyLimit/status_200_bytes_4194304",
+              "TestRelayResponseHTTPBodyLimit/status_200_bytes_4194305",
+              "TestRelayResponseHTTPBodyLimit/status_200_bytes_4202496",
+              "TestRelayResponseHTTPBodyLimit/status_503_bytes_4194304",
+              "TestRelayResponseHTTPBodyLimit/status_503_bytes_4194305",
+              "TestRelayResponseHTTPBodyLimit/status_503_bytes_4202496",
+              "TestRelayResponseHTTPBodyLimit",
+              "TestRelayResponseSSEAggregateLimit/4194304",
+              "TestRelayResponseSSEAggregateLimit/4194305",
+              "TestRelayResponseSSEAggregateLimit",
+              "TestRelayResponseSSELineFailureIsReturned",
+              "TestRelayResponsePOSTReadFailureIsReturned/json",
+              "TestRelayResponsePOSTReadFailureIsReturned/error_body",
+              "TestRelayResponsePOSTReadFailureIsReturned/post_sse",
+              "TestRelayResponsePOSTReadFailureIsReturned",
+              "TestRelayResponseReadAndOutputFailuresRemainVisible",
+              "TestRelayResponsePOSTTransportFailureSurvivesCancellation",
+              "TestRelayResponsePOSTRedirectNeverResends/301",
+              "TestRelayResponsePOSTRedirectNeverResends/302",
+              "TestRelayResponsePOSTRedirectNeverResends/303",
+              "TestRelayResponsePOSTRedirectNeverResends/307",
+              "TestRelayResponsePOSTRedirectNeverResends/308",
+              "TestRelayResponsePOSTRedirectNeverResends",
+              "TestRelayResponseGETTransportFailureSurvivesCancellation",
+              "TestRelayResponseGETFailureStopsAndJoins/truncated_false",
+              "TestRelayResponseGETFailureStopsAndJoins/truncated_true",
+              "TestRelayResponseGETFailureStopsAndJoins",
+              "TestRelayResponseGETCleanEOFStillResumes",
+              "TestRelayResponseParserPreservesObservedCauses",
+              "TestRelayResponseParserFiniteReceiverContract/at_cap",
+              "TestRelayResponseParserFiniteReceiverContract/over_cap",
+              "TestRelayResponseParserFiniteReceiverContract",
+              "TestRelayResponseFramingFeedsOneStdioMessage/application/json",
+              "TestRelayResponseFramingFeedsOneStdioMessage/text/event-stream",
+              "TestRelayResponseFramingFeedsOneStdioMessage",
+              "TestRelayResponseFramingRejectsMalformedJSON/empty/application/json",
+              "TestRelayResponseFramingRejectsMalformedJSON/whitespace_only/application/json",
+              "TestRelayResponseFramingRejectsMalformedJSON/whitespace_only/text/event-stream",
+              "TestRelayResponseFramingRejectsMalformedJSON/double_empty_data/application/json",
+              "TestRelayResponseFramingRejectsMalformedJSON/double_empty_data/text/event-stream",
+              "TestRelayResponseFramingRejectsMalformedJSON/truncated/application/json",
+              "TestRelayResponseFramingRejectsMalformedJSON/truncated/text/event-stream",
+              "TestRelayResponseFramingRejectsMalformedJSON/two_values/application/json",
+              "TestRelayResponseFramingRejectsMalformedJSON/two_values/text/event-stream",
+              "TestRelayResponseFramingRejectsMalformedJSON/raw_newline/application/json",
+              "TestRelayResponseFramingRejectsMalformedJSON/raw_newline/text/event-stream",
+              "TestRelayResponseFramingRejectsMalformedJSON/invalid_utf8/application/json",
+              "TestRelayResponseFramingRejectsMalformedJSON/invalid_utf8/text/event-stream",
+              "TestRelayResponseFramingRejectsMalformedJSON",
+              "TestRelayResponseFramingPreservesCompoundCauses/malformed_false",
+              "TestRelayResponseFramingPreservesCompoundCauses/malformed_true",
+              "TestRelayResponseFramingPreservesCompoundCauses",
+              "TestRelayResponseFramingEnforcesCommonByteCap",
+              "TestRelayResponseSSEUnterminatedEventDoesNotDispatch/bytes_43",
+              "TestRelayResponseSSEUnterminatedEventDoesNotDispatch/bytes_29",
+              "TestRelayResponseSSEUnterminatedEventDoesNotDispatch/bytes_6",
+              "TestRelayResponseSSEUnterminatedEventDoesNotDispatch",
+              "TestRelayResponseSSESelectsMCPMessages/sdk_prime_empty",
+              "TestRelayResponseSSESelectsMCPMessages/empty_default_data",
+              "TestRelayResponseSSESelectsMCPMessages/bare_data",
+              "TestRelayResponseSSESelectsMCPMessages/empty_message_data",
+              "TestRelayResponseSSESelectsMCPMessages/named_non_json",
+              "TestRelayResponseSSESelectsMCPMessages/named_json",
+              "TestRelayResponseSSESelectsMCPMessages/reset_after_type_only",
+              "TestRelayResponseSSESelectsMCPMessages/reset_after_id_only",
+              "TestRelayResponseSSESelectsMCPMessages/reset_after_empty_block",
+              "TestRelayResponseSSESelectsMCPMessages/explicit_message",
+              "TestRelayResponseSSESelectsMCPMessages/last_event_type_wins",
+              "TestRelayResponseSSESelectsMCPMessages/bare_event_resets_type",
+              "TestRelayResponseSSESelectsMCPMessages/one_space_only",
+              "TestRelayResponseSSESelectsMCPMessages/case_sensitive_type",
+              "TestRelayResponseSSESelectsMCPMessages/finite_receiver_stop",
+              "TestRelayResponseSSESelectsMCPMessages",
+              "TestRelayResponseSSEControlCursorBoundaries/complete_prime",
+              "TestRelayResponseSSEControlCursorBoundaries/complete_control",
+              "TestRelayResponseSSEControlCursorBoundaries/complete_id_only",
+              "TestRelayResponseSSEControlCursorBoundaries/incomplete_prime",
+              "TestRelayResponseSSEControlCursorBoundaries/incomplete_control",
+              "TestRelayResponseSSEControlCursorBoundaries/incomplete_id_only",
+              "TestRelayResponseSSEControlCursorBoundaries/pending_after_commit",
+              "TestRelayResponseSSEControlCursorBoundaries/id_whitespace",
+              "TestRelayResponseSSEControlCursorBoundaries/nul_id_ignored",
+              "TestRelayResponseSSEControlCursorBoundaries/nul_after_valid_id",
+              "TestRelayResponseSSEControlCursorBoundaries/bare_id_resets",
+              "TestRelayResponseSSEControlCursorBoundaries/last_id_wins",
+              "TestRelayResponseSSEControlCursorBoundaries/field_case_sensitive",
+              "TestRelayResponseSSEControlCursorBoundaries",
+              "TestRelayResponseSSEControlSelectionPreservesFailures/malformed_message",
+              "TestRelayResponseSSEControlSelectionPreservesFailures/whitespace_message",
+              "TestRelayResponseSSEControlSelectionPreservesFailures/double_empty_data",
+              "TestRelayResponseSSEControlSelectionPreservesFailures/invalid_utf8_message",
+              "TestRelayResponseSSEControlSelectionPreservesFailures/output_failure",
+              "TestRelayResponseSSEControlSelectionPreservesFailures",
+              "TestRelayResponseSSEControlEventsRemainBounded/at_cap",
+              "TestRelayResponseSSEControlEventsRemainBounded/over_cap",
+              "TestRelayResponseSSEControlEventsRemainBounded",
+              "TestRelayResponsePOSTSSEPrimingReachesStdio",
+              "TestRelayResponseDefaultGETFollowsRunContextAcrossRuns",
+              "TestRelayResponseDefaultPOSTTimeoutRemainsBounded",
+              "TestRelayResponseExplicitClientTimeoutIsPreserved/POST",
+              "TestRelayResponseExplicitClientTimeoutIsPreserved/GET",
+              "TestRelayResponseExplicitClientTimeoutIsPreserved",
+              "TestRelayResponseHTTPBodyLimit/status_200_bytes_4194304",
+              "TestRelayResponseHTTPBodyLimit/status_200_bytes_4194305",
+              "TestRelayResponseHTTPBodyLimit/status_200_bytes_4202496",
+              "TestRelayResponseHTTPBodyLimit/status_503_bytes_4194304",
+              "TestRelayResponseHTTPBodyLimit/status_503_bytes_4194305",
+              "TestRelayResponseHTTPBodyLimit/status_503_bytes_4202496",
+              "TestRelayResponseHTTPBodyLimit",
+              "TestRelayResponseSSEAggregateLimit/4194304",
+              "TestRelayResponseSSEAggregateLimit/4194305",
+              "TestRelayResponseSSEAggregateLimit",
+              "TestRelayResponseSSELineFailureIsReturned",
+              "TestRelayResponsePOSTReadFailureIsReturned/json",
+              "TestRelayResponsePOSTReadFailureIsReturned/error_body",
+              "TestRelayResponsePOSTReadFailureIsReturned/post_sse",
+              "TestRelayResponsePOSTReadFailureIsReturned",
+              "TestRelayResponseReadAndOutputFailuresRemainVisible",
+              "TestRelayResponsePOSTTransportFailureSurvivesCancellation",
+              "TestRelayResponsePOSTRedirectNeverResends/301",
+              "TestRelayResponsePOSTRedirectNeverResends/302",
+              "TestRelayResponsePOSTRedirectNeverResends/303",
+              "TestRelayResponsePOSTRedirectNeverResends/307",
+              "TestRelayResponsePOSTRedirectNeverResends/308",
+              "TestRelayResponsePOSTRedirectNeverResends",
+              "TestRelayResponseGETTransportFailureSurvivesCancellation",
+              "TestRelayResponseGETFailureStopsAndJoins/truncated_false",
+              "TestRelayResponseGETFailureStopsAndJoins/truncated_true",
+              "TestRelayResponseGETFailureStopsAndJoins",
+              "TestRelayResponseGETCleanEOFStillResumes",
+              "TestRelayResponseParserPreservesObservedCauses",
+              "TestRelayResponseParserFiniteReceiverContract/at_cap",
+              "TestRelayResponseParserFiniteReceiverContract/over_cap",
+              "TestRelayResponseParserFiniteReceiverContract",
+              "TestRelayResponseFramingFeedsOneStdioMessage/application/json",
+              "TestRelayResponseFramingFeedsOneStdioMessage/text/event-stream",
+              "TestRelayResponseFramingFeedsOneStdioMessage",
+              "TestRelayResponseFramingRejectsMalformedJSON/empty/application/json",
+              "TestRelayResponseFramingRejectsMalformedJSON/whitespace_only/application/json",
+              "TestRelayResponseFramingRejectsMalformedJSON/whitespace_only/text/event-stream",
+              "TestRelayResponseFramingRejectsMalformedJSON/double_empty_data/application/json",
+              "TestRelayResponseFramingRejectsMalformedJSON/double_empty_data/text/event-stream",
+              "TestRelayResponseFramingRejectsMalformedJSON/truncated/application/json",
+              "TestRelayResponseFramingRejectsMalformedJSON/truncated/text/event-stream",
+              "TestRelayResponseFramingRejectsMalformedJSON/two_values/application/json",
+              "TestRelayResponseFramingRejectsMalformedJSON/two_values/text/event-stream",
+              "TestRelayResponseFramingRejectsMalformedJSON/raw_newline/application/json",
+              "TestRelayResponseFramingRejectsMalformedJSON/raw_newline/text/event-stream",
+              "TestRelayResponseFramingRejectsMalformedJSON/invalid_utf8/application/json",
+              "TestRelayResponseFramingRejectsMalformedJSON/invalid_utf8/text/event-stream",
+              "TestRelayResponseFramingRejectsMalformedJSON",
+              "TestRelayResponseFramingPreservesCompoundCauses/malformed_false",
+              "TestRelayResponseFramingPreservesCompoundCauses/malformed_true",
+              "TestRelayResponseFramingPreservesCompoundCauses",
+              "TestRelayResponseFramingEnforcesCommonByteCap",
+              "TestRelayResponseSSEUnterminatedEventDoesNotDispatch/bytes_43",
+              "TestRelayResponseSSEUnterminatedEventDoesNotDispatch/bytes_29",
+              "TestRelayResponseSSEUnterminatedEventDoesNotDispatch/bytes_6",
+              "TestRelayResponseSSEUnterminatedEventDoesNotDispatch",
+              "TestRelayResponseSSESelectsMCPMessages/sdk_prime_empty",
+              "TestRelayResponseSSESelectsMCPMessages/empty_default_data",
+              "TestRelayResponseSSESelectsMCPMessages/bare_data",
+              "TestRelayResponseSSESelectsMCPMessages/empty_message_data",
+              "TestRelayResponseSSESelectsMCPMessages/named_non_json",
+              "TestRelayResponseSSESelectsMCPMessages/named_json",
+              "TestRelayResponseSSESelectsMCPMessages/reset_after_type_only",
+              "TestRelayResponseSSESelectsMCPMessages/reset_after_id_only",
+              "TestRelayResponseSSESelectsMCPMessages/reset_after_empty_block",
+              "TestRelayResponseSSESelectsMCPMessages/explicit_message",
+              "TestRelayResponseSSESelectsMCPMessages/last_event_type_wins",
+              "TestRelayResponseSSESelectsMCPMessages/bare_event_resets_type",
+              "TestRelayResponseSSESelectsMCPMessages/one_space_only",
+              "TestRelayResponseSSESelectsMCPMessages/case_sensitive_type",
+              "TestRelayResponseSSESelectsMCPMessages/finite_receiver_stop",
+              "TestRelayResponseSSESelectsMCPMessages",
+              "TestRelayResponseSSEControlCursorBoundaries/complete_prime",
+              "TestRelayResponseSSEControlCursorBoundaries/complete_control",
+              "TestRelayResponseSSEControlCursorBoundaries/complete_id_only",
+              "TestRelayResponseSSEControlCursorBoundaries/incomplete_prime",
+              "TestRelayResponseSSEControlCursorBoundaries/incomplete_control",
+              "TestRelayResponseSSEControlCursorBoundaries/incomplete_id_only",
+              "TestRelayResponseSSEControlCursorBoundaries/pending_after_commit",
+              "TestRelayResponseSSEControlCursorBoundaries/id_whitespace",
+              "TestRelayResponseSSEControlCursorBoundaries/nul_id_ignored",
+              "TestRelayResponseSSEControlCursorBoundaries/nul_after_valid_id",
+              "TestRelayResponseSSEControlCursorBoundaries/bare_id_resets",
+              "TestRelayResponseSSEControlCursorBoundaries/last_id_wins",
+              "TestRelayResponseSSEControlCursorBoundaries/field_case_sensitive",
+              "TestRelayResponseSSEControlCursorBoundaries",
+              "TestRelayResponseSSEControlSelectionPreservesFailures/malformed_message",
+              "TestRelayResponseSSEControlSelectionPreservesFailures/whitespace_message",
+              "TestRelayResponseSSEControlSelectionPreservesFailures/double_empty_data",
+              "TestRelayResponseSSEControlSelectionPreservesFailures/invalid_utf8_message",
+              "TestRelayResponseSSEControlSelectionPreservesFailures/output_failure",
+              "TestRelayResponseSSEControlSelectionPreservesFailures",
+              "TestRelayResponseSSEControlEventsRemainBounded/at_cap",
+              "TestRelayResponseSSEControlEventsRemainBounded/over_cap",
+              "TestRelayResponseSSEControlEventsRemainBounded",
+              "TestRelayResponsePOSTSSEPrimingReachesStdio",
+              "TestRelayResponseDefaultGETFollowsRunContextAcrossRuns",
+              "TestRelayResponseDefaultPOSTTimeoutRemainsBounded",
+              "TestRelayResponseExplicitClientTimeoutIsPreserved/POST",
+              "TestRelayResponseExplicitClientTimeoutIsPreserved/GET",
+              "TestRelayResponseExplicitClientTimeoutIsPreserved",
+              "PACKAGE:mcp-local-hub/internal/daemon"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "root_counts": {
+            "pass": {
+              "TestRelayResponseHTTPBodyLimit": 2,
+              "TestRelayResponseSSEAggregateLimit": 2,
+              "TestRelayResponseSSELineFailureIsReturned": 2,
+              "TestRelayResponsePOSTReadFailureIsReturned": 2,
+              "TestRelayResponseReadAndOutputFailuresRemainVisible": 2,
+              "TestRelayResponsePOSTTransportFailureSurvivesCancellation": 2,
+              "TestRelayResponsePOSTRedirectNeverResends": 2,
+              "TestRelayResponseGETTransportFailureSurvivesCancellation": 2,
+              "TestRelayResponseGETFailureStopsAndJoins": 2,
+              "TestRelayResponseGETCleanEOFStillResumes": 2,
+              "TestRelayResponseParserPreservesObservedCauses": 2,
+              "TestRelayResponseParserFiniteReceiverContract": 2,
+              "TestRelayResponseFramingFeedsOneStdioMessage": 2,
+              "TestRelayResponseFramingRejectsMalformedJSON": 2,
+              "TestRelayResponseFramingPreservesCompoundCauses": 2,
+              "TestRelayResponseFramingEnforcesCommonByteCap": 2,
+              "TestRelayResponseSSEUnterminatedEventDoesNotDispatch": 2,
+              "TestRelayResponseSSESelectsMCPMessages": 2,
+              "TestRelayResponseSSEControlCursorBoundaries": 2,
+              "TestRelayResponseSSEControlSelectionPreservesFailures": 2,
+              "TestRelayResponseSSEControlEventsRemainBounded": 2,
+              "TestRelayResponsePOSTSSEPrimingReachesStdio": 2,
+              "TestRelayResponseDefaultGETFollowsRunContextAcrossRuns": 2,
+              "TestRelayResponseDefaultPOSTTimeoutRemainsBounded": 2,
+              "TestRelayResponseExplicitClientTimeoutIsPreserved": 2
+            },
+            "fail": {},
+            "skip": {}
+          },
+          "event_counts": {
+            "pass": 205,
+            "fail": 0,
+            "skip": 0
+          },
+          "failure_assertions": [],
+          "raw_stdout": {
+            "archive": "relay-evidence.tar.xz",
+            "member": "history/relay-v2-contract/relay-v2-contract.stdout.log"
+          },
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        }
+      ]
+    },
+    {
+      "phase": "relay-v2-control-body",
+      "historical": true,
+      "receipt_sha256": "c641b577cc95a29249bc223c9672259c04ac120d3d8e55dfe9aaa3f9a4ed7faf",
+      "source": "858812988833a84368c60fba1540ae601155fa71",
+      "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+      "manifest_sha256": "5cbf7df8c3ae3ba72c59556fe72af682f8d6649d50a3f6c02e959605b5dbbaea",
+      "runner_sha256": "d8cb7090ddda09cb14a50759f56397a55ff03f3a6ce9bfc29f226788217ed17e",
+      "source_snapshot_sha256": "26cfa4b8725fa723ad4c48fc4daa3ecdbed425c0c578d69138f45b44bf8ff7f4",
+      "source_unchanged": true,
+      "tools_unchanged": true,
+      "commands": [
+        {
+          "label": "gofmt-check",
+          "exit_code": 0,
+          "seconds": 0.020286899991333485,
+          "started_utc": "2026-11-21T22:39:11.008326+00:00",
+          "finished_utc": "2026-11-21T22:39:11.029001+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:39:11.029191+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:39:11.029303+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\cmd\\mcphub\\main.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\cmd\\mcphub\\relay_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_native_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_other.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\main_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay_input_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay_output_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay_response_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay_sse_session_retry_test.go"
+          ],
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        },
+        {
+          "label": "relay-v2-control-body",
+          "exit_code": 1,
+          "seconds": 3.792322300025262,
+          "started_utc": "2026-11-21T22:39:11.778314+00:00",
+          "finished_utc": "2026-11-21T22:39:15.570950+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 10840,
+            "sha256": "a2fdc86e76eceeaf1dff3cf57a419b4a3b1d79c427f4ffe42d4b0f5a8b01dea2",
+            "captured_utc": "2026-11-21T22:39:15.571185+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:39:15.571286+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\relay-v2-control-body\\overlay.json",
+            "-mod=readonly",
+            "-tags=test_state_path_env",
+            "-race",
+            "-json",
+            "-count=1",
+            "-timeout=90s",
+            "-parallel=1",
+            "-run",
+            "^(TestRelayResponseHTTPBodyLimit|TestRelayResponseSSEAggregateLimit)$",
+            "./internal/daemon"
+          ],
+          "terminal_events": {
+            "pass": [
+              "TestRelayResponseHTTPBodyLimit/status_200_bytes_4194304",
+              "TestRelayResponseHTTPBodyLimit/status_503_bytes_4194304"
+            ],
+            "fail": [
+              "TestRelayResponseHTTPBodyLimit/status_200_bytes_4194305",
+              "TestRelayResponseHTTPBodyLimit/status_200_bytes_4202496",
+              "TestRelayResponseHTTPBodyLimit/status_503_bytes_4194305",
+              "TestRelayResponseHTTPBodyLimit/status_503_bytes_4202496",
+              "TestRelayResponseHTTPBodyLimit",
+              "TestRelayResponseSSEAggregateLimit/4194304",
+              "TestRelayResponseSSEAggregateLimit/4194305",
+              "TestRelayResponseSSEAggregateLimit",
+              "PACKAGE:mcp-local-hub/internal/daemon"
+            ],
+            "skip": []
+          },
+          "root_counts": {
+            "pass": {},
+            "fail": {
+              "TestRelayResponseHTTPBodyLimit": 1,
+              "TestRelayResponseSSEAggregateLimit": 1
+            },
+            "skip": {}
+          },
+          "event_counts": {
+            "pass": 2,
+            "fail": 9,
+            "skip": 0
+          },
+          "failure_assertions": [
+            "relay_response_contract_test.go:94: oversize body cause lost: <nil>",
+            "relay_response_contract_test.go:94: oversize body cause lost: <nil>",
+            "relay_response_contract_test.go:94: oversize body cause lost: <nil>",
+            "relay_response_contract_test.go:94: oversize body cause lost: <nil>",
+            "relay_response_contract_test.go:140: at-cap event must produce one compact frame: error=<nil> output bytes=4194305",
+            "relay_response_contract_test.go:137: oversize event: error=<nil> output bytes=4194306"
+          ],
+          "raw_stdout": {
+            "archive": "relay-evidence.tar.xz",
+            "member": "history/relay-v2-control-body/relay-v2-control-body.stdout.log"
+          },
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        }
+      ]
+    },
+    {
+      "phase": "relay-v2-control-errors",
+      "historical": true,
+      "receipt_sha256": "cedebec381ea59c39c7ffbf1735f35b401b2f1e2eec7bb490240ed9698a0d6f2",
+      "source": "858812988833a84368c60fba1540ae601155fa71",
+      "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+      "manifest_sha256": "5cbf7df8c3ae3ba72c59556fe72af682f8d6649d50a3f6c02e959605b5dbbaea",
+      "runner_sha256": "d8cb7090ddda09cb14a50759f56397a55ff03f3a6ce9bfc29f226788217ed17e",
+      "source_snapshot_sha256": "26cfa4b8725fa723ad4c48fc4daa3ecdbed425c0c578d69138f45b44bf8ff7f4",
+      "source_unchanged": true,
+      "tools_unchanged": true,
+      "commands": [
+        {
+          "label": "gofmt-check",
+          "exit_code": 0,
+          "seconds": 0.022401400026865304,
+          "started_utc": "2026-11-21T22:39:45.606101+00:00",
+          "finished_utc": "2026-11-21T22:39:45.628907+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:39:45.629096+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:39:45.629195+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\cmd\\mcphub\\main.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\cmd\\mcphub\\relay_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_native_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_other.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\main_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay_input_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay_output_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay_response_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay_sse_session_retry_test.go"
+          ],
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        },
+        {
+          "label": "relay-v2-control-errors",
+          "exit_code": 1,
+          "seconds": 4.253337800037116,
+          "started_utc": "2026-11-21T22:39:46.385765+00:00",
+          "finished_utc": "2026-11-21T22:39:50.639426+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 7083,
+            "sha256": "17a7a3450546c956fb1fccc6761d9a163342516f272930bf641e093c4211f0fa",
+            "captured_utc": "2026-11-21T22:39:50.639642+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:39:50.639757+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\relay-v2-control-errors\\overlay.json",
+            "-mod=readonly",
+            "-tags=test_state_path_env",
+            "-race",
+            "-json",
+            "-count=1",
+            "-timeout=90s",
+            "-parallel=1",
+            "-run",
+            "^(TestRelayResponseSSELineFailureIsReturned|TestRelayResponsePOSTReadFailureIsReturned|TestRelayResponseReadAndOutputFailuresRemainVisible)$",
+            "./internal/daemon"
+          ],
+          "terminal_events": {
+            "pass": [],
+            "fail": [
+              "TestRelayResponseSSELineFailureIsReturned",
+              "TestRelayResponsePOSTReadFailureIsReturned/json",
+              "TestRelayResponsePOSTReadFailureIsReturned/error_body",
+              "TestRelayResponsePOSTReadFailureIsReturned/post_sse",
+              "TestRelayResponsePOSTReadFailureIsReturned",
+              "TestRelayResponseReadAndOutputFailuresRemainVisible",
+              "PACKAGE:mcp-local-hub/internal/daemon"
+            ],
+            "skip": []
+          },
+          "root_counts": {
+            "pass": {},
+            "fail": {
+              "TestRelayResponseSSELineFailureIsReturned": 1,
+              "TestRelayResponsePOSTReadFailureIsReturned": 1,
+              "TestRelayResponseReadAndOutputFailuresRemainVisible": 1
+            },
+            "skip": {}
+          },
+          "event_counts": {
+            "pass": 0,
+            "fail": 7,
+            "skip": 0
+          },
+          "failure_assertions": [
+            "relay_response_contract_test.go:150: scanner failure was lost: <nil>",
+            "relay_response_contract_test.go:175: response read cause lost: <nil>",
+            "relay_response_contract_test.go:175: response read cause lost: <nil>",
+            "relay_response_contract_test.go:175: response read cause lost: <nil>",
+            "relay_response_contract_test.go:194: must retain response and output causes: relay stdout: synthetic output failed"
+          ],
+          "raw_stdout": {
+            "archive": "relay-evidence.tar.xz",
+            "member": "history/relay-v2-control-errors/relay-v2-control-errors.stdout.log"
+          },
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        }
+      ]
+    },
+    {
+      "phase": "relay-v2-control-framing",
+      "historical": true,
+      "receipt_sha256": "a62ea5dcc249b81e26eb64aff9823d79eb109f300f3b9615ef0f341fbc9858b7",
+      "source": "858812988833a84368c60fba1540ae601155fa71",
+      "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+      "manifest_sha256": "5cbf7df8c3ae3ba72c59556fe72af682f8d6649d50a3f6c02e959605b5dbbaea",
+      "runner_sha256": "d8cb7090ddda09cb14a50759f56397a55ff03f3a6ce9bfc29f226788217ed17e",
+      "source_snapshot_sha256": "26cfa4b8725fa723ad4c48fc4daa3ecdbed425c0c578d69138f45b44bf8ff7f4",
+      "source_unchanged": true,
+      "tools_unchanged": true,
+      "commands": [
+        {
+          "label": "gofmt-check",
+          "exit_code": 0,
+          "seconds": 0.021088399924337864,
+          "started_utc": "2026-11-21T22:40:13.107005+00:00",
+          "finished_utc": "2026-11-21T22:40:13.128452+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:40:13.128648+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:40:13.128746+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\cmd\\mcphub\\main.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\cmd\\mcphub\\relay_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_native_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_other.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\main_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay_input_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay_output_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay_response_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay_sse_session_retry_test.go"
+          ],
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        },
+        {
+          "label": "relay-v2-control-framing",
+          "exit_code": 1,
+          "seconds": 2.930327699985355,
+          "started_utc": "2026-11-21T22:40:13.890918+00:00",
+          "finished_utc": "2026-11-21T22:40:16.821575+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 4204,
+            "sha256": "d550f0fb9523d4c0b1c711dc2bc04eda529769712eacb4b34d34d9540126fb59",
+            "captured_utc": "2026-11-21T22:40:16.821839+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:40:16.821941+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\relay-v2-control-framing\\overlay.json",
+            "-mod=readonly",
+            "-tags=test_state_path_env",
+            "-race",
+            "-json",
+            "-count=1",
+            "-timeout=90s",
+            "-parallel=1",
+            "-run",
+            "^(TestRelayResponseFramingFeedsOneStdioMessage)$",
+            "./internal/daemon"
+          ],
+          "terminal_events": {
+            "pass": [],
+            "fail": [
+              "TestRelayResponseFramingFeedsOneStdioMessage/application/json",
+              "TestRelayResponseFramingFeedsOneStdioMessage/text/event-stream",
+              "TestRelayResponseFramingFeedsOneStdioMessage",
+              "PACKAGE:mcp-local-hub/internal/daemon"
+            ],
+            "skip": []
+          },
+          "root_counts": {
+            "pass": {},
+            "fail": {
+              "TestRelayResponseFramingFeedsOneStdioMessage": 1
+            },
+            "skip": {}
+          },
+          "event_counts": {
+            "pass": 0,
+            "fail": 4,
+            "skip": 0
+          },
+          "failure_assertions": [
+            "relay_response_contract_test.go:425: stdio frame count/close: output=\"{\\n  \\\"jsonrpc\\\": \\\"2.0\\\",\\n  \\\"id\\\": 9007199254740993,\\n  \\\"result\\\": {\\\"text\\\": \\\"first\\\\nsecond\\\", \\\"literal\\\": \\\"backslash\\\\\\\\n\\\"}\\n}\\n\" closes=1",
+            "relay_response_contract_test.go:425: stdio frame count/close: output=\"{\\n  \\\"jsonrpc\\\": \\\"2.0\\\",\\n  \\\"id\\\": 9007199254740993,\\n  \\\"result\\\": {\\\"text\\\": \\\"first\\\\nsecond\\\", \\\"literal\\\": \\\"backslash\\\\\\\\n\\\"}\\n}\\n\" closes=1"
+          ],
+          "raw_stdout": {
+            "archive": "relay-evidence.tar.xz",
+            "member": "history/relay-v2-control-framing/relay-v2-control-framing.stdout.log"
+          },
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        }
+      ]
+    },
+    {
+      "phase": "relay-v2-control-redirect",
+      "historical": true,
+      "receipt_sha256": "6de61e48dc9d54b111c7e84da99935a8310a2b180b9082e61cb531554d0cf88e",
+      "source": "858812988833a84368c60fba1540ae601155fa71",
+      "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+      "manifest_sha256": "5cbf7df8c3ae3ba72c59556fe72af682f8d6649d50a3f6c02e959605b5dbbaea",
+      "runner_sha256": "d8cb7090ddda09cb14a50759f56397a55ff03f3a6ce9bfc29f226788217ed17e",
+      "source_snapshot_sha256": "26cfa4b8725fa723ad4c48fc4daa3ecdbed425c0c578d69138f45b44bf8ff7f4",
+      "source_unchanged": true,
+      "tools_unchanged": true,
+      "commands": [
+        {
+          "label": "gofmt-check",
+          "exit_code": 0,
+          "seconds": 0.024525800021365285,
+          "started_utc": "2026-11-21T22:40:32.591235+00:00",
+          "finished_utc": "2026-11-21T22:40:32.616160+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:40:32.616409+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:40:32.616507+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\cmd\\mcphub\\main.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\cmd\\mcphub\\relay_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_native_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_other.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\cli\\relay_process_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\main_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay_input_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay_output_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay_response_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-control\\candidate\\internal\\daemon\\relay_sse_session_retry_test.go"
+          ],
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        },
+        {
+          "label": "relay-v2-control-redirect",
+          "exit_code": 1,
+          "seconds": 2.964297499973327,
+          "started_utc": "2026-11-21T22:40:33.687274+00:00",
+          "finished_utc": "2026-11-21T22:40:36.652207+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 7149,
+            "sha256": "6b2f0d80c9420e5b91b906fb158eed6f9b1d9b42b760a9dbe730944939f69602",
+            "captured_utc": "2026-11-21T22:40:36.652409+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:40:36.652508+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\relay-v2-control-redirect\\overlay.json",
+            "-mod=readonly",
+            "-tags=test_state_path_env",
+            "-race",
+            "-json",
+            "-count=1",
+            "-timeout=90s",
+            "-parallel=1",
+            "-run",
+            "^(TestRelayResponsePOSTRedirectNeverResends)$",
+            "./internal/daemon"
+          ],
+          "terminal_events": {
+            "pass": [],
+            "fail": [
+              "TestRelayResponsePOSTRedirectNeverResends/301",
+              "TestRelayResponsePOSTRedirectNeverResends/302",
+              "TestRelayResponsePOSTRedirectNeverResends/303",
+              "TestRelayResponsePOSTRedirectNeverResends/307",
+              "TestRelayResponsePOSTRedirectNeverResends/308",
+              "TestRelayResponsePOSTRedirectNeverResends",
+              "PACKAGE:mcp-local-hub/internal/daemon"
+            ],
+            "skip": []
+          },
+          "root_counts": {
+            "pass": {},
+            "fail": {
+              "TestRelayResponsePOSTRedirectNeverResends": 1
+            },
+            "skip": {}
+          },
+          "event_counts": {
+            "pass": 0,
+            "fail": 7,
+            "skip": 0
+          },
+          "failure_assertions": [
+            "relay_response_contract_test.go:238: redirect response must remain local: requests=2 supplied policy calls=1 output=\"\\n\"",
+            "relay_response_contract_test.go:238: redirect response must remain local: requests=2 supplied policy calls=1 output=\"\\n\"",
+            "relay_response_contract_test.go:238: redirect response must remain local: requests=2 supplied policy calls=1 output=\"\\n\"",
+            "relay_response_contract_test.go:238: redirect response must remain local: requests=2 supplied policy calls=1 output=\"\\n\"",
+            "relay_response_contract_test.go:238: redirect response must remain local: requests=2 supplied policy calls=1 output=\"\\n\""
+          ],
+          "raw_stdout": {
+            "archive": "relay-evidence.tar.xz",
+            "member": "history/relay-v2-control-redirect/relay-v2-control-redirect.stdout.log"
+          },
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        }
+      ]
+    },
+    {
+      "phase": "relay-v2-prime-control",
+      "historical": true,
+      "receipt_sha256": "71b1c21c6bd6d452b9d3501242779e0c1f295aa2e62a84ad65221e5dbf54956f",
+      "source": "858812988833a84368c60fba1540ae601155fa71",
+      "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+      "manifest_sha256": "2db10f175e29b5fdb29fae0e02ad36f784c6d333e6deb90ef51b734f3fcd1fc7",
+      "runner_sha256": "d8cb7090ddda09cb14a50759f56397a55ff03f3a6ce9bfc29f226788217ed17e",
+      "source_snapshot_sha256": "26cfa4b8725fa723ad4c48fc4daa3ecdbed425c0c578d69138f45b44bf8ff7f4",
+      "source_unchanged": true,
+      "tools_unchanged": true,
+      "commands": [
+        {
+          "label": "gofmt-check",
+          "exit_code": 0,
+          "seconds": 0.019329700036905706,
+          "started_utc": "2026-11-21T22:43:53.424875+00:00",
+          "finished_utc": "2026-11-21T22:43:53.444608+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:43:53.444790+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:43:53.444887+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\cmd\\mcphub\\main.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\cmd\\mcphub\\relay_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\cli\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\cli\\relay_process_input.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\cli\\relay_process_input_native_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\cli\\relay_process_input_other.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\cli\\relay_process_input_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\cli\\relay_process_input_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\cli\\relay_process_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\daemon\\main_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\daemon\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\daemon\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\daemon\\relay_input_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\daemon\\relay_output_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\daemon\\relay_response_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\relay-v2-prime-control\\candidate\\internal\\daemon\\relay_sse_session_retry_test.go"
+          ],
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        },
+        {
+          "label": "relay-v2-prime-control",
+          "exit_code": 1,
+          "seconds": 3.1245187999447808,
+          "started_utc": "2026-11-21T22:43:54.187689+00:00",
+          "finished_utc": "2026-11-21T22:43:57.312531+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 1985,
+            "sha256": "3c62ec058f6133f2701a1e87be32524a753321d79a86c0f71f68863ccca5c286",
+            "captured_utc": "2026-11-21T22:43:57.312784+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:43:57.312882+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\relay-v2-prime-control\\overlay.json",
+            "-mod=readonly",
+            "-tags=test_state_path_env",
+            "-race",
+            "-json",
+            "-count=1",
+            "-timeout=30s",
+            "-parallel=1",
+            "-run",
+            "^(TestRelayResponsePOSTSSEPrimingReachesStdio)$",
+            "./internal/daemon"
+          ],
+          "terminal_events": {
+            "pass": [],
+            "fail": [
+              "TestRelayResponsePOSTSSEPrimingReachesStdio",
+              "PACKAGE:mcp-local-hub/internal/daemon"
+            ],
+            "skip": []
+          },
+          "root_counts": {
+            "pass": {},
+            "fail": {
+              "TestRelayResponsePOSTSSEPrimingReachesStdio": 1
+            },
+            "skip": {}
+          },
+          "event_counts": {
+            "pass": 0,
+            "fail": 2,
+            "skip": 0
+          },
+          "failure_assertions": [
+            "relay_response_contract_test.go:727: priming POST did not reach stdio: error=relay stdout: unexpected end of JSON input"
+          ],
+          "raw_stdout": {
+            "archive": "relay-evidence.tar.xz",
+            "member": "history/relay-v2-prime-control/relay-v2-prime-control.stdout.log"
+          },
+          "frozen_oracle_matched": true,
+          "historical_evidence_reused_without_rerun": true
+        }
+      ]
+    },
+    {
+      "phase": "neighbors",
+      "historical": false,
+      "source_unchanged": true,
+      "composition_sha256": "c3f0be2cd6fe0310cc7b951ebeacfc17e16629a32e98eed6af32f7fcc152fb28",
+      "format_exit": 0,
+      "format_stdout_bytes": 0,
+      "commands": [
+        {
+          "label": "neighbors",
+          "exit_code": 0,
+          "seconds": 68.54080790001899,
+          "started_utc": "2026-11-22T08:42:05.961461+00:00",
+          "finished_utc": "2026-11-22T08:43:14.503094+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 31648,
+            "sha256": "734ea73400c379f1cd6e27e8310c2289f5995981b6c1f59aa1b336711b700cfc"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-mod=readonly",
+            "-tags=test_state_path_env",
+            "-race",
+            "-json",
+            "-count=1",
+            "-timeout=5m",
+            "-parallel=1",
+            "-run",
+            "^(TestRelayInputInterruptUnblocksAndJoins|TestRelayInputInterruptWaitsForCallback|TestRelayInputInterruptFailureDoesNotAbandonRead|TestRelayInputInterruptDisarmedAtNormalEOF|TestRelayInputInterruptPreCanceledDoesNotTouchInput|TestRelayInputInterruptOnOutputFailure|TestRelayInputInterruptDoesNotDispatchLateRead|TestRelayInputInterruptPreservesDeadline|TestRelayInputInterruptDisarmedWhileDrainingHTTP|TestRelayInputBorrowedCloserIsNotImplicitCapability|TestRelayInputCombinedErrorsRemainVisible|TestRelayInputDeadlineSurvivesEOFAdapter|TestRelaySSEWaitingForSessionDoesNotSpendRetries|TestQualificationExchangeUsesRealReceiver|TestQualificationSessionCloseIsCached|TestQualificationZeroObservationRefuses|TestRelayOutputFailureWaitsForBorrowedInputOwner)$",
+            "./internal/daemon"
+          ],
+          "terminal_events": {
+            "pass": [
+              "TestRelayInputInterruptUnblocksAndJoins",
+              "TestRelayInputInterruptWaitsForCallback",
+              "TestRelayInputInterruptFailureDoesNotAbandonRead",
+              "TestRelayInputInterruptDisarmedAtNormalEOF",
+              "TestRelayInputInterruptPreCanceledDoesNotTouchInput",
+              "TestRelayInputInterruptOnOutputFailure",
+              "TestRelayInputInterruptDoesNotDispatchLateRead",
+              "TestRelayInputInterruptPreservesDeadline",
+              "TestRelayInputInterruptDisarmedWhileDrainingHTTP",
+              "TestRelayInputBorrowedCloserIsNotImplicitCapability",
+              "TestRelayInputCombinedErrorsRemainVisible/EOF",
+              "TestRelayInputCombinedErrorsRemainVisible/canceled",
+              "TestRelayInputCombinedErrorsRemainVisible/wrapped_EOF",
+              "TestRelayInputCombinedErrorsRemainVisible/wrapped_canceled",
+              "TestRelayInputCombinedErrorsRemainVisible/only_clean_leaves",
+              "TestRelayInputCombinedErrorsRemainVisible/failure",
+              "TestRelayInputCombinedErrorsRemainVisible/failure_with_EOF",
+              "TestRelayInputCombinedErrorsRemainVisible/failure_with_canceled",
+              "TestRelayInputCombinedErrorsRemainVisible/wrapped_nested_failure",
+              "TestRelayInputCombinedErrorsRemainVisible/deadline_with_EOF",
+              "TestRelayInputCombinedErrorsRemainVisible/deadline_with_canceled",
+              "TestRelayInputCombinedErrorsRemainVisible",
+              "TestRelayInputDeadlineSurvivesEOFAdapter",
+              "TestRelayOutputFailureWaitsForBorrowedInputOwner",
+              "TestQualificationExchangeUsesRealReceiver/json",
+              "TestQualificationExchangeUsesRealReceiver/wrong-id",
+              "TestQualificationExchangeUsesRealReceiver/rpc-error",
+              "TestQualificationExchangeUsesRealReceiver/sse-notification-before-reply",
+              "TestQualificationExchangeUsesRealReceiver/sse-missing",
+              "TestQualificationExchangeUsesRealReceiver/initialized",
+              "TestQualificationExchangeUsesRealReceiver/initialized-rejected",
+              "TestQualificationExchangeUsesRealReceiver/close-fault",
+              "TestQualificationExchangeUsesRealReceiver",
+              "TestQualificationSessionCloseIsCached",
+              "TestQualificationZeroObservationRefuses",
+              "TestRelaySSEWaitingForSessionDoesNotSpendRetries",
+              "PACKAGE:mcp-local-hub/internal/daemon"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "root_counts": {
+            "pass": {
+              "TestRelayInputInterruptUnblocksAndJoins": 1,
+              "TestRelayInputInterruptWaitsForCallback": 1,
+              "TestRelayInputInterruptFailureDoesNotAbandonRead": 1,
+              "TestRelayInputInterruptDisarmedAtNormalEOF": 1,
+              "TestRelayInputInterruptPreCanceledDoesNotTouchInput": 1,
+              "TestRelayInputInterruptOnOutputFailure": 1,
+              "TestRelayInputInterruptDoesNotDispatchLateRead": 1,
+              "TestRelayInputInterruptPreservesDeadline": 1,
+              "TestRelayInputInterruptDisarmedWhileDrainingHTTP": 1,
+              "TestRelayInputBorrowedCloserIsNotImplicitCapability": 1,
+              "TestRelayInputCombinedErrorsRemainVisible": 1,
+              "TestRelayInputDeadlineSurvivesEOFAdapter": 1,
+              "TestRelayOutputFailureWaitsForBorrowedInputOwner": 1,
+              "TestQualificationExchangeUsesRealReceiver": 1,
+              "TestQualificationSessionCloseIsCached": 1,
+              "TestQualificationZeroObservationRefuses": 1,
+              "TestRelaySSEWaitingForSessionDoesNotSpendRetries": 1
+            },
+            "fail": {},
+            "skip": {}
+          },
+          "event_counts": {
+            "pass": 37,
+            "fail": 0,
+            "skip": 0
+          },
+          "failure_assertions": [],
+          "raw_stdout": {
+            "archive": "relay-evidence.tar.xz",
+            "member": "evidence/neighbors/neighbors.stdout.log"
+          }
+        }
+      ]
+    },
+    {
+      "phase": "build",
+      "historical": false,
+      "source_unchanged": true,
+      "composition_sha256": "c3f0be2cd6fe0310cc7b951ebeacfc17e16629a32e98eed6af32f7fcc152fb28",
+      "format_exit": 0,
+      "format_stdout_bytes": 0,
+      "commands": [
+        {
+          "label": "build",
+          "exit_code": 0,
+          "seconds": 36.581412999890745,
+          "started_utc": "2026-11-22T08:44:03.731946+00:00",
+          "finished_utc": "2026-11-22T08:44:40.314377+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "build",
+            "-mod=readonly",
+            "-tags=test_state_path_env",
+            "./..."
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "vet",
+      "historical": false,
+      "source_unchanged": true,
+      "composition_sha256": "c3f0be2cd6fe0310cc7b951ebeacfc17e16629a32e98eed6af32f7fcc152fb28",
+      "format_exit": 0,
+      "format_stdout_bytes": 0,
+      "commands": [
+        {
+          "label": "vet",
+          "exit_code": 0,
+          "seconds": 29.69911589997355,
+          "started_utc": "2026-11-22T08:45:00.653452+00:00",
+          "finished_utc": "2026-11-22T08:45:30.394370+00:00",
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "vet",
+            "-mod=readonly",
+            "-tags=test_state_path_env",
+            "./..."
+          ]
+        }
+      ]
+    }
+  ]
+}

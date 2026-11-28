@@ -1,0 +1,33 @@
+{
+  "date": "2026-11-25",
+  "base": "e33924ac97449c7cb8f103d80a39ecbb064310d3",
+  "scope": "focused Windows Relay/HTTPToStdio regressions; not full repository or Product qualification",
+  "toolchain": "go1.27.4 windows/amd64",
+  "status": "PASS",
+  "inputs": {
+    "internal/daemon/relay.go": "e1e0cba798571b6744b0e0b709140a5329d49f533b7bb95b00c0ae92b824ca7a",
+    "internal/daemon/relay_test.go": "d00371fc023f843208bc8a84d8e8e1640c641eee236a33cedc5af4b7adafb56b",
+    "internal/daemon/relay_admission_contract_test.go": "5ebab1a8146d0de4df04af6d33040301e701cb929b182c5521bc0c1f34c8448b"
+  },
+  "negative_control": {
+    "test": "TestRelayAdmissionKeepsNestedResponsesLive",
+    "production_unchanged": true,
+    "test_only_sentinel_for_baseline_compilation": true,
+    "expected_exit": 1,
+    "observed_exit": 1,
+    "failing_subtests": [
+      "stateless",
+      "saturated"
+    ]
+  },
+  "fixed_command": "go test -count=1 -timeout 5m ./internal/daemon -run (Relay|HTTPToStdio)",
+  "fixed_exit": 0,
+  "test_seconds": 2.761,
+  "all_original_commands_settled": true,
+  "not_run": [
+    "race detector",
+    "full repository gates",
+    "external client restart",
+    "installed Product"
+  ]
+}

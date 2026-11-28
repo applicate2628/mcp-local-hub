@@ -1,0 +1,1035 @@
+{
+  "schema": 1,
+  "component": "relay",
+  "physical_source_commit": "858812988833a84368c60fba1540ae601155fa71",
+  "physical_source_tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+  "overlay_paths": 20,
+  "runner_sha256": "719122c74e1347c1aa952067717c0f00222051eac7ca7e0650c158effd1a9047",
+  "manifest_sha256": {
+    "control": "71be55158cc7f8fda7c42fc7bbc59d9efc63b7495bfc92adf9819259c9ba0c23",
+    "candidate": "6e50eeded81d4306acfdb3ff3f57a290eca23a52ed449ecf4942caaf27d3d6d4"
+  },
+  "phases": [
+    {
+      "phase": "relay-build",
+      "receipt_path": "qualification/raw/relay-build/receipt.json",
+      "receipt_sha256": "1d0e9ba7fddb8e68e27e25447500cc98c93dedde0d2c401afcd424d78ddccfed",
+      "started_moscow": "2026-11-22T13:59:18.918406+03:00",
+      "finished_moscow": "2026-11-22T13:59:44.410436+03:00",
+      "source_admission": {
+        "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+        "matched_files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "2086845d9b610a74da049e4524af48df4b0d07458f31b3ad82a42739015c8345",
+        "inventory_schema": "ls-tree order; JSON compact ASCII rows [relative_path, git_blob, byte_length]"
+      },
+      "commands": [
+        {
+          "label": "relay-build-format",
+          "executable": "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+          "args": [
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\cmd\\mcphub\\main.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\cmd\\mcphub\\relay_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_native_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_other.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\main_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_consumer_profile_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_input_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_output_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_protocol_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_qualification.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_response_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_sse_session_retry_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_test.go"
+          ],
+          "exit_code": 0,
+          "seconds": 0.02315459994133562,
+          "settled": true,
+          "timed_out": false
+        },
+        {
+          "label": "relay-build",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "build",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\evidence\\relay-build\\overlay.json",
+            "-p=2",
+            "./..."
+          ],
+          "exit_code": 0,
+          "seconds": 17.428269899915904,
+          "settled": true,
+          "timed_out": false
+        }
+      ]
+    },
+    {
+      "phase": "relay-format",
+      "receipt_path": "qualification/raw/relay-format/receipt.json",
+      "receipt_sha256": "d81af4d2c6e686cc46422d17f8e70ca76004fd1eb3b510598322bb3ff2a0260c",
+      "started_moscow": "2026-11-22T13:52:03.606883+03:00",
+      "finished_moscow": "2026-11-22T13:52:11.419098+03:00",
+      "source_admission": {
+        "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+        "matched_files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "2086845d9b610a74da049e4524af48df4b0d07458f31b3ad82a42739015c8345",
+        "inventory_schema": "ls-tree order; JSON compact ASCII rows [relative_path, git_blob, byte_length]"
+      },
+      "commands": [
+        {
+          "label": "relay-version",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "version"
+          ],
+          "exit_code": 0,
+          "seconds": 0.025961400009691715,
+          "settled": true,
+          "timed_out": false
+        },
+        {
+          "label": "relay-format",
+          "executable": "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+          "args": [
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\cmd\\mcphub\\main.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\cmd\\mcphub\\relay_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_native_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_other.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\main_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_consumer_profile_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_input_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_output_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_protocol_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_qualification.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_response_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_sse_session_retry_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_test.go"
+          ],
+          "exit_code": 0,
+          "seconds": 0.0245311000617221,
+          "settled": true,
+          "timed_out": false
+        }
+      ]
+    },
+    {
+      "phase": "relay-v3-consumer",
+      "receipt_path": "qualification/raw/relay-v3-consumer/receipt.json",
+      "receipt_sha256": "b263d08c0faa41afeb1a6e4371216df5fda11fdaad7dcf7d23596249d303e8bb",
+      "started_moscow": "2026-11-22T13:58:49.095100+03:00",
+      "finished_moscow": "2026-11-22T13:59:01.949990+03:00",
+      "source_admission": {
+        "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+        "matched_files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "2086845d9b610a74da049e4524af48df4b0d07458f31b3ad82a42739015c8345",
+        "inventory_schema": "ls-tree order; JSON compact ASCII rows [relative_path, git_blob, byte_length]"
+      },
+      "commands": [
+        {
+          "label": "relay-v3-consumer-format",
+          "executable": "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+          "args": [
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\cmd\\mcphub\\main.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\cmd\\mcphub\\relay_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_native_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_other.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\main_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_consumer_profile_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_input_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_output_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_protocol_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_qualification.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_response_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_sse_session_retry_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_test.go"
+          ],
+          "exit_code": 0,
+          "seconds": 0.02265189995523542,
+          "settled": true,
+          "timed_out": false
+        },
+        {
+          "label": "relay-v3-consumer",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\evidence\\relay-v3-consumer\\overlay.json",
+            "-p=2",
+            "-race",
+            "-count=1",
+            "-timeout=90s",
+            "-json",
+            "-run",
+            "^(TestRelayConsumerGETSSEResume)$",
+            "./internal/daemon"
+          ],
+          "exit_code": 0,
+          "seconds": 4.498494499945082,
+          "settled": true,
+          "timed_out": false,
+          "terminal_counts": {
+            "pass": 2,
+            "fail": 0,
+            "skip": 0
+          },
+          "test_counts": {
+            "pass": 1,
+            "fail": 0,
+            "skip": 0
+          },
+          "package_counts": {
+            "pass": 1,
+            "fail": 0,
+            "skip": 0
+          },
+          "root_passes": [
+            "TestRelayConsumerGETSSEResume"
+          ],
+          "consumer_observation": "relay_consumer_profile_test.go:377: real SDK GET-SSE consumer: sent=32 delivered=32 GETs=2 cursor=\"_3\" server_retry=75ms observed_reconnect=76.0908ms active_HTTP_after_close=0"
+        }
+      ]
+    },
+    {
+      "phase": "relay-v3-contract",
+      "receipt_path": "qualification/raw/relay-v3-contract/receipt.json",
+      "receipt_sha256": "3b009d02ea9b97746cd34ea69190f4dca4289c6988c305aef6acf693c3a1e7e4",
+      "started_moscow": "2026-11-22T13:55:43.218775+03:00",
+      "finished_moscow": "2026-11-22T13:56:00.882300+03:00",
+      "source_admission": {
+        "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+        "matched_files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "2086845d9b610a74da049e4524af48df4b0d07458f31b3ad82a42739015c8345",
+        "inventory_schema": "ls-tree order; JSON compact ASCII rows [relative_path, git_blob, byte_length]"
+      },
+      "commands": [
+        {
+          "label": "relay-v3-contract-format",
+          "executable": "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+          "args": [
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\cmd\\mcphub\\main.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\cmd\\mcphub\\relay_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_native_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_other.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\main_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_consumer_profile_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_input_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_output_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_protocol_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_qualification.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_response_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_sse_session_retry_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_test.go"
+          ],
+          "exit_code": 0,
+          "seconds": 0.02356330002658069,
+          "settled": true,
+          "timed_out": false
+        },
+        {
+          "label": "relay-v3-contract",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\evidence\\relay-v3-contract\\overlay.json",
+            "-p=2",
+            "-race",
+            "-count=1",
+            "-timeout=90s",
+            "-json",
+            "-run",
+            "^(TestRelayProtocolVersionHeaders|TestRelayProtocolVersionMatchesJSONID|TestRelayProtocolVersionRejectsUnrelatedResponses|TestRelayProtocolVersionWaitsForCompleteOutput|TestRelayProtocolVersionOutputFailureDoesNotPublishSession|TestRelayProtocolVersionResetsBetweenRuns|TestRelayServerRetryFields|TestRelayServerRetryPersistsAcrossReconnects|TestRelayServerRetryCancellation|TestRelayServerRetryOverflowStops|TestRelayServerRetryDoesNotRecoverParserFailure)$",
+            "./internal/daemon"
+          ],
+          "exit_code": 0,
+          "seconds": 9.215712899924256,
+          "settled": true,
+          "timed_out": false,
+          "terminal_counts": {
+            "pass": 80,
+            "fail": 0,
+            "skip": 0
+          },
+          "test_counts": {
+            "pass": 79,
+            "fail": 0,
+            "skip": 0
+          },
+          "package_counts": {
+            "pass": 1,
+            "fail": 0,
+            "skip": 0
+          },
+          "root_passes": [
+            "TestRelayProtocolVersionHeaders",
+            "TestRelayProtocolVersionMatchesJSONID",
+            "TestRelayProtocolVersionRejectsUnrelatedResponses",
+            "TestRelayProtocolVersionWaitsForCompleteOutput",
+            "TestRelayProtocolVersionOutputFailureDoesNotPublishSession",
+            "TestRelayProtocolVersionResetsBetweenRuns",
+            "TestRelayServerRetryFields",
+            "TestRelayServerRetryPersistsAcrossReconnects",
+            "TestRelayServerRetryCancellation",
+            "TestRelayServerRetryOverflowStops",
+            "TestRelayServerRetryDoesNotRecoverParserFailure"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "relay-v3-control-gating",
+      "receipt_path": "qualification/raw/relay-v3-control-gating/receipt.json",
+      "receipt_sha256": "275da413f7686a1b533fff608b37703c8e3f956c9f83d17afbf516b20d4fd3cb",
+      "started_moscow": "2026-11-22T13:53:18.403468+03:00",
+      "finished_moscow": "2026-11-22T13:53:30.009543+03:00",
+      "source_admission": {
+        "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+        "matched_files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "2086845d9b610a74da049e4524af48df4b0d07458f31b3ad82a42739015c8345",
+        "inventory_schema": "ls-tree order; JSON compact ASCII rows [relative_path, git_blob, byte_length]"
+      },
+      "commands": [
+        {
+          "label": "relay-v3-control-gating-format",
+          "executable": "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+          "args": [
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\cmd\\mcphub\\main.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\cmd\\mcphub\\relay_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay_process_input.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay_process_input_native_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay_process_input_other.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay_process_input_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay_process_input_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay_process_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\main_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_consumer_profile_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_input_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_output_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_protocol_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_qualification.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_response_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_sse_session_retry_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_test.go"
+          ],
+          "exit_code": 0,
+          "seconds": 0.0313359999563545,
+          "settled": true,
+          "timed_out": false
+        },
+        {
+          "label": "relay-v3-control-gating",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\evidence\\relay-v3-control-gating\\overlay.json",
+            "-p=2",
+            "-race",
+            "-count=1",
+            "-timeout=90s",
+            "-json",
+            "-run",
+            "^(TestRelayProtocolVersionWaitsForCompleteOutput|TestRelayProtocolVersionOutputFailureDoesNotPublishSession)$",
+            "./internal/daemon"
+          ],
+          "exit_code": 1,
+          "seconds": 3.582472199923359,
+          "settled": true,
+          "timed_out": false,
+          "terminal_counts": {
+            "pass": 1,
+            "fail": 7,
+            "skip": 0
+          },
+          "test_counts": {
+            "pass": 1,
+            "fail": 6,
+            "skip": 0
+          },
+          "package_counts": {
+            "pass": 0,
+            "fail": 1,
+            "skip": 0
+          },
+          "root_passes": []
+        }
+      ]
+    },
+    {
+      "phase": "relay-v3-control-overflow",
+      "receipt_path": "qualification/raw/relay-v3-control-overflow/receipt.json",
+      "receipt_sha256": "15ebd8f26e679ecb49cebcbb8aee703fa57a1bafe8f5a4dade32d36fe2b2dacc",
+      "started_moscow": "2026-11-22T13:54:54.746195+03:00",
+      "finished_moscow": "2026-11-22T13:55:05.944496+03:00",
+      "source_admission": {
+        "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+        "matched_files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "2086845d9b610a74da049e4524af48df4b0d07458f31b3ad82a42739015c8345",
+        "inventory_schema": "ls-tree order; JSON compact ASCII rows [relative_path, git_blob, byte_length]"
+      },
+      "commands": [
+        {
+          "label": "relay-v3-control-overflow-format",
+          "executable": "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+          "args": [
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\cmd\\mcphub\\main.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\cmd\\mcphub\\relay_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay_process_input.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay_process_input_native_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay_process_input_other.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay_process_input_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay_process_input_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay_process_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\main_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_consumer_profile_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_input_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_output_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_protocol_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_qualification.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_response_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_sse_session_retry_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_test.go"
+          ],
+          "exit_code": 0,
+          "seconds": 0.02390569995623082,
+          "settled": true,
+          "timed_out": false
+        },
+        {
+          "label": "relay-v3-control-overflow",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\evidence\\relay-v3-control-overflow\\overlay.json",
+            "-p=2",
+            "-race",
+            "-count=1",
+            "-timeout=90s",
+            "-json",
+            "-run",
+            "^(TestRelayServerRetryOverflowStops)$",
+            "./internal/daemon"
+          ],
+          "exit_code": 1,
+          "seconds": 3.3076068999944255,
+          "settled": true,
+          "timed_out": false,
+          "terminal_counts": {
+            "pass": 0,
+            "fail": 5,
+            "skip": 0
+          },
+          "test_counts": {
+            "pass": 0,
+            "fail": 4,
+            "skip": 0
+          },
+          "package_counts": {
+            "pass": 0,
+            "fail": 1,
+            "skip": 0
+          },
+          "root_passes": []
+        }
+      ]
+    },
+    {
+      "phase": "relay-v3-control-retry",
+      "receipt_path": "qualification/raw/relay-v3-control-retry/receipt.json",
+      "receipt_sha256": "2795537c0fb166e318d19f61e7835509c6cadb79a2d39b35e5e144e757f24ba3",
+      "started_moscow": "2026-11-22T13:54:06.287098+03:00",
+      "finished_moscow": "2026-11-22T13:54:17.578603+03:00",
+      "source_admission": {
+        "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+        "matched_files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "2086845d9b610a74da049e4524af48df4b0d07458f31b3ad82a42739015c8345",
+        "inventory_schema": "ls-tree order; JSON compact ASCII rows [relative_path, git_blob, byte_length]"
+      },
+      "commands": [
+        {
+          "label": "relay-v3-control-retry-format",
+          "executable": "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+          "args": [
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\cmd\\mcphub\\main.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\cmd\\mcphub\\relay_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay_process_input.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay_process_input_native_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay_process_input_other.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay_process_input_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay_process_input_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay_process_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\main_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_consumer_profile_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_input_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_output_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_protocol_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_qualification.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_response_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_sse_session_retry_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_test.go"
+          ],
+          "exit_code": 0,
+          "seconds": 0.023778699920512736,
+          "settled": true,
+          "timed_out": false
+        },
+        {
+          "label": "relay-v3-control-retry",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\evidence\\relay-v3-control-retry\\overlay.json",
+            "-p=2",
+            "-race",
+            "-count=1",
+            "-timeout=90s",
+            "-json",
+            "-run",
+            "^(TestRelayServerRetryFields|TestRelayServerRetryPersistsAcrossReconnects)$",
+            "./internal/daemon"
+          ],
+          "exit_code": 1,
+          "seconds": 3.4215942999580875,
+          "settled": true,
+          "timed_out": false,
+          "terminal_counts": {
+            "pass": 12,
+            "fail": 11,
+            "skip": 0
+          },
+          "test_counts": {
+            "pass": 12,
+            "fail": 10,
+            "skip": 0
+          },
+          "package_counts": {
+            "pass": 0,
+            "fail": 1,
+            "skip": 0
+          },
+          "root_passes": []
+        }
+      ]
+    },
+    {
+      "phase": "relay-v3-control-version",
+      "receipt_path": "qualification/raw/relay-v3-control-version/receipt.json",
+      "receipt_sha256": "8312a12cb1356608f7a8b6351b0d6fb6e2823a38c920bbd40ea227ed02776e82",
+      "started_moscow": "2026-11-22T13:52:37.924804+03:00",
+      "finished_moscow": "2026-11-22T13:53:07.768964+03:00",
+      "source_admission": {
+        "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+        "matched_files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "2086845d9b610a74da049e4524af48df4b0d07458f31b3ad82a42739015c8345",
+        "inventory_schema": "ls-tree order; JSON compact ASCII rows [relative_path, git_blob, byte_length]"
+      },
+      "commands": [
+        {
+          "label": "relay-v3-control-version-format",
+          "executable": "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+          "args": [
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\cmd\\mcphub\\main.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\cmd\\mcphub\\relay_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay_process_input.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay_process_input_native_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay_process_input_other.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay_process_input_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay_process_input_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\cli\\relay_process_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\main_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_consumer_profile_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_input_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_output_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_protocol_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_qualification.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_response_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_sse_session_retry_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\control\\candidate\\internal\\daemon\\relay_test.go"
+          ],
+          "exit_code": 0,
+          "seconds": 0.023504600045271218,
+          "settled": true,
+          "timed_out": false
+        },
+        {
+          "label": "relay-v3-control-version",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\evidence\\relay-v3-control-version\\overlay.json",
+            "-p=2",
+            "-race",
+            "-count=1",
+            "-timeout=90s",
+            "-json",
+            "-run",
+            "^(TestRelayProtocolVersionHeaders|TestRelayProtocolVersionMatchesJSONID|TestRelayProtocolVersionRejectsUnrelatedResponses)$",
+            "./internal/daemon"
+          ],
+          "exit_code": 1,
+          "seconds": 21.707340799970552,
+          "settled": true,
+          "timed_out": false,
+          "terminal_counts": {
+            "pass": 0,
+            "fail": 38,
+            "skip": 0
+          },
+          "test_counts": {
+            "pass": 0,
+            "fail": 37,
+            "skip": 0
+          },
+          "package_counts": {
+            "pass": 0,
+            "fail": 1,
+            "skip": 0
+          },
+          "root_passes": []
+        }
+      ]
+    },
+    {
+      "phase": "relay-v3-owner-regression",
+      "receipt_path": "qualification/raw/relay-v3-owner-regression/receipt.json",
+      "receipt_sha256": "6d89dc31375305bbe018aee207e83c4a1bece52f9617282de9d6ece8883372ec",
+      "started_moscow": "2026-11-22T13:57:36.613044+03:00",
+      "finished_moscow": "2026-11-22T13:57:48.914887+03:00",
+      "source_admission": {
+        "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+        "matched_files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "2086845d9b610a74da049e4524af48df4b0d07458f31b3ad82a42739015c8345",
+        "inventory_schema": "ls-tree order; JSON compact ASCII rows [relative_path, git_blob, byte_length]"
+      },
+      "commands": [
+        {
+          "label": "relay-v3-owner-regression-format",
+          "executable": "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+          "args": [
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\cmd\\mcphub\\main.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\cmd\\mcphub\\relay_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_native_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_other.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\main_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_consumer_profile_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_input_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_output_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_protocol_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_qualification.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_response_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_sse_session_retry_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_test.go"
+          ],
+          "exit_code": 0,
+          "seconds": 0.022058599977754056,
+          "settled": true,
+          "timed_out": false
+        },
+        {
+          "label": "relay-v3-owner-regression",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\evidence\\relay-v3-owner-regression\\overlay.json",
+            "-p=2",
+            "-race",
+            "-count=1",
+            "-timeout=90s",
+            "-json",
+            "-run",
+            "^(TestRelayInputInterruptUnblocksAndJoins|TestRelayInputInterruptWaitsForCallback|TestRelayInputInterruptFailureDoesNotAbandonRead|TestRelayInputInterruptDisarmedAtNormalEOF|TestRelayInputInterruptPreCanceledDoesNotTouchInput|TestRelayInputInterruptOnOutputFailure|TestRelayInputInterruptDoesNotDispatchLateRead|TestRelayInputInterruptPreservesDeadline|TestRelayInputInterruptDisarmedWhileDrainingHTTP|TestRelayInputBorrowedCloserIsNotImplicitCapability|TestRelayInputCombinedErrorsRemainVisible|TestRelayInputDeadlineSurvivesEOFAdapter|TestRelaySSEWaitingForSessionDoesNotSpendRetries|TestQualificationExchangeUsesRealReceiver|TestQualificationSessionCloseIsCached|TestQualificationZeroObservationRefuses|TestRelayOutputFailureWaitsForBorrowedInputOwner|TestRelayOutputFailureMatrix|TestRelayOutputFailureConcurrentProducers|TestRelayOutputFailurePreservesInputFailure|TestRelayOutputFailureDoesNotPoisonNewRun|TestRelayOutputFailureCancelsPendingHTTP|TestRelayOutputSuccessDrainsAfterEOF)$",
+            "./internal/daemon"
+          ],
+          "exit_code": 0,
+          "seconds": 4.57427350000944,
+          "settled": true,
+          "timed_out": false,
+          "terminal_counts": {
+            "pass": 63,
+            "fail": 0,
+            "skip": 0
+          },
+          "test_counts": {
+            "pass": 62,
+            "fail": 0,
+            "skip": 0
+          },
+          "package_counts": {
+            "pass": 1,
+            "fail": 0,
+            "skip": 0
+          },
+          "root_passes": [
+            "TestRelayInputInterruptUnblocksAndJoins",
+            "TestRelayInputInterruptWaitsForCallback",
+            "TestRelayInputInterruptFailureDoesNotAbandonRead",
+            "TestRelayInputInterruptDisarmedAtNormalEOF",
+            "TestRelayInputInterruptPreCanceledDoesNotTouchInput",
+            "TestRelayInputInterruptOnOutputFailure",
+            "TestRelayInputInterruptDoesNotDispatchLateRead",
+            "TestRelayInputInterruptPreservesDeadline",
+            "TestRelayInputInterruptDisarmedWhileDrainingHTTP",
+            "TestRelayInputBorrowedCloserIsNotImplicitCapability",
+            "TestRelayInputCombinedErrorsRemainVisible",
+            "TestRelayInputDeadlineSurvivesEOFAdapter",
+            "TestRelayOutputFailureMatrix",
+            "TestRelayOutputFailureConcurrentProducers",
+            "TestRelayOutputFailurePreservesInputFailure",
+            "TestRelayOutputFailureDoesNotPoisonNewRun",
+            "TestRelayOutputFailureCancelsPendingHTTP",
+            "TestRelayOutputFailureWaitsForBorrowedInputOwner",
+            "TestRelayOutputSuccessDrainsAfterEOF",
+            "TestQualificationExchangeUsesRealReceiver",
+            "TestQualificationSessionCloseIsCached",
+            "TestQualificationZeroObservationRefuses",
+            "TestRelaySSEWaitingForSessionDoesNotSpendRetries"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "relay-v3-response-regression",
+      "receipt_path": "qualification/raw/relay-v3-response-regression/receipt.json",
+      "receipt_sha256": "50c71411314af0e4c1aba89957bdacdd5178a86ac8acebeb9da93c711487c88a",
+      "started_moscow": "2026-11-22T13:56:35.777158+03:00",
+      "finished_moscow": "2026-11-22T13:56:49.263666+03:00",
+      "source_admission": {
+        "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+        "matched_files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "2086845d9b610a74da049e4524af48df4b0d07458f31b3ad82a42739015c8345",
+        "inventory_schema": "ls-tree order; JSON compact ASCII rows [relative_path, git_blob, byte_length]"
+      },
+      "commands": [
+        {
+          "label": "relay-v3-response-regression-format",
+          "executable": "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+          "args": [
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\cmd\\mcphub\\main.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\cmd\\mcphub\\relay_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_native_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_other.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\main_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_consumer_profile_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_input_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_output_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_protocol_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_qualification.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_response_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_sse_session_retry_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_test.go"
+          ],
+          "exit_code": 0,
+          "seconds": 0.021961999940685928,
+          "settled": true,
+          "timed_out": false
+        },
+        {
+          "label": "relay-v3-response-regression",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\evidence\\relay-v3-response-regression\\overlay.json",
+            "-p=2",
+            "-race",
+            "-count=1",
+            "-timeout=90s",
+            "-json",
+            "-run",
+            "^(TestRelayResponseHTTPBodyLimit|TestRelayResponseSSEAggregateLimit|TestRelayResponseSSELineFailureIsReturned|TestRelayResponsePOSTReadFailureIsReturned|TestRelayResponseReadAndOutputFailuresRemainVisible|TestRelayResponsePOSTTransportFailureSurvivesCancellation|TestRelayResponsePOSTRedirectNeverResends|TestRelayResponseGETTransportFailureSurvivesCancellation|TestRelayResponseGETFailureStopsAndJoins|TestRelayResponseGETCleanEOFStillResumes|TestRelayResponseParserPreservesObservedCauses|TestRelayResponseParserFiniteReceiverContract|TestRelayResponseFramingFeedsOneStdioMessage|TestRelayResponseFramingRejectsMalformedJSON|TestRelayResponseFramingPreservesCompoundCauses|TestRelayResponseFramingEnforcesCommonByteCap|TestRelayResponseSSEUnterminatedEventDoesNotDispatch|TestRelayResponseSSESelectsMCPMessages|TestRelayResponseSSEControlCursorBoundaries|TestRelayResponseSSEControlSelectionPreservesFailures|TestRelayResponseSSEControlEventsRemainBounded|TestRelayResponsePOSTSSEPrimingReachesStdio|TestRelayResponseDefaultGETFollowsRunContextAcrossRuns|TestRelayResponseDefaultPOSTTimeoutRemainsBounded|TestRelayResponseExplicitClientTimeoutIsPreserved)$",
+            "./internal/daemon"
+          ],
+          "exit_code": 0,
+          "seconds": 5.36982599995099,
+          "settled": true,
+          "timed_out": false,
+          "terminal_counts": {
+            "pass": 103,
+            "fail": 0,
+            "skip": 0
+          },
+          "test_counts": {
+            "pass": 102,
+            "fail": 0,
+            "skip": 0
+          },
+          "package_counts": {
+            "pass": 1,
+            "fail": 0,
+            "skip": 0
+          },
+          "root_passes": [
+            "TestRelayResponseHTTPBodyLimit",
+            "TestRelayResponseSSEAggregateLimit",
+            "TestRelayResponseSSELineFailureIsReturned",
+            "TestRelayResponsePOSTReadFailureIsReturned",
+            "TestRelayResponseReadAndOutputFailuresRemainVisible",
+            "TestRelayResponsePOSTTransportFailureSurvivesCancellation",
+            "TestRelayResponsePOSTRedirectNeverResends",
+            "TestRelayResponseGETTransportFailureSurvivesCancellation",
+            "TestRelayResponseGETFailureStopsAndJoins",
+            "TestRelayResponseGETCleanEOFStillResumes",
+            "TestRelayResponseParserPreservesObservedCauses",
+            "TestRelayResponseParserFiniteReceiverContract",
+            "TestRelayResponseFramingFeedsOneStdioMessage",
+            "TestRelayResponseFramingRejectsMalformedJSON",
+            "TestRelayResponseFramingPreservesCompoundCauses",
+            "TestRelayResponseFramingEnforcesCommonByteCap",
+            "TestRelayResponseSSEUnterminatedEventDoesNotDispatch",
+            "TestRelayResponseSSESelectsMCPMessages",
+            "TestRelayResponseSSEControlCursorBoundaries",
+            "TestRelayResponseSSEControlSelectionPreservesFailures",
+            "TestRelayResponseSSEControlEventsRemainBounded",
+            "TestRelayResponsePOSTSSEPrimingReachesStdio",
+            "TestRelayResponseDefaultGETFollowsRunContextAcrossRuns",
+            "TestRelayResponseDefaultPOSTTimeoutRemainsBounded",
+            "TestRelayResponseExplicitClientTimeoutIsPreserved"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "relay-v3-session-regression",
+      "receipt_path": "qualification/raw/relay-v3-session-regression/receipt.json",
+      "receipt_sha256": "fd4439afaf2590098c897215c20edfd7a2aa65d00d733777b032c99e7df78a43",
+      "started_moscow": "2026-11-22T13:58:06.569428+03:00",
+      "finished_moscow": "2026-11-22T13:58:20.106971+03:00",
+      "source_admission": {
+        "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+        "matched_files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "2086845d9b610a74da049e4524af48df4b0d07458f31b3ad82a42739015c8345",
+        "inventory_schema": "ls-tree order; JSON compact ASCII rows [relative_path, git_blob, byte_length]"
+      },
+      "commands": [
+        {
+          "label": "relay-v3-session-regression-format",
+          "executable": "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+          "args": [
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\cmd\\mcphub\\main.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\cmd\\mcphub\\relay_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_native_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_other.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\main_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_consumer_profile_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_input_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_output_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_protocol_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_qualification.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_response_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_sse_session_retry_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_test.go"
+          ],
+          "exit_code": 0,
+          "seconds": 0.023942400002852082,
+          "settled": true,
+          "timed_out": false
+        },
+        {
+          "label": "relay-v3-session-regression",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\evidence\\relay-v3-session-regression\\overlay.json",
+            "-p=2",
+            "-race",
+            "-count=1",
+            "-timeout=90s",
+            "-json",
+            "-run",
+            "^(TestRelay_InitializePOSTMintsSession|TestRelay_SessionHeaderEchoedOnSubsequentPOSTs|TestRelay_GracefulShutdownSendsDELETE|TestRelay_ShutdownReleasesOwnedSessionReference)$",
+            "./internal/daemon"
+          ],
+          "exit_code": 0,
+          "seconds": 5.484067999990657,
+          "settled": true,
+          "timed_out": false,
+          "terminal_counts": {
+            "pass": 7,
+            "fail": 0,
+            "skip": 0
+          },
+          "test_counts": {
+            "pass": 6,
+            "fail": 0,
+            "skip": 0
+          },
+          "package_counts": {
+            "pass": 1,
+            "fail": 0,
+            "skip": 0
+          },
+          "root_passes": [
+            "TestRelay_InitializePOSTMintsSession",
+            "TestRelay_SessionHeaderEchoedOnSubsequentPOSTs",
+            "TestRelay_GracefulShutdownSendsDELETE",
+            "TestRelay_ShutdownReleasesOwnedSessionReference"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "relay-vet",
+      "receipt_path": "qualification/raw/relay-vet/receipt.json",
+      "receipt_sha256": "719b82803a175d1783af48d6d2c56e8980c39b840b78ec6a65a86e1453c60f6e",
+      "started_moscow": "2026-11-22T14:00:27.100220+03:00",
+      "finished_moscow": "2026-11-22T14:00:56.370166+03:00",
+      "source_admission": {
+        "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+        "matched_files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "2086845d9b610a74da049e4524af48df4b0d07458f31b3ad82a42739015c8345",
+        "inventory_schema": "ls-tree order; JSON compact ASCII rows [relative_path, git_blob, byte_length]"
+      },
+      "commands": [
+        {
+          "label": "relay-vet-format",
+          "executable": "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+          "args": [
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\cmd\\mcphub\\main.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\cmd\\mcphub\\relay_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_native_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_other.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\cli\\relay_process_input_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\main_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_consumer_profile_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_input_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_output_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_protocol_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_qualification.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_response_contract_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_sse_session_retry_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\relay-qualification\\candidate\\candidate\\internal\\daemon\\relay_test.go"
+          ],
+          "exit_code": 0,
+          "seconds": 0.0712077000644058,
+          "settled": true,
+          "timed_out": false
+        },
+        {
+          "label": "relay-vet",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "vet",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\evidence\\relay-vet\\overlay.json",
+            "-p=2",
+            "./..."
+          ],
+          "exit_code": 0,
+          "seconds": 20.942840500036255,
+          "settled": true,
+          "timed_out": false
+        }
+      ]
+    }
+  ],
+  "raw_archive": {
+    "path": "raw-evidence.tar.gz",
+    "bytes": 3872612,
+    "sha256": "beb16c79c122f7dd0e9e3f754dda80048bfc0ff7ce8e56b617cc55b639367e55",
+    "git_blob": "7e61d7f5c30ae975ff7438872e433bcc0d588a06",
+    "indexed_files": 2540,
+    "total_regular_members": 2541
+  },
+  "full_default_tests": "NOT_RUN",
+  "full_tagged_tests": "NOT_RUN",
+  "external_exact_published_head_review": "PENDING",
+  "standalone_published_tree_tested": false,
+  "whole_process_tree_deadline_or_settlement_proven": false
+}

@@ -1,0 +1,229 @@
+{
+  "own_review": {
+    "reviewer": "/root",
+    "kind": "Own review of requirements, correctness, safety, compatibility and complexity; independent reviews supplement it",
+    "component": "relay",
+    "review": {
+      "status": "NO_OPEN_MANDATORY_FINDINGS_IN_DECLARED_SCOPE",
+      "requirements": "Bind protocol version to the matching successful InitializeResult, publish session/version after a complete delivered stdout frame, honor server retry and preserve existing bounded parsing/ownership contracts.",
+      "reviewed": [
+        "Six final formatted files against exact preceding #629 bytes, shared parser callers, session state synchronization, cancellation and pending-session cleanup.",
+        "Exact string/integer JSON request IDs avoid float rounding; calendar dates are validated without inventing a protocol-version allowlist.",
+        "A pending session belongs to its POST worker until output admission. Best-effort cleanup has an independent two-second context and Run joins that worker; remote DELETE success is not guaranteed.",
+        "SSE retry uses ASCII decimal milliseconds, persists across GET reconnects, treats zero as valid and fails closed on an unrepresentable duration. Cursor commits remain tied to completed delivery; POST is not replayed.",
+        "The real SDK consumer uses owned pipes and loopback HTTP, the real event store and a deliberately cut GET stream. It establishes one functional recovery observation, not peak/retained-memory or POST-origin recovery acceptance.",
+        "All formatter changes were read and bound to frozen candidates; independent lexical checks preserve tokens, literals and comments. No unrelated refactor, new dependency or second owner was added."
+      ],
+      "findings_fixed_before_qualification": [
+        {
+          "location": "internal/daemon/relay.go:post response session admission",
+          "condition": "A non-initialize or unrelated response presents an MCP session header.",
+          "consequence": "The relay could establish an active session before a matching successful initialization result was delivered.",
+          "fix": "Admit the session/version pair only from the matching valid InitializeResult after full stdout delivery."
+        },
+        {
+          "location": "internal/daemon/relay.go:canonical JSON numeric-ID exponent handling",
+          "condition": "A bounded JSON input contains an extremely long exponent.",
+          "consequence": "Arbitrary-precision exponent arithmetic could impose disproportionate CPU work within the byte cap.",
+          "fix": "Use linear decimal normalization/carry/borrow without math/big or expanded powers; retain boundary regressions."
+        }
+      ],
+      "qualification": "Frozen source858 + 20 overlays; four distinct controls and five candidate groups, full build/vet completed with the fixed runner. Exact raw counts are derived in runtime-summary.json.",
+      "remaining": [
+        "POST-origin SSE recovery",
+        "peak/retained-memory and load measurements",
+        "full default/tagged suites",
+        "external review of the exact published commit"
+      ]
+    },
+    "global_limits": [
+      "Qualification compositions are explicit overlays, not an assertion that an entire standalone branch passed all acceptance gates.",
+      "No full Go test suite, installed product, real Scheduler action, installation, manual CI or paid/quota reviewer was executed.",
+      "Direct-child settlement and available command-line observations do not constitute an atomic whole-process-tree guarantee."
+    ]
+  },
+  "independent_source_review": {
+    "schema": 1,
+    "status": "SOURCE_REVIEWED_NOT_RUN",
+    "reviewer": "/root/pr658_audit",
+    "reviewed_utc": "2026-11-22T10:45:32.372392+00:00",
+    "scope": "Independent read-only review of the complete six-file preformat delta, both new tests, affected call paths, exact source bindings and selected SDK stream/store implementation. Reviewer executed no formatter, Go, tests or Comet.",
+    "base_commit": "f11cd6cf1f4031f3a2d7db60fb5d4edf19d0a4da",
+    "production_sha256": "51180c9e742929d6cf87bbaa6a0db6cc54bcbd41768f570a85c0f3af63337895",
+    "artifacts_sha256": {
+      "candidate-preformat.diff": "bdfc69e993e3b13f60eeddbe23bd70da3efb3a7c00dcf2645c06d82e2992ca02",
+      "candidate-freeze-preformat.json": "0fa1a75c2f67b8923b3ed77f5d2427e7ae97aaf0ffa551013abd68e5a2c3403b",
+      "qualification-plan-preformat.json": "daeb5cd6cac3aec1122463248fdd7c6441e34ff9280608142b4b51426fde5cc1",
+      "sdk-runtime-source-binding.json": "53883e392814fcbbe2aedd34cffb54ea1b7a2e78767426f42a274b6b4a470da4"
+    },
+    "blocking_findings": [],
+    "root_own_review": {
+      "basis": "Explicit parent confirmation received before this receipt",
+      "completed_scope": "Full production diff, both new tests, mechanical nil arguments, two existing fixture changes, bounded_cleanup_joins_run and final numeric comparator",
+      "reported_blocking_findings": []
+    },
+    "source_verified_properties": [
+      "All six frozen file lengths, SHA256 and Git blobs match; the complete diff matches them and four preceding file bytes match exact local Git commit f11cd6cf1f4031f3a2d7db60fb5d4edf19d0a4da; both new tests are absent in that commit.",
+      "All 18 candidate/control file bindings match the qualification plan; all eight local SDK file hashes match the separate SDK source binding.",
+      "Only a matching initialize result establishes active metadata. Session ID and version publish under one mutex after writeLine accepts the complete frame, including its newline; unrelated-method headers cannot establish a session.",
+      "An unpublished initialize session remains owned by its POST worker and receives one best-effort DELETE through an independent 2-second context. Run joins that worker; the final owned-session cleanup clears both session and protocol version.",
+      "The numeric ID comparator preserves exact coefficients/exponents without float64, large exponent integers or powers of ten. Its decimal carry/borrow uses bounded passes; noninteger numeric IDs do not qualify negotiation.",
+      "Valid ASCII retry milliseconds update GET reconnection state on field receipt and persist across clean EOF, transport error and HTTP-status retry. Invalid values preserve the prior delay; duration overflow terminates instead of reconnecting early. Parser/output failures remain terminal.",
+      "The SDK consumer fixture owns actual stdio pipes, Relay.Run, loopback HTTP, SDK sessions and MemoryEventStore. SDK Write appends before delivery; GET acquireStream replays After(Last-Event-ID) under the stream lock. The fixture holds resumed GET until messages 5-32 are stored, then checks all 32 deliveries, frame order, cursor, retry minimum and settlement.",
+      "Existing finite qualification/parser callers receive nil retry state; their behavior is preserved. The two existing initialize fixtures now supply the protocol version required by the negotiated-result contract."
+    ],
+    "control_oracle_note": "bounded_cleanup_joins_run is expected to PASS on the old control as its final session cleanup also has the independent 2-second bound; the two media subtests of that root remain distinguishing FAIL cases. This is a static prediction, not an observed result.",
+    "conditions_and_limits": [
+      "This receipt covers preformat frozen bytes. Parent reported completed formatting of three files, but formatted byte readback and its separate binding are not covered here.",
+      "No Relay build, test, race, control or consumer result is claimed by this review. Exact runner/terminal-event oracles remain a separate qualification responsibility.",
+      "Cleanup is a bounded best-effort attempt, not proof that a remote session was deleted. Arbitrary caller-owned blocking I/O still requires its owner to terminate it.",
+      "The SDK fixture exercises one GET-origin logical stream. POST-origin stream resumption, installed/named-host compatibility and peak/retained memory or load behavior remain unqualified.",
+      "Date-shaped negotiated header forwarding is not proof of compatibility with every protocol date. Reinitialization/session rotation remains outside the existing one-session lifetime contract.",
+      "The 18-file composition does not prove physical source 858 equals master75; full source admission and final TestMain overlays remain root-owned.",
+      "This independent agent source review does not substitute for external review of the later exact published commit."
+    ],
+    "primary_reference_checks": [
+      {
+        "url": "https://modelcontextprotocol.io/specification/2025-11-25/basic/index",
+        "checked_rule": "MCP request IDs are strings or integers, non-null; a result carries the corresponding request ID."
+      },
+      {
+        "url": "https://modelcontextprotocol.io/specification/2025-11-25/basic/transports",
+        "checked_rule": "Session assignment accompanies InitializeResult; subsequent HTTP requests carry negotiated metadata; GET resumption uses Last-Event-ID and honors retry."
+      },
+      {
+        "url": "https://html.spec.whatwg.org/multipage/server-sent-events.html#parsing-an-event-stream",
+        "checked_rule": "retry is processed as a field using ASCII decimal digits; malformed values are ignored."
+      }
+    ]
+  },
+  "independent_formatted_binding": {
+    "schema": "relay-formatted-input-independent-review-v1",
+    "status": "SOURCE_AND_INPUTS_REVIEWED_NO_TEST_EXECUTION_BY_REVIEWER",
+    "reviewer": "/root/pr658_audit, independent of Relay author and parent own review",
+    "scope": "Final formatted-byte binding and local 20-path control/candidate compositions; source behavior review is the separately pinned preformat review.",
+    "mandatory_findings": [],
+    "artifact_sha256": {
+      "relay/candidate-freeze-preformat.json": "0fa1a75c2f67b8923b3ed77f5d2427e7ae97aaf0ffa551013abd68e5a2c3403b",
+      "relay/formatted-manifest.json": "9355d3ebe7975c3438d343e79969ff0ed5aef08b9329284f5858cdbf720feb89",
+      "relay/format-receipt.json": "2643d934ae1a4238945dedf19718da0c92843aa325491e298c3cff4c2d099af8",
+      "relay/format-readback.json": "a0eb93a029408f844de3e3c12da60f1531fb86bf9fe8c97c228732f4098d7ac8",
+      "relay/format-only.diff": "cf0ac8eced03828173d0177c3b99f324c2e9036399a7e1ba7e710817c5fb20b0",
+      "qualification/relay_runner.py": "719122c74e1347c1aa952067717c0f00222051eac7ca7e0650c158effd1a9047",
+      "qualification/relay-runner-scope.json": "436c594e1c5e2da5cac8178826e45617d07a118062678abecb793e418feca099",
+      "qualification/make_relay_manifests.py": "e52d6177c977aa1e497aad76c2f2bc4f06f0b75f94bb456e174a5300b1b7015b",
+      "qualification/relay-qualification/control/manifest.json": "71be55158cc7f8fda7c42fc7bbc59d9efc63b7495bfc92adf9819259c9ba0c23",
+      "qualification/relay-qualification/candidate/manifest.json": "6e50eeded81d4306acfdb3ff3f57a290eca23a52ed449ecf4942caaf27d3d6d4",
+      "qualification/relay-source-independent-review-preformat.json": "cb92ccc8dc31896187a7453696d40786b4ef5988ac983d59028a42d4c8c820d3",
+      "qualification/relay-transfer.json": "6ae726f4be680dbcf63e6448e00bd25e7810e45077e2a71ce635b92645412c95"
+    },
+    "formatted_files": [
+      {
+        "path": "internal/daemon/relay.go",
+        "bytes": 32405,
+        "sha256": "f02549680ee78323150205a843c56e83a51193f481a18db6277d268557de06a3",
+        "git_blob": "d0cf1ba96d9b6d42c562255bad68b3091ee0dda5"
+      },
+      {
+        "path": "internal/daemon/relay_consumer_profile_test.go",
+        "bytes": 11789,
+        "sha256": "f1a87a9746c805bdaafa2423c0fe66a49d1164234efdb240ce7f235b71b87ef2",
+        "git_blob": "bfacc5068b66a2b3389b724f0ab4da0965dd59b0"
+      },
+      {
+        "path": "internal/daemon/relay_protocol_contract_test.go",
+        "bytes": 22032,
+        "sha256": "d62759a589d2f2db6686e6f5bec1ff8cbab2c2ddbf4a92e1ae6e6c519da619cb",
+        "git_blob": "959ca512162c57d1d5519c758f147fb490186e16"
+      },
+      {
+        "path": "internal/daemon/relay_qualification.go",
+        "bytes": 21423,
+        "sha256": "be155873eb35e11eb337107a43c7f4c99c0e426f403b2a9b5cc60a35ef2ff082",
+        "git_blob": "5ece5adf409d4dc7d287048281fe8fe0a05f936b"
+      },
+      {
+        "path": "internal/daemon/relay_response_contract_test.go",
+        "bytes": 39400,
+        "sha256": "6d8b1f524503432fc7587f363a2e3679f0cb6834e2b2a9dc9664a7f6b2f6525c",
+        "git_blob": "ea5a229f0359c7fbfad49144da8e857360c3d5aa"
+      },
+      {
+        "path": "internal/daemon/relay_test.go",
+        "bytes": 13654,
+        "sha256": "4ea59e9f3def0ec45f986bfcc9ee87f4dbd2124d775464993d1e079515cd05de",
+        "git_blob": "3e7e2d403e78edbf3c1a3097936c92c8f6f00430"
+      }
+    ],
+    "format_binding": {
+      "frozen_input_files": 6,
+      "formatted_output_files": 6,
+      "changed_files": [
+        "internal/daemon/relay.go",
+        "internal/daemon/relay_consumer_profile_test.go",
+        "internal/daemon/relay_protocol_contract_test.go"
+      ],
+      "unchanged_files": 3,
+      "checks": [
+        "All six preformat bytes/lengths/Git blobs match the independently reviewed freeze and receipt files_before.",
+        "All six returned formatted bytes/lengths/Git blobs match formatted-manifest, readback content, files_after_write and files_after.",
+        "Stored 43783-byte format-only.diff exactly equals independently recomputed unified diff.",
+        "All six files preserve ordered lexical Go tokens with newline semicolon insertion and legal omission before closing delimiters normalized; string/rune/raw literals and every comment are unchanged. This is a lexical comparison, not a Go AST or compile result.",
+        "Formatter helper, manifest and bundle hashes match local pinned files; receipt records exactly gofmt -w and -l over the six files, each direct child settled, exit 0, no timeout and empty stdout/stderr."
+      ]
+    },
+    "composition": {
+      "physical_source_commit": "858812988833a84368c60fba1540ae601155fa71",
+      "physical_source_tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+      "preceding_relay_commit": "f11cd6cf1f4031f3a2d7db60fb5d4edf19d0a4da",
+      "canonical_daemon_fixture_commit": "b4bb85c2a099916974c55a69490c6644702b6fe0",
+      "canonical_daemon_fixture_pr": 664,
+      "paths_per_variant": 20,
+      "local_candidate_files_checked": 40,
+      "control_original_files_from_preceding_commit": 16,
+      "shared_formatted_new_tests": [
+        "internal/daemon/relay_consumer_profile_test.go",
+        "internal/daemon/relay_protocol_contract_test.go"
+      ],
+      "shared_canonical_daemon_fixtures": [
+        {
+          "path": "internal/daemon/main_test.go",
+          "bytes": 4764,
+          "sha256": "85b12d32ab13bac46284586908b0d59eabf6d87bd50bac5123ca1ab61c447cc8",
+          "git_blob": "f9ce99733688bb630efe144f06a18ad5892d76a8"
+        },
+        {
+          "path": "internal/daemon/main_dispatch_test.go",
+          "bytes": 8345,
+          "sha256": "f70b81e92396d2d72b342c9ec8d76e29830c7359b2e54c7733c34871683a1dd1",
+          "git_blob": "2146ff844d14b19e65e08520dcea2efabf01b4c7"
+        }
+      ],
+      "exact_variant_difference": [
+        "internal/daemon/relay.go",
+        "internal/daemon/relay_qualification.go",
+        "internal/daemon/relay_response_contract_test.go",
+        "internal/daemon/relay_test.go"
+      ],
+      "difference_roles": "Two production files and two existing test files; the two new contract/consumer tests are shared exactly.",
+      "control_phase_count": 4,
+      "candidate_phase_count": 8,
+      "checks": [
+        "All source_sha256/source_git_blob entries match exact physical-source Git objects, including absent-file entries.",
+        "Both candidate directories contain exactly the 20 manifest paths; all 40 local bytes match their manifest length, SHA-256 and Git blob.",
+        "Control original files equal exact f11 Git blobs; both fixtures equal exact #664 Git blobs; candidate changed files and both shared new tests equal formatted outputs.",
+        "Scope paths, phase sets and all command/oracle objects exactly match literal runner constants. Manifest phases exactly match the scope; runner SHA matches both manifests.",
+        "Control-gating correctly expects bounded_cleanup_joins_run to pass while the two media-type output-gating cases fail; no blanket all-control-tests-fail claim.",
+        "All 42 transfer rows (40 files and two manifests) match their local bytes, hashes, lengths and exact expected path set.",
+        "make_relay_manifests.py was read without executing it; current output implements the reviewed fixture/formatted/old-source selection and uses exclusive file creation."
+      ]
+    },
+    "limits": [
+      "No Go, gofmt, test, qualification runner, remote command, installation, external review or Git mutation was executed by this reviewer. Only this independent JSON record was created.",
+      "Formatter outcomes above are read from saved exact receipts and returned bytes. This review does not independently observe a live remote process or remote filesystem.",
+      "No Relay qualification runtime result, build/vet PASS, full regression, installed product, native Scheduler operation, memory/load result or whole descendant-tree settlement is claimed.",
+      "The physical qualification source is 858 plus the specified overlays. No equality to the complete master75 tree, no standalone PR qualification and no automatic transfer of previous runtime evidence is asserted.",
+      "candidate_stage=source-reviewed-format-required remains conservative metadata because the qualification format gate has not been reviewed here; no runtime success is inferred from it."
+    ]
+  }
+}

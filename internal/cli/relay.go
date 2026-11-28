@@ -40,11 +40,20 @@ installed manifest, or --url to point at any HTTP endpoint directly.`,
 			if err != nil {
 				return err
 			}
+			input := cmd.InOrStdin()
+			var interrupt func() error
+			if owner, ok := input.(*relayProcessInput); ok {
+				interrupt, err = processRelayInputInterrupt(owner)
+				if err != nil {
+					return err
+				}
+			}
 			r := &daemon.HTTPToStdioRelay{
-				URL:    resolvedURL,
-				Stdin:  cmd.InOrStdin(),
-				Stdout: cmd.OutOrStdout(),
-				Stderr: cmd.ErrOrStderr(),
+				URL:            resolvedURL,
+				Stdin:          input,
+				Stdout:         cmd.OutOrStdout(),
+				Stderr:         cmd.ErrOrStderr(),
+				InterruptStdin: interrupt,
 			}
 			_ = projectPath // reserved for Phase 3 workspace-scoped routing (pass-through only for now)
 			return r.Run(cmd.Context())
