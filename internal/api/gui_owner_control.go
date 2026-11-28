@@ -4,8 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/gofrs/flock"
 )
 
 const (
@@ -29,6 +33,9 @@ type GUIOwnerControl struct {
 	StopCause      string
 	StopGeneration string
 }
+
+// Equal compares the complete observation, including absent versus false autorun.
+func (c GUIOwnerControl) Equal(other GUIOwnerControl) bool { return equalGUIOwnerControl(c, other) }
 
 type GUIOwnerControlResult struct {
 	Control GUIOwnerControl
@@ -290,4 +297,87 @@ func (a *API) SetGUIAutorunEnabled(enabled bool, project func(GUIOwnerControl) e
 // GUIStopIncludesDaemons reports the original accepted operation's breadth.
 func (c GUIOwnerControl) GUIStopIncludesDaemons() bool {
 	return strings.HasSuffix(c.StopCause, "-and-stop-all")
+}
+
+// RequiredGUIOwnerControlObservation preserves required-leaf presence and every
+// original acquisition/read/close outcome. It issues no mutation authority.
+type RequiredGUIOwnerControlObservation struct {
+	Control                        *GUIOwnerControl
+	LeafPresent                    bool
+	Lease                          *StateFileObservedLease
+	Acquisition                    flock.AcquisitionObservation
+	Close                          *StateFileLeaseCloseObservation
+	OperationError, ReceivingError error
+}
+
+// ObserveRequiredGUIOwnerControlContextIn reads one required settings leaf
+// through the original observed settings lease.
+func (a *API) ObserveRequiredGUIOwnerControlContextIn(ctx context.Context, path string) (result RequiredGUIOwnerControlObservation, retErr error) {
+	if ctx == nil {
+		err := errors.New("GUI control context required")
+		result.OperationError = err
+		return result, err
+	}
+	if err := ctx.Err(); err != nil {
+		result.OperationError = err
+		return result, err
+	}
+	if _, err := observedStateFileLeasePath(path); err != nil {
+		result.OperationError = err
+		return result, err
+	}
+	parent, err := os.Lstat(filepath.Dir(path))
+	if err != nil {
+		result.OperationError = err
+		return result, err
+	}
+	if !parent.IsDir() || parent.Mode()&os.ModeSymlink != 0 {
+		err := errors.New("required GUI settings namespace is not ordinary")
+		result.OperationError = err
+		return result, err
+	}
+	lease, err := AcquireStateFileObservedLease(ctx, path)
+	result.Lease = lease
+	if lease == nil {
+		result.OperationError = errors.Join(err, errors.New("original required GUI settings lease unavailable"))
+		return result, result.OperationError
+	}
+	result.Acquisition = lease.AcquisitionObservation()
+	defer func() {
+		result.OperationError = retErr
+		result.Close, result.ReceivingError = lease.CloseObserved()
+		if result.ReceivingError == nil && result.Acquisition.Held {
+			result.ReceivingError = result.Close.Validate(lease)
+		}
+		retErr = errors.Join(retErr, result.ReceivingError, ctx.Err())
+		if retErr != nil {
+			result.Control = nil
+		}
+	}()
+	if err != nil {
+		return result, err
+	}
+	retErr = lease.Borrow(ctx, path, func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		raw, present, err := readRawSettingsMapPresence(path)
+		result.LeafPresent = present
+		if err != nil {
+			return err
+		}
+		if !present {
+			return os.ErrNotExist
+		}
+		control, err := decodeGUIOwnerControl(raw)
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		result.Control = &control
+		return nil
+	})
+	return result, retErr
 }

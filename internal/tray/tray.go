@@ -594,7 +594,7 @@ func readAttemptEvents(ctx context.Context, stdout io.Reader, cfg Config, protoc
 			select {
 			case protocolWarnings <- struct{}{}:
 			case <-ctx.Done():
-				return ctx.Err()
+				return nil
 			}
 			continue
 		}

@@ -2017,6 +2017,7 @@ func (a *API) buildMergedSupervisorIntentFromPriorWithProjection(m *config.Serve
 	}
 
 	merged = &SupervisorIntentFile{
+		BackendRunHold:          prior.BackendRunHold.clone(),
 		Version:                 prior.Version,
 		SerenaPreparedConsumers: clonePreparedSerenaConsumers(prior.SerenaPreparedConsumers),
 		UpdatedAt:               time.Now().UTC().Format(time.RFC3339Nano),
@@ -3067,7 +3068,13 @@ func readSupervisorIntentForMergeWithRawStopMaps(path string) (file *SupervisorI
 // happens, so a doomed install fails fast with a pristine end-state.
 func preflightSupervisorIntentWrite(stateDir string, desired *SupervisorIntentFile) error {
 	tmp := joinStateFilePath(stateDir, supervisorIntentFileLeaf+".preflight")
-	if err := WriteSupervisorIntent(tmp, desired); err != nil {
+	probe := desired
+	if desired != nil && !desired.BackendRunHold.IsZero() {
+		// The temporary write probe has no authority to carry a real hold.
+		probe = cloneSupervisorIntentFile(desired)
+		probe.BackendRunHold = SupervisorBackendRunHold{}
+	}
+	if err := WriteSupervisorIntent(tmp, probe); err != nil {
 		return err
 	}
 	// Best-effort cleanup of the probe file + its flock leaf. A leftover
