@@ -1,0 +1,99 @@
+{
+  "schema": "b-archive-evidence-transformation-v1",
+  "operations": [
+    "Parse source JSON, replace only enumerated absolute root prefixes by logical tokens, serialize indent 2 ASCII JSON with terminal LF.",
+    "Keep all candidate hash,size,target/status fields, scope,limits,errors,skips and remaining queues in full content reports.",
+    "Project the preliminary selection to actual 266 paths and exact omitted-row counts; bind complete original by SHA.",
+    "Correct initial launcher claim to terminal/closure UNKNOWN, retain tool call ID and reported PID without ownership/exit inference.",
+    "Append closure of previously completed summary run; current preparation is outside this closure summary."
+  ],
+  "prefix_rules": [
+    {
+      "logical_token": "{D_WORKTREE_ROOT}",
+      "original_prefix_sha256": "abfc46e4e7fecf7b995964512e26ed3ccdc9a4bb1c795f470f154fa5f5827df6",
+      "original_prefix_utf8_bytes": 28,
+      "replacement_occurrences": 0
+    },
+    {
+      "logical_token": "{D_REPOSITORY_ROOT}",
+      "original_prefix_sha256": "1bd1fd86a9215dd4f46d8e262d907259ee21736c3aec0c3a689467d6b45d0aa1",
+      "original_prefix_utf8_bytes": 20,
+      "replacement_occurrences": 3532
+    },
+    {
+      "logical_token": "{D_TASK_ROOT}",
+      "original_prefix_sha256": "0d00d6e3361faa70341f30c831fd9392da3de54ba54c6d7177be768d6cdab4c7",
+      "original_prefix_utf8_bytes": 14,
+      "replacement_occurrences": 0
+    },
+    {
+      "logical_token": "{E_IMPORTED_TASK_ROOT}",
+      "original_prefix_sha256": "e50c92758e5e3317e2575476e44a2d32bc0d06bbb371f43b7a5a198b9332d204",
+      "original_prefix_utf8_bytes": 10,
+      "replacement_occurrences": 10878
+    }
+  ],
+  "privacy": {
+    "payload_bytes_in_reports": false,
+    "absolute_path_prefixes_removed": true,
+    "unrelated_preliminary_selection_paths_omitted": true,
+    "relative_archive_member_names_retained": "Known project/evidence member labels; no member contents in these reports.",
+    "original_files_modified": false
+  },
+  "artifacts": [
+    {
+      "original_name": "selection-v1.json",
+      "original_bytes": 910753,
+      "original_sha256": "224bf701e5bba9c64f0d125fa5d2268dc80d7800d68521c2232a051897aeac49",
+      "public_name": "archive-selection-v1.json",
+      "public_bytes": 73209,
+      "public_sha256": "f7527ee0011e2871d41ae703dd23a421000e027fe6970370e6cedd337dc1cd41",
+      "operation": "scope_projection"
+    },
+    {
+      "original_name": "transports-v1.json",
+      "original_bytes": 64929,
+      "original_sha256": "513dc809de55908f25466e9398863d9d0c2069c6348a5ee48456a3f67720c957",
+      "public_name": "transport-inputs-v1.json",
+      "public_bytes": 64929,
+      "public_sha256": "513dc809de55908f25466e9398863d9d0c2069c6348a5ee48456a3f67720c957",
+      "operation": "prefix_substitution_only"
+    },
+    {
+      "original_name": "transports-v2.json",
+      "original_bytes": 24311,
+      "original_sha256": "4a67dd6310df6e705a40dcdeb2ae7e4c896e06ccf39c77a71b5f22bba3b4b3c4",
+      "public_name": "transport-inputs-v2.json",
+      "public_bytes": 24311,
+      "public_sha256": "4a67dd6310df6e705a40dcdeb2ae7e4c896e06ccf39c77a71b5f22bba3b4b3c4",
+      "operation": "prefix_substitution_only"
+    },
+    {
+      "original_name": "archives-v1.json",
+      "original_bytes": 4911966,
+      "original_sha256": "2b0a4ebf145b561e83519648bde967273e391f455a5374a900f7b372c438dcd2",
+      "public_name": "archive-content-v1.json",
+      "public_bytes": 5017726,
+      "public_sha256": "ed47cf3832e0231f03a5598653ae1a7b1680165998c87c2415b4a138b58d2aca",
+      "operation": "prefix_substitution_only"
+    },
+    {
+      "original_name": "archives-v2.json",
+      "original_bytes": 10661,
+      "original_sha256": "182742b0c3821fb0d93de5a65f85dc03abc47ce9f44cd1839d11b4431eaadb2e",
+      "public_name": "archive-content-v2.json",
+      "public_bytes": 11139,
+      "public_sha256": "3ff56663b5cd01b7f91b5623958d9cbc266ecde58c25f47fe7255bbd715106c5",
+      "operation": "prefix_substitution_only"
+    },
+    {
+      "original_name": "public-summary-v1.json",
+      "original_bytes": 5970,
+      "original_sha256": "89fa68841c9be4b5a080c60ddfbffc0ed109fd90d4c7cea7cbe2bb64072a9a1b",
+      "public_name": "archive-recovery-summary-v2.json",
+      "public_bytes": 8297,
+      "public_sha256": "9336e822163440faabca0bff24952915ae3f9b4cfbdcddbe0d03d2ec786ef479",
+      "operation": "prefix_substitution; explicit UNKNOWN correction; append independently received sixth run; add public report links"
+    }
+  ]
+}
