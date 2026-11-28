@@ -14,8 +14,6 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
-
-	"github.com/gofrs/flock"
 )
 
 type recoveryTarget struct {
@@ -79,7 +77,7 @@ func (e *SecretsRecoveryPersistenceError) Error() string {
 }
 func (e *SecretsRecoveryPersistenceError) Unwrap() error {
 	if e.InitError != nil {
-		return e.InitError
+		return errors.Join(e.InitError, e.PersistenceCause)
 	}
 	return e.PersistenceCause
 }
@@ -524,15 +522,15 @@ func (o *secretsInitRecoveryOwner) capacity(extra []byte) error {
 	}
 	return nil
 }
-func (o *secretsInitRecoveryOwner) locked(fn func() error) error {
+func (o *secretsInitRecoveryOwner) locked(fn func() error) (retErr error) {
 	if o == nil || o.root == "" || !filepath.IsAbs(o.root) || o.write == nil {
 		return errors.New("invalid recovery owner")
 	}
-	lock := flock.New(filepath.Join(o.root, "secrets-init-recovery.lock"))
-	if err := lock.Lock(); err != nil {
+	release, err := lockLeafLedgered(filepath.Join(o.root, "secrets-init-recovery.lock"))
+	if err != nil {
 		return err
 	}
-	defer func() { _ = lock.Unlock() }()
+	defer ReleaseAndJoin(&retErr, release, "release secrets initialization recovery lock")
 	return fn()
 }
 func (o *secretsInitRecoveryOwner) absent(id string, phases ...string) error {
