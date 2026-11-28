@@ -62,11 +62,11 @@ func isPackageLevelObject(file *ast.File, object *ast.Object) bool {
 	return false
 }
 
-func identifierIsDeclaration(ident *ast.Ident, parents map[ast.Node]ast.Node) bool {
+func identifierIsDeclaration(ident *ast.Ident, parent ast.Node) bool {
 	if ident == nil {
 		return false
 	}
-	switch parent := parents[ident].(type) {
+	switch parent := parent.(type) {
 	case *ast.FuncDecl:
 		return parent.Name == ident
 	case *ast.TypeSpec:
@@ -102,7 +102,7 @@ func unresolvedConstructorRuleForSelector(ctx fileContext, selector *ast.Selecto
 	if importPath, bound := ctx.Imports[alias.Name]; bound {
 		for i := range rules {
 			rule := &rules[i]
-			if rule.ImportPath != importPath || selector.Sel.Name != rule.Symbol || matchesAnyGlob(rule.AllowedGlobs, ctx.Path, false) {
+			if rule.ImportPath != importPath || selector.Sel.Name != rule.Symbol || ctx.globExpressions.matchesAny(rule.AllowedGlobs, ctx.Path) {
 				continue
 			}
 			if _, unresolved := ctx.UnaliasedImports[rule.ImportPath]; unresolved {
@@ -119,7 +119,7 @@ func unresolvedConstructorRuleForSelector(ctx fileContext, selector *ast.Selecto
 	var matched *SymbolRule
 	for i := range rules {
 		rule := &rules[i]
-		if selector.Sel.Name != rule.Symbol || matchesAnyGlob(rule.AllowedGlobs, ctx.Path, false) {
+		if selector.Sel.Name != rule.Symbol || ctx.globExpressions.matchesAny(rule.AllowedGlobs, ctx.Path) {
 			continue
 		}
 		if _, unresolved := ctx.UnaliasedImports[rule.ImportPath]; !unresolved {

@@ -7,7 +7,7 @@ import "fmt"
 // additional match is emitted with the same stable identity so Scan can
 // aggregate it into a count-ratcheted metric.
 func ruleHistoryAdditionalOccurrences(ctx fileContext, policy Policy) []Violation {
-	if ctx.Generated || matchesAnyGlob(policy.HistoryAllowedGlobs, ctx.Path, false) {
+	if ctx.Generated || ctx.globExpressions.matchesAny(policy.HistoryAllowedGlobs, ctx.Path) {
 		return nil
 	}
 	var out []Violation

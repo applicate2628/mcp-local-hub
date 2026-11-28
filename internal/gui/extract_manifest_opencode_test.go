@@ -38,7 +38,8 @@ func TestRealExtractor_OpenCodeConfigPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	yaml, err := (realExtractor{}).ExtractManifestFromClient("opencode", "fetch", api.ScanOpts{})
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	yaml, err := s.extractor.ExtractManifestFromClient("opencode", "fetch", api.ScanOpts{})
 	if err != nil {
 		t.Fatalf("realExtractor ExtractManifestFromClient(opencode): %v", err)
 	}

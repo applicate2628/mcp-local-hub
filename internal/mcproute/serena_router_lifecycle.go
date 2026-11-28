@@ -43,9 +43,8 @@ import (
 // hostile agent could otherwise smuggle ANSI/OSC escape sequences or C0/C1
 // control bytes into the error that a client UI, log viewer, or terminal would
 // render — corrupting output or injecting hyperlinks. It mirrors the catalog
-// sanitizer posture (internal/cli/marketplace.go sanitizeCatalogField) using
-// the SAME single safety predicate api.IsUnsafeMarketplaceTextRune so the
-// control/bidi/Trojan-Source rune set stays defined in one owner:
+// sanitizer (internal/cli/marketplace.go sanitizeCatalogField): both use
+// api.IsUnsafeMarketplaceTextRune for the shared control/bidi/Trojan-Source set:
 //   - U+001B (ESC) and other C0 controls (<0x20) → a single space (defeats
 //     CSI/OSC sequences without dropping the surrounding path text);
 //   - DEL/C1 controls and Unicode bidi/line/paragraph separators → '?';

@@ -136,11 +136,12 @@ func TestGUIOwnerRecord_ReadsLegacyButNewAcquireWritesV2(t *testing.T) {
 func TestGUIOwnerLifecycle_CASNeverOverwritesSuccessor(t *testing.T) {
 	dir := apitest.HardenedTempDir(t)
 	path := filepath.Join(dir, "gui.pidport")
-	first, err := writeCurrentGUIOwnerRecord(path, os.Getpid(), 9125)
+	policy := api.NewAPI()
+	first, err := writeCurrentGUIOwnerRecord(path, os.Getpid(), 9125, policy)
 	if err != nil {
 		t.Fatal(err)
 	}
-	lifecycle := newGUIOwnerLifecycle(path, first)
+	lifecycle := newGUIOwnerLifecycle(path, first, policy)
 	successor := first
 	successor.Generation = "successor-generation"
 	if err := writeGUIOwnerRecord(path, successor); err != nil {
@@ -165,6 +166,11 @@ func TestAcquireSingleInstance_BoundLifecycleAvoidsPostPublishOpenFailure(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := lock.ReleaseErr(); err != nil {
+			t.Error(err)
+		}
+	})
 	// Keep a copy solely to restore the intentionally-corrupted fixture before
 	// terminal settlement. The production startup path now carries the bound
 	// lifecycle and performs no post-publication constructor read.
@@ -203,11 +209,12 @@ func TestAcquireSingleInstance_BoundLifecycleAvoidsPostPublishOpenFailure(t *tes
 func TestGUIOwnerLifecycle_HandoffRollbackAndTerminalSettlement(t *testing.T) {
 	dir := apitest.HardenedTempDir(t)
 	path := filepath.Join(dir, "gui.pidport")
-	record, err := writeCurrentGUIOwnerRecord(path, os.Getpid(), 9125)
+	policy := api.NewAPI()
+	record, err := writeCurrentGUIOwnerRecord(path, os.Getpid(), 9125, policy)
 	if err != nil {
 		t.Fatal(err)
 	}
-	lifecycle := newGUIOwnerLifecycle(path, record)
+	lifecycle := newGUIOwnerLifecycle(path, record, policy)
 	if port, terminal, err := record.ReservationEndpoint(); err != nil || terminal || port != record.Port {
 		t.Fatal("active positive endpoint was lost")
 	}

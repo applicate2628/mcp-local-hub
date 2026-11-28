@@ -21,7 +21,7 @@ type extractor interface {
 	ExtractManifestFromClient(client, server string, opts api.ScanOpts) (string, error)
 }
 
-type realExtractor struct{}
+type realExtractor struct{ api *api.API }
 
 // ExtractManifestFromClient delegates to api.ExtractManifestFromClient with
 // ScanOpts fully populated from the user's home dir — all managed client
@@ -31,8 +31,8 @@ type realExtractor struct{}
 //
 // The opts argument is intentionally ignored by the production path; tests
 // inject their own extractor stub to redirect paths under a temp home.
-func (realExtractor) ExtractManifestFromClient(client, server string, _ api.ScanOpts) (string, error) {
-	return api.NewAPI().ExtractManifestFromClient(client, server, api.ScanOpts{
+func (e realExtractor) ExtractManifestFromClient(client, server string, _ api.ScanOpts) (string, error) {
+	return e.api.ExtractManifestFromClient(client, server, api.ScanOpts{
 		ClaudeConfigPath:      guiClientConfigPath("claude-code"),
 		CodexConfigPath:       guiClientConfigPath("codex-cli"),
 		CursorConfigPath:      guiClientConfigPath("cursor"),

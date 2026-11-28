@@ -19,18 +19,8 @@ func ruleConstructorReferences(ctx fileContext, policy Policy, rules []SymbolRul
 		return nil
 	}
 
-	parents := make(map[ast.Node]ast.Node)
 	selectorMembers := make(map[token.Pos]struct{})
-	var stack []ast.Node
 	ast.Inspect(ctx.File, func(node ast.Node) bool {
-		if node == nil {
-			stack = stack[:len(stack)-1]
-			return false
-		}
-		if len(stack) > 0 {
-			parents[node] = stack[len(stack)-1]
-		}
-		stack = append(stack, node)
 		if selector, ok := node.(*ast.SelectorExpr); ok {
 			selectorMembers[selector.Sel.Pos()] = struct{}{}
 		}
@@ -48,18 +38,18 @@ func ruleConstructorReferences(ctx fileContext, policy Policy, rules []SymbolRul
 	}
 
 	var out []Violation
-	ast.Inspect(ctx.File, func(node ast.Node) bool {
+	ast.PreorderStack(ctx.File, nil, func(node ast.Node, ancestors []ast.Node) bool {
 		expr, ok := node.(ast.Expr)
-		if !ok || isImmediateCallTarget(expr, parents) {
+		if !ok || isImmediateCallTarget(expr, ancestors) {
 			return true
 		}
-		if ident, ok := expr.(*ast.Ident); ok && identifierIsDeclaration(ident, parents) {
+		if ident, ok := expr.(*ast.Ident); ok && len(ancestors) > 0 && identifierIsDeclaration(ident, ancestors[len(ancestors)-1]) {
 			return true
 		}
 
 		matched := false
 		for _, rule := range rules {
-			if matchesAnyGlob(rule.AllowedGlobs, ctx.Path, false) ||
+			if ctx.globExpressions.matchesAny(rule.AllowedGlobs, ctx.Path) ||
 				!referenceMatchesSymbolRule(ctx, policy.Module, expr, selectorMembers, rule) {
 				continue
 			}
@@ -107,10 +97,10 @@ func referenceMatchesSymbolRule(ctx fileContext, module string, expr ast.Expr, s
 	}
 }
 
-func isImmediateCallTarget(expr ast.Expr, parents map[ast.Node]ast.Node) bool {
+func isImmediateCallTarget(expr ast.Expr, ancestors []ast.Node) bool {
 	current := ast.Node(expr)
-	for {
-		parent := parents[current]
+	for i := len(ancestors) - 1; i >= 0; i-- {
+		parent := ancestors[i]
 		switch wrapped := parent.(type) {
 		case *ast.ParenExpr:
 			if wrapped.X != current {
@@ -133,4 +123,5 @@ func isImmediateCallTarget(expr ast.Expr, parents map[ast.Node]ast.Node) bool {
 			return false
 		}
 	}
+	return false
 }

@@ -13,8 +13,7 @@
 //
 // The persistence + validation + effective-set resolution all live in the
 // api layer (internal/api/client_install_prefs.go); this file is the thin
-// HTTP wrapper, mirroring how internal/gui/settings.go delegates to
-// api.NewAPI().SettingsList()/SettingsSet(). Wiring: the api layer's
+// HTTP adapter over the API retained by its Server. The api layer's
 // API.DefaultInstallClientNamesOverride feeds installClientPredicate's
 // default-set fallback (via BuildPlanOpts.DefaultClientsOverride at the
 // Install entry points), so the toggle ACTUALLY changes which clients a
@@ -37,29 +36,9 @@ import (
 	"mcp-local-hub/internal/api"
 )
 
-// clientInstallPrefsViewFn / clientInstallPrefsSetFn are package-level
-// indirections so a unit test can stub the api round-trip without touching
-// the real gui-preferences.yaml. Production leaves them nil and the handler
-// calls api.NewAPI() directly (the same direct-api pattern
-// lspTrustedRootsHandler uses). A test sets these to a fake before driving
-// the handler and restores them after.
-var (
-	clientInstallPrefsViewFn func() (api.ClientInstallToggleSnapshot, error)
-	clientInstallPrefsSetFn  func(names []string) error
-)
-
-func clientInstallPrefsView() (api.ClientInstallToggleSnapshot, error) {
-	if clientInstallPrefsViewFn != nil {
-		return clientInstallPrefsViewFn()
-	}
-	return api.NewAPI().ClientInstallToggleView()
-}
-
-func clientInstallPrefsSetNames(names []string) error {
-	if clientInstallPrefsSetFn != nil {
-		return clientInstallPrefsSetFn(names)
-	}
-	return api.NewAPI().SetDefaultInstallClientNames(names)
+type clientInstallPrefsAPI interface {
+	ClientInstallToggleView() (api.ClientInstallToggleSnapshot, error)
+	SetDefaultInstallClientNames([]string) error
 }
 
 func registerClientInstallPrefsRoutes(s *Server) {
@@ -106,7 +85,7 @@ func (s *Server) clientInstallPrefsHandler(w http.ResponseWriter, r *http.Reques
 // compile-time default set selected (override_active=false) — the normal
 // first-run path.
 func (s *Server) clientInstallPrefsList(w http.ResponseWriter, _ *http.Request) {
-	snap, err := clientInstallPrefsView()
+	snap, err := s.clientInstallPrefs.ClientInstallToggleView()
 	if err != nil {
 		writeAPIError(w, err, http.StatusInternalServerError, "CLIENT_INSTALL_PREFS_LIST_FAILED")
 		return
@@ -127,7 +106,7 @@ func (s *Server) clientInstallPrefsSet(w http.ResponseWriter, r *http.Request) {
 		writeDecodeBodyError(w, err, "CLIENT_INSTALL_PREFS_INVALID_JSON")
 		return
 	}
-	if err := clientInstallPrefsSetNames(body.Clients); err != nil {
+	if err := s.clientInstallPrefs.SetDefaultInstallClientNames(body.Clients); err != nil {
 		// The api layer returns "unknown client ..." for an unsupported
 		// name and "must name at least one ..." for an empty set — both
 		// are operator-input errors → 400 so the UI surfaces a precise
@@ -139,7 +118,7 @@ func (s *Server) clientInstallPrefsSet(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, err, http.StatusInternalServerError, "CLIENT_INSTALL_PREFS_SET_FAILED")
 		return
 	}
-	snap, err := clientInstallPrefsView()
+	snap, err := s.clientInstallPrefs.ClientInstallToggleView()
 	if err != nil {
 		// The write landed but the post-write read failed — surface as 500
 		// so the UI refreshes manually (mirrors respondWithTrustedRoots).

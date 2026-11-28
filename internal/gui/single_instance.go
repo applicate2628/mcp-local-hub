@@ -75,6 +75,9 @@ type OwnedSingleInstanceLease interface {
 // single acquisition. Existing callers pass no options and retain the legacy
 // single-shot behavior without reading the marker.
 type SingleInstanceAcquireOptions struct {
+	// OwnerPolicy is bound before publication and retained through handoff.
+	// Nil preserves the canonical API-backed settings policy.
+	OwnerPolicy GUIOwnerPolicy
 	// Non-nil only for an explicit resume consumer. Compared inside settings
 	// RMW AFTER this acquisition owns the real GUI lease, before publication.
 	GUIResumeControl     *api.GUIOwnerControl
@@ -309,19 +312,26 @@ func AcquireSingleInstance(port int) (*SingleInstanceLock, error) {
 }
 
 // acquireSingleInstanceAt is the injectable form used by tests.
-func acquireSingleInstanceAt(pidportPath string, port int, resume ...*api.GUIOwnerControl) (*SingleInstanceLock, error) {
+func acquireSingleInstanceAt(pidportPath string, port int, options ...SingleInstanceAcquireOptions) (*SingleInstanceLock, error) {
+	if len(options) > 1 {
+		return nil, errors.New("multiple GUI acquisition option sets")
+	}
+	var option SingleInstanceAcquireOptions
+	if len(options) == 1 {
+		option = options[0]
+	}
 	lease, err := tryAcquireSingleInstanceLockAt(pidportPath)
 	if err != nil {
 		return nil, err
 	}
-	ownerRecord, err := writeCurrentGUIOwnerRecord(pidportPath, os.Getpid(), port, resume...)
-	if err != nil {
+	owner := newGUIOwnerLifecycle(pidportPath, GUIOwnerRecord{}, option.OwnerPolicy)
+	if err := owner.publishCurrent(os.Getpid(), port, option.GUIResumeControl); err != nil {
 		if releaseErr := lease.ReleaseErr(); releaseErr != nil {
 			return nil, newGUIOwnerLeaseUnknown("release tentative GUI lease after publication refusal", errors.Join(err, releaseErr))
 		}
 		return nil, fmt.Errorf("write pidport: %w", err)
 	}
-	lease.ownerLifecycle = newGUIOwnerLifecycle(pidportPath, ownerRecord)
+	lease.ownerLifecycle = owner
 	return lease, nil
 }
 
@@ -517,13 +527,7 @@ func formatPidport(pid, port int) string {
 // force-kill callers intentionally remain unwired in Phase E.
 func AcquireSingleInstanceAt(pidportPath string, port int, options ...SingleInstanceAcquireOptions) (*SingleInstanceLock, error) {
 	if len(options) == 0 || !options[0].RestartV3Enabled {
-		if len(options) > 1 {
-			return nil, errors.New("multiple GUI acquisition option sets")
-		}
-		if len(options) == 1 {
-			return acquireSingleInstanceAt(pidportPath, port, options[0].GUIResumeControl)
-		}
-		return acquireSingleInstanceAt(pidportPath, port)
+		return acquireSingleInstanceAt(pidportPath, port, options...)
 	}
 	if len(options) != 1 {
 		return nil, newGUIOwnerLeaseUnknown("acquire options", fmt.Errorf("got %d option sets, want exactly one", len(options)))
@@ -562,14 +566,14 @@ func acquireReservationAwareSingleInstanceAt(pidportPath string, port int, optio
 		return nil, releaseTentativeLeaseWithReason(lease, ErrHandoffReserved)
 	}
 
-	ownerRecord, err := writeCurrentGUIOwnerRecord(pidportPath, os.Getpid(), port, options.GUIResumeControl)
-	if err != nil {
+	owner := newGUIOwnerLifecycle(pidportPath, GUIOwnerRecord{}, options.OwnerPolicy)
+	if err := owner.publishCurrent(os.Getpid(), port, options.GUIResumeControl); err != nil {
 		if releaseErr := lease.release(); releaseErr != nil {
 			return nil, newGUIOwnerLeaseUnknown("release tentative lease after pidport write failure", errors.Join(err, releaseErr))
 		}
 		return nil, fmt.Errorf("write pidport: %w", err)
 	}
-	lease.ownerLifecycle = newGUIOwnerLifecycle(pidportPath, ownerRecord)
+	lease.ownerLifecycle = owner
 	return lease, nil
 }
 
@@ -815,8 +819,8 @@ func RewritePidportPort(pidportPath string, port int) error {
 // != requestedPort and only updated the port field — leaving the
 // killed incumbent's PID stale in the pidport after a successful kill.
 func WritePidport(pidportPath string, pid, port int) error {
-	_, err := writeCurrentGUIOwnerRecord(pidportPath, pid, port)
-	return err
+	owner := newGUIOwnerLifecycle(pidportPath, GUIOwnerRecord{}, nil)
+	return owner.publishCurrent(pid, port)
 }
 
 // VerdictClass enumerates the result of Probe / KillRecordedHolder.

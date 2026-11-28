@@ -13,6 +13,8 @@ exclude_globs:
 import_rules:
   - from:
       - internal/api/**
+      - internal/binaryadmission/**
+      - internal/mcproute/**
       - internal/config/**
       - internal/daemon/**
       - internal/process/**

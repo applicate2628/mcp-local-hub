@@ -10,25 +10,30 @@ import (
 	"mcp-local-hub/internal/api"
 )
 
-// clientInstallPrefsTestServer wires a fresh Server with the
-// /api/client-install-prefs routes registered (production registration is
-// wired centrally; this test registers them directly on the test mux) and
-// stubs the api round-trip so no real gui-preferences.yaml is touched. The
-// returned cleanup restores the package-level seams.
+type fakeClientInstallPrefsAPI struct {
+	view func() (api.ClientInstallToggleSnapshot, error)
+	set  func([]string) error
+}
+
+func (f fakeClientInstallPrefsAPI) ClientInstallToggleView() (api.ClientInstallToggleSnapshot, error) {
+	return f.view()
+}
+
+func (f fakeClientInstallPrefsAPI) SetDefaultInstallClientNames(names []string) error {
+	return f.set(names)
+}
+
+// clientInstallPrefsTestServer retains production route registration and
+// supplies only this Server's preference dependency. No real preferences
+// file is touched, and other servers retain their own dependencies.
 func clientInstallPrefsTestServer(
 	t *testing.T,
 	view func() (api.ClientInstallToggleSnapshot, error),
 	set func([]string) error,
 ) *Server {
 	t.Helper()
-	origView, origSet := clientInstallPrefsViewFn, clientInstallPrefsSetFn
-	clientInstallPrefsViewFn = view
-	clientInstallPrefsSetFn = set
-	t.Cleanup(func() {
-		clientInstallPrefsViewFn = origView
-		clientInstallPrefsSetFn = origSet
-	})
 	s := newEphemeralServer(t, Config{})
+	s.clientInstallPrefs = fakeClientInstallPrefsAPI{view: view, set: set}
 	return s
 }
 
@@ -51,6 +56,74 @@ func decodeClientPrefsResp(t *testing.T, rec *httptest.ResponseRecorder) clientI
 		t.Fatalf("decode response %q: %v", rec.Body.String(), err)
 	}
 	return resp
+}
+
+func TestClientInstallPrefs_UsesServerAPI(t *testing.T) {
+	s := newEphemeralServer(t, Config{})
+	if s.clientInstallPrefs != s.api {
+		t.Fatal("client-install preferences must use the Server's API")
+	}
+}
+
+func TestClientInstallPrefs_ServersKeepIndependentDependencies(t *testing.T) {
+	newServer := func(selectedName string) *Server {
+		selected := map[string]bool{selectedName: true}
+		return clientInstallPrefsTestServer(t,
+			func() (api.ClientInstallToggleSnapshot, error) {
+				return sampleSnapshot(true, selected), nil
+			},
+			func(names []string) error {
+				selected = map[string]bool{}
+				for _, name := range names {
+					selected[name] = true
+				}
+				return nil
+			},
+		)
+	}
+	first := newServer("cursor")
+	second := newServer("vscode")
+
+	// Interleave both servers after both dependencies have been installed.
+	// Each POST must read back the same server's updated state, while the
+	// other server retains its prior selection.
+	steps := []struct {
+		name     string
+		server   *Server
+		method   string
+		body     string
+		selected string
+	}{
+		{"first initial read", first, http.MethodGet, "", "cursor"},
+		{"second initial read", second, http.MethodGet, "", "vscode"},
+		{"first mutation", first, http.MethodPost, `{"clients":["claude-code"]}`, "claude-code"},
+		{"second after first mutation", second, http.MethodGet, "", "vscode"},
+		{"second mutation", second, http.MethodPost, `{"clients":["codex-cli"]}`, "codex-cli"},
+		{"first after second mutation", first, http.MethodGet, "", "claude-code"},
+	}
+	for _, step := range steps {
+		t.Run(step.name, func(t *testing.T) {
+			req := httptest.NewRequest(step.method, "/api/client-install-prefs", bytes.NewBufferString(step.body))
+			rec := httptest.NewRecorder()
+			step.server.mux.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+			}
+			resp := decodeClientPrefsResp(t, rec)
+			if !resp.OverrideActive || len(resp.Clients) != 4 {
+				t.Fatalf("response = %+v, want an active override with four client rows", resp)
+			}
+			selected := []string{}
+			for _, client := range resp.Clients {
+				if client.Selected {
+					selected = append(selected, client.Name)
+				}
+			}
+			if len(selected) != 1 || selected[0] != step.selected {
+				t.Fatalf("selected=%v, want [%s]", selected, step.selected)
+			}
+		})
+	}
 }
 
 func TestClientInstallPrefs_GetDefault(t *testing.T) {

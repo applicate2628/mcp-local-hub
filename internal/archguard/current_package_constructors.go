@@ -28,7 +28,7 @@ func ruleCurrentPackageConstructorCalls(ctx fileContext, policy Policy, rules []
 			return true
 		}
 		for _, rule := range rules {
-			if matchesAnyGlob(rule.AllowedGlobs, ctx.Path, false) ||
+			if ctx.globExpressions.matchesAny(rule.AllowedGlobs, ctx.Path) ||
 				!ruleMatchesCurrentPackage(ctx, policy.Module, rule) ||
 				ident.Name != rule.Symbol ||
 				!identifierMayReferToCurrentPackageSymbol(ctx, ident) {

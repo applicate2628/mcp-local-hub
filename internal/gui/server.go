@@ -284,65 +284,6 @@ func (realDismisser) ListDismissedUnknown() (map[string]struct{}, error) {
 	return api.ListDismissedUnknown()
 }
 
-// realManifestCreator is the production adapter for /api/manifest/create.
-// Matches the realDemigrater / realDismisser idiom: empty value receiver,
-// lazy api.NewAPI() per call so tests can swap the interface without
-// needing to stub a constructor.
-type realManifestCreator struct{}
-
-func (realManifestCreator) ManifestCreate(name, yaml string) error {
-	return api.NewAPI().ManifestCreate(name, yaml)
-}
-
-// realManifestValidator is the production adapter for /api/manifest/validate.
-// Same shape as realManifestCreator above.
-type realManifestValidator struct{}
-
-func (realManifestValidator) ManifestValidate(yaml string) []string {
-	return api.NewAPI().ManifestValidate(yaml)
-}
-
-// realManifestGetter is the production adapter for /api/manifest/get.
-type realManifestGetter struct{}
-
-func (realManifestGetter) ManifestGetWithHash(name string) (string, string, error) {
-	return api.NewAPI().ManifestGetWithHash(name)
-}
-
-// realManifestViewer is the production adapter for /api/manifest/view.
-type realManifestViewer struct{}
-
-func (realManifestViewer) ManifestGet(name string) (string, error) {
-	return api.NewAPI().ManifestGet(name)
-}
-
-type realManifestPresence struct{}
-
-func (realManifestPresence) ManifestExists(name string) (bool, error) {
-	return api.NewAPI().ManifestExists(name)
-}
-
-// realManifestEditor is the production adapter for /api/manifest/edit.
-type realManifestEditor struct{}
-
-func (realManifestEditor) ManifestEditWithHash(name, yaml, expectedHash string) (string, error) {
-	return api.NewAPI().ManifestEditWithHash(name, yaml, expectedHash)
-}
-
-// realManifestLister is the production adapter for GET /api/manifests.
-type realManifestLister struct{}
-
-func (realManifestLister) ManifestList() ([]string, error) {
-	return api.NewAPI().ManifestList()
-}
-
-// realManifestDeleter is the production adapter for DELETE /api/manifest/:name.
-type realManifestDeleter struct{}
-
-func (realManifestDeleter) ManifestDelete(name string) error {
-	return api.NewAPI().ManifestDelete(name)
-}
-
 // realCatalogLister is the production adapter for GET /api/catalog.
 type realCatalogLister struct{}
 
@@ -517,29 +458,27 @@ func (realSecretsAPI) Delete(name string, confirm bool) error {
 	return api.NewAPI().SecretsDelete(name, confirm)
 }
 
-// logsProvider is the narrow interface the /api/logs/:server handler needs.
-// The handler converts the stored log text to either a plain GET body or an
-// SSE tail-follow stream. The daemon parameter threads a specific daemon
-// name through to api.LogsGet; an empty string resolves to "default" in
-// realLogs below, preserving single-daemon-per-server behavior while
-// letting multi-daemon servers (serena ships claude + codex with no
-// "default") pick the correct log file.
+// logsProvider serves daemon log snapshots and incremental Follow reads.
 type logsProvider interface {
 	Logs(server, daemon string, tail int) (string, error)
+	PollDaemonLog(server, daemon string, offset int64, prime bool) (api.DaemonLogPoll, error)
 }
 
 type realLogs struct{}
 
-// Logs delegates to api.LogsGet. An empty daemon falls back to "default",
-// which matches the single-daemon-per-server manifest shape used by most
-// Phase 3B servers. Multi-daemon servers (e.g. serena, which exposes
-// claude + codex daemons and no "default") can pass the explicit daemon
-// name the GUI picker selected — see /api/status rows for daemon values.
 func (realLogs) Logs(server, daemon string, tail int) (string, error) {
+	return api.NewAPI().LogsGet(server, logDaemonName(daemon), tail)
+}
+
+func (realLogs) PollDaemonLog(server, daemon string, offset int64, prime bool) (api.DaemonLogPoll, error) {
+	return api.PollDaemonLog(server, logDaemonName(daemon), offset, prime)
+}
+
+func logDaemonName(daemon string) string {
 	if daemon == "" {
-		daemon = "default"
+		return "default"
 	}
-	return api.NewAPI().LogsGet(server, daemon, tail)
+	return daemon
 }
 
 type lspRegistrar interface {
@@ -719,12 +658,14 @@ type Server struct {
 	hubHealth          *hubHealthTracker
 	secrets            secretsAPI
 	settings           settingsAPI
+	clientInstallPrefs clientInstallPrefsAPI
 	backups            backupsAPI
 	backupActions      backupActionsAPI
 	cleanup            cleanupAPI
 	clientInit         clientInitializer
 	symlinkWriter      symlinkResolveWriter
 	lspRegistrar       lspRegistrar
+	lspRouterControl   lspRouterControlAPI
 	groups             groupsAPI
 
 	// groupsRepublishFn is the live hub-snapshot re-publish seam used by the
@@ -847,14 +788,14 @@ func NewServer(cfg Config) *Server {
 	s.demigrater = realDemigrater{}
 	s.clientEntryRemover = s.api
 	s.dismisser = realDismisser{}
-	s.manifestCreator = realManifestCreator{}
-	s.manifestValidator = realManifestValidator{}
-	s.manifestGetter = realManifestGetter{}
-	s.manifestViewer = realManifestViewer{}
-	s.manifestPresence = realManifestPresence{}
-	s.manifestEditor = realManifestEditor{}
-	s.manifestLister = realManifestLister{}
-	s.manifestDeleter = realManifestDeleter{}
+	s.manifestCreator = s.api
+	s.manifestValidator = s.api
+	s.manifestGetter = s.api
+	s.manifestViewer = s.api
+	s.manifestPresence = s.api
+	s.manifestEditor = s.api
+	s.manifestLister = s.api
+	s.manifestDeleter = s.api
 	s.catalogLister = realCatalogLister{}
 	s.catalogManifestGetter = realCatalogManifestGetter{}
 	s.marketplaceLister = realMarketplaceLister{}
@@ -870,7 +811,7 @@ func NewServer(cfg Config) *Server {
 	s.daemonRecover = realDaemonRecoverer{}
 	s.stop = realStopper{}
 	s.logs = realLogs{}
-	s.extractor = realExtractor{}
+	s.extractor = realExtractor{api: s.api}
 	s.events = NewBroadcaster()
 	shutdownDrainTimeout := cfg.GUIShutdownDrainTimeout
 	if shutdownDrainTimeout <= 0 {
@@ -897,14 +838,16 @@ func NewServer(cfg Config) *Server {
 		}
 	})
 	s.secrets = realSecretsAPI{}
-	s.settings = realSettingsAPI{}
+	s.settings = realSettingsAPI{api: s.api}
+	s.clientInstallPrefs = s.api
 	s.backups = realBackupsAPI{}
 	s.backupActions = realBackupActionsAPI{}
 	s.cleanup = realCleanupAPI{}
 	s.clientInit = realClientInitializer{}
 	s.symlinkWriter = realSymlinkResolveWriter{}
 	s.lspRegistrar = realLSPRegistrar{}
-	s.groups = realGroupsAPI{}
+	s.lspRouterControl = s.api
+	s.groups = realGroupsAPI{api: s.api}
 	registerPingRoutes(s)
 	registerAssetRoutes(s)
 	registerScanRoutes(s)

@@ -5,12 +5,8 @@
 //   - GET /api/logs/:server[?tail=N]           plain text snapshot
 //   - GET /api/logs/:server/stream             SSE tail-follow
 //
-// The streaming path is a deliberately minimal MVP: it re-reads the log
-// file every 500ms and emits any new suffix as "log-line" SSE events.
-// This is accurate-enough for an interactive "Follow" checkbox on the
-// Logs screen without adding an fsnotify dependency. Phase 3B-II may
-// replace it with filesystem-event-driven streaming if latency or CPU
-// cost becomes visible.
+// The streaming path polls the log every 500 ms and emits new complete lines
+// as "log-line" events.
 package gui
 
 import (
@@ -186,19 +182,10 @@ func (s *Server) logsOpenFolderHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"opened": dir})
 }
 
-// streamLogs implements the SSE tail-follow. Each tick we ask the
-// logsProvider for the full log text (tail=0) and emit the new suffix
-// since lastLen as individual "log-line" events. Empty trailing lines
-// after a Split on "\n" are skipped so a trailing newline does not
-// produce a blank SSE event.
-//
-// daemon is threaded through to every logsProvider call (both the
-// initial prime and the per-tick fetch) so multi-daemon servers like
-// serena can follow the correct daemon's log file. An empty daemon is
-// forwarded as-is and the logsProvider adapter falls back to "default".
-//
-// The handler exits when the client disconnects (r.Context cancellation)
-// or when the provider returns an error (sent as an "error" SSE event).
+// streamLogs follows newly appended daemon log bytes at 500 ms intervals.
+// It keeps a trailing fragment across polls until a newline arrives, and
+// exits on request cancellation or after sending a provider error.
+
 func streamLogs(s *Server, server, daemon string, w http.ResponseWriter, r *http.Request) {
 	// Spec §4.6 defines only GET /api/logs/:server/stream. Enforce that
 	// here rather than after the flusher type-assert: the outer route
@@ -229,160 +216,51 @@ func streamLogs(s *Server, server, daemon string, w http.ResponseWriter, r *http
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
-	// Prime lastLen with the current log size before the loop. Without
-	// this the first tick emits the ENTIRE current log as live
-	// "log-line" events — duplicating what /api/logs/:server already
-	// rendered when the UI first opened the Logs screen.
-	//
-	// Skip the prime when the body is api.LogsGet's "no log file yet"
-	// placeholder (file does not exist and the API returns nil error +
-	// human-readable text). Seeding the cursor from the placeholder's
-	// length would silently discard the first len(placeholder) bytes of
-	// the real log once the daemon finally writes to stderr — the user
-	// would permanently miss the start of that first session. See
-	// api.LogPlaceholderFor for the shared exact-match sentinel.
-	var lastLen int
-	// pendingLine holds any unterminated trailing fragment (no "\n") that
-	// arrived on the previous tick's suffix. A daemon often writes one
-	// logical line in multiple writes — e.g. "Loading..." then " done\n"
-	// — so without carrying the fragment across ticks the first write's
-	// suffix splits into a log-line event for "Loading..." and the next
-	// tick emits another event for " done". The UI then sees corrupted
-	// line boundaries. Holding the unterminated fragment until its
-	// newline arrives merges the writes back into one event.
-	var pendingLine string
-	if body, err := s.logs.Logs(server, daemon, 0); err == nil && !isLogPlaceholder(body, server, daemon) {
-		lastLen = len(body)
-		// We deliberately do NOT seed pendingLine from the prime. The
-		// prime is the initial-state snapshot already rendered by
-		// /api/logs/:server when the UI opened the Logs screen; it is
-		// not re-emitted as SSE log-line events. Carrying a fragment
-		// from it into the first tick would risk prepending prime
-		// bytes to a live suffix. The rotation branch below applies
-		// the same rule for the same reason.
+	// The snapshot already displayed the existing bytes. Skip them without
+	// keeping its trailing fragment. A prime error is reported by the first
+	// tick if the file still cannot be read.
+	var offset int64
+	if poll, err := s.logs.PollDaemonLog(server, daemon, offset, true); err == nil {
+		offset = poll.Offset
 	}
+	var pendingLine string
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			body, err := s.logs.Logs(server, daemon, 0)
+			poll, err := s.logs.PollDaemonLog(server, daemon, offset, false)
 			if err != nil {
 				fmt.Fprintf(w, "event: error\ndata: %s\n\n", err.Error())
 				flusher.Flush()
 				return
 			}
-			if isLogPlaceholder(body, server, daemon) {
-				// The daemon hasn't written anything yet (or the log
-				// file was removed and api.LogsGet is again returning
-				// the "no log file yet" placeholder). Do NOT emit it as
-				// a log-line event and do NOT advance lastLen. Emitting
-				// would push human-readable placeholder text into the
-				// UI's line stream; advancing would seed the cursor
-				// from the placeholder's length (~100+ chars), and then
-				// on the next tick the real log — typically shorter
-				// than the placeholder — would hit the
-				// `len(body) < lastLen` rotation branch, which resets
-				// the cursor to the new size and `continue`s, silently
-				// skipping the first bytes of the daemon's first
-				// session. See api.LogPlaceholderFor for the shared
-				// exact-match sentinel and the prime block above for
-				// the matching guard on the initial fetch.
+			if poll.Offset < offset {
+				// Rotation or truncation leaves any pending fragment behind.
+				pendingLine = ""
+			}
+			offset = poll.Offset
+			if poll.Suffix == "" {
 				continue
 			}
-			if len(body) < lastLen {
-				// Log rotated or truncated — the file is smaller than
-				// our cursor. Reset to the current size instead of
-				// replaying the new file from the start; continuing to
-				// gate on `len(body) > lastLen` would freeze emission
-				// until the new file grew past the old length. Also
-				// drop any pendingLine: it belonged to the previous
-				// file's trailing fragment, which has no relationship
-				// to the rotated file's contents. Carrying it forward
-				// would prepend dead text onto the first real line of
-				// the new file.
-				lastLen = len(body)
-				pendingLine = ""
-				continue
-			}
-			if len(body) > lastLen {
-				// Prepend any unterminated fragment held from the
-				// previous tick, then clear it — if this tick's suffix
-				// also ends mid-line, the new fragment is reassigned
-				// to pendingLine below.
-				suffix := pendingLine + body[lastLen:]
-				pendingLine = ""
-
-				lines := strings.Split(suffix, "\n")
-				// strings.Split("a\nb\n", "\n") -> ["a", "b", ""].
-				// strings.Split("a\nb",   "\n") -> ["a", "b"].
-				// A non-empty last element means the suffix ended
-				// without a newline — that fragment is unterminated
-				// and must be held until the next tick supplies its
-				// continuation. An empty last element means the
-				// suffix ended cleanly on a newline; drop the empty
-				// tail so it isn't emitted as a blank line event.
-				if n := len(lines); n > 0 && lines[n-1] != "" {
-					pendingLine = lines[n-1]
-					lines = lines[:n-1]
-				} else if n > 0 && lines[n-1] == "" {
-					lines = lines[:n-1]
-				}
-				for _, line := range lines {
-					if line == "" {
-						// Interior blank lines inside the suffix
-						// (e.g. two consecutive newlines) are not
-						// emitted as blank SSE events; keep the
-						// pre-R22 behavior of skipping them.
-						continue
-					}
+			lines := strings.Split(pendingLine+poll.Suffix, "\n")
+			pendingLine = lines[len(lines)-1]
+			for _, line := range lines[:len(lines)-1] {
+				if line != "" {
 					fmt.Fprintf(w, "event: log-line\ndata: %s\n\n", line)
 				}
-				// Bound pendingLine so a daemon emitting a single
-				// unterminated line forever can't grow this string
-				// without limit. When the held fragment exceeds the
-				// cap, emit it as one truncated log-line event AFTER
-				// the complete lines from this tick (preserves arrival
-				// order) and retain only the last maxPendingLineBytes
-				// of the fragment so the eventual newline arrival can
-				// still complete a coherent line. Codex finding:
-				// PR #66 emitted the overflow BEFORE complete lines,
-				// reordering input like "ready\n" + long_fragment.
-				if len(pendingLine) > maxPendingLineBytes {
-					truncated := pendingLine[:maxPendingLineBytes]
-					fmt.Fprintf(w, "event: log-line\ndata: %s [truncated unterminated line]\n\n", truncated)
-					pendingLine = pendingLine[len(pendingLine)-maxPendingLineBytes:]
-				}
-				lastLen = len(body)
-				flusher.Flush()
 			}
+
+			// Emit overflow after the complete lines to preserve event order.
+			if len(pendingLine) > maxPendingLineBytes {
+				truncated := pendingLine[:maxPendingLineBytes]
+				fmt.Fprintf(w, "event: log-line\ndata: %s [truncated unterminated line]\n\n", truncated)
+				pendingLine = pendingLine[len(pendingLine)-maxPendingLineBytes:]
+			}
+			// Keep only the fragment's storage across polls.
+			pendingLine = strings.Clone(pendingLine)
+			flusher.Flush()
 		}
 	}
-}
-
-// isLogPlaceholder reports whether body is the exact "no log file yet"
-// placeholder api.LogsGet returns for (server, daemon) when the log file
-// does not exist. That body is human-readable text, not log content, so
-// streamLogs must NOT seed its lastLen cursor from its length — doing so
-// would silently skip the first len(placeholder) bytes of the real log
-// once the daemon eventually writes to stderr.
-//
-// Matches by exact full-string equality against api.LogPlaceholderFor,
-// not by prefix against api.LogPlaceholderPrefix. A prefix check would
-// misclassify any real log line whose leading text happens to start with
-// "(no log output yet" — Follow would then permanently drop that line
-// from the SSE stream. api.LogPlaceholderFor is the single source of
-// truth for the exact bytes LogsGet emits for a given (server, daemon);
-// this helper is the consumer side of that contract.
-//
-// An empty daemon is normalized to "default" here to match realLogs.Logs,
-// which makes the same substitution before calling api.LogsGet — so the
-// placeholder produced by the API layer always uses "default" in that
-// branch, and this side must compare against the same value.
-func isLogPlaceholder(body, server, daemon string) bool {
-	if daemon == "" {
-		daemon = "default"
-	}
-	return body == api.LogPlaceholderFor(server, daemon)
 }

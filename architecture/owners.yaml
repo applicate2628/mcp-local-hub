@@ -9,6 +9,13 @@ rules:
     reason: Architecture-tooling debt is reduced while A2-A6 establish the repository ratchet.
 
   - globs:
+      - internal/binaryadmission/**
+    owner: lifecycle-runtime
+    work_package: WP-11C
+    remove_by: 2027-03-31
+    reason: Native executable admission and retained file-handle custody remain below CLI and GUI orchestration.
+
+  - globs:
       - internal/cli/**
       - internal/process/**
       - internal/scheduler/**
@@ -53,6 +60,7 @@ rules:
   - globs:
       - internal/daemon/**
       - internal/mcpcompat/**
+      - internal/mcproute/**
     owner: mcp-runtime
     work_package: WP-11E
     remove_by: 2027-03-31

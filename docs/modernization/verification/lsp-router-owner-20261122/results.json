@@ -1,0 +1,222 @@
+{
+  "schema": 1,
+  "status": "SCOPED_VERIFICATION_PASS_FULL_ACCEPTANCE_OPEN",
+  "date_utc": "2026-11-22",
+  "pr": 663,
+  "source_parent": "d39b99db427eee026af12f8120c24477a2d9612a",
+  "candidate": [
+    {
+      "path": "internal/gui/server.go",
+      "bytes": 53673,
+      "sha256": "cd2d06a86ba0393293daa92e52f9f4d0c60a7e7cb5df7bb4be2e3f295f27ad2b"
+    },
+    {
+      "path": "internal/gui/lsp_router_control.go",
+      "bytes": 5480,
+      "sha256": "c84607442f0523e2dbf8726e6041f24acbe7cbc4b5f008db84e5b0496138228e"
+    },
+    {
+      "path": "internal/gui/lsp_router_control_test.go",
+      "bytes": 8692,
+      "sha256": "973259cd775f3a4dad5d15a58e06c80767e37d09c3eea65efc19c4ee8356529b"
+    },
+    {
+      "path": "architecture/baseline.yaml",
+      "bytes": 1435735,
+      "sha256": "f7a7ad049c2e27b0df8fca68e1cb772909d3eed504fbb6ccf07ffdc0f0a0dd7a"
+    }
+  ],
+  "verification": {
+    "archive_bytes": 1070779,
+    "archive_sha256": "3c9d3ca51b131b15fd828c2410faf052d8a8cb684ff3a34f2b51ab584f292534",
+    "payloads_verified": 148,
+    "phases": [
+      {
+        "phase": "architecture-green",
+        "manifest_sha256": "8a972c6edb8fc0318bb21cbe800f18fcc203a5cc7f20bf99831c38bbbe7a5c5a",
+        "source": {
+          "files": 3276,
+          "bytes": 52563034,
+          "inventory_sha256": "aec6a7b7c3fab3db737d7988a4c4dc75299f5cfbee515c33846ff96231c4fb3b"
+        },
+        "inputs": {
+          "files": 50,
+          "bytes": 2489036,
+          "inventory_sha256": "e9e68219b749cd20bfffad10011a96478701aea0233c9a09e41c406a7bb305d4"
+        },
+        "commands": [
+          {
+            "label": "lsp-green",
+            "exit_code": 0,
+            "seconds": 14.908762200037017,
+            "direct_child_waited": true,
+            "whole_process_tree_deadline_enforced": false,
+            "exact_events": {
+              "pass": [
+                "TestLSPRouterDisableRoutePersistsOptOutAndRollsBackTargetClient",
+                "TestLSPRouterEnableRouteClearsOptOutAndForcesEnsureForTargetClient",
+                "TestLSPRouterStatusRouteReportsPersistedClientOptOut",
+                "TestLSPRouterControlRoutesKeepServerDependenciesSeparate/first",
+                "TestLSPRouterControlRoutesKeepServerDependenciesSeparate/second",
+                "TestLSPRouterControlRoutesKeepServerDependenciesSeparate",
+                "PACKAGE:mcp-local-hub/internal/gui"
+              ],
+              "fail": [],
+              "skip": []
+            },
+            "counts_including_package": {
+              "pass": 7,
+              "fail": 0,
+              "skip": 0
+            }
+          },
+          {
+            "label": "arch-scan",
+            "exit_code": 0,
+            "seconds": 44.900347299990244,
+            "direct_child_waited": true,
+            "whole_process_tree_deadline_enforced": false
+          },
+          {
+            "label": "arch-verify",
+            "exit_code": 1,
+            "seconds": 43.57333759998437,
+            "direct_child_waited": true,
+            "whole_process_tree_deadline_enforced": false
+          },
+          {
+            "label": "build",
+            "exit_code": 0,
+            "seconds": 19.285445799934678,
+            "direct_child_waited": true,
+            "whole_process_tree_deadline_enforced": false
+          },
+          {
+            "label": "vet",
+            "exit_code": 0,
+            "seconds": 23.929490600014105,
+            "direct_child_waited": true,
+            "whole_process_tree_deadline_enforced": false
+          }
+        ]
+      },
+      {
+        "phase": "architecture-red",
+        "manifest_sha256": "6ace43c8980ed703d9706cc98f896d628fb061030f696a0546ccab149a68fd0f",
+        "source": {
+          "files": 3276,
+          "bytes": 52562627,
+          "inventory_sha256": "c7f9cf27c42bc9e3a2aa2b51b841bc6dbc88c3a30080f498cf868f35f584e075"
+        },
+        "inputs": {
+          "files": 50,
+          "bytes": 2489036,
+          "inventory_sha256": "e9e68219b749cd20bfffad10011a96478701aea0233c9a09e41c406a7bb305d4"
+        },
+        "commands": [
+          {
+            "label": "lsp-red",
+            "exit_code": 1,
+            "seconds": 39.731833899975754,
+            "direct_child_waited": true,
+            "whole_process_tree_deadline_enforced": false,
+            "exact_events": {
+              "pass": [
+                "TestLSPRouterControlRoutesKeepServerDependenciesSeparate/second"
+              ],
+              "fail": [
+                "TestLSPRouterControlRoutesKeepServerDependenciesSeparate/first",
+                "TestLSPRouterControlRoutesKeepServerDependenciesSeparate",
+                "PACKAGE:mcp-local-hub/internal/gui"
+              ],
+              "skip": []
+            },
+            "counts_including_package": {
+              "pass": 1,
+              "fail": 3,
+              "skip": 0
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "review": {
+    "own": true,
+    "independent_source": true,
+    "external_exact_head": "PENDING"
+  },
+  "full_default_tagged_suites": "NOT_RUN",
+  "native_scheduler_operations": false,
+  "installed_product_operations": false,
+  "scan_delta": {
+    "before_findings": 2663,
+    "after_findings": 2661,
+    "removed": [
+      {
+        "fingerprint": "e5fdef8f26dc96d7e48ecb4765a02366700db59ddb2bc8a5dadef4ddf59feb1e",
+        "kind": "mutable_global",
+        "location": {
+          "path": "internal/gui/lsp_router_control.go",
+          "symbol": "lspRouterControlAPIFactory",
+          "line": 18
+        },
+        "evidence": "var lspRouterControlAPIFactory",
+        "message": "production package-level var lspRouterControlAPIFactory requires an explicit policy allowance or instance-owned dependency"
+      },
+      {
+        "fingerprint": "f3d272e6ed8a36d6358b42d85f3f10b2280af119c731c45422694de9d84c981a",
+        "kind": "api_construction",
+        "location": {
+          "path": "internal/gui/lsp_router_control.go",
+          "symbol": "lspRouterControlAPIFactory",
+          "line": 18
+        },
+        "evidence": "mcp-local-hub/internal/api.NewAPI",
+        "metric": 1,
+        "message": "constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths"
+      }
+    ],
+    "added": [],
+    "metric_changes": [
+      {
+        "fingerprint": "e7f29b64ccfbb97e6553b041f6a4c1d9952da9e14de4033f9da9820e976d1d88",
+        "kind": "file_budget",
+        "path": "internal/gui/server.go",
+        "before": 1263,
+        "after": 1265
+      }
+    ],
+    "before_scan_sha256": "65bfd254e612f19ca6c730e66da7e3532e050e2a1c70b1f80410ee1bac49b70a",
+    "after_scan_sha256": "9e0a683f892584b8d2e47155d04a5a031f89444e1a369efacaecd8e1de312cf6"
+  },
+  "baseline_delta": {
+    "before_entries": 2403,
+    "after_entries": 2401,
+    "before_sha256": "e0620345b7999fdb97462172d20226255e3397345078e98178098ddcd082632c",
+    "after_sha256": "f7a7ad049c2e27b0df8fca68e1cb772909d3eed504fbb6ccf07ffdc0f0a0dd7a",
+    "removed": [
+      {
+        "block": "    - fingerprint: e5fdef8f26dc96d7e48ecb4765a02366700db59ddb2bc8a5dadef4ddf59feb1e\n      kind: mutable_global\n      location:\n        path: internal/gui/lsp_router_control.go\n        symbol: lspRouterControlAPIFactory\n        line: 18\n      evidence: var lspRouterControlAPIFactory\n      message: production package-level var lspRouterControlAPIFactory requires an explicit policy allowance or instance-owned dependency\n      owner: gui-adapter\n      work_package: WP-11B\n      remove_by: \"2027-03-31\"\n      reason: GUI handlers become thin adapters over process-scoped application services.\n",
+        "sha256": "6a92f0cd94ae97e1aaecd0a6112bc0b7211d3a6ca330191827b3d83037536db2",
+        "bytes": 593
+      },
+      {
+        "block": "    - fingerprint: f3d272e6ed8a36d6358b42d85f3f10b2280af119c731c45422694de9d84c981a\n      kind: api_construction\n      location:\n        path: internal/gui/lsp_router_control.go\n        symbol: lspRouterControlAPIFactory\n        line: 18\n      evidence: mcp-local-hub/internal/api.NewAPI\n      metric: 1\n      message: constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths\n      owner: gui-adapter\n      work_package: WP-11B\n      remove_by: \"2027-03-31\"\n      reason: GUI handlers become thin adapters over process-scoped application services.\n      max_metric: 1\n",
+        "sha256": "15607f25b622ac5ecac00e22c466d89dbcbb18df89848323fa0aacbd3e05bbab",
+        "bytes": 605
+      }
+    ],
+    "unchanged_other_blocks": true
+  },
+  "architecture_gate": {
+    "status": "FAILED",
+    "exit_code": 1,
+    "new": 388,
+    "stale": 128,
+    "grown": 42,
+    "workers_in_new": 72,
+    "expired": 0,
+    "unowned": 0
+  }
+}

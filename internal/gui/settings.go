@@ -19,12 +19,14 @@ type settingsAPI interface {
 	SettingsPath() string
 }
 
-type realSettingsAPI struct{}
+type realSettingsAPI struct {
+	api *api.API
+}
 
-func (realSettingsAPI) List() (map[string]string, error) { return api.NewAPI().SettingsList() }
-func (realSettingsAPI) Set(key, value string) error      { return api.NewAPI().SettingsSet(key, value) }
-func (realSettingsAPI) SettingsPath() string             { return api.SettingsPath() }
-func (realSettingsAPI) OpenPath(path string) error       { return OpenPath(path) }
+func (a realSettingsAPI) List() (map[string]string, error) { return a.api.SettingsList() }
+func (a realSettingsAPI) Set(key, value string) error      { return a.api.SettingsSet(key, value) }
+func (realSettingsAPI) SettingsPath() string               { return api.SettingsPath() }
+func (realSettingsAPI) OpenPath(path string) error         { return OpenPath(path) }
 
 // configSettingDTO is the JSON shape for non-action settings entries.
 // `default` and `value` are ALWAYS emitted (no omitempty) so legitimate

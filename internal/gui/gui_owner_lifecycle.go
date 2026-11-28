@@ -57,19 +57,31 @@ func (record GUIOwnerRecord) ReservationEndpoint() (port int, terminal bool, err
 	return 0, false, errors.New("GUI owner record is not a settled terminal or active positive endpoint")
 }
 
+// GUIOwnerPolicy is the settings authority retained by one GUI acquisition.
+// Both operations must return only after releasing their settings lock, and
+// must report release failures. The caller keeps the GUI lease throughout.
+type GUIOwnerPolicy interface {
+	WithGUIOwnerControl(func(api.GUIOwnerControl) error) error
+	ResumeGUIOwner(api.GUIOwnerControl) (api.GUIOwnerControlResult, error)
+}
+
 // GUIOwnerLifecycle owns the durable record transitions for one process that
 // already owns the GUI flock. SingleInstanceLock deliberately remains an
 // unlock-only resource; cleanup changes the record before that lock releases.
 type GUIOwnerLifecycle struct {
 	mu         sync.Mutex
 	path       string
+	policy     GUIOwnerPolicy
 	generation string
 	pid        int
 	startTime  time.Time
 }
 
-func newGUIOwnerLifecycle(path string, record GUIOwnerRecord) *GUIOwnerLifecycle {
-	return &GUIOwnerLifecycle{path: path, generation: record.Generation, pid: record.PID, startTime: record.StartTime.UTC()}
+func newGUIOwnerLifecycle(path string, record GUIOwnerRecord, policy GUIOwnerPolicy) *GUIOwnerLifecycle {
+	if policy == nil {
+		policy = api.NewAPI()
+	}
+	return &GUIOwnerLifecycle{path: path, policy: policy, generation: record.Generation, pid: record.PID, startTime: record.StartTime.UTC()}
 }
 
 // NewGUIOwnerLifecycle reads the record written by this process after flock
@@ -93,7 +105,7 @@ func NewGUIOwnerLifecycle(path string) (*GUIOwnerLifecycle, error) {
 		}
 		return nil, errors.New("GUI owner lifecycle record has a stale process generation")
 	}
-	return newGUIOwnerLifecycle(path, record), nil
+	return newGUIOwnerLifecycle(path, record, nil), nil
 }
 
 // ReadGUIOwnerRecord accepts legacy v1 only so old installations remain
@@ -200,12 +212,23 @@ func writeGUIOwnerRecord(path string, record GUIOwnerRecord) error {
 	return api.WriteStateFileBytesLockHeld(path, append(b, '\n'))
 }
 
-func writeCurrentGUIOwnerRecord(path string, pid, port int, resume ...*api.GUIOwnerControl) (GUIOwnerRecord, error) {
+// publishCurrent binds the exact successfully written generation without a
+// second file read. It runs before the newly created lifecycle is exposed.
+func (l *GUIOwnerLifecycle) publishCurrent(pid, port int, resume ...*api.GUIOwnerControl) error {
+	record, err := writeCurrentGUIOwnerRecord(l.path, pid, port, l.policy, resume...)
+	if err != nil {
+		return err
+	}
+	l.generation, l.pid, l.startTime = record.Generation, record.PID, record.StartTime.UTC()
+	return nil
+}
+
+func writeCurrentGUIOwnerRecord(path string, pid, port int, policy GUIOwnerPolicy, resume ...*api.GUIOwnerControl) (GUIOwnerRecord, error) {
 	if len(resume) > 1 {
 		return GUIOwnerRecord{}, errors.New("GUI resume has multiple policy preimages")
 	}
 	if len(resume) == 1 && resume[0] != nil {
-		if _, err := api.NewAPI().ResumeGUIOwner(*resume[0]); err != nil {
+		if _, err := policy.ResumeGUIOwner(*resume[0]); err != nil {
 			return GUIOwnerRecord{}, err
 		}
 	}
@@ -213,7 +236,7 @@ func writeCurrentGUIOwnerRecord(path string, pid, port int, resume ...*api.GUIOw
 	// need that SAME lease, and the prior owner terminalized before releasing
 	// it. Confirm policy AND settings release before publishing any active row;
 	// a settings-release failure must not create an unowned active generation.
-	if err := api.NewAPI().WithGUIOwnerControl(func(control api.GUIOwnerControl) error {
+	if err := policy.WithGUIOwnerControl(func(control api.GUIOwnerControl) error {
 		return control.ValidateAutomaticStart()
 	}); err != nil {
 		return GUIOwnerRecord{}, err
@@ -266,7 +289,7 @@ func (l *GUIOwnerLifecycle) BeginHandoff(id, generation string, targetPID, targe
 	if !l.matches(record) || record.State != guiOwnerStateActive {
 		return errors.New("GUI owner record changed before handoff")
 	}
-	if err := api.NewAPI().WithGUIOwnerControl(func(control api.GUIOwnerControl) error {
+	if err := l.policy.WithGUIOwnerControl(func(control api.GUIOwnerControl) error {
 		if control.RunDesired == api.GUIRunStopped {
 			return api.ErrGUIStoppedByUser
 		}
