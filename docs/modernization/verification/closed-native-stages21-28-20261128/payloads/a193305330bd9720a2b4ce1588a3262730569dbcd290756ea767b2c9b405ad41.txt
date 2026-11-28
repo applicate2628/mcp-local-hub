@@ -1,0 +1,44 @@
+{
+  "schema": "root-public-fixture-source-byte-readback-v1",
+  "status": "PASS",
+  "sources": [
+    {
+      "path": "internal/gui/catalog_manifest_get_test.go",
+      "bytes": 6325,
+      "sha256": "c1de2803efaf3bff838431ef29dcd943aebd32bde07b42444f7a9253713b2114",
+      "git_blob": "ca6dfd361d7682563ce76a10947188e7ee7f78b3",
+      "match": true
+    },
+    {
+      "path": "internal/gui/status_test.go",
+      "bytes": 9171,
+      "sha256": "8c2fb1ee10870665366e1938c1fd5bc5714c7695cc3bfb3aefe31c17fec0f9ec",
+      "git_blob": "d5f5329baa3a062c573f4a038af4ed5abfa63647",
+      "match": true
+    },
+    {
+      "path": "internal/gui/lsp_register_response_test.go",
+      "bytes": 9253,
+      "sha256": "e14efb884b775673a62a753b397574bcc2ed7e3b3a4a84c08d4740eb273dca82",
+      "git_blob": "01511c54f3b316a2e7a8ad87c18e3f4862df02b4",
+      "match": true
+    },
+    {
+      "path": "internal/gui/projects_toggle_test.go",
+      "bytes": 31619,
+      "sha256": "522214845cf76ca37375cd1793ee70ffa515bd2dec0d11ccf0f39b799b87baaa",
+      "git_blob": "ab6af062252118019398ee01fdb6e5307fa92f1e",
+      "match": true
+    },
+    {
+      "path": "internal/gui/manifest_test.go",
+      "bytes": 38251,
+      "sha256": "74476960ea1c0984735caca9fe5147c1bae884a9c633b4c33a0488e477013123",
+      "git_blob": "d636073616286f7366a406b3456ff099e7d6d2e2",
+      "match": true
+    }
+  ],
+  "raw_fixture_values_saved": false,
+  "readback_method": "GitHub connector decoded Git blobs; independent SHA-256 and Git SHA-1 of actual UTF-8 bytes.",
+  "publication_authority": false
+}

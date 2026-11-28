@@ -1,0 +1,1004 @@
+{
+  "schema": "closed-native-events21-28-preservation-index-v1",
+  "events": [
+    {
+      "event": "stage-20261128-v21",
+      "status": "FAIL",
+      "physical_classification": "CLOSED",
+      "original_receipt": {
+        "role": "events/stage-20261128-v21/receipt.json",
+        "bytes": 437783,
+        "sha256": "312817aaa820039f0e22e99214521244299364909ff4e6d596e14e934b943fe0"
+      },
+      "config": {
+        "role": "events/stage-20261128-v21/config.json",
+        "sha256": "fd4e8ca89ce5c9ecfe7cd72e467d4d59987cb5afd21ba654c9e7c1960c1d6016"
+      },
+      "root": {
+        "role": "events/stage-20261128-v21/root-receiving.json",
+        "sha256": "639ef71c151227ab4bb1b7732e85e0dd5916ac0c2a34920a4bfd68615e4a4536"
+      },
+      "outer": {
+        "role": "events/stage-20261128-v21/outer-original.json",
+        "sha256": "d9f798a1cb3cfc12b6c7d2fa3ecb33c0bb5af2bc13bca0d3e0546ecd0e1d8b18"
+      },
+      "expected_start_head": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+      "controller_exit_code": 1,
+      "controller_seconds": 0.6936209999257699,
+      "original_native_io_controls_verified": true,
+      "original_root_and_outer_verified": true,
+      "commands": [
+        {
+          "name": "head",
+          "exit_code": 0,
+          "seconds": 0.0349166999803856,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v21/captures/head.stdout.txt",
+            "sha256": "fe69bf89766a772b8e2c0910d80842e23bd30ae77fd518c0ffa9240c0f12083d",
+            "bytes": 41
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v21/captures/head.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "current59f-three-identity-baseline-default",
+          "exit_code": 1,
+          "seconds": 0.42777439998462796,
+          "command_success": false,
+          "stdout": {
+            "role": "events/stage-20261128-v21/captures/current59f-three-identity-baseline-default.stdout.txt",
+            "sha256": "8a6aab727eb0041c2e16f74e65e1bdadb2760f005172acedfb27e1c65ece696d",
+            "bytes": 52
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v21/captures/current59f-three-identity-baseline-default.stderr.txt",
+            "sha256": "566f515bbdd251f604c2a185419f8af9f547b8a07b00216cb570032bc7d47f32",
+            "bytes": 2591
+          }
+        }
+      ]
+    },
+    {
+      "event": "stage-20261128-v22",
+      "status": "PASS",
+      "physical_classification": "CLOSED",
+      "original_receipt": {
+        "role": "events/stage-20261128-v22/receipt.json",
+        "bytes": 723033,
+        "sha256": "5ba351a931486875873eec998fc3222e9175ab0730c1da8a29c6cb06f4d89c28"
+      },
+      "config": {
+        "role": "events/stage-20261128-v22/config.json",
+        "sha256": "15bdd94c30a5c6c198db5002ccfc69710fbb3c0901ef3de95b4547694ed71da6"
+      },
+      "root": {
+        "role": "events/stage-20261128-v22/root-receiving.json",
+        "sha256": "a59fbc8374e82f3abc0205fa430166407c97cdb898a8f51591eaa2874d2a1d1c"
+      },
+      "outer": {
+        "role": "events/stage-20261128-v22/outer-original.json",
+        "sha256": "da934c2f5fdae586c4c64f081e340ede1d4a653cfb348d1ac5c2ceb0a1ebb286"
+      },
+      "expected_start_head": "27d90e626465dc9a3a012e50785d62785d4c5e7e",
+      "controller_exit_code": 0,
+      "controller_seconds": 2.7502267999807373,
+      "original_native_io_controls_verified": true,
+      "original_root_and_outer_verified": true,
+      "commands": [
+        {
+          "name": "head",
+          "exit_code": 0,
+          "seconds": 0.03189480002038181,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v22/captures/head.stdout.txt",
+            "sha256": "73aa24f699b6c06ce27e215551c8b246f45f00183a079260aed1401b22a07bb0",
+            "bytes": 41
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v22/captures/head.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "stage-reviewed-checkpoint-artifacts",
+          "exit_code": 0,
+          "seconds": 1.0643152999691665,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v22/captures/stage-reviewed-checkpoint-artifacts.stdout.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v22/captures/stage-reviewed-checkpoint-artifacts.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "check-reviewed-human-docs",
+          "exit_code": 0,
+          "seconds": 0.04416859999764711,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v22/captures/check-reviewed-human-docs.stdout.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v22/captures/check-reviewed-human-docs.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "reviewed-checkpoint-staged-names",
+          "exit_code": 0,
+          "seconds": 0.04335799999535084,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v22/captures/reviewed-checkpoint-staged-names.stdout.txt",
+            "sha256": "48bd369c6234cf9f698045f95f0fd88fe5edf5d8eaec4e602abf5bb0e9951ac0",
+            "bytes": 86082
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v22/captures/reviewed-checkpoint-staged-names.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "reviewed-checkpoint-staged-stat",
+          "exit_code": 0,
+          "seconds": 0.1741391000105068,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v22/captures/reviewed-checkpoint-staged-stat.stdout.txt",
+            "sha256": "19970112e0fa3b6cfd82d60ee3213e906b95f51753e9a38147c196fb82ac919e",
+            "bytes": 38336
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v22/captures/reviewed-checkpoint-staged-stat.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "reviewed-checkpoint-tree",
+          "exit_code": 0,
+          "seconds": 0.16568150010425597,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v22/captures/reviewed-checkpoint-tree.stdout.txt",
+            "sha256": "65569e446f5eaa26793678f7e9955d88d71567750a2e84f18456ff635e2eab8b",
+            "bytes": 41
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v22/captures/reviewed-checkpoint-tree.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        }
+      ]
+    },
+    {
+      "event": "stage-20261128-v23",
+      "status": "PASS",
+      "physical_classification": "CLOSED",
+      "original_receipt": {
+        "role": "events/stage-20261128-v23/receipt.json",
+        "bytes": 15960,
+        "sha256": "44c11cf8fba4f876e73ff6c347c9365900785ee743320676aae8d937fd662921"
+      },
+      "config": {
+        "role": "events/stage-20261128-v23/config.json",
+        "sha256": "eb96e82dadab507bc94a6f4e7c140d97bfc5d99547255935b0037a8653e377c5"
+      },
+      "root": {
+        "role": "events/stage-20261128-v23/root-receiving.json",
+        "sha256": "7db204216a1714396d997e89f5a8bf46b20117e6946dc3b2abd66c9536fc4eff"
+      },
+      "outer": {
+        "role": "events/stage-20261128-v23/outer-original.json",
+        "sha256": "9b19c18442b95129b503cef5f9d660c21d6d16f2d1612bd7a28a467bd470dd54"
+      },
+      "expected_start_head": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+      "controller_exit_code": 0,
+      "controller_seconds": 5.522667000070214,
+      "original_native_io_controls_verified": true,
+      "original_root_and_outer_verified": true,
+      "commands": [
+        {
+          "name": "head",
+          "exit_code": 0,
+          "seconds": 0.2188540999777615,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v23/captures/head.stdout.txt",
+            "sha256": "fe69bf89766a772b8e2c0910d80842e23bd30ae77fd518c0ffa9240c0f12083d",
+            "bytes": 41
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v23/captures/head.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "prepare-isolated-baseline-control",
+          "exit_code": 0,
+          "seconds": 5.010104699991643,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v23/captures/prepare-isolated-baseline-control.stdout.txt",
+            "sha256": "a71d23494b1d44d90c9b785fb03f68378efd75c6dee5940244dd0c22ef6706dc",
+            "bytes": 383
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v23/captures/prepare-isolated-baseline-control.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        }
+      ]
+    },
+    {
+      "event": "stage-20261128-v24",
+      "status": "PASS",
+      "physical_classification": "CLOSED",
+      "original_receipt": {
+        "role": "events/stage-20261128-v24/receipt.json",
+        "bytes": 1738979,
+        "sha256": "2555fbc338249c157f9326aafa22dd8a5b31a17c06baff72ce0182a1dcd5ae46"
+      },
+      "config": {
+        "role": "events/stage-20261128-v24/config.json",
+        "sha256": "26aa3574a15f33ff8965c2d2b73541beae0feef60207826206b182b9e0d0ad75"
+      },
+      "root": {
+        "role": "events/stage-20261128-v24/root-receiving.json",
+        "sha256": "c5137facc30c403ffd940ab5467f9521fb1b4e0c32a870ddd9dee638263fee7f"
+      },
+      "outer": {
+        "role": "events/stage-20261128-v24/outer-original.json",
+        "sha256": "aa6a0b9f8aaba5e0f07f0b4d7db6a0d0fbba95f15eabb1ad8c481a987180a539"
+      },
+      "expected_start_head": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+      "controller_exit_code": 0,
+      "controller_seconds": 488.03392769990023,
+      "original_native_io_controls_verified": true,
+      "original_root_and_outer_verified": true,
+      "commands": [
+        {
+          "name": "head",
+          "exit_code": 0,
+          "seconds": 0.03401030006352812,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v24/captures/head.stdout.txt",
+            "sha256": "fe69bf89766a772b8e2c0910d80842e23bd30ae77fd518c0ffa9240c0f12083d",
+            "bytes": 41
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v24/captures/head.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "copy-closed-product-caches-for-baseline",
+          "exit_code": 0,
+          "seconds": 167.4893217999488,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v24/captures/copy-closed-product-caches-for-baseline.stdout.txt",
+            "sha256": "5aafc7a0388e03c59b0e926d287311aba3af8a75c06c9044939dd286b7ba1ff8",
+            "bytes": 692
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v24/captures/copy-closed-product-caches-for-baseline.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "focused-cli-identity-default",
+          "exit_code": 0,
+          "seconds": 193.593260499998,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v24/captures/focused-cli-identity-default.stdout.txt",
+            "sha256": "5bbe498786e6f9b604379ad8cc4a0ebd289e403bd02a3eb24716d43f7ef3f0e2",
+            "bytes": 414
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v24/captures/focused-cli-identity-default.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "focused-cli-identity-test-state-path-env",
+          "exit_code": 0,
+          "seconds": 123.30344160005916,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v24/captures/focused-cli-identity-test-state-path-env.stdout.txt",
+            "sha256": "0fa5d572a9566a3afefdff40a1aae8f0e802c71c651d8cb9263e09aad19d197c",
+            "bytes": 415
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v24/captures/focused-cli-identity-test-state-path-env.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "isolated-source-still-clean",
+          "exit_code": 0,
+          "seconds": 0.13677899993490428,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v24/captures/isolated-source-still-clean.stdout.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v24/captures/isolated-source-still-clean.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        }
+      ]
+    },
+    {
+      "event": "stage-20261128-v25",
+      "status": "PASS",
+      "physical_classification": "CLOSED",
+      "original_receipt": {
+        "role": "events/stage-20261128-v25/receipt.json",
+        "bytes": 23932,
+        "sha256": "569eaf2f20858422e9d5a05e9631301259b9cb293ada3f0703878cfd9741edf9"
+      },
+      "config": {
+        "role": "events/stage-20261128-v25/config.json",
+        "sha256": "26e05b9a48f98dc25d47e41bf074af773180ad930ab4cea642e1eb4f8d486216"
+      },
+      "root": {
+        "role": "events/stage-20261128-v25/root-receiving.json",
+        "sha256": "e2f5df396e5691e2a4e9e382c8713824ba89f6db08bc8bd08f8dd20a1f9b2509"
+      },
+      "outer": {
+        "role": "events/stage-20261128-v25/outer-original.json",
+        "sha256": "6e380badbfd3568cc88f1fa87e7a87bd204ea7c012fb9e671444c9e1dc33ed66"
+      },
+      "expected_start_head": "264a0601b7d027652c12ec88ae4debd6c3bfb69f",
+      "controller_exit_code": 0,
+      "controller_seconds": 154.13117770000827,
+      "original_native_io_controls_verified": true,
+      "original_root_and_outer_verified": true,
+      "commands": [
+        {
+          "name": "head",
+          "exit_code": 0,
+          "seconds": 0.20953280001413077,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v25/captures/head.stdout.txt",
+            "sha256": "f665546f0d1211b43018ecd17c352657643c26cfea06b729ca0ac3bfac68a795",
+            "bytes": 41
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v25/captures/head.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "canonical-readonly-publication-locations",
+          "exit_code": 0,
+          "seconds": 153.65984700003173,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v25/captures/canonical-readonly-publication-locations.stdout.txt",
+            "sha256": "0b35231c8baadffd57190ed60bf83d7e09d449328e59cd3a6c3ef9e975d685cb",
+            "bytes": 279
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v25/captures/canonical-readonly-publication-locations.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "publication-source-unchanged",
+          "exit_code": 0,
+          "seconds": 0.0840185999404639,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v25/captures/publication-source-unchanged.stdout.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v25/captures/publication-source-unchanged.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        }
+      ]
+    },
+    {
+      "event": "stage-20261128-v26",
+      "status": "PASS",
+      "physical_classification": "CLOSED",
+      "original_receipt": {
+        "role": "events/stage-20261128-v26/receipt.json",
+        "bytes": 31554,
+        "sha256": "980b40d340a8ed19fd4fc3ff167819e1a9c553029a4db2bf9a44298cb1bd3e4a"
+      },
+      "config": {
+        "role": "events/stage-20261128-v26/config.json",
+        "sha256": "45985cd9463dd50980643876b6cac334140b03f6c8c7d9852f70400037e8f905"
+      },
+      "root": {
+        "role": "events/stage-20261128-v26/root-receiving.json",
+        "sha256": "1ce4b50aa6ffdf4e5601b1ea0f0730bc3d88ccce7a824fdb367108c9985700d3"
+      },
+      "outer": {
+        "role": "events/stage-20261128-v26/outer-original.json",
+        "sha256": "ee4682beb24d7bb7093e38a1c502ad48b1ba76b9c1eb2137a4d0e99e33de5059"
+      },
+      "expected_start_head": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+      "controller_exit_code": 0,
+      "controller_seconds": 5.762871399987489,
+      "original_native_io_controls_verified": true,
+      "original_root_and_outer_verified": true,
+      "commands": [
+        {
+          "name": "head",
+          "exit_code": 0,
+          "seconds": 0.07883969997055829,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v26/captures/head.stdout.txt",
+            "sha256": "fe69bf89766a772b8e2c0910d80842e23bd30ae77fd518c0ffa9240c0f12083d",
+            "bytes": 41
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v26/captures/head.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "create-cli-fixture-candidate-worktree",
+          "exit_code": 0,
+          "seconds": 5.277785099926405,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v26/captures/create-cli-fixture-candidate-worktree.stdout.txt",
+            "sha256": "2b90687ac648df0f86023dd07c61c469067f025638ca03a0b87e8c538a64d035",
+            "bytes": 80
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v26/captures/create-cli-fixture-candidate-worktree.stderr.txt",
+            "sha256": "b0ec8eaac8c2c4960afd55f2226ea31734aed847138493c203e1ed2f44746c9f",
+            "bytes": 2712
+          }
+        },
+        {
+          "name": "new-cli-source-head",
+          "exit_code": 0,
+          "seconds": 0.0679467999143526,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v26/captures/new-cli-source-head.stdout.txt",
+            "sha256": "fe69bf89766a772b8e2c0910d80842e23bd30ae77fd518c0ffa9240c0f12083d",
+            "bytes": 41
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v26/captures/new-cli-source-head.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "new-cli-source-clean",
+          "exit_code": 0,
+          "seconds": 0.15065900003537536,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v26/captures/new-cli-source-clean.stdout.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v26/captures/new-cli-source-clean.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        }
+      ]
+    },
+    {
+      "event": "stage-20261128-v27",
+      "status": "PASS",
+      "physical_classification": "CLOSED",
+      "original_receipt": {
+        "role": "events/stage-20261128-v27/receipt.json",
+        "bytes": 1200427,
+        "sha256": "e73c107d696ddcc645f1b00854de858b1eace6e59551d14f2df1b6f98f831259"
+      },
+      "config": {
+        "role": "events/stage-20261128-v27/config.json",
+        "sha256": "d5f5c36b73655ff74616758937bb7ed739b2d2531e37cd284299acd2aed5e7e1"
+      },
+      "root": {
+        "role": "events/stage-20261128-v27/root-receiving.json",
+        "sha256": "d835235c1fdf3dd1b0afbb0bbda90ea1d634593b7f6439ebf6f6f2ead8d60ebf"
+      },
+      "outer": {
+        "role": "events/stage-20261128-v27/outer-original.json",
+        "sha256": "b35fa0543dfd08e730f80de78af18df9735e125a8c056cb088ff9e40a1a07d20"
+      },
+      "expected_start_head": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+      "controller_exit_code": 0,
+      "controller_seconds": 36.59349170001224,
+      "original_native_io_controls_verified": true,
+      "original_root_and_outer_verified": true,
+      "commands": [
+        {
+          "name": "head",
+          "exit_code": 0,
+          "seconds": 0.03514990000985563,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v27/captures/head.stdout.txt",
+            "sha256": "fe69bf89766a772b8e2c0910d80842e23bd30ae77fd518c0ffa9240c0f12083d",
+            "bytes": 41
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v27/captures/head.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "build-timing-only-namespace-owner",
+          "exit_code": 0,
+          "seconds": 17.26094629999716,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v27/captures/build-timing-only-namespace-owner.stdout.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v27/captures/build-timing-only-namespace-owner.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "safe-source-still-clean",
+          "exit_code": 0,
+          "seconds": 0.08234259998425841,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v27/captures/safe-source-still-clean.stdout.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v27/captures/safe-source-still-clean.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        }
+      ]
+    },
+    {
+      "event": "commit-20261128-v11",
+      "status": "PASS",
+      "physical_classification": "CLOSED",
+      "original_receipt": {
+        "role": "events/commit-20261128-v11/receipt.json",
+        "bytes": 864954,
+        "sha256": "39198b81985988547bc6a4125dce5d1a1ced6ead2df12cc2b87f2b7852c85256"
+      },
+      "config": {
+        "role": "events/commit-20261128-v11/config.json",
+        "sha256": "87c0e19a23c3837273172f34db7e184b60b541be076955de33bf0269a86a6bc6"
+      },
+      "root": {
+        "role": "events/commit-20261128-v11/root-receiving.json",
+        "sha256": "e5ce1731d99d5b7282cf3237fbd37a33257ff96d0ffac5c6e6f096c69317db16"
+      },
+      "outer": {
+        "role": "events/commit-20261128-v11/outer-original.json",
+        "sha256": "33b23dea291d96713470a6719e604dc2db6aaf4aea433b32e40d65c0c06000b5"
+      },
+      "expected_start_head": "27d90e626465dc9a3a012e50785d62785d4c5e7e",
+      "controller_exit_code": 0,
+      "controller_seconds": 2.1640040000202134,
+      "original_native_io_controls_verified": true,
+      "original_root_and_outer_verified": true,
+      "commands": [
+        {
+          "name": "head",
+          "exit_code": 0,
+          "seconds": 0.04494749999139458,
+          "command_success": true,
+          "stdout": {
+            "role": "events/commit-20261128-v11/captures/head.stdout.txt",
+            "sha256": "73aa24f699b6c06ce27e215551c8b246f45f00183a079260aed1401b22a07bb0",
+            "bytes": 41
+          },
+          "stderr": {
+            "role": "events/commit-20261128-v11/captures/head.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "bind-reviewed-index-blobs",
+          "exit_code": 0,
+          "seconds": 0.045820700004696846,
+          "command_success": true,
+          "stdout": {
+            "role": "events/commit-20261128-v11/captures/bind-reviewed-index-blobs.stdout.txt",
+            "sha256": "44f104ea3c12067921dae21fa12f76629175265f5083727c87f76566bca8d22d",
+            "bytes": 116882
+          },
+          "stderr": {
+            "role": "events/commit-20261128-v11/captures/bind-reviewed-index-blobs.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "commit-reviewed-complete-evidence",
+          "exit_code": 0,
+          "seconds": 0.7187707000412047,
+          "command_success": true,
+          "stdout": {
+            "role": "events/commit-20261128-v11/captures/commit-reviewed-complete-evidence.stdout.txt",
+            "sha256": "9db2302235a3fb75cc86a0ad5da1603de5058bac65f91f8c82b79b6983c5c73b",
+            "bytes": 98504
+          },
+          "stderr": {
+            "role": "events/commit-20261128-v11/captures/commit-reviewed-complete-evidence.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "committed-head",
+          "exit_code": 0,
+          "seconds": 0.03698229999281466,
+          "command_success": true,
+          "stdout": {
+            "role": "events/commit-20261128-v11/captures/committed-head.stdout.txt",
+            "sha256": "f665546f0d1211b43018ecd17c352657643c26cfea06b729ca0ac3bfac68a795",
+            "bytes": 41
+          },
+          "stderr": {
+            "role": "events/commit-20261128-v11/captures/committed-head.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "committed-exact-tree",
+          "exit_code": 0,
+          "seconds": 0.04030570003669709,
+          "command_success": true,
+          "stdout": {
+            "role": "events/commit-20261128-v11/captures/committed-exact-tree.stdout.txt",
+            "sha256": "65569e446f5eaa26793678f7e9955d88d71567750a2e84f18456ff635e2eab8b",
+            "bytes": 41
+          },
+          "stderr": {
+            "role": "events/commit-20261128-v11/captures/committed-exact-tree.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "committed-identity",
+          "exit_code": 0,
+          "seconds": 0.04800080007407814,
+          "command_success": true,
+          "stdout": {
+            "role": "events/commit-20261128-v11/captures/committed-identity.stdout.txt",
+            "sha256": "ea1a2ab68057909c6434f57a9db52557f0bce9a6b36a752dd3c8a5defc18a05d",
+            "bytes": 331
+          },
+          "stderr": {
+            "role": "events/commit-20261128-v11/captures/committed-identity.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "post-commit-status",
+          "exit_code": 0,
+          "seconds": 0.057258700020611286,
+          "command_success": true,
+          "stdout": {
+            "role": "events/commit-20261128-v11/captures/post-commit-status.stdout.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          },
+          "stderr": {
+            "role": "events/commit-20261128-v11/captures/post-commit-status.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        }
+      ]
+    },
+    {
+      "event": "push-20261128-v8",
+      "status": "FAIL",
+      "physical_classification": "CLOSED",
+      "original_receipt": {
+        "role": "events/push-20261128-v8/receipt.json",
+        "bytes": 151100,
+        "sha256": "7f9fa90913bde526676cacfe644e5cd57b1b35eca039375b003b5facf74c7e45"
+      },
+      "config": {
+        "role": "events/push-20261128-v8/config.json",
+        "sha256": "3d095a5432b45091f7386f9af867a7f49cbc36b685ce70024546e31c936fc9a8"
+      },
+      "root": {
+        "role": "events/push-20261128-v8/root-receiving.json",
+        "sha256": "4e1ddcc05807a32abd4281214aee84901ccda6402b18ccee68d44da197e2c824"
+      },
+      "outer": {
+        "role": "events/push-20261128-v8/outer-original.json",
+        "sha256": "16d3f09b7ed2494bc701b138336065cc55ed9819c28bac49a4d8c0ac7754b632"
+      },
+      "expected_start_head": "264a0601b7d027652c12ec88ae4debd6c3bfb69f",
+      "controller_exit_code": 1,
+      "controller_seconds": 80.8693400999764,
+      "original_native_io_controls_verified": true,
+      "original_root_and_outer_verified": true,
+      "commands": [
+        {
+          "name": "head",
+          "exit_code": 0,
+          "seconds": 0.03807790006976575,
+          "command_success": true,
+          "stdout": {
+            "role": "events/push-20261128-v8/captures/head.stdout.txt",
+            "sha256": "f665546f0d1211b43018ecd17c352657643c26cfea06b729ca0ac3bfac68a795",
+            "bytes": 41
+          },
+          "stderr": {
+            "role": "events/push-20261128-v8/captures/head.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "native-complete-acceptance-evidence-publication",
+          "exit_code": 1,
+          "seconds": 80.61977119999938,
+          "command_success": false,
+          "stdout": {
+            "role": "events/push-20261128-v8/captures/native-complete-acceptance-evidence-publication.stdout.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          },
+          "stderr": {
+            "role": "events/push-20261128-v8/captures/native-complete-acceptance-evidence-publication.stderr.txt",
+            "sha256": "dd0ca6715381392927211ceb70bd81307a702d25ccbd66e89cd7d2f7bdcdf8b0",
+            "bytes": 185
+          }
+        }
+      ]
+    },
+    {
+      "event": "stage-20261128-v28",
+      "status": "PASS",
+      "physical_classification": "CLOSED",
+      "original_receipt": {
+        "role": "events/stage-20261128-v28/receipt.json",
+        "bytes": 5345312,
+        "sha256": "766ba5e9662eb1fa51314537ca0bd5cd4c209997c33f228b5037eb8fed8d567c"
+      },
+      "config": {
+        "role": "events/stage-20261128-v28/config.json",
+        "sha256": "372a23a3c23a57bb16a734527d0f82abef84a9893b3c7396594836e938809081"
+      },
+      "root": {
+        "role": "events/stage-20261128-v28/root-receiving.json",
+        "sha256": "9b58debadb83e344f498feeaf3464cd54f8e08ebc2906e01cf4235ea31a10684"
+      },
+      "outer": {
+        "role": "events/stage-20261128-v28/outer-original.json",
+        "sha256": "9a54f09d9bc3d74a5c4ba84052709b0aadec9c89f0cf827782a0d84f4a2bfc10"
+      },
+      "expected_start_head": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+      "controller_exit_code": 0,
+      "controller_seconds": 126.01922949997243,
+      "original_native_io_controls_verified": true,
+      "original_root_and_outer_verified": true,
+      "commands": [
+        {
+          "name": "head",
+          "exit_code": 0,
+          "seconds": 0.03855429997202009,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v28/captures/head.stdout.txt",
+            "sha256": "fe69bf89766a772b8e2c0910d80842e23bd30ae77fd518c0ffa9240c0f12083d",
+            "bytes": 41
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v28/captures/head.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "check-shared-image-patch",
+          "exit_code": 0,
+          "seconds": 0.03844060003757477,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v28/captures/check-shared-image-patch.stdout.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v28/captures/check-shared-image-patch.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "check-prespawn-barrier-patch",
+          "exit_code": 0,
+          "seconds": 0.03690790000837296,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v28/captures/check-prespawn-barrier-patch.stdout.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v28/captures/check-prespawn-barrier-patch.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "apply-shared-image-patch",
+          "exit_code": 0,
+          "seconds": 0.04479750001337379,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v28/captures/apply-shared-image-patch.stdout.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v28/captures/apply-shared-image-patch.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "apply-prespawn-barrier-patch",
+          "exit_code": 0,
+          "seconds": 0.041626400081440806,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v28/captures/apply-prespawn-barrier-patch.stdout.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v28/captures/apply-prespawn-barrier-patch.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "format-three-test-files",
+          "exit_code": 0,
+          "seconds": 0.13900640001520514,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v28/captures/format-three-test-files.stdout.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v28/captures/format-three-test-files.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "check-three-test-file-diff",
+          "exit_code": 0,
+          "seconds": 0.10019279993139207,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v28/captures/check-three-test-file-diff.stdout.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v28/captures/check-three-test-file-diff.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "focused-fixtures-default",
+          "exit_code": 0,
+          "seconds": 72.8688110000221,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v28/captures/focused-fixtures-default.stdout.txt",
+            "sha256": "74b32ce578b514a5bd27ac8ae67d4ddc1dd069a40e3d34a6667c2b3c2e748dc7",
+            "bytes": 1162
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v28/captures/focused-fixtures-default.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "focused-fixtures-tagged",
+          "exit_code": 0,
+          "seconds": 50.01528689998668,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v28/captures/focused-fixtures-tagged.stdout.txt",
+            "sha256": "8473935f6b4b852a87f30992d32c17fe19075d170f59388e3e5d427b6fb162b9",
+            "bytes": 1162
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v28/captures/focused-fixtures-tagged.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        },
+        {
+          "name": "changed-test-files",
+          "exit_code": 0,
+          "seconds": 0.11534210003446788,
+          "command_success": true,
+          "stdout": {
+            "role": "events/stage-20261128-v28/captures/changed-test-files.stdout.txt",
+            "sha256": "d54a2f1b9d0ec5d3e99bea53258a288aa6760a3e9c4ddeff7ca5a10bdafe545b",
+            "bytes": 158
+          },
+          "stderr": {
+            "role": "events/stage-20261128-v28/captures/changed-test-files.stderr.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        }
+      ]
+    }
+  ],
+  "original_command_count": 44,
+  "command_capture_paths": 88,
+  "controller_capture_paths": 20,
+  "new_execution_by_preservation_author": false,
+  "UNKNOWN_payload_read": false
+}

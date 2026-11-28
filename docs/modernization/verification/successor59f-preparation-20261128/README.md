@@ -31,7 +31,7 @@
 
 Точный commit: `59f618ebfbf6d9f52c6994d68586e3c2ebc202a8`; tree: `03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1`; parent: `74e7563db244ede5984834233ce8d59072e92c0a`. Карта содержит **3369 tracked paths, 69 340 536 исходных байтов**. Сохраняются [карта фактических SHA-256](templates/source/source59f-input-sha256.json.template) и [полная карта Git mode/blob](sources/source/source59f-git-map.json); реальные входы каждого producer связаны с этими данными и повторно измерены вокруг команд.
 
-Цепочка test-only изменений начинается после восстановленного `33eaf8af8fc46cb231f48c70f4775922393245b1`: семь ранее опубликованных test fixes дали Source04e, два литерала migration manifest — Source74e, затем проверка ошибки исходного `Process.Wait` — Source59f. Последняя дельта и точный afterimage включены здесь: [original-breakaway-wait.patch](sources/source/wait-fix/original-breakaway-wait.patch) и [исправленный тест](sources/source/wait-fix/afterimages/internal/cli/supervisor_spawn_breakaway_windows_test.go).
+Цепочка test-only изменений начинается после восстановленного `33eaf8af8fc46cb231f48c70f4775922393245b1`: семь ранее опубликованных test fixes дали Source04e, два литерала migration manifest — Source74e, затем проверка ошибки исходного `Process.Wait` — Source59f. Последняя дельта и точный afterimage включены здесь: [original-breakaway-wait.patch](sources/source/wait-fix/original-breakaway-wait.patch) и [исправленный тест](sources/source/wait-fix/afterimages/internal/cli/supervisor_spawn_breakaway_windows_test.go.txt).
 
 Семь предыдущих test fixes и два manifest literals уже сохранены в отдельных опубликованных капсулах, ссылки приведены в §9. Отдельный raw Git commit object для 59f здесь не экспортирован. Его идентичность подтверждает закрытая native операция commit-v10 в отдельном publication trail. Эта капсула сохраняет точные file maps и финальный patch; она не выдаёт их за новый экспорт commit object.
 
@@ -88,7 +88,7 @@ go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./interna
 
 В [evidence.json](evidence.json) сохранены точные 14 migration roots, два canonical controls, три исходных API stderr roots и три дополнительных CLI stderr roots. В namespace также обязательны три исходных namespace tests и peer transport test. Наличие имён в конфигурации не означает их выполнение или PASS. Из четырнадцати migration roots тринадцать проходят реальную production preparation; TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite использует существующую inert test seam, которая изолирует проверку переданного manifest. Новые mock не вводились; пакет не добавляет пропуски, неподдержанный UV cache import или частную Source727d схему.
 
-Пять успешно выполненных unit tests относятся только к auxiliary parser: unframed spoof, корректная frame после prompt и one-byte chunks, длинный обычный вывод/слишком большая frame, повторный PASS, FAIL/SKIP требуемого root. Их [точные тесты](sources/inputs/foreground/main_windows_test.go) и [исходный stdout](sources/captures/producer-v1/check-foreground-framed-parser.stdout.txt) сохранены. Они не являются полным API/CLI прогоном.
+Пять успешно выполненных unit tests относятся только к auxiliary parser: unframed spoof, корректная frame после prompt и one-byte chunks, длинный обычный вывод/слишком большая frame, повторный PASS, FAIL/SKIP требуемого root. Их [точные тесты](sources/inputs/foreground/main_windows_test.go.txt) и [исходный stdout](sources/captures/producer-v1/check-foreground-framed-parser.stdout.txt) сохранены. Они не являются полным API/CLI прогоном.
 
 ## 6. Исходное владение процессами
 
@@ -116,7 +116,9 @@ python CAPSULE/reconstruct_sources.py --roles-json operator-roles.json --output 
 
 Здесь CAPSULE обозначает каталог данного пакета; output должен отсутствовать, а его parent — уже существовать. JSON оператора должен содержать ровно роли из `required_roles`. Renderer сначала проверяет все опубликованные payloads, число markers, исходные размеры и SHA-256 для каждого восстановленного файла. Только затем создаёт новый output и пишет файлы через exclusive create. Он не импортирует сохранённые scripts, не запускает Go/Git/модели, не обращается в сеть, не меняет gate и не переносит никакую квалификацию.
 
-[data-reconstruction-proof.json](data-reconstruction-proof.json) фиксирует независимое восстановление всех 133 оригиналов в памяти. Это DATA-проверка. Hash manifest позволяет повторно проверить именно опубликованные байты; `.gitattributes` с `* -text` сохраняет окончания строк.
+[data-reconstruction-proof.json](data-reconstruction-proof.json) сохраняет историческое независимое восстановление всех 133 оригиналов в памяти для первоначального bindings SHA-256 `f6291141e747d821f22f174a0b4db38e808fb6bd9b8ed53eabee7f87f5e56090` в commit `747cc17a966b0a0cbcdfbe4607e392c771009ba4`. Этот receipt не изменён и не изображает новый запуск renderer.
+
+Три опубликованных исходника с расширением `.go` теперь хранятся с суффиксом `.go.txt`, чтобы обычный `go test ./...` не считал доказательные afterimages исходниками пакетов. В `source-bindings.json` изменились только три `published_path` и соответствующий pin renderer; все 133 исходных роли, размеры, SHA-256, substitutions и bytes payloads сохранены. Renderer по-прежнему восстанавливает исходные имена `.go` только в явно указанном новом DATA-каталоге. Hash manifest проверяет текущий publication layout; `.gitattributes` с `* -text` сохраняет окончания строк.
 
 ## 8. Состав и границы доказательств
 

@@ -1,0 +1,274 @@
+{
+  "schema": "successor267f-producer-review-projection-v1",
+  "status": "NOT_BOUND",
+  "source": {
+    "commit": "267f076500b982475b57be45e8a7d8a03edcc2a6",
+    "tree": "d9636aa81dbcb995934a5ee1e51331b0a10af55f",
+    "root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-cli-fixtures-20261128",
+    "files": 3369,
+    "bytes": 69342009
+  },
+  "planned_input_count_without_cache": 3393,
+  "missing_inputs": "actual APIv2 cache handoff + cache copier/binding only",
+  "producer_build_is_not_full_acceptance": true,
+  "wrapper": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\product-continuation-v2\\build_successor_products_v2.ps1",
+    "sha256": "6230aaa4474526e9d8ccf864e35d363669605e0560c784f7df36753cc5e35b06"
+  },
+  "product_configuration": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer267f-candidate-v1\\product-build-config.json",
+    "sha256": "80d3d2b1872146b2fe025990b8bf4d7275a485c946ec47cb39c9195a82bf22b5"
+  },
+  "helper_binding": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer267f-candidate-v1\\helper-build-bindings.json",
+    "sha256": "8c7cb17e937b406efea94cde7c4df04e7b4cb6bb58394a44c56a21cbf6270069"
+  },
+  "environment": {
+    "APPDATA": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\private\\home\\AppData\\Roaming",
+    "CC": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\bin\\gcc.exe",
+    "CGO_ENABLED": "1",
+    "COMSPEC": "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\cmd.exe",
+    "GCM_INTERACTIVE": "Never",
+    "GIT_CONFIG_GLOBAL": "NUL",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_NO_LAZY_FETCH": "1",
+    "GIT_NO_REPLACE_OBJECTS": "1",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GOCACHE": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\private\\go-build",
+    "GOFLAGS": "-mod=readonly -p=1",
+    "GOMODCACHE": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\private\\go-mod",
+    "GOPROXY": "https://proxy.golang.org,direct",
+    "GOROOT": "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go",
+    "GOSUMDB": "sum.golang.org",
+    "GOTMPDIR": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\private\\go-tmp",
+    "GOTOOLCHAIN": "local",
+    "GOWORK": "off",
+    "HOME": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\private\\home",
+    "LOCALAPPDATA": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\private\\home\\AppData\\Local",
+    "PATH": "@@RECOVERY_NATIVE_POWERSHELL_WORK_AREA_JSON@@\\bns26\\pwsh7;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\mingw64\\bin;@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\usr\\bin;@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin;@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\bin;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@;@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\WindowsPowerShell\\v1.0",
+    "PATHEXT": ".COM;.EXE;.BAT;.CMD",
+    "POWERSHELL_TELEMETRY_OPTOUT": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONUTF8": "1",
+    "SystemRoot": "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@",
+    "TEMP": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\private\\temp",
+    "TMP": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\private\\temp",
+    "TMPDIR": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\private\\temp",
+    "USERPROFILE": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\private\\home",
+    "WINDIR": "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@",
+    "GOENV": "off",
+    "GOOS": "windows",
+    "GOARCH": "amd64",
+    "ProgramFiles": "@@RECOVERY_PROGRAM_FILES_64_JSON@@",
+    "ProgramFiles(x86)": "@@RECOVERY_PROGRAM_FILES_32_JSON@@",
+    "OS": "Windows_NT"
+  },
+  "commands": [
+    {
+      "name": "copy-closed-baseline-caches",
+      "argv": null,
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1",
+      "seconds": 600,
+      "executable_sha256": "d4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd",
+      "status": "NOT_BOUND"
+    },
+    {
+      "name": "stage-exact-source-and-helpers",
+      "argv": [
+        "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+        "-I",
+        "-S",
+        "-B",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer267f-candidate-v1\\prepare_successor267f_inputs.py",
+        "stage",
+        "--bindings",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer267f-candidate-v1\\helper-build-bindings.json",
+        "--bindings-sha256",
+        "8c7cb17e937b406efea94cde7c4df04e7b4cb6bb58394a44c56a21cbf6270069"
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1",
+      "seconds": 120,
+      "executable_sha256": "d4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd"
+    },
+    {
+      "name": "build-validator",
+      "argv": [
+        "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe",
+        "build",
+        "-p=1",
+        "-mod=readonly",
+        "-trimpath=false",
+        "-ldflags=",
+        "-o",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\windows-product-validate.exe",
+        "./tools/windows-product-validate"
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-cli-fixtures-20261128",
+      "seconds": 300,
+      "executable_sha256": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113"
+    },
+    {
+      "name": "build-test2json",
+      "argv": [
+        "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe",
+        "build",
+        "-p=1",
+        "-mod=readonly",
+        "-trimpath=false",
+        "-ldflags=",
+        "-o",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\test2json.exe",
+        "cmd/test2json"
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-cli-fixtures-20261128",
+      "seconds": 120,
+      "executable_sha256": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113"
+    },
+    {
+      "name": "build-job",
+      "argv": [
+        "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe",
+        "build",
+        "-p=1",
+        "-mod=readonly",
+        "-trimpath=false",
+        "-ldflags=",
+        "-o",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\test-job-entry.exe",
+        "./.scratch/qualified-successor-job"
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-cli-fixtures-20261128",
+      "seconds": 300,
+      "executable_sha256": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113"
+    },
+    {
+      "name": "build-contained",
+      "argv": [
+        "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe",
+        "build",
+        "-p=1",
+        "-mod=readonly",
+        "-trimpath=false",
+        "-ldflags=",
+        "-o",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\literal-contained.exe",
+        "./.scratch/qualified-successor-contained"
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-cli-fixtures-20261128",
+      "seconds": 300,
+      "executable_sha256": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113"
+    },
+    {
+      "name": "build-namespace",
+      "argv": [
+        "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe",
+        "build",
+        "-p=1",
+        "-mod=readonly",
+        "-trimpath=false",
+        "-ldflags=-H=windowsgui",
+        "-o",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\test-recovery-namespace.exe",
+        "./.scratch/qualified-successor-namespace"
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-cli-fixtures-20261128",
+      "seconds": 300,
+      "executable_sha256": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113"
+    },
+    {
+      "name": "build-cli",
+      "argv": [
+        "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe",
+        "build",
+        "-p=1",
+        "-mod=readonly",
+        "-trimpath=false",
+        "-ldflags=",
+        "-o",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor267f-product-helper-inputs-v1\\literal-foreground-cli.exe",
+        "./.scratch/qualified-successor-cli"
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-cli-fixtures-20261128",
+      "seconds": 300,
+      "executable_sha256": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113"
+    },
+    {
+      "name": "check-foreground-framed-parser",
+      "argv": [
+        "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe",
+        "test",
+        "-p=1",
+        "-mod=readonly",
+        "-ldflags=-H=windowsgui",
+        "-count=1",
+        "-timeout",
+        "30s",
+        "./.scratch/qualified-successor-cli"
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-cli-fixtures-20261128",
+      "seconds": 60,
+      "executable_sha256": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113"
+    },
+    {
+      "name": "build-marked-product",
+      "argv": [
+        "@@RECOVERY_NATIVE_POWERSHELL_WORK_AREA_JSON@@\\bns26\\pwsh7\\pwsh.exe",
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\product-continuation-v2\\build_successor_products_v2.ps1",
+        "-ConfigPath",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer267f-candidate-v1\\product-build-config.json",
+        "-ConfigSHA256",
+        "80d3d2b1872146b2fe025990b8bf4d7275a485c946ec47cb39c9195a82bf22b5",
+        "-Role",
+        "marked"
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-cli-fixtures-20261128",
+      "seconds": 600,
+      "executable_sha256": "f2833e07a5a7d59153ffc63db83bd6b62f6c63ffd8b5b5099a2feadf6b605336"
+    },
+    {
+      "name": "build-native-product",
+      "argv": [
+        "@@RECOVERY_NATIVE_POWERSHELL_WORK_AREA_JSON@@\\bns26\\pwsh7\\pwsh.exe",
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\product-continuation-v2\\build_successor_products_v2.ps1",
+        "-ConfigPath",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer267f-candidate-v1\\product-build-config.json",
+        "-ConfigSHA256",
+        "80d3d2b1872146b2fe025990b8bf4d7275a485c946ec47cb39c9195a82bf22b5",
+        "-Role",
+        "native"
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-cli-fixtures-20261128",
+      "seconds": 600,
+      "executable_sha256": "f2833e07a5a7d59153ffc63db83bd6b62f6c63ffd8b5b5099a2feadf6b605336"
+    },
+    {
+      "name": "receive-compiled-inputs-data",
+      "argv": [
+        "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+        "-I",
+        "-S",
+        "-B",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer267f-candidate-v1\\prepare_successor267f_inputs.py",
+        "receive",
+        "--bindings",
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer267f-candidate-v1\\helper-build-bindings.json",
+        "--bindings-sha256",
+        "8c7cb17e937b406efea94cde7c4df04e7b4cb6bb58394a44c56a21cbf6270069"
+      ],
+      "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1",
+      "seconds": 120,
+      "executable_sha256": "d4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd"
+    }
+  ],
+  "parent_seconds": 4100,
+  "work_seconds": 3720,
+  "required_parent_minimum": 3870
+}

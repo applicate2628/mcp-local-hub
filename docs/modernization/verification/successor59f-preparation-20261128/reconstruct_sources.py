@@ -9,7 +9,7 @@ import json
 import re
 from pathlib import Path, PurePosixPath
 
-BINDINGS_SHA256 = "f6291141e747d821f22f174a0b4db38e808fb6bd9b8ed53eabee7f87f5e56090"
+BINDINGS_SHA256 = "10d3bf78697f030801188f08600ecb9c076e5053ca6788c09c5316a63ff70849"
 SCHEMA = "original-v6-source-preservation-bindings-v1"
 
 

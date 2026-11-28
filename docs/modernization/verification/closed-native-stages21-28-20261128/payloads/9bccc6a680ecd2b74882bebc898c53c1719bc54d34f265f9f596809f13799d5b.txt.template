@@ -1,0 +1,45 @@
+{
+    "schema":  "publication-original-root-data-audit-v1",
+    "status":  "PASS",
+    "physical_complete":  true,
+    "scope":  "cache-acceptance-stage-20261128-v23",
+    "config_sha256":  "eb96e82dadab507bc94a6f4e7c140d97bfc5d99547255935b0037a8653e377c5",
+    "receipt_sha256":  "44c11cf8fba4f876e73ff6c347c9365900785ee743320676aae8d937fd662921",
+    "root_sha256":  "7db204216a1714396d997e89f5a8bf46b20117e6946dc3b2abd66c9536fc4eff",
+    "outer_sha256":  "9b19c18442b95129b503cef5f9d660c21d6d16f2d1612bd7a28a467bd470dd54",
+    "commands_verified":  2,
+    "captures_verified":  4,
+    "results":  [
+                    {
+                        "name":  "head.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rev-parse",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.2188540999777615,
+                        "exit_code":  0,
+                        "stdout_sha256":  "fe69bf89766a772b8e2c0910d80842e23bd30ae77fd518c0ffa9240c0f12083d",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8\n"
+                    },
+                    {
+                        "name":  "prepare-isolated-baseline-control.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_WINDOWS_SYSTEM_ROOT_JSON@@\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+                                     "-NoLogo",
+                                     "-NoProfile",
+                                     "-NonInteractive",
+                                     "-File",
+                                     "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\prepare-cli59f-baseline-v2-directory-fix.ps1"
+                                 ],
+                        "seconds":  5.010104699991643,
+                        "exit_code":  0,
+                        "stdout_sha256":  "a71d23494b1d44d90c9b785fb03f68378efd75c6dee5940244dd0c22ef6706dc",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "{\r\n    \"config_sha256\":  \"26aa3574a15f33ff8965c2d2b73541beae0feef60207826206b182b9e0d0ad75\",\r\n    \"source_files\":  3369,\r\n    \"observed_inputs\":  3384,\r\n    \"commands\":  5,\r\n    \"original_source_unchanged\":  true,\r\n    \"cache_transfer_started\":  false,\r\n    \"go_test_started\":  false,\r\n    \"ambient_inheritance\":  \"native original route retained; explicit difference documented\"\r\n}\r\n"
+                    }
+                ],
+    "tests_executed":  false,
+    "reviewed_utc":  "2026-11-28T16:15:51.3689127Z"
+}

@@ -7,12 +7,12 @@
       "sha256": "705fd4d6451a31d36b3df7de96f83f30ac976c9b4a6d1e51671d8e2f33e2d0da"
     },
     "README.md": {
-      "bytes": 23810,
-      "sha256": "fee31fb5a19e036fc8d1d412d9e3c57bc3bbe1bc5ce60bc91d10f900d687dc68"
+      "bytes": 24743,
+      "sha256": "03cfd1966d0b5b2c1a1a87c840678bbccfe6b07be5b9660154117a581237793f"
     },
     "binary-provenance.json": {
-      "bytes": 8224,
-      "sha256": "18c35552ff74bfad9f70cc5dc734ada6c8ee45c4d877cd9f4ba2840714225edb"
+      "bytes": 8228,
+      "sha256": "17734839d5a8e41d9eb48fd7e90157986bfc0634612f17769771225069faad54"
     },
     "data-reconstruction-proof.json": {
       "bytes": 30293,
@@ -23,8 +23,8 @@
       "sha256": "1fcfda2e51e6de4e52cd7d3103b587d3fe3407ff60d68cf3d125a1f8d7c04ef5"
     },
     "evidence.json": {
-      "bytes": 10488,
-      "sha256": "f1ac7f1d315ae7fca13d07faee863d8c827d9490ed874a2c166b2c9b6d062f68"
+      "bytes": 10496,
+      "sha256": "414d8d7ef05179dea5e5e9e7ebd2925d65237aa35c580052ef550442641d9d36"
     },
     "existing-public-inputs.json": {
       "bytes": 4488,
@@ -36,11 +36,11 @@
     },
     "reconstruct_sources.py": {
       "bytes": 6943,
-      "sha256": "7f053ae4756d735bb74c3c476a130697c440fcf4c42f7b99c32bd83344bf9c12"
+      "sha256": "261b98698d479b3f1573f8c9879b6a9e0f072be2e1d4a73a2e21d9a54eb617d6"
     },
     "source-bindings.json": {
-      "bytes": 91194,
-      "sha256": "f6291141e747d821f22f174a0b4db38e808fb6bd9b8ed53eabee7f87f5e56090"
+      "bytes": 91206,
+      "sha256": "10d3bf78697f030801188f08600ecb9c076e5053ca6788c09c5316a63ff70849"
     },
     "sources/captures/empty.txt": {
       "bytes": 0,
@@ -58,7 +58,7 @@
       "bytes": 155,
       "sha256": "bd0e612b2bd2e2fac61869ee24c20f4e846d7a4eaab7b51d9bdd2a75c53375e1"
     },
-    "sources/inputs/foreground/main_windows_test.go": {
+    "sources/inputs/foreground/main_windows_test.go.txt": {
       "bytes": 2772,
       "sha256": "9712a445ce383ce89ec3a6051d7eb11dee5cf29a08ba93854d0c85fa8c142a0b"
     },
@@ -74,7 +74,7 @@
       "bytes": 23316,
       "sha256": "ce20de6a117350681b9db5979a67285b1d8d07ea7937ea912680b4e3d6a6fa32"
     },
-    "sources/inputs/namespace/main_windows.go": {
+    "sources/inputs/namespace/main_windows.go.txt": {
       "bytes": 24227,
       "sha256": "4e91b8ce877400a91a4f315b68a166ae3d2c7c19d4963d52ade521f03f2ac4b4"
     },
@@ -178,7 +178,7 @@
       "bytes": 1217703,
       "sha256": "2f85b5e27243da8c853f20600df576b51fd60fea2fa420509a331b538dc8c547"
     },
-    "sources/source/wait-fix/afterimages/internal/cli/supervisor_spawn_breakaway_windows_test.go": {
+    "sources/source/wait-fix/afterimages/internal/cli/supervisor_spawn_breakaway_windows_test.go.txt": {
       "bytes": 7527,
       "sha256": "d42abb3c6fef077397949e80fa74eebc264fa2e3e112a9830236fc196e02e95b"
     },

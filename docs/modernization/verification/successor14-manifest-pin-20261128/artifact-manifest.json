@@ -6,8 +6,8 @@
       "bytes": 8
     },
     "README.md": {
-      "sha256": "a654a39059a585609868ac967368cda547141433f486c3146919cda9a01d3af5",
-      "bytes": 4894
+      "sha256": "a929e14412ee1722d747d0823881bb9b8238a0e21aec6455cef857bd1c187aa2",
+      "bytes": 5154
     },
     "evidence.json": {
       "sha256": "6e8ba5a4783b67eb8a2046bb16e379a9b637e705ac9e30bd1bee5803dd61bfe8",
@@ -17,7 +17,7 @@
       "sha256": "c3d28e8e2cb40f4e04cf20e3b047841b234b501321b9b0b9a0421c12951fd5b4",
       "bytes": 710
     },
-    "afterimages/internal/cli/migrate_serena_test.go": {
+    "afterimages/internal/cli/migrate_serena_test.go.txt": {
       "sha256": "2f0b41dbb97b01288f8f1871f6482e9fa80a3962a706d1e3d0872728175dd6b1",
       "bytes": 189894
     }

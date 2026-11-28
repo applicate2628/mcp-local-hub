@@ -458,7 +458,7 @@
       "kind": "exact_bytes",
       "original_bytes": 2772,
       "original_sha256": "9712a445ce383ce89ec3a6051d7eb11dee5cf29a08ba93854d0c85fa8c142a0b",
-      "published_path": "sources/inputs/foreground/main_windows_test.go",
+      "published_path": "sources/inputs/foreground/main_windows_test.go.txt",
       "published_bytes": 2772,
       "published_sha256": "9712a445ce383ce89ec3a6051d7eb11dee5cf29a08ba93854d0c85fa8c142a0b",
       "substitutions": []
@@ -478,7 +478,7 @@
       "kind": "exact_bytes",
       "original_bytes": 24227,
       "original_sha256": "4e91b8ce877400a91a4f315b68a166ae3d2c7c19d4963d52ade521f03f2ac4b4",
-      "published_path": "sources/inputs/namespace/main_windows.go",
+      "published_path": "sources/inputs/namespace/main_windows.go.txt",
       "published_bytes": 24227,
       "published_sha256": "4e91b8ce877400a91a4f315b68a166ae3d2c7c19d4963d52ade521f03f2ac4b4",
       "substitutions": []
@@ -2234,7 +2234,7 @@
       "kind": "exact_bytes",
       "original_bytes": 7527,
       "original_sha256": "d42abb3c6fef077397949e80fa74eebc264fa2e3e112a9830236fc196e02e95b",
-      "published_path": "sources/source/wait-fix/afterimages/internal/cli/supervisor_spawn_breakaway_windows_test.go",
+      "published_path": "sources/source/wait-fix/afterimages/internal/cli/supervisor_spawn_breakaway_windows_test.go.txt",
       "published_bytes": 7527,
       "published_sha256": "d42abb3c6fef077397949e80fa74eebc264fa2e3e112a9830236fc196e02e95b",
       "substitutions": []

@@ -1,0 +1,26 @@
+{
+  "schema": "api-diagnostic-author-capture-ledger-data-check-v1",
+  "capture_sha256": "8bbcfd601e1d1e0f4ea688fe3e11dc5b6bed4a6a0a89a5da6100d181c8b1437c",
+  "root_analysis_sha256": "6b343afd3ea229d4ca1606cb0e8716d610f709b9362ca8ad02073896e8a6a23f",
+  "counts": {
+    "started": 1481,
+    "terminal": 1480,
+    "pass": 1434,
+    "fail": 20,
+    "skip": 26,
+    "all_terminal": 2319,
+    "paused": 0,
+    "continued": 0
+  },
+  "top_level_ledger_matches": true,
+  "all_terminal_ledger_matches": true,
+  "started_without_terminal": [
+    "TestRunDaemonIntentCollapse_MintsSupervisorIntentForLegacyOnlyActiveStop"
+  ],
+  "root_started_without_terminal": [
+    "TestRunDaemonIntentCollapse_MintsSupervisorIntentForLegacyOnlyActiveStop"
+  ],
+  "raw_frame_prefix": "U+0016 accepted only at beginning of each line before exact Go event matching",
+  "new_test_execution": false,
+  "source_or_cache_read": false
+}

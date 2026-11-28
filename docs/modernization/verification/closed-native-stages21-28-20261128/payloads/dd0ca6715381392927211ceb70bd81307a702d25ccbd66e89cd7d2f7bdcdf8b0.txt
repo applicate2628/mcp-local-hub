@@ -1,0 +1,2 @@
+PGG-SCAN-FINDING: Native publication scan did not qualify this transfer. Stage: range-coverage.
+error: failed to push some refs to 'https://github.com/applicate2628/mcp-local-hub.git'

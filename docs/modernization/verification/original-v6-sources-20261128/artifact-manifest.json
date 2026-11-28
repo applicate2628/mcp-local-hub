@@ -16,13 +16,13 @@
     },
     {
       "path": "README.md",
-      "bytes": 16576,
-      "sha256": "17ffeeac36d8821a38e77cc36e09d6fc602d963edb5db118939e4a81e845c28b"
+      "bytes": 17387,
+      "sha256": "77c82ff278d4b71a3436f5cc526fbaa4ea1a3ffc382e981ded5647a85f28e753"
     },
     {
       "path": "source-bindings.json",
-      "bytes": 15888,
-      "sha256": "6aa4972cdb658c70c39eafcce74da671ede759b3fa0c78a29773834fec20d55d"
+      "bytes": 15900,
+      "sha256": "5e129d10d56d669674fd1831c361c06a337983f27b6212a62c0013a8afcf908b"
     },
     {
       "path": "existing-public-inputs.json",
@@ -37,7 +37,7 @@
     {
       "path": "reconstruct_sources.py",
       "bytes": 6943,
-      "sha256": "7441c4f529fda6fc87141ec96442a25145e5ff459ba3a2af82763e38a63905e4"
+      "sha256": "6da549f406d4a194ca305c3eb328ad2fb2f243d26acc9ece2cb1510c1c520853"
     },
     {
       "path": "metadata/templates-manifest.json",
@@ -140,22 +140,22 @@
       "sha256": "817e93de849ace4485b08b9c242500bf3a5a12210c5ff0e5bd893cbe4bc6bab8"
     },
     {
-      "path": "sources/inputs-original-v6/external-source-original/controller/cases_windows.go",
+      "path": "sources/inputs-original-v6/external-source-original/controller/cases_windows.go.txt",
       "bytes": 19075,
       "sha256": "9b1af23646315fc6b08c45a634ae5adebb05635c38fb21e4e56e0fb152184631"
     },
     {
-      "path": "sources/inputs-original-v6/external-source-original/controller/main_windows.go",
+      "path": "sources/inputs-original-v6/external-source-original/controller/main_windows.go.txt",
       "bytes": 23646,
       "sha256": "c48b5b339d7ece5cd6ecdad4c870e0968a33867e1bc5f2ae0e2b5a58f3b591ef"
     },
     {
-      "path": "sources/inputs-original-v6/external-source-original/owner/canonicalcaseowner/events_windows_amd64.go",
+      "path": "sources/inputs-original-v6/external-source-original/owner/canonicalcaseowner/events_windows_amd64.go.txt",
       "bytes": 27574,
       "sha256": "3b3137d2bdc6284a497fe2052d3e78e7bd426a0f7694b381043523e555c0a1fa"
     }
   ],
-  "source_bindings_sha256": "6aa4972cdb658c70c39eafcce74da671ede759b3fa0c78a29773834fec20d55d",
+  "source_bindings_sha256": "5e129d10d56d669674fd1831c361c06a337983f27b6212a62c0013a8afcf908b",
   "in_memory_data_reconstruction_all_22_equal": true,
   "actual_written_payloads_rehashed": true,
   "reconstructor_ast_parsed_as_data": true,

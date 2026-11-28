@@ -1,0 +1,60 @@
+{
+  "schema": "namespace-diagnostic-driver-candidate-manifest-v2",
+  "status": "PREPARED_NOT_EXECUTED",
+  "source_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+  "source_tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+  "original_v1": {
+    "manifest": {
+      "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-admission-diagnostic-driver-v1\\artifact-manifest.json",
+      "sha256": "a7d377783508b1f18e80e86af3658316e3a7efd0280c3a41692e57a573e18395"
+    },
+    "immutable": true,
+    "pre_CoreRun_failure": true,
+    "original_outer_exit_code": 1,
+    "original_pid": 443112,
+    "original_outer_wait_disposed_observed": true,
+    "original_traceback_capture_available": false
+  },
+  "correction": "exact pinned function slice before AST; composition before Source reads and scope creation; separate preflight failure metadata and rethrow",
+  "author_runtime_or_test_execution": false,
+  "data_probe_executed_by_author": false,
+  "root_helper_compile": "stage27 PASS/CLOSED; helper unchanged",
+  "cache_handoff": "stage28 PASS/CLOSED; no v1 runtime cache consumer",
+  "future_runtime_outputs_excluded_from_inputs": [
+    "preflight-failure.json",
+    "slice-composition-data.json",
+    "namespace-diagnostic-outer-original.json"
+  ],
+  "files": [
+    {
+      "path": "run_namespace_diagnostic.py",
+      "bytes": 15972,
+      "sha256": "06ef67bdb08fde5630d2f6c4be0e130ec60e87bb688c7aca148e07797dcf6189"
+    },
+    {
+      "path": "runtime-inputs.json",
+      "bytes": 8483,
+      "sha256": "80ec6a8bca0c0a7a8ff75ca5e1d9b8ddef1876289fb458b3cb3c7fa7e591ac2c"
+    },
+    {
+      "path": "launch_namespace_diagnostic_original.ps1",
+      "bytes": 3806,
+      "sha256": "8c54bfa0b05cec7a4161e5b24fa3c5b4261854cefb837c9450c0cc5d97c0912a"
+    },
+    {
+      "path": "verify_slice_composition.py",
+      "bytes": 5744,
+      "sha256": "e43da6a15cd33abc0e6c2daac9110e63c4f78c7fa7adc2e62b652701eeb8faeb"
+    },
+    {
+      "path": "v1-to-v2.patch",
+      "bytes": 10407,
+      "sha256": "afed36fd623f6553d366cf80667633abce48a79e055c86fc45c023806851db25"
+    },
+    {
+      "path": "README.md",
+      "bytes": 8104,
+      "sha256": "e66e41c8f3bbea3b9e8e6c1d7e84080d4c1ac51a8ffbf9739b5f187ca792ccbf"
+    }
+  ]
+}

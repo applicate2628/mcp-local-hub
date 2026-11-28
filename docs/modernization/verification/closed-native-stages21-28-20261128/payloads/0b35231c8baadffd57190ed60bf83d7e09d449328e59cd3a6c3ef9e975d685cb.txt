@@ -1,0 +1,1 @@
+{"status": "reviewable", "occurrences": 9, "rule_counts": {"machine-path-prefix-v1": 4, "value-password-v1": 5}, "unsupported": [], "receipt_sha256": "89ee95d6088435f1c21174fb1319c8d38eefc9b6104a0539693a9307612995da", "publication_authority": false, "raw_content_saved": false}

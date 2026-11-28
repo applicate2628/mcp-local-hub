@@ -1,0 +1,82 @@
+"""Read-only canonical scanner capture; emit only safe occurrence coordinates."""
+import sys
+sys.dont_write_bytecode = True
+import base64, collections, contextlib, hashlib, importlib.util, io, json
+from pathlib import Path
+
+SCANNER = Path(r"@@RECOVERY_ORCHESTRARIUM_INSTALLATION_ROOT@@\releases\dad4875f\app\scripts\universal-hooks\scripts\check-publication-safety.py")
+SCANNER_SHA = "f55ee02d9c65f08ae6c7e1e50ed060c2408d47bba36847bf9e93890eda6f4956"
+TASK = Path(r"@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1")
+TRANSFER = TASK / "recovery-inputs-v1/publication-checkpoint-615-v1/transfer-receipt.json"
+TRANSFER_SHA = "079b80b7a2381a43c75d6c76d3f6bd62c18784b9cfee5fe2e96a5ef8a5228ee0"
+OUTPUT = TASK / "publication-diagnostics-v1/safe-finding-locations.json"
+SOURCE = "264a0601b7d027652c12ec88ae4debd6c3bfb69f"
+REPO = Path(r"@@RECOVERY_APPROVED_WORK_AREA@@\pub664-363b")
+
+def need(ok, why):
+    if not ok:
+        raise ValueError(why)
+
+def pinned(path, expected):
+    raw = path.read_bytes()
+    need(hashlib.sha256(raw).hexdigest() == expected, "diagnostic input pin differs")
+    return raw
+
+def main():
+    need(Path.cwd().resolve() == REPO.resolve(), "exact repository cwd required")
+    need(not OUTPUT.exists() and not OUTPUT.parent.exists(), "fresh diagnostic output required")
+    allowed = {row["path"] for row in json.loads(pinned(TRANSFER, TRANSFER_SHA))["files"]}
+    source = pinned(SCANNER, SCANNER_SHA)
+    sys.path.insert(0, str(SCANNER.parent))
+    spec = importlib.util.spec_from_file_location("canonical_scanner_readonly_diagnostic", SCANNER)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    private_stdout, private_stderr = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(private_stdout), contextlib.redirect_stderr(private_stderr):
+        exec(compile(source, str(SCANNER), "exec"), module.__dict__)
+        captured = module.capture_history_review("origin", "refs/heads/fix/p0-test-entry-preserve-20261121", source_revision=SOURCE)
+    packet = captured.get("packet") or {}
+    rows = []
+    for occurrence in packet.get("occurrences", []):
+        raw_path = base64.b64decode(occurrence["rawPathBase64"], validate=True)
+        path = raw_path.decode("utf-8", errors="strict")
+        region = occurrence["reviewRegion"]
+        rows.append({
+            "path": path if path in allowed else None,
+            "path_in_reviewed_checkpoint": path in allowed,
+            "path_sha256": hashlib.sha256(raw_path).hexdigest(),
+            "occurrence_id": occurrence["id"],
+            "blob_oid": occurrence["blobOid"],
+            "blob_sha256": occurrence["blobSha256"],
+            "blob_bytes": occurrence["blobByteCount"],
+            "git_mode": occurrence["gitMode"],
+            "rule_id": occurrence["detector"]["ruleId"],
+            "rule_meaning_sha256": occurrence["detector"]["meaningSha256"],
+            "region_start_byte": region["startByte"],
+            "region_end_byte_exclusive": region["endByteExclusive"],
+            "region_sha256": region["sha256"],
+        })
+    result = {
+        "schema": "canonical-publication-readonly-safe-locations-v1",
+        "status": captured["status"], "source_commit": SOURCE,
+        "scanner_sha256": SCANNER_SHA, "transfer_sha256": TRANSFER_SHA,
+        "packet_id": packet.get("packetId"), "range_scope": packet.get("rangeScope"),
+        "unsupported": captured.get("unsupported", []), "occurrences": rows,
+        "rule_counts": dict(collections.Counter(row["rule_id"] for row in rows)),
+        "private_content_blob_count": len(captured.get("content", {})),
+        "private_stdout_chars_discarded": len(private_stdout.getvalue()),
+        "private_stderr_chars_discarded": len(private_stderr.getvalue()),
+        "publication_authority": False, "review_policy_written": False,
+        "matched_values_emitted": False, "raw_content_saved": False,
+    }
+    OUTPUT.parent.mkdir(parents=False, exist_ok=False)
+    raw = (json.dumps(result, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    with OUTPUT.open("xb") as stream:
+        stream.write(raw)
+    print(json.dumps({"status": result["status"], "occurrences": len(rows),
+                      "rule_counts": result["rule_counts"], "unsupported": result["unsupported"],
+                      "receipt_sha256": hashlib.sha256(raw).hexdigest(),
+                      "publication_authority": False, "raw_content_saved": False}))
+
+if __name__ == "__main__":
+    main()

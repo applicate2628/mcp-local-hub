@@ -1,0 +1,311 @@
+{
+  "schema": "closed-native-stages21-28-and-publication-supplement-v1",
+  "original_files": 197,
+  "original_bytes": 13267093,
+  "unique_payload_files": 112,
+  "native_events": 10,
+  "original_commands": 44,
+  "original_command_captures": 88,
+  "controller_captures": 20,
+  "original_native_and_IO_closure_verified_before_capture_reads": true,
+  "same_original_outer_process_wait_and_dispose_verified": true,
+  "actual_command_capture_bytes_match_original_receipt_hashes": true,
+  "event_results": {
+    "PASS_CLOSED": 8,
+    "FAIL_CLOSED": 2
+  },
+  "stage21": {
+    "status": "FAIL/CLOSED",
+    "tests": "NOT_RUN",
+    "cause": "The ordinary runner used the earlier default module cache with module lookup disabled; go test exited during setup.",
+    "receipt_role": "events/stage-20261128-v21/receipt.json"
+  },
+  "commit11": {
+    "status": "PASS/CLOSED",
+    "local_commit": "264a0601b7d027652c12ec88ae4debd6c3bfb69f",
+    "tree": "f7fbccfb8cfc5d1c33b986591675d07847af929c",
+    "publication_result_not_implied": true
+  },
+  "push8": {
+    "status": "FAIL/CLOSED",
+    "native_exit": 1,
+    "gate_code": "PGG-SCAN-FINDING",
+    "gate_stage": "range-coverage",
+    "original_failed_attempt_preserved": true
+  },
+  "stage24": {
+    "status": "PASS/CLOSED",
+    "ordinary_go_test_layout": true,
+    "source_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+    "root_verified_source_files": 3369,
+    "observations": [
+      {
+        "mode": "default",
+        "name": "TestPidMatchesMcphub_CurrentProcess",
+        "seconds": 0,
+        "status": "PASS"
+      },
+      {
+        "mode": "default",
+        "name": "TestPidMatchesMcphub_RejectsForeignPathSameBasename",
+        "seconds": 4.59,
+        "status": "PASS"
+      },
+      {
+        "mode": "default",
+        "name": "TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID",
+        "seconds": 2.99,
+        "status": "PASS"
+      },
+      {
+        "mode": "test-state-path-env",
+        "name": "TestPidMatchesMcphub_CurrentProcess",
+        "seconds": 0,
+        "status": "PASS"
+      },
+      {
+        "mode": "test-state-path-env",
+        "name": "TestPidMatchesMcphub_RejectsForeignPathSameBasename",
+        "seconds": 8.39,
+        "status": "PASS"
+      },
+      {
+        "mode": "test-state-path-env",
+        "name": "TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID",
+        "seconds": 8.75,
+        "status": "PASS"
+      }
+    ],
+    "full_cli_qualification_claimed": false
+  },
+  "stage25": {
+    "status": "PASS/CLOSED",
+    "scope": "Supported canonical read-only publication diagnostics; no permission or policy change.",
+    "exact_occurrences": 9,
+    "rules": {
+      "machine-path-prefix-v1": 4,
+      "value-password-v1": 5
+    },
+    "locations_sha256": "89ee95d6088435f1c21174fb1319c8d38eefc9b6104a0539693a9307612995da",
+    "exact_locations_companion_path": "../original-full-v6-complete-captures-20261128/canonical-finding-locations.json"
+  },
+  "stage27": {
+    "status": "PASS/CLOSED",
+    "scope": "Compile timing-only namespace owner from preserved candidate; no namespace diagnostic run is inferred.",
+    "two_source_inputs": [
+      "candidates/timing/main_windows.go",
+      "candidates/timing/prebuilt_windows.go"
+    ],
+    "overlay_role": "namespace-timing/namespace-timing-overlay.json",
+    "mutable_caller_or_new_configuration_read": false
+  },
+  "stage28": {
+    "status": "PASS/CLOSED",
+    "ordinary_go_test_layout": true,
+    "baseline_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+    "exact_test_only_afterimages": {
+      "internal/cli/supervise_prespawn_binary_gate_test.go": "5e3a6517a9fed3a329cea60d12915965720b37c2bb6a865880d3c0c05ed48feb",
+      "internal/cli/settings_registry_test.go": "40de5fd188c8c94ec67e4fd852d89b0122aee602c3dde91fd8f8ceb2e4c7854a",
+      "internal/cli/process_identity_match_windows_test.go": "e97fd7cc9cc9d9dfe09643c8e03334bd6f7f3e663b07a7f0fe711f0ef974708f"
+    },
+    "production_edits": 0,
+    "root_verified_source_files": 3369,
+    "observations": [
+      {
+        "mode": "default",
+        "name": "TestPidMatchesMcphub_CurrentProcess",
+        "seconds": 0,
+        "status": "PASS"
+      },
+      {
+        "mode": "default",
+        "name": "TestPidMatchesMcphub_RejectsForeignPathSameBasename",
+        "seconds": 6.59,
+        "status": "PASS"
+      },
+      {
+        "mode": "default",
+        "name": "TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID",
+        "seconds": 0.3,
+        "status": "PASS"
+      },
+      {
+        "mode": "default",
+        "name": "TestPreSpawnBinaryGate_MissingBinaryNeverBurnsBudget",
+        "seconds": 0.77,
+        "status": "PASS"
+      },
+      {
+        "mode": "default",
+        "name": "TestPreSpawnBinaryGate_AutoRecoversWhenBinaryAppears",
+        "seconds": 0.04,
+        "status": "PASS"
+      },
+      {
+        "mode": "default",
+        "name": "TestPreSpawnBinaryGate_EmitsActionableOperatorMessage",
+        "seconds": 0.02,
+        "status": "PASS"
+      },
+      {
+        "mode": "default",
+        "name": "TestPreSpawnBinaryGate_MissingWorkspaceHolds",
+        "seconds": 0.02,
+        "status": "PASS"
+      },
+      {
+        "mode": "default",
+        "name": "TestPreSpawnBinaryGate_PresentBinarySpawns",
+        "seconds": 0.01,
+        "status": "PASS"
+      },
+      {
+        "mode": "default",
+        "name": "TestPreSpawnBinaryGate_EmptyCommandSpawns",
+        "seconds": 0.66,
+        "status": "PASS"
+      },
+      {
+        "mode": "tagged",
+        "name": "TestPidMatchesMcphub_CurrentProcess",
+        "seconds": 0,
+        "status": "PASS"
+      },
+      {
+        "mode": "tagged",
+        "name": "TestPidMatchesMcphub_RejectsForeignPathSameBasename",
+        "seconds": 4.61,
+        "status": "PASS"
+      },
+      {
+        "mode": "tagged",
+        "name": "TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID",
+        "seconds": 0.26,
+        "status": "PASS"
+      },
+      {
+        "mode": "tagged",
+        "name": "TestPreSpawnBinaryGate_MissingBinaryNeverBurnsBudget",
+        "seconds": 0.33,
+        "status": "PASS"
+      },
+      {
+        "mode": "tagged",
+        "name": "TestPreSpawnBinaryGate_AutoRecoversWhenBinaryAppears",
+        "seconds": 0.04,
+        "status": "PASS"
+      },
+      {
+        "mode": "tagged",
+        "name": "TestPreSpawnBinaryGate_EmitsActionableOperatorMessage",
+        "seconds": 0.02,
+        "status": "PASS"
+      },
+      {
+        "mode": "tagged",
+        "name": "TestPreSpawnBinaryGate_MissingWorkspaceHolds",
+        "seconds": 0.02,
+        "status": "PASS"
+      },
+      {
+        "mode": "tagged",
+        "name": "TestPreSpawnBinaryGate_PresentBinarySpawns",
+        "seconds": 0.02,
+        "status": "PASS"
+      },
+      {
+        "mode": "tagged",
+        "name": "TestPreSpawnBinaryGate_EmptyCommandSpawns",
+        "seconds": 0.01,
+        "status": "PASS"
+      }
+    ],
+    "full_cli_qualification_claimed": false,
+    "author_candidate_NOT_RUN_records_retained_as_history": true
+  },
+  "root_DATA_receiving": {
+    "source59f_closed_api": {
+      "role": "root-data/source59f-closed-api-diagnostics-root-data-v1.json",
+      "sha256": "3d0eddee58e1cfadc82f03799c11c820cc2d78fdc3595d6146e7523851b23986",
+      "artifacts": 96,
+      "originals": 136,
+      "qualification": "FAIL/CLOSED_PRECHILD",
+      "suite_started": false
+    },
+    "fixture_v2": {
+      "role": "root-data/root-fixture-v2-verification.json",
+      "sha256": "c5e30d5e200645cdaad307edca2709747c39e1ffbd59d613c4ea459a4b7bfc7b",
+      "artifacts": 350,
+      "originals": 333,
+      "capture_paths": 566,
+      "historical_qualification": "FAIL/CLOSED"
+    },
+    "public_fixture_source_readback": {
+      "role": "root-data/root-public-fixture-readback-v1.json",
+      "sha256": "a193305330bd9720a2b4ce1588a3262730569dbcd290756ea767b2c9b405ad41",
+      "public_sources": 5,
+      "full_bytes_sha256_and_git_sha1_match": true,
+      "fixture_values_in_result": false
+    }
+  },
+  "incidental_DATA_errors": [
+    {
+      "kind": "DATA_PARSER_ERROR_BEFORE_OUTPUT",
+      "artifact_role": "root-data/receive-cli59f-focused-original-v2.ps1",
+      "sha256": "1ef2d1dd93c3961598e8ff9d0d588a3d857a7389796b124cdb0b6877df23206c",
+      "basis": "Root reported a JavaScript replacement-induced PowerShell parser error before DATA output. The exact failed script is preserved; no separate primary error-output file was supplied.",
+      "successor_role": "root-data/receive-cli59f-focused-original-v3.ps1",
+      "native_test_result_changed": false
+    },
+    {
+      "kind": "DATA_SUMMARY_ERROR_AFTER_SUCCESSFUL_REPLAY",
+      "artifact_role": "root-data/verify-fixture-v2-root-v1.ps1",
+      "sha256": "abb6b3ce03d4d25adee9b880e9a79c443883564dbfed2a7999c58a37d9064eca",
+      "basis": "The exact root v2 verification JSON records the case-insensitive PowerShell M/m collision after 333 originals were reconstructed and 566 captures were verified.",
+      "successor_role": "root-data/verify-fixture-v2-root-v2.ps1",
+      "primary_receiving_role": "root-data/root-fixture-v2-verification.json",
+      "native_test_result_changed": false
+    }
+  ],
+  "historical_scope": {
+    "old_full_v6": "FAIL/CLOSED",
+    "old_full_v8": "UNKNOWN unchanged",
+    "full59f_or_CLI_UNKNOWN": "No later full closure received or claimed by this supplement; UNKNOWN payload not read.",
+    "both_literal_full_gates": "No new PASS claimed",
+    "migration14_and_canonical2": "No new full acceptance claimed",
+    "remaining_original_expected_refusal": "No identity or completion invented"
+  },
+  "author_work": {
+    "new_native_test_or_Git_execution": false,
+    "Source_or_cache_reads": false,
+    "UNKNOWN_payload_reads": false,
+    "stage29_or_later_reads": false,
+    "policy_or_hook_changes": false,
+    "moves": false
+  },
+  "companion_artifacts": [
+    {
+      "directory": "original-full-v6-complete-captures-20261128",
+      "manifest_sha256": "e6d697ad37b8bc9a892496d2dad6ad00759bfc367b4a3cd18a70ece88689d861",
+      "scope": "350-file fixture-template v2; root DATA proof included here"
+    },
+    {
+      "directory": "source59f-closed-api-diagnostics-20261128",
+      "manifest_sha256": "606fae7b90c1c18c37adff72aa73410e0c3668fb945ee21f44e196ce0aedeed6",
+      "scope": "96 files/136 originals; separate failed prechild API receiving"
+    },
+    {
+      "directory": "cli-shared-image-candidate-20261128",
+      "manifest_sha256": "74ef1f32f87f005ac265e07199f67c2e76931d000936e43107a1c3a02a3484af",
+      "scope": "Exact companion shared-image source delta applied in stage28; not duplicated here"
+    }
+  ],
+  "publication_template_revision": {
+    "file": "fixture-template-revision.json",
+    "original_artifacts_unchanged": 197,
+    "afterimage_template_only": true,
+    "original_push11_status": "FAIL/CLOSED",
+    "replacement_scan_status": "NOT_RUN",
+    "qualification_changed": false
+  }
+}
