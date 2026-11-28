@@ -1,0 +1,48 @@
+worktree @@RECOVERY_NATIVE_POWERSHELL_WORK_AREA_FORWARD@@/mcp-product-rust-custody-retry-20261119
+HEAD f0ffbde1beaf5a4ffbb4fa4630aa5d0f18332e02
+branch refs/heads/spike/product-rust-members-20261119
+
+worktree @@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-rust-contained-stream-20261120
+HEAD 31de3217b9b25492a23c288160936a6e571bc4ba
+branch refs/heads/review/rust-contained-stream-20261120
+
+worktree @@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-rust-receiving-followup-20261120
+HEAD 900fba3eb7c97477ca24dbf6e6cda749ed6d5de3
+branch refs/heads/fix/rust-receiving-regressions-20261120
+
+worktree @@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-rust-root-result-receiving-20261119
+HEAD c3405e038730f0b0212e9b4148e5b8b2026b2aac
+branch refs/heads/spike/rust-root-result-receiving-20261119
+
+worktree @@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-rust-supervisor-baseline-20261119
+HEAD e3b415878175b89c4dc86291f670cff6993796a7
+detached
+
+worktree @@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/mcp-rust-supervisor-resume-20261119
+HEAD 9ccd96a07d2b198463272ab8fad43e3ba99aa65c
+branch refs/heads/review/rust-supervisor-resume-20261119
+
+worktree @@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/pub631-363b
+HEAD c80fd6b4e6f9806eb7d94726a979e9e89d46ec75
+detached
+
+worktree @@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/pub660-363b
+HEAD a706b5b2a71ca850136398f7d4a45e624d107151
+detached
+
+worktree @@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/pub664-363b
+HEAD 05fbffa30f99914c8174966525a70bc9984e7038
+branch refs/heads/work/ab664-text-source-bd7-363b-v1
+
+worktree @@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/pub666-recovered-20261128
+HEAD 59f618ebfbf6d9f52c6994d68586e3c2ebc202a8
+detached
+
+worktree @@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/trash/ad660-evidence-published-20261128-8204d340
+HEAD 8204d3400cbfde401850d3acd3479fb8b1450fd3
+detached
+
+worktree @@RECOVERY_APPROVED_WORK_AREA_FORWARD@@/trash/ad664-evidence-published-20261128-27d90e62
+HEAD 27d90e626465dc9a3a012e50785d62785d4c5e7e
+detached
+

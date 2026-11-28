@@ -1,0 +1,22 @@
+=== RUN   TestParseErrorVsInvalidRequest
+--- PASS: TestParseErrorVsInvalidRequest (0.00s)
+=== NAME  
+=== RUN   TestPresentButInvalidIdIsInvalidRequest
+--- PASS: TestPresentButInvalidIdIsInvalidRequest (0.00s)
+=== NAME  
+=== RUN   TestNotificationVsRequestForLifecycleNames
+--- PASS: TestNotificationVsRequestForLifecycleNames (0.00s)
+=== NAME  
+=== RUN   TestUnknownToolIsInvalidParams
+--- PASS: TestUnknownToolIsInvalidParams (0.00s)
+=== NAME  
+=== RUN   TestToolPanicRecovered
+--- PASS: TestToolPanicRecovered (0.00s)
+=== NAME  
+=== RUN   TestServeDrainsInFlightOnEOF
+--- PASS: TestServeDrainsInFlightOnEOF (0.05s)
+=== NAME  
+=== RUN   TestServeCancellationUnblocksReadAndDrains
+--- PASS: TestServeCancellationUnblocksReadAndDrains (0.05s)
+=== NAME  
+PASS

@@ -1,0 +1,219 @@
+{
+  "schema": "successor-runtime-static-receiving-v1",
+  "source_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+  "source_tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+  "scope": "SOURCE_ONLY_NOT_EXECUTED",
+  "runtime_modules_imported": false,
+  "native_or_test_commands_started": false,
+  "python_syntax_parsed": true,
+  "original_issuer_methods_unchanged": true,
+  "adapter_complete_finally_unchanged": true,
+  "core_original_run_only_schema_changed": true,
+  "partition_functions_unchanged": true,
+  "driver_original_phase_closure_and_capture_guard_unchanged": true,
+  "closed_warm_donor_receiving_and_inventory_code_unchanged": true,
+  "acceptance": {
+    "MIGRATION_ROOTS": [
+      "TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds",
+      "TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite",
+      "TestMigrateSerena_DrivesSupervisorRestart",
+      "TestMigrateSerena_NilSpecRowsHealedBeforeSpawn",
+      "TestMigrateSerena_LiveSupervisor_ReapClearsTheGateBeforeWrite",
+      "TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry",
+      "TestMigrateSerena_PostCommitReconcileReadyTimeout_ExitsZeroWithWarning",
+      "TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud",
+      "TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts",
+      "TestMigrateSerena_ConcurrentRegisterInWindow_AppearsInCommittedIntent",
+      "TestMigrateSerena_EmptyFirstSnapshot_WorkspaceRegisteredInWindow_RecomputesStart",
+      "TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut",
+      "TestMigrateSerena_EmptyFirstSnapshot_SupervisorRunning_LateReapClearsGate",
+      "TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow"
+    ],
+    "CANONICAL_ROOTS": [
+      "TestCanonicalGUIRuntimeRecoveryNativeIndependentReplay",
+      "TestCanonicalSuccessorNativeControlRetainsOriginalFiles"
+    ],
+    "LITERAL_DEFAULT": "go build ./... && go vet ./... && go test -count=1 -timeout 5m ./...",
+    "LITERAL_STATE": "go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/",
+    "API_STDERR_TESTS": [
+      "TestRotateSupervisorStderrSinkIfOversize_AtBoundary",
+      "TestRotateSupervisorStderrSinkIfOversize_ReplacesExistingBackup",
+      "TestSupervisorStderrSinkOversize_MatchesRotationThreshold"
+    ],
+    "CLI_STDERR_EXTRA_TESTS": [
+      "TestSupervisorStderrSink_CapturesRuntimePanic",
+      "TestSupervisorStderrSink_CapturesMainGoroutinePanic",
+      "TestSupervisorStderrSink_RecordsErrorExit"
+    ]
+  },
+  "comparisons": {
+    "core": {
+      "base": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\qualified_windows_products_consumer_v6.py.in",
+        "sha256": "716e2e0aeb7e94b5bd302149e7765c8d5708378bc94f2d2de959dfc063c2592d"
+      },
+      "candidate": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-candidate\\core_successor.py.in",
+        "sha256": "fcd8fadd43744d94426f59780028cef98d7b3c968dc42df200f9130b1e589991"
+      },
+      "unchanged_functions": [
+        "checked_input",
+        "copy_file",
+        "copy_tree",
+        "create_short_temp",
+        "ensure_private_telemetry_off",
+        "headless_config_snapshot",
+        "new_json",
+        "ordinary",
+        "prepare_headless_environment",
+        "private_run",
+        "read_input",
+        "receive_closed_producers",
+        "receive_headless_after",
+        "receive_headless_before",
+        "receive_short_temp",
+        "require",
+        "scope_helper",
+        "scope_name",
+        "serena_preparation_path",
+        "sha",
+        "snapshot_files",
+        "source_snapshot",
+        "tree",
+        "unique_object"
+      ],
+      "changed_functions": [
+        "bundle_admission",
+        "clean_environment",
+        "copy_closed_cache_inputs",
+        "pinned_inputs",
+        "receive_original_source_compatibility"
+      ],
+      "removed_functions": [
+        "receive_marked_inputs",
+        "receive_migration_parent_binding"
+      ],
+      "added_functions": [
+        "receive_product_inputs"
+      ]
+    },
+    "primitives": {
+      "base": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\run_partitioned_go_gate_v6.py.in",
+        "sha256": "9b81714df735fe5e5196be944312a717d8e1d75ca9195506dd9e609c23f330a9"
+      },
+      "candidate": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-candidate\\primitives_successor.py.in",
+        "sha256": "4dd6ea68986a8cda1da65373dad3077340a7483be15128f443d2657ca5a0483a"
+      },
+      "unchanged_functions": [
+        "begin",
+        "canonical_environment",
+        "command",
+        "events",
+        "ledger",
+        "objects",
+        "package_manifest",
+        "required",
+        "restore_resource",
+        "sha"
+      ],
+      "changed_functions": [],
+      "removed_functions": [],
+      "added_functions": []
+    },
+    "adapter": {
+      "base": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\literal_go_exec_adapter_v6.py.in",
+        "sha256": "6ee83887864e3be983ccd31628926f4026007ba9df0f296e9cd5504faeefe886"
+      },
+      "candidate": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-candidate\\adapter_successor.py.in",
+        "sha256": "48c5d6af30d62c1e63c1455689a19c1ce0b67ab761fc9b1683e5a522494b98bd"
+      },
+      "unchanged_functions": [
+        "abandoned_slot",
+        "ack_slot",
+        "consume",
+        "flags_are_literal",
+        "incoming_build_info",
+        "issuer_plan",
+        "main",
+        "mandatory",
+        "namespace_failed_receiver",
+        "ordinary_channel_path",
+        "pinned",
+        "publish_channel_json",
+        "raw_command",
+        "read_channel_json",
+        "request_slot",
+        "response_binding",
+        "response_slot",
+        "sha",
+        "validate_replay_ack",
+        "validate_request"
+      ],
+      "changed_functions": [
+        "execute",
+        "finalize_owner_capture",
+        "load_owner_runtime",
+        "native_settled",
+        "owner_proof",
+        "qualify",
+        "validate_namespace_terminal"
+      ],
+      "removed_functions": [
+        "canonical_failed_receiver",
+        "canonical_plan",
+        "flags_are_focused"
+      ],
+      "added_functions": [
+        "foreground_failed_receiver",
+        "foreground_qualification",
+        "namespace_qualification",
+        "validate_foreground_terminal"
+      ]
+    },
+    "driver": {
+      "base": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\run_literal_go_gate_v6.py.in",
+        "sha256": "a1aecc2d2db889f2aa4d6d58bc885bac6cfd545fd9f55e4c0055ea1eed83a422"
+      },
+      "candidate": {
+        "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-candidate\\driver_successor.py.in",
+        "sha256": "c29938a6c6570aa417c933bc7ce92ef44ced42e37727999ae46a115d758b6787"
+      },
+      "unchanged_functions": [
+        "execute",
+        "go_word",
+        "load_issuer_module",
+        "load_module",
+        "main",
+        "manifests",
+        "phase_capture_guard",
+        "phase_physical_closure",
+        "sha",
+        "verify_inputs"
+      ],
+      "changed_functions": [
+        "collect_phase",
+        "driver_flags",
+        "execute_gate",
+        "original_native_settlement",
+        "phase_command_args",
+        "product_linker_flags",
+        "stage_product_copy"
+      ],
+      "removed_functions": [
+        "collect_private_phase",
+        "focused_plan",
+        "verify_private_exports"
+      ],
+      "added_functions": []
+    }
+  },
+  "template_manifest": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-candidate\\templates-manifest.candidate.json",
+    "sha256": "7eb9d0a93ce8d9ba6bc17a78037c9a1d072b919bc881d8ea7f3e2c5c965290c4"
+  }
+}

@@ -1,0 +1,231 @@
+{"Action":"start","Package":"mcp-local-hub/cmd/mcphub"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication","Output":"=== RUN   TestWindowsConsolePolicyApplication\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/GUI_calls_no_APIs"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/GUI_calls_no_APIs","Output":"=== RUN   TestWindowsConsolePolicyApplication/GUI_calls_no_APIs\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/GUI_calls_no_APIs","Output":"--- PASS: TestWindowsConsolePolicyApplication/GUI_calls_no_APIs (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/GUI_calls_no_APIs"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/background_calls_no_APIs"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/background_calls_no_APIs","Output":"=== RUN   TestWindowsConsolePolicyApplication/background_calls_no_APIs\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/background_calls_no_APIs","Output":"--- PASS: TestWindowsConsolePolicyApplication/background_calls_no_APIs (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/background_calls_no_APIs"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/stdio_protocol_calls_no_APIs"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/stdio_protocol_calls_no_APIs","Output":"=== RUN   TestWindowsConsolePolicyApplication/stdio_protocol_calls_no_APIs\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/stdio_protocol_calls_no_APIs","Output":"--- PASS: TestWindowsConsolePolicyApplication/stdio_protocol_calls_no_APIs (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/stdio_protocol_calls_no_APIs"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/background_ignores_debug_console_prefix"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/background_ignores_debug_console_prefix","Output":"=== RUN   TestWindowsConsolePolicyApplication/background_ignores_debug_console_prefix\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/background_ignores_debug_console_prefix","Output":"--- PASS: TestWindowsConsolePolicyApplication/background_ignores_debug_console_prefix (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/background_ignores_debug_console_prefix"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/stdio_protocol_ignores_debug_console_prefix"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/stdio_protocol_ignores_debug_console_prefix","Output":"=== RUN   TestWindowsConsolePolicyApplication/stdio_protocol_ignores_debug_console_prefix\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/stdio_protocol_ignores_debug_console_prefix","Output":"--- PASS: TestWindowsConsolePolicyApplication/stdio_protocol_ignores_debug_console_prefix (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/stdio_protocol_ignores_debug_console_prefix"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/explicit_attaches_to_parent"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/explicit_attaches_to_parent","Output":"=== RUN   TestWindowsConsolePolicyApplication/explicit_attaches_to_parent\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/explicit_attaches_to_parent","Output":"--- PASS: TestWindowsConsolePolicyApplication/explicit_attaches_to_parent (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/explicit_attaches_to_parent"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/explicit_allocates_without_parent"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/explicit_allocates_without_parent","Output":"=== RUN   TestWindowsConsolePolicyApplication/explicit_allocates_without_parent\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/explicit_allocates_without_parent","Output":"--- PASS: TestWindowsConsolePolicyApplication/explicit_allocates_without_parent (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/explicit_allocates_without_parent"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/explicit_dual_failure_is_typed"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/explicit_dual_failure_is_typed","Output":"=== RUN   TestWindowsConsolePolicyApplication/explicit_dual_failure_is_typed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/explicit_dual_failure_is_typed","Output":"--- PASS: TestWindowsConsolePolicyApplication/explicit_dual_failure_is_typed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/explicit_dual_failure_is_typed"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/valid_redirected_handles_are_preserved"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/valid_redirected_handles_are_preserved","Output":"=== RUN   TestWindowsConsolePolicyApplication/valid_redirected_handles_are_preserved\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/valid_redirected_handles_are_preserved","Output":"--- PASS: TestWindowsConsolePolicyApplication/valid_redirected_handles_are_preserved (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication/valid_redirected_handles_are_preserved"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication","Output":"--- PASS: TestWindowsConsolePolicyApplication (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsConsolePolicyApplication"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs","Output":"=== RUN   TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/valid_inherited_standard_handles_need_no_console_API"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/valid_inherited_standard_handles_need_no_console_API","Output":"=== RUN   TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/valid_inherited_standard_handles_need_no_console_API\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/valid_inherited_standard_handles_need_no_console_API","Output":"--- PASS: TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/valid_inherited_standard_handles_need_no_console_API (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/valid_inherited_standard_handles_need_no_console_API"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/invalid_output_attaches_once_and_never_allocates"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/invalid_output_attaches_once_and_never_allocates","Output":"=== RUN   TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/invalid_output_attaches_once_and_never_allocates\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/invalid_output_attaches_once_and_never_allocates","Output":"--- PASS: TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/invalid_output_attaches_once_and_never_allocates (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/invalid_output_attaches_once_and_never_allocates"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/attach_failure_is_typed"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/attach_failure_is_typed","Output":"=== RUN   TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/attach_failure_is_typed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/attach_failure_is_typed","Output":"--- PASS: TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/attach_failure_is_typed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/attach_failure_is_typed"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/repair_still_invalid_is_typed"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/repair_still_invalid_is_typed","Output":"=== RUN   TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/repair_still_invalid_is_typed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/repair_still_invalid_is_typed","Output":"--- PASS: TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/repair_still_invalid_is_typed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs/repair_still_invalid_is_typed"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs","Output":"--- PASS: TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput","Output":"=== RUN   TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput/input_alone_requires_parent_attachment"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput/input_alone_requires_parent_attachment","Output":"=== RUN   TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput/input_alone_requires_parent_attachment\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput/input_alone_requires_parent_attachment","Output":"--- PASS: TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput/input_alone_requires_parent_attachment (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput/input_alone_requires_parent_attachment"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput/no_parent_leaves_input_optional"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput/no_parent_leaves_input_optional","Output":"=== RUN   TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput/no_parent_leaves_input_optional\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput/no_parent_leaves_input_optional","Output":"--- PASS: TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput/no_parent_leaves_input_optional (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput/no_parent_leaves_input_optional"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput/unavailable_console_input_remains_optional"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput/unavailable_console_input_remains_optional","Output":"=== RUN   TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput/unavailable_console_input_remains_optional\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput/unavailable_console_input_remains_optional","Output":"--- PASS: TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput/unavailable_console_input_remains_optional (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput/unavailable_console_input_remains_optional"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput","Output":"--- PASS: TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsOptedOutBareUsesCLIOutputAcquisition"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsOptedOutBareUsesCLIOutputAcquisition","Output":"=== RUN   TestWindowsOptedOutBareUsesCLIOutputAcquisition\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsOptedOutBareUsesCLIOutputAcquisition","Output":"--- PASS: TestWindowsOptedOutBareUsesCLIOutputAcquisition (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestWindowsOptedOutBareUsesCLIOutputAcquisition"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationWindowsBareLaunchReturnsWithoutInlineCobra"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationWindowsBareLaunchReturnsWithoutInlineCobra","Output":"=== RUN   TestPrepareInvocationWindowsBareLaunchReturnsWithoutInlineCobra\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationWindowsBareLaunchReturnsWithoutInlineCobra","Output":"--- PASS: TestPrepareInvocationWindowsBareLaunchReturnsWithoutInlineCobra (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationWindowsBareLaunchReturnsWithoutInlineCobra"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestClassifyWindowsEntrypointMode_CBuildIsStdioProtocol"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestClassifyWindowsEntrypointMode_CBuildIsStdioProtocol","Output":"=== RUN   TestClassifyWindowsEntrypointMode_CBuildIsStdioProtocol\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestClassifyWindowsEntrypointMode_CBuildIsStdioProtocol","Output":"--- PASS: TestClassifyWindowsEntrypointMode_CBuildIsStdioProtocol (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestClassifyWindowsEntrypointMode_CBuildIsStdioProtocol"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationPreservesNonBareAndOptOutRoutes"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationPreservesNonBareAndOptOutRoutes","Output":"=== RUN   TestPrepareInvocationPreservesNonBareAndOptOutRoutes\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationPreservesNonBareAndOptOutRoutes/explicit_gui"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationPreservesNonBareAndOptOutRoutes/explicit_gui","Output":"=== RUN   TestPrepareInvocationPreservesNonBareAndOptOutRoutes/explicit_gui\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationPreservesNonBareAndOptOutRoutes/explicit_gui","Output":"--- PASS: TestPrepareInvocationPreservesNonBareAndOptOutRoutes/explicit_gui (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationPreservesNonBareAndOptOutRoutes/explicit_gui"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationPreservesNonBareAndOptOutRoutes/version"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationPreservesNonBareAndOptOutRoutes/version","Output":"=== RUN   TestPrepareInvocationPreservesNonBareAndOptOutRoutes/version\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationPreservesNonBareAndOptOutRoutes/version","Output":"--- PASS: TestPrepareInvocationPreservesNonBareAndOptOutRoutes/version (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationPreservesNonBareAndOptOutRoutes/version"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationPreservesNonBareAndOptOutRoutes/debug_console"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationPreservesNonBareAndOptOutRoutes/debug_console","Output":"=== RUN   TestPrepareInvocationPreservesNonBareAndOptOutRoutes/debug_console\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationPreservesNonBareAndOptOutRoutes/debug_console","Output":"--- PASS: TestPrepareInvocationPreservesNonBareAndOptOutRoutes/debug_console (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationPreservesNonBareAndOptOutRoutes/debug_console"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationPreservesNonBareAndOptOutRoutes/bare_opt_out"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationPreservesNonBareAndOptOutRoutes/bare_opt_out","Output":"=== RUN   TestPrepareInvocationPreservesNonBareAndOptOutRoutes/bare_opt_out\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationPreservesNonBareAndOptOutRoutes/bare_opt_out","Output":"--- PASS: TestPrepareInvocationPreservesNonBareAndOptOutRoutes/bare_opt_out (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationPreservesNonBareAndOptOutRoutes/bare_opt_out"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationPreservesNonBareAndOptOutRoutes","Output":"--- PASS: TestPrepareInvocationPreservesNonBareAndOptOutRoutes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationPreservesNonBareAndOptOutRoutes"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationBareLaunchFailureRemainsVisible"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationBareLaunchFailureRemainsVisible","Output":"=== RUN   TestPrepareInvocationBareLaunchFailureRemainsVisible\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationBareLaunchFailureRemainsVisible","Output":"--- PASS: TestPrepareInvocationBareLaunchFailureRemainsVisible (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationBareLaunchFailureRemainsVisible"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationNormalizedDebugBareStaysInline"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationNormalizedDebugBareStaysInline","Output":"=== RUN   TestPrepareInvocationNormalizedDebugBareStaysInline\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationNormalizedDebugBareStaysInline","Output":"--- PASS: TestPrepareInvocationNormalizedDebugBareStaysInline (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationNormalizedDebugBareStaysInline"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationNormalizedPlainBareCallsDetachedCoordinator"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationNormalizedPlainBareCallsDetachedCoordinator","Output":"=== RUN   TestPrepareInvocationNormalizedPlainBareCallsDetachedCoordinator\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationNormalizedPlainBareCallsDetachedCoordinator","Output":"--- PASS: TestPrepareInvocationNormalizedPlainBareCallsDetachedCoordinator (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestPrepareInvocationNormalizedPlainBareCallsDetachedCoordinator"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestRouteBareInvocationProducesTrayEnabledGUIArgs"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestRouteBareInvocationProducesTrayEnabledGUIArgs","Output":"=== RUN   TestRouteBareInvocationProducesTrayEnabledGUIArgs\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestRouteBareInvocationProducesTrayEnabledGUIArgs","Output":"--- PASS: TestRouteBareInvocationProducesTrayEnabledGUIArgs (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestRouteBareInvocationProducesTrayEnabledGUIArgs"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs","Output":"=== RUN   TestShouldAutoLaunchGUIForArgs\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/bare_invocation_routes_to_gui"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/bare_invocation_routes_to_gui","Output":"=== RUN   TestShouldAutoLaunchGUIForArgs/bare_invocation_routes_to_gui\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/bare_invocation_routes_to_gui","Output":"--- PASS: TestShouldAutoLaunchGUIForArgs/bare_invocation_routes_to_gui (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/bare_invocation_routes_to_gui"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/bare_invocation_with_absolute_path"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/bare_invocation_with_absolute_path","Output":"=== RUN   TestShouldAutoLaunchGUIForArgs/bare_invocation_with_absolute_path\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/bare_invocation_with_absolute_path","Output":"--- PASS: TestShouldAutoLaunchGUIForArgs/bare_invocation_with_absolute_path (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/bare_invocation_with_absolute_path"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/defensive:_empty_argv_treated_as_bare"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/defensive:_empty_argv_treated_as_bare","Output":"=== RUN   TestShouldAutoLaunchGUIForArgs/defensive:_empty_argv_treated_as_bare\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/defensive:_empty_argv_treated_as_bare","Output":"--- PASS: TestShouldAutoLaunchGUIForArgs/defensive:_empty_argv_treated_as_bare (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/defensive:_empty_argv_treated_as_bare"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/--help_still_prints_the_command_list"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/--help_still_prints_the_command_list","Output":"=== RUN   TestShouldAutoLaunchGUIForArgs/--help_still_prints_the_command_list\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/--help_still_prints_the_command_list","Output":"--- PASS: TestShouldAutoLaunchGUIForArgs/--help_still_prints_the_command_list (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/--help_still_prints_the_command_list"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/-h_still_prints_the_command_list"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/-h_still_prints_the_command_list","Output":"=== RUN   TestShouldAutoLaunchGUIForArgs/-h_still_prints_the_command_list\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/-h_still_prints_the_command_list","Output":"--- PASS: TestShouldAutoLaunchGUIForArgs/-h_still_prints_the_command_list (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/-h_still_prints_the_command_list"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/help_subcommand_untouched"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/help_subcommand_untouched","Output":"=== RUN   TestShouldAutoLaunchGUIForArgs/help_subcommand_untouched\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/help_subcommand_untouched","Output":"--- PASS: TestShouldAutoLaunchGUIForArgs/help_subcommand_untouched (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/help_subcommand_untouched"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/gui_subcommand_untouched"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/gui_subcommand_untouched","Output":"=== RUN   TestShouldAutoLaunchGUIForArgs/gui_subcommand_untouched\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/gui_subcommand_untouched","Output":"--- PASS: TestShouldAutoLaunchGUIForArgs/gui_subcommand_untouched (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/gui_subcommand_untouched"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/status_subcommand_untouched"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/status_subcommand_untouched","Output":"=== RUN   TestShouldAutoLaunchGUIForArgs/status_subcommand_untouched\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/status_subcommand_untouched","Output":"--- PASS: TestShouldAutoLaunchGUIForArgs/status_subcommand_untouched (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/status_subcommand_untouched"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/subcommand_with_flags_untouched"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/subcommand_with_flags_untouched","Output":"=== RUN   TestShouldAutoLaunchGUIForArgs/subcommand_with_flags_untouched\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/subcommand_with_flags_untouched","Output":"--- PASS: TestShouldAutoLaunchGUIForArgs/subcommand_with_flags_untouched (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs/subcommand_with_flags_untouched"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs","Output":"--- PASS: TestShouldAutoLaunchGUIForArgs (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIForArgs"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIIsConsoleIndependent"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIIsConsoleIndependent","Output":"=== RUN   TestShouldAutoLaunchGUIIsConsoleIndependent\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIIsConsoleIndependent","Output":"--- PASS: TestShouldAutoLaunchGUIIsConsoleIndependent (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUIIsConsoleIndependent"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut","Output":"=== RUN   TestShouldAutoLaunchGUI_EnvOptOut\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/unset:_bare_mcphub_starts_the_hub"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/unset:_bare_mcphub_starts_the_hub","Output":"=== RUN   TestShouldAutoLaunchGUI_EnvOptOut/unset:_bare_mcphub_starts_the_hub\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/unset:_bare_mcphub_starts_the_hub","Output":"--- PASS: TestShouldAutoLaunchGUI_EnvOptOut/unset:_bare_mcphub_starts_the_hub (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/unset:_bare_mcphub_starts_the_hub"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/empty_value_is_not_an_opt-out"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/empty_value_is_not_an_opt-out","Output":"=== RUN   TestShouldAutoLaunchGUI_EnvOptOut/empty_value_is_not_an_opt-out\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/empty_value_is_not_an_opt-out","Output":"--- PASS: TestShouldAutoLaunchGUI_EnvOptOut/empty_value_is_not_an_opt-out (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/empty_value_is_not_an_opt-out"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/0_is_not_an_opt-out"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/0_is_not_an_opt-out","Output":"=== RUN   TestShouldAutoLaunchGUI_EnvOptOut/0_is_not_an_opt-out\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/0_is_not_an_opt-out","Output":"--- PASS: TestShouldAutoLaunchGUI_EnvOptOut/0_is_not_an_opt-out (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/0_is_not_an_opt-out"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/arbitrary_value_is_not_an_opt-out"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/arbitrary_value_is_not_an_opt-out","Output":"=== RUN   TestShouldAutoLaunchGUI_EnvOptOut/arbitrary_value_is_not_an_opt-out\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/arbitrary_value_is_not_an_opt-out","Output":"--- PASS: TestShouldAutoLaunchGUI_EnvOptOut/arbitrary_value_is_not_an_opt-out (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/arbitrary_value_is_not_an_opt-out"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/1_opts_out"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/1_opts_out","Output":"=== RUN   TestShouldAutoLaunchGUI_EnvOptOut/1_opts_out\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/1_opts_out","Output":"--- PASS: TestShouldAutoLaunchGUI_EnvOptOut/1_opts_out (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/1_opts_out"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/true_opts_out"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/true_opts_out","Output":"=== RUN   TestShouldAutoLaunchGUI_EnvOptOut/true_opts_out\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/true_opts_out","Output":"--- PASS: TestShouldAutoLaunchGUI_EnvOptOut/true_opts_out (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/true_opts_out"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/TRUE_opts_out_(case-insensitive)"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/TRUE_opts_out_(case-insensitive)","Output":"=== RUN   TestShouldAutoLaunchGUI_EnvOptOut/TRUE_opts_out_(case-insensitive)\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/TRUE_opts_out_(case-insensitive)","Output":"--- PASS: TestShouldAutoLaunchGUI_EnvOptOut/TRUE_opts_out_(case-insensitive) (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/TRUE_opts_out_(case-insensitive)"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/padded_value_opts_out_(trimmed)"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/padded_value_opts_out_(trimmed)","Output":"=== RUN   TestShouldAutoLaunchGUI_EnvOptOut/padded_value_opts_out_(trimmed)\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/padded_value_opts_out_(trimmed)","Output":"--- PASS: TestShouldAutoLaunchGUI_EnvOptOut/padded_value_opts_out_(trimmed) (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut/padded_value_opts_out_(trimmed)"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut","Output":"--- PASS: TestShouldAutoLaunchGUI_EnvOptOut (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_EnvOptOut"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_OptOutDoesNotLeakIntoThePureSeam"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_OptOutDoesNotLeakIntoThePureSeam","Output":"=== RUN   TestShouldAutoLaunchGUI_OptOutDoesNotLeakIntoThePureSeam\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_OptOutDoesNotLeakIntoThePureSeam","Output":"--- PASS: TestShouldAutoLaunchGUI_OptOutDoesNotLeakIntoThePureSeam (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestShouldAutoLaunchGUI_OptOutDoesNotLeakIntoThePureSeam"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestClassifyWindowsEntrypointModeExhaustiveRootCommands"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestClassifyWindowsEntrypointModeExhaustiveRootCommands","Output":"=== RUN   TestClassifyWindowsEntrypointModeExhaustiveRootCommands\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestClassifyWindowsEntrypointModeExhaustiveRootCommands","Output":"--- PASS: TestClassifyWindowsEntrypointModeExhaustiveRootCommands (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestClassifyWindowsEntrypointModeExhaustiveRootCommands"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp","Output":"=== RUN   TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp/1"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp/1","Output":"=== RUN   TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp/1\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp/1","Output":"--- PASS: TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp/1 (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp/1"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp/true"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp/true","Output":"=== RUN   TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp/true\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp/true","Output":"--- PASS: TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp/true (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp/true"}
+{"Action":"run","Package":"mcp-local-hub/cmd/mcphub","Test":"TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp/_TRUE_"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp/_TRUE_","Output":"=== RUN   TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp/_TRUE_\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp/_TRUE_","Output":"--- PASS: TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp/_TRUE_ (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp/_TRUE_"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Test":"TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp","Output":"--- PASS: TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp (0.09s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub","Test":"TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp"}
+{"Action":"output","Package":"mcp-local-hub/cmd/mcphub","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/cmd/mcphub"}

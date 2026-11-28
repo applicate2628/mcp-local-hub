@@ -1,0 +1,39 @@
+{
+  "run": "runs/cache-acceptance-stage-20261128-v19",
+  "source": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-acceptance-20261128-v2",
+  "head": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+  "environment": {
+    "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_NO_REPLACE_OBJECTS": "1",
+    "GIT_NO_LAZY_FETCH": "1",
+    "GOOS": "windows",
+    "GOARCH": "amd64",
+    "CGO_ENABLED": "0",
+    "GOTOOLCHAIN": "local"
+  },
+  "observed_files": [
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-copy-probe-v1\\main_windows.go",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\closed-api-receiving-v1\\root-api-receiving-v3.json",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-copy-probe-v1\\namespace-copy-probe.exe"
+  ],
+  "steps": [
+    {
+      "name": "closed-api-copy-sync-data-observation",
+      "argv": [
+        "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-copy-probe-v1\\namespace-copy-probe.exe"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "isolated-source-still-clean",
+      "argv": [
+        "git",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all"
+      ],
+      "timeout": 30
+    }
+  ]
+}

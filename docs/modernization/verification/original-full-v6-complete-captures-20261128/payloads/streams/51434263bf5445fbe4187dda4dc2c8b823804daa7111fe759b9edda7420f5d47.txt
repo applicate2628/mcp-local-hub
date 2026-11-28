@@ -1,0 +1,7 @@
+=== RUN   TestEnabled_ExactOneOnly
+--- PASS: TestEnabled_ExactOneOnly (0.00s)
+=== NAME  
+=== RUN   TestRegisterAllowed_LogsWhenDisabled
+--- PASS: TestRegisterAllowed_LogsWhenDisabled (0.00s)
+=== NAME  
+PASS

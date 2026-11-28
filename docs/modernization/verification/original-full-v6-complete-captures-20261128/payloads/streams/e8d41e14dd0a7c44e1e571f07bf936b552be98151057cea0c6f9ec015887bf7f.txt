@@ -1,0 +1,107 @@
+=== RUN   TestMoreThan512CandidatesSettleInBoundedBatchCount
+--- PASS: TestMoreThan512CandidatesSettleInBoundedBatchCount (1.27s)
+=== NAME  
+=== RUN   TestPermutationBatchBoundaryByteEquality
+--- PASS: TestPermutationBatchBoundaryByteEquality (0.00s)
+=== NAME  
+=== RUN   TestOneBatchFailureMakesNegativeUnknownAndRetainsPositives
+--- PASS: TestOneBatchFailureMakesNegativeUnknownAndRetainsPositives (0.20s)
+=== NAME  
+=== RUN   TestCancellationSettlesAllActiveBatches
+--- PASS: TestCancellationSettlesAllActiveBatches (0.37s)
+=== NAME  
+=== RUN   TestAnalyzeUsesResolvedPlansAndRemovesScratch
+--- PASS: TestAnalyzeUsesResolvedPlansAndRemovesScratch (0.00s)
+=== NAME  
+=== RUN   TestUnsupportedVersionFailsBeforeGraph
+--- PASS: TestUnsupportedVersionFailsBeforeGraph (0.00s)
+=== NAME  
+=== RUN   TestNonzeroPreservesRedactedStderr
+--- PASS: TestNonzeroPreservesRedactedStderr (0.00s)
+=== NAME  
+=== RUN   TestEveryCoverageHoleMakesNegativeUnknown
+--- PASS: TestEveryCoverageHoleMakesNegativeUnknown (0.00s)
+=== NAME  
+=== RUN   TestTripletInputDriftFailsClosed
+--- PASS: TestTripletInputDriftFailsClosed (0.00s)
+=== NAME  
+=== RUN   TestRemoteRegistryRefusedBeforeChildStart
+--- PASS: TestRemoteRegistryRefusedBeforeChildStart (0.00s)
+=== NAME  
+=== RUN   TestResolvedDGMLAndListContract
+--- PASS: TestResolvedDGMLAndListContract (0.00s)
+=== NAME  
+=== RUN   TestDGMLListMismatchFailsClosed
+--- PASS: TestDGMLListMismatchFailsClosed (0.00s)
+=== NAME  
+=== RUN   TestTargetHostOtherTripletIdentity
+--- PASS: TestTargetHostOtherTripletIdentity (0.00s)
+=== NAME  
+=== RUN   TestDeclaredFilterIsSuperset
+--- PASS: TestDeclaredFilterIsSuperset (0.00s)
+=== NAME  
+=== RUN   TestReverseDiamondMinDistance
+--- PASS: TestReverseDiamondMinDistance (0.00s)
+=== NAME  
+=== RUN   TestCycleSCCRetainsClosingEdges
+--- PASS: TestCycleSCCRetainsClosingEdges (0.00s)
+=== NAME  
+=== RUN   TestFeatureQualifiedNodesDoNotCollapse
+--- PASS: TestFeatureQualifiedNodesDoNotCollapse (0.00s)
+=== NAME  
+=== RUN   TestLiveDependInfoOracle
+    live_dependinfo_test.go:21: set VCPKG_REVERSE_DEPENDENCIES_LIVE_ROOT for the installed-vcpkg oracle
+--- SKIP: TestLiveDependInfoOracle (0.00s)
+=== NAME  
+=== RUN   TestRunnerArgvEnvironmentAllowlist
+--- PASS: TestRunnerArgvEnvironmentAllowlist (0.00s)
+=== NAME  
+=== RUN   TestProcessTreeHelper
+--- PASS: TestProcessTreeHelper (0.00s)
+=== NAME  
+=== RUN   TestCancellationReapsProcessTree
+--- PASS: TestCancellationReapsProcessTree (0.23s)
+=== NAME  
+=== RUN   TestTimeoutReapsProcessTree
+--- PASS: TestTimeoutReapsProcessTree (0.35s)
+=== NAME  
+=== RUN   TestStartPlatformProcessSuppressesConsole
+--- PASS: TestStartPlatformProcessSuppressesConsole (0.00s)
+=== NAME  
+=== RUN   TestProjectionNMinusOneNPlusOne
+--- PASS: TestProjectionNMinusOneNPlusOne (0.01s)
+=== NAME  
+=== RUN   TestBindTrustedRootReturnsCanonicalOperatorRoot
+--- PASS: TestBindTrustedRootReturnsCanonicalOperatorRoot (0.00s)
+=== NAME  
+=== RUN   TestBindTrustedRootAdmitsAliasButReturnsTrustedCanonicalPath
+--- PASS: TestBindTrustedRootAdmitsAliasButReturnsTrustedCanonicalPath (0.00s)
+=== NAME  
+=== RUN   TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs
+=== RUN   TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/missing-requested
+--- PASS: TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/missing-requested (0.00s)
+=== NAME  TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs
+=== RUN   TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/missing-trusted
+--- PASS: TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/missing-trusted (0.00s)
+=== NAME  TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs
+=== RUN   TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/file-requested
+--- PASS: TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/file-requested (0.00s)
+=== NAME  TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs
+=== RUN   TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/file-trusted
+--- PASS: TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs/file-trusted (0.00s)
+=== NAME  TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs
+--- PASS: TestBindTrustedRootRefusesUnresolvableOrNonDirectoryInputs (0.00s)
+=== NAME  
+=== RUN   TestBindTrustedRootRefusesDistinctCaseSensitiveWindowsRoots
+--- PASS: TestBindTrustedRootRefusesDistinctCaseSensitiveWindowsRoots (0.00s)
+=== NAME  
+=== RUN   TestUniverseOverlayBuiltinPrecedence
+--- PASS: TestUniverseOverlayBuiltinPrecedence (0.00s)
+=== NAME  
+=== RUN   TestRemoteRegistryRefused
+--- PASS: TestRemoteRegistryRefused (0.00s)
+=== NAME  
+=== RUN   TestUniverseLocalRegistryUnion
+--- PASS: TestUniverseLocalRegistryUnion (0.00s)
+=== NAME  
+PASS

@@ -1,0 +1,25 @@
+{
+  "schema": "successor-reviewed-manifest-data-receiving-v1",
+  "status": "RECORDED",
+  "source_templates_unchanged": true,
+  "candidate_files_verified": 15,
+  "original_candidate_manifest": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-candidate\\candidate-manifest.json",
+    "sha256": "88ae2fa8e94191babf660c94665819ca2c4939b60566c49bb9098cdd3c0b16bc"
+  },
+  "original_template_manifest": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-candidate\\templates-manifest.candidate.json",
+    "sha256": "7eb9d0a93ce8d9ba6bc17a78037c9a1d072b919bc881d8ea7f3e2c5c965290c4"
+  },
+  "review_record": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-review-v1\\static-review-record.json",
+    "sha256": "b28db1a4349a1220e283686f2a2d80704bd808b70622059184c510af870109d2"
+  },
+  "reviewed_template_manifest": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-review-v1\\templates-manifest.reviewed.json",
+    "sha256": "03800ce5a383c993372dd40dc84079d5af5add24163978f9fbab7bd513e6d8b6"
+  },
+  "active_producer_outputs_or_captures_read": false,
+  "runtime_imported": false,
+  "native_or_test_commands_started": false
+}

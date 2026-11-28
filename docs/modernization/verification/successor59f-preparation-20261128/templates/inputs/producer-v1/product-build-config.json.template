@@ -1,0 +1,35 @@
+{
+  "schema": "successor-product-build-config-v1",
+  "source_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128",
+  "source_commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+  "source_tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+  "source_file_count": 3369,
+  "source_map": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\source-binding\\source59f-input-sha256.json",
+    "sha256": "e8c3fc2f577a130f92ba4eee7f8eee7153afc032dee909557cf1156890917c06"
+  },
+  "export_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\source",
+  "source_snapshot": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer-candidate\\publisher-source-snapshot.json",
+    "sha256": "0249af1149b94877e011186a92ee05f104a9bd7afd0e1d676755ee190e64356e"
+  },
+  "output_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1",
+  "marked_output": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\marked-bundle",
+  "native_output": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128\\.scratch\\qualified-successor-native-product\\bundle",
+  "marked_receipt_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\marked-inputs",
+  "native_receipt_root": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-helper-inputs-v1\\native-inputs",
+  "release_version": "0.4.65",
+  "release_build_date": "2026-11-28T13:33:34Z",
+  "windows_target_arch": "amd64",
+  "build_script_sha256": "92be70f504bb3ee6a6a78c0bb979c7112147f2ce4dc6c43c0635cc7eebaec86d",
+  "tools": {
+    "go": {
+      "path": "@@RECOVERY_MSYS_UCRT64_ROOT_JSON@@\\lib\\go\\bin\\go.exe",
+      "sha256": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113"
+    },
+    "git": {
+      "path": "@@RECOVERY_GIT_INSTALLATION_JSON@@\\cmd\\git.exe",
+      "sha256": "177bc8a9af84fa3a400c694c975fda731d048279c074e1a93947ce8b067ebb48"
+    }
+  }
+}

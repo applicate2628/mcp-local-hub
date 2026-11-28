@@ -1,0 +1,58 @@
+=== RUN   TestParseLegalAndIllegalNames
+=== RUN   TestParseLegalAndIllegalNames/legal-zlib
+--- PASS: TestParseLegalAndIllegalNames/legal-zlib (0.00s)
+=== NAME  TestParseLegalAndIllegalNames
+=== RUN   TestParseLegalAndIllegalNames/legal-mcp-language-server
+--- PASS: TestParseLegalAndIllegalNames/legal-mcp-language-server (0.00s)
+=== NAME  TestParseLegalAndIllegalNames
+=== RUN   TestParseLegalAndIllegalNames/legal-abseil
+--- PASS: TestParseLegalAndIllegalNames/legal-abseil (0.00s)
+=== NAME  TestParseLegalAndIllegalNames
+=== RUN   TestParseLegalAndIllegalNames/legal-libpng16
+--- PASS: TestParseLegalAndIllegalNames/legal-libpng16 (0.00s)
+=== NAME  TestParseLegalAndIllegalNames
+=== RUN   TestParseLegalAndIllegalNames/legal-a-b-c
+--- PASS: TestParseLegalAndIllegalNames/legal-a-b-c (0.00s)
+=== NAME  TestParseLegalAndIllegalNames
+=== RUN   TestParseLegalAndIllegalNames/legal-x264
+--- PASS: TestParseLegalAndIllegalNames/legal-x264 (0.00s)
+=== NAME  TestParseLegalAndIllegalNames
+=== RUN   TestParseLegalAndIllegalNames/illegal-
+--- PASS: TestParseLegalAndIllegalNames/illegal- (0.00s)
+=== NAME  TestParseLegalAndIllegalNames
+=== RUN   TestParseLegalAndIllegalNames/illegal-UPPERCASE
+--- PASS: TestParseLegalAndIllegalNames/illegal-UPPERCASE (0.00s)
+=== NAME  TestParseLegalAndIllegalNames
+=== RUN   TestParseLegalAndIllegalNames/illegal--leading
+--- PASS: TestParseLegalAndIllegalNames/illegal--leading (0.00s)
+=== NAME  TestParseLegalAndIllegalNames
+=== RUN   TestParseLegalAndIllegalNames/illegal-trailing-
+--- PASS: TestParseLegalAndIllegalNames/illegal-trailing- (0.00s)
+=== NAME  TestParseLegalAndIllegalNames
+=== RUN   TestParseLegalAndIllegalNames/illegal-under_score
+--- PASS: TestParseLegalAndIllegalNames/illegal-under_score (0.00s)
+=== NAME  TestParseLegalAndIllegalNames
+=== RUN   TestParseLegalAndIllegalNames/illegal-sub/nested
+--- PASS: TestParseLegalAndIllegalNames/illegal-sub/nested (0.00s)
+=== NAME  TestParseLegalAndIllegalNames
+=== RUN   TestParseLegalAndIllegalNames/illegal-..\windows-sibling
+--- PASS: TestParseLegalAndIllegalNames/illegal-..\windows-sibling (0.00s)
+=== NAME  TestParseLegalAndIllegalNames
+=== RUN   TestParseLegalAndIllegalNames/illegal-../escape
+--- PASS: TestParseLegalAndIllegalNames/illegal-../escape (0.00s)
+=== NAME  TestParseLegalAndIllegalNames
+=== RUN   TestParseLegalAndIllegalNames/illegal-..
+--- PASS: TestParseLegalAndIllegalNames/illegal-.. (0.00s)
+=== NAME  TestParseLegalAndIllegalNames
+--- PASS: TestParseLegalAndIllegalNames (0.00s)
+=== NAME  
+=== RUN   TestJoinContainsOpaqueNameAndRejectsZeroOrEscape
+--- PASS: TestJoinContainsOpaqueNameAndRejectsZeroOrEscape (0.00s)
+=== NAME  
+=== RUN   TestPortNamePolicyHasOneProductionOwner
+--- PASS: TestPortNamePolicyHasOneProductionOwner (0.00s)
+=== NAME  
+=== RUN   TestR34ConsecutiveHyphensAreRejected
+--- PASS: TestR34ConsecutiveHyphensAreRejected (0.00s)
+=== NAME  
+PASS

@@ -1,0 +1,764 @@
+{"Action":"start","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailureRejectsRelativeWrapperBeforeIO"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailureRejectsRelativeWrapperBeforeIO","Output":"=== RUN   TestLastFailureRejectsRelativeWrapperBeforeIO\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailureRejectsRelativeWrapperBeforeIO","Output":"--- PASS: TestLastFailureRejectsRelativeWrapperBeforeIO (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailureRejectsRelativeWrapperBeforeIO"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestSplitRecordedCommandLineUsesPOSIXQuoting"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestSplitRecordedCommandLineUsesPOSIXQuoting","Output":"=== RUN   TestSplitRecordedCommandLineUsesPOSIXQuoting\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestSplitRecordedCommandLineUsesPOSIXQuoting","Output":"--- PASS: TestSplitRecordedCommandLineUsesPOSIXQuoting (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestSplitRecordedCommandLineUsesPOSIXQuoting"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWrapperMetadataUsesInjectedCommandPlatform"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWrapperMetadataUsesInjectedCommandPlatform","Output":"=== RUN   TestWrapperMetadataUsesInjectedCommandPlatform\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWrapperMetadataUsesInjectedCommandPlatform","Output":"--- PASS: TestWrapperMetadataUsesInjectedCommandPlatform (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWrapperMetadataUsesInjectedCommandPlatform"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestRedactResultCommandsCoversEveryWireCommand"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestRedactResultCommandsCoversEveryWireCommand","Output":"=== RUN   TestRedactResultCommandsCoversEveryWireCommand\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestRedactResultCommandsCoversEveryWireCommand","Output":"--- PASS: TestRedactResultCommandsCoversEveryWireCommand (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestRedactResultCommandsCoversEveryWireCommand"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_SpecificDriverErrorOutranksAggregateDriverError"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_SpecificDriverErrorOutranksAggregateDriverError","Output":"=== RUN   TestLastFailure_SpecificDriverErrorOutranksAggregateDriverError\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_SpecificDriverErrorOutranksAggregateDriverError","Output":"--- PASS: TestLastFailure_SpecificDriverErrorOutranksAggregateDriverError (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_SpecificDriverErrorOutranksAggregateDriverError"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_AggregateFirstInFileOrderStillLoses"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_AggregateFirstInFileOrderStillLoses","Output":"=== RUN   TestLastFailure_AggregateFirstInFileOrderStillLoses\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_AggregateFirstInFileOrderStillLoses","Output":"--- PASS: TestLastFailure_AggregateFirstInFileOrderStillLoses (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_AggregateFirstInFileOrderStillLoses"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_DiagnosticLogFollowsTheHeadlineAcrossLogs"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_DiagnosticLogFollowsTheHeadlineAcrossLogs","Output":"=== RUN   TestLastFailure_DiagnosticLogFollowsTheHeadlineAcrossLogs\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_DiagnosticLogFollowsTheHeadlineAcrossLogs","Output":"--- PASS: TestLastFailure_DiagnosticLogFollowsTheHeadlineAcrossLogs (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_DiagnosticLogFollowsTheHeadlineAcrossLogs"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_LoneAggregateIsStillTheHeadline"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_LoneAggregateIsStillTheHeadline","Output":"=== RUN   TestLastFailure_LoneAggregateIsStillTheHeadline\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_LoneAggregateIsStillTheHeadline","Output":"--- PASS: TestLastFailure_LoneAggregateIsStillTheHeadline (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_LoneAggregateIsStillTheHeadline"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_LNK2019OutranksLNK1120"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_LNK2019OutranksLNK1120","Output":"=== RUN   TestLastFailure_LNK2019OutranksLNK1120\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_LNK2019OutranksLNK1120/msvc_real_order"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_LNK2019OutranksLNK1120/msvc_real_order","Output":"=== RUN   TestLastFailure_LNK2019OutranksLNK1120/msvc_real_order\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_LNK2019OutranksLNK1120/msvc_real_order","Output":"--- PASS: TestLastFailure_LNK2019OutranksLNK1120/msvc_real_order (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_LNK2019OutranksLNK1120/msvc_real_order"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_LNK2019OutranksLNK1120/aggregate_first"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_LNK2019OutranksLNK1120/aggregate_first","Output":"=== RUN   TestLastFailure_LNK2019OutranksLNK1120/aggregate_first\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_LNK2019OutranksLNK1120/aggregate_first","Output":"--- PASS: TestLastFailure_LNK2019OutranksLNK1120/aggregate_first (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_LNK2019OutranksLNK1120/aggregate_first"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_LNK2019OutranksLNK1120","Output":"--- PASS: TestLastFailure_LNK2019OutranksLNK1120 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_LNK2019OutranksLNK1120"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep","Output":"=== RUN   TestMatchDiagnosticLine_TierSweep\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/gcc/clang_error"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/gcc/clang_error","Output":"=== RUN   TestMatchDiagnosticLine_TierSweep/gcc/clang_error\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/gcc/clang_error","Output":"--- PASS: TestMatchDiagnosticLine_TierSweep/gcc/clang_error (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/gcc/clang_error"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/gcc/clang_warning"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/gcc/clang_warning","Output":"=== RUN   TestMatchDiagnosticLine_TierSweep/gcc/clang_warning\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/gcc/clang_warning","Output":"--- PASS: TestMatchDiagnosticLine_TierSweep/gcc/clang_warning (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/gcc/clang_warning"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/msvc_compile_w/_code"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/msvc_compile_w/_code","Output":"=== RUN   TestMatchDiagnosticLine_TierSweep/msvc_compile_w/_code\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/msvc_compile_w/_code","Output":"--- PASS: TestMatchDiagnosticLine_TierSweep/msvc_compile_w/_code (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/msvc_compile_w/_code"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/clang-cl_compile_no_code"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/clang-cl_compile_no_code","Output":"=== RUN   TestMatchDiagnosticLine_TierSweep/clang-cl_compile_no_code\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/clang-cl_compile_no_code","Output":"--- PASS: TestMatchDiagnosticLine_TierSweep/clang-cl_compile_no_code (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/clang-cl_compile_no_code"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK1120_counts_others"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK1120_counts_others","Output":"=== RUN   TestMatchDiagnosticLine_TierSweep/LNK1120_counts_others\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK1120_counts_others","Output":"--- PASS: TestMatchDiagnosticLine_TierSweep/LNK1120_counts_others (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK1120_counts_others"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK1169_follows_LNK2005"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK1169_follows_LNK2005","Output":"=== RUN   TestMatchDiagnosticLine_TierSweep/LNK1169_follows_LNK2005\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK1169_follows_LNK2005","Output":"--- PASS: TestMatchDiagnosticLine_TierSweep/LNK1169_follows_LNK2005 (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK1169_follows_LNK2005"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK2019_names_the_symbol"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK2019_names_the_symbol","Output":"=== RUN   TestMatchDiagnosticLine_TierSweep/LNK2019_names_the_symbol\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK2019_names_the_symbol","Output":"--- PASS: TestMatchDiagnosticLine_TierSweep/LNK2019_names_the_symbol (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK2019_names_the_symbol"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK2001_names_the_symbol"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK2001_names_the_symbol","Output":"=== RUN   TestMatchDiagnosticLine_TierSweep/LNK2001_names_the_symbol\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK2001_names_the_symbol","Output":"--- PASS: TestMatchDiagnosticLine_TierSweep/LNK2001_names_the_symbol (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK2001_names_the_symbol"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK2005_names_the_symbol"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK2005_names_the_symbol","Output":"=== RUN   TestMatchDiagnosticLine_TierSweep/LNK2005_names_the_symbol\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK2005_names_the_symbol","Output":"--- PASS: TestMatchDiagnosticLine_TierSweep/LNK2005_names_the_symbol (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK2005_names_the_symbol"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK1104_names_the_file"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK1104_names_the_file","Output":"=== RUN   TestMatchDiagnosticLine_TierSweep/LNK1104_names_the_file\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK1104_names_the_file","Output":"--- PASS: TestMatchDiagnosticLine_TierSweep/LNK1104_names_the_file (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK1104_names_the_file"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK1181_names_the_file"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK1181_names_the_file","Output":"=== RUN   TestMatchDiagnosticLine_TierSweep/LNK1181_names_the_file\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK1181_names_the_file","Output":"--- PASS: TestMatchDiagnosticLine_TierSweep/LNK1181_names_the_file (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/LNK1181_names_the_file"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/clang-cl_relays_exit_code"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/clang-cl_relays_exit_code","Output":"=== RUN   TestMatchDiagnosticLine_TierSweep/clang-cl_relays_exit_code\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/clang-cl_relays_exit_code","Output":"--- PASS: TestMatchDiagnosticLine_TierSweep/clang-cl_relays_exit_code (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/clang-cl_relays_exit_code"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/clang++_relays_exit_code"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/clang++_relays_exit_code","Output":"=== RUN   TestMatchDiagnosticLine_TierSweep/clang++_relays_exit_code\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/clang++_relays_exit_code","Output":"--- PASS: TestMatchDiagnosticLine_TierSweep/clang++_relays_exit_code (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/clang++_relays_exit_code"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/clang_relays_frontend_exit_code"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/clang_relays_frontend_exit_code","Output":"=== RUN   TestMatchDiagnosticLine_TierSweep/clang_relays_frontend_exit_code\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/clang_relays_frontend_exit_code","Output":"--- PASS: TestMatchDiagnosticLine_TierSweep/clang_relays_frontend_exit_code (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/clang_relays_frontend_exit_code"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/lld-link_names_the_symbol"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/lld-link_names_the_symbol","Output":"=== RUN   TestMatchDiagnosticLine_TierSweep/lld-link_names_the_symbol\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/lld-link_names_the_symbol","Output":"--- PASS: TestMatchDiagnosticLine_TierSweep/lld-link_names_the_symbol (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/lld-link_names_the_symbol"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/clang-cl_names_the_argument"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/clang-cl_names_the_argument","Output":"=== RUN   TestMatchDiagnosticLine_TierSweep/clang-cl_names_the_argument\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/clang-cl_names_the_argument","Output":"--- PASS: TestMatchDiagnosticLine_TierSweep/clang-cl_names_the_argument (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/clang-cl_names_the_argument"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/clang_names_the_file"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/clang_names_the_file","Output":"=== RUN   TestMatchDiagnosticLine_TierSweep/clang_names_the_file\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/clang_names_the_file","Output":"--- PASS: TestMatchDiagnosticLine_TierSweep/clang_names_the_file (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/clang_names_the_file"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/ninja_FAILED"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/ninja_FAILED","Output":"=== RUN   TestMatchDiagnosticLine_TierSweep/ninja_FAILED\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/ninja_FAILED","Output":"--- PASS: TestMatchDiagnosticLine_TierSweep/ninja_FAILED (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep/ninja_FAILED"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep","Output":"--- PASS: TestMatchDiagnosticLine_TierSweep (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_TierSweep"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestPR591_DriveQualifiedMSVCLinkerDiagnosticIsSpecific"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestPR591_DriveQualifiedMSVCLinkerDiagnosticIsSpecific","Output":"=== RUN   TestPR591_DriveQualifiedMSVCLinkerDiagnosticIsSpecific\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestPR591_DriveQualifiedMSVCLinkerDiagnosticIsSpecific","Output":"--- PASS: TestPR591_DriveQualifiedMSVCLinkerDiagnosticIsSpecific (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestPR591_DriveQualifiedMSVCLinkerDiagnosticIsSpecific"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_EveryRecognizedLineIsTiered"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_EveryRecognizedLineIsTiered","Output":"=== RUN   TestMatchDiagnosticLine_EveryRecognizedLineIsTiered\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_EveryRecognizedLineIsTiered","Output":"--- PASS: TestMatchDiagnosticLine_EveryRecognizedLineIsTiered (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMatchDiagnosticLine_EveryRecognizedLineIsTiered"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_ClangErrorCountTailStaysUnrecognized"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_ClangErrorCountTailStaysUnrecognized","Output":"=== RUN   TestScanDiagnostics_ClangErrorCountTailStaysUnrecognized\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_ClangErrorCountTailStaysUnrecognized","Output":"--- PASS: TestScanDiagnostics_ClangErrorCountTailStaysUnrecognized (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_ClangErrorCountTailStaysUnrecognized"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestRankDiagnostics_FirstOccurrencePreservedWithinTier"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestRankDiagnostics_FirstOccurrencePreservedWithinTier","Output":"=== RUN   TestRankDiagnostics_FirstOccurrencePreservedWithinTier\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestRankDiagnostics_FirstOccurrencePreservedWithinTier","Output":"--- PASS: TestRankDiagnostics_FirstOccurrencePreservedWithinTier (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestRankDiagnostics_FirstOccurrencePreservedWithinTier"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestHeadlineErrorDiagnostic_MatchesRankedIndexZero"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestHeadlineErrorDiagnostic_MatchesRankedIndexZero","Output":"=== RUN   TestHeadlineErrorDiagnostic_MatchesRankedIndexZero\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestHeadlineErrorDiagnostic_MatchesRankedIndexZero","Output":"--- PASS: TestHeadlineErrorDiagnostic_MatchesRankedIndexZero (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestHeadlineErrorDiagnostic_MatchesRankedIndexZero"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_RelativeBuildtreesRoot_Refused"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_RelativeBuildtreesRoot_Refused","Output":"=== RUN   TestLastFailure_RelativeBuildtreesRoot_Refused\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_RelativeBuildtreesRoot_Refused","Output":"--- PASS: TestLastFailure_RelativeBuildtreesRoot_Refused (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_RelativeBuildtreesRoot_Refused"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_RelativeRootParam_Refused"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_RelativeRootParam_Refused","Output":"=== RUN   TestLastFailure_RelativeRootParam_Refused\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_RelativeRootParam_Refused","Output":"--- PASS: TestLastFailure_RelativeRootParam_Refused (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_RelativeRootParam_Refused"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_RelativeWrapperBuildtreesRoot_Refused"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_RelativeWrapperBuildtreesRoot_Refused","Output":"=== RUN   TestLastFailure_RelativeWrapperBuildtreesRoot_Refused\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_RelativeWrapperBuildtreesRoot_Refused","Output":"--- PASS: TestLastFailure_RelativeWrapperBuildtreesRoot_Refused (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_RelativeWrapperBuildtreesRoot_Refused"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_PortNameEscapingBuildtreesRoot_Refused"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_PortNameEscapingBuildtreesRoot_Refused","Output":"=== RUN   TestLastFailure_PortNameEscapingBuildtreesRoot_Refused\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_PortNameEscapingBuildtreesRoot_Refused","Output":"--- PASS: TestLastFailure_PortNameEscapingBuildtreesRoot_Refused (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_PortNameEscapingBuildtreesRoot_Refused"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_BuildtreesRootUnreadable_NotReportedAsCleaned"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_BuildtreesRootUnreadable_NotReportedAsCleaned","Output":"=== RUN   TestLastFailure_BuildtreesRootUnreadable_NotReportedAsCleaned\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_BuildtreesRootUnreadable_NotReportedAsCleaned","Output":"--- PASS: TestLastFailure_BuildtreesRootUnreadable_NotReportedAsCleaned (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_BuildtreesRootUnreadable_NotReportedAsCleaned"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_PortDirUnreadable_NotReportedAsNotFound"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_PortDirUnreadable_NotReportedAsNotFound","Output":"=== RUN   TestLastFailure_PortDirUnreadable_NotReportedAsNotFound\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_PortDirUnreadable_NotReportedAsNotFound","Output":"--- PASS: TestLastFailure_PortDirUnreadable_NotReportedAsNotFound (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_PortDirUnreadable_NotReportedAsNotFound"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_UnreadablePhaseLog_NoConfidentVerdict"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_UnreadablePhaseLog_NoConfidentVerdict","Output":"=== RUN   TestLastFailure_UnreadablePhaseLog_NoConfidentVerdict\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_UnreadablePhaseLog_NoConfidentVerdict","Output":"--- PASS: TestLastFailure_UnreadablePhaseLog_NoConfidentVerdict (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_UnreadablePhaseLog_NoConfidentVerdict"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_WarningOnlyLog_NotAFailure"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_WarningOnlyLog_NotAFailure","Output":"=== RUN   TestLastFailure_WarningOnlyLog_NotAFailure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_WarningOnlyLog_NotAFailure","Output":"--- PASS: TestLastFailure_WarningOnlyLog_NotAFailure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_WarningOnlyLog_NotAFailure"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ErrorOutranksLaterPhaseWarning"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ErrorOutranksLaterPhaseWarning","Output":"=== RUN   TestLastFailure_ErrorOutranksLaterPhaseWarning\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ErrorOutranksLaterPhaseWarning","Output":"--- PASS: TestLastFailure_ErrorOutranksLaterPhaseWarning (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ErrorOutranksLaterPhaseWarning"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_IncompleteWrapperList_NeverConfirmsNoFailure"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_IncompleteWrapperList_NeverConfirmsNoFailure","Output":"=== RUN   TestLastFailure_IncompleteWrapperList_NeverConfirmsNoFailure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_IncompleteWrapperList_NeverConfirmsNoFailure","Output":"--- PASS: TestLastFailure_IncompleteWrapperList_NeverConfirmsNoFailure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_IncompleteWrapperList_NeverConfirmsNoFailure"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_CompleteWrapperListStillConfirms"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_CompleteWrapperListStillConfirms","Output":"=== RUN   TestLastFailure_CompleteWrapperListStillConfirms\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_CompleteWrapperListStillConfirms","Output":"--- PASS: TestLastFailure_CompleteWrapperListStillConfirms (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_CompleteWrapperListStillConfirms"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWrapperInfo_FailedPortsListIsComplete"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWrapperInfo_FailedPortsListIsComplete","Output":"=== RUN   TestWrapperInfo_FailedPortsListIsComplete\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWrapperInfo_FailedPortsListIsComplete","Output":"--- PASS: TestWrapperInfo_FailedPortsListIsComplete (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWrapperInfo_FailedPortsListIsComplete"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestParseWrapperContent_ScanErrorSurfaced"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestParseWrapperContent_ScanErrorSurfaced","Output":"=== RUN   TestParseWrapperContent_ScanErrorSurfaced\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestParseWrapperContent_ScanErrorSurfaced","Output":"--- PASS: TestParseWrapperContent_ScanErrorSurfaced (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestParseWrapperContent_ScanErrorSurfaced"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestSplitWindowsCommandLine_MatchesRealCommandLineToArgvW"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestSplitWindowsCommandLine_MatchesRealCommandLineToArgvW","Output":"=== RUN   TestSplitWindowsCommandLine_MatchesRealCommandLineToArgvW\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestSplitWindowsCommandLine_MatchesRealCommandLineToArgvW","Output":"--- PASS: TestSplitWindowsCommandLine_MatchesRealCommandLineToArgvW (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestSplitWindowsCommandLine_MatchesRealCommandLineToArgvW"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestParseWrapperContent_QuotedRootWithSpaces"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestParseWrapperContent_QuotedRootWithSpaces","Output":"=== RUN   TestParseWrapperContent_QuotedRootWithSpaces\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestParseWrapperContent_QuotedRootWithSpaces","Output":"--- PASS: TestParseWrapperContent_QuotedRootWithSpaces (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestParseWrapperContent_QuotedRootWithSpaces"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDefaultDeps_GetenvReadsRealEnvironment"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDefaultDeps_GetenvReadsRealEnvironment","Output":"=== RUN   TestDefaultDeps_GetenvReadsRealEnvironment\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDefaultDeps_GetenvReadsRealEnvironment","Output":"--- PASS: TestDefaultDeps_GetenvReadsRealEnvironment (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDefaultDeps_GetenvReadsRealEnvironment"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_OverlayChainFromEnv"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_OverlayChainFromEnv","Output":"=== RUN   TestLastFailure_OverlayChainFromEnv\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_OverlayChainFromEnv","Output":"--- PASS: TestLastFailure_OverlayChainFromEnv (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_OverlayChainFromEnv"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ErrorRankedFirst_AboveWarningFlood"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ErrorRankedFirst_AboveWarningFlood","Output":"=== RUN   TestLastFailure_ErrorRankedFirst_AboveWarningFlood\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ErrorRankedFirst_AboveWarningFlood","Output":"--- PASS: TestLastFailure_ErrorRankedFirst_AboveWarningFlood (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ErrorRankedFirst_AboveWarningFlood"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_DiagnosticOrdering_SeverityThenFirstOccurrence"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_DiagnosticOrdering_SeverityThenFirstOccurrence","Output":"=== RUN   TestLastFailure_DiagnosticOrdering_SeverityThenFirstOccurrence\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_DiagnosticOrdering_SeverityThenFirstOccurrence","Output":"--- PASS: TestLastFailure_DiagnosticOrdering_SeverityThenFirstOccurrence (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_DiagnosticOrdering_SeverityThenFirstOccurrence"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_LateErrorSurvivesWarningFlood"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_LateErrorSurvivesWarningFlood","Output":"=== RUN   TestScanDiagnostics_LateErrorSurvivesWarningFlood\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_LateErrorSurvivesWarningFlood","Output":"--- PASS: TestScanDiagnostics_LateErrorSurvivesWarningFlood (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_LateErrorSurvivesWarningFlood"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestReadMetadataLimited_BoundsBeforeMaterializing"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestReadMetadataLimited_BoundsBeforeMaterializing","Output":"=== RUN   TestReadMetadataLimited_BoundsBeforeMaterializing\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestReadMetadataLimited_BoundsBeforeMaterializing","Output":"--- PASS: TestReadMetadataLimited_BoundsBeforeMaterializing (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestReadMetadataLimited_BoundsBeforeMaterializing"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_OversizeLog_FailsClosedNotSilentlyTruncated"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_OversizeLog_FailsClosedNotSilentlyTruncated","Output":"=== RUN   TestLastFailure_OversizeLog_FailsClosedNotSilentlyTruncated\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_OversizeLog_FailsClosedNotSilentlyTruncated","Output":"--- PASS: TestLastFailure_OversizeLog_FailsClosedNotSilentlyTruncated (1.91s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_OversizeLog_FailsClosedNotSilentlyTruncated"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ExactCommand_IsVcpkgInvocationNotMakeTrace"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ExactCommand_IsVcpkgInvocationNotMakeTrace","Output":"=== RUN   TestLastFailure_ExactCommand_IsVcpkgInvocationNotMakeTrace\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ExactCommand_IsVcpkgInvocationNotMakeTrace","Output":"--- PASS: TestLastFailure_ExactCommand_IsVcpkgInvocationNotMakeTrace (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ExactCommand_IsVcpkgInvocationNotMakeTrace"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ExactCommand_AbsentRatherThanWrongLayer"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ExactCommand_AbsentRatherThanWrongLayer","Output":"=== RUN   TestLastFailure_ExactCommand_AbsentRatherThanWrongLayer\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ExactCommand_AbsentRatherThanWrongLayer","Output":"--- PASS: TestLastFailure_ExactCommand_AbsentRatherThanWrongLayer (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ExactCommand_AbsentRatherThanWrongLayer"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_BuildCommand_CarriesTheSubInvocation"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_BuildCommand_CarriesTheSubInvocation","Output":"=== RUN   TestLastFailure_BuildCommand_CarriesTheSubInvocation\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_BuildCommand_CarriesTheSubInvocation","Output":"--- PASS: TestLastFailure_BuildCommand_CarriesTheSubInvocation (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_BuildCommand_CarriesTheSubInvocation"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_BuildCommand_MatchesTheDiagnosticBearingConfiguration"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_BuildCommand_MatchesTheDiagnosticBearingConfiguration","Output":"=== RUN   TestLastFailure_BuildCommand_MatchesTheDiagnosticBearingConfiguration\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_BuildCommand_MatchesTheDiagnosticBearingConfiguration","Output":"--- PASS: TestLastFailure_BuildCommand_MatchesTheDiagnosticBearingConfiguration (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_BuildCommand_MatchesTheDiagnosticBearingConfiguration"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_OverlayChainNote_DescribesInputNotTheBuild"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_OverlayChainNote_DescribesInputNotTheBuild","Output":"=== RUN   TestLastFailure_OverlayChainNote_DescribesInputNotTheBuild\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_OverlayChainNote_DescribesInputNotTheBuild","Output":"--- PASS: TestLastFailure_OverlayChainNote_DescribesInputNotTheBuild (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_OverlayChainNote_DescribesInputNotTheBuild"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_WrapperNotSuppliedVsNotFoundVsUnreadable"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_WrapperNotSuppliedVsNotFoundVsUnreadable","Output":"=== RUN   TestLastFailure_WrapperNotSuppliedVsNotFoundVsUnreadable\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_WrapperNotSuppliedVsNotFoundVsUnreadable","Output":"--- PASS: TestLastFailure_WrapperNotSuppliedVsNotFoundVsUnreadable (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_WrapperNotSuppliedVsNotFoundVsUnreadable"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_OverlayChainFromConfigFile_NotLabelledExplicitParam"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_OverlayChainFromConfigFile_NotLabelledExplicitParam","Output":"=== RUN   TestLastFailure_OverlayChainFromConfigFile_NotLabelledExplicitParam\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_OverlayChainFromConfigFile_NotLabelledExplicitParam","Output":"--- PASS: TestLastFailure_OverlayChainFromConfigFile_NotLabelledExplicitParam (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_OverlayChainFromConfigFile_NotLabelledExplicitParam"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ExplicitRootThatIsNotAVcpkgTree_NotReportedAsUnspecified"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ExplicitRootThatIsNotAVcpkgTree_NotReportedAsUnspecified","Output":"=== RUN   TestLastFailure_ExplicitRootThatIsNotAVcpkgTree_NotReportedAsUnspecified\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ExplicitRootThatIsNotAVcpkgTree_NotReportedAsUnspecified","Output":"--- PASS: TestLastFailure_ExplicitRootThatIsNotAVcpkgTree_NotReportedAsUnspecified (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ExplicitRootThatIsNotAVcpkgTree_NotReportedAsUnspecified"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_AbsentBuildtreesRoot_DescribesAbsenceNotItsCause"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_AbsentBuildtreesRoot_DescribesAbsenceNotItsCause","Output":"=== RUN   TestLastFailure_AbsentBuildtreesRoot_DescribesAbsenceNotItsCause\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_AbsentBuildtreesRoot_DescribesAbsenceNotItsCause","Output":"--- PASS: TestLastFailure_AbsentBuildtreesRoot_DescribesAbsenceNotItsCause (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_AbsentBuildtreesRoot_DescribesAbsenceNotItsCause"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_MarkerMustBeAWholeLine"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_MarkerMustBeAWholeLine","Output":"=== RUN   TestDetectInterrupted_MarkerMustBeAWholeLine\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_MarkerMustBeAWholeLine/MSVC_diagnostic_whose_path_contains_the_phrase"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_MarkerMustBeAWholeLine/MSVC_diagnostic_whose_path_contains_the_phrase","Output":"=== RUN   TestDetectInterrupted_MarkerMustBeAWholeLine/MSVC_diagnostic_whose_path_contains_the_phrase\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_MarkerMustBeAWholeLine/MSVC_diagnostic_whose_path_contains_the_phrase","Output":"--- PASS: TestDetectInterrupted_MarkerMustBeAWholeLine/MSVC_diagnostic_whose_path_contains_the_phrase (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_MarkerMustBeAWholeLine/MSVC_diagnostic_whose_path_contains_the_phrase"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_MarkerMustBeAWholeLine/ninja_-v_echo_of_a_command_line_carrying_the_phrase"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_MarkerMustBeAWholeLine/ninja_-v_echo_of_a_command_line_carrying_the_phrase","Output":"=== RUN   TestDetectInterrupted_MarkerMustBeAWholeLine/ninja_-v_echo_of_a_command_line_carrying_the_phrase\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_MarkerMustBeAWholeLine/ninja_-v_echo_of_a_command_line_carrying_the_phrase","Output":"--- PASS: TestDetectInterrupted_MarkerMustBeAWholeLine/ninja_-v_echo_of_a_command_line_carrying_the_phrase (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_MarkerMustBeAWholeLine/ninja_-v_echo_of_a_command_line_carrying_the_phrase"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_MarkerMustBeAWholeLine/clang_echoing_the_offending_source_line"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_MarkerMustBeAWholeLine/clang_echoing_the_offending_source_line","Output":"=== RUN   TestDetectInterrupted_MarkerMustBeAWholeLine/clang_echoing_the_offending_source_line\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_MarkerMustBeAWholeLine/clang_echoing_the_offending_source_line","Output":"--- PASS: TestDetectInterrupted_MarkerMustBeAWholeLine/clang_echoing_the_offending_source_line (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_MarkerMustBeAWholeLine/clang_echoing_the_offending_source_line"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_MarkerMustBeAWholeLine/the_project's_own_CMake_status_line"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_MarkerMustBeAWholeLine/the_project's_own_CMake_status_line","Output":"=== RUN   TestDetectInterrupted_MarkerMustBeAWholeLine/the_project's_own_CMake_status_line\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_MarkerMustBeAWholeLine/the_project's_own_CMake_status_line","Output":"--- PASS: TestDetectInterrupted_MarkerMustBeAWholeLine/the_project's_own_CMake_status_line (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_MarkerMustBeAWholeLine/the_project's_own_CMake_status_line"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_MarkerMustBeAWholeLine/ninja's_own_narration_quoted_inside_a_longer_message"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_MarkerMustBeAWholeLine/ninja's_own_narration_quoted_inside_a_longer_message","Output":"=== RUN   TestDetectInterrupted_MarkerMustBeAWholeLine/ninja's_own_narration_quoted_inside_a_longer_message\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_MarkerMustBeAWholeLine/ninja's_own_narration_quoted_inside_a_longer_message","Output":"--- PASS: TestDetectInterrupted_MarkerMustBeAWholeLine/ninja's_own_narration_quoted_inside_a_longer_message (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_MarkerMustBeAWholeLine/ninja's_own_narration_quoted_inside_a_longer_message"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_MarkerMustBeAWholeLine","Output":"--- PASS: TestDetectInterrupted_MarkerMustBeAWholeLine (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_MarkerMustBeAWholeLine"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected","Output":"=== RUN   TestDetectInterrupted_RealProducerLinesAreStillDetected\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/the_observed_real_sequence_(scout_pass_boost-thread;_fixture_interruptedlib)"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/the_observed_real_sequence_(scout_pass_boost-thread;_fixture_interruptedlib)","Output":"=== RUN   TestDetectInterrupted_RealProducerLinesAreStillDetected/the_observed_real_sequence_(scout_pass_boost-thread;_fixture_interruptedlib)\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/the_observed_real_sequence_(scout_pass_boost-thread;_fixture_interruptedlib)","Output":"--- PASS: TestDetectInterrupted_RealProducerLinesAreStillDetected/the_observed_real_sequence_(scout_pass_boost-thread;_fixture_interruptedlib) (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/the_observed_real_sequence_(scout_pass_boost-thread;_fixture_interruptedlib)"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/subprocess_line_alone"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/subprocess_line_alone","Output":"=== RUN   TestDetectInterrupted_RealProducerLinesAreStillDetected/subprocess_line_alone\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/subprocess_line_alone","Output":"--- PASS: TestDetectInterrupted_RealProducerLinesAreStillDetected/subprocess_line_alone (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/subprocess_line_alone"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/ninja_narration_alone"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/ninja_narration_alone","Output":"=== RUN   TestDetectInterrupted_RealProducerLinesAreStillDetected/ninja_narration_alone\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/ninja_narration_alone","Output":"--- PASS: TestDetectInterrupted_RealProducerLinesAreStillDetected/ninja_narration_alone (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/ninja_narration_alone"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/CRLF_log"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/CRLF_log","Output":"=== RUN   TestDetectInterrupted_RealProducerLinesAreStillDetected/CRLF_log\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/CRLF_log","Output":"--- PASS: TestDetectInterrupted_RealProducerLinesAreStillDetected/CRLF_log (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/CRLF_log"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/indented_by_a_capture_wrapper"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/indented_by_a_capture_wrapper","Output":"=== RUN   TestDetectInterrupted_RealProducerLinesAreStillDetected/indented_by_a_capture_wrapper\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/indented_by_a_capture_wrapper","Output":"--- PASS: TestDetectInterrupted_RealProducerLinesAreStillDetected/indented_by_a_capture_wrapper (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/indented_by_a_capture_wrapper"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/no_trailing_newline_at_end_of_file"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/no_trailing_newline_at_end_of_file","Output":"=== RUN   TestDetectInterrupted_RealProducerLinesAreStillDetected/no_trailing_newline_at_end_of_file\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/no_trailing_newline_at_end_of_file","Output":"--- PASS: TestDetectInterrupted_RealProducerLinesAreStillDetected/no_trailing_newline_at_end_of_file (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/no_trailing_newline_at_end_of_file"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/carriage-return_separated_(terminal_overwrite_retained_in_a_capture)"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/carriage-return_separated_(terminal_overwrite_retained_in_a_capture)","Output":"=== RUN   TestDetectInterrupted_RealProducerLinesAreStillDetected/carriage-return_separated_(terminal_overwrite_retained_in_a_capture)\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/carriage-return_separated_(terminal_overwrite_retained_in_a_capture)","Output":"--- PASS: TestDetectInterrupted_RealProducerLinesAreStillDetected/carriage-return_separated_(terminal_overwrite_retained_in_a_capture) (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected/carriage-return_separated_(terminal_overwrite_retained_in_a_capture)"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected","Output":"--- PASS: TestDetectInterrupted_RealProducerLinesAreStillDetected (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_RealProducerLinesAreStillDetected"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestParseWrapperContent_RealShapedFixture"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestParseWrapperContent_RealShapedFixture","Output":"=== RUN   TestParseWrapperContent_RealShapedFixture\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestParseWrapperContent_RealShapedFixture","Output":"--- PASS: TestParseWrapperContent_RealShapedFixture (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestParseWrapperContent_RealShapedFixture"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestParseWrapperContent_Malformed"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestParseWrapperContent_Malformed","Output":"=== RUN   TestParseWrapperContent_Malformed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestParseWrapperContent_Malformed","Output":"--- PASS: TestParseWrapperContent_Malformed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestParseWrapperContent_Malformed"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_FilenameTrapsNeverMatch"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_FilenameTrapsNeverMatch","Output":"=== RUN   TestScanDiagnostics_FilenameTrapsNeverMatch\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_FilenameTrapsNeverMatch","Output":"--- PASS: TestScanDiagnostics_FilenameTrapsNeverMatch (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_FilenameTrapsNeverMatch"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_MSVCCompileErrorMatches"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_MSVCCompileErrorMatches","Output":"=== RUN   TestScanDiagnostics_MSVCCompileErrorMatches\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_MSVCCompileErrorMatches","Output":"--- PASS: TestScanDiagnostics_MSVCCompileErrorMatches (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_MSVCCompileErrorMatches"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_MSVCWarningWithErrorLikeFilenameStillMatchesAsWarning"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_MSVCWarningWithErrorLikeFilenameStillMatchesAsWarning","Output":"=== RUN   TestScanDiagnostics_MSVCWarningWithErrorLikeFilenameStillMatchesAsWarning\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_MSVCWarningWithErrorLikeFilenameStillMatchesAsWarning","Output":"--- PASS: TestScanDiagnostics_MSVCWarningWithErrorLikeFilenameStillMatchesAsWarning (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_MSVCWarningWithErrorLikeFilenameStillMatchesAsWarning"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_GCCClangShape"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_GCCClangShape","Output":"=== RUN   TestScanDiagnostics_GCCClangShape\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_GCCClangShape","Output":"--- PASS: TestScanDiagnostics_GCCClangShape (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_GCCClangShape"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_ScoutPassTraps_NeverMatch"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_ScoutPassTraps_NeverMatch","Output":"=== RUN   TestScanDiagnostics_ScoutPassTraps_NeverMatch\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_ScoutPassTraps_NeverMatch","Output":"--- PASS: TestScanDiagnostics_ScoutPassTraps_NeverMatch (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_ScoutPassTraps_NeverMatch"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_RealScoutPassSample_MSVCFatalErrorPlusNinjaFailed"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_RealScoutPassSample_MSVCFatalErrorPlusNinjaFailed","Output":"=== RUN   TestScanDiagnostics_RealScoutPassSample_MSVCFatalErrorPlusNinjaFailed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_RealScoutPassSample_MSVCFatalErrorPlusNinjaFailed","Output":"--- PASS: TestScanDiagnostics_RealScoutPassSample_MSVCFatalErrorPlusNinjaFailed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_RealScoutPassSample_MSVCFatalErrorPlusNinjaFailed"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted","Output":"=== RUN   TestDetectInterrupted\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted","Output":"--- PASS: TestDetectInterrupted (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_Case_A_BuildtreesPlusWrapper"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_Case_A_BuildtreesPlusWrapper","Output":"=== RUN   TestLastFailure_Case_A_BuildtreesPlusWrapper\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_Case_A_BuildtreesPlusWrapper","Output":"--- PASS: TestLastFailure_Case_A_BuildtreesPlusWrapper (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_Case_A_BuildtreesPlusWrapper"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_Case_B_BuildtreesOnly_NoWrapper"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_Case_B_BuildtreesOnly_NoWrapper","Output":"=== RUN   TestLastFailure_Case_B_BuildtreesOnly_NoWrapper\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_Case_B_BuildtreesOnly_NoWrapper","Output":"--- PASS: TestLastFailure_Case_B_BuildtreesOnly_NoWrapper (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_Case_B_BuildtreesOnly_NoWrapper"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_Case_C_WrapperMalformed_Degrades"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_Case_C_WrapperMalformed_Degrades","Output":"=== RUN   TestLastFailure_Case_C_WrapperMalformed_Degrades\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_Case_C_WrapperMalformed_Degrades","Output":"--- PASS: TestLastFailure_Case_C_WrapperMalformed_Degrades (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_Case_C_WrapperMalformed_Degrades"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_Case_D_BuildtreesRootAbsent"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_Case_D_BuildtreesRootAbsent","Output":"=== RUN   TestLastFailure_Case_D_BuildtreesRootAbsent\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_Case_D_BuildtreesRootAbsent","Output":"--- PASS: TestLastFailure_Case_D_BuildtreesRootAbsent (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_Case_D_BuildtreesRootAbsent"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_PortDirNotFound"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_PortDirNotFound","Output":"=== RUN   TestLastFailure_PortDirNotFound\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_PortDirNotFound","Output":"--- PASS: TestLastFailure_PortDirNotFound (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_PortDirNotFound"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_NoPhaseLogsFound"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_NoPhaseLogsFound","Output":"=== RUN   TestLastFailure_NoPhaseLogsFound\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_NoPhaseLogsFound","Output":"--- PASS: TestLastFailure_NoPhaseLogsFound (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_NoPhaseLogsFound"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_SuccessfulPort_NoDiagnostic_NeverFabricates"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_SuccessfulPort_NoDiagnostic_NeverFabricates","Output":"=== RUN   TestLastFailure_SuccessfulPort_NoDiagnostic_NeverFabricates\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_SuccessfulPort_NoDiagnostic_NeverFabricates","Output":"--- PASS: TestLastFailure_SuccessfulPort_NoDiagnostic_NeverFabricates (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_SuccessfulPort_NoDiagnostic_NeverFabricates"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_WrapperConfirmsPortDidNotFail"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_WrapperConfirmsPortDidNotFail","Output":"=== RUN   TestLastFailure_WrapperConfirmsPortDidNotFail\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_WrapperConfirmsPortDidNotFail","Output":"--- PASS: TestLastFailure_WrapperConfirmsPortDidNotFail (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_WrapperConfirmsPortDidNotFail"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_MultipleFailedPortsAmbiguous_NeverSilentlyPicks"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_MultipleFailedPortsAmbiguous_NeverSilentlyPicks","Output":"=== RUN   TestLastFailure_MultipleFailedPortsAmbiguous_NeverSilentlyPicks\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_MultipleFailedPortsAmbiguous_NeverSilentlyPicks","Output":"--- PASS: TestLastFailure_MultipleFailedPortsAmbiguous_NeverSilentlyPicks (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_MultipleFailedPortsAmbiguous_NeverSilentlyPicks"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_BuildInterrupted_NotReportedAsFailure"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_BuildInterrupted_NotReportedAsFailure","Output":"=== RUN   TestLastFailure_BuildInterrupted_NotReportedAsFailure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_BuildInterrupted_NotReportedAsFailure","Output":"--- PASS: TestLastFailure_BuildInterrupted_NotReportedAsFailure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_BuildInterrupted_NotReportedAsFailure"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_PatchPhaseFileRecognized_InSituWithRealFailure"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_PatchPhaseFileRecognized_InSituWithRealFailure","Output":"=== RUN   TestLastFailure_PatchPhaseFileRecognized_InSituWithRealFailure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_PatchPhaseFileRecognized_InSituWithRealFailure","Output":"--- PASS: TestLastFailure_PatchPhaseFileRecognized_InSituWithRealFailure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_PatchPhaseFileRecognized_InSituWithRealFailure"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_SuccessfulPatchAlone_NeverFabricatesFailure"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_SuccessfulPatchAlone_NeverFabricatesFailure","Output":"=== RUN   TestLastFailure_SuccessfulPatchAlone_NeverFabricatesFailure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_SuccessfulPatchAlone_NeverFabricatesFailure","Output":"--- PASS: TestLastFailure_SuccessfulPatchAlone_NeverFabricatesFailure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_SuccessfulPatchAlone_NeverFabricatesFailure"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_CapabilityProbeOnly_NeverReportedAsFailure"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_CapabilityProbeOnly_NeverReportedAsFailure","Output":"=== RUN   TestLastFailure_CapabilityProbeOnly_NeverReportedAsFailure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_CapabilityProbeOnly_NeverReportedAsFailure","Output":"--- PASS: TestLastFailure_CapabilityProbeOnly_NeverReportedAsFailure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_CapabilityProbeOnly_NeverReportedAsFailure"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_PortNotSpecified_NoWrapperNoPort"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_PortNotSpecified_NoWrapperNoPort","Output":"=== RUN   TestLastFailure_PortNotSpecified_NoWrapperNoPort\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_PortNotSpecified_NoWrapperNoPort","Output":"--- PASS: TestLastFailure_PortNotSpecified_NoWrapperNoPort (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_PortNotSpecified_NoWrapperNoPort"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestNormalizeLogLine"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestNormalizeLogLine","Output":"=== RUN   TestNormalizeLogLine\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestNormalizeLogLine","Output":"--- PASS: TestNormalizeLogLine (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestNormalizeLogLine"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_SurvivesTerminalDisplayBytes"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_SurvivesTerminalDisplayBytes","Output":"=== RUN   TestDetectInterrupted_SurvivesTerminalDisplayBytes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_SurvivesTerminalDisplayBytes","Output":"--- PASS: TestDetectInterrupted_SurvivesTerminalDisplayBytes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDetectInterrupted_SurvivesTerminalDisplayBytes"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_MatchesColourizedOutput"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_MatchesColourizedOutput","Output":"=== RUN   TestScanDiagnostics_MatchesColourizedOutput\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_MatchesColourizedOutput","Output":"--- PASS: TestScanDiagnostics_MatchesColourizedOutput (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_MatchesColourizedOutput"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestFindRunBuildCommandLine_SurvivesTerminalDisplayBytes"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestFindRunBuildCommandLine_SurvivesTerminalDisplayBytes","Output":"=== RUN   TestFindRunBuildCommandLine_SurvivesTerminalDisplayBytes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestFindRunBuildCommandLine_SurvivesTerminalDisplayBytes","Output":"--- PASS: TestFindRunBuildCommandLine_SurvivesTerminalDisplayBytes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestFindRunBuildCommandLine_SurvivesTerminalDisplayBytes"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_OwnedBuffersDoNotScaleWithLogBytes"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_OwnedBuffersDoNotScaleWithLogBytes","Output":"=== RUN   TestScanPhaseLogStream_OwnedBuffersDoNotScaleWithLogBytes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_OwnedBuffersDoNotScaleWithLogBytes","Output":"--- PASS: TestScanPhaseLogStream_OwnedBuffersDoNotScaleWithLogBytes (0.10s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_OwnedBuffersDoNotScaleWithLogBytes"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_LogBufferHighWaterWireShape"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_LogBufferHighWaterWireShape","Output":"=== RUN   TestScanPhaseLogStream_LogBufferHighWaterWireShape\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_LogBufferHighWaterWireShape","Output":"--- PASS: TestScanPhaseLogStream_LogBufferHighWaterWireShape (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_LogBufferHighWaterWireShape"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_PerLogAndTotalSentinelsFailClosed"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_PerLogAndTotalSentinelsFailClosed","Output":"=== RUN   TestScanPhaseLogStream_PerLogAndTotalSentinelsFailClosed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_PerLogAndTotalSentinelsFailClosed","Output":"--- PASS: TestScanPhaseLogStream_PerLogAndTotalSentinelsFailClosed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_PerLogAndTotalSentinelsFailClosed"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_LineAndValueBounds"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_LineAndValueBounds","Output":"=== RUN   TestScanPhaseLogStream_LineAndValueBounds\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_LineAndValueBounds","Output":"--- PASS: TestScanPhaseLogStream_LineAndValueBounds (0.21s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_LineAndValueBounds"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_ProducerAggregationCapsBeforeResultMaterialization"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_ProducerAggregationCapsBeforeResultMaterialization","Output":"=== RUN   TestScanPhaseLogStream_ProducerAggregationCapsBeforeResultMaterialization\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_ProducerAggregationCapsBeforeResultMaterialization","Output":"--- PASS: TestScanPhaseLogStream_ProducerAggregationCapsBeforeResultMaterialization (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_ProducerAggregationCapsBeforeResultMaterialization"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_CancelReadClosePaths"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_CancelReadClosePaths","Output":"=== RUN   TestScanPhaseLogStream_CancelReadClosePaths\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_CancelReadClosePaths/pre-cancel"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_CancelReadClosePaths/pre-cancel","Output":"=== RUN   TestScanPhaseLogStream_CancelReadClosePaths/pre-cancel\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_CancelReadClosePaths/pre-cancel","Output":"--- PASS: TestScanPhaseLogStream_CancelReadClosePaths/pre-cancel (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_CancelReadClosePaths/pre-cancel"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_CancelReadClosePaths/mid-read-cancel"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_CancelReadClosePaths/mid-read-cancel","Output":"=== RUN   TestScanPhaseLogStream_CancelReadClosePaths/mid-read-cancel\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_CancelReadClosePaths/mid-read-cancel","Output":"--- PASS: TestScanPhaseLogStream_CancelReadClosePaths/mid-read-cancel (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_CancelReadClosePaths/mid-read-cancel"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_CancelReadClosePaths/read-error"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_CancelReadClosePaths/read-error","Output":"=== RUN   TestScanPhaseLogStream_CancelReadClosePaths/read-error\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_CancelReadClosePaths/read-error","Output":"--- PASS: TestScanPhaseLogStream_CancelReadClosePaths/read-error (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_CancelReadClosePaths/read-error"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_CancelReadClosePaths/close-error"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_CancelReadClosePaths/close-error","Output":"=== RUN   TestScanPhaseLogStream_CancelReadClosePaths/close-error\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_CancelReadClosePaths/close-error","Output":"--- PASS: TestScanPhaseLogStream_CancelReadClosePaths/close-error (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_CancelReadClosePaths/close-error"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_CancelReadClosePaths/orchestrator-rolls-back-partial-read"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_CancelReadClosePaths/orchestrator-rolls-back-partial-read","Output":"=== RUN   TestScanPhaseLogStream_CancelReadClosePaths/orchestrator-rolls-back-partial-read\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_CancelReadClosePaths/orchestrator-rolls-back-partial-read","Output":"--- PASS: TestScanPhaseLogStream_CancelReadClosePaths/orchestrator-rolls-back-partial-read (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_CancelReadClosePaths/orchestrator-rolls-back-partial-read"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_CancelReadClosePaths","Output":"--- PASS: TestScanPhaseLogStream_CancelReadClosePaths (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_CancelReadClosePaths"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_PreservesThreeConsumerLineSemantics"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_PreservesThreeConsumerLineSemantics","Output":"=== RUN   TestScanPhaseLogStream_PreservesThreeConsumerLineSemantics\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_PreservesThreeConsumerLineSemantics","Output":"--- PASS: TestScanPhaseLogStream_PreservesThreeConsumerLineSemantics (0.03s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanPhaseLogStream_PreservesThreeConsumerLineSemantics"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_OperatorNestedBuildLines"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_OperatorNestedBuildLines","Output":"=== RUN   TestScanDiagnostics_OperatorNestedBuildLines\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_OperatorNestedBuildLines","Output":"--- PASS: TestScanDiagnostics_OperatorNestedBuildLines (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_OperatorNestedBuildLines"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestIsWrapperNoise_Predicate"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestIsWrapperNoise_Predicate","Output":"=== RUN   TestIsWrapperNoise_Predicate\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestIsWrapperNoise_Predicate","Output":"--- PASS: TestIsWrapperNoise_Predicate (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestIsWrapperNoise_Predicate"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_NMAKEWrapperNoiseNeverMatches"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_NMAKEWrapperNoiseNeverMatches","Output":"=== RUN   TestScanDiagnostics_NMAKEWrapperNoiseNeverMatches\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_NMAKEWrapperNoiseNeverMatches","Output":"--- PASS: TestScanDiagnostics_NMAKEWrapperNoiseNeverMatches (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_NMAKEWrapperNoiseNeverMatches"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_FirstErrorPreferredOverWrapperTail"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_FirstErrorPreferredOverWrapperTail","Output":"=== RUN   TestScanDiagnostics_FirstErrorPreferredOverWrapperTail\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_FirstErrorPreferredOverWrapperTail","Output":"--- PASS: TestScanDiagnostics_FirstErrorPreferredOverWrapperTail (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_FirstErrorPreferredOverWrapperTail"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_NestedBuildPhaseLog_OperatorFieldCase"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_NestedBuildPhaseLog_OperatorFieldCase","Output":"=== RUN   TestLastFailure_NestedBuildPhaseLog_OperatorFieldCase\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_NestedBuildPhaseLog_OperatorFieldCase","Output":"--- PASS: TestLastFailure_NestedBuildPhaseLog_OperatorFieldCase (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_NestedBuildPhaseLog_OperatorFieldCase"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_NMAKENoiseAlone_NeverEstablishesFailure"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_NMAKENoiseAlone_NeverEstablishesFailure","Output":"=== RUN   TestLastFailure_NMAKENoiseAlone_NeverEstablishesFailure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_NMAKENoiseAlone_NeverEstablishesFailure","Output":"--- PASS: TestLastFailure_NMAKENoiseAlone_NeverEstablishesFailure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_NMAKENoiseAlone_NeverEstablishesFailure"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ClangClErrorInProbeLogStillCapabilityProbeOnly"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ClangClErrorInProbeLogStillCapabilityProbeOnly","Output":"=== RUN   TestLastFailure_ClangClErrorInProbeLogStillCapabilityProbeOnly\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ClangClErrorInProbeLogStillCapabilityProbeOnly","Output":"--- PASS: TestLastFailure_ClangClErrorInProbeLogStillCapabilityProbeOnly (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ClangClErrorInProbeLogStillCapabilityProbeOnly"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_PortDirEntryLimitFailsClosed"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_PortDirEntryLimitFailsClosed","Output":"=== RUN   TestLastFailure_PortDirEntryLimitFailsClosed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_PortDirEntryLimitFailsClosed","Output":"--- PASS: TestLastFailure_PortDirEntryLimitFailsClosed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_PortDirEntryLimitFailsClosed"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_RelevantLogCountLimitFailsClosed"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_RelevantLogCountLimitFailsClosed","Output":"=== RUN   TestLastFailure_RelevantLogCountLimitFailsClosed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_RelevantLogCountLimitFailsClosed","Output":"--- PASS: TestLastFailure_RelevantLogCountLimitFailsClosed (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_RelevantLogCountLimitFailsClosed"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_TotalLogByteLimitFailsClosed"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_TotalLogByteLimitFailsClosed","Output":"=== RUN   TestLastFailure_TotalLogByteLimitFailsClosed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_TotalLogByteLimitFailsClosed","Output":"--- PASS: TestLastFailure_TotalLogByteLimitFailsClosed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_TotalLogByteLimitFailsClosed"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_WrapperMetadataLimitFailsClosed"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_WrapperMetadataLimitFailsClosed","Output":"=== RUN   TestLastFailure_WrapperMetadataLimitFailsClosed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_WrapperMetadataLimitFailsClosed","Output":"--- PASS: TestLastFailure_WrapperMetadataLimitFailsClosed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_WrapperMetadataLimitFailsClosed"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_OverlayAndFailedPortListsAreBoundedAndReported"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_OverlayAndFailedPortListsAreBoundedAndReported","Output":"=== RUN   TestLastFailure_OverlayAndFailedPortListsAreBoundedAndReported\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_OverlayAndFailedPortListsAreBoundedAndReported","Output":"--- PASS: TestLastFailure_OverlayAndFailedPortListsAreBoundedAndReported (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_OverlayAndFailedPortListsAreBoundedAndReported"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ProducerAggregationCapsBeforeResultMaterialization"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ProducerAggregationCapsBeforeResultMaterialization","Output":"=== RUN   TestLastFailure_ProducerAggregationCapsBeforeResultMaterialization\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ProducerAggregationCapsBeforeResultMaterialization","Output":"--- PASS: TestLastFailure_ProducerAggregationCapsBeforeResultMaterialization (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestLastFailure_ProducerAggregationCapsBeforeResultMaterialization"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_FailedCausalTupleSurvivesPackageShaping"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_FailedCausalTupleSurvivesPackageShaping","Output":"=== RUN   TestResponseBudget_FailedCausalTupleSurvivesPackageShaping\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_FailedCausalTupleSurvivesPackageShaping","Output":"--- PASS: TestResponseBudget_FailedCausalTupleSurvivesPackageShaping (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_FailedCausalTupleSurvivesPackageShaping"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_MinimalFallbackCannotEmitUncausedFailure"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_MinimalFallbackCannotEmitUncausedFailure","Output":"=== RUN   TestResponseBudget_MinimalFallbackCannotEmitUncausedFailure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_MinimalFallbackCannotEmitUncausedFailure","Output":"--- PASS: TestResponseBudget_MinimalFallbackCannotEmitUncausedFailure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_MinimalFallbackCannotEmitUncausedFailure"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestTruncateWireValue_TinyBudgetTerminatesAndStaysBounded"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestTruncateWireValue_TinyBudgetTerminatesAndStaysBounded","Output":"=== RUN   TestTruncateWireValue_TinyBudgetTerminatesAndStaysBounded\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestTruncateWireValue_TinyBudgetTerminatesAndStaysBounded","Output":"--- PASS: TestTruncateWireValue_TinyBudgetTerminatesAndStaysBounded (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestTruncateWireValue_TinyBudgetTerminatesAndStaysBounded"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestProjectStopClassRegistryIsTotalAndTerminal"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestProjectStopClassRegistryIsTotalAndTerminal","Output":"=== RUN   TestProjectStopClassRegistryIsTotalAndTerminal\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestProjectStopClassRegistryIsTotalAndTerminal","Output":"--- PASS: TestProjectStopClassRegistryIsTotalAndTerminal (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestProjectStopClassRegistryIsTotalAndTerminal"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestProjectionRowsThatPreviouslyContradictedTheirDomains"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestProjectionRowsThatPreviouslyContradictedTheirDomains","Output":"=== RUN   TestProjectionRowsThatPreviouslyContradictedTheirDomains\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestProjectionRowsThatPreviouslyContradictedTheirDomains/arguments_invalid_leaves_evidence_not_applicable"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestProjectionRowsThatPreviouslyContradictedTheirDomains/arguments_invalid_leaves_evidence_not_applicable","Output":"=== RUN   TestProjectionRowsThatPreviouslyContradictedTheirDomains/arguments_invalid_leaves_evidence_not_applicable\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestProjectionRowsThatPreviouslyContradictedTheirDomains/arguments_invalid_leaves_evidence_not_applicable","Output":"--- PASS: TestProjectionRowsThatPreviouslyContradictedTheirDomains/arguments_invalid_leaves_evidence_not_applicable (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestProjectionRowsThatPreviouslyContradictedTheirDomains/arguments_invalid_leaves_evidence_not_applicable"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestProjectionRowsThatPreviouslyContradictedTheirDomains/wrapper_proof_settles_metadata_and_makes_later_domains_inapplicable"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestProjectionRowsThatPreviouslyContradictedTheirDomains/wrapper_proof_settles_metadata_and_makes_later_domains_inapplicable","Output":"=== RUN   TestProjectionRowsThatPreviouslyContradictedTheirDomains/wrapper_proof_settles_metadata_and_makes_later_domains_inapplicable\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestProjectionRowsThatPreviouslyContradictedTheirDomains/wrapper_proof_settles_metadata_and_makes_later_domains_inapplicable","Output":"--- PASS: TestProjectionRowsThatPreviouslyContradictedTheirDomains/wrapper_proof_settles_metadata_and_makes_later_domains_inapplicable (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestProjectionRowsThatPreviouslyContradictedTheirDomains/wrapper_proof_settles_metadata_and_makes_later_domains_inapplicable"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestProjectionRowsThatPreviouslyContradictedTheirDomains/verified_zero_logs_settles_discovery_and_makes_byte_scan_inapplicable"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestProjectionRowsThatPreviouslyContradictedTheirDomains/verified_zero_logs_settles_discovery_and_makes_byte_scan_inapplicable","Output":"=== RUN   TestProjectionRowsThatPreviouslyContradictedTheirDomains/verified_zero_logs_settles_discovery_and_makes_byte_scan_inapplicable\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestProjectionRowsThatPreviouslyContradictedTheirDomains/verified_zero_logs_settles_discovery_and_makes_byte_scan_inapplicable","Output":"--- PASS: TestProjectionRowsThatPreviouslyContradictedTheirDomains/verified_zero_logs_settles_discovery_and_makes_byte_scan_inapplicable (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestProjectionRowsThatPreviouslyContradictedTheirDomains/verified_zero_logs_settles_discovery_and_makes_byte_scan_inapplicable"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestProjectionRowsThatPreviouslyContradictedTheirDomains","Output":"--- PASS: TestProjectionRowsThatPreviouslyContradictedTheirDomains (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestProjectionRowsThatPreviouslyContradictedTheirDomains"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDiagnosticsDroppedExactnessMatrix"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDiagnosticsDroppedExactnessMatrix","Output":"=== RUN   TestDiagnosticsDroppedExactnessMatrix\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDiagnosticsDroppedExactnessMatrix","Output":"--- PASS: TestDiagnosticsDroppedExactnessMatrix (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestDiagnosticsDroppedExactnessMatrix"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestBuildInterruptedPreservesEarlierProducerIncompleteness"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestBuildInterruptedPreservesEarlierProducerIncompleteness","Output":"=== RUN   TestBuildInterruptedPreservesEarlierProducerIncompleteness\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestBuildInterruptedPreservesEarlierProducerIncompleteness","Output":"--- PASS: TestBuildInterruptedPreservesEarlierProducerIncompleteness (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestBuildInterruptedPreservesEarlierProducerIncompleteness"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMissingProjectionFailsClosedAndSerializes"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMissingProjectionFailsClosedAndSerializes","Output":"=== RUN   TestMissingProjectionFailsClosedAndSerializes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMissingProjectionFailsClosedAndSerializes","Output":"--- PASS: TestMissingProjectionFailsClosedAndSerializes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestMissingProjectionFailsClosedAndSerializes"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR17WrapperPreservesWindowsPathsOnPOSIXHost"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR17WrapperPreservesWindowsPathsOnPOSIXHost","Output":"=== RUN   TestR17WrapperPreservesWindowsPathsOnPOSIXHost\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR17WrapperPreservesWindowsPathsOnPOSIXHost","Output":"--- PASS: TestR17WrapperPreservesWindowsPathsOnPOSIXHost (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR17WrapperPreservesWindowsPathsOnPOSIXHost"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR17GNUDriverDiagnosticsRetainLinkerCause"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR17GNUDriverDiagnosticsRetainLinkerCause","Output":"=== RUN   TestR17GNUDriverDiagnosticsRetainLinkerCause\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR17GNUDriverDiagnosticsRetainLinkerCause","Output":"--- PASS: TestR17GNUDriverDiagnosticsRetainLinkerCause (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR17GNUDriverDiagnosticsRetainLinkerCause"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR18PhaseLogRejectsSpecialFileBeforeOpen"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR18PhaseLogRejectsSpecialFileBeforeOpen","Output":"=== RUN   TestR18PhaseLogRejectsSpecialFileBeforeOpen\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR18PhaseLogRejectsSpecialFileBeforeOpen","Output":"--- PASS: TestR18PhaseLogRejectsSpecialFileBeforeOpen (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR18PhaseLogRejectsSpecialFileBeforeOpen"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR19GNULDWarningPreservesWarningSeverity"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR19GNULDWarningPreservesWarningSeverity","Output":"=== RUN   TestR19GNULDWarningPreservesWarningSeverity\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR19GNULDWarningPreservesWarningSeverity","Output":"--- PASS: TestR19GNULDWarningPreservesWarningSeverity (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR19GNULDWarningPreservesWarningSeverity"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR20NinjaOwnErrorIsSpecificFailureCause"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR20NinjaOwnErrorIsSpecificFailureCause","Output":"=== RUN   TestR20NinjaOwnErrorIsSpecificFailureCause\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR20NinjaOwnErrorIsSpecificFailureCause","Output":"--- PASS: TestR20NinjaOwnErrorIsSpecificFailureCause (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR20NinjaOwnErrorIsSpecificFailureCause"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR21ProjectionEnumeratesEveryOmittedSemanticField"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR21ProjectionEnumeratesEveryOmittedSemanticField","Output":"=== RUN   TestR21ProjectionEnumeratesEveryOmittedSemanticField\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR21ProjectionEnumeratesEveryOmittedSemanticField","Output":"--- PASS: TestR21ProjectionEnumeratesEveryOmittedSemanticField (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR21ProjectionEnumeratesEveryOmittedSemanticField"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR21CMakeErrorIsRecognizedAsSpecificFailure"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR21CMakeErrorIsRecognizedAsSpecificFailure","Output":"=== RUN   TestR21CMakeErrorIsRecognizedAsSpecificFailure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR21CMakeErrorIsRecognizedAsSpecificFailure","Output":"--- PASS: TestR21CMakeErrorIsRecognizedAsSpecificFailure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR21CMakeErrorIsRecognizedAsSpecificFailure"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR22WrapperNegativeProofRequiresRequestedCommandTarget"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR22WrapperNegativeProofRequiresRequestedCommandTarget","Output":"=== RUN   TestR22WrapperNegativeProofRequiresRequestedCommandTarget\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR22WrapperNegativeProofRequiresRequestedCommandTarget","Output":"--- PASS: TestR22WrapperNegativeProofRequiresRequestedCommandTarget (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR22WrapperNegativeProofRequiresRequestedCommandTarget"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR22WireRedactionFailsClosedOnUnclassifiedValueCarriers"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR22WireRedactionFailsClosedOnUnclassifiedValueCarriers","Output":"=== RUN   TestR22WireRedactionFailsClosedOnUnclassifiedValueCarriers\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR22WireRedactionFailsClosedOnUnclassifiedValueCarriers","Output":"--- PASS: TestR22WireRedactionFailsClosedOnUnclassifiedValueCarriers (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR22WireRedactionFailsClosedOnUnclassifiedValueCarriers"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation","Output":"=== RUN   TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation/wrong_executable"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation/wrong_executable","Output":"=== RUN   TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation/wrong_executable\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation/wrong_executable","Output":"--- PASS: TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation/wrong_executable (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation/wrong_executable"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation/wrong_triplet"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation/wrong_triplet","Output":"=== RUN   TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation/wrong_triplet\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation/wrong_triplet","Output":"--- PASS: TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation/wrong_triplet (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation/wrong_triplet"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation","Output":"--- PASS: TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR22WrapperCommandContextMustBeTheMatchingVcpkgInvocation"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR23WrapperDoesNotPairEarlierTargetWithLaterCommandTriplet"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR23WrapperDoesNotPairEarlierTargetWithLaterCommandTriplet","Output":"=== RUN   TestR23WrapperDoesNotPairEarlierTargetWithLaterCommandTriplet\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR23WrapperDoesNotPairEarlierTargetWithLaterCommandTriplet","Output":"--- PASS: TestR23WrapperDoesNotPairEarlierTargetWithLaterCommandTriplet (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR23WrapperDoesNotPairEarlierTargetWithLaterCommandTriplet"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR29CMakeErrorRetainsIndentedContinuation"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR29CMakeErrorRetainsIndentedContinuation","Output":"=== RUN   TestR29CMakeErrorRetainsIndentedContinuation\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR29CMakeErrorRetainsIndentedContinuation","Output":"--- PASS: TestR29CMakeErrorRetainsIndentedContinuation (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR29CMakeErrorRetainsIndentedContinuation"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR30StandaloneUserInterruptNeedsStructuralCorrelation"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR30StandaloneUserInterruptNeedsStructuralCorrelation","Output":"=== RUN   TestR30StandaloneUserInterruptNeedsStructuralCorrelation\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR30StandaloneUserInterruptNeedsStructuralCorrelation","Output":"--- PASS: TestR30StandaloneUserInterruptNeedsStructuralCorrelation (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR30StandaloneUserInterruptNeedsStructuralCorrelation"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR30StreamingInterruptUsesTheSameCorrelationRule"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR30StreamingInterruptUsesTheSameCorrelationRule","Output":"=== RUN   TestR30StreamingInterruptUsesTheSameCorrelationRule\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR30StreamingInterruptUsesTheSameCorrelationRule","Output":"--- PASS: TestR30StreamingInterruptUsesTheSameCorrelationRule (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR30StreamingInterruptUsesTheSameCorrelationRule"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR30SeparateUnsafeOptionValueIsRedacted"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR30SeparateUnsafeOptionValueIsRedacted","Output":"=== RUN   TestR30SeparateUnsafeOptionValueIsRedacted\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR30SeparateUnsafeOptionValueIsRedacted","Output":"--- PASS: TestR30SeparateUnsafeOptionValueIsRedacted (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR30SeparateUnsafeOptionValueIsRedacted"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR30GCCDiagnosticWithoutColumn"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR30GCCDiagnosticWithoutColumn","Output":"=== RUN   TestR30GCCDiagnosticWithoutColumn\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR30GCCDiagnosticWithoutColumn","Output":"--- PASS: TestR30GCCDiagnosticWithoutColumn (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR30GCCDiagnosticWithoutColumn"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR31CMakeInstallFailureKeepsInstallPhase"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR31CMakeInstallFailureKeepsInstallPhase","Output":"=== RUN   TestR31CMakeInstallFailureKeepsInstallPhase\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR31CMakeInstallFailureKeepsInstallPhase","Output":"--- PASS: TestR31CMakeInstallFailureKeepsInstallPhase (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR31CMakeInstallFailureKeepsInstallPhase"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt","Output":"=== RUN   TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt/latest_command-derived_value"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt/latest_command-derived_value","Output":"=== RUN   TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt/latest_command-derived_value\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt/latest_command-derived_value","Output":"--- PASS: TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt/latest_command-derived_value (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt/latest_command-derived_value"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt/latest_command_without_triplet_clears_inferred_value"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt/latest_command_without_triplet_clears_inferred_value","Output":"=== RUN   TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt/latest_command_without_triplet_clears_inferred_value\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt/latest_command_without_triplet_clears_inferred_value","Output":"--- PASS: TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt/latest_command_without_triplet_clears_inferred_value (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt/latest_command_without_triplet_clears_inferred_value"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt/header_remains_authoritative"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt/header_remains_authoritative","Output":"=== RUN   TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt/header_remains_authoritative\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt/header_remains_authoritative","Output":"--- PASS: TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt/header_remains_authoritative (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt/header_remains_authoritative"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt","Output":"--- PASS: TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR31LatestCommandOwnsInferredTripletUnlessHeaderOwnsIt"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR33MSVCDiagnosticAllowsParenthesesBeforeFinalLocation"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR33MSVCDiagnosticAllowsParenthesesBeforeFinalLocation","Output":"=== RUN   TestR33MSVCDiagnosticAllowsParenthesesBeforeFinalLocation\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR33MSVCDiagnosticAllowsParenthesesBeforeFinalLocation","Output":"--- PASS: TestR33MSVCDiagnosticAllowsParenthesesBeforeFinalLocation (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestR33MSVCDiagnosticAllowsParenthesesBeforeFinalLocation"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_BoundsThePhaseConcatenation"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_BoundsThePhaseConcatenation","Output":"=== RUN   TestResponseBudget_BoundsThePhaseConcatenation\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_BoundsThePhaseConcatenation","Output":"    response_budget_test.go:109: 1 config(s) ( 2 logs): 200 diagnostics + 360 dropped, 52584 bytes JSON\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_BoundsThePhaseConcatenation","Output":"    response_budget_test.go:109: 2 config(s) ( 4 logs): 200 diagnostics + 920 dropped, 58192 bytes JSON\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_BoundsThePhaseConcatenation","Output":"    response_budget_test.go:109: 4 config(s) ( 8 logs): 200 diagnostics + 2040 dropped, 59482 bytes JSON\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_BoundsThePhaseConcatenation","Output":"    response_budget_test.go:109: 8 config(s) (16 logs): 200 diagnostics + 4280 dropped, 61899 bytes JSON\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_BoundsThePhaseConcatenation","Output":"--- PASS: TestResponseBudget_BoundsThePhaseConcatenation (0.05s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_BoundsThePhaseConcatenation"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_DropsTheLowestRankedTailOnly"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_DropsTheLowestRankedTailOnly","Output":"=== RUN   TestResponseBudget_DropsTheLowestRankedTailOnly\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_DropsTheLowestRankedTailOnly","Output":"--- PASS: TestResponseBudget_DropsTheLowestRankedTailOnly (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_DropsTheLowestRankedTailOnly"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_BoundsOneEnormousDiagnosticLine"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_BoundsOneEnormousDiagnosticLine","Output":"=== RUN   TestResponseBudget_BoundsOneEnormousDiagnosticLine\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_BoundsOneEnormousDiagnosticLine","Output":"    response_budget_test.go:205: one 3 MiB diagnostic line -\u003e 15015-byte response\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_BoundsOneEnormousDiagnosticLine","Output":"--- PASS: TestResponseBudget_BoundsOneEnormousDiagnosticLine (0.70s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_BoundsOneEnormousDiagnosticLine"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_TextTruncationIsRuneSafe"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_TextTruncationIsRuneSafe","Output":"=== RUN   TestResponseBudget_TextTruncationIsRuneSafe\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_TextTruncationIsRuneSafe","Output":"--- PASS: TestResponseBudget_TextTruncationIsRuneSafe (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_TextTruncationIsRuneSafe"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_NeverBindsOnRealFixtures"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_NeverBindsOnRealFixtures","Output":"=== RUN   TestResponseBudget_NeverBindsOnRealFixtures\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_NeverBindsOnRealFixtures","Output":"--- PASS: TestResponseBudget_NeverBindsOnRealFixtures (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestResponseBudget_NeverBindsOnRealFixtures"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestApplyResponseBudget_Edges"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestApplyResponseBudget_Edges","Output":"=== RUN   TestApplyResponseBudget_Edges\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestApplyResponseBudget_Edges","Output":"--- PASS: TestApplyResponseBudget_Edges (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestApplyResponseBudget_Edges"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_AggregateFloodCannotStarveTheSpecificError"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_AggregateFloodCannotStarveTheSpecificError","Output":"=== RUN   TestScanDiagnostics_AggregateFloodCannotStarveTheSpecificError\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_AggregateFloodCannotStarveTheSpecificError","Output":"--- PASS: TestScanDiagnostics_AggregateFloodCannotStarveTheSpecificError (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_AggregateFloodCannotStarveTheSpecificError"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_WarningFloodStillCannotStarveTheError"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_WarningFloodStillCannotStarveTheError","Output":"=== RUN   TestScanDiagnostics_WarningFloodStillCannotStarveTheError\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_WarningFloodStillCannotStarveTheError","Output":"--- PASS: TestScanDiagnostics_WarningFloodStillCannotStarveTheError (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_WarningFloodStillCannotStarveTheError"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_BudgetIsStillBounded"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_BudgetIsStillBounded","Output":"=== RUN   TestScanDiagnostics_BudgetIsStillBounded\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_BudgetIsStillBounded","Output":"--- PASS: TestScanDiagnostics_BudgetIsStillBounded (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestScanDiagnostics_BudgetIsStillBounded"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded","Output":"=== RUN   TestWireSize_EveryProducerIsBounded\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/gcc-clang_file_prefix"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/gcc-clang_file_prefix","Output":"=== RUN   TestWireSize_EveryProducerIsBounded/gcc-clang_file_prefix\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/gcc-clang_file_prefix","Output":"    wire_size_test.go:106: gcc-clang file prefix                                oversize fields: []\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/gcc-clang_file_prefix","Output":"--- PASS: TestWireSize_EveryProducerIsBounded/gcc-clang_file_prefix (0.22s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/gcc-clang_file_prefix"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/msvc-compile_file_prefix"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/msvc-compile_file_prefix","Output":"=== RUN   TestWireSize_EveryProducerIsBounded/msvc-compile_file_prefix\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/msvc-compile_file_prefix","Output":"    wire_size_test.go:106: msvc-compile file prefix                             oversize fields: []\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/msvc-compile_file_prefix","Output":"--- PASS: TestWireSize_EveryProducerIsBounded/msvc-compile_file_prefix (0.40s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/msvc-compile_file_prefix"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/msvc-link_file_prefix"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/msvc-link_file_prefix","Output":"=== RUN   TestWireSize_EveryProducerIsBounded/msvc-link_file_prefix\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/msvc-link_file_prefix","Output":"    wire_size_test.go:106: msvc-link file prefix                                oversize fields: []\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/msvc-link_file_prefix","Output":"--- PASS: TestWireSize_EveryProducerIsBounded/msvc-link_file_prefix (0.67s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/msvc-link_file_prefix"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/tool-driver_message_(control:_File_is_a_closed_allowlist)"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/tool-driver_message_(control:_File_is_a_closed_allowlist)","Output":"=== RUN   TestWireSize_EveryProducerIsBounded/tool-driver_message_(control:_File_is_a_closed_allowlist)\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/tool-driver_message_(control:_File_is_a_closed_allowlist)","Output":"    wire_size_test.go:106: tool-driver message (control: File is a closed allowlist) oversize fields: []\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/tool-driver_message_(control:_File_is_a_closed_allowlist)","Output":"--- PASS: TestWireSize_EveryProducerIsBounded/tool-driver_message_(control:_File_is_a_closed_allowlist) (0.82s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/tool-driver_message_(control:_File_is_a_closed_allowlist)"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/ninja_FAILED_target"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/ninja_FAILED_target","Output":"=== RUN   TestWireSize_EveryProducerIsBounded/ninja_FAILED_target\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/ninja_FAILED_target","Output":"    wire_size_test.go:106: ninja FAILED target                                  oversize fields: []\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/ninja_FAILED_target","Output":"--- PASS: TestWireSize_EveryProducerIsBounded/ninja_FAILED_target (1.31s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/ninja_FAILED_target"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/Run_Build_Command(s)_tail"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/Run_Build_Command(s)_tail","Output":"=== RUN   TestWireSize_EveryProducerIsBounded/Run_Build_Command(s)_tail\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/Run_Build_Command(s)_tail","Output":"    wire_size_test.go:106: Run Build Command(s) tail                            oversize fields: []\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/Run_Build_Command(s)_tail","Output":"--- PASS: TestWireSize_EveryProducerIsBounded/Run_Build_Command(s)_tail (0.39s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/Run_Build_Command(s)_tail"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/wrapper_command:_line_(exact_command)"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/wrapper_command:_line_(exact_command)","Output":"=== RUN   TestWireSize_EveryProducerIsBounded/wrapper_command:_line_(exact_command)\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/wrapper_command:_line_(exact_command)","Output":"    wire_size_test.go:106: wrapper command: line (exact_command)                oversize fields: []\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/wrapper_command:_line_(exact_command)","Output":"--- PASS: TestWireSize_EveryProducerIsBounded/wrapper_command:_line_(exact_command) (0.13s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/wrapper_command:_line_(exact_command)"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/wrapper_--overlay-ports_value_(overlay_chain)"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/wrapper_--overlay-ports_value_(overlay_chain)","Output":"=== RUN   TestWireSize_EveryProducerIsBounded/wrapper_--overlay-ports_value_(overlay_chain)\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/wrapper_--overlay-ports_value_(overlay_chain)","Output":"    wire_size_test.go:106: wrapper --overlay-ports value (overlay_chain)        oversize fields: []\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/wrapper_--overlay-ports_value_(overlay_chain)","Output":"--- PASS: TestWireSize_EveryProducerIsBounded/wrapper_--overlay-ports_value_(overlay_chain) (0.09s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded/wrapper_--overlay-ports_value_(overlay_chain)"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded","Output":"--- PASS: TestWireSize_EveryProducerIsBounded (4.04s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWireSize_EveryProducerIsBounded"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWrapperScanAbort_IsNotReportedAsMalformed"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWrapperScanAbort_IsNotReportedAsMalformed","Output":"=== RUN   TestWrapperScanAbort_IsNotReportedAsMalformed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWrapperScanAbort_IsNotReportedAsMalformed","Output":"--- PASS: TestWrapperScanAbort_IsNotReportedAsMalformed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWrapperScanAbort_IsNotReportedAsMalformed"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWrapperReadableButUnrecognizable_IsStillMalformed"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWrapperReadableButUnrecognizable_IsStillMalformed","Output":"=== RUN   TestWrapperReadableButUnrecognizable_IsStillMalformed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWrapperReadableButUnrecognizable_IsStillMalformed","Output":"--- PASS: TestWrapperReadableButUnrecognizable_IsStillMalformed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Test":"TestWrapperReadableButUnrecognizable_IsStillMalformed"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/lastfailure"}

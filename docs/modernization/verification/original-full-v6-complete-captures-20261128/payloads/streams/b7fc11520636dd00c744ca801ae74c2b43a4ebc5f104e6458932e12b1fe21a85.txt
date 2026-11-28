@@ -1,0 +1,212 @@
+=== RUN   TestDispatchEvent_RoutesEachEventToTheRightCallback
+--- PASS: TestDispatchEvent_RoutesEachEventToTheRightCallback (0.00s)
+=== NAME  
+=== RUN   TestDispatchEvent_QuitAndStopAllFallsBackToQuit
+--- PASS: TestDispatchEvent_QuitAndStopAllFallsBackToQuit (0.00s)
+=== NAME  
+=== RUN   TestDispatchEvent_NilCallbacksAreSafe
+tray: unknown event "unknown-event"
+--- PASS: TestDispatchEvent_NilCallbacksAreSafe (0.00s)
+=== NAME  
+=== RUN   TestIconBytes_AllStatesHaveDistinctIcons
+--- PASS: TestIconBytes_AllStatesHaveDistinctIcons (0.00s)
+=== NAME  
+=== RUN   TestIconBytes_FormatPerOS
+--- PASS: TestIconBytes_FormatPerOS (0.00s)
+=== NAME  
+=== RUN   TestIconBytes_LazyCacheReusesBytes
+--- PASS: TestIconBytes_LazyCacheReusesBytes (0.00s)
+=== NAME  
+=== RUN   TestAggregateWithIntent_RealFailure_NoIntent_StillError
+--- PASS: TestAggregateWithIntent_RealFailure_NoIntent_StillError (0.00s)
+=== NAME  
+=== RUN   TestAggregateWithIntent_RealFailure_UserStop_DownNotError
+--- PASS: TestAggregateWithIntent_RealFailure_UserStop_DownNotError (0.00s)
+=== NAME  
+=== RUN   TestAggregateWithIntent_RealFailure_UserStop_TTLExpired_BackToError
+--- PASS: TestAggregateWithIntent_RealFailure_UserStop_TTLExpired_BackToError (0.00s)
+=== NAME  
+=== RUN   TestAggregateWithIntent_RealFailure_UserDisabled_DownNotError
+--- PASS: TestAggregateWithIntent_RealFailure_UserDisabled_DownNotError (0.00s)
+=== NAME  
+=== RUN   TestAggregateWithIntent_RealFailure_Uninstalled_DownNotError
+--- PASS: TestAggregateWithIntent_RealFailure_Uninstalled_DownNotError (0.00s)
+=== NAME  
+=== RUN   TestAggregateWithIntent_RealFailure_ChronicFailure_StaysError
+--- PASS: TestAggregateWithIntent_RealFailure_ChronicFailure_StaysError (0.00s)
+=== NAME  
+=== RUN   TestAggregateWithIntent_Running_IgnoresIntent
+--- PASS: TestAggregateWithIntent_Running_IgnoresIntent (0.00s)
+=== NAME  
+=== RUN   TestAggregateWithIntent_StateContainsFail_UserStop_Suppressed
+--- PASS: TestAggregateWithIntent_StateContainsFail_UserStop_Suppressed (0.00s)
+=== NAME  
+=== RUN   TestAggregateWithIntent_TaskNameNormalization
+--- PASS: TestAggregateWithIntent_TaskNameNormalization (0.00s)
+=== NAME  
+=== RUN   TestAggregateWithIntent_MixedRunningPlusUserStopped_Healthy
+--- PASS: TestAggregateWithIntent_MixedRunningPlusUserStopped_Healthy (0.00s)
+=== NAME  
+=== RUN   TestAggregateWithIntent_MultiRow_OneUserStoppedPlusOneRealFailure
+--- PASS: TestAggregateWithIntent_MultiRow_OneUserStoppedPlusOneRealFailure (0.00s)
+=== NAME  
+=== RUN   TestAggregateWithIntent_ZeroNow_FallsBackToTimeNow
+--- PASS: TestAggregateWithIntent_ZeroNow_FallsBackToTimeNow (0.00s)
+=== NAME  
+=== RUN   TestAggregateWithIntent_ZeroNow_ChronicFailure_StaysError
+--- PASS: TestAggregateWithIntent_ZeroNow_ChronicFailure_StaysError (0.00s)
+=== NAME  
+=== RUN   TestAggregateWithIntent_AllUserStopped_StateDown
+--- PASS: TestAggregateWithIntent_AllUserStopped_StateDown (0.00s)
+=== NAME  
+=== RUN   TestAggregateWithIntent_AllUserDisabled_StateDown
+--- PASS: TestAggregateWithIntent_AllUserDisabled_StateDown (0.00s)
+=== NAME  
+=== RUN   TestAggregateWithIntent_RunningPlusUserStop_LastResultZero_Healthy
+--- PASS: TestAggregateWithIntent_RunningPlusUserStop_LastResultZero_Healthy (0.00s)
+=== NAME  
+=== RUN   TestAggregateWithIntent_RunningPlusUserStop_NeverRunSentinel_Healthy
+--- PASS: TestAggregateWithIntent_RunningPlusUserStop_NeverRunSentinel_Healthy (0.00s)
+=== NAME  
+=== RUN   TestAggregateWithIntent_RunningPlusUserStop_TaskSchedulerInfoCode_Healthy
+--- PASS: TestAggregateWithIntent_RunningPlusUserStop_TaskSchedulerInfoCode_Healthy (0.00s)
+=== NAME  
+=== RUN   TestAggregateWithIntent_PlainStoppedPlusUserStopped_StateDown
+--- PASS: TestAggregateWithIntent_PlainStoppedPlusUserStopped_StateDown (0.00s)
+=== NAME  
+=== RUN   TestAggregateWithIntent_NoRows_StateHealthy
+--- PASS: TestAggregateWithIntent_NoRows_StateHealthy (0.00s)
+=== NAME  
+=== RUN   TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate
+=== RUN   TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/empty
+--- PASS: TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/empty (0.00s)
+=== NAME  TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate
+=== RUN   TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/all_running
+--- PASS: TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/all_running (0.00s)
+=== NAME  TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate
+=== RUN   TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/some_stopped
+--- PASS: TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/some_stopped (0.00s)
+=== NAME  TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate
+=== RUN   TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/all_stopped
+--- PASS: TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/all_stopped (0.00s)
+=== NAME  TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate
+=== RUN   TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/failure
+--- PASS: TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/failure (0.00s)
+=== NAME  TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate
+=== RUN   TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/info_code
+--- PASS: TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate/info_code (0.00s)
+=== NAME  TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate
+--- PASS: TestAggregateWithIntent_EmptyIntent_BehavesLikeAggregate (0.00s)
+=== NAME  
+=== RUN   TestAggregate
+=== RUN   TestAggregate/empty_→_Healthy
+--- PASS: TestAggregate/empty_→_Healthy (0.00s)
+=== NAME  TestAggregate
+=== RUN   TestAggregate/all_Running_→_Healthy
+--- PASS: TestAggregate/all_Running_→_Healthy (0.00s)
+=== NAME  TestAggregate
+=== RUN   TestAggregate/some_Running_→_Partial
+--- PASS: TestAggregate/some_Running_→_Partial (0.00s)
+=== NAME  TestAggregate
+=== RUN   TestAggregate/none_Running_→_Down
+--- PASS: TestAggregate/none_Running_→_Down (0.00s)
+=== NAME  TestAggregate
+=== RUN   TestAggregate/any_LastResult_!=_0_→_Error_overrides_Partial
+--- PASS: TestAggregate/any_LastResult_!=_0_→_Error_overrides_Partial (0.00s)
+=== NAME  TestAggregate
+=== RUN   TestAggregate/any_LastResult_!=_0_→_Error_overrides_Healthy
+--- PASS: TestAggregate/any_LastResult_!=_0_→_Error_overrides_Healthy (0.00s)
+=== NAME  TestAggregate
+=== RUN   TestAggregate/Task_Scheduler_info_code_0x41300_(ready_to_run)_is_NOT_a_failure
+--- PASS: TestAggregate/Task_Scheduler_info_code_0x41300_(ready_to_run)_is_NOT_a_failure (0.00s)
+=== NAME  TestAggregate
+=== RUN   TestAggregate/Task_Scheduler_info_code_0x41301_(currently_running)_is_NOT_a_failure
+--- PASS: TestAggregate/Task_Scheduler_info_code_0x41301_(currently_running)_is_NOT_a_failure (0.00s)
+=== NAME  TestAggregate
+=== RUN   TestAggregate/Task_Scheduler_info_code_0x41303_(never_run)_is_NOT_a_failure_—_DM-1_orphan_case
+--- PASS: TestAggregate/Task_Scheduler_info_code_0x41303_(never_run)_is_NOT_a_failure_—_DM-1_orphan_case (0.00s)
+=== NAME  TestAggregate
+=== RUN   TestAggregate/-1_sentinel_(internal/scheduler_never-run_default)_is_NOT_a_failure_—_Codex_r2_P1
+--- PASS: TestAggregate/-1_sentinel_(internal/scheduler_never-run_default)_is_NOT_a_failure_—_Codex_r2_P1 (0.00s)
+=== NAME  TestAggregate
+=== RUN   TestAggregate/HRESULT-shaped_failure_(high_bit_set,_negative_int32)_IS_a_failure
+--- PASS: TestAggregate/HRESULT-shaped_failure_(high_bit_set,_negative_int32)_IS_a_failure (0.00s)
+=== NAME  TestAggregate
+=== RUN   TestAggregate/state_containing_'fail'_→_Error
+--- PASS: TestAggregate/state_containing_'fail'_→_Error (0.00s)
+=== NAME  TestAggregate
+=== RUN   TestAggregate/maintenance_rows_skipped_(would_otherwise_look_Down)
+--- PASS: TestAggregate/maintenance_rows_skipped_(would_otherwise_look_Down) (0.00s)
+=== NAME  TestAggregate
+=== RUN   TestAggregate/only_maintenance_rows_→_Healthy_(no_real_daemons)
+--- PASS: TestAggregate/only_maintenance_rows_→_Healthy_(no_real_daemons) (0.00s)
+=== NAME  TestAggregate
+=== RUN   TestAggregate/maintenance_with_non-zero_LastResult_still_triggers_Error
+--- PASS: TestAggregate/maintenance_with_non-zero_LastResult_still_triggers_Error (0.00s)
+=== NAME  TestAggregate
+--- PASS: TestAggregate (0.00s)
+=== NAME  
+=== RUN   TestTrayState_String
+--- PASS: TestTrayState_String (0.00s)
+=== NAME  
+=== RUN   TestPsEscape
+--- PASS: TestPsEscape (0.00s)
+=== NAME  
+=== RUN   TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn
+=== RUN   TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/served_cancellation
+--- PASS: TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/served_cancellation (0.00s)
+=== NAME  TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn
+=== RUN   TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/served_stream_failure
+--- PASS: TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/served_stream_failure (0.00s)
+=== NAME  TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn
+=== RUN   TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/unserved_cancellation
+--- PASS: TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/unserved_cancellation (0.00s)
+=== NAME  TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn
+=== RUN   TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/unserved_drain_failure
+--- PASS: TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/unserved_drain_failure (0.00s)
+=== NAME  TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn
+=== RUN   TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/blocked_writer_cancellation
+--- PASS: TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn/blocked_writer_cancellation (0.00s)
+=== NAME  TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn
+--- PASS: TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn (0.00s)
+=== NAME  
+=== RUN   TestRunRetriesWithExactBackoffAndThirtySecondReset
+--- PASS: TestRunRetriesWithExactBackoffAndThirtySecondReset (0.00s)
+=== NAME  
+=== RUN   TestRunShortLivedFailureDoesNotResetBackoffDuringSettlement
+--- PASS: TestRunShortLivedFailureDoesNotResetBackoffDuringSettlement (0.00s)
+=== NAME  
+=== RUN   TestRunReplaysLatestSnapshotAfterChildAbsence
+--- PASS: TestRunReplaysLatestSnapshotAfterChildAbsence (0.00s)
+=== NAME  
+=== RUN   TestRunRetriesZeroExitWhileContextAlive
+--- PASS: TestRunRetriesZeroExitWhileContextAlive (0.00s)
+=== NAME  
+=== RUN   TestRunCancellationAlreadyWonDoesNotReportFailure
+=== RUN   TestRunCancellationAlreadyWonDoesNotReportFailure/launch_failure
+--- PASS: TestRunCancellationAlreadyWonDoesNotReportFailure/launch_failure (0.00s)
+=== NAME  TestRunCancellationAlreadyWonDoesNotReportFailure
+=== RUN   TestRunCancellationAlreadyWonDoesNotReportFailure/child_exit
+--- PASS: TestRunCancellationAlreadyWonDoesNotReportFailure/child_exit (0.00s)
+=== NAME  TestRunCancellationAlreadyWonDoesNotReportFailure
+--- PASS: TestRunCancellationAlreadyWonDoesNotReportFailure (0.00s)
+=== NAME  
+=== RUN   TestRunMalformedEventReportsRateLimitedProtocolWarning
+--- PASS: TestRunMalformedEventReportsRateLimitedProtocolWarning (0.00s)
+=== NAME  
+=== RUN   TestRunCancellationSettlesAttemptAndJoins
+=== RUN   TestRunCancellationSettlesAttemptAndJoins/during_backoff
+--- PASS: TestRunCancellationSettlesAttemptAndJoins/during_backoff (0.00s)
+=== NAME  TestRunCancellationSettlesAttemptAndJoins
+=== RUN   TestRunCancellationSettlesAttemptAndJoins/hung_child_input_closes_before_owned_kill_and_Wait_failure_survives
+--- PASS: TestRunCancellationSettlesAttemptAndJoins/hung_child_input_closes_before_owned_kill_and_Wait_failure_survives (0.00s)
+=== NAME  TestRunCancellationSettlesAttemptAndJoins
+--- PASS: TestRunCancellationSettlesAttemptAndJoins (0.00s)
+=== NAME  
+=== RUN   TestRunMainStateCloseIsTerminalButRelaxCloseIsNot
+--- PASS: TestRunMainStateCloseIsTerminalButRelaxCloseIsNot (0.00s)
+=== NAME  
+=== RUN   TestRunLifecycleDiagnosticsAreRateLimitedAndClassified
+--- PASS: TestRunLifecycleDiagnosticsAreRateLimitedAndClassified (0.00s)
+=== NAME  
+PASS

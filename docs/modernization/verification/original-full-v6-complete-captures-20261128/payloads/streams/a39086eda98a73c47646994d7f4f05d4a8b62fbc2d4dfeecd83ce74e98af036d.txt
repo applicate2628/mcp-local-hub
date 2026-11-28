@@ -1,0 +1,640 @@
+{"Action":"start","Package":"mcp-local-hub/internal/e2e"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintBaselineBudget"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintBaselineBudget","Output":"=== RUN   TestCSTSavedFieldFingerprintBaselineBudget\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintBaselineBudget","Output":"--- PASS: TestCSTSavedFieldFingerprintBaselineBudget (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintBaselineBudget"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintZeroSizeRowAtExactAggregateBudget"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintZeroSizeRowAtExactAggregateBudget","Output":"=== RUN   TestCSTSavedFieldFingerprintZeroSizeRowAtExactAggregateBudget\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintZeroSizeRowAtExactAggregateBudget","Output":"--- PASS: TestCSTSavedFieldFingerprintZeroSizeRowAtExactAggregateBudget (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintZeroSizeRowAtExactAggregateBudget"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFiveRowExactBudgetAllowsFinalZeroOnly"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFiveRowExactBudgetAllowsFinalZeroOnly","Output":"=== RUN   TestCSTSavedFieldFiveRowExactBudgetAllowsFinalZeroOnly\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFiveRowExactBudgetAllowsFinalZeroOnly","Output":"--- PASS: TestCSTSavedFieldFiveRowExactBudgetAllowsFinalZeroOnly (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFiveRowExactBudgetAllowsFinalZeroOnly"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFiveRowManifestRejectsOutsideHardlink"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFiveRowManifestRejectsOutsideHardlink","Output":"=== RUN   TestCSTSavedFieldFiveRowManifestRejectsOutsideHardlink\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFiveRowManifestRejectsOutsideHardlink","Output":"--- PASS: TestCSTSavedFieldFiveRowManifestRejectsOutsideHardlink (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFiveRowManifestRejectsOutsideHardlink"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns","Output":"=== RUN   TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/empty"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/empty","Output":"=== RUN   TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/empty\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/empty","Output":"--- PASS: TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/empty (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/empty"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/malformed"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/malformed","Output":"=== RUN   TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/malformed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/malformed","Output":"--- PASS: TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/malformed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/malformed"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/partial"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/partial","Output":"=== RUN   TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/partial\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/partial","Output":"--- PASS: TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/partial (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/partial"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/missing_status"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/missing_status","Output":"=== RUN   TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/missing_status\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/missing_status","Output":"--- PASS: TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/missing_status (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/missing_status"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/blocked"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/blocked","Output":"=== RUN   TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/blocked\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/blocked","Output":"--- PASS: TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/blocked (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/blocked"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/pass"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/pass","Output":"=== RUN   TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/pass\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/pass","Output":"--- PASS: TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/pass (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/pass"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_empty"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_empty","Output":"=== RUN   TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_empty\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_empty","Output":"--- PASS: TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_empty (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_empty"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_partial"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_partial","Output":"=== RUN   TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_partial\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_partial","Output":"--- PASS: TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_partial (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_partial"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_blocked"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_blocked","Output":"=== RUN   TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_blocked\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_blocked","Output":"--- PASS: TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_blocked (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_blocked"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_pass"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_pass","Output":"=== RUN   TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_pass\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_pass","Output":"--- PASS: TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_pass (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns/generation_pass"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns","Output":"--- PASS: TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildReceiptDecodeAllReturns"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyFakeChildRun"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyFakeChildRun","Output":"=== RUN   TestCSTSavedFieldLegacyFakeChildRun\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyFakeChildRun/empty"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyFakeChildRun/empty","Output":"=== RUN   TestCSTSavedFieldLegacyFakeChildRun/empty\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyFakeChildRun/empty","Output":"--- PASS: TestCSTSavedFieldLegacyFakeChildRun/empty (0.15s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyFakeChildRun/empty"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyFakeChildRun/malformed"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyFakeChildRun/malformed","Output":"=== RUN   TestCSTSavedFieldLegacyFakeChildRun/malformed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyFakeChildRun/malformed","Output":"--- PASS: TestCSTSavedFieldLegacyFakeChildRun/malformed (0.15s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyFakeChildRun/malformed"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyFakeChildRun/partial"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyFakeChildRun/partial","Output":"=== RUN   TestCSTSavedFieldLegacyFakeChildRun/partial\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyFakeChildRun/partial","Output":"--- PASS: TestCSTSavedFieldLegacyFakeChildRun/partial (0.15s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyFakeChildRun/partial"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyFakeChildRun/blocked"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyFakeChildRun/blocked","Output":"=== RUN   TestCSTSavedFieldLegacyFakeChildRun/blocked\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyFakeChildRun/blocked","Output":"--- PASS: TestCSTSavedFieldLegacyFakeChildRun/blocked (0.15s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyFakeChildRun/blocked"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyFakeChildRun/pass"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyFakeChildRun/pass","Output":"=== RUN   TestCSTSavedFieldLegacyFakeChildRun/pass\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyFakeChildRun/pass","Output":"--- PASS: TestCSTSavedFieldLegacyFakeChildRun/pass (0.15s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyFakeChildRun/pass"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyFakeChildRun","Output":"--- PASS: TestCSTSavedFieldLegacyFakeChildRun (0.76s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyFakeChildRun"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationFullManifestWire"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationFullManifestWire","Output":"=== RUN   TestCSTSavedFieldGenerationFullManifestWire\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationFullManifestWire/absent"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationFullManifestWire/absent","Output":"=== RUN   TestCSTSavedFieldGenerationFullManifestWire/absent\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationFullManifestWire/absent","Output":"--- PASS: TestCSTSavedFieldGenerationFullManifestWire/absent (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationFullManifestWire/absent"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationFullManifestWire/present"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationFullManifestWire/present","Output":"=== RUN   TestCSTSavedFieldGenerationFullManifestWire/present\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationFullManifestWire/present","Output":"--- PASS: TestCSTSavedFieldGenerationFullManifestWire/present (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationFullManifestWire/present"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationFullManifestWire","Output":"--- PASS: TestCSTSavedFieldGenerationFullManifestWire (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationFullManifestWire"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationInputBudget"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationInputBudget","Output":"=== RUN   TestCSTSavedFieldGenerationInputBudget\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationInputBudget","Output":"    cst_saved_field_result_tree_probe_windows_test.go:1047: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationInputBudget","Output":"--- SKIP: TestCSTSavedFieldGenerationInputBudget (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationInputBudget"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationManifestAdmissionBeforeCSTImport"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationManifestAdmissionBeforeCSTImport","Output":"=== RUN   TestCSTSavedFieldGenerationManifestAdmissionBeforeCSTImport\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationManifestAdmissionBeforeCSTImport","Output":"    cst_saved_field_result_tree_probe_windows_test.go:1142: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationManifestAdmissionBeforeCSTImport","Output":"--- SKIP: TestCSTSavedFieldGenerationManifestAdmissionBeforeCSTImport (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationManifestAdmissionBeforeCSTImport"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationMetadataPostcheckSupportsVariableRows"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationMetadataPostcheckSupportsVariableRows","Output":"=== RUN   TestCSTSavedFieldGenerationMetadataPostcheckSupportsVariableRows\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationMetadataPostcheckSupportsVariableRows","Output":"    cst_saved_field_result_tree_probe_windows_test.go:1190: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationMetadataPostcheckSupportsVariableRows","Output":"--- SKIP: TestCSTSavedFieldGenerationMetadataPostcheckSupportsVariableRows (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationMetadataPostcheckSupportsVariableRows"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestOwnedResultTreeProbeRejectsOpenRequest"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestOwnedResultTreeProbeRejectsOpenRequest","Output":"=== RUN   TestOwnedResultTreeProbeRejectsOpenRequest\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestOwnedResultTreeProbeRejectsOpenRequest","Output":"    cst_saved_field_result_tree_probe_windows_test.go:1314: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestOwnedResultTreeProbeRejectsOpenRequest","Output":"--- SKIP: TestOwnedResultTreeProbeRejectsOpenRequest (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestOwnedResultTreeProbeRejectsOpenRequest"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestOwnedResultTreeProbeSyntheticLifecycle"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestOwnedResultTreeProbeSyntheticLifecycle","Output":"=== RUN   TestOwnedResultTreeProbeSyntheticLifecycle\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestOwnedResultTreeProbeSyntheticLifecycle","Output":"    cst_saved_field_result_tree_probe_windows_test.go:1341: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestOwnedResultTreeProbeSyntheticLifecycle","Output":"--- SKIP: TestOwnedResultTreeProbeSyntheticLifecycle (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestOwnedResultTreeProbeSyntheticLifecycle"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldOwnedResultTreeProbeTimeout"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldOwnedResultTreeProbeTimeout","Output":"=== RUN   TestCSTSavedFieldOwnedResultTreeProbeTimeout\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldOwnedResultTreeProbeTimeout","Output":"    cst_saved_field_result_tree_probe_windows_test.go:1431: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldOwnedResultTreeProbeTimeout","Output":"--- SKIP: TestCSTSavedFieldOwnedResultTreeProbeTimeout (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldOwnedResultTreeProbeTimeout"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestOwnedResultTreeProbePreservationEvidence"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestOwnedResultTreeProbePreservationEvidence","Output":"=== RUN   TestOwnedResultTreeProbePreservationEvidence\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestOwnedResultTreeProbePreservationEvidence","Output":"    cst_saved_field_result_tree_probe_windows_test.go:1492: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestOwnedResultTreeProbePreservationEvidence","Output":"--- SKIP: TestOwnedResultTreeProbePreservationEvidence (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestOwnedResultTreeProbePreservationEvidence"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestOwnedResultTreeProbeForbiddenCallFailsClosed"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestOwnedResultTreeProbeForbiddenCallFailsClosed","Output":"=== RUN   TestOwnedResultTreeProbeForbiddenCallFailsClosed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestOwnedResultTreeProbeForbiddenCallFailsClosed","Output":"    cst_saved_field_result_tree_probe_windows_test.go:1618: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestOwnedResultTreeProbeForbiddenCallFailsClosed","Output":"--- SKIP: TestOwnedResultTreeProbeForbiddenCallFailsClosed (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestOwnedResultTreeProbeForbiddenCallFailsClosed"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10FixtureCommandAllowlist"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10FixtureCommandAllowlist","Output":"=== RUN   TestCSTSavedFieldGenerateLine10FixtureCommandAllowlist\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10FixtureCommandAllowlist","Output":"    cst_saved_field_result_tree_probe_windows_test.go:1687: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10FixtureCommandAllowlist","Output":"--- SKIP: TestCSTSavedFieldGenerateLine10FixtureCommandAllowlist (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10FixtureCommandAllowlist"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintInventoryHardlinkBeforeFallback"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintInventoryHardlinkBeforeFallback","Output":"=== RUN   TestCSTSavedFieldFingerprintInventoryHardlinkBeforeFallback\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintInventoryHardlinkBeforeFallback","Output":"--- PASS: TestCSTSavedFieldFingerprintInventoryHardlinkBeforeFallback (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintInventoryHardlinkBeforeFallback"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintSelectedRexCapture"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintSelectedRexCapture","Output":"=== RUN   TestCSTSavedFieldFingerprintSelectedRexCapture\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintSelectedRexCapture/cap_and_cap_plus_one"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintSelectedRexCapture/cap_and_cap_plus_one","Output":"=== RUN   TestCSTSavedFieldFingerprintSelectedRexCapture/cap_and_cap_plus_one\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintSelectedRexCapture/cap_and_cap_plus_one","Output":"--- PASS: TestCSTSavedFieldFingerprintSelectedRexCapture/cap_and_cap_plus_one (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintSelectedRexCapture/cap_and_cap_plus_one"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintSelectedRexCapture/growth_and_swap"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintSelectedRexCapture/growth_and_swap","Output":"=== RUN   TestCSTSavedFieldFingerprintSelectedRexCapture/growth_and_swap\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintSelectedRexCapture/growth_and_swap","Output":"--- PASS: TestCSTSavedFieldFingerprintSelectedRexCapture/growth_and_swap (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintSelectedRexCapture/growth_and_swap"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintSelectedRexCapture","Output":"--- PASS: TestCSTSavedFieldFingerprintSelectedRexCapture (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintSelectedRexCapture"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintBudgetGrowthAndSwap"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintBudgetGrowthAndSwap","Output":"=== RUN   TestCSTSavedFieldFingerprintBudgetGrowthAndSwap\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintBudgetGrowthAndSwap/oversized_row"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintBudgetGrowthAndSwap/oversized_row","Output":"=== RUN   TestCSTSavedFieldFingerprintBudgetGrowthAndSwap/oversized_row\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintBudgetGrowthAndSwap/oversized_row","Output":"--- PASS: TestCSTSavedFieldFingerprintBudgetGrowthAndSwap/oversized_row (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintBudgetGrowthAndSwap/oversized_row"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintBudgetGrowthAndSwap/growing_row"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintBudgetGrowthAndSwap/growing_row","Output":"=== RUN   TestCSTSavedFieldFingerprintBudgetGrowthAndSwap/growing_row\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintBudgetGrowthAndSwap/growing_row","Output":"--- PASS: TestCSTSavedFieldFingerprintBudgetGrowthAndSwap/growing_row (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintBudgetGrowthAndSwap/growing_row"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintBudgetGrowthAndSwap/path_swap_window"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintBudgetGrowthAndSwap/path_swap_window","Output":"=== RUN   TestCSTSavedFieldFingerprintBudgetGrowthAndSwap/path_swap_window\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintBudgetGrowthAndSwap/path_swap_window","Output":"--- PASS: TestCSTSavedFieldFingerprintBudgetGrowthAndSwap/path_swap_window (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintBudgetGrowthAndSwap/path_swap_window"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintBudgetGrowthAndSwap","Output":"--- PASS: TestCSTSavedFieldFingerprintBudgetGrowthAndSwap (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFingerprintBudgetGrowthAndSwap"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldBundleProbeCopyModesNoSolve"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldBundleProbeCopyModesNoSolve","Output":"=== RUN   TestCSTSavedFieldBundleProbeCopyModesNoSolve\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldBundleProbeCopyModesNoSolve","Output":"    cst_saved_field_result_tree_probe_windows_test.go:2353: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldBundleProbeCopyModesNoSolve","Output":"--- SKIP: TestCSTSavedFieldBundleProbeCopyModesNoSolve (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldBundleProbeCopyModesNoSolve"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFullBundleGenerationRequiresTwoPortsBeforeSolver"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFullBundleGenerationRequiresTwoPortsBeforeSolver","Output":"=== RUN   TestCSTSavedFieldFullBundleGenerationRequiresTwoPortsBeforeSolver\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFullBundleGenerationRequiresTwoPortsBeforeSolver","Output":"    cst_saved_field_result_tree_probe_windows_test.go:2403: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFullBundleGenerationRequiresTwoPortsBeforeSolver","Output":"--- SKIP: TestCSTSavedFieldFullBundleGenerationRequiresTwoPortsBeforeSolver (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFullBundleGenerationRequiresTwoPortsBeforeSolver"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFullBundleRetainsUnverifiedPostSolverTree"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFullBundleRetainsUnverifiedPostSolverTree","Output":"=== RUN   TestCSTSavedFieldFullBundleRetainsUnverifiedPostSolverTree\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFullBundleRetainsUnverifiedPostSolverTree","Output":"    cst_saved_field_result_tree_probe_windows_test.go:2450: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFullBundleRetainsUnverifiedPostSolverTree","Output":"--- SKIP: TestCSTSavedFieldFullBundleRetainsUnverifiedPostSolverTree (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldFullBundleRetainsUnverifiedPostSolverTree"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldBundleCompletenessLine10Diagnostic"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldBundleCompletenessLine10Diagnostic","Output":"=== RUN   TestCSTSavedFieldBundleCompletenessLine10Diagnostic\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldBundleCompletenessLine10Diagnostic","Output":"    cst_saved_field_result_tree_probe_windows_test.go:2487: set MCPHUB_CST_GENERATION_RUN=1 for authorized native bundle diagnostic\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldBundleCompletenessLine10Diagnostic","Output":"--- SKIP: TestCSTSavedFieldBundleCompletenessLine10Diagnostic (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldBundleCompletenessLine10Diagnostic"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldPort2CompletionRetainsObservedOutput"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldPort2CompletionRetainsObservedOutput","Output":"=== RUN   TestCSTSavedFieldPort2CompletionRetainsObservedOutput\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldPort2CompletionRetainsObservedOutput","Output":"    cst_saved_field_result_tree_probe_windows_test.go:2578: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldPort2CompletionRetainsObservedOutput","Output":"--- SKIP: TestCSTSavedFieldPort2CompletionRetainsObservedOutput (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldPort2CompletionRetainsObservedOutput"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateVendorFailuresRetainRedactedReceipt"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateVendorFailuresRetainRedactedReceipt","Output":"=== RUN   TestCSTSavedFieldGenerateVendorFailuresRetainRedactedReceipt\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateVendorFailuresRetainRedactedReceipt","Output":"    cst_saved_field_result_tree_probe_windows_test.go:2607: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateVendorFailuresRetainRedactedReceipt","Output":"--- SKIP: TestCSTSavedFieldGenerateVendorFailuresRetainRedactedReceipt (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateVendorFailuresRetainRedactedReceipt"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateSetupOnlyDiagnosticRedactsVendorMessage"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateSetupOnlyDiagnosticRedactsVendorMessage","Output":"=== RUN   TestCSTSavedFieldGenerateSetupOnlyDiagnosticRedactsVendorMessage\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateSetupOnlyDiagnosticRedactsVendorMessage","Output":"    cst_saved_field_result_tree_probe_windows_test.go:2679: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateSetupOnlyDiagnosticRedactsVendorMessage","Output":"--- SKIP: TestCSTSavedFieldGenerateSetupOnlyDiagnosticRedactsVendorMessage (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateSetupOnlyDiagnosticRedactsVendorMessage"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateSetupOnlyStopsBeforeSolver"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateSetupOnlyStopsBeforeSolver","Output":"=== RUN   TestCSTSavedFieldGenerateSetupOnlyStopsBeforeSolver\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateSetupOnlyStopsBeforeSolver","Output":"    cst_saved_field_result_tree_probe_windows_test.go:2719: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateSetupOnlyStopsBeforeSolver","Output":"--- SKIP: TestCSTSavedFieldGenerateSetupOnlyStopsBeforeSolver (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateSetupOnlyStopsBeforeSolver"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10FixtureRetention"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10FixtureRetention","Output":"=== RUN   TestCSTSavedFieldGenerateLine10FixtureRetention\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10FixtureRetention","Output":"    cst_saved_field_result_tree_probe_windows_test.go:1687: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10FixtureRetention","Output":"--- SKIP: TestCSTSavedFieldGenerateLine10FixtureRetention (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10FixtureRetention"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10FixtureLimits"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10FixtureLimits","Output":"=== RUN   TestCSTSavedFieldGenerateLine10FixtureLimits\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10FixtureLimits","Output":"    cst_saved_field_result_tree_probe_windows_test.go:2755: exercised by the manual-lifetime fixture parent\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10FixtureLimits","Output":"--- SKIP: TestCSTSavedFieldGenerateLine10FixtureLimits (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10FixtureLimits"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10FixtureLimitsPostWorkerRoot"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10FixtureLimitsPostWorkerRoot","Output":"=== RUN   TestCSTSavedFieldGenerateLine10FixtureLimitsPostWorkerRoot\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10FixtureLimitsPostWorkerRoot","Output":"    cst_saved_field_result_tree_probe_windows_test.go:2817: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10FixtureLimitsPostWorkerRoot","Output":"--- SKIP: TestCSTSavedFieldGenerateLine10FixtureLimitsPostWorkerRoot (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10FixtureLimitsPostWorkerRoot"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationTimeoutDisposalRequiresPositiveProof"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationTimeoutDisposalRequiresPositiveProof","Output":"=== RUN   TestCSTSavedFieldGenerationTimeoutDisposalRequiresPositiveProof\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationTimeoutDisposalRequiresPositiveProof","Output":"    cst_saved_field_result_tree_probe_windows_test.go:2900: exercised by the manual-lifetime parent worker test\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationTimeoutDisposalRequiresPositiveProof","Output":"--- SKIP: TestCSTSavedFieldGenerationTimeoutDisposalRequiresPositiveProof (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationTimeoutDisposalRequiresPositiveProof"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationTimeoutProofRootOutlivesWorker"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationTimeoutProofRootOutlivesWorker","Output":"=== RUN   TestCSTSavedFieldGenerationTimeoutProofRootOutlivesWorker\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationTimeoutProofRootOutlivesWorker","Output":"--- PASS: TestCSTSavedFieldGenerationTimeoutProofRootOutlivesWorker (0.17s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationTimeoutProofRootOutlivesWorker"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationWatcherStopJoins"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationWatcherStopJoins","Output":"=== RUN   TestCSTSavedFieldGenerationWatcherStopJoins\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationWatcherStopJoins","Output":"--- PASS: TestCSTSavedFieldGenerationWatcherStopJoins (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationWatcherStopJoins"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationWatcherStopCancelsActiveWalk"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationWatcherStopCancelsActiveWalk","Output":"=== RUN   TestCSTSavedFieldGenerationWatcherStopCancelsActiveWalk\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationWatcherStopCancelsActiveWalk","Output":"--- PASS: TestCSTSavedFieldGenerationWatcherStopCancelsActiveWalk (0.25s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationWatcherStopCancelsActiveWalk"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild","Output":"=== RUN   TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild/growth"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild/growth","Output":"=== RUN   TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild/growth\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild/growth","Output":"--- PASS: TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild/growth (0.25s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild/growth"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild/read"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild/read","Output":"=== RUN   TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild/read\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild/read","Output":"--- PASS: TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild/read (0.25s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild/read"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild","Output":"--- PASS: TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild (0.51s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationWatcherFaultKindsCancelChild"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationWatcherGoexitJoinsActiveWalk"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationWatcherGoexitJoinsActiveWalk","Output":"=== RUN   TestCSTSavedFieldGenerationWatcherGoexitJoinsActiveWalk\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationWatcherGoexitJoinsActiveWalk","Output":"--- PASS: TestCSTSavedFieldGenerationWatcherGoexitJoinsActiveWalk (0.25s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationWatcherGoexitJoinsActiveWalk"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildPostflightObservesSourceAndForeignIndependently"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildPostflightObservesSourceAndForeignIndependently","Output":"=== RUN   TestCSTSavedFieldLegacyChildPostflightObservesSourceAndForeignIndependently\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildPostflightObservesSourceAndForeignIndependently","Output":"--- PASS: TestCSTSavedFieldLegacyChildPostflightObservesSourceAndForeignIndependently (0.06s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldLegacyChildPostflightObservesSourceAndForeignIndependently"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake","Output":"=== RUN   TestCSTSavedFieldGenerationSettledOutcomeFake\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/setup_pass"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/setup_pass","Output":"=== RUN   TestCSTSavedFieldGenerationSettledOutcomeFake/setup_pass\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/setup_pass","Output":"--- PASS: TestCSTSavedFieldGenerationSettledOutcomeFake/setup_pass (1.32s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/setup_pass"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/setup_blocked_exit1"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/setup_blocked_exit1","Output":"=== RUN   TestCSTSavedFieldGenerationSettledOutcomeFake/setup_blocked_exit1\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/setup_blocked_exit1","Output":"--- PASS: TestCSTSavedFieldGenerationSettledOutcomeFake/setup_blocked_exit1 (0.12s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/setup_blocked_exit1"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/setup_blocked_missing_history_trace"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/setup_blocked_missing_history_trace","Output":"=== RUN   TestCSTSavedFieldGenerationSettledOutcomeFake/setup_blocked_missing_history_trace\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/setup_blocked_missing_history_trace","Output":"--- PASS: TestCSTSavedFieldGenerationSettledOutcomeFake/setup_blocked_missing_history_trace (0.12s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/setup_blocked_missing_history_trace"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/port2_exit1"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/port2_exit1","Output":"=== RUN   TestCSTSavedFieldGenerationSettledOutcomeFake/port2_exit1\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/port2_exit1","Output":"--- PASS: TestCSTSavedFieldGenerationSettledOutcomeFake/port2_exit1 (0.12s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/port2_exit1"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/setup_job_close_fault"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/setup_job_close_fault","Output":"=== RUN   TestCSTSavedFieldGenerationSettledOutcomeFake/setup_job_close_fault\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/setup_job_close_fault","Output":"--- PASS: TestCSTSavedFieldGenerationSettledOutcomeFake/setup_job_close_fault (0.12s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/setup_job_close_fault"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/port2_job_close_fault"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/port2_job_close_fault","Output":"=== RUN   TestCSTSavedFieldGenerationSettledOutcomeFake/port2_job_close_fault\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/port2_job_close_fault","Output":"--- PASS: TestCSTSavedFieldGenerationSettledOutcomeFake/port2_job_close_fault (0.12s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/port2_job_close_fault"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/watcher_growth"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/watcher_growth","Output":"=== RUN   TestCSTSavedFieldGenerationSettledOutcomeFake/watcher_growth\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/watcher_growth","Output":"--- PASS: TestCSTSavedFieldGenerationSettledOutcomeFake/watcher_growth (0.12s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/watcher_growth"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/source_foreign_drift"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/source_foreign_drift","Output":"=== RUN   TestCSTSavedFieldGenerationSettledOutcomeFake/source_foreign_drift\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/source_foreign_drift","Output":"--- PASS: TestCSTSavedFieldGenerationSettledOutcomeFake/source_foreign_drift (0.12s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake/source_foreign_drift"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake","Output":"--- PASS: TestCSTSavedFieldGenerationSettledOutcomeFake (2.16s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerationSettledOutcomeFake"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateSetupOnlyRequestUsesShortDeadline"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateSetupOnlyRequestUsesShortDeadline","Output":"=== RUN   TestCSTSavedFieldGenerateSetupOnlyRequestUsesShortDeadline\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateSetupOnlyRequestUsesShortDeadline","Output":"--- PASS: TestCSTSavedFieldGenerateSetupOnlyRequestUsesShortDeadline (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateSetupOnlyRequestUsesShortDeadline"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGeneratePort2RequestMode"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGeneratePort2RequestMode","Output":"=== RUN   TestCSTSavedFieldGeneratePort2RequestMode\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGeneratePort2RequestMode","Output":"--- PASS: TestCSTSavedFieldGeneratePort2RequestMode (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGeneratePort2RequestMode"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10Fixture"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10Fixture","Output":"=== RUN   TestCSTSavedFieldGenerateLine10Fixture\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10Fixture","Output":"    cst_saved_field_result_tree_probe_windows_test.go:3447: set MCPHUB_CST_GENERATION_RUN=1 for authorized native generation path\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10Fixture","Output":"--- SKIP: TestCSTSavedFieldGenerateLine10Fixture (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10Fixture"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10SetupOnlyDiagnostic"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10SetupOnlyDiagnostic","Output":"=== RUN   TestCSTSavedFieldGenerateLine10SetupOnlyDiagnostic\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10SetupOnlyDiagnostic","Output":"    cst_saved_field_result_tree_probe_windows_test.go:3447: set MCPHUB_CST_GENERATION_RUN=1 for authorized native generation path\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10SetupOnlyDiagnostic","Output":"--- SKIP: TestCSTSavedFieldGenerateLine10SetupOnlyDiagnostic (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10SetupOnlyDiagnostic"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10Port2Completion"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10Port2Completion","Output":"=== RUN   TestCSTSavedFieldGenerateLine10Port2Completion\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10Port2Completion","Output":"    cst_saved_field_result_tree_probe_windows_test.go:3447: set MCPHUB_CST_GENERATION_RUN=1 for authorized native generation path\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10Port2Completion","Output":"--- SKIP: TestCSTSavedFieldGenerateLine10Port2Completion (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldGenerateLine10Port2Completion"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldOwnedResultTreeProbe"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldOwnedResultTreeProbe","Output":"=== RUN   TestCSTSavedFieldOwnedResultTreeProbe\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldOwnedResultTreeProbe","Output":"    cst_saved_field_result_tree_probe_windows_test.go:3672: set MCPHUB_CST_RESULT_TREE_RUN=1 for the single authorized native inspection\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldOwnedResultTreeProbe","Output":"--- SKIP: TestCSTSavedFieldOwnedResultTreeProbe (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldOwnedResultTreeProbe"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence","Output":"=== RUN   TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence/project"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence/project","Output":"=== RUN   TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence/project\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence/project","Output":"--- PASS: TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence/project (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence/project"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence/rex"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence/rex","Output":"=== RUN   TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence/rex\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence/rex","Output":"--- PASS: TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence/rex (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence/rex"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence","Output":"--- PASS: TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativePostflightHardlinksKeepIndependentEvidence"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks","Output":"=== RUN   TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/safe_exact_full_and_result"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/safe_exact_full_and_result","Output":"=== RUN   TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/safe_exact_full_and_result\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/safe_exact_full_and_result","Output":"--- PASS: TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/safe_exact_full_and_result (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/safe_exact_full_and_result"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/project"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/project","Output":"=== RUN   TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/project\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/project","Output":"--- PASS: TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/project (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/project"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/m3d"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/m3d","Output":"=== RUN   TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/m3d\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/m3d","Output":"--- PASS: TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/m3d (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/m3d"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/rex"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/rex","Output":"=== RUN   TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/rex\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/rex","Output":"--- PASS: TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/rex (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks/rex"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks","Output":"--- PASS: TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldNativeSourceAdmissionRejectsRetainedHardlinks"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorRexSafeCapture"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorRexSafeCapture","Output":"=== RUN   TestCSTSavedFieldSelectorRexSafeCapture\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorRexSafeCapture/growth"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorRexSafeCapture/growth","Output":"=== RUN   TestCSTSavedFieldSelectorRexSafeCapture/growth\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorRexSafeCapture/growth","Output":"--- PASS: TestCSTSavedFieldSelectorRexSafeCapture/growth (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorRexSafeCapture/growth"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorRexSafeCapture/oversize"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorRexSafeCapture/oversize","Output":"=== RUN   TestCSTSavedFieldSelectorRexSafeCapture/oversize\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorRexSafeCapture/oversize","Output":"--- PASS: TestCSTSavedFieldSelectorRexSafeCapture/oversize (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorRexSafeCapture/oversize"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorRexSafeCapture/swap"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorRexSafeCapture/swap","Output":"=== RUN   TestCSTSavedFieldSelectorRexSafeCapture/swap\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorRexSafeCapture/swap","Output":"--- PASS: TestCSTSavedFieldSelectorRexSafeCapture/swap (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorRexSafeCapture/swap"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorRexSafeCapture","Output":"--- PASS: TestCSTSavedFieldSelectorRexSafeCapture (0.02s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorRexSafeCapture"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldProtectedHardlinkAfterDegradedFull"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldProtectedHardlinkAfterDegradedFull","Output":"=== RUN   TestCSTSavedFieldProtectedHardlinkAfterDegradedFull\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldProtectedHardlinkAfterDegradedFull","Output":"--- PASS: TestCSTSavedFieldProtectedHardlinkAfterDegradedFull (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldProtectedHardlinkAfterDegradedFull"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSelectorHardlinkCaptureFailurePreservesOutside"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSelectorHardlinkCaptureFailurePreservesOutside","Output":"=== RUN   TestCSTSelectorHardlinkCaptureFailurePreservesOutside\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSelectorHardlinkCaptureFailurePreservesOutside","Output":"    cst_saved_field_result_tree_probe_windows_test.go:5586: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSelectorHardlinkCaptureFailurePreservesOutside","Output":"--- SKIP: TestCSTSelectorHardlinkCaptureFailurePreservesOutside (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSelectorHardlinkCaptureFailurePreservesOutside"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorBindingSynthetic"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorBindingSynthetic","Output":"=== RUN   TestCSTSavedFieldSelectorBindingSynthetic\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorBindingSynthetic","Output":"    cst_saved_field_result_tree_probe_windows_test.go:5676: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorBindingSynthetic","Output":"--- SKIP: TestCSTSavedFieldSelectorBindingSynthetic (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorBindingSynthetic"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationHostFake"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationHostFake","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationHostFake\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationHostFake","Output":"    cst_saved_field_result_tree_probe_windows_test.go:7048: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationHostFake","Output":"--- SKIP: TestCSTSavedFieldASCIIPointCalibrationHostFake (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationHostFake"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationNative"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationNative","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationNative\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationNative","Output":"    cst_saved_field_result_tree_probe_windows_test.go:7305: native ASCII export needs separate one-run admission\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationNative","Output":"--- SKIP: TestCSTSavedFieldASCIIPointCalibrationNative (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationNative"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorBindingNative"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorBindingNative","Output":"=== RUN   TestCSTSavedFieldSelectorBindingNative\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorBindingNative","Output":"    cst_saved_field_result_tree_probe_windows_test.go:7386: native copied-project selector binding requires explicit one-run opt-in\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorBindingNative","Output":"--- SKIP: TestCSTSavedFieldSelectorBindingNative (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldSelectorBindingNative"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/synthetic_raw_wire_only"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/synthetic_raw_wire_only","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/synthetic_raw_wire_only\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/synthetic_raw_wire_only","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/synthetic_raw_wire_only (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/synthetic_raw_wire_only"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/stale_request"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/stale_request","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/stale_request\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/stale_request","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/stale_request (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/stale_request"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/wrong_section_id"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/wrong_section_id","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/wrong_section_id\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/wrong_section_id","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/wrong_section_id (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/wrong_section_id"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/foreign_frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/foreign_frame","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/foreign_frame\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/foreign_frame","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/foreign_frame (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/foreign_frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/wrong_selected_readback"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/wrong_selected_readback","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/wrong_selected_readback\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/wrong_selected_readback","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/wrong_selected_readback (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/wrong_selected_readback"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/false_selection"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/false_selection","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/false_selection\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/false_selection","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/false_selection (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/false_selection"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/unsettled"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/unsettled","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/unsettled\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/unsettled","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/unsettled (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/unsettled"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/forbidden_call"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/forbidden_call","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/forbidden_call\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/forbidden_call","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/forbidden_call (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/forbidden_call"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/changed_hash"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/changed_hash","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/changed_hash\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/changed_hash","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/changed_hash (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/changed_hash"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/missing_field"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/missing_field","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/missing_field\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/missing_field","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/missing_field (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/missing_field"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/unknown_field"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/unknown_field","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/unknown_field\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/unknown_field","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/unknown_field (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/unknown_field"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/wrong_repeat"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/wrong_repeat","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/wrong_repeat\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/wrong_repeat","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/wrong_repeat (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/wrong_repeat"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/producer_grammar_failure"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/producer_grammar_failure","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/producer_grammar_failure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/producer_grammar_failure","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/producer_grammar_failure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/producer_grammar_failure"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/output_oversized"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/output_oversized","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/output_oversized\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/output_oversized","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/output_oversized (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/output_oversized"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/partial"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/partial","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/partial\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/partial","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/partial (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/partial"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/oversized"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/oversized","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/oversized\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/oversized","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/oversized (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/oversized"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/trailing_json"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/trailing_json","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/trailing_json\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/trailing_json","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/trailing_json (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/trailing_json"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/duplicate_key"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/duplicate_key","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/duplicate_key\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/duplicate_key","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/duplicate_key (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/duplicate_key"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/unknown_status_not_echoed"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/unknown_status_not_echoed","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationReceipt/unknown_status_not_echoed\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/unknown_status_not_echoed","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt/unknown_status_not_echoed (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt/unknown_status_not_echoed"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationReceipt (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationReceipt"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationSection"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationSection","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationSection\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationSection","Output":"    cst_saved_field_result_tree_probe_windows_test.go:7955: explicit work-item root required for immutable native section fixture\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationSection","Output":"--- SKIP: TestCSTSavedFieldASCIIPointCalibrationSection (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationSection"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationContainedFake"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationContainedFake","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationContainedFake\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationContainedFake","Output":"    cst_saved_field_result_tree_probe_windows_test.go:8087: set MCPHUB_CST_PROBE_TEST_PYTHON to an explicit Python executable\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationContainedFake","Output":"--- SKIP: TestCSTSavedFieldASCIIPointCalibrationContainedFake (0.00s)\n","OutputType":"frame"}
+{"Action":"skip","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationContainedFake"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/headerless_synthetic_pipeline"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/headerless_synthetic_pipeline","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/headerless_synthetic_pipeline\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/headerless_synthetic_pipeline","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/headerless_synthetic_pipeline (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/headerless_synthetic_pipeline"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/producer_fake"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/producer_fake","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/producer_fake\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/producer_fake","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/producer_fake (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/producer_fake"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/plausible_header"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/plausible_header","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/plausible_header\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/plausible_header","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/plausible_header (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/plausible_header"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/bom"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/bom","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/bom\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/bom","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/bom (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/bom"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/non_ascii"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/non_ascii","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/non_ascii\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/non_ascii","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/non_ascii (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/non_ascii"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/nan"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/nan","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/nan\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/nan","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/nan (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/nan"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/overflow"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/overflow","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/overflow\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/overflow","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/overflow (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/overflow"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/hex"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/hex","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/hex\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/hex","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/hex (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/hex"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/bare_cr"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/bare_cr","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/bare_cr\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/bare_cr","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/bare_cr (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/bare_cr"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/blank_line"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/blank_line","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/blank_line\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/blank_line","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/blank_line (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/blank_line"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/eight_columns"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/eight_columns","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/eight_columns\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/eight_columns","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/eight_columns (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/eight_columns"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/duplicate_point"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/duplicate_point","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/duplicate_point\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/duplicate_point","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/duplicate_point (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/duplicate_point"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/swapped_points"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/swapped_points","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/swapped_points\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/swapped_points","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/swapped_points (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/swapped_points"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/rounded_coordinate"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/rounded_coordinate","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/rounded_coordinate\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/rounded_coordinate","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/rounded_coordinate (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/rounded_coordinate"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/repeat_drift"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/repeat_drift","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/repeat_drift\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/repeat_drift","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/repeat_drift (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/repeat_drift"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/metre_exact_rational_independent_oracle"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/metre_exact_rational_independent_oracle","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibrationParser/metre_exact_rational_independent_oracle\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/metre_exact_rational_independent_oracle","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser/metre_exact_rational_independent_oracle (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser/metre_exact_rational_independent_oracle"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibrationParser (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibrationParser"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibration\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/synthetic_unique_common_map"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/synthetic_unique_common_map","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibration/synthetic_unique_common_map\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/synthetic_unique_common_map","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibration/synthetic_unique_common_map (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/synthetic_unique_common_map"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/one_bit"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/one_bit","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibration/one_bit\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/one_bit","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibration/one_bit (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/one_bit"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/two_cells"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/two_cells","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibration/two_cells\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/two_cells","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibration/two_cells (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/two_cells"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/multiple_maps"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/multiple_maps","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibration/multiple_maps\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/multiple_maps","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibration/multiple_maps (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/multiple_maps"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/E_signed_zero_witness"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/E_signed_zero_witness","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibration/E_signed_zero_witness\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/E_signed_zero_witness","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibration/E_signed_zero_witness (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/E_signed_zero_witness"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/H_signed_zero_witness"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/H_signed_zero_witness","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibration/H_signed_zero_witness\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/H_signed_zero_witness","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibration/H_signed_zero_witness (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/H_signed_zero_witness"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/signed_zero_bits"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/signed_zero_bits","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibration/signed_zero_bits\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/signed_zero_bits","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibration/signed_zero_bits (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/signed_zero_bits"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/nan"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/nan","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibration/nan\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/nan","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibration/nan (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/nan"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/infinite_query"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/infinite_query","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibration/infinite_query\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/infinite_query","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibration/infinite_query (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/infinite_query"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/frame_specific_permutation"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/frame_specific_permutation","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibration/frame_specific_permutation\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/frame_specific_permutation","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibration/frame_specific_permutation (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/frame_specific_permutation"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/missing_query"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/missing_query","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibration/missing_query\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/missing_query","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibration/missing_query (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/missing_query"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/singleton_ascii"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/singleton_ascii","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibration/singleton_ascii\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/singleton_ascii","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibration/singleton_ascii (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/singleton_ascii"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/duplicate_in_one_row_still_unique"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/duplicate_in_one_row_still_unique","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibration/duplicate_in_one_row_still_unique\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/duplicate_in_one_row_still_unique","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibration/duplicate_in_one_row_still_unique (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/duplicate_in_one_row_still_unique"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/metre_one_round"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/metre_one_round","Output":"=== RUN   TestCSTSavedFieldASCIIPointCalibration/metre_one_round\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/metre_one_round","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibration/metre_one_round (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration/metre_one_round"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration","Output":"--- PASS: TestCSTSavedFieldASCIIPointCalibration (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestCSTSavedFieldASCIIPointCalibration"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestFakeScheduler_CreateExportDeleteRestoreContract"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestFakeScheduler_CreateExportDeleteRestoreContract","Output":"=== RUN   TestFakeScheduler_CreateExportDeleteRestoreContract\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestFakeScheduler_CreateExportDeleteRestoreContract","Output":"--- PASS: TestFakeScheduler_CreateExportDeleteRestoreContract (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestFakeScheduler_CreateExportDeleteRestoreContract"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestFakeScheduler_FailedCreateDoesNotPublishTask"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestFakeScheduler_FailedCreateDoesNotPublishTask","Output":"=== RUN   TestFakeScheduler_FailedCreateDoesNotPublishTask\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestFakeScheduler_FailedCreateDoesNotPublishTask","Output":"--- PASS: TestFakeScheduler_FailedCreateDoesNotPublishTask (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestFakeScheduler_FailedCreateDoesNotPublishTask"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e","Test":"TestE2E_LazyRegisterFullLifecycle"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestE2E_LazyRegisterFullLifecycle","Output":"=== RUN   TestE2E_LazyRegisterFullLifecycle\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestE2E_LazyRegisterFullLifecycle","Output":"✓ deleted scheduler task mcp-local-hub-lsp-517e1d91-python\n"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Test":"TestE2E_LazyRegisterFullLifecycle","Output":"--- PASS: TestE2E_LazyRegisterFullLifecycle (0.19s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e","Test":"TestE2E_LazyRegisterFullLifecycle"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e"}

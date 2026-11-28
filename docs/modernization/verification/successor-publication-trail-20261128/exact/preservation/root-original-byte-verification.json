@@ -1,0 +1,1892 @@
+{
+    "schema":  "closed-trail-root-original-byte-verification-v1",
+    "status":  "MATCH",
+    "spec_sha256":  "f4bb396ec5436ed104ce3602c01d0dd11a66abe355d3cbcb8a3364160e248945",
+    "files":  209,
+    "matched":  209,
+    "rows":  [
+                 {
+                     "role_path":  "events/stage-v11/receipt.json",
+                     "expected_bytes":  34287,
+                     "actual_bytes":  34287,
+                     "expected_sha256":  "b9cda69df6f2052c33f3f3504ac93613d4bc3371a41efaca6a5e4e80ae68b192",
+                     "actual_sha256":  "b9cda69df6f2052c33f3f3504ac93613d4bc3371a41efaca6a5e4e80ae68b192",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/stage-v11/plan.json",
+                     "expected_bytes":  4010,
+                     "actual_bytes":  4010,
+                     "expected_sha256":  "3e0bd76278be9de1c4eb87786f46de33fde7a9f858a7e1e213057791dddbbbf3",
+                     "actual_sha256":  "3e0bd76278be9de1c4eb87786f46de33fde7a9f858a7e1e213057791dddbbbf3",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/stage-v12/receipt.json",
+                     "expected_bytes":  78339,
+                     "actual_bytes":  78339,
+                     "expected_sha256":  "f28d92a27baf20b005d6ecb08a378ec26244dc4c2949cf1f137629a63206760e",
+                     "actual_sha256":  "f28d92a27baf20b005d6ecb08a378ec26244dc4c2949cf1f137629a63206760e",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/stage-v12/plan.json",
+                     "expected_bytes":  3381,
+                     "actual_bytes":  3381,
+                     "expected_sha256":  "ac6474cb067179b26737992e634e410ae6599128512fda87cd28f5a65463f5dd",
+                     "actual_sha256":  "ac6474cb067179b26737992e634e410ae6599128512fda87cd28f5a65463f5dd",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/stage-v13/receipt.json",
+                     "expected_bytes":  87712,
+                     "actual_bytes":  87712,
+                     "expected_sha256":  "e9e45e2ca9a5c5fee82f59f87d2fae12b5f08c92bdcc0580986b036113fbd372",
+                     "actual_sha256":  "e9e45e2ca9a5c5fee82f59f87d2fae12b5f08c92bdcc0580986b036113fbd372",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/stage-v13/plan.json",
+                     "expected_bytes":  2669,
+                     "actual_bytes":  2669,
+                     "expected_sha256":  "b324e56c54585340ed370fc320b1e084f9c41ffbfe248e04e94f6500644658a7",
+                     "actual_sha256":  "b324e56c54585340ed370fc320b1e084f9c41ffbfe248e04e94f6500644658a7",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/stage-v13/root.json",
+                     "expected_bytes":  243,
+                     "actual_bytes":  243,
+                     "expected_sha256":  "39ea382d4f689219e2d99d961967d766d6e1755981b1131fdd6f6f8d1e05aa9f",
+                     "actual_sha256":  "39ea382d4f689219e2d99d961967d766d6e1755981b1131fdd6f6f8d1e05aa9f",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/stage-v13/outer.json",
+                     "expected_bytes":  482,
+                     "actual_bytes":  482,
+                     "expected_sha256":  "235027c685bbf505adcd7cee8f5b3b460450e2e1e4fbe092724d464dd63f11bf",
+                     "actual_sha256":  "235027c685bbf505adcd7cee8f5b3b460450e2e1e4fbe092724d464dd63f11bf",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/stage-v13/root-data-audit.json",
+                     "expected_bytes":  9624,
+                     "actual_bytes":  9624,
+                     "expected_sha256":  "de6d6d20e6ecd828a8bc8ca50e4207595c3ddd1dbb19eaf11b328884a8ea2120",
+                     "actual_sha256":  "de6d6d20e6ecd828a8bc8ca50e4207595c3ddd1dbb19eaf11b328884a8ea2120",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/commit-v7/receipt.json",
+                     "expected_bytes":  49710,
+                     "actual_bytes":  49710,
+                     "expected_sha256":  "d94591a33c5de636849b07985529cedcd71b47ac6f5dbd8d40fd4032f08d9a93",
+                     "actual_sha256":  "d94591a33c5de636849b07985529cedcd71b47ac6f5dbd8d40fd4032f08d9a93",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/commit-v7/plan.json",
+                     "expected_bytes":  1936,
+                     "actual_bytes":  1936,
+                     "expected_sha256":  "7cae01bb4a043dbc1433780d82ab3fa1eb567dab9bc0e718277aa3d9737700a9",
+                     "actual_sha256":  "7cae01bb4a043dbc1433780d82ab3fa1eb567dab9bc0e718277aa3d9737700a9",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/commit-v8/receipt.json",
+                     "expected_bytes":  45944,
+                     "actual_bytes":  45944,
+                     "expected_sha256":  "3ad8230876e52e048d289b9dc97e710c9cca0ce2278f2291f6d394c8a8a5eefa",
+                     "actual_sha256":  "3ad8230876e52e048d289b9dc97e710c9cca0ce2278f2291f6d394c8a8a5eefa",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/commit-v8/plan.json",
+                     "expected_bytes":  1553,
+                     "actual_bytes":  1553,
+                     "expected_sha256":  "7e695bab3757aa3f4384112a5f031cade81582f4bc7da789f246722221ea276b",
+                     "actual_sha256":  "7e695bab3757aa3f4384112a5f031cade81582f4bc7da789f246722221ea276b",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/commit-v8/root.json",
+                     "expected_bytes":  243,
+                     "actual_bytes":  243,
+                     "expected_sha256":  "6693f63fbf509c2a759a977fe3cf19367dc06c1f9988e8760fae77e1a44556b9",
+                     "actual_sha256":  "6693f63fbf509c2a759a977fe3cf19367dc06c1f9988e8760fae77e1a44556b9",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/commit-v8/outer.json",
+                     "expected_bytes":  482,
+                     "actual_bytes":  482,
+                     "expected_sha256":  "bfed9835cc2cfdb53cb489968aaf8f4f86871960f5515aaeb4a77092db10cf47",
+                     "actual_sha256":  "bfed9835cc2cfdb53cb489968aaf8f4f86871960f5515aaeb4a77092db10cf47",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/commit-v8/root-data-audit.json",
+                     "expected_bytes":  5774,
+                     "actual_bytes":  5774,
+                     "expected_sha256":  "4a20bf9f6b6050c537d5a98e5d848c13eb1e0806be8569cd12aa30119f0f4235",
+                     "actual_sha256":  "4a20bf9f6b6050c537d5a98e5d848c13eb1e0806be8569cd12aa30119f0f4235",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/stage-v14/receipt.json",
+                     "expected_bytes":  116937,
+                     "actual_bytes":  116937,
+                     "expected_sha256":  "b3c099bfd8c0c50d0e4433f0b14b63784b55001853f30f360e142c4484c8d889",
+                     "actual_sha256":  "b3c099bfd8c0c50d0e4433f0b14b63784b55001853f30f360e142c4484c8d889",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/stage-v14/plan.json",
+                     "expected_bytes":  14016,
+                     "actual_bytes":  14016,
+                     "expected_sha256":  "e9e87fbb844f8eb3300b2b2756b4aa8a4c5f4b8e6a77bcee62adf9cc7cededcc",
+                     "actual_sha256":  "e9e87fbb844f8eb3300b2b2756b4aa8a4c5f4b8e6a77bcee62adf9cc7cededcc",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/stage-v14/root.json",
+                     "expected_bytes":  242,
+                     "actual_bytes":  242,
+                     "expected_sha256":  "f9e9b349fc4a151ac984fc096d5a63b328240f7abf4b58b2b4277ef39e657550",
+                     "actual_sha256":  "f9e9b349fc4a151ac984fc096d5a63b328240f7abf4b58b2b4277ef39e657550",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/stage-v14/outer.json",
+                     "expected_bytes":  482,
+                     "actual_bytes":  482,
+                     "expected_sha256":  "9d3f9b8a09226e8bb6f8df56863e4813806188e04f8f212f4e78dba73dcd6de8",
+                     "actual_sha256":  "9d3f9b8a09226e8bb6f8df56863e4813806188e04f8f212f4e78dba73dcd6de8",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/commit-v9/receipt.json",
+                     "expected_bytes":  93008,
+                     "actual_bytes":  93008,
+                     "expected_sha256":  "e91c35780b63e7db1cb3d153031efe53e886750399d32b916d252fdf15af7a89",
+                     "actual_sha256":  "e91c35780b63e7db1cb3d153031efe53e886750399d32b916d252fdf15af7a89",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/commit-v9/plan.json",
+                     "expected_bytes":  7317,
+                     "actual_bytes":  7317,
+                     "expected_sha256":  "10a8e14d049aa675cf01b3bfc51a204722802c27d8b83881796ed88159d4d80c",
+                     "actual_sha256":  "10a8e14d049aa675cf01b3bfc51a204722802c27d8b83881796ed88159d4d80c",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/commit-v9/root.json",
+                     "expected_bytes":  243,
+                     "actual_bytes":  243,
+                     "expected_sha256":  "8110e1c72921fd06ab933ae993e7a33d6ee90bcb8d7958d99bb2377ada500c4d",
+                     "actual_sha256":  "8110e1c72921fd06ab933ae993e7a33d6ee90bcb8d7958d99bb2377ada500c4d",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/commit-v9/outer.json",
+                     "expected_bytes":  482,
+                     "actual_bytes":  482,
+                     "expected_sha256":  "665fb5de424358b042828516726907df5a2011b37a7cf06d2b6cd5648367c849",
+                     "actual_sha256":  "665fb5de424358b042828516726907df5a2011b37a7cf06d2b6cd5648367c849",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/push-v7/receipt.json",
+                     "expected_bytes":  59797,
+                     "actual_bytes":  59797,
+                     "expected_sha256":  "bbcd6a775c7eed9c40286dd93ffc1e04fa32a5e8269140fda3cf3e6380c7ed72",
+                     "actual_sha256":  "bbcd6a775c7eed9c40286dd93ffc1e04fa32a5e8269140fda3cf3e6380c7ed72",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/push-v7/plan.json",
+                     "expected_bytes":  7209,
+                     "actual_bytes":  7209,
+                     "expected_sha256":  "bbf00ec8374393bdc056d6af8e057e1fc0085454682f41e56f39f4c1dc0cf231",
+                     "actual_sha256":  "bbf00ec8374393bdc056d6af8e057e1fc0085454682f41e56f39f4c1dc0cf231",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/push-v7/root.json",
+                     "expected_bytes":  243,
+                     "actual_bytes":  243,
+                     "expected_sha256":  "c74394433850611d1e01d32ed667a4f6b7026c9704e566a635acf8eecd688013",
+                     "actual_sha256":  "c74394433850611d1e01d32ed667a4f6b7026c9704e566a635acf8eecd688013",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/push-v7/outer.json",
+                     "expected_bytes":  480,
+                     "actual_bytes":  480,
+                     "expected_sha256":  "4ac60fb8b758eac6b0eed9c92e0b3d96d28de2f6fb2f8359846da36ff8eaf1fe",
+                     "actual_sha256":  "4ac60fb8b758eac6b0eed9c92e0b3d96d28de2f6fb2f8359846da36ff8eaf1fe",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/stage-v15/receipt.json",
+                     "expected_bytes":  86940,
+                     "actual_bytes":  86940,
+                     "expected_sha256":  "3ae5e72a2fc79739839979305d464a4f2afe41e6448b0a4edb79dc384ed96188",
+                     "actual_sha256":  "3ae5e72a2fc79739839979305d464a4f2afe41e6448b0a4edb79dc384ed96188",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/stage-v15/plan.json",
+                     "expected_bytes":  2711,
+                     "actual_bytes":  2711,
+                     "expected_sha256":  "eeae16b52a14d695d266badcaf6eace9ec29596fdf307a1db46838c3eb4037ed",
+                     "actual_sha256":  "eeae16b52a14d695d266badcaf6eace9ec29596fdf307a1db46838c3eb4037ed",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/stage-v15/root.json",
+                     "expected_bytes":  243,
+                     "actual_bytes":  243,
+                     "expected_sha256":  "722932e2f5e3ddf81b0d31da8f324cb3c086c4a58652d4cc8d122b4892bdc868",
+                     "actual_sha256":  "722932e2f5e3ddf81b0d31da8f324cb3c086c4a58652d4cc8d122b4892bdc868",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/stage-v15/outer.json",
+                     "expected_bytes":  482,
+                     "actual_bytes":  482,
+                     "expected_sha256":  "c710fbb87f243d43a5e79be0fe8924107d2400a84ab439a5c5b8082ffe13180e",
+                     "actual_sha256":  "c710fbb87f243d43a5e79be0fe8924107d2400a84ab439a5c5b8082ffe13180e",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/commit-v10/receipt.json",
+                     "expected_bytes":  45572,
+                     "actual_bytes":  45572,
+                     "expected_sha256":  "2cb3880b49e29383e462f0416c22776dee7f7df3184927e1d6115a170d6a446b",
+                     "actual_sha256":  "2cb3880b49e29383e462f0416c22776dee7f7df3184927e1d6115a170d6a446b",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/commit-v10/plan.json",
+                     "expected_bytes":  1536,
+                     "actual_bytes":  1536,
+                     "expected_sha256":  "84d3b2b7ddedda87e1c26eae15b0e095215545ec26d6a2388e9bc0e4f1986a83",
+                     "actual_sha256":  "84d3b2b7ddedda87e1c26eae15b0e095215545ec26d6a2388e9bc0e4f1986a83",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/commit-v10/root.json",
+                     "expected_bytes":  244,
+                     "actual_bytes":  244,
+                     "expected_sha256":  "50104f38fc28d467ee062ff3cb518c00a3ef96b1665633db0efa5036dd920646",
+                     "actual_sha256":  "50104f38fc28d467ee062ff3cb518c00a3ef96b1665633db0efa5036dd920646",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/commit-v10/outer.json",
+                     "expected_bytes":  483,
+                     "actual_bytes":  483,
+                     "expected_sha256":  "4a7d54506af92a377c4be8ac349ca553d8a5c3bbee0de92d73321f2446a53eec",
+                     "actual_sha256":  "4a7d54506af92a377c4be8ac349ca553d8a5c3bbee0de92d73321f2446a53eec",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "warm-cache/parent.json",
+                     "expected_bytes":  1480,
+                     "actual_bytes":  1480,
+                     "expected_sha256":  "119d72b5603cd078d538c0e396d7e6fcfee592daa1c851f8aa59a1d15a5e697c",
+                     "actual_sha256":  "119d72b5603cd078d538c0e396d7e6fcfee592daa1c851f8aa59a1d15a5e697c",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "warm-cache/execution.json",
+                     "expected_bytes":  4685871,
+                     "actual_bytes":  4685871,
+                     "expected_sha256":  "7f6cd144b02ecc796a5fa1506c19b72d50a6a65816b508a902689535c13671cd",
+                     "actual_sha256":  "7f6cd144b02ecc796a5fa1506c19b72d50a6a65816b508a902689535c13671cd",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "warm-cache/plan.json",
+                     "expected_bytes":  651556,
+                     "actual_bytes":  651556,
+                     "expected_sha256":  "bf28e617ee0e319ec4c085d13ee0c16b7536552bac92f28070138835d8286fb6",
+                     "actual_sha256":  "bf28e617ee0e319ec4c085d13ee0c16b7536552bac92f28070138835d8286fb6",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "warm-cache/outer-original.json",
+                     "expected_bytes":  438,
+                     "actual_bytes":  438,
+                     "expected_sha256":  "3f07c4eab0445beb0140749186fc8a3bb906dfb628da584756ec59d4c96274cb",
+                     "actual_sha256":  "3f07c4eab0445beb0140749186fc8a3bb906dfb628da584756ec59d4c96274cb",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "warm-cache/cache-copy-receipt.json",
+                     "expected_bytes":  2011,
+                     "actual_bytes":  2011,
+                     "expected_sha256":  "e930b1cd6ed2a386b2d3b79185a72bf1c50b409c9de0f57ef2b294696c49a763",
+                     "actual_sha256":  "e930b1cd6ed2a386b2d3b79185a72bf1c50b409c9de0f57ef2b294696c49a763",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "preservation/root-reconstruction-trash-receiving.json",
+                     "expected_bytes":  987,
+                     "actual_bytes":  987,
+                     "expected_sha256":  "215143637aafe87ff3d1ae4c2713c1d452f5c86b319040d34e72f04518989e92",
+                     "actual_sha256":  "215143637aafe87ff3d1ae4c2713c1d452f5c86b319040d34e72f04518989e92",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "warm-cache/root-data-audit.json",
+                     "expected_bytes":  4412,
+                     "actual_bytes":  4412,
+                     "expected_sha256":  "9e418d2bcf526571331b1052b8660070e159978fcc4fddeccee9213474a1a3ce",
+                     "actual_sha256":  "9e418d2bcf526571331b1052b8660070e159978fcc4fddeccee9213474a1a3ce",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "sources/freeze_warm_plan.ps1",
+                     "expected_bytes":  8077,
+                     "actual_bytes":  8077,
+                     "expected_sha256":  "c48f7a6021a80fc2e79945bae41e5335d0750b2ea669a7ae7ceb448e9aa15907",
+                     "actual_sha256":  "c48f7a6021a80fc2e79945bae41e5335d0750b2ea669a7ae7ceb448e9aa15907",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "sources/invoke_warm_build.ps1",
+                     "expected_bytes":  1808,
+                     "actual_bytes":  1808,
+                     "expected_sha256":  "e1cbac874f4f219783e7a62de1daaae04032213d3d1fe1ed1e4ffe2646467401",
+                     "actual_sha256":  "e1cbac874f4f219783e7a62de1daaae04032213d3d1fe1ed1e4ffe2646467401",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 },
+                 {
+                     "role_path":  "events/stage-v11/root.json",
+                     "expected_bytes":  243,
+                     "actual_bytes":  243,
+                     "expected_sha256":  "716b5f49a8744dbba0ebf9accc014b4647d417a01315bb4ff7e14fc311f77a3a",
+                     "actual_sha256":  "716b5f49a8744dbba0ebf9accc014b4647d417a01315bb4ff7e14fc311f77a3a",
+                     "matched":  true,
+                     "basis":  "complete_text_and_actual_size_root_hash_review_pending"
+                 },
+                 {
+                     "role_path":  "events/stage-v11/outer.json",
+                     "expected_bytes":  481,
+                     "actual_bytes":  481,
+                     "expected_sha256":  "2bfe816f9b42aefa691eebe7a07f063b49ae81e70d9430cac3d39d8abe1c66cc",
+                     "actual_sha256":  "2bfe816f9b42aefa691eebe7a07f063b49ae81e70d9430cac3d39d8abe1c66cc",
+                     "matched":  true,
+                     "basis":  "complete_text_and_actual_size_root_hash_review_pending"
+                 },
+                 {
+                     "role_path":  "events/stage-v12/root.json",
+                     "expected_bytes":  243,
+                     "actual_bytes":  243,
+                     "expected_sha256":  "bf4a809143865e6c7b527390795046f7950b0cb12bdc544aa108097e4bd9c73b",
+                     "actual_sha256":  "bf4a809143865e6c7b527390795046f7950b0cb12bdc544aa108097e4bd9c73b",
+                     "matched":  true,
+                     "basis":  "complete_text_and_actual_size_root_hash_review_pending"
+                 },
+                 {
+                     "role_path":  "events/stage-v12/outer.json",
+                     "expected_bytes":  482,
+                     "actual_bytes":  482,
+                     "expected_sha256":  "83b9d234b656a314130d90fd2964c04c9666ba7891e20e4f80aecfb42a3f6cba",
+                     "actual_sha256":  "83b9d234b656a314130d90fd2964c04c9666ba7891e20e4f80aecfb42a3f6cba",
+                     "matched":  true,
+                     "basis":  "complete_text_and_actual_size_root_hash_review_pending"
+                 },
+                 {
+                     "role_path":  "events/commit-v7/root.json",
+                     "expected_bytes":  243,
+                     "actual_bytes":  243,
+                     "expected_sha256":  "b7a4c0b8a16e587c72d90e628683e7fc2f18866cbad48c6df629a8fab468df71",
+                     "actual_sha256":  "b7a4c0b8a16e587c72d90e628683e7fc2f18866cbad48c6df629a8fab468df71",
+                     "matched":  true,
+                     "basis":  "complete_text_and_actual_size_root_hash_review_pending"
+                 },
+                 {
+                     "role_path":  "events/commit-v7/outer.json",
+                     "expected_bytes":  482,
+                     "actual_bytes":  482,
+                     "expected_sha256":  "e2e46c87030ddb8ba1b1c242e2c0e1f1cbefcee5d86253bb0abeca416c96354c",
+                     "actual_sha256":  "e2e46c87030ddb8ba1b1c242e2c0e1f1cbefcee5d86253bb0abeca416c96354c",
+                     "matched":  true,
+                     "basis":  "complete_text_and_actual_size_root_hash_review_pending"
+                 },
+                 {
+                     "role_path":  "events/stage-v14/root-data-audit.json",
+                     "expected_bytes":  22452,
+                     "actual_bytes":  22452,
+                     "expected_sha256":  "25b343ff7c11b7420e5cc2f78ed71a4e650c1b5d5a2ca9d7135530d0cf43b6b3",
+                     "actual_sha256":  "25b343ff7c11b7420e5cc2f78ed71a4e650c1b5d5a2ca9d7135530d0cf43b6b3",
+                     "matched":  true,
+                     "basis":  "complete_text_and_actual_size_root_hash_review_pending"
+                 },
+                 {
+                     "role_path":  "events/commit-v9/root-data-audit.json",
+                     "expected_bytes":  8176,
+                     "actual_bytes":  8176,
+                     "expected_sha256":  "22e41783b5ffd1f3d07f05bd91c6501ae22943bf605f7a521ec412d5c735fbd9",
+                     "actual_sha256":  "22e41783b5ffd1f3d07f05bd91c6501ae22943bf605f7a521ec412d5c735fbd9",
+                     "matched":  true,
+                     "basis":  "complete_text_and_actual_size_root_hash_review_pending"
+                 },
+                 {
+                     "role_path":  "events/push-v7/root-data-audit.json",
+                     "expected_bytes":  6529,
+                     "actual_bytes":  6529,
+                     "expected_sha256":  "c0df640542cc9d2878454ab9bf60432d1baacfeda76ff959906866e9035b1723",
+                     "actual_sha256":  "c0df640542cc9d2878454ab9bf60432d1baacfeda76ff959906866e9035b1723",
+                     "matched":  true,
+                     "basis":  "complete_text_and_actual_size_root_hash_review_pending"
+                 },
+                 {
+                     "role_path":  "events/stage-v15/root-data-audit.json",
+                     "expected_bytes":  9743,
+                     "actual_bytes":  9743,
+                     "expected_sha256":  "ffdcda7aaa46884cd1b4c6683e74d5a19e2fe3108eb32d242661815350a9eb99",
+                     "actual_sha256":  "ffdcda7aaa46884cd1b4c6683e74d5a19e2fe3108eb32d242661815350a9eb99",
+                     "matched":  true,
+                     "basis":  "complete_text_and_actual_size_root_hash_review_pending"
+                 },
+                 {
+                     "role_path":  "events/commit-v10/root-data-audit.json",
+                     "expected_bytes":  5762,
+                     "actual_bytes":  5762,
+                     "expected_sha256":  "1312539ab4afa62af3d481e92941a5d04758716c031d053192353bb1aed192ae",
+                     "actual_sha256":  "1312539ab4afa62af3d481e92941a5d04758716c031d053192353bb1aed192ae",
+                     "matched":  true,
+                     "basis":  "complete_text_and_actual_size_root_hash_review_pending"
+                 },
+                 {
+                     "role_path":  "sources/launch_helper_cache_warm_v7.ps1",
+                     "expected_bytes":  3685,
+                     "actual_bytes":  3685,
+                     "expected_sha256":  "370da6f9fea13700aae8cd9b2d9e9e9e9618fa918413717273a23a9268ee5502",
+                     "actual_sha256":  "370da6f9fea13700aae8cd9b2d9e9e9e9618fa918413717273a23a9268ee5502",
+                     "matched":  true,
+                     "basis":  "complete_text_and_actual_size_root_hash_review_pending"
+                 },
+                 {
+                     "role_path":  "sources/receive_warm_cache_v7.ps1",
+                     "expected_bytes":  5611,
+                     "actual_bytes":  5611,
+                     "expected_sha256":  "3ff67e9bfbcd7a85b02f5fa60fb2792d996570f6639453756075426b329d3a39",
+                     "actual_sha256":  "3ff67e9bfbcd7a85b02f5fa60fb2792d996570f6639453756075426b329d3a39",
+                     "matched":  true,
+                     "basis":  "complete_text_and_actual_size_root_hash_review_pending"
+                 },
+                 {
+                     "role_path":  "sources/receive_publication_original_data.ps1",
+                     "expected_bytes":  4122,
+                     "actual_bytes":  4122,
+                     "expected_sha256":  "bd67d604d69fcd0b7195a1fc07e77748c5c1476a05b718c3e9eef39cfe36f604",
+                     "actual_sha256":  "bd67d604d69fcd0b7195a1fc07e77748c5c1476a05b718c3e9eef39cfe36f604",
+                     "matched":  true,
+                     "basis":  "complete_text_and_actual_size_root_hash_review_pending"
+                 },
+                 {
+                     "role_path":  "preservation/full-v6-root-data-verification.json",
+                     "expected_bytes":  1520,
+                     "actual_bytes":  1520,
+                     "expected_sha256":  "d86eef7e56823fc5a7c10f984e582e08066806eb106a15a05b64b1ad53f86135",
+                     "actual_sha256":  "d86eef7e56823fc5a7c10f984e582e08066806eb106a15a05b64b1ad53f86135",
+                     "matched":  true,
+                     "basis":  "complete_text_and_actual_size_root_hash_review_pending"
+                 },
+                 {
+                     "role_path":  "captures/stage-v11/head.stdout.txt",
+                     "expected_bytes":  41,
+                     "actual_bytes":  41,
+                     "expected_sha256":  "f8f914df28020a535334faa62a257c545a4843351fb1e121c19836bf82538d9c",
+                     "actual_sha256":  "f8f914df28020a535334faa62a257c545a4843351fb1e121c19836bf82538d9c",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v11/head.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v11/starting-worktree-state.stdout.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v11/starting-worktree-state.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v11/reviewed-patch-preimage-check.stdout.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v11/reviewed-patch-preimage-check.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v11/apply-minimal-successor-tests.stdout.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v11/apply-minimal-successor-tests.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v12/head.stdout.txt",
+                     "expected_bytes":  41,
+                     "actual_bytes":  41,
+                     "expected_sha256":  "f8f914df28020a535334faa62a257c545a4843351fb1e121c19836bf82538d9c",
+                     "actual_sha256":  "f8f914df28020a535334faa62a257c545a4843351fb1e121c19836bf82538d9c",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v12/head.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v12/starting-worktree-state.stdout.txt",
+                     "expected_bytes":  438,
+                     "actual_bytes":  438,
+                     "expected_sha256":  "8331fe88fd02ec9b930003ac970ef5b5c17b38ceb324f70a7eb34fae0e46fdc8",
+                     "actual_sha256":  "8331fe88fd02ec9b930003ac970ef5b5c17b38ceb324f70a7eb34fae0e46fdc8",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v12/starting-worktree-state.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v12/gofmt-read-only-check.stdout.txt",
+                     "expected_bytes":  65,
+                     "actual_bytes":  65,
+                     "expected_sha256":  "c7746977932693786f0565c6cb92cf53d40ec2b965d38876750e81e411ce26de",
+                     "actual_sha256":  "c7746977932693786f0565c6cb92cf53d40ec2b965d38876750e81e411ce26de",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v12/gofmt-read-only-check.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v12/test-patch-whitespace.stdout.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v12/test-patch-whitespace.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v12/stage-seven-reviewed-test-files.stdout.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v12/stage-seven-reviewed-test-files.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v12/staged-name-status.stdout.txt",
+                     "expected_bytes":  431,
+                     "actual_bytes":  431,
+                     "expected_sha256":  "26084b8a5d453f935b8de694f8202a8fbb148b386ae2486492e028846db5b01f",
+                     "actual_sha256":  "26084b8a5d453f935b8de694f8202a8fbb148b386ae2486492e028846db5b01f",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v12/staged-name-status.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v12/reviewed-staged-tree.stdout.txt",
+                     "expected_bytes":  41,
+                     "actual_bytes":  41,
+                     "expected_sha256":  "f57b1cc40d98d1d4a97fa80809dc0f42a2104942070ec2f4b0688563f5aa527b",
+                     "actual_sha256":  "f57b1cc40d98d1d4a97fa80809dc0f42a2104942070ec2f4b0688563f5aa527b",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v12/reviewed-staged-tree.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v12/staged-stat.stdout.txt",
+                     "expected_bytes":  505,
+                     "actual_bytes":  505,
+                     "expected_sha256":  "951bab4cef128fe35e74bfbc0aeab371929973f8d523f7f9f183a538a36564c5",
+                     "actual_sha256":  "951bab4cef128fe35e74bfbc0aeab371929973f8d523f7f9f183a538a36564c5",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v12/staged-stat.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v12/staged-worktree-state.stdout.txt",
+                     "expected_bytes":  438,
+                     "actual_bytes":  438,
+                     "expected_sha256":  "40d614dc75f615c13bae63471cb3616b6e7d687e84317db425df392038c8fc0e",
+                     "actual_sha256":  "40d614dc75f615c13bae63471cb3616b6e7d687e84317db425df392038c8fc0e",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v12/staged-worktree-state.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v13/head.stdout.txt",
+                     "expected_bytes":  41,
+                     "actual_bytes":  41,
+                     "expected_sha256":  "5ebe6358d1f36ad1c8e34db1926b80e71ec95368410d43b6a3e540a04cf4d65a",
+                     "actual_sha256":  "5ebe6358d1f36ad1c8e34db1926b80e71ec95368410d43b6a3e540a04cf4d65a",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v13/head.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v13/starting-worktree-state.stdout.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v13/starting-worktree-state.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v13/reviewed-test-patch-check.stdout.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v13/reviewed-test-patch-check.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v13/apply-two-source-requirement-literals.stdout.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v13/apply-two-source-requirement-literals.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v13/gofmt-read-only-check.stdout.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v13/gofmt-read-only-check.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v13/test-patch-whitespace.stdout.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v13/test-patch-whitespace.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v13/stage-reviewed-test-input.stdout.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v13/stage-reviewed-test-input.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v13/staged-name-status.stdout.txt",
+                     "expected_bytes":  38,
+                     "actual_bytes":  38,
+                     "expected_sha256":  "0af7cac03348933c738091470280747e3c031a1d735f9fdee15ab4961e816fa7",
+                     "actual_sha256":  "0af7cac03348933c738091470280747e3c031a1d735f9fdee15ab4961e816fa7",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v13/staged-name-status.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v13/reviewed-staged-tree.stdout.txt",
+                     "expected_bytes":  41,
+                     "actual_bytes":  41,
+                     "expected_sha256":  "72c193aae7b6179d784a27e615a2ab5243ac24209887fdec7c2b2a61b30bf601",
+                     "actual_sha256":  "72c193aae7b6179d784a27e615a2ab5243ac24209887fdec7c2b2a61b30bf601",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v13/reviewed-staged-tree.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v13/staged-stat.stdout.txt",
+                     "expected_bytes":  95,
+                     "actual_bytes":  95,
+                     "expected_sha256":  "57d968e45f65e763b1543a8786aa21350c89f7bd91b7b80b35104b314548655b",
+                     "actual_sha256":  "57d968e45f65e763b1543a8786aa21350c89f7bd91b7b80b35104b314548655b",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v13/staged-stat.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v13/staged-worktree-state.stdout.txt",
+                     "expected_bytes":  39,
+                     "actual_bytes":  39,
+                     "expected_sha256":  "a39f7d19ef04c6e18b2417c6c51adcda7cf81569213820bde75fb1fcb78e6491",
+                     "actual_sha256":  "a39f7d19ef04c6e18b2417c6c51adcda7cf81569213820bde75fb1fcb78e6491",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v13/staged-worktree-state.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v7/head.stdout.txt",
+                     "expected_bytes":  41,
+                     "actual_bytes":  41,
+                     "expected_sha256":  "f8f914df28020a535334faa62a257c545a4843351fb1e121c19836bf82538d9c",
+                     "actual_sha256":  "f8f914df28020a535334faa62a257c545a4843351fb1e121c19836bf82538d9c",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v7/head.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v7/reviewed-parent.stdout.txt",
+                     "expected_bytes":  82,
+                     "actual_bytes":  82,
+                     "expected_sha256":  "09d332886089fdefea126a088c8404e66b119b35f7777c8d6be92d6d64dce4f4",
+                     "actual_sha256":  "09d332886089fdefea126a088c8404e66b119b35f7777c8d6be92d6d64dce4f4",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v7/reviewed-parent.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v7/reviewed-staged-tree.stdout.txt",
+                     "expected_bytes":  41,
+                     "actual_bytes":  41,
+                     "expected_sha256":  "f57b1cc40d98d1d4a97fa80809dc0f42a2104942070ec2f4b0688563f5aa527b",
+                     "actual_sha256":  "f57b1cc40d98d1d4a97fa80809dc0f42a2104942070ec2f4b0688563f5aa527b",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v7/reviewed-staged-tree.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v7/commit-reviewed-successor-tests.stdout.txt",
+                     "expected_bytes":  141,
+                     "actual_bytes":  141,
+                     "expected_sha256":  "84d9c7e6f7d6786f1c567abc07be51794b8d06d69b67997fcc4438ce3d4ba337",
+                     "actual_sha256":  "84d9c7e6f7d6786f1c567abc07be51794b8d06d69b67997fcc4438ce3d4ba337",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v7/commit-reviewed-successor-tests.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v7/committed-identity.stdout.txt",
+                     "expected_bytes":  123,
+                     "actual_bytes":  123,
+                     "expected_sha256":  "4b0cd17c85ab7c60fd550c4b54f8233d3bd667b73d1bda9ae655a5d79c754211",
+                     "actual_sha256":  "4b0cd17c85ab7c60fd550c4b54f8233d3bd667b73d1bda9ae655a5d79c754211",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v7/committed-identity.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v7/committed-worktree-state.stdout.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v7/committed-worktree-state.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v8/head.stdout.txt",
+                     "expected_bytes":  41,
+                     "actual_bytes":  41,
+                     "expected_sha256":  "5ebe6358d1f36ad1c8e34db1926b80e71ec95368410d43b6a3e540a04cf4d65a",
+                     "actual_sha256":  "5ebe6358d1f36ad1c8e34db1926b80e71ec95368410d43b6a3e540a04cf4d65a",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v8/head.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v8/reviewed-parent.stdout.txt",
+                     "expected_bytes":  82,
+                     "actual_bytes":  82,
+                     "expected_sha256":  "23a9c73b061181f5bef525a08440b8c8b9f8669b963185e0699e6db820f3ef9c",
+                     "actual_sha256":  "23a9c73b061181f5bef525a08440b8c8b9f8669b963185e0699e6db820f3ef9c",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v8/reviewed-parent.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v8/reviewed-staged-tree.stdout.txt",
+                     "expected_bytes":  41,
+                     "actual_bytes":  41,
+                     "expected_sha256":  "72c193aae7b6179d784a27e615a2ab5243ac24209887fdec7c2b2a61b30bf601",
+                     "actual_sha256":  "72c193aae7b6179d784a27e615a2ab5243ac24209887fdec7c2b2a61b30bf601",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v8/reviewed-staged-tree.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v8/commit-pinned-migration-fixtures.stdout.txt",
+                     "expected_bytes":  140,
+                     "actual_bytes":  140,
+                     "expected_sha256":  "b4fbe17de4c0c68b901863e4496470647c837c12c4b1e4735b1100ffdd019b24",
+                     "actual_sha256":  "b4fbe17de4c0c68b901863e4496470647c837c12c4b1e4735b1100ffdd019b24",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v8/commit-pinned-migration-fixtures.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v8/committed-identity.stdout.txt",
+                     "expected_bytes":  123,
+                     "actual_bytes":  123,
+                     "expected_sha256":  "f016875688d5e87ff8cd7bc78d753d905fb35f4292675abd3f7cb442556da1e0",
+                     "actual_sha256":  "f016875688d5e87ff8cd7bc78d753d905fb35f4292675abd3f7cb442556da1e0",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v8/committed-identity.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v8/committed-worktree-state.stdout.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v8/committed-worktree-state.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v14/head.stdout.txt",
+                     "expected_bytes":  41,
+                     "actual_bytes":  41,
+                     "expected_sha256":  "83b2c611d123badeb08a5271c7cbc11965324004ef7c5c71fb69a4a30c3f9736",
+                     "actual_sha256":  "83b2c611d123badeb08a5271c7cbc11965324004ef7c5c71fb69a4a30c3f9736",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v14/head.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v14/starting-worktree-state.stdout.txt",
+                     "expected_bytes":  5625,
+                     "actual_bytes":  5625,
+                     "expected_sha256":  "fddd7797c0db17c403f49e65c81e9e997dcbbc4361bb070c95f2e3bde2207002",
+                     "actual_sha256":  "fddd7797c0db17c403f49e65c81e9e997dcbbc4361bb070c95f2e3bde2207002",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v14/starting-worktree-state.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v14/stage-full-failure-and-reviewed-test-patches.stdout.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v14/stage-full-failure-and-reviewed-test-patches.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v14/new-documentation-and-data-verifier-whitespace.stdout.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v14/new-documentation-and-data-verifier-whitespace.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v14/staged-name-status.stdout.txt",
+                     "expected_bytes":  5573,
+                     "actual_bytes":  5573,
+                     "expected_sha256":  "61994879d9e5c6e3b98569051b1771a595f51d0305047ae273d44c9c2b9494e4",
+                     "actual_sha256":  "61994879d9e5c6e3b98569051b1771a595f51d0305047ae273d44c9c2b9494e4",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v14/staged-name-status.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v14/staged-stat.stdout.txt",
+                     "expected_bytes":  3357,
+                     "actual_bytes":  3357,
+                     "expected_sha256":  "f5d89484ffb2c7d2f948c29f7ab7cea4cca5176a317e901c641031194c426391",
+                     "actual_sha256":  "f5d89484ffb2c7d2f948c29f7ab7cea4cca5176a317e901c641031194c426391",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v14/staged-stat.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v14/reviewed-staged-tree.stdout.txt",
+                     "expected_bytes":  41,
+                     "actual_bytes":  41,
+                     "expected_sha256":  "113ddfdf87626cefed901e40fe38dfe70d5cb603b351aa06db53a4c1a84b83c9",
+                     "actual_sha256":  "113ddfdf87626cefed901e40fe38dfe70d5cb603b351aa06db53a4c1a84b83c9",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v14/reviewed-staged-tree.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v9/head.stdout.txt",
+                     "expected_bytes":  41,
+                     "actual_bytes":  41,
+                     "expected_sha256":  "83b2c611d123badeb08a5271c7cbc11965324004ef7c5c71fb69a4a30c3f9736",
+                     "actual_sha256":  "83b2c611d123badeb08a5271c7cbc11965324004ef7c5c71fb69a4a30c3f9736",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v9/head.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v9/reviewed-parent.stdout.txt",
+                     "expected_bytes":  82,
+                     "actual_bytes":  82,
+                     "expected_sha256":  "21486923ea5eaf5ae592b722dbc9c0ae8ddd2f65750a2d00d698a13ce9ecd15c",
+                     "actual_sha256":  "21486923ea5eaf5ae592b722dbc9c0ae8ddd2f65750a2d00d698a13ce9ecd15c",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v9/reviewed-parent.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v9/reviewed-staged-tree.stdout.txt",
+                     "expected_bytes":  41,
+                     "actual_bytes":  41,
+                     "expected_sha256":  "113ddfdf87626cefed901e40fe38dfe70d5cb603b351aa06db53a4c1a84b83c9",
+                     "actual_sha256":  "113ddfdf87626cefed901e40fe38dfe70d5cb603b351aa06db53a4c1a84b83c9",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v9/reviewed-staged-tree.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v9/commit-full-failure-and-reviewed-successor-inputs.stdout.txt",
+                     "expected_bytes":  6617,
+                     "actual_bytes":  6617,
+                     "expected_sha256":  "4e34d77a9f99bab1ed3b68823d85afa2afa9b649a5a183294d1d77a9f624f06f",
+                     "actual_sha256":  "4e34d77a9f99bab1ed3b68823d85afa2afa9b649a5a183294d1d77a9f624f06f",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v9/commit-full-failure-and-reviewed-successor-inputs.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v9/committed-identity.stdout.txt",
+                     "expected_bytes":  123,
+                     "actual_bytes":  123,
+                     "expected_sha256":  "3252407a960d81b758170a36a7cc96e6af8ffcc84198339ea5029f8dc6868a48",
+                     "actual_sha256":  "3252407a960d81b758170a36a7cc96e6af8ffcc84198339ea5029f8dc6868a48",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v9/committed-identity.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v9/committed-worktree-state.stdout.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v9/committed-worktree-state.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/push-v7/head.stdout.txt",
+                     "expected_bytes":  41,
+                     "actual_bytes":  41,
+                     "expected_sha256":  "6286fde56a4136dea90ff072f706018088d3eef7a22ae5bbdd05d0df13770e8f",
+                     "actual_sha256":  "6286fde56a4136dea90ff072f706018088d3eef7a22ae5bbdd05d0df13770e8f",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/push-v7/head.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/push-v7/native-full-failure-evidence-publication.stdout.txt",
+                     "expected_bytes":  1928,
+                     "actual_bytes":  1928,
+                     "expected_sha256":  "acc9f1479f2cf7e8a3927045eef93bc8dbe7a0141fcb44863491b67ab6928960",
+                     "actual_sha256":  "acc9f1479f2cf7e8a3927045eef93bc8dbe7a0141fcb44863491b67ab6928960",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/push-v7/native-full-failure-evidence-publication.stderr.txt",
+                     "expected_bytes":  157,
+                     "actual_bytes":  157,
+                     "expected_sha256":  "e437bf58739c9c88b07673e0ce7505a5d0f4a337b29bd29ee2e853da20728a4e",
+                     "actual_sha256":  "e437bf58739c9c88b07673e0ce7505a5d0f4a337b29bd29ee2e853da20728a4e",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/push-v7/source-after-publication.stdout.txt",
+                     "expected_bytes":  123,
+                     "actual_bytes":  123,
+                     "expected_sha256":  "3252407a960d81b758170a36a7cc96e6af8ffcc84198339ea5029f8dc6868a48",
+                     "actual_sha256":  "3252407a960d81b758170a36a7cc96e6af8ffcc84198339ea5029f8dc6868a48",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/push-v7/source-after-publication.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/push-v7/state-after-publication.stdout.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/push-v7/state-after-publication.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v15/head.stdout.txt",
+                     "expected_bytes":  41,
+                     "actual_bytes":  41,
+                     "expected_sha256":  "134925bd22595f2e4d5bdd102be956742eca330e9cb923504d5024718c1d4e34",
+                     "actual_sha256":  "134925bd22595f2e4d5bdd102be956742eca330e9cb923504d5024718c1d4e34",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v15/head.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v15/starting-worktree-state.stdout.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v15/starting-worktree-state.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v15/reviewed-test-patch-check.stdout.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v15/reviewed-test-patch-check.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v15/receive-existing-original-breakaway-wait-error.stdout.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v15/receive-existing-original-breakaway-wait-error.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v15/gofmt-read-only-check.stdout.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v15/gofmt-read-only-check.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v15/test-patch-whitespace.stdout.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v15/test-patch-whitespace.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v15/stage-reviewed-test-input.stdout.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v15/stage-reviewed-test-input.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v15/staged-name-status.stdout.txt",
+                     "expected_bytes":  58,
+                     "actual_bytes":  58,
+                     "expected_sha256":  "e69e59fe80f96994220a62326e7b4d1c0893fc8e19dd98b0d745ca2fac9ae39e",
+                     "actual_sha256":  "e69e59fe80f96994220a62326e7b4d1c0893fc8e19dd98b0d745ca2fac9ae39e",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v15/staged-name-status.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v15/reviewed-staged-tree.stdout.txt",
+                     "expected_bytes":  41,
+                     "actual_bytes":  41,
+                     "expected_sha256":  "b7e1bb5295be80748d128cd67156426babc6f2543105084ced15ab44cc362761",
+                     "actual_sha256":  "b7e1bb5295be80748d128cd67156426babc6f2543105084ced15ab44cc362761",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v15/reviewed-staged-tree.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v15/staged-stat.stdout.txt",
+                     "expected_bytes":  116,
+                     "actual_bytes":  116,
+                     "expected_sha256":  "8ca7322545351daf081fcb6e90957c0e65caedfae298f8b8ec403d98b7f0c41d",
+                     "actual_sha256":  "8ca7322545351daf081fcb6e90957c0e65caedfae298f8b8ec403d98b7f0c41d",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v15/staged-stat.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v15/staged-worktree-state.stdout.txt",
+                     "expected_bytes":  59,
+                     "actual_bytes":  59,
+                     "expected_sha256":  "5582cad830a9bb46595887d5b28c21d830c2fd287935b12956d7ec688df44e8f",
+                     "actual_sha256":  "5582cad830a9bb46595887d5b28c21d830c2fd287935b12956d7ec688df44e8f",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/stage-v15/staged-worktree-state.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v10/head.stdout.txt",
+                     "expected_bytes":  41,
+                     "actual_bytes":  41,
+                     "expected_sha256":  "134925bd22595f2e4d5bdd102be956742eca330e9cb923504d5024718c1d4e34",
+                     "actual_sha256":  "134925bd22595f2e4d5bdd102be956742eca330e9cb923504d5024718c1d4e34",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v10/head.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v10/reviewed-parent.stdout.txt",
+                     "expected_bytes":  82,
+                     "actual_bytes":  82,
+                     "expected_sha256":  "3f82cceda6a691de79f9976b4cdd418ce75b906afd0b114d93f3be517dec1a39",
+                     "actual_sha256":  "3f82cceda6a691de79f9976b4cdd418ce75b906afd0b114d93f3be517dec1a39",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v10/reviewed-parent.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v10/reviewed-staged-tree.stdout.txt",
+                     "expected_bytes":  41,
+                     "actual_bytes":  41,
+                     "expected_sha256":  "b7e1bb5295be80748d128cd67156426babc6f2543105084ced15ab44cc362761",
+                     "actual_sha256":  "b7e1bb5295be80748d128cd67156426babc6f2543105084ced15ab44cc362761",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v10/reviewed-staged-tree.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v10/commit-original-breakaway-wait-assertion.stdout.txt",
+                     "expected_bytes":  129,
+                     "actual_bytes":  129,
+                     "expected_sha256":  "9dff104e3347060ff6cdd77699f5554dc8f35a623f20bb4ced68f4f994546c1c",
+                     "actual_sha256":  "9dff104e3347060ff6cdd77699f5554dc8f35a623f20bb4ced68f4f994546c1c",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v10/commit-original-breakaway-wait-assertion.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v10/committed-identity.stdout.txt",
+                     "expected_bytes":  123,
+                     "actual_bytes":  123,
+                     "expected_sha256":  "5b27cd5753ddda1601ab2c4e312e4255186bb7e4a2b93bd79a1202e9ce8220e3",
+                     "actual_sha256":  "5b27cd5753ddda1601ab2c4e312e4255186bb7e4a2b93bd79a1202e9ce8220e3",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v10/committed-identity.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v10/committed-worktree-state.stdout.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/commit-v10/committed-worktree-state.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/warm-cache/copy-original-pass-donor-caches.stdout.txt",
+                     "expected_bytes":  681,
+                     "actual_bytes":  681,
+                     "expected_sha256":  "103346ede5c029a958fa69f2723aa70571487ab424549152c3ab1adaaba474aa",
+                     "actual_sha256":  "103346ede5c029a958fa69f2723aa70571487ab424549152c3ab1adaaba474aa",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/warm-cache/copy-original-pass-donor-caches.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/warm-cache/build-provider-386.stdout.txt",
+                     "expected_bytes":  683,
+                     "actual_bytes":  683,
+                     "expected_sha256":  "44c557213016406a9f0e8ac72569500aa864f13cb879dda151b6c37aeddb9425",
+                     "actual_sha256":  "44c557213016406a9f0e8ac72569500aa864f13cb879dda151b6c37aeddb9425",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/warm-cache/build-provider-386.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/warm-cache/build-provider-amd64.stdout.txt",
+                     "expected_bytes":  689,
+                     "actual_bytes":  689,
+                     "expected_sha256":  "840420bc10b1c8877744acbf01e44af90e11107d0f1bc187a3979284d394a3bf",
+                     "actual_sha256":  "840420bc10b1c8877744acbf01e44af90e11107d0f1bc187a3979284d394a3bf",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/warm-cache/build-provider-amd64.stderr.txt",
+                     "expected_bytes":  0,
+                     "actual_bytes":  0,
+                     "expected_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "actual_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/warm-cache/build-cli-state.stdout.txt",
+                     "expected_bytes":  647,
+                     "actual_bytes":  647,
+                     "expected_sha256":  "331cf4f0ec54dce741b506f1762178e2b563a6750ec467f8a43caa1fb6f5ea13",
+                     "actual_sha256":  "331cf4f0ec54dce741b506f1762178e2b563a6750ec467f8a43caa1fb6f5ea13",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "captures/warm-cache/build-cli-state.stderr.txt",
+                     "expected_bytes":  53,
+                     "actual_bytes":  53,
+                     "expected_sha256":  "6a19eaf3a9431d6d8e0fa675a44df0df271ebc655f9a9f5eb6aec89e9d1b316d",
+                     "actual_sha256":  "6a19eaf3a9431d6d8e0fa675a44df0df271ebc655f9a9f5eb6aec89e9d1b316d",
+                     "matched":  true,
+                     "basis":  "known_original_native_capture_sha256"
+                 },
+                 {
+                     "role_path":  "warm-cache/source04e-input-sha256.json",
+                     "expected_bytes":  459816,
+                     "actual_bytes":  459816,
+                     "expected_sha256":  "0469ae9723b651dad46cc35b1e2365a3325785264c2b5d6ad8fe44d28c109697",
+                     "actual_sha256":  "0469ae9723b651dad46cc35b1e2365a3325785264c2b5d6ad8fe44d28c109697",
+                     "matched":  true,
+                     "basis":  "known_native_sha256"
+                 }
+             ],
+    "native_or_test_execution":  false,
+    "qualification_passed":  false
+}

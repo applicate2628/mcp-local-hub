@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 3,
+  "testOnly": false,
+  "buildTags": [],
+  "version": "0.4.65",
+  "commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+  "buildDate": "2026-11-28T13:33:34Z",
+  "windowsTargetArch": "amd64",
+  "expectedMachine": 34404,
+  "resourceGeneratorArgs": [
+    "-64"
+  ],
+  "artifacts": [
+    {
+      "role": "product",
+      "filename": "mcphub-product/mcphub.exe",
+      "source": "./cmd/mcphub",
+      "subsystem": 2,
+      "productMetadata": true,
+      "npmPayload": true,
+      "npmBin": false,
+      "ldflags": "-X main.version=0.4.65 -X main.commit=59f618ebfbf6d9f52c6994d68586e3c2ebc202a8 -X main.buildDate=2026-11-28T13:33:34Z -X mcp-local-hub/internal/buildinfo.publisherSourceEpoch=861852f807c36673755014ef4657bf10252b4e75505bc8b73819bcf8cded7a3a -X main.entrySetBuildID=85abd999a2fb449d9ce6b2a0c1aa791c -X main.expectedCanonicalEntrySHA256=f1be7e81c0d82e6d61b8f636c9c3632073e33221cc251a5936bc51890aa1805e -X main.canonicalEntryReverseProjection=../mcphub.exe -H windowsgui",
+      "versionInfo": {
+        "ProductName": "mcp-local-hub",
+        "ProductVersion": "0.4.65",
+        "PrivateBuild": "mcphub-build-v1;commit=59f618ebfbf6d9f52c6994d68586e3c2ebc202a8;build_date=2026-11-28T13:33:34Z",
+        "SpecialBuild": "mcphub-role-v1;role=product",
+        "InternalName": "mcphub",
+        "OriginalFilename": "mcphub.exe",
+        "Comments": "Homepage: https://github.com/applicate2628/mcp-local-hub | Issues: https://github.com/applicate2628/mcp-local-hub/issues | License: MPL-2.0 | Commercial: https://github.com/applicate2628/mcp-local-hub/blob/master/README.md#license\nmcphub-source-v1;sha256=861852f807c36673755014ef4657bf10252b4e75505bc8b73819bcf8cded7a3a\nMCPHUB-CANONICAL-ENTRY-V1={\"build_id\":\"85abd999a2fb449d9ce6b2a0c1aa791c\",\"launcher_sha256\":\"f1be7e81c0d82e6d61b8f636c9c3632073e33221cc251a5936bc51890aa1805e\",\"reverse_projection\":\"../mcphub.exe\"}"
+      },
+      "output": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\marked-bundle/mcphub-product/mcphub.exe"
+    },
+    {
+      "role": "launcher",
+      "filename": "mcphub.exe",
+      "source": "./cmd/mcphub-launcher",
+      "subsystem": 3,
+      "productMetadata": false,
+      "npmPayload": true,
+      "npmBin": false,
+      "ldflags": "-X main.productRelativePath=mcphub-product/mcphub.exe -X main.publicEntrySetBuildID=85abd999a2fb449d9ce6b2a0c1aa791c",
+      "versionInfo": null,
+      "output": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\marked-bundle/mcphub.exe"
+    }
+  ],
+  "identityManifest": {
+    "schema": "windows-product-identity-v1",
+    "filename": "windows-product-identity.json",
+    "output": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\marked-bundle/windows-product-identity.json"
+  },
+  "admissionCommand": {
+    "executable": "go",
+    "argv": [
+      "run",
+      "./tools/windows-product-validate",
+      "--candidate",
+      "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\marked-bundle/mcphub-product/mcphub.exe",
+      "--expected-version",
+      "0.4.65",
+      "--expected-commit",
+      "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+      "--expected-build-date",
+      "2026-11-28T13:33:34Z",
+      "--expected-source-epoch",
+      "861852f807c36673755014ef4657bf10252b4e75505bc8b73819bcf8cded7a3a"
+    ]
+  },
+  "entrySetBuildID": "85abd999a2fb449d9ce6b2a0c1aa791c",
+  "canonicalEntry": {
+    "entryRelativePath": "mcphub.exe",
+    "productRelativePath": "mcphub-product/mcphub.exe",
+    "identityRelativePath": "windows-product-identity.json",
+    "reverseProjection": "../mcphub.exe",
+    "expectedCanonicalEntrySHA256": "f1be7e81c0d82e6d61b8f636c9c3632073e33221cc251a5936bc51890aa1805e",
+    "received": true,
+    "buildOrder": [
+      "launcher",
+      "product"
+    ]
+  },
+  "entrySetAdmissionCommand": {
+    "executable": "go",
+    "argv": [
+      "run",
+      "./tools/windows-product-validate",
+      "--validate-entry-set-build",
+      "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\successor-product-only-inputs-v2\\marked-bundle\\mcphub.exe",
+      "--expected-entry-set-build-id",
+      "85abd999a2fb449d9ce6b2a0c1aa791c",
+      "--expected-canonical-entry-sha256",
+      "f1be7e81c0d82e6d61b8f636c9c3632073e33221cc251a5936bc51890aa1805e",
+      "--canonical-entry-reverse-projection",
+      "../mcphub.exe",
+      "--expected-version",
+      "0.4.65",
+      "--expected-commit",
+      "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+      "--expected-build-date",
+      "2026-11-28T13:33:34Z",
+      "--expected-source-epoch",
+      "861852f807c36673755014ef4657bf10252b4e75505bc8b73819bcf8cded7a3a"
+    ]
+  },
+  "retiredOutputFiles": [
+    "mcphub-windowless.exe",
+    "mcphub-pe-admit.exe"
+  ],
+  "publisherSource": {
+    "source_epoch": "861852f807c36673755014ef4657bf10252b4e75505bc8b73819bcf8cded7a3a",
+    "source_snapshot_sha256": "0249af1149b94877e011186a92ee05f104a9bd7afd0e1d676755ee190e64356e",
+    "file_count": 3369
+  }
+}

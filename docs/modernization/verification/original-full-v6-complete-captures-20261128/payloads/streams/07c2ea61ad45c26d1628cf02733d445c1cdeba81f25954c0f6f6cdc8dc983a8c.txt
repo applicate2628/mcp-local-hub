@@ -1,0 +1,238 @@
+=== RUN   TestDecodeRunRequestDefaultsHighAndRejectsUnsafeShapes
+--- PASS: TestDecodeRunRequestDefaultsHighAndRejectsUnsafeShapes (0.00s)
+=== NAME  
+=== RUN   TestDecodeRunRequestAcceptsExplicitMaxAndAbsoluteCapabilityFile
+--- PASS: TestDecodeRunRequestAcceptsExplicitMaxAndAbsoluteCapabilityFile (0.00s)
+=== NAME  
+=== RUN   TestRunKimiInputSchemaIsClosed
+--- PASS: TestRunKimiInputSchemaIsClosed (0.00s)
+=== NAME  
+=== RUN   TestRunKimiCleanupFailureRoundTripsAcquiredReceiptAndCleanShape
+--- PASS: TestRunKimiCleanupFailureRoundTripsAcquiredReceiptAndCleanShape (0.00s)
+=== NAME  
+=== RUN   TestKimiManifestAndCanonicalPortRegistryAgree
+--- PASS: TestKimiManifestAndCanonicalPortRegistryAgree (0.00s)
+=== NAME  
+=== RUN   TestProviderReceiptRequiresMatchingPrimaryOutcome
+=== RUN   TestProviderReceiptRequiresMatchingPrimaryOutcome/success/matching
+--- PASS: TestProviderReceiptRequiresMatchingPrimaryOutcome/success/matching (0.00s)
+=== NAME  TestProviderReceiptRequiresMatchingPrimaryOutcome
+=== RUN   TestProviderReceiptRequiresMatchingPrimaryOutcome/success/exitCode
+--- PASS: TestProviderReceiptRequiresMatchingPrimaryOutcome/success/exitCode (0.00s)
+=== NAME  TestProviderReceiptRequiresMatchingPrimaryOutcome
+=== RUN   TestProviderReceiptRequiresMatchingPrimaryOutcome/success/status
+--- PASS: TestProviderReceiptRequiresMatchingPrimaryOutcome/success/status (0.00s)
+=== NAME  TestProviderReceiptRequiresMatchingPrimaryOutcome
+=== RUN   TestProviderReceiptRequiresMatchingPrimaryOutcome/success/gate
+--- PASS: TestProviderReceiptRequiresMatchingPrimaryOutcome/success/gate (0.00s)
+=== NAME  TestProviderReceiptRequiresMatchingPrimaryOutcome
+=== RUN   TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/matching
+--- PASS: TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/matching (0.00s)
+=== NAME  TestProviderReceiptRequiresMatchingPrimaryOutcome
+=== RUN   TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/exitCode
+--- PASS: TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/exitCode (0.00s)
+=== NAME  TestProviderReceiptRequiresMatchingPrimaryOutcome
+=== RUN   TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/status
+--- PASS: TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/status (0.00s)
+=== NAME  TestProviderReceiptRequiresMatchingPrimaryOutcome
+=== RUN   TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/gate
+--- PASS: TestProviderReceiptRequiresMatchingPrimaryOutcome/failure/gate (0.00s)
+=== NAME  TestProviderReceiptRequiresMatchingPrimaryOutcome
+--- PASS: TestProviderReceiptRequiresMatchingPrimaryOutcome (0.00s)
+=== NAME  
+=== RUN   TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit
+=== RUN   TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/PASS
+--- PASS: TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/PASS (0.00s)
+=== NAME  TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit
+=== RUN   TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/FAIL
+--- PASS: TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/FAIL (0.00s)
+=== NAME  TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit
+=== RUN   TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/BLOCKED
+--- PASS: TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/BLOCKED (0.00s)
+=== NAME  TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit
+=== RUN   TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/unknown
+--- PASS: TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit/unknown (0.00s)
+=== NAME  TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit
+--- PASS: TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit (0.00s)
+=== NAME  
+=== RUN   TestProviderReceiptBindsRequestedRoleAndExecutionLane
+=== RUN   TestProviderReceiptBindsRequestedRoleAndExecutionLane/legacy_direct_reviewer
+--- PASS: TestProviderReceiptBindsRequestedRoleAndExecutionLane/legacy_direct_reviewer (0.00s)
+=== NAME  TestProviderReceiptBindsRequestedRoleAndExecutionLane
+=== RUN   TestProviderReceiptBindsRequestedRoleAndExecutionLane/reviewer
+--- PASS: TestProviderReceiptBindsRequestedRoleAndExecutionLane/reviewer (0.00s)
+=== NAME  TestProviderReceiptBindsRequestedRoleAndExecutionLane
+=== RUN   TestProviderReceiptBindsRequestedRoleAndExecutionLane/worker
+--- PASS: TestProviderReceiptBindsRequestedRoleAndExecutionLane/worker (0.00s)
+=== NAME  TestProviderReceiptBindsRequestedRoleAndExecutionLane
+=== RUN   TestProviderReceiptBindsRequestedRoleAndExecutionLane/consultant
+--- PASS: TestProviderReceiptBindsRequestedRoleAndExecutionLane/consultant (0.00s)
+=== NAME  TestProviderReceiptBindsRequestedRoleAndExecutionLane
+=== RUN   TestProviderReceiptBindsRequestedRoleAndExecutionLane/wrong_assignment_same_lane
+--- PASS: TestProviderReceiptBindsRequestedRoleAndExecutionLane/wrong_assignment_same_lane (0.00s)
+=== NAME  TestProviderReceiptBindsRequestedRoleAndExecutionLane
+=== RUN   TestProviderReceiptBindsRequestedRoleAndExecutionLane/wrong_lane
+--- PASS: TestProviderReceiptBindsRequestedRoleAndExecutionLane/wrong_lane (0.00s)
+=== NAME  TestProviderReceiptBindsRequestedRoleAndExecutionLane
+=== RUN   TestProviderReceiptBindsRequestedRoleAndExecutionLane/worker_promoted_to_reviewer
+--- PASS: TestProviderReceiptBindsRequestedRoleAndExecutionLane/worker_promoted_to_reviewer (0.00s)
+=== NAME  TestProviderReceiptBindsRequestedRoleAndExecutionLane
+=== RUN   TestProviderReceiptBindsRequestedRoleAndExecutionLane/unknown_role
+--- PASS: TestProviderReceiptBindsRequestedRoleAndExecutionLane/unknown_role (0.00s)
+=== NAME  TestProviderReceiptBindsRequestedRoleAndExecutionLane
+=== RUN   TestProviderReceiptBindsRequestedRoleAndExecutionLane/missing_requested_role
+--- PASS: TestProviderReceiptBindsRequestedRoleAndExecutionLane/missing_requested_role (0.00s)
+=== NAME  TestProviderReceiptBindsRequestedRoleAndExecutionLane
+=== RUN   TestProviderReceiptBindsRequestedRoleAndExecutionLane/unsupported_role
+--- PASS: TestProviderReceiptBindsRequestedRoleAndExecutionLane/unsupported_role (0.00s)
+=== NAME  TestProviderReceiptBindsRequestedRoleAndExecutionLane
+--- PASS: TestProviderReceiptBindsRequestedRoleAndExecutionLane (0.00s)
+=== NAME  
+=== RUN   TestParseProviderReceiptPreservesOwnerPayloadAndEffort
+=== RUN   TestParseProviderReceiptPreservesOwnerPayloadAndEffort/high
+--- PASS: TestParseProviderReceiptPreservesOwnerPayloadAndEffort/high (0.00s)
+=== NAME  TestParseProviderReceiptPreservesOwnerPayloadAndEffort
+=== RUN   TestParseProviderReceiptPreservesOwnerPayloadAndEffort/max
+--- PASS: TestParseProviderReceiptPreservesOwnerPayloadAndEffort/max (0.00s)
+=== NAME  TestParseProviderReceiptPreservesOwnerPayloadAndEffort
+--- PASS: TestParseProviderReceiptPreservesOwnerPayloadAndEffort (0.00s)
+=== NAME  
+=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance
+=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/authorizing
+--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/authorizing (0.00s)
+=== NAME  TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance
+=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/extra_line
+--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/extra_line (0.00s)
+=== NAME  TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance
+=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_prefix
+--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_prefix (0.00s)
+=== NAME  TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance
+=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_model
+--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_model (0.00s)
+=== NAME  TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance
+=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_effort
+--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_effort (0.00s)
+=== NAME  TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance
+=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/launch_flags
+--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/launch_flags (0.00s)
+=== NAME  TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance
+=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/selected_extra
+--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/selected_extra (0.00s)
+=== NAME  TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance
+=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/observed_invalid_status
+--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/observed_invalid_status (0.00s)
+=== NAME  TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance
+=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/nonempty_none
+--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/nonempty_none (0.00s)
+=== NAME  TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance
+=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/missing_newline
+--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/missing_newline (0.00s)
+=== NAME  TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance
+=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/trailing_JSON_whitespace
+--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/trailing_JSON_whitespace (0.00s)
+=== NAME  TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance
+=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_schema
+--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_schema (0.00s)
+=== NAME  TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance
+=== RUN   TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_provider
+--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance/bad_provider (0.00s)
+=== NAME  TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance
+--- PASS: TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance (0.00s)
+=== NAME  
+=== RUN   TestProviderReceiptIsErrorUsesStructuralOutcomeNotResultText
+--- PASS: TestProviderReceiptIsErrorUsesStructuralOutcomeNotResultText (0.00s)
+=== NAME  
+=== RUN   TestBuildWrapperArgsExactDefaultHighAndExplicitMax
+--- PASS: TestBuildWrapperArgsExactDefaultHighAndExplicitMax (0.00s)
+=== NAME  
+=== RUN   TestResolveWrapperUsesOnlyGlobalPairAndRefusesIrregularGlobal
+--- PASS: TestResolveWrapperUsesOnlyGlobalPairAndRefusesIrregularGlobal (0.00s)
+=== NAME  
+=== RUN   TestRunWithDependenciesReturnsReceiptAndExactArgv
+--- PASS: TestRunWithDependenciesReturnsReceiptAndExactArgv (0.00s)
+=== NAME  
+=== RUN   TestRunWithDependenciesPreservesCompletedOutcome
+=== RUN   TestRunWithDependenciesPreservesCompletedOutcome/success_before_late_deadline
+--- PASS: TestRunWithDependenciesPreservesCompletedOutcome/success_before_late_deadline (1.00s)
+=== NAME  TestRunWithDependenciesPreservesCompletedOutcome
+=== RUN   TestRunWithDependenciesPreservesCompletedOutcome/success_before_late_cancellation
+--- PASS: TestRunWithDependenciesPreservesCompletedOutcome/success_before_late_cancellation (0.33s)
+=== NAME  TestRunWithDependenciesPreservesCompletedOutcome
+--- PASS: TestRunWithDependenciesPreservesCompletedOutcome (1.33s)
+=== NAME  
+=== RUN   TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure
+=== RUN   TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout
+--- PASS: TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout (1.00s)
+=== NAME  TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure
+=== RUN   TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/cancel
+--- PASS: TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/cancel (0.00s)
+=== NAME  TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure
+=== RUN   TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/legacy_timeout_receipt
+--- PASS: TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/legacy_timeout_receipt (0.00s)
+=== NAME  TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure
+=== RUN   TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/legacy_cancel_receipt
+--- PASS: TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/legacy_cancel_receipt (0.00s)
+=== NAME  TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure
+=== RUN   TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/cleanup
+--- PASS: TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/cleanup (0.00s)
+=== NAME  TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure
+=== RUN   TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/exit_before_late_cancellation/none
+--- PASS: TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/exit_before_late_cancellation/none (0.00s)
+=== NAME  TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure
+=== RUN   TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/exit_before_late_cancellation/contained_process
+--- PASS: TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/exit_before_late_cancellation/contained_process (0.00s)
+=== NAME  TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure
+=== RUN   TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/exit_before_late_cancellation/receipt_directory
+--- PASS: TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/exit_before_late_cancellation/receipt_directory (0.00s)
+=== NAME  TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure
+=== RUN   TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout_before_late_cancellation/none
+--- PASS: TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout_before_late_cancellation/none (0.00s)
+=== NAME  TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure
+=== RUN   TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout_before_late_cancellation/contained_process
+--- PASS: TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout_before_late_cancellation/contained_process (0.00s)
+=== NAME  TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure
+=== RUN   TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout_before_late_cancellation/receipt_directory
+--- PASS: TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure/timeout_before_late_cancellation/receipt_directory (0.00s)
+=== NAME  TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure
+--- PASS: TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure (1.01s)
+=== NAME  
+=== RUN   TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure
+=== RUN   TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure/receipt_only_with_directory_cleanup_failure
+--- PASS: TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure/receipt_only_with_directory_cleanup_failure (0.00s)
+=== NAME  TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure
+=== RUN   TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure/primary_plus_contained_cleanup_and_directory_cleanup
+--- PASS: TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure/primary_plus_contained_cleanup_and_directory_cleanup (0.00s)
+=== NAME  TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure
+=== RUN   TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure/cleanup-only_stage_cause
+--- PASS: TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure/cleanup-only_stage_cause (0.00s)
+=== NAME  TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure
+--- PASS: TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure (0.00s)
+=== NAME  
+=== RUN   TestRunWithDependenciesRetainsParseRunAndCleanupCauses
+--- PASS: TestRunWithDependenciesRetainsParseRunAndCleanupCauses (0.00s)
+=== NAME  
+=== RUN   TestFailureJSONIsTypedAndDetailFree
+--- PASS: TestFailureJSONIsTypedAndDetailFree (0.00s)
+=== NAME  
+=== RUN   TestRunWithContainedStreamSettlesStubbornChild
+--- PASS: TestRunWithContainedStreamSettlesStubbornChild (1.25s)
+=== NAME  
+=== RUN   TestKimiFakeWrapperProcess
+--- PASS: TestKimiFakeWrapperProcess (0.00s)
+=== NAME  
+=== RUN   TestReadReceiptFileSizeBound
+=== RUN   TestReadReceiptFileSizeBound/0
+--- PASS: TestReadReceiptFileSizeBound/0 (0.00s)
+=== NAME  TestReadReceiptFileSizeBound
+=== RUN   TestReadReceiptFileSizeBound/64
+--- PASS: TestReadReceiptFileSizeBound/64 (0.00s)
+=== NAME  TestReadReceiptFileSizeBound
+=== RUN   TestReadReceiptFileSizeBound/8388608
+--- PASS: TestReadReceiptFileSizeBound/8388608 (0.01s)
+=== NAME  TestReadReceiptFileSizeBound
+=== RUN   TestReadReceiptFileSizeBound/8388609
+--- PASS: TestReadReceiptFileSizeBound/8388609 (0.01s)
+=== NAME  TestReadReceiptFileSizeBound
+--- PASS: TestReadReceiptFileSizeBound (0.02s)
+=== NAME  
+PASS

@@ -1,0 +1,107 @@
+{
+  "schema": "old-cli-budget-source-correspondence-v1",
+  "old_source": "727d66753814dc218e26d699e57402db2d13190a",
+  "old_map_sha256": "a3483e469b606fa297a4b33698cd22db7bf25493023f3117feeafb52bb9db5f1",
+  "new_source": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+  "new_map_sha256": "e8c3fc2f577a130f92ba4eee7f8eee7153afc032dee909557cf1156890917c06",
+  "method": "Compare received immutable metadata. Selected unchanged source bytes were checked in the closed Product export; the differing PID implementation was subsequently read in root's newly received isolated Source59f copy.",
+  "files": [
+    {
+      "path": "internal/cli/process_identity_match_windows_test.go",
+      "old_sha256": "64c5e6a5d499529c617ca32d0e8eb572c4f3d7e8b0f37a7397193f6095103936",
+      "new_sha256": "64c5e6a5d499529c617ca32d0e8eb572c4f3d7e8b0f37a7397193f6095103936",
+      "same_bytes": true,
+      "selected_closed_export_bytes_read": true,
+      "isolated_source59f_bytes_read": false
+    },
+    {
+      "path": "internal/cli/daemon_reliability_test.go",
+      "old_sha256": "3c4ffbe4c50a34f8ae874ab8c3a010acb3e9b483d39d2978744c3e092646d160",
+      "new_sha256": "3c4ffbe4c50a34f8ae874ab8c3a010acb3e9b483d39d2978744c3e092646d160",
+      "same_bytes": true,
+      "selected_closed_export_bytes_read": true,
+      "isolated_source59f_bytes_read": false
+    },
+    {
+      "path": "internal/cli/supervise_ensure_alive_marker_worker_test.go",
+      "old_sha256": "3d89d7309bce2cafb6c75f44d22a78c3423b3fd0a765d4173a41d2f434f1e669",
+      "new_sha256": "3d89d7309bce2cafb6c75f44d22a78c3423b3fd0a765d4173a41d2f434f1e669",
+      "same_bytes": true,
+      "selected_closed_export_bytes_read": true,
+      "isolated_source59f_bytes_read": false
+    },
+    {
+      "path": "internal/cli/supervisor_death_forensics_test.go",
+      "old_sha256": "65dfb15fa6126249d477dd58b2e4d7848e8b04c2b9ad8a4fb297c662ead12058",
+      "new_sha256": "65dfb15fa6126249d477dd58b2e4d7848e8b04c2b9ad8a4fb297c662ead12058",
+      "same_bytes": true,
+      "selected_closed_export_bytes_read": true,
+      "isolated_source59f_bytes_read": false
+    },
+    {
+      "path": "internal/cli/process_identity_match_windows.go",
+      "old_sha256": "8026b73148dd91155db4fbec510300390ddd3a4b7f1a54c88cbc1995d28c232a",
+      "new_sha256": "8026b73148dd91155db4fbec510300390ddd3a4b7f1a54c88cbc1995d28c232a",
+      "same_bytes": true,
+      "selected_closed_export_bytes_read": true,
+      "isolated_source59f_bytes_read": false
+    },
+    {
+      "path": "internal/cli/process_identity_match_common.go",
+      "old_sha256": "cfe0f9cf09cdb812a4c431b9d7368eb694d2dc6e2336c4c06f736a2d490c71b9",
+      "new_sha256": "cfe0f9cf09cdb812a4c431b9d7368eb694d2dc6e2336c4c06f736a2d490c71b9",
+      "same_bytes": true,
+      "selected_closed_export_bytes_read": true,
+      "isolated_source59f_bytes_read": false
+    },
+    {
+      "path": "internal/cli/supervise_ensure_alive_marker_worker.go",
+      "old_sha256": "2bac2aaa8250d278e95d80ce0aeb25cdfc4ae6b89cc1ade968d01040d2937e1a",
+      "new_sha256": "2bac2aaa8250d278e95d80ce0aeb25cdfc4ae6b89cc1ade968d01040d2937e1a",
+      "same_bytes": true,
+      "selected_closed_export_bytes_read": true,
+      "isolated_source59f_bytes_read": false
+    },
+    {
+      "path": "internal/process/pid_identity_windows.go",
+      "old_sha256": "dbf0ac13cf543ac0218df9ff33fb94d40a6bf819255f20f560b9ea3c493ce5aa",
+      "new_sha256": "c10a4c87e0d7049249f536bf95279efbd2434631936a78825479a299e4e7f491",
+      "same_bytes": false,
+      "selected_closed_export_bytes_read": false,
+      "isolated_source59f_bytes_read": true
+    },
+    {
+      "path": "internal/cli/supervise_ensure_alive.go",
+      "old_sha256": "76fc0865b4d3f363deebc82d5c3b0998fa050ae1cbd00e39a3ec1c0e18e045a4",
+      "new_sha256": "b35bd81155af2c5c4c64508fdc16e163304f064640680a366114e1cacd28a50a",
+      "same_bytes": false,
+      "selected_closed_export_bytes_read": false,
+      "isolated_source59f_bytes_read": false
+    },
+    {
+      "path": "internal/cli/supervise_liveness.go",
+      "old_sha256": "621913ed485bebc0f29fdf541dffa9a557f904f8e11cbf94f2cd875298a9fd38",
+      "new_sha256": "504b037bd97008a8e080253adc339295fe914c0fb956bd5a8325abfe8eb5d850",
+      "same_bytes": false,
+      "selected_closed_export_bytes_read": false,
+      "isolated_source59f_bytes_read": false
+    },
+    {
+      "path": "internal/cli/migrate_serena_test.go",
+      "old_sha256": "a93fe8a79650202d697003028fb9420f46678101d7ae469402a2e315cdfa65da",
+      "new_sha256": "2f0b41dbb97b01288f8f1871f6482e9fa80a3962a706d1e3d0872728175dd6b1",
+      "same_bytes": false,
+      "selected_closed_export_bytes_read": false,
+      "isolated_source59f_bytes_read": false
+    },
+    {
+      "path": "internal/cli/settings_registry_test.go",
+      "old_sha256": "30e22d1588509cfe025126a7a5356253e6f7e4b4b6d1440c0b12377e29283e9e",
+      "new_sha256": "30e22d1588509cfe025126a7a5356253e6f7e4b4b6d1440c0b12377e29283e9e",
+      "same_bytes": true,
+      "selected_closed_export_bytes_read": false,
+      "isolated_source59f_bytes_read": true
+    }
+  ],
+  "qualification_or_timing_transferred": false
+}

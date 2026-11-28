@@ -1,0 +1,94 @@
+=== RUN   TestFindDrMemory_NotFoundMessageNamesSearchLocations
+--- PASS: TestFindDrMemory_NotFoundMessageNamesSearchLocations (0.00s)
+=== NAME  
+=== RUN   TestFindDrMemory_DrMemoryHomeMiss
+--- PASS: TestFindDrMemory_DrMemoryHomeMiss (0.00s)
+=== NAME  
+=== RUN   TestFirstNonEmptyLine
+--- PASS: TestFirstNonEmptyLine (0.00s)
+=== NAME  
+=== RUN   TestIsExecutableFile
+--- PASS: TestIsExecutableFile (0.00s)
+=== NAME  
+=== RUN   TestRunTool_ParsesInjectedResults
+--- PASS: TestRunTool_ParsesInjectedResults (0.00s)
+=== NAME  
+=== RUN   TestRunTool_DrMemoryNotFound
+--- PASS: TestRunTool_DrMemoryNotFound (0.00s)
+=== NAME  
+=== RUN   TestRunTool_MissingExe
+--- PASS: TestRunTool_MissingExe (0.00s)
+=== NAME  
+=== RUN   TestRunTool_DefaultsCheckUninitializedTrue
+--- PASS: TestRunTool_DefaultsCheckUninitializedTrue (0.00s)
+=== NAME  
+=== RUN   TestRunTool_RunnerFailureSurfaces
+--- PASS: TestRunTool_RunnerFailureSurfaces (0.00s)
+=== NAME  
+=== RUN   TestRunTool_PanicRecoveredToStructuredError
+--- PASS: TestRunTool_PanicRecoveredToStructuredError (0.00s)
+=== NAME  
+=== RUN   TestRunTool_NoResultsTxtSurfacesError
+--- PASS: TestRunTool_NoResultsTxtSurfacesError (0.00s)
+=== NAME  
+=== RUN   TestStatusTool_Available
+--- PASS: TestStatusTool_Available (0.00s)
+=== NAME  
+=== RUN   TestStatusTool_Unavailable
+--- PASS: TestStatusTool_Unavailable (0.00s)
+=== NAME  
+=== RUN   TestStatusTool_AvailableVersionUnknown
+--- PASS: TestStatusTool_AvailableVersionUnknown (0.00s)
+=== NAME  
+=== RUN   TestDrmemoryEnabledRequiresExplicitOptIn
+--- PASS: TestDrmemoryEnabledRequiresExplicitOptIn (0.00s)
+=== NAME  
+=== RUN   TestParseResults_StructuredErrorsAndCounts
+--- PASS: TestParseResults_StructuredErrorsAndCounts (0.00s)
+=== NAME  
+=== RUN   TestParseResults_PossibleLeakClassifiedAsLeak
+--- PASS: TestParseResults_PossibleLeakClassifiedAsLeak (0.00s)
+=== NAME  
+=== RUN   TestParseResults_NoErrors
+--- PASS: TestParseResults_NoErrors (0.00s)
+=== NAME  
+=== RUN   TestParseResults_InvalidHeapArgument
+--- PASS: TestParseResults_InvalidHeapArgument (0.00s)
+=== NAME  
+=== RUN   TestBuildDrMemoryArgs
+=== RUN   TestBuildDrMemoryArgs/defaults
+--- PASS: TestBuildDrMemoryArgs/defaults (0.00s)
+=== NAME  TestBuildDrMemoryArgs
+=== RUN   TestBuildDrMemoryArgs/light
+--- PASS: TestBuildDrMemoryArgs/light (0.00s)
+=== NAME  TestBuildDrMemoryArgs
+=== RUN   TestBuildDrMemoryArgs/no-uninit
+--- PASS: TestBuildDrMemoryArgs/no-uninit (0.00s)
+=== NAME  TestBuildDrMemoryArgs
+=== RUN   TestBuildDrMemoryArgs/light+no-uninit
+--- PASS: TestBuildDrMemoryArgs/light+no-uninit (0.00s)
+=== NAME  TestBuildDrMemoryArgs
+=== RUN   TestBuildDrMemoryArgs/with-symcache
+--- PASS: TestBuildDrMemoryArgs/with-symcache (0.00s)
+=== NAME  TestBuildDrMemoryArgs
+=== RUN   TestBuildDrMemoryArgs/empty-symcache-omits-flag
+--- PASS: TestBuildDrMemoryArgs/empty-symcache-omits-flag (0.00s)
+=== NAME  TestBuildDrMemoryArgs
+--- PASS: TestBuildDrMemoryArgs (0.00s)
+=== NAME  
+=== RUN   TestReadResultsTxt_FindsPerRunSubdir
+--- PASS: TestReadResultsTxt_FindsPerRunSubdir (0.00s)
+=== NAME  
+=== RUN   TestReadResultsTxt_EmptyLogdir
+--- PASS: TestReadResultsTxt_EmptyLogdir (0.00s)
+=== NAME  
+=== RUN   TestReadResultsTxt_PicksNewestSubdir
+--- PASS: TestReadResultsTxt_PicksNewestSubdir (0.00s)
+=== NAME  
+=== RUN   TestFormatCommandLine
+--- PASS: TestFormatCommandLine (0.00s)
+=== NAME  
+=== RUN   TestTruncate
+--- PASS: TestTruncate (0.00s)
+=== NAME  
+PASS

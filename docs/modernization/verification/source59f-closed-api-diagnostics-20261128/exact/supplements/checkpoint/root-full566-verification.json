@@ -1,0 +1,18 @@
+{
+  "schema": "closed-full-v6-all-captures-data-verification-v1",
+  "status": "EXACT_CLOSED_FULL_V6_CAPTURE_DATA_VERIFIED",
+  "classification": "FAIL/CLOSED",
+  "capture_index_sha256": "1064ec8e060b826c9bc38a64b98ed5292042073d9a1bc8a9a60a3e895db9bb08",
+  "main_receipt_sha256": "6cd606a5ec4e6e1a3e74d4b8324786cc98dffe8cd587f4a41c89a751ea7f0c4a",
+  "root_receiving_sha256": "f02bf04c80d0e84a5989297f742662ea874bbf7743c78ab3da947305004849d5",
+  "commands": 283,
+  "captures": 566,
+  "distinct_payloads": 285,
+  "empty_captures": 277,
+  "total_original_capture_bytes": 46234475,
+  "package_receipts": 65,
+  "original_native_owner_receipts_previously_received": 130,
+  "new_native_or_test_execution": false,
+  "runtime_sources_imported": false,
+  "qualification_inherited": false
+}

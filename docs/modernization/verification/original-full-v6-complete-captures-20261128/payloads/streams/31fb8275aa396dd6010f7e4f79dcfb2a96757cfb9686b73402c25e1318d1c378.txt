@@ -1,0 +1,11 @@
+{"Action":"start","Package":"mcp-local-hub/internal/lldb"}
+{"Action":"run","Package":"mcp-local-hub/internal/lldb","Test":"TestBridgeSignalReturnsWhenStdinIdle"}
+{"Action":"output","Package":"mcp-local-hub/internal/lldb","Test":"TestBridgeSignalReturnsWhenStdinIdle","Output":"=== RUN   TestBridgeSignalReturnsWhenStdinIdle\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/lldb","Test":"TestBridgeSignalReturnsWhenStdinIdle","Output":"=== PAUSE TestBridgeSignalReturnsWhenStdinIdle\n","OutputType":"frame"}
+{"Action":"pause","Package":"mcp-local-hub/internal/lldb","Test":"TestBridgeSignalReturnsWhenStdinIdle"}
+{"Action":"cont","Package":"mcp-local-hub/internal/lldb","Test":"TestBridgeSignalReturnsWhenStdinIdle"}
+{"Action":"output","Package":"mcp-local-hub/internal/lldb","Test":"TestBridgeSignalReturnsWhenStdinIdle","Output":"=== CONT  TestBridgeSignalReturnsWhenStdinIdle\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/lldb","Test":"TestBridgeSignalReturnsWhenStdinIdle","Output":"--- PASS: TestBridgeSignalReturnsWhenStdinIdle (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/lldb","Test":"TestBridgeSignalReturnsWhenStdinIdle"}
+{"Action":"output","Package":"mcp-local-hub/internal/lldb","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/lldb"}

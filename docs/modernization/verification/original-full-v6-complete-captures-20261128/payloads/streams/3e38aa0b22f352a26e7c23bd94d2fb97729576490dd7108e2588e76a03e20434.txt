@@ -1,0 +1,112 @@
+=== RUN   TestEntryCommentsEncoderPreservesPowerShellJSONWire
+--- PASS: TestEntryCommentsEncoderPreservesPowerShellJSONWire (0.00s)
+=== NAME  
+=== RUN   TestEntryCommentsRequestRejectsAmbiguousWire
+--- PASS: TestEntryCommentsRequestRejectsAmbiguousWire (0.00s)
+=== NAME  
+=== RUN   TestCanonicalEntryToolModesCannotMix
+--- PASS: TestCanonicalEntryToolModesCannotMix (0.00s)
+=== NAME  
+=== RUN   TestEntrySetBuildModeIsExplicitAndSeparate
+--- PASS: TestEntrySetBuildModeIsExplicitAndSeparate (0.00s)
+=== NAME  
+=== RUN   TestEntrySetBuildObservationRejectsOriginalInputMismatch
+--- PASS: TestEntrySetBuildObservationRejectsOriginalInputMismatch (0.00s)
+=== NAME  
+=== RUN   TestRunEmitsAdmittedWindowsProductIdentity
+--- PASS: TestRunEmitsAdmittedWindowsProductIdentity (0.00s)
+=== NAME  
+=== RUN   TestRunRejectsMalformedExpectedCommitAsUsageBeforeCandidateAdmission
+=== RUN   TestRunRejectsMalformedExpectedCommitAsUsageBeforeCandidateAdmission/empty
+--- PASS: TestRunRejectsMalformedExpectedCommitAsUsageBeforeCandidateAdmission/empty (0.00s)
+=== NAME  TestRunRejectsMalformedExpectedCommitAsUsageBeforeCandidateAdmission
+=== RUN   TestRunRejectsMalformedExpectedCommitAsUsageBeforeCandidateAdmission/39_characters
+--- PASS: TestRunRejectsMalformedExpectedCommitAsUsageBeforeCandidateAdmission/39_characters (0.00s)
+=== NAME  TestRunRejectsMalformedExpectedCommitAsUsageBeforeCandidateAdmission
+=== RUN   TestRunRejectsMalformedExpectedCommitAsUsageBeforeCandidateAdmission/41_characters
+--- PASS: TestRunRejectsMalformedExpectedCommitAsUsageBeforeCandidateAdmission/41_characters (0.00s)
+=== NAME  TestRunRejectsMalformedExpectedCommitAsUsageBeforeCandidateAdmission
+=== RUN   TestRunRejectsMalformedExpectedCommitAsUsageBeforeCandidateAdmission/uppercase
+--- PASS: TestRunRejectsMalformedExpectedCommitAsUsageBeforeCandidateAdmission/uppercase (0.00s)
+=== NAME  TestRunRejectsMalformedExpectedCommitAsUsageBeforeCandidateAdmission
+=== RUN   TestRunRejectsMalformedExpectedCommitAsUsageBeforeCandidateAdmission/non-hex
+--- PASS: TestRunRejectsMalformedExpectedCommitAsUsageBeforeCandidateAdmission/non-hex (0.00s)
+=== NAME  TestRunRejectsMalformedExpectedCommitAsUsageBeforeCandidateAdmission
+--- PASS: TestRunRejectsMalformedExpectedCommitAsUsageBeforeCandidateAdmission (0.00s)
+=== NAME  
+=== RUN   TestRunClassifiesUsageAndValidationFailures
+=== RUN   TestRunClassifiesUsageAndValidationFailures/missing_required_flag_is_usage
+--- PASS: TestRunClassifiesUsageAndValidationFailures/missing_required_flag_is_usage (0.00s)
+=== NAME  TestRunClassifiesUsageAndValidationFailures
+=== RUN   TestRunClassifiesUsageAndValidationFailures/malformed_candidate_is_admission_failure
+--- PASS: TestRunClassifiesUsageAndValidationFailures/malformed_candidate_is_admission_failure (0.00s)
+=== NAME  TestRunClassifiesUsageAndValidationFailures
+=== RUN   TestRunClassifiesUsageAndValidationFailures/wrong_filename_is_validation_failure
+--- PASS: TestRunClassifiesUsageAndValidationFailures/wrong_filename_is_validation_failure (0.00s)
+=== NAME  TestRunClassifiesUsageAndValidationFailures
+=== RUN   TestRunClassifiesUsageAndValidationFailures/tuple_mismatch_is_validation_failure
+--- PASS: TestRunClassifiesUsageAndValidationFailures/tuple_mismatch_is_validation_failure (0.00s)
+=== NAME  TestRunClassifiesUsageAndValidationFailures
+--- PASS: TestRunClassifiesUsageAndValidationFailures (0.00s)
+=== NAME  
+=== RUN   TestRuntimeLibraryValidationSelectsExactBorrowProfile
+=== RUN   TestRuntimeLibraryValidationSelectsExactBorrowProfile/owner-v1/owner-v1-members-v1-borrow-v1
+--- PASS: TestRuntimeLibraryValidationSelectsExactBorrowProfile/owner-v1/owner-v1-members-v1-borrow-v1 (0.00s)
+=== NAME  TestRuntimeLibraryValidationSelectsExactBorrowProfile
+=== RUN   TestRuntimeLibraryValidationSelectsExactBorrowProfile/owner-v1-members-v1/owner-v1-members-v1-borrow-v1
+--- PASS: TestRuntimeLibraryValidationSelectsExactBorrowProfile/owner-v1-members-v1/owner-v1-members-v1-borrow-v1 (0.00s)
+=== NAME  TestRuntimeLibraryValidationSelectsExactBorrowProfile
+=== RUN   TestRuntimeLibraryValidationSelectsExactBorrowProfile/owner-v1-members-v1-borrow-v1/owner-v1
+--- PASS: TestRuntimeLibraryValidationSelectsExactBorrowProfile/owner-v1-members-v1-borrow-v1/owner-v1 (0.00s)
+=== NAME  TestRuntimeLibraryValidationSelectsExactBorrowProfile
+=== RUN   TestRuntimeLibraryValidationSelectsExactBorrowProfile/owner-v1-members-v1-borrow-v1/owner-v1-members-v1
+--- PASS: TestRuntimeLibraryValidationSelectsExactBorrowProfile/owner-v1-members-v1-borrow-v1/owner-v1-members-v1 (0.00s)
+=== NAME  TestRuntimeLibraryValidationSelectsExactBorrowProfile
+=== RUN   TestRuntimeLibraryValidationSelectsExactBorrowProfile/owner-v1-members-v1-borrow-v1/owner-v1-members-v1-borrow-v1
+--- PASS: TestRuntimeLibraryValidationSelectsExactBorrowProfile/owner-v1-members-v1-borrow-v1/owner-v1-members-v1-borrow-v1 (0.00s)
+=== NAME  TestRuntimeLibraryValidationSelectsExactBorrowProfile
+--- PASS: TestRuntimeLibraryValidationSelectsExactBorrowProfile (0.00s)
+=== NAME  
+=== RUN   TestRuntimeLibraryValidationMode
+--- PASS: TestRuntimeLibraryValidationMode (0.00s)
+=== NAME  
+=== RUN   TestRuntimeLibraryValidationModeRejectsWrongNameAndMixedModes
+--- PASS: TestRuntimeLibraryValidationModeRejectsWrongNameAndMixedModes (0.00s)
+=== NAME  
+=== RUN   TestRuntimeLibraryValidationSelectsExactMemberProfile
+=== RUN   TestRuntimeLibraryValidationSelectsExactMemberProfile/members_cannot_use_default_legacy
+--- PASS: TestRuntimeLibraryValidationSelectsExactMemberProfile/members_cannot_use_default_legacy (0.00s)
+=== NAME  TestRuntimeLibraryValidationSelectsExactMemberProfile
+=== RUN   TestRuntimeLibraryValidationSelectsExactMemberProfile/legacy_cannot_claim_members
+--- PASS: TestRuntimeLibraryValidationSelectsExactMemberProfile/legacy_cannot_claim_members (0.00s)
+=== NAME  TestRuntimeLibraryValidationSelectsExactMemberProfile
+=== RUN   TestRuntimeLibraryValidationSelectsExactMemberProfile/unknown_name_at_correct_count
+--- PASS: TestRuntimeLibraryValidationSelectsExactMemberProfile/unknown_name_at_correct_count (0.00s)
+=== NAME  TestRuntimeLibraryValidationSelectsExactMemberProfile
+--- PASS: TestRuntimeLibraryValidationSelectsExactMemberProfile (0.00s)
+=== NAME  
+=== RUN   TestRuntimeLibraryValidationRejectsPartialMemberExports
+=== RUN   TestRuntimeLibraryValidationRejectsPartialMemberExports/mh_members_close1
+--- PASS: TestRuntimeLibraryValidationRejectsPartialMemberExports/mh_members_close1 (0.00s)
+=== NAME  TestRuntimeLibraryValidationRejectsPartialMemberExports
+=== RUN   TestRuntimeLibraryValidationRejectsPartialMemberExports/mh_members_observe1
+--- PASS: TestRuntimeLibraryValidationRejectsPartialMemberExports/mh_members_observe1 (0.00s)
+=== NAME  TestRuntimeLibraryValidationRejectsPartialMemberExports
+=== RUN   TestRuntimeLibraryValidationRejectsPartialMemberExports/mh_members_revalidate1
+--- PASS: TestRuntimeLibraryValidationRejectsPartialMemberExports/mh_members_revalidate1 (0.00s)
+=== NAME  TestRuntimeLibraryValidationRejectsPartialMemberExports
+=== RUN   TestRuntimeLibraryValidationRejectsPartialMemberExports/mh_members_snapshot1
+--- PASS: TestRuntimeLibraryValidationRejectsPartialMemberExports/mh_members_snapshot1 (0.00s)
+=== NAME  TestRuntimeLibraryValidationRejectsPartialMemberExports
+--- PASS: TestRuntimeLibraryValidationRejectsPartialMemberExports (0.00s)
+=== NAME  
+=== RUN   TestRuntimeLibraryValidationRejectsUnknownOrUnboundProfile
+--- PASS: TestRuntimeLibraryValidationRejectsUnknownOrUnboundProfile (0.00s)
+=== NAME  
+=== RUN   TestPreparationFlagGrammarIsExclusiveIncludingSuppliedEmpty
+--- PASS: TestPreparationFlagGrammarIsExclusiveIncludingSuppliedEmpty (0.00s)
+=== NAME  
+=== RUN   TestExistingSourceVerificationStillEmitsItsTaggedRow
+--- PASS: TestExistingSourceVerificationStillEmitsItsTaggedRow (0.00s)
+=== NAME  
+PASS

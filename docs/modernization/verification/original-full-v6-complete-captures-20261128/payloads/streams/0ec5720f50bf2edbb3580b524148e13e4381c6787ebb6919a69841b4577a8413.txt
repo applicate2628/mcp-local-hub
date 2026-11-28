@@ -1,0 +1,195 @@
+{"Action":"start","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_WellFormed_IncludeChainAndExecutedLines"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_WellFormed_IncludeChainAndExecutedLines","Output":"=== RUN   TestTrace_WellFormed_IncludeChainAndExecutedLines\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_WellFormed_IncludeChainAndExecutedLines","Output":"--- PASS: TestTrace_WellFormed_IncludeChainAndExecutedLines (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_WellFormed_IncludeChainAndExecutedLines"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_NoVersionHeader_ParsedAnyway"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_NoVersionHeader_ParsedAnyway","Output":"=== RUN   TestTrace_NoVersionHeader_ParsedAnyway\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_NoVersionHeader_ParsedAnyway","Output":"--- PASS: TestTrace_NoVersionHeader_ParsedAnyway (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_NoVersionHeader_ParsedAnyway"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_MalformedLinesCountedAndParseContinues"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_MalformedLinesCountedAndParseContinues","Output":"=== RUN   TestTrace_MalformedLinesCountedAndParseContinues\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_MalformedLinesCountedAndParseContinues","Output":"--- PASS: TestTrace_MalformedLinesCountedAndParseContinues (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_MalformedLinesCountedAndParseContinues"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_EmptyFile"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_EmptyFile","Output":"=== RUN   TestTrace_EmptyFile\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_EmptyFile","Output":"--- PASS: TestTrace_EmptyFile (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_EmptyFile"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_NotJSONLines"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_NotJSONLines","Output":"=== RUN   TestTrace_NotJSONLines\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_NotJSONLines","Output":"--- PASS: TestTrace_NotJSONLines (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_NotJSONLines"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_MissingPath"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_MissingPath","Output":"=== RUN   TestTrace_MissingPath\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_MissingPath","Output":"--- PASS: TestTrace_MissingPath (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_MissingPath"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_Unreadable"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_Unreadable","Output":"=== RUN   TestTrace_Unreadable\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_Unreadable","Output":"--- PASS: TestTrace_Unreadable (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_Unreadable"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileAndCommandFilters"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileAndCommandFilters","Output":"=== RUN   TestTrace_FileAndCommandFilters\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileAndCommandFilters/file_filter_narrows_to_one_file"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileAndCommandFilters/file_filter_narrows_to_one_file","Output":"=== RUN   TestTrace_FileAndCommandFilters/file_filter_narrows_to_one_file\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileAndCommandFilters/file_filter_narrows_to_one_file","Output":"--- PASS: TestTrace_FileAndCommandFilters/file_filter_narrows_to_one_file (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileAndCommandFilters/file_filter_narrows_to_one_file"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileAndCommandFilters/command_filter_is_case-insensitive_across_differing-case_occurrences"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileAndCommandFilters/command_filter_is_case-insensitive_across_differing-case_occurrences","Output":"=== RUN   TestTrace_FileAndCommandFilters/command_filter_is_case-insensitive_across_differing-case_occurrences\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileAndCommandFilters/command_filter_is_case-insensitive_across_differing-case_occurrences","Output":"--- PASS: TestTrace_FileAndCommandFilters/command_filter_is_case-insensitive_across_differing-case_occurrences (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileAndCommandFilters/command_filter_is_case-insensitive_across_differing-case_occurrences"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileAndCommandFilters/file_and_command_combined"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileAndCommandFilters/file_and_command_combined","Output":"=== RUN   TestTrace_FileAndCommandFilters/file_and_command_combined\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileAndCommandFilters/file_and_command_combined","Output":"--- PASS: TestTrace_FileAndCommandFilters/file_and_command_combined (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileAndCommandFilters/file_and_command_combined"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileAndCommandFilters/include_chain_and_executed_lines_stay_whole-trace_under_a_filter"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileAndCommandFilters/include_chain_and_executed_lines_stay_whole-trace_under_a_filter","Output":"=== RUN   TestTrace_FileAndCommandFilters/include_chain_and_executed_lines_stay_whole-trace_under_a_filter\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileAndCommandFilters/include_chain_and_executed_lines_stay_whole-trace_under_a_filter","Output":"--- PASS: TestTrace_FileAndCommandFilters/include_chain_and_executed_lines_stay_whole-trace_under_a_filter (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileAndCommandFilters/include_chain_and_executed_lines_stay_whole-trace_under_a_filter"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileAndCommandFilters","Output":"--- PASS: TestTrace_FileAndCommandFilters (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileAndCommandFilters"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_MaxRecordsCapsAndSetsTruncated"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_MaxRecordsCapsAndSetsTruncated","Output":"=== RUN   TestTrace_MaxRecordsCapsAndSetsTruncated\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_MaxRecordsCapsAndSetsTruncated","Output":"--- PASS: TestTrace_MaxRecordsCapsAndSetsTruncated (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_MaxRecordsCapsAndSetsTruncated"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_MaxRecordsZeroUsesDefaultAndDoesNotTruncateASmallTrace"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_MaxRecordsZeroUsesDefaultAndDoesNotTruncateASmallTrace","Output":"=== RUN   TestTrace_MaxRecordsZeroUsesDefaultAndDoesNotTruncateASmallTrace\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_MaxRecordsZeroUsesDefaultAndDoesNotTruncateASmallTrace","Output":"--- PASS: TestTrace_MaxRecordsZeroUsesDefaultAndDoesNotTruncateASmallTrace (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_MaxRecordsZeroUsesDefaultAndDoesNotTruncateASmallTrace"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_ArgsPreservedVerbatim"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_ArgsPreservedVerbatim","Output":"=== RUN   TestTrace_ArgsPreservedVerbatim\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_ArgsPreservedVerbatim","Output":"--- PASS: TestTrace_ArgsPreservedVerbatim (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_ArgsPreservedVerbatim"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim","Output":"=== RUN   TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim/unseen_file_yields_no_records_matched_and_is_absent_from_FilesInTrace"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim/unseen_file_yields_no_records_matched_and_is_absent_from_FilesInTrace","Output":"=== RUN   TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim/unseen_file_yields_no_records_matched_and_is_absent_from_FilesInTrace\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim/unseen_file_yields_no_records_matched_and_is_absent_from_FilesInTrace","Output":"--- PASS: TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim/unseen_file_yields_no_records_matched_and_is_absent_from_FilesInTrace (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim/unseen_file_yields_no_records_matched_and_is_absent_from_FilesInTrace"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim/known_file_with_an_unobserved_line_is_a_distinct_absence_claim"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim/known_file_with_an_unobserved_line_is_a_distinct_absence_claim","Output":"=== RUN   TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim/known_file_with_an_unobserved_line_is_a_distinct_absence_claim\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim/known_file_with_an_unobserved_line_is_a_distinct_absence_claim","Output":"--- PASS: TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim/known_file_with_an_unobserved_line_is_a_distinct_absence_claim (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim/known_file_with_an_unobserved_line_is_a_distinct_absence_claim"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim","Output":"--- PASS: TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_MidRecordInputIsIndependentlyMarkedIncomplete"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_MidRecordInputIsIndependentlyMarkedIncomplete","Output":"=== RUN   TestTrace_MidRecordInputIsIndependentlyMarkedIncomplete\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_MidRecordInputIsIndependentlyMarkedIncomplete","Output":"--- PASS: TestTrace_MidRecordInputIsIndependentlyMarkedIncomplete (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_MidRecordInputIsIndependentlyMarkedIncomplete"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_InvalidMandatoryRecordFieldsAreMalformedNotEvidence"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_InvalidMandatoryRecordFieldsAreMalformedNotEvidence","Output":"=== RUN   TestTrace_InvalidMandatoryRecordFieldsAreMalformedNotEvidence\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_InvalidMandatoryRecordFieldsAreMalformedNotEvidence","Output":"--- PASS: TestTrace_InvalidMandatoryRecordFieldsAreMalformedNotEvidence (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_InvalidMandatoryRecordFieldsAreMalformedNotEvidence"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_CancellationDuringTheParseStopsReadingMidStream"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_CancellationDuringTheParseStopsReadingMidStream","Output":"=== RUN   TestF26_CancellationDuringTheParseStopsReadingMidStream\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_CancellationDuringTheParseStopsReadingMidStream","Output":"--- PASS: TestF26_CancellationDuringTheParseStopsReadingMidStream (0.08s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_CancellationDuringTheParseStopsReadingMidStream"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_CanceledRequestFailsClosedAndStopsReading"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_CanceledRequestFailsClosedAndStopsReading","Output":"=== RUN   TestF26_CanceledRequestFailsClosedAndStopsReading\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_CanceledRequestFailsClosedAndStopsReading","Output":"--- PASS: TestF26_CanceledRequestFailsClosedAndStopsReading (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_CanceledRequestFailsClosedAndStopsReading"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_TraceReaderIsClosedOnTheSuccessPath"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_TraceReaderIsClosedOnTheSuccessPath","Output":"=== RUN   TestF26_TraceReaderIsClosedOnTheSuccessPath\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_TraceReaderIsClosedOnTheSuccessPath","Output":"--- PASS: TestF26_TraceReaderIsClosedOnTheSuccessPath (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_TraceReaderIsClosedOnTheSuccessPath"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_OverlongLineIsRefusedAndReportedAsIncomplete"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_OverlongLineIsRefusedAndReportedAsIncomplete","Output":"=== RUN   TestF26_OverlongLineIsRefusedAndReportedAsIncomplete\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_OverlongLineIsRefusedAndReportedAsIncomplete","Output":"--- PASS: TestF26_OverlongLineIsRefusedAndReportedAsIncomplete (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_OverlongLineIsRefusedAndReportedAsIncomplete"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_MultipleIncompletenessCausesAreAllReported"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_MultipleIncompletenessCausesAreAllReported","Output":"=== RUN   TestF26_MultipleIncompletenessCausesAreAllReported\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_MultipleIncompletenessCausesAreAllReported","Output":"--- PASS: TestF26_MultipleIncompletenessCausesAreAllReported (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_MultipleIncompletenessCausesAreAllReported"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_EmptyAndWhitespaceOnlyTracesStillReportTraceEmpty"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_EmptyAndWhitespaceOnlyTracesStillReportTraceEmpty","Output":"=== RUN   TestF26_EmptyAndWhitespaceOnlyTracesStillReportTraceEmpty\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_EmptyAndWhitespaceOnlyTracesStillReportTraceEmpty","Output":"--- PASS: TestF26_EmptyAndWhitespaceOnlyTracesStillReportTraceEmpty (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_EmptyAndWhitespaceOnlyTracesStillReportTraceEmpty"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_RecordCeilingBoundsParseIndexAndResponseTogether"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_RecordCeilingBoundsParseIndexAndResponseTogether","Output":"=== RUN   TestF26_RecordCeilingBoundsParseIndexAndResponseTogether\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_RecordCeilingBoundsParseIndexAndResponseTogether","Output":"--- PASS: TestF26_RecordCeilingBoundsParseIndexAndResponseTogether (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_RecordCeilingBoundsParseIndexAndResponseTogether"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_ByteCeilingStopsTheReadAndIsReported"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_ByteCeilingStopsTheReadAndIsReported","Output":"=== RUN   TestF26_ByteCeilingStopsTheReadAndIsReported\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_ByteCeilingStopsTheReadAndIsReported","Output":"--- PASS: TestF26_ByteCeilingStopsTheReadAndIsReported (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_ByteCeilingStopsTheReadAndIsReported"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_LineCeilingBoundsTheReadNotJustTheClassification"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_LineCeilingBoundsTheReadNotJustTheClassification","Output":"=== RUN   TestF26_LineCeilingBoundsTheReadNotJustTheClassification\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_LineCeilingBoundsTheReadNotJustTheClassification","Output":"--- PASS: TestF26_LineCeilingBoundsTheReadNotJustTheClassification (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestF26_LineCeilingBoundsTheReadNotJustTheClassification"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTraceRejectsSpecialFileFromOpenedHandle"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTraceRejectsSpecialFileFromOpenedHandle","Output":"=== RUN   TestTraceRejectsSpecialFileFromOpenedHandle\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTraceRejectsSpecialFileFromOpenedHandle","Output":"--- PASS: TestTraceRejectsSpecialFileFromOpenedHandle (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTraceRejectsSpecialFileFromOpenedHandle"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestRelativeTracePathIsRefusedBeforeFilesystemAccess"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestRelativeTracePathIsRefusedBeforeFilesystemAccess","Output":"=== RUN   TestRelativeTracePathIsRefusedBeforeFilesystemAccess\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestRelativeTracePathIsRefusedBeforeFilesystemAccess","Output":"--- PASS: TestRelativeTracePathIsRefusedBeforeFilesystemAccess (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestRelativeTracePathIsRefusedBeforeFilesystemAccess"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestUnsupportedTraceMajorFailsClosedWithoutPartialRecords"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestUnsupportedTraceMajorFailsClosedWithoutPartialRecords","Output":"=== RUN   TestUnsupportedTraceMajorFailsClosedWithoutPartialRecords\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestUnsupportedTraceMajorFailsClosedWithoutPartialRecords","Output":"--- PASS: TestUnsupportedTraceMajorFailsClosedWithoutPartialRecords (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestUnsupportedTraceMajorFailsClosedWithoutPartialRecords"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR16TraceProjectionRetainsIdentityAndEnumeratesCollections"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR16TraceProjectionRetainsIdentityAndEnumeratesCollections","Output":"=== RUN   TestR16TraceProjectionRetainsIdentityAndEnumeratesCollections\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR16TraceProjectionRetainsIdentityAndEnumeratesCollections","Output":"--- PASS: TestR16TraceProjectionRetainsIdentityAndEnumeratesCollections (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR16TraceProjectionRetainsIdentityAndEnumeratesCollections"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR16TraceAdmissionRejectsLargeAggregateBeforeEncoding"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR16TraceAdmissionRejectsLargeAggregateBeforeEncoding","Output":"=== RUN   TestR16TraceAdmissionRejectsLargeAggregateBeforeEncoding\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR16TraceAdmissionRejectsLargeAggregateBeforeEncoding","Output":"--- PASS: TestR16TraceAdmissionRejectsLargeAggregateBeforeEncoding (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR16TraceAdmissionRejectsLargeAggregateBeforeEncoding"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR18TraceAdmissionAccountsForEncodedLineNumberBytes"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR18TraceAdmissionAccountsForEncodedLineNumberBytes","Output":"=== RUN   TestR18TraceAdmissionAccountsForEncodedLineNumberBytes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR18TraceAdmissionAccountsForEncodedLineNumberBytes","Output":"--- PASS: TestR18TraceAdmissionAccountsForEncodedLineNumberBytes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR18TraceAdmissionAccountsForEncodedLineNumberBytes"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR19TraceAdmissionAccountsForExecutedLineEntrySyntax"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR19TraceAdmissionAccountsForExecutedLineEntrySyntax","Output":"=== RUN   TestR19TraceAdmissionAccountsForExecutedLineEntrySyntax\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR19TraceAdmissionAccountsForExecutedLineEntrySyntax","Output":"--- PASS: TestR19TraceAdmissionAccountsForExecutedLineEntrySyntax (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR19TraceAdmissionAccountsForExecutedLineEntrySyntax"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR21TraceUsesSameHandleForOpenAndRegularFileValidation"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR21TraceUsesSameHandleForOpenAndRegularFileValidation","Output":"=== RUN   TestR21TraceUsesSameHandleForOpenAndRegularFileValidation\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR21TraceUsesSameHandleForOpenAndRegularFileValidation","Output":"--- PASS: TestR21TraceUsesSameHandleForOpenAndRegularFileValidation (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR21TraceUsesSameHandleForOpenAndRegularFileValidation"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR22TraceAdmissionAccountsForEscapedJSONStringBytes"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR22TraceAdmissionAccountsForEscapedJSONStringBytes","Output":"=== RUN   TestR22TraceAdmissionAccountsForEscapedJSONStringBytes\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR22TraceAdmissionAccountsForEscapedJSONStringBytes","Output":"--- PASS: TestR22TraceAdmissionAccountsForEscapedJSONStringBytes (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR22TraceAdmissionAccountsForEscapedJSONStringBytes"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR22EncodedJSONStringBytesMatchesJSONEncoder"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR22EncodedJSONStringBytesMatchesJSONEncoder","Output":"=== RUN   TestR22EncodedJSONStringBytesMatchesJSONEncoder\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR22EncodedJSONStringBytesMatchesJSONEncoder","Output":"--- PASS: TestR22EncodedJSONStringBytesMatchesJSONEncoder (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR22EncodedJSONStringBytesMatchesJSONEncoder"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR23TraceAdmissionAccountsForRecordObjectSyntax"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR23TraceAdmissionAccountsForRecordObjectSyntax","Output":"=== RUN   TestR23TraceAdmissionAccountsForRecordObjectSyntax\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR23TraceAdmissionAccountsForRecordObjectSyntax","Output":"--- PASS: TestR23TraceAdmissionAccountsForRecordObjectSyntax (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR23TraceAdmissionAccountsForRecordObjectSyntax"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR23ParserRetainedRecordByteCeiling"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR23ParserRetainedRecordByteCeiling","Output":"=== RUN   TestR23ParserRetainedRecordByteCeiling\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR23ParserRetainedRecordByteCeiling","Output":"--- PASS: TestR23ParserRetainedRecordByteCeiling (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR23ParserRetainedRecordByteCeiling"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR28DerivedTraceIndexesShareRetainedByteBudget"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR28DerivedTraceIndexesShareRetainedByteBudget","Output":"=== RUN   TestR28DerivedTraceIndexesShareRetainedByteBudget\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR28DerivedTraceIndexesShareRetainedByteBudget","Output":"--- PASS: TestR28DerivedTraceIndexesShareRetainedByteBudget (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR28DerivedTraceIndexesShareRetainedByteBudget"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR32TraceRequiresPresentNonNullArgsArray"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR32TraceRequiresPresentNonNullArgsArray","Output":"=== RUN   TestR32TraceRequiresPresentNonNullArgsArray\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR32TraceRequiresPresentNonNullArgsArray","Output":"--- PASS: TestR32TraceRequiresPresentNonNullArgsArray (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR32TraceRequiresPresentNonNullArgsArray"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR32OversizedLineDrainStopsOnCancellation"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR32OversizedLineDrainStopsOnCancellation","Output":"=== RUN   TestR32OversizedLineDrainStopsOnCancellation\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR32OversizedLineDrainStopsOnCancellation","Output":"--- PASS: TestR32OversizedLineDrainStopsOnCancellation (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestR32OversizedLineDrainStopsOnCancellation"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence","Output":"=== RUN   TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence/field_omitted_/_empty"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence/field_omitted_/_empty","Output":"=== RUN   TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence/field_omitted_/_empty\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence/field_omitted_/_empty","Output":"--- PASS: TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence/field_omitted_/_empty (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence/field_omitted_/_empty"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence/whitespace_only_names_no_file_either"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence/whitespace_only_names_no_file_either","Output":"=== RUN   TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence/whitespace_only_names_no_file_either\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence/whitespace_only_names_no_file_either","Output":"--- PASS: TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence/whitespace_only_names_no_file_either (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence/whitespace_only_names_no_file_either"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence","Output":"--- PASS: TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence"}
+{"Action":"run","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_SuppliedButAbsentPath_IsStillAVerifiedAbsence"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_SuppliedButAbsentPath_IsStillAVerifiedAbsence","Output":"=== RUN   TestTrace_SuppliedButAbsentPath_IsStillAVerifiedAbsence\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_SuppliedButAbsentPath_IsStillAVerifiedAbsence","Output":"--- PASS: TestTrace_SuppliedButAbsentPath_IsStillAVerifiedAbsence (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Test":"TestTrace_SuppliedButAbsentPath_IsStillAVerifiedAbsence"}
+{"Action":"output","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/vcpkgmcp/cmaketrace"}

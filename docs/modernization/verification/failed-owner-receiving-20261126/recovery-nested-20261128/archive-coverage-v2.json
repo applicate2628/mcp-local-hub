@@ -1,0 +1,449 @@
+{
+  "input_status": [
+    {
+      "outer_pin_verified": true,
+      "resolved_path_sha256": "18c1eaa638fa8eaf9e9b79e6323e660c50d423e77d25ce6b99b3c0b1421be8e6",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-continuation-evidence-20261122.zip",
+      "status": "partial"
+    },
+    {
+      "outer_pin_verified": true,
+      "resolved_path_sha256": "0fad228b64de3cf84586f333d5bfecc594e5672f003dbfd997fd1c08e8eda1f7",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-next-evidence-20261122.zip",
+      "status": "partial"
+    },
+    {
+      "outer_pin_verified": true,
+      "resolved_path_sha256": "3c1c8a9e8b79c5116b897a796c192270b8d983b9cd01dc881f55c7f4401b06d6",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\archguard-migration-2026-11-21\\migration-audit.zip",
+      "status": "partial"
+    },
+    {
+      "outer_pin_verified": true,
+      "resolved_path_sha256": "eb01c7f645c4344efc32f2c47d90ad91de3e64cb631eabc5431fa8dc0be618fc",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\cmaketrace-terminal-cancellation-2026-11-22\\evidence.zip",
+      "status": "partial"
+    },
+    {
+      "outer_pin_verified": true,
+      "resolved_path_sha256": "ce141e8ff94ba5dd1cbbc978a3f849ad94dc9133ab58835881e0a037bac672aa",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\gui-original-owner-2026-11-22\\gui-owner-evidence.zip",
+      "status": "partial"
+    },
+    {
+      "resolved_path_sha256": "3524965b387b0eb1a01ce8f4afd3e43be2344131b14eb7b1a12928e947194652",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\p0-safe-test-gates-2026-11-21\\p0-gates-evidence.zip",
+      "status": "skipped"
+    },
+    {
+      "resolved_path_sha256": "24df65ed135f89228563bf4a232adeea20e0e2bc59f9af57283cb5d3c30d1c40",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\serena-owner-composition-2026-11-22\\serena-composition-evidence.zip",
+      "status": "skipped"
+    },
+    {
+      "resolved_path_sha256": "caf976986337c477034aab16b802c77e5cdbb56ff7a1193a3d154cbce63b48db",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\qualification\\scheduler-generation-error-origins-20261123\\scheduler-error-origins-20261123-57604a3a.zip",
+      "status": "skipped"
+    },
+    {
+      "resolved_path_sha256": "5c23b35b73d210331bd07c1c2103d1932b45437f1b0cd284f6f0b16464f9b8bc",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr668-verify-141552fcc73c\\source.zip",
+      "status": "skipped"
+    },
+    {
+      "resolved_path_sha256": "a19af615f486c745cc263ba589e1729297746cd1a730b2c81f373b629976acf7",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\cmake-sdk-consumer-profile-20261122\\raw-evidence.tar.gz",
+      "status": "skipped"
+    },
+    {
+      "resolved_path_sha256": "33863270f41dd1c7db8af22b914586eb45787595bb322f37a152c314eff54930",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\qualification\\known-folder-census-20261124\\census-qualification-20261124-57604a3a.zip",
+      "status": "skipped"
+    }
+  ],
+  "archives": [
+    {
+      "depth": 0,
+      "directory_entries": 43,
+      "found_requested_members": [
+        "cleanup/architecture-cleanup-evidence.zip",
+        "cleanup/control-asus/control-payload-backup.zip",
+        "cleanup/control-comet/comet-control-closeout-evidence.zip",
+        "cleanup/encoding-cleanup-raw.zip",
+        "cleanup/scheduler-cleanup-evidence.zip"
+      ],
+      "kind": "zip",
+      "members_read": 5,
+      "prior_seen_container_index_reopened": true,
+      "requested_members": [
+        "cleanup/architecture-cleanup-evidence.zip",
+        "cleanup/control-asus/control-payload-backup.zip",
+        "cleanup/control-comet/comet-control-closeout-evidence.zip",
+        "cleanup/encoding-cleanup-raw.zip",
+        "cleanup/scheduler-cleanup-evidence.zip"
+      ],
+      "scope": "requested_members",
+      "sha256": "44b13007507ae4cac5b0e6631f171a9d950a420c77e1c4258f597dba0e9338ac",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-continuation-evidence-20261122.zip",
+      "status": "partial"
+    },
+    {
+      "depth": 1,
+      "directory_entries": 22,
+      "kind": "zip",
+      "members_read": 22,
+      "scope": "all_members",
+      "sha256": "8cfe54a30b9d89c6a3232c9793ed9269e4e4715977ad6895c5e17b4ebc9fc042",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-continuation-evidence-20261122.zip::cleanup/architecture-cleanup-evidence.zip",
+      "status": "partial"
+    },
+    {
+      "depth": 1,
+      "directory_entries": 12,
+      "kind": "zip",
+      "members_read": 12,
+      "scope": "all_members",
+      "sha256": "45850a83c60fac8019093e93c4d8f000ec815d099be30e33304794a8f96ff85c",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-continuation-evidence-20261122.zip::cleanup/control-asus/control-payload-backup.zip",
+      "status": "checked_declared_scope"
+    },
+    {
+      "depth": 1,
+      "directory_entries": 13,
+      "kind": "zip",
+      "members_read": 13,
+      "scope": "all_members",
+      "sha256": "ca5c0c4be469f1ca0b77252446fd3e5864555cda89eec8836db96cb5f4eec34d",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-continuation-evidence-20261122.zip::cleanup/control-comet/comet-control-closeout-evidence.zip",
+      "status": "checked_declared_scope"
+    },
+    {
+      "depth": 1,
+      "directory_entries": 9,
+      "kind": "zip",
+      "members_read": 9,
+      "scope": "all_members",
+      "sha256": "3326b6cce714decd0e463120f548de5eb0e9d32dc8670a8c58b2cdb7dd4de054",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-continuation-evidence-20261122.zip::cleanup/encoding-cleanup-raw.zip",
+      "status": "checked_declared_scope"
+    },
+    {
+      "depth": 1,
+      "directory_entries": 9,
+      "kind": "zip",
+      "members_read": 9,
+      "scope": "all_members",
+      "sha256": "527bbcb6fa7765bebdb157d86f04b7f78c5e5065fc83a5d6137b9172eb0ac9d7",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-continuation-evidence-20261122.zip::cleanup/scheduler-cleanup-evidence.zip",
+      "status": "partial"
+    },
+    {
+      "depth": 0,
+      "directory_entries": 29,
+      "found_requested_members": [
+        "local-inventory-after.json.gz",
+        "windows-preserved-workspace.zip"
+      ],
+      "kind": "zip",
+      "members_read": 2,
+      "prior_seen_container_index_reopened": true,
+      "requested_members": [
+        "local-inventory-after.json.gz",
+        "windows-preserved-workspace.zip"
+      ],
+      "scope": "requested_members",
+      "sha256": "34544fab2529666fdd59d258834a979bd60bfaadd0ba990951c7e2c77bba4d97",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-next-evidence-20261122.zip",
+      "status": "partial"
+    },
+    {
+      "depth": 1,
+      "kind": "gzip",
+      "scope": "all_members",
+      "sha256": "286475bff1719270e5aa7db3d01de4f6cdce93cdfc9ee5eef15afa6c6261ec2f",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-next-evidence-20261122.zip::local-inventory-after.json.gz",
+      "status": "partial"
+    },
+    {
+      "depth": 1,
+      "directory_entries": 297,
+      "kind": "zip",
+      "members_read": 297,
+      "scope": "all_members",
+      "sha256": "7ab38eb7fa472e10b013df68ba6fe477ccfaa2ec199cf170db96f36cfa3921f3",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-next-evidence-20261122.zip::windows-preserved-workspace.zip",
+      "status": "partial"
+    },
+    {
+      "depth": 2,
+      "kind": "gzip",
+      "scope": "all_members",
+      "sha256": "f3d08178cd315a1433084509932cb4420d25455df1fe1ba322311b85870f5c1b",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-next-evidence-20261122.zip::windows-preserved-workspace.zip::workspace-inventory-before.json.gz",
+      "status": "partial"
+    },
+    {
+      "depth": 0,
+      "directory_entries": 19,
+      "found_requested_members": [
+        "mcphub-p0/verification/received/architecture-evidence.zip"
+      ],
+      "kind": "zip",
+      "members_read": 1,
+      "prior_seen_container_index_reopened": true,
+      "requested_members": [
+        "mcphub-p0/verification/received/architecture-evidence.zip"
+      ],
+      "scope": "requested_members",
+      "sha256": "954083dcaad3036d3f2758e14c89136c679975f269306c7e6afa9e3e9d8cc8a9",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\archguard-migration-2026-11-21\\migration-audit.zip",
+      "status": "partial"
+    },
+    {
+      "depth": 1,
+      "directory_entries": 662,
+      "kind": "zip",
+      "members_read": 662,
+      "scope": "all_members",
+      "sha256": "ffb6130b84d4e1c5f6ea3a2f91d9442aba3d28cd62fc784ef727d4d2c1db547c",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\archguard-migration-2026-11-21\\migration-audit.zip::mcphub-p0/verification/received/architecture-evidence.zip",
+      "status": "partial"
+    },
+    {
+      "depth": 0,
+      "directory_entries": 21,
+      "found_requested_members": [
+        "native/cmake-evidence.zip"
+      ],
+      "kind": "zip",
+      "members_read": 1,
+      "prior_seen_container_index_reopened": true,
+      "requested_members": [
+        "native/cmake-evidence.zip"
+      ],
+      "scope": "requested_members",
+      "sha256": "5444b8c4825034fa8a0fa2936a20a1f9a98d12a75698b89772a8c03238021e67",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\cmaketrace-terminal-cancellation-2026-11-22\\evidence.zip",
+      "status": "partial"
+    },
+    {
+      "depth": 1,
+      "directory_entries": 1148,
+      "kind": "zip",
+      "members_read": 1148,
+      "scope": "all_members",
+      "sha256": "b224a0ab9423d47e91c3fe3f39660c6ad6c15b2ad361b67cff4c6ff4c7c02bc4",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\cmaketrace-terminal-cancellation-2026-11-22\\evidence.zip::native/cmake-evidence.zip",
+      "status": "partial"
+    },
+    {
+      "depth": 0,
+      "directory_entries": 28,
+      "found_requested_members": [
+        "gui-final/received/gui-evidence.zip"
+      ],
+      "kind": "zip",
+      "members_read": 1,
+      "prior_seen_container_index_reopened": true,
+      "requested_members": [
+        "gui-final/received/gui-evidence.zip"
+      ],
+      "scope": "requested_members",
+      "sha256": "7b5cb19644e66910e4dd69e077c361c79845b8087e2d9771f0545c9c08788010",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\gui-original-owner-2026-11-22\\gui-owner-evidence.zip",
+      "status": "partial"
+    },
+    {
+      "depth": 1,
+      "directory_entries": 1346,
+      "kind": "zip",
+      "members_read": 1025,
+      "reason": "Limit: items",
+      "scope": "all_members",
+      "sha256": "52879c23549f17d6aeaa622f702bc61c7417131441b1e3c3b7eb3b261101a335",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\gui-original-owner-2026-11-22\\gui-owner-evidence.zip::gui-final/received/gui-evidence.zip",
+      "status": "skipped"
+    }
+  ],
+  "limitations": [
+    {
+      "reason": "JSON per-document node budget before parsing",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-continuation-evidence-20261122.zip::cleanup/architecture-cleanup-evidence.zip::architecture-recovery-inventory-after.json"
+    },
+    {
+      "reason": "JSON per-document node budget before parsing",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-continuation-evidence-20261122.zip::cleanup/architecture-cleanup-evidence.zip::architecture-recovery-inventory-before.json"
+    },
+    {
+      "reason": "JSON per-document node budget before parsing",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-continuation-evidence-20261122.zip::cleanup/scheduler-cleanup-evidence.zip::scheduler-inventory-after.json"
+    },
+    {
+      "reason": "JSON per-document node budget before parsing",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-continuation-evidence-20261122.zip::cleanup/scheduler-cleanup-evidence.zip::scheduler-inventory-before.json"
+    },
+    {
+      "reason": "JSON per-document candidate budget (1000)",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-next-evidence-20261122.zip::local-inventory-after.json.gz::gzip-decoded"
+    },
+    {
+      "reason": "JSON per-document node budget before parsing",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-next-evidence-20261122.zip::windows-preserved-workspace.zip::preserved/evidence/architecture-green/arch-scan.stdout.log"
+    },
+    {
+      "reason": "JSON per-document node budget before parsing",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-next-evidence-20261122.zip::windows-preserved-workspace.zip::preserved/plans/architecture-green.json"
+    },
+    {
+      "reason": "JSON per-document node budget before parsing",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-next-evidence-20261122.zip::windows-preserved-workspace.zip::preserved/plans/architecture-red.json"
+    },
+    {
+      "reason": "JSON per-document node budget before parsing",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-next-evidence-20261122.zip::windows-preserved-workspace.zip::preserved/plans/scheduler-red-green.json"
+    },
+    {
+      "reason": "JSON per-document node budget before parsing",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-next-evidence-20261122.zip::windows-preserved-workspace.zip::preserved/plans/serena-exit-red.json"
+    },
+    {
+      "reason": "JSON per-document node budget before parsing",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-next-evidence-20261122.zip::windows-preserved-workspace.zip::preserved/plans/serena-green.json"
+    },
+    {
+      "reason": "JSON per-document node budget before parsing",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-next-evidence-20261122.zip::windows-preserved-workspace.zip::preserved/plans/serena-proof-red.json"
+    },
+    {
+      "reason": "JSON per-document node budget before parsing",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr667-perftools-d10a818\\src\\.plans\\2026-11\\p0-next-evidence-20261122.zip::windows-preserved-workspace.zip::workspace-inventory-before.json.gz::gzip-decoded"
+    },
+    {
+      "reason": "JSON per-document node budget before parsing",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\archguard-migration-2026-11-21\\migration-audit.zip::mcphub-p0/verification/received/architecture-evidence.zip::candidate/full-scan.stdout.log"
+    },
+    {
+      "reason": "JSON per-document node budget before parsing",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\archguard-migration-2026-11-21\\migration-audit.zip::mcphub-p0/verification/received/architecture-evidence.zip::master/arch-base-scan.stdout.log"
+    },
+    {
+      "reason": "JSON per-document candidate budget (1000)",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\cmaketrace-terminal-cancellation-2026-11-22\\evidence.zip::native/cmake-evidence.zip::MANIFEST.json"
+    },
+    {
+      "reason": "JSON per-document candidate budget (1000)",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\gui-original-owner-2026-11-22\\gui-owner-evidence.zip::gui-final/received/gui-evidence.zip::MANIFEST.json"
+    },
+    {
+      "reason": "items",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\gui-original-owner-2026-11-22\\gui-owner-evidence.zip::gui-final/received/gui-evidence.zip::evidence/gui-rewrite/observation-0021.launched.json::$[\"manifest_sha256\";pair=11]::base64-decoded"
+    },
+    {
+      "reason": "items",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\gui-original-owner-2026-11-22\\gui-owner-evidence.zip::gui-final/received/gui-evidence.zip::evidence/gui-rewrite/observation-0021.receipt.json"
+    },
+    {
+      "reason": "items",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\gui-original-owner-2026-11-22\\gui-owner-evidence.zip::gui-final/received/gui-evidence.zip"
+    },
+    {
+      "reason": "items",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\p0-safe-test-gates-2026-11-21\\p0-gates-evidence.zip"
+    },
+    {
+      "reason": "items",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\serena-owner-composition-2026-11-22\\serena-composition-evidence.zip"
+    },
+    {
+      "reason": "items",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\qualification\\scheduler-generation-error-origins-20261123\\scheduler-error-origins-20261123-57604a3a.zip"
+    },
+    {
+      "reason": "items",
+      "source": "{D_REPOSITORY_ROOT}\\.scratch\\pr668-verify-141552fcc73c\\source.zip"
+    },
+    {
+      "reason": "items",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\cmake-sdk-consumer-profile-20261122\\raw-evidence.tar.gz"
+    },
+    {
+      "reason": "items",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\qualification\\known-folder-census-20261124\\census-qualification-20261124-57604a3a.zip"
+    }
+  ],
+  "errors": [],
+  "hits": [
+    {
+      "artifact": "candidate-sha256-9315f5fdd56a4f17f3946a5a1281bab1a5a6032be0d8687492f7ba3af84c0037.bin",
+      "bytes": 47,
+      "classification": "text_or_binary",
+      "prefix9315": true,
+      "qualification": "unqualified_hash_prefix_only",
+      "sha256": "9315f5fdd56a4f17f3946a5a1281bab1a5a6032be0d8687492f7ba3af84c0037",
+      "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\gui-original-owner-2026-11-22\\gui-owner-evidence.zip::gui-final/received/gui-evidence.zip::MANIFEST.json::$[\"files\";pair=4][506][\"path\";pair=1]::utf8-string",
+      "targets": [],
+      "whole_bytes_checked": true
+    }
+  ],
+  "cues": [],
+  "budget_used": {
+    "expanded_bytes": 30766537,
+    "items": 20000
+  },
+  "complete_for_declared_scope": false,
+  "limits": {
+    "archive_depth": 6,
+    "expanded_total_bytes": 268435456,
+    "input_bytes": 67108864,
+    "items": 20000,
+    "json_depth": 12,
+    "member_bytes": 33554432,
+    "seconds": 45
+  },
+  "json_policy": "all decoded string values are SHA-256 checked; short metadata values without a hit are counted rather than individually listed; long/structured/explicit-base64 values and actual hits are candidates; at most 1000 value candidates per document",
+  "summary": {
+    "archive_status_counts": {
+      "checked_declared_scope": 3,
+      "partial": 12,
+      "skipped": 1
+    },
+    "budget_used": {
+      "expanded_bytes": 30766537,
+      "items": 20000
+    },
+    "candidate_artifacts": [
+      {
+        "bytes": 47,
+        "file": "candidate-sha256-9315f5fdd56a4f17f3946a5a1281bab1a5a6032be0d8687492f7ba3af84c0037.bin",
+        "fsynced_and_readback_verified": true,
+        "sha256": "9315f5fdd56a4f17f3946a5a1281bab1a5a6032be0d8687492f7ba3af84c0037"
+      }
+    ],
+    "complete_for_declared_scope": false,
+    "error_count": 0,
+    "exact_target_hits": [],
+    "input_count": 11,
+    "limitation_count": 26,
+    "report_artifact": {
+      "bytes": 11608037,
+      "file": "report.json",
+      "fsynced_and_readback_verified": true,
+      "sha256": "549e94cb9a38128074a1afa6cedfecd7dfe1fa21fb4b2ef03e6cd0872d1d0f14"
+    },
+    "schema": "receiver-nested-archive-summary-v1",
+    "unqualified_prefix9315_hits": [
+      {
+        "artifact": "candidate-sha256-9315f5fdd56a4f17f3946a5a1281bab1a5a6032be0d8687492f7ba3af84c0037.bin",
+        "bytes": 47,
+        "classification": "text_or_binary",
+        "prefix9315": true,
+        "qualification": "unqualified_hash_prefix_only",
+        "sha256": "9315f5fdd56a4f17f3946a5a1281bab1a5a6032be0d8687492f7ba3af84c0037",
+        "source": "{E_IMPORTED_TASK_ROOT}\\lf363b-bdiag-v1\\docs\\modernization\\verification\\gui-original-owner-2026-11-22\\gui-owner-evidence.zip::gui-final/received/gui-evidence.zip::MANIFEST.json::$[\"files\";pair=4][506][\"path\";pair=1]::utf8-string",
+        "targets": [],
+        "whole_bytes_checked": true
+      }
+    ],
+    "whole_byte_candidates": 16793
+  }
+}

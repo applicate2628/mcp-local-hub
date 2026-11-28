@@ -1,0 +1,77 @@
+{
+    "schema":  "publication-original-root-data-audit-v1",
+    "status":  "PASS",
+    "physical_complete":  true,
+    "scope":  "cache-acceptance-push-20261128-v7",
+    "config_sha256":  "bbf00ec8374393bdc056d6af8e057e1fc0085454682f41e56f39f4c1dc0cf231",
+    "receipt_sha256":  "bbcd6a775c7eed9c40286dd93ffc1e04fa32a5e8269140fda3cf3e6380c7ed72",
+    "root_sha256":  "c74394433850611d1e01d32ed667a4f6b7026c9704e566a635acf8eecd688013",
+    "outer_sha256":  "4ac60fb8b758eac6b0eed9c92e0b3d96d28de2f6fb2f8359846da36ff8eaf1fe",
+    "commands_verified":  4,
+    "captures_verified":  8,
+    "results":  [
+                    {
+                        "name":  "head.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rev-parse",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.05855030007660389,
+                        "exit_code":  0,
+                        "stdout_sha256":  "6286fde56a4136dea90ff072f706018088d3eef7a22ae5bbdd05d0df13770e8f",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "05fbffa30f99914c8174966525a70bc9984e7038\n"
+                    },
+                    {
+                        "name":  "native-full-failure-evidence-publication.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+                                     "-E",
+                                     "-S",
+                                     "-B",
+                                     "@@RECOVERY_ORCHESTRARIUM_INSTALLATION_ROOT_JSON@@\\releases\\dad4875f\\app\\scripts\\universal-hooks\\scripts\\check-git-push-gate.py",
+                                     "--target-local-push",
+                                     "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub664-363b",
+                                     "origin",
+                                     "05fbffa30f99914c8174966525a70bc9984e7038",
+                                     "refs/heads/fix/p0-test-entry-preserve-20261121"
+                                 ],
+                        "seconds":  28.623471800005063,
+                        "exit_code":  0,
+                        "stdout_sha256":  "acc9f1479f2cf7e8a3927045eef93bc8dbe7a0141fcb44863491b67ab6928960",
+                        "stderr_sha256":  "e437bf58739c9c88b07673e0ce7505a5d0f4a337b29bd29ee2e853da20728a4e",
+                        "stdout_preview":  "publication-safety: clean (range, receipt=v3, commits=1, commit-set=178d2e5180822040ba16eb05361d675af890e05ca274d7b954f73456c091a236, messages=complete, objects=79, object-set=5572967f3f9a022708bd432f3c77facd35b8a7e2fe255c4373d58454c932a603, blobs=48, blob-set=cd6b02a038b7c9ae6fae510cdfd2e84af81578212ba92de0f49e878eef6595f1, blob-bytes=15777889, text=48, binary=0, subjects=49, subject-set=819a351c1148e913c69bfaacb8b8546a9678374daa7ba832224e931c3a988b72, paths=49, path-set=8750a6321d59c9a8155ab5e6a0f7c700a73126e8012b8f91eae1ae9711e090dd, history=complete, remote=origin, dst=refs%2Fheads%2Ffix%2Fp0-test-entry-preserve-20261121, src=05fbffa30f99914c8174966525a70bc9984e7038, tip=05fbffa30f99914c8174966525a70bc9984e7038)\r\r\n{\"binary\":0,\"blobBytes\":15777889,\"blobSetSha256\":\"cd6b02a038b7c9ae6fae510cdfd2e84af81578212ba92de0f49e878eef6595f1\",\"blobs\":48,\"commitSetSha256\":\"178d2e5180822040ba16eb05361d675af890e05ca274d7b954f73456c091a236\",\"commits\":1,\"coverageKind\":\"objects\",\"coverageSha256\":\"565533bbcca539a247240a82b53df5b4dd17047ccc93b7ff89e36ab521ee32e4\",\"endpointIdentity\":\"sha256:ec6e8b135f9ba57a21a2b523646572e00d39bdfdd9d936611c543d9b5b07c08b\",\"inputSha256\":\"b55579976f46fdf084c1b49575d2cc62920572eecf7dd9e8be3c23a36d72fa5a\",\"kind\":\"publication-safety-native\",\"objectFormat\":\"sha1\",\"objectSetSha256\":\"5572967f3f9a022708bd432f3c77facd35b8a7e2fe255c4373d58454c932a603\",\"objects\":79,\"pathSetSha256\":\"8750a6321d59c9a8155ab5e6a0f7c700a73126e8012b8f91eae1ae9711e090dd\",\"paths\":49,\"repositoryObservationSha256\":\"065ca773091ba020cb3880e95210abf4c8fa58eaae7c8329724c458ca4afdf2a\",\"review\":null,\"selectionSha256\":\"398bf238517ceeea6205d26c6170e18231b202b30edae80b7663e58dbea09d76\",\"status\":\"clean\",\"subjectSetSha256\":\"819a351c1148e913c69bfaacb8b8546a9678374daa7ba832224e931c3a988b72\",\"subjects\":49,\"tags\":0,\"text\":48,\"updateSetSha256\":\"50507f7843be1b2ec79c1646f3f8b251ff2417eb6b7c2f1e2fe36bc8a35fb137\",\"updates\":1,\"version\":4}\r\r\n"
+                    },
+                    {
+                        "name":  "source-after-publication.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "show",
+                                     "-s",
+                                     "--format=%H%n%T%n%P"
+                                 ],
+                        "seconds":  0.05098349996842444,
+                        "exit_code":  0,
+                        "stdout_sha256":  "3252407a960d81b758170a36a7cc96e6af8ffcc84198339ea5029f8dc6868a48",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "05fbffa30f99914c8174966525a70bc9984e7038\n89f3c5715356ff424d8538c1409cb91e58b1977c\n01b4e915af6439e4c5e7c5c880a6d4885a2dbd3a\n"
+                    },
+                    {
+                        "name":  "state-after-publication.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "status",
+                                     "--porcelain=v1",
+                                     "--untracked-files=all"
+                                 ],
+                        "seconds":  0.04893539997283369,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    }
+                ],
+    "tests_executed":  false,
+    "reviewed_utc":  "2026-11-28T13:27:10.9007865Z"
+}

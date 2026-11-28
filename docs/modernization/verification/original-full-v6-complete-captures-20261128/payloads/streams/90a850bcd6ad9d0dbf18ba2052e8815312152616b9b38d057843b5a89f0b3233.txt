@@ -1,0 +1,160 @@
+=== RUN   TestDiscoverRoot_ExplicitParamWins
+--- PASS: TestDiscoverRoot_ExplicitParamWins (0.00s)
+=== NAME  
+=== RUN   TestDiscoverRoot_EnvVarWhenNoExplicit
+--- PASS: TestDiscoverRoot_EnvVarWhenNoExplicit (0.00s)
+=== NAME  
+=== RUN   TestDiscoverRoot_PathLookup
+--- PASS: TestDiscoverRoot_PathLookup (0.00s)
+=== NAME  
+=== RUN   TestDiscoverRoot_ManifestWalkup
+--- PASS: TestDiscoverRoot_ManifestWalkup (0.00s)
+=== NAME  
+=== RUN   TestDiscoverRoot_ManifestFoundButNoSubmoduleBinary_FallsThrough
+--- PASS: TestDiscoverRoot_ManifestFoundButNoSubmoduleBinary_FallsThrough (0.00s)
+=== NAME  
+=== RUN   TestDiscoverRoot_HeuristicSingleHit_NeverSelected
+--- PASS: TestDiscoverRoot_HeuristicSingleHit_NeverSelected (0.00s)
+=== NAME  
+=== RUN   TestDiscoverRoot_HeuristicMultipleHits_ReportsAllNeverPicks
+--- PASS: TestDiscoverRoot_HeuristicMultipleHits_ReportsAllNeverPicks (0.00s)
+=== NAME  
+=== RUN   TestDiscoverRoot_NoneFound_OffersManualSpecification
+--- PASS: TestDiscoverRoot_NoneFound_OffersManualSpecification (0.00s)
+=== NAME  
+=== RUN   TestDiscoverRoot_ExplicitInvalid_IsTerminal_NeverFallsThrough
+--- PASS: TestDiscoverRoot_ExplicitInvalid_IsTerminal_NeverFallsThrough (0.00s)
+=== NAME  
+=== RUN   TestDiscoverRoot_ExplicitUnreadable_DistinctFromInvalid
+--- PASS: TestDiscoverRoot_ExplicitUnreadable_DistinctFromInvalid (0.00s)
+=== NAME  
+=== RUN   TestDiscoverRoot_POSIXHeuristics_NeverSelected
+--- PASS: TestDiscoverRoot_POSIXHeuristics_NeverSelected (0.00s)
+=== NAME  
+=== RUN   TestRelativeExplicitRootIsTerminalBeforeProbe
+--- PASS: TestRelativeExplicitRootIsTerminalBeforeProbe (0.00s)
+=== NAME  
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/explicit/regular-executable
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/explicit/regular-executable (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/explicit/followed-executable-symlink-target
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/explicit/followed-executable-symlink-target (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/explicit/regular-non-executable
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/explicit/regular-non-executable (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/explicit/directory
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/explicit/directory (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/explicit/fifo
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/explicit/fifo (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/explicit/socket
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/explicit/socket (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/explicit/device
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/explicit/device (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/env/regular-executable
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/env/regular-executable (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/env/followed-executable-symlink-target
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/env/followed-executable-symlink-target (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/env/regular-non-executable
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/env/regular-non-executable (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/env/directory
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/env/directory (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/env/fifo
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/env/fifo (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/env/socket
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/env/socket (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/env/device
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/env/device (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/path/regular-executable
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/path/regular-executable (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/path/followed-executable-symlink-target
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/path/followed-executable-symlink-target (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/path/regular-non-executable
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/path/regular-non-executable (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/path/directory
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/path/directory (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/path/fifo
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/path/fifo (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/path/socket
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/path/socket (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/path/device
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/path/device (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/manifest/regular-executable
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/manifest/regular-executable (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/manifest/followed-executable-symlink-target
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/manifest/followed-executable-symlink-target (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/manifest/regular-non-executable
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/manifest/regular-non-executable (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/manifest/directory
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/manifest/directory (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/manifest/fifo
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/manifest/fifo (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/manifest/socket
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/manifest/socket (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/manifest/device
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/manifest/device (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/regular-executable
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/regular-executable (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/followed-executable-symlink-target
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/followed-executable-symlink-target (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/regular-non-executable
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/regular-non-executable (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/directory
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/directory (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/fifo
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/fifo (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/socket
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/socket (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+=== RUN   TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/device
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission/heuristic/device (0.00s)
+=== NAME  TestEveryDiscoveryTierUsesExecutableAdmission
+--- PASS: TestEveryDiscoveryTierUsesExecutableAdmission (0.00s)
+=== NAME  
+=== RUN   TestManifestWalkupRequiresRegularMarker
+--- PASS: TestManifestWalkupRequiresRegularMarker (0.00s)
+=== NAME  
+=== RUN   TestR20PathLookupResolvesExecutableSymlinkBeforeRoot
+--- PASS: TestR20PathLookupResolvesExecutableSymlinkBeforeRoot (0.00s)
+=== NAME  
+=== RUN   TestR21RelativeEnvironmentRootFailsClosedBeforeFilesystemProbe
+--- PASS: TestR21RelativeEnvironmentRootFailsClosedBeforeFilesystemProbe (0.00s)
+=== NAME  
+=== RUN   TestR25PathLookupRootIsMadeAbsolute
+--- PASS: TestR25PathLookupRootIsMadeAbsolute (0.00s)
+=== NAME  
+=== RUN   TestR35ExplicitRegularFileIsInvalidRoot
+--- PASS: TestR35ExplicitRegularFileIsInvalidRoot (0.00s)
+=== NAME  
+PASS

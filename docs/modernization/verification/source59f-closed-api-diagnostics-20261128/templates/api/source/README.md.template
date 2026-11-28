@@ -1,0 +1,57 @@
+# Closed default API receiving for Source59f
+
+This is a DATA-only receiving candidate for the single original API invocation
+`@@RECOVERY_APPROVED_WORK_AREA@@\r7\x149e4a76727c`.
+The CLI subtree and whole full59f run remain UNKNOWN. No full-run closure, cache
+handoff, Source verification, second-mode result, or CLI result follows from this
+API receiving.
+
+## Input and execution
+
+`receive_closed_api59f.py` is 32,491 bytes / 479 lines, SHA256
+`08b79031a662be16a90cf80142a6b746808f6891e0655761711540d7d6204cbe`.
+
+After own review, the root may invoke the pinned Python interpreter with:
+
+```text
+Python -I -S -B receive_closed_api59f.py --receipt-sha256 <actual original API receipt SHA256> --output <fresh JSON sibling>
+```
+
+The receipt SHA must come from the actual original API control metadata. The
+script admits no arbitrary case, phase, package, Source, or capture root. It
+writes only one new JSON sibling and cannot overwrite an existing file.
+
+## Receiving boundary
+
+The script first verifies the immutable runtime manifest/configuration and the
+API invocation receipt, original phase-plan binding, started/completed markers,
+original request/response/replay acknowledgment, inventory owner, and namespace
+owner. Every original command and both owners must show physical native and IO
+closure. The original five-minute arguments and historical 355-second consumer
+deadline are checked unchanged. There is no new process, wait, replay, cleanup,
+or deadline extension.
+
+Only after those checks does it measure capture hashes. Allowed payloads are
+the exact API case and that invocation's original namespace evidence root. It
+then checks the preserved incoming image and closed namespace copy, reconstructs
+the same-image full API inventory and original test2json ledger, and reports
+failed tests with their original output. The three agreed API stderr roots
+remain explicit. No runtime module is imported, no Source/cache payload is
+opened, and no parent/full/CLI capture is opened.
+
+A successful DATA verification returns exit0 even when the original test result
+is FAIL. The report keeps that result as FAIL/CLOSED. An unreceived physical
+predicate gives UNKNOWN without capture access. A post-closure data mismatch
+gives FAIL/CLOSED with receiving issues, and never changes the original result.
+
+## Provenance and validation
+
+Pure closure, namespace, replay, and ledger predicates are copied from the
+reviewed full59f receiver v2. The prior public
+`closed-api-failure-20261128/verify_closed_api.py`
+was read for the established single-subtree boundary. Its Source727d pins,
+counts, failures and conclusions are not imported.
+
+Only static AST parsing and source hashing were performed while preparing this
+candidate. The receiver has not been executed by its author. Root review and
+actual scoped receiving remain separate.

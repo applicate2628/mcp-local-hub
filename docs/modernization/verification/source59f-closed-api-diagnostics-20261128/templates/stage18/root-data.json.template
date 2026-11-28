@@ -1,0 +1,115 @@
+{
+    "schema":  "publication-original-root-data-audit-v1",
+    "status":  "PASS",
+    "physical_complete":  true,
+    "scope":  "cache-acceptance-stage-20261128-v18",
+    "config_sha256":  "563177199b6957fa665745efd8f3359073bc51ba6a157a5dac19e6efe8f71611",
+    "receipt_sha256":  "4b5aa01821cfb7b650ee8df12426035f259f71e4e07b6422ab6636d48fca18a2",
+    "root_sha256":  "46e4e0e991cad8e78621117db8c30b81184ea9911ee7727b19d0891f89e28787",
+    "outer_sha256":  "91f4bb7dc633df96d0dea8424ed8ef1498d89c66ef817c107a78c8fafca24d1d",
+    "commands_verified":  7,
+    "captures_verified":  14,
+    "results":  [
+                    {
+                        "name":  "head.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "rev-parse",
+                                     "HEAD"
+                                 ],
+                        "seconds":  0.03561020002234727,
+                        "exit_code":  0,
+                        "stdout_sha256":  "fe69bf89766a772b8e2c0910d80842e23bd30ae77fd518c0ffa9240c0f12083d",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8\n"
+                    },
+                    {
+                        "name":  "raw-source04e-commit.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "cat-file",
+                                     "commit",
+                                     "04e5b4eadd6407cbff4e04ba453546d278314bd7"
+                                 ],
+                        "seconds":  0.03662040003109723,
+                        "exit_code":  0,
+                        "stdout_sha256":  "f2235c70f5fa0ad25d7885074957db09acf11f8cfa83cb42daf38812c4ddd4dc",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "tree f68f7584dba7744e7607b07f615758f3ff633f54\nparent 33eaf8af8fc46cb231f48c70f4775922393245b1\nauthor applicate2628 \u003cdima_den@inbox.ru\u003e 1795870366 +0300\ncommitter applicate2628 \u003cdima_den@inbox.ru\u003e 1795870366 +0300\n\ntest: repair full-suite fixture contracts and tagged CLI build\n"
+                    },
+                    {
+                        "name":  "raw-source74e-commit.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "cat-file",
+                                     "commit",
+                                     "74e7563db244ede5984834233ce8d59072e92c0a"
+                                 ],
+                        "seconds":  0.03719129995442927,
+                        "exit_code":  0,
+                        "stdout_sha256":  "634cf46e5c32deabd9a328172bb3a441de991e63a296c8c2793b1179a5b76a60",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "tree bcf1bd3539a8ba5ab54cff123adbb4bc071276d3\nparent 04e5b4eadd6407cbff4e04ba453546d278314bd7\nauthor applicate2628 \u003cdima_den@inbox.ru\u003e 1795871806 +0300\ncommitter applicate2628 \u003cdima_den@inbox.ru\u003e 1795871806 +0300\n\ntest: pin migration fixture source to the Serena catalog revision\n"
+                    },
+                    {
+                        "name":  "raw-source59f-commit.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "cat-file",
+                                     "commit",
+                                     "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8"
+                                 ],
+                        "seconds":  0.038680900004692376,
+                        "exit_code":  0,
+                        "stdout_sha256":  "c4fe2c8f2673d678916f965987549a31cdba593a47305973514c105f577a6e68",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "tree 03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1\nparent 74e7563db244ede5984834233ce8d59072e92c0a\nauthor applicate2628 \u003cdima_den@inbox.ru\u003e 1795872628 +0300\ncommitter applicate2628 \u003cdima_den@inbox.ru\u003e 1795872628 +0300\n\ntest: receive the original breakaway process wait error\n"
+                    },
+                    {
+                        "name":  "build-closed-api-copy-data-probe.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe",
+                                     "build",
+                                     "-o",
+                                     "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-copy-probe-v1\\namespace-copy-probe.exe",
+                                     "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-copy-probe-v1\\main_windows.go"
+                                 ],
+                        "seconds":  22.07883699995,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    },
+                    {
+                        "name":  "compiled-data-probe-build-info.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\go.exe",
+                                     "version",
+                                     "-m",
+                                     "-json",
+                                     "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\namespace-copy-probe-v1\\namespace-copy-probe.exe"
+                                 ],
+                        "seconds":  0.14663370000198483,
+                        "exit_code":  0,
+                        "stdout_sha256":  "965e2c16ada383eee610196698a65012a0a9e674293e675254fa7aff0ab041d7",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  "{\n\t\"GoVersion\": \"go1.27.4\",\n\t\"Path\": \"command-line-arguments\",\n\t\"Main\": {},\n\t\"Settings\": [\n\t\t{\n\t\t\t\"Key\": \"-buildmode\",\n\t\t\t\"Value\": \"exe\"\n\t\t},\n\t\t{\n\t\t\t\"Key\": \"-compiler\",\n\t\t\t\"Value\": \"gc\"\n\t\t},\n\t\t{\n\t\t\t\"Key\": \"DefaultGODEBUG\",\n\t\t\t\"Value\": \"tracebacklabels=0,x509sslcertoverrideplatform=0\"\n\t\t},\n\t\t{\n\t\t\t\"Key\": \"CGO_ENABLED\",\n\t\t\t\"Value\": \"0\"\n\t\t},\n\t\t{\n\t\t\t\"Key\": \"GOARCH\",\n\t\t\t\"Value\": \"amd64\"\n\t\t},\n\t\t{\n\t\t\t\"Key\": \"GOOS\",\n\t\t\t\"Value\": \"windows\"\n\t\t},\n\t\t{\n\t\t\t\"Key\": \"GOAMD64\",\n\t\t\t\"Value\": \"v1\"\n\t\t}\n\t]\n}\n"
+                    },
+                    {
+                        "name":  "isolated-source-still-clean.stdout.txt",
+                        "argv":  [
+                                     "@@RECOVERY_GIT_INSTALLATION_HOME_JSON@@\\cmd\\git.exe",
+                                     "status",
+                                     "--porcelain=v1",
+                                     "--untracked-files=all"
+                                 ],
+                        "seconds":  0.07112199999392033,
+                        "exit_code":  0,
+                        "stdout_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stderr_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "stdout_preview":  ""
+                    }
+                ],
+    "tests_executed":  false,
+    "reviewed_utc":  "2026-11-28T15:30:36.4953095Z"
+}

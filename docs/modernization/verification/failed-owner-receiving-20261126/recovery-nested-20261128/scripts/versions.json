@@ -1,0 +1,23 @@
+{
+  "schema": "nested-inspector-source-history-v1",
+  "versions": [
+    {
+      "version": "v1",
+      "bytes": 30889,
+      "sha256": "f86636d9f02be91d739c7c9a030c279e43bf070a71b80b388e51257b60120e33"
+    },
+    {
+      "version": "v2",
+      "bytes": 31089,
+      "sha256": "3c880b1625c1b7b8695493730354a09c6599b504ba5adac01bb2d0b44a766422"
+    },
+    {
+      "version": "v3",
+      "bytes": 31155,
+      "sha256": "6d0d1a68da00c3567beda01b53506e551e7346f6879a2b517f56d34cdc886da3"
+    }
+  ],
+  "reconstruction": "Published inspect_nested.py is exact v3; reverse v2-to-v3.patch for v2, then reverse zero-context v1-to-v2.patch for v1 (git apply --unidiff-zero --reverse). Verify every resulting source against the listed complete byte pins.",
+  "validation": "Focused smoke checks and nine stat regressions PASS in retained local runs; native v1 FAIL, v2/v3 reports and closures preserved in execution-receipt.json.",
+  "scope": "Data inspection tools; no recovered production source executed"
+}

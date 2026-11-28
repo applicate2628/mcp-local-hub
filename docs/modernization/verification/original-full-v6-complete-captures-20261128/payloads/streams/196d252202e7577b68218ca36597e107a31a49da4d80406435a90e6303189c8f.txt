@@ -1,0 +1,95 @@
+{"Action":"start","Package":"mcp-local-hub/internal/api/lsp_routing"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg","Output":"=== RUN   TestToolCallParamsAndExtractPathArg\n","OutputType":"frame"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/gopls_file"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/gopls_file","Output":"=== RUN   TestToolCallParamsAndExtractPathArg/gopls_file\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/gopls_file","Output":"--- PASS: TestToolCallParamsAndExtractPathArg/gopls_file (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/gopls_file"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/gopls_files_first_non-empty"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/gopls_files_first_non-empty","Output":"=== RUN   TestToolCallParamsAndExtractPathArg/gopls_files_first_non-empty\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/gopls_files_first_non-empty","Output":"--- PASS: TestToolCallParamsAndExtractPathArg/gopls_files_first_non-empty (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/gopls_files_first_non-empty"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/gopls_dir"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/gopls_dir","Output":"=== RUN   TestToolCallParamsAndExtractPathArg/gopls_dir\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/gopls_dir","Output":"--- PASS: TestToolCallParamsAndExtractPathArg/gopls_dir (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/gopls_dir"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/gopls_pathless_workspace"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/gopls_pathless_workspace","Output":"=== RUN   TestToolCallParamsAndExtractPathArg/gopls_pathless_workspace\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/gopls_pathless_workspace","Output":"--- PASS: TestToolCallParamsAndExtractPathArg/gopls_pathless_workspace (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/gopls_pathless_workspace"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/mcp-language-server_filePath"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/mcp-language-server_filePath","Output":"=== RUN   TestToolCallParamsAndExtractPathArg/mcp-language-server_filePath\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/mcp-language-server_filePath","Output":"--- PASS: TestToolCallParamsAndExtractPathArg/mcp-language-server_filePath (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/mcp-language-server_filePath"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/mcp-language-server_pathless_definition"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/mcp-language-server_pathless_definition","Output":"=== RUN   TestToolCallParamsAndExtractPathArg/mcp-language-server_pathless_definition\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/mcp-language-server_pathless_definition","Output":"--- PASS: TestToolCallParamsAndExtractPathArg/mcp-language-server_pathless_definition (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/mcp-language-server_pathless_definition"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/priority_file_before_files"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/priority_file_before_files","Output":"=== RUN   TestToolCallParamsAndExtractPathArg/priority_file_before_files\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/priority_file_before_files","Output":"--- PASS: TestToolCallParamsAndExtractPathArg/priority_file_before_files (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg/priority_file_before_files"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg","Output":"--- PASS: TestToolCallParamsAndExtractPathArg (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsAndExtractPathArg"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsRejectsNonObject"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsRejectsNonObject","Output":"=== RUN   TestToolCallParamsRejectsNonObject\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsRejectsNonObject","Output":"--- PASS: TestToolCallParamsRejectsNonObject (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestToolCallParamsRejectsNonObject"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestExtractPathArgsReturnsAllFiles"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestExtractPathArgsReturnsAllFiles","Output":"=== RUN   TestExtractPathArgsReturnsAllFiles\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestExtractPathArgsReturnsAllFiles","Output":"--- PASS: TestExtractPathArgsReturnsAllFiles (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestExtractPathArgsReturnsAllFiles"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups","Output":"=== RUN   TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups","Output":"--- PASS: TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestRegisteredWorkspace_SameIdentitySizeMtimeEditObservedWithin32Lookups"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestRegisteredWorkspace_SameIdentitySizeMtimeEditObservedWithin32Lookups","Output":"=== RUN   TestRegisteredWorkspace_SameIdentitySizeMtimeEditObservedWithin32Lookups\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestRegisteredWorkspace_SameIdentitySizeMtimeEditObservedWithin32Lookups","Output":"--- PASS: TestRegisteredWorkspace_SameIdentitySizeMtimeEditObservedWithin32Lookups (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestRegisteredWorkspace_SameIdentitySizeMtimeEditObservedWithin32Lookups"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestRegisteredWorkspace_DoesNotCloneUnrelatedNestedRows"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestRegisteredWorkspace_DoesNotCloneUnrelatedNestedRows","Output":"=== RUN   TestRegisteredWorkspace_DoesNotCloneUnrelatedNestedRows\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestRegisteredWorkspace_DoesNotCloneUnrelatedNestedRows","Output":"--- PASS: TestRegisteredWorkspace_DoesNotCloneUnrelatedNestedRows (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestRegisteredWorkspace_DoesNotCloneUnrelatedNestedRows"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_GoMarkerReturnsCanonicalRootWithoutRegistration"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_GoMarkerReturnsCanonicalRootWithoutRegistration","Output":"=== RUN   TestResolveByPath_GoMarkerReturnsCanonicalRootWithoutRegistration\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_GoMarkerReturnsCanonicalRootWithoutRegistration","Output":"--- PASS: TestResolveByPath_GoMarkerReturnsCanonicalRootWithoutRegistration (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_GoMarkerReturnsCanonicalRootWithoutRegistration"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_NestedLanguageMarkerWins"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_NestedLanguageMarkerWins","Output":"=== RUN   TestResolveByPath_NestedLanguageMarkerWins\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_NestedLanguageMarkerWins","Output":"--- PASS: TestResolveByPath_NestedLanguageMarkerWins (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_NestedLanguageMarkerWins"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_RustCargoTomlMatchesExistingRegistration"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_RustCargoTomlMatchesExistingRegistration","Output":"=== RUN   TestResolveByPath_RustCargoTomlMatchesExistingRegistration\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_RustCargoTomlMatchesExistingRegistration","Output":"--- PASS: TestResolveByPath_RustCargoTomlMatchesExistingRegistration (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_RustCargoTomlMatchesExistingRegistration"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_MatchesLegacySymlinkWorkspaceKey"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_MatchesLegacySymlinkWorkspaceKey","Output":"=== RUN   TestResolveByPath_MatchesLegacySymlinkWorkspaceKey\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_MatchesLegacySymlinkWorkspaceKey","Output":"--- PASS: TestResolveByPath_MatchesLegacySymlinkWorkspaceKey (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_MatchesLegacySymlinkWorkspaceKey"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_RegisteredMatchIsLanguageSpecific"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_RegisteredMatchIsLanguageSpecific","Output":"=== RUN   TestResolveByPath_RegisteredMatchIsLanguageSpecific\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_RegisteredMatchIsLanguageSpecific","Output":"--- PASS: TestResolveByPath_RegisteredMatchIsLanguageSpecific (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_RegisteredMatchIsLanguageSpecific"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_GitFallbackWhenNoLanguageMarkerExists"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_GitFallbackWhenNoLanguageMarkerExists","Output":"=== RUN   TestResolveByPath_GitFallbackWhenNoLanguageMarkerExists\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_GitFallbackWhenNoLanguageMarkerExists","Output":"--- PASS: TestResolveByPath_GitFallbackWhenNoLanguageMarkerExists (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_GitFallbackWhenNoLanguageMarkerExists"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_NoMarkerOrGitReturnsWorkspaceNotFound"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_NoMarkerOrGitReturnsWorkspaceNotFound","Output":"=== RUN   TestResolveByPath_NoMarkerOrGitReturnsWorkspaceNotFound\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_NoMarkerOrGitReturnsWorkspaceNotFound","Output":"--- PASS: TestResolveByPath_NoMarkerOrGitReturnsWorkspaceNotFound (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_NoMarkerOrGitReturnsWorkspaceNotFound"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_RefreshesRegistryOnMtimeAdvance"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_RefreshesRegistryOnMtimeAdvance","Output":"=== RUN   TestResolveByPath_RefreshesRegistryOnMtimeAdvance\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_RefreshesRegistryOnMtimeAdvance","Output":"--- PASS: TestResolveByPath_RefreshesRegistryOnMtimeAdvance (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestResolveByPath_RefreshesRegistryOnMtimeAdvance"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock","Output":"=== RUN   TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock","Output":"--- PASS: TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock"}
+{"Action":"run","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock","Output":"=== RUN   TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock","Output":"--- PASS: TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock (0.31s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/lsp_routing","Test":"TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock"}
+{"Action":"output","Package":"mcp-local-hub/internal/api/lsp_routing","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/api/lsp_routing"}

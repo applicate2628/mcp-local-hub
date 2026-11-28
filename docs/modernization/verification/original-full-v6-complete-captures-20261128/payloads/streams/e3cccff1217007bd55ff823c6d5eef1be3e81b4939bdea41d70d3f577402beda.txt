@@ -1,0 +1,239 @@
+=== RUN   TestClangTidyTool_RejectsOversizedOutput
+    clangtidy_test.go:20: bash-script fake clang-tidy not executable on Windows
+--- SKIP: TestClangTidyTool_RejectsOversizedOutput (0.00s)
+=== NAME  
+=== RUN   TestRunCaptureLimited_EnforcesStdoutLimit
+--- PASS: TestRunCaptureLimited_EnforcesStdoutLimit (0.29s)
+=== NAME  
+=== RUN   TestDetectTools_ReportsInstalledWithVersion
+--- PASS: TestDetectTools_ReportsInstalledWithVersion (0.15s)
+=== NAME  
+=== RUN   TestListToolsTool_MirrorsResourceCatalog
+--- PASS: TestListToolsTool_MirrorsResourceCatalog (0.12s)
+=== NAME  
+=== RUN   TestListToolsTool_HidesHyperfineWhenGateClosed
+--- PASS: TestListToolsTool_HidesHyperfineWhenGateClosed (0.11s)
+=== NAME  
+=== RUN   TestToolsResource_ReturnsJSONCatalog
+--- PASS: TestToolsResource_ReturnsJSONCatalog (0.11s)
+=== NAME  
+=== RUN   TestToolsResource_HidesHyperfineWhenGateClosed
+--- PASS: TestToolsResource_HidesHyperfineWhenGateClosed (0.10s)
+=== NAME  
+=== RUN   TestClangTidy_ParsesRealOutput
+--- PASS: TestClangTidy_ParsesRealOutput (0.32s)
+=== NAME  
+=== RUN   TestValidateClangTidyInputs_DisallowedExtraArgs
+--- PASS: TestValidateClangTidyInputs_DisallowedExtraArgs (0.00s)
+=== NAME  
+=== RUN   TestValidateClangTidyInputs_RejectsDashPrefixedFiles
+--- PASS: TestValidateClangTidyInputs_RejectsDashPrefixedFiles (0.00s)
+=== NAME  
+=== RUN   TestValidateClangTidyInputs_AllowsSafeArgs
+--- PASS: TestValidateClangTidyInputs_AllowsSafeArgs (0.00s)
+=== NAME  
+=== RUN   TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag
+=== RUN   TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/build-id-eq
+--- PASS: TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/build-id-eq (0.00s)
+=== NAME  TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag
+=== RUN   TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/build-id-bare
+--- PASS: TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/build-id-bare (0.00s)
+=== NAME  TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag
+=== RUN   TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/debug-file-directory-eq
+--- PASS: TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/debug-file-directory-eq (0.00s)
+=== NAME  TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag
+=== RUN   TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/dsym-eq
+--- PASS: TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag/dsym-eq (0.00s)
+=== NAME  TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag
+--- PASS: TestLLVMObjdumpTool_RejectsExtraArgsPathValuedFlag (0.00s)
+=== NAME  
+=== RUN   TestHyperfine_ComparesTwoCommands
+--- PASS: TestHyperfine_ComparesTwoCommands (0.60s)
+=== NAME  
+=== RUN   TestLLVMObjdump_DisassemblesBinary
+--- PASS: TestLLVMObjdump_DisassemblesBinary (1.22s)
+=== NAME  
+=== RUN   TestIWYU_ParsesSuggestions
+    handlers_test.go:469: reports[] is empty — iwyu produced no parseable output for the test file
+--- SKIP: TestIWYU_ParsesSuggestions (0.36s)
+=== NAME  
+=== RUN   TestHyperfineEnabled_RequiresExactOptIn
+=== RUN   TestHyperfineEnabled_RequiresExactOptIn/unset
+--- PASS: TestHyperfineEnabled_RequiresExactOptIn/unset (0.00s)
+=== NAME  TestHyperfineEnabled_RequiresExactOptIn
+=== RUN   TestHyperfineEnabled_RequiresExactOptIn/empty-explicit
+--- PASS: TestHyperfineEnabled_RequiresExactOptIn/empty-explicit (0.00s)
+=== NAME  TestHyperfineEnabled_RequiresExactOptIn
+=== RUN   TestHyperfineEnabled_RequiresExactOptIn/literal-one
+--- PASS: TestHyperfineEnabled_RequiresExactOptIn/literal-one (0.00s)
+=== NAME  TestHyperfineEnabled_RequiresExactOptIn
+=== RUN   TestHyperfineEnabled_RequiresExactOptIn/literal-zero
+--- PASS: TestHyperfineEnabled_RequiresExactOptIn/literal-zero (0.00s)
+=== NAME  TestHyperfineEnabled_RequiresExactOptIn
+=== RUN   TestHyperfineEnabled_RequiresExactOptIn/truthy-true
+--- PASS: TestHyperfineEnabled_RequiresExactOptIn/truthy-true (0.00s)
+=== NAME  TestHyperfineEnabled_RequiresExactOptIn
+=== RUN   TestHyperfineEnabled_RequiresExactOptIn/truthy-yes
+--- PASS: TestHyperfineEnabled_RequiresExactOptIn/truthy-yes (0.00s)
+=== NAME  TestHyperfineEnabled_RequiresExactOptIn
+=== RUN   TestHyperfineEnabled_RequiresExactOptIn/typo-whitespace
+--- PASS: TestHyperfineEnabled_RequiresExactOptIn/typo-whitespace (0.00s)
+=== NAME  TestHyperfineEnabled_RequiresExactOptIn
+=== RUN   TestHyperfineEnabled_RequiresExactOptIn/typo-newline
+--- PASS: TestHyperfineEnabled_RequiresExactOptIn/typo-newline (0.00s)
+=== NAME  TestHyperfineEnabled_RequiresExactOptIn
+=== RUN   TestHyperfineEnabled_RequiresExactOptIn/quoted
+--- PASS: TestHyperfineEnabled_RequiresExactOptIn/quoted (0.00s)
+=== NAME  TestHyperfineEnabled_RequiresExactOptIn
+--- PASS: TestHyperfineEnabled_RequiresExactOptIn (0.00s)
+=== NAME  
+=== RUN   TestIWYUTool_RejectsOversizedStdout
+--- PASS: TestIWYUTool_RejectsOversizedStdout (0.13s)
+=== NAME  
+=== RUN   TestIWYUTool_RejectsOversizedStderr
+--- PASS: TestIWYUTool_RejectsOversizedStderr (0.12s)
+=== NAME  
+=== RUN   TestIWYUHelperProcess
+--- PASS: TestIWYUHelperProcess (0.00s)
+=== NAME  
+=== RUN   TestIWYUTool_RequiresProjectRoot
+--- PASS: TestIWYUTool_RequiresProjectRoot (0.00s)
+=== NAME  
+=== RUN   TestIWYUTool_RejectsFileOutsideProjectRoot
+--- PASS: TestIWYUTool_RejectsFileOutsideProjectRoot (0.00s)
+=== NAME  
+=== RUN   TestIWYUTool_RejectsSymlinkEscape
+    iwyu_test.go:137: Windows symlink creation requires privileges on many hosts
+--- SKIP: TestIWYUTool_RejectsSymlinkEscape (0.00s)
+=== NAME  
+=== RUN   TestIWYUTool_RejectsExtraArgsPositional
+--- PASS: TestIWYUTool_RejectsExtraArgsPositional (0.00s)
+=== NAME  
+=== RUN   TestIWYUTool_RejectsExtraArgsResponseFile
+--- PASS: TestIWYUTool_RejectsExtraArgsResponseFile (0.00s)
+=== NAME  
+=== RUN   TestValidateIWYUExtraArgs_AllowsBenignClangFlags
+--- PASS: TestValidateIWYUExtraArgs_AllowsBenignClangFlags (0.00s)
+=== NAME  
+=== RUN   TestValidateIWYUExtraArgs_RejectsPathValuedIWYUFlags
+--- PASS: TestValidateIWYUExtraArgs_RejectsPathValuedIWYUFlags (0.00s)
+=== NAME  
+=== RUN   TestValidateIWYUExtraArgs_RejectsPositionalAndResponseFile
+--- PASS: TestValidateIWYUExtraArgs_RejectsPositionalAndResponseFile (0.00s)
+=== NAME  
+=== RUN   TestIWYUTool_RejectsExtraArgsPathValuedFlag
+--- PASS: TestIWYUTool_RejectsExtraArgsPathValuedFlag (0.00s)
+=== NAME  
+=== RUN   TestLLVMNMTool_NotInstalled
+--- PASS: TestLLVMNMTool_NotInstalled (0.00s)
+=== NAME  
+=== RUN   TestLLVMNMTool_RequiresProjectRoot
+--- PASS: TestLLVMNMTool_RequiresProjectRoot (0.00s)
+=== NAME  
+=== RUN   TestLLVMSizeTool_RequiresProjectRoot
+--- PASS: TestLLVMSizeTool_RequiresProjectRoot (0.00s)
+=== NAME  
+=== RUN   TestLLVMNMTool_RejectsExtraArgsBypass
+=== RUN   TestLLVMNMTool_RejectsExtraArgsBypass/response-file
+--- PASS: TestLLVMNMTool_RejectsExtraArgsBypass/response-file (0.00s)
+=== NAME  TestLLVMNMTool_RejectsExtraArgsBypass
+=== RUN   TestLLVMNMTool_RejectsExtraArgsBypass/positional-absolute
+--- PASS: TestLLVMNMTool_RejectsExtraArgsBypass/positional-absolute (0.00s)
+=== NAME  TestLLVMNMTool_RejectsExtraArgsBypass
+=== RUN   TestLLVMNMTool_RejectsExtraArgsBypass/positional-relative
+--- PASS: TestLLVMNMTool_RejectsExtraArgsBypass/positional-relative (0.00s)
+=== NAME  TestLLVMNMTool_RejectsExtraArgsBypass
+=== RUN   TestLLVMNMTool_RejectsExtraArgsBypass/flag-then-positional
+--- PASS: TestLLVMNMTool_RejectsExtraArgsBypass/flag-then-positional (0.00s)
+=== NAME  TestLLVMNMTool_RejectsExtraArgsBypass
+=== RUN   TestLLVMNMTool_RejectsExtraArgsBypass/path-valued-flag
+--- PASS: TestLLVMNMTool_RejectsExtraArgsBypass/path-valued-flag (0.00s)
+=== NAME  TestLLVMNMTool_RejectsExtraArgsBypass
+--- PASS: TestLLVMNMTool_RejectsExtraArgsBypass (0.00s)
+=== NAME  
+=== RUN   TestLLVMSizeTool_RejectsExtraArgsBypass
+=== RUN   TestLLVMSizeTool_RejectsExtraArgsBypass/response-file
+--- PASS: TestLLVMSizeTool_RejectsExtraArgsBypass/response-file (0.00s)
+=== NAME  TestLLVMSizeTool_RejectsExtraArgsBypass
+=== RUN   TestLLVMSizeTool_RejectsExtraArgsBypass/positional-absolute
+--- PASS: TestLLVMSizeTool_RejectsExtraArgsBypass/positional-absolute (0.00s)
+=== NAME  TestLLVMSizeTool_RejectsExtraArgsBypass
+=== RUN   TestLLVMSizeTool_RejectsExtraArgsBypass/flag-then-positional
+--- PASS: TestLLVMSizeTool_RejectsExtraArgsBypass/flag-then-positional (0.00s)
+=== NAME  TestLLVMSizeTool_RejectsExtraArgsBypass
+=== RUN   TestLLVMSizeTool_RejectsExtraArgsBypass/path-valued-flag
+--- PASS: TestLLVMSizeTool_RejectsExtraArgsBypass/path-valued-flag (0.00s)
+=== NAME  TestLLVMSizeTool_RejectsExtraArgsBypass
+--- PASS: TestLLVMSizeTool_RejectsExtraArgsBypass (0.00s)
+=== NAME  
+=== RUN   TestLLVMNM_DumpsSymbols
+--- PASS: TestLLVMNM_DumpsSymbols (1.08s)
+=== NAME  
+=== RUN   TestLLVMSize_DumpsSections
+--- PASS: TestLLVMSize_DumpsSections (1.22s)
+=== NAME  
+=== RUN   TestLLVMObjdumpTool_RequiresProjectRoot
+--- PASS: TestLLVMObjdumpTool_RequiresProjectRoot (0.00s)
+=== NAME  
+=== RUN   TestValidateLLVMObjdumpBinaryPath_AllowsBinaryInsideProjectRoot
+--- PASS: TestValidateLLVMObjdumpBinaryPath_AllowsBinaryInsideProjectRoot (0.00s)
+=== NAME  
+=== RUN   TestValidateLLVMObjdumpBinaryPath_RejectsBinaryOutsideProjectRoot
+--- PASS: TestValidateLLVMObjdumpBinaryPath_RejectsBinaryOutsideProjectRoot (0.00s)
+=== NAME  
+=== RUN   TestValidateLLVMObjdumpBinaryPath_RejectsSymlinkEscape
+    llvmobjdump_test.go:85: Windows symlink creation requires privileges on many hosts
+--- SKIP: TestValidateLLVMObjdumpBinaryPath_RejectsSymlinkEscape (0.00s)
+=== NAME  
+=== RUN   TestValidateLLVMObjdumpExtraArgs_AllowsFlags
+--- PASS: TestValidateLLVMObjdumpExtraArgs_AllowsFlags (0.00s)
+=== NAME  
+=== RUN   TestValidateLLVMObjdumpExtraArgs_RejectsResponseFile
+--- PASS: TestValidateLLVMObjdumpExtraArgs_RejectsResponseFile (0.00s)
+=== NAME  
+=== RUN   TestValidateLLVMObjdumpExtraArgs_RejectsPositional
+--- PASS: TestValidateLLVMObjdumpExtraArgs_RejectsPositional (0.00s)
+=== NAME  
+=== RUN   TestValidateLLVMObjdumpExtraArgs_RejectsPathValuedFlags
+--- PASS: TestValidateLLVMObjdumpExtraArgs_RejectsPathValuedFlags (0.00s)
+=== NAME  
+=== RUN   TestMatchesForbiddenFlagPrefix_DoesNotFalseMatch
+--- PASS: TestMatchesForbiddenFlagPrefix_DoesNotFalseMatch (0.00s)
+=== NAME  
+=== RUN   TestLLVMObjdumpTool_RejectsExtraArgsBypass
+=== RUN   TestLLVMObjdumpTool_RejectsExtraArgsBypass/response-file
+--- PASS: TestLLVMObjdumpTool_RejectsExtraArgsBypass/response-file (0.00s)
+=== NAME  TestLLVMObjdumpTool_RejectsExtraArgsBypass
+=== RUN   TestLLVMObjdumpTool_RejectsExtraArgsBypass/positional-absolute
+--- PASS: TestLLVMObjdumpTool_RejectsExtraArgsBypass/positional-absolute (0.00s)
+=== NAME  TestLLVMObjdumpTool_RejectsExtraArgsBypass
+=== RUN   TestLLVMObjdumpTool_RejectsExtraArgsBypass/positional-relative
+--- PASS: TestLLVMObjdumpTool_RejectsExtraArgsBypass/positional-relative (0.00s)
+=== NAME  TestLLVMObjdumpTool_RejectsExtraArgsBypass
+=== RUN   TestLLVMObjdumpTool_RejectsExtraArgsBypass/flag-then-positional
+--- PASS: TestLLVMObjdumpTool_RejectsExtraArgsBypass/flag-then-positional (0.00s)
+=== NAME  TestLLVMObjdumpTool_RejectsExtraArgsBypass
+--- PASS: TestLLVMObjdumpTool_RejectsExtraArgsBypass (0.00s)
+=== NAME  
+=== RUN   TestValidateBinaryInsideRoot_ResolvesRealPath
+--- PASS: TestValidateBinaryInsideRoot_ResolvesRealPath (0.00s)
+=== NAME  
+=== RUN   TestValidateBinaryInsideRoot_RejectsMissingProjectRoot
+--- PASS: TestValidateBinaryInsideRoot_RejectsMissingProjectRoot (0.00s)
+=== NAME  
+=== RUN   TestValidateBinaryInsideRoot_RejectsMissingTarget
+--- PASS: TestValidateBinaryInsideRoot_RejectsMissingTarget (0.00s)
+=== NAME  
+=== RUN   TestValidateBinaryInsideRoot_RejectsFilesystemRoot
+--- PASS: TestValidateBinaryInsideRoot_RejectsFilesystemRoot (0.00s)
+=== NAME  
+=== RUN   TestValidateBinaryInsideRoot_RejectsDirectoryTarget
+--- PASS: TestValidateBinaryInsideRoot_RejectsDirectoryTarget (0.00s)
+=== NAME  
+=== RUN   TestValidateBinaryInsideRoot_RejectsParentTraversal
+--- PASS: TestValidateBinaryInsideRoot_RejectsParentTraversal (0.00s)
+=== NAME  
+=== RUN   TestValidateBinaryInsideRoot_KindWordingPropagated
+--- PASS: TestValidateBinaryInsideRoot_KindWordingPropagated (0.00s)
+=== NAME  
+PASS

@@ -1,0 +1,29 @@
+{
+    "schema":  "successor-input-producer-root-review-v2",
+    "status":  "REVIEWED_NOT_EXECUTED",
+    "candidate":  {
+                      "sha256":  "e6e93b7c44e48f4500fde09d8f5ed8eb63e0bb9a11a669848aec3d523e87984f",
+                      "path":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer-candidate\\successor-product-helper-inputs-v1-plan-v2.candidate.json"
+                  },
+    "plan":  {
+                 "sha256":  "99333ab4cb43f9a01720c70e567782475065b0f7077d70a3f157dca475c9c15a",
+                 "path":  "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\producer-candidate\\successor-product-helper-inputs-v1-plan-v2.json"
+             },
+    "source_commit":  "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+    "source_tree":  "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+    "source_files":  3369,
+    "actual_input_pins_verified":  3398,
+    "commands":  12,
+    "required_seconds":  3870,
+    "parent_seconds":  4100,
+    "own_review":  [
+                       "Stage 244 lines, cache copier 211 lines, private scope 264 lines, bindings and all 12 commands",
+                       "Product wrapper and actual Source build fields; schema 3 and original builder output receiving",
+                       "Namespace whole-suite image-copy owner and original observations",
+                       "Foreground owner, framed parser tests, four native path-pin receipts and one-line panic retention correction",
+                       "Explicit environment and closed original warm donor evidence"
+                   ],
+    "source_tracked_mutation_performed":  false,
+    "native_or_test_execution":  false,
+    "qualification_passed":  false
+}

@@ -1,0 +1,200 @@
+//go:build windows
+
+// DATA-only copy/flush measurement. No test image, child process, or network use.
+package main
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"runtime"
+	"syscall"
+	"time"
+)
+
+const (
+	taskRoot = `@@RECOVERY_APPROVED_WORK_AREA@@\mcp-acceptance-rebuild-20261127-v1`
+	sourcePath = `@@RECOVERY_APPROVED_WORK_AREA@@\r7\x149e4a76727c\incoming-original.exe`
+	expectedSHA = "d237704913484fe2931860793badbfdaadb3bb216f5c436b8d01bdf2301d3e60"
+	outputRoot = taskRoot + `\namespace-copy-probe-v1-data`
+)
+
+type sample struct {
+	Mode                    string   `json:"mode"`
+	Path                    string   `json:"path"`
+	Bytes                   int64    `json:"bytes"`
+	CopySHA256              string   `json:"copy_sha256"`
+	ReadbackSHA256          string   `json:"readback_sha256"`
+	CopyNS                  int64    `json:"copy_ns"`
+	SyncRequested           bool     `json:"sync_requested"`
+	SyncCalled              bool     `json:"sync_called"`
+	SyncNS                  int64    `json:"sync_ns"`
+	DestinationCloseNS      int64    `json:"destination_close_ns"`
+	DestinationCloseReturned bool    `json:"destination_close_returned"`
+	SourceCloseNS            int64   `json:"source_close_ns"`
+	SourceCloseReturned      bool    `json:"source_close_returned"`
+	ReadbackNS               int64   `json:"readback_ns"`
+	TotalNS                  int64   `json:"total_ns"`
+	Errors                   []string `json:"errors"`
+	DataChecksPassed         bool     `json:"data_checks_passed"`
+}
+
+type report struct {
+	Schema                      string   `json:"schema"`
+	Source                      string   `json:"source"`
+	ExpectedSHA256              string   `json:"expected_sha256"`
+	SourceBeforeSHA256          string   `json:"source_before_sha256"`
+	SourceAfterSHA256           string   `json:"source_after_sha256"`
+	SourceBytes                 int64    `json:"source_bytes"`
+	SourceSameFile              bool     `json:"source_same_file"`
+	GoVersion                   string   `json:"go_version"`
+	StartedUTC                  string   `json:"started_utc"`
+	FinishedUTC                 string   `json:"finished_utc"`
+	Samples                     []sample `json:"samples"`
+	Errors                      []string `json:"errors"`
+	DataChecksPassed            bool     `json:"data_checks_passed"`
+	SingleObservationPerMode    bool     `json:"single_observation_per_mode"`
+	OrderRandomized             bool     `json:"order_randomized"`
+	ChildProcessesStarted       int      `json:"child_processes_started"`
+	TestImagesExecuted          bool     `json:"test_images_executed"`
+	NetworkUsed                 bool     `json:"network_used"`
+	NamespaceQualificationClaimed bool   `json:"namespace_qualification_claimed"`
+}
+
+func ordinary(path string, directory bool) error {
+	var parts []string
+	for p := path; ; p = filepath.Dir(p) {
+		parts = append(parts, p)
+		if filepath.Dir(p) == p { break }
+	}
+	for i := len(parts)-1; i >= 0; i-- {
+		info, err := os.Lstat(parts[i])
+		if err != nil { return err }
+		data, ok := info.Sys().(*syscall.Win32FileAttributeData)
+		if !ok || data.FileAttributes&syscall.FILE_ATTRIBUTE_REPARSE_POINT != 0 || info.Mode()&os.ModeSymlink != 0 {
+			return errors.New("reparse or unsupported path metadata refused")
+		}
+		if i != 0 || directory {
+			if !info.IsDir() { return errors.New("ordinary directory required") }
+		} else if !info.Mode().IsRegular() { return errors.New("ordinary file required") }
+	}
+	return nil
+}
+
+func hashFile(path string) (digest string, returned error) {
+	if err := ordinary(path, false); err != nil { return "", err }
+	file, err := os.Open(path)
+	if err != nil { return "", err }
+	defer func() { returned = errors.Join(returned, file.Close()) }()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil { return "", err }
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func copySample(name string, withSync bool, expectedBytes int64) (row sample) {
+	started := time.Now()
+	row.Mode, row.Path, row.SyncRequested = name, filepath.Join(outputRoot, name+".exe"), withSync
+	row.Errors = []string{}
+	defer func() { row.TotalNS = time.Since(started).Nanoseconds() }()
+	keep := func(label string, err error) {
+		if err != nil { row.Errors = append(row.Errors, label+": "+err.Error()) }
+	}
+	source, err := os.Open(sourcePath)
+	if err != nil { keep("source open", err); return row }
+	target, err := os.OpenFile(row.Path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		keep("destination create", err)
+		at := time.Now(); err = source.Close(); row.SourceCloseNS = time.Since(at).Nanoseconds()
+		row.SourceCloseReturned = true; keep("source close", err)
+		return row
+	}
+	hash := sha256.New()
+	at := time.Now()
+	row.Bytes, err = io.Copy(io.MultiWriter(target, hash), source)
+	row.CopyNS = time.Since(at).Nanoseconds()
+	keep("copy", err)
+	row.CopySHA256 = hex.EncodeToString(hash.Sum(nil))
+	if row.Bytes != expectedBytes || row.CopySHA256 != expectedSHA {
+		keep("copy identity", errors.New("complete copied bytes differ from the admitted source"))
+	}
+	if withSync && len(row.Errors) == 0 {
+		row.SyncCalled = true
+		at = time.Now(); err = target.Sync(); row.SyncNS = time.Since(at).Nanoseconds()
+		keep("destination sync", err)
+	}
+	at = time.Now(); err = target.Close(); row.DestinationCloseNS = time.Since(at).Nanoseconds()
+	row.DestinationCloseReturned = true; keep("destination close", err)
+	at = time.Now(); err = source.Close(); row.SourceCloseNS = time.Since(at).Nanoseconds()
+	row.SourceCloseReturned = true; keep("source close", err)
+	if len(row.Errors) == 0 {
+		at = time.Now()
+		row.ReadbackSHA256, err = hashFile(row.Path)
+		row.ReadbackNS = time.Since(at).Nanoseconds()
+		keep("destination reopened readback", err)
+		if row.ReadbackSHA256 != expectedSHA {
+			keep("readback identity", errors.New("destination readback differs from the admitted source"))
+		}
+	}
+	row.DataChecksPassed = len(row.Errors) == 0 && row.DestinationCloseReturned && row.SourceCloseReturned
+	return row
+}
+
+func publish(path string, raw []byte) (returned error) {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil { return err }
+	defer func() { returned = errors.Join(returned, file.Close()) }()
+	if _, err := file.Write(raw); err != nil { return err }
+	return file.Sync() // Receipt durability is outside the copy measurements.
+}
+
+func run() error {
+	if len(os.Args) != 1 { return errors.New("this fixed-source DATA probe accepts no operands") }
+	if err := ordinary(sourcePath, false); err != nil { return err }
+	if err := ordinary(taskRoot, true); err != nil { return err }
+	beforeInfo, err := os.Stat(sourcePath)
+	if err != nil { return err }
+	beforeSHA, err := hashFile(sourcePath)
+	if err != nil || beforeSHA != expectedSHA {
+		return errors.Join(err, errors.New("closed API input SHA256 differs before any output creation"))
+	}
+	if _, err := os.Lstat(outputRoot); !os.IsNotExist(err) {
+		return errors.New("probe output must be a new absent directory")
+	}
+	if err := os.Mkdir(outputRoot, 0700); err != nil { return err }
+	r := report{Schema:"namespace-copy-sync-data-probe-v1", Source:sourcePath,
+		ExpectedSHA256:expectedSHA, SourceBeforeSHA256:beforeSHA, SourceBytes:beforeInfo.Size(),
+		GoVersion:runtime.Version(), StartedUTC:time.Now().UTC().Format(time.RFC3339Nano),
+		SingleObservationPerMode:true, Samples:[]sample{}, Errors:[]string{}}
+	for _, mode := range []struct{name string; sync bool}{{"with-sync",true},{"without-sync",false}} {
+		r.Samples = append(r.Samples, copySample(mode.name, mode.sync, beforeInfo.Size()))
+	}
+	r.SourceAfterSHA256, err = hashFile(sourcePath)
+	if err != nil { r.Errors = append(r.Errors, "source after hash: "+err.Error()) }
+	afterInfo, err := os.Stat(sourcePath)
+	if err != nil { r.Errors = append(r.Errors, "source after stat: "+err.Error()) } else {
+		r.SourceSameFile = os.SameFile(beforeInfo, afterInfo)
+		if !r.SourceSameFile || beforeInfo.Size()!=afterInfo.Size() || !beforeInfo.ModTime().Equal(afterInfo.ModTime()) {
+			r.Errors = append(r.Errors, "source identity/size/mtime changed")
+		}
+	}
+	if r.SourceAfterSHA256 != expectedSHA { r.Errors = append(r.Errors, "source digest changed") }
+	r.DataChecksPassed = len(r.Errors)==0
+	for _, row := range r.Samples { r.DataChecksPassed = r.DataChecksPassed && row.DataChecksPassed }
+	r.FinishedUTC = time.Now().UTC().Format(time.RFC3339Nano)
+	raw, err := json.MarshalIndent(r,"","  ")
+	if err != nil { return err }
+	raw = append(raw,'\n')
+	if err := publish(filepath.Join(outputRoot,"probe-receipt.json"),raw); err != nil { return err }
+	if _, err := os.Stdout.Write(raw); err != nil { return err }
+	if !r.DataChecksPassed { return errors.New("DATA copy/hash/close checks failed; outputs retained") }
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil { fmt.Fprintln(os.Stderr,err); os.Exit(1) }
+}

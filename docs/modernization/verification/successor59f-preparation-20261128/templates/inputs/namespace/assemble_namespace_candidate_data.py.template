@@ -1,0 +1,66 @@
+from pathlib import Path
+import hashlib, json, difflib
+task=Path(r'@@RECOVERY_APPROVED_WORK_AREA_RAW@@\mcp-acceptance-rebuild-20261127-v1')
+old=task/'source-original727d-v2'/'tools'/'test-recovery-namespace'
+source=Path(r'@@RECOVERY_APPROVED_WORK_AREA_RAW@@\pub666-recovered-20261128')
+out=task/'inputs-successor33-v1'/'namespace-candidate'
+def sha(b): return hashlib.sha256(b).hexdigest()
+def replace_once(text, before, after):
+    assert text.count(before)==1, (text.count(before),before[:120])
+    return text.replace(before,after,1)
+base_main=(old/'main_windows.go').read_bytes()
+base_pre=(old/'prebuilt_windows.go').read_bytes()
+assert sha(base_main)=='7d30a698fbe9521f853e2f7c0bd394796ac8fc2e16d5d28f4b62bff33898dbb8'
+assert sha(base_pre)=='cbbbf28bd340aaec42dbc34ad54a3e1e2960804d7e9260fcd6af2f56fe09def7'
+main=base_main.decode('utf-8')
+pre=base_pre.decode('utf-8')
+main=replace_once(main,"// test-recovery-namespace runs the fixed native namespace tests or one supplied\n// complete API suite. Execution uses the original production contained owner.","// Auxiliary successor33 namespace owner. The whole-suite mode runs an exact\n// copy of the incoming Go API image under the unchanged Source33 helper contract.\n// It is built against the selected successor's original production contained owner.")
+main=replace_once(main,"func main() {\n\tif err := run(); err != nil {\n\t\tfmt.Fprintln(os.Stderr, \"recovery namespace fixture:\", err)\n\t\tvar suiteFailure *namespaceSuiteFailure\n\t\tif errors.As(err, &suiteFailure) {\n\t\t\tos.Exit(suiteFailure.code)\n\t\t}\n\t\tos.Exit(1)\n\t}\n}","func main() {\n\terr := run()\n\tif retainedNamespaceStage != nil {\n\t\t// UNKNOWN remains in this original process. Neither its owner nor its\n\t\t// borrowed sinks/path pins are closed, replayed, or replaced by PID lookup.\n\t\tretainedNamespaceStage.returned = err\n\t\tfmt.Fprintln(os.Stderr, \"recovery namespace fixture: UNKNOWN; original custody retained:\", err)\n\t\tfor {\n\t\t\ttime.Sleep(time.Minute)\n\t\t}\n\t}\n\tif err != nil {\n\t\tfmt.Fprintln(os.Stderr, \"recovery namespace fixture:\", err)\n\t\tvar suiteFailure *namespaceSuiteFailure\n\t\tif errors.As(err, &suiteFailure) {\n\t\t\tos.Exit(suiteFailure.code)\n\t\t}\n\t\tos.Exit(1)\n\t}\n}")
+main=replace_once(main,"\"prebuilt admitted API Product; enables one full suite without compilation\"","\"exact incoming Go API image; enables one full suite without compilation\"")
+main=replace_once(main,"\tdefer func() {\n\t\tfor i := len(pins) - 1; i >= 0; i-- {\n\t\t\treturned = errors.Join(returned, windows.CloseHandle(pins[i]))\n\t\t}\n\t}()","\tdefer func() {\n\t\tif retainedNamespaceStage != nil {\n\t\t\tretainedNamespaceStage.pathPins = pins\n\t\t\tretainedNamespaceStage.returned = returned\n\t\t\treturn\n\t\t}\n\t\tfor i := len(pins) - 1; i >= 0; i-- {\n\t\t\treturned = errors.Join(returned, windows.CloseHandle(pins[i]))\n\t\t}\n\t}()")
+main=replace_once(main,"sourceLeaves := []string{\"go.mod\", \"go.sum\", \"internal/api/secrets_init_recovery_test.go\", \"internal/api/secrets_init_recovery_directory_windows.go\", \"internal/api/secrets_init_recovery_directory_probe_windows_test.go\", \"tools/test-recovery-namespace/main_windows.go\", \"tools/test-recovery-namespace/prebuilt_windows.go\", \"scripts/test-recovery-namespace/helper.ps1\"}","sourceLeaves := []string{\"go.mod\", \"go.sum\", \"internal/api/secrets_init_recovery_test.go\", \"internal/api/secrets_init_recovery_directory_windows.go\", \"tools/test-recovery-namespace/main_windows.go\", \"scripts/test-recovery-namespace/helper.ps1\"}")
+main=replace_once(main,"sourceLeaves = append(sourceLeaves, \"internal/api/main_test.go\", \"internal/api/supervisor_ipc_peer_transport_windows_test.go\")","sourceLeaves = append(sourceLeaves, \"internal/api/main_test.go\", \"internal/api/supervisor_ipc_peer_transport_windows_test.go\", \"internal/api/attach_client_public_cli_receiving_windows_test.go\", \"internal/api/supervisor_stderr_sink_test.go\")")
+main=replace_once(main,"\tif wholeSuite {\n\t\tbinary, buildArgs, buildArgv, tests = suite.Binary, nil, nil, \"\"\n\t}","\tif wholeSuite {\n\t\tbuildArgs, buildArgv, tests = nil, nil, \"\"\n\t\tif err := copyNamespaceSuiteImage(suite, binary); err != nil {\n\t\t\treturn err\n\t\t}\n\t}")
+main=replace_once(main,"\t\tif err := writeNamespaceActorBinding(root, suite, held[len(held)-1], &pins); err != nil {\n\t\t\treturn err\n\t\t}","\t\tsuite.ExecutionBinary = binary\n\t\tsuite.ExecutionSHA256 = hex.EncodeToString(binaryDigest.Sum(nil))")
+pre=replace_once(pre,"\t\"TestSupervisorPeerStrictControlConnections\",\n}","\t\"TestSupervisorPeerStrictControlConnections\",\n\t\"TestRotateSupervisorStderrSinkIfOversize_AtBoundary\",\n\t\"TestRotateSupervisorStderrSinkIfOversize_ReplacesExistingBackup\",\n\t\"TestSupervisorStderrSinkOversize_MatchesRotationThreshold\",\n}")
+pre=replace_once(pre,"\tFixtureSHA256                                              string","\tExecutionBinary, ExecutionSHA256                           string")
+pre=replace_once(pre,"\tstdout, stderr *os.File\n}","\tstdout, stderr *os.File\n\tpathPins       []windows.Handle\n\treturned       error\n}")
+pre=replace_once(pre,"\tFixtureSHA256        string                           `json:\"canonical_fixture_sha256\"`","\tExecutionBinary      string                           `json:\"execution_binary\"`\n\tExecutionSHA256      string                           `json:\"execution_sha256\"`\n\tExecutionUnchanged   bool                             `json:\"execution_binary_unchanged\"`")
+actor_start=pre.index('// The helper\'s full-mode image binding comes only from the admitted input and')
+actor_end=pre.index('func namespaceSuiteExitCode', actor_start)
+pre=pre[:actor_start]+"// The exact Source33 helper measures root/bin/api.test.exe. The incoming Go\n// image stays separately pinned; a fresh ordinary copy changes no image bytes,\n// Go arguments, working directory, or five-minute test deadline.\nfunc copyNamespaceSuiteImage(input *namespaceSuiteInput, destination string) (returned error) {\n\tsource, err := os.Open(input.Binary)\n\tif err != nil {\n\t\treturn err\n\t}\n\tdefer func() { returned = errors.Join(returned, source.Close()) }()\n\ttarget, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)\n\tif err != nil {\n\t\treturn err\n\t}\n\tdefer func() { returned = errors.Join(returned, target.Close()) }()\n\tdigest := sha256.New()\n\tif _, err := io.Copy(io.MultiWriter(target, digest), source); err != nil {\n\t\treturn err\n\t}\n\tif hex.EncodeToString(digest.Sum(nil)) != input.ExpectedSHA256 {\n\t\treturn errors.New(\"incoming API bytes changed during exclusive namespace copy\")\n\t}\n\treturn target.Sync()\n}\n\n"+pre[actor_end:]
+pre=replace_once(pre,"\t\t// Global Go flag metadata may include another package's publisher flags.\n\t\t// Receive the source epoch through this image's canonical fixture below.","\t\t// This ordinary API image is the actual incoming Go test executable.\n\t\t// Its source and compiler invocation are received by the original issuer.")
+pre=replace_once(pre,"\tactual, err := binaryadmission.AdmitWindowsRole(binaryadmission.WindowsArtifact{\n\t\tPath: binary, Role: binaryadmission.WindowsArtifactRoleProduct, SHA256: expected,\n\t})\n\tif err != nil || actual.Machine != pe.IMAGE_FILE_MACHINE_AMD64 {\n\t\treturn nil, errors.Join(err, errors.New(\"full API receiver must be the pinned Windows AMD64 Product image\"))\n\t}","\tif err := binaryadmission.ValidateWindowsNativeImage(binary); err != nil {\n\t\treturn nil, err\n\t}\n\timage, err := pe.Open(binary)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tmachine := image.Machine\n\tif err := image.Close(); err != nil {\n\t\treturn nil, err\n\t}\n\tif machine != pe.IMAGE_FILE_MACHINE_AMD64 {\n\t\treturn nil, errors.New(\"full API receiver must be the incoming Windows AMD64 Go test image\")\n\t}\n\tactual, err := namespaceFileHash(binary)\n\tif err != nil || actual != expected {\n\t\treturn nil, errors.Join(err, errors.New(\"incoming API executable SHA-256 differs from its original request\"))\n\t}")
+pre=replace_once(pre,"Binary: binary, ExpectedSHA256: expected, BinarySHA256: actual.SHA256, SourceDir: source, GoVersion: compiled.GoVersion,","Binary: binary, ExpectedSHA256: expected, BinarySHA256: actual, SourceDir: source, GoVersion: compiled.GoVersion,")
+canonical_start=pre.index('\tfor _, key := range []string{'+chr(34)+'MCPHUB_CANONICAL_FIXTURE_TEST_PRODUCT'+chr(34))
+canonical_end=pre.index('\tattach, attachSHA := ',canonical_start)
+pre=pre[:canonical_start]+pre[canonical_end:]
+pre=replace_once(pre,"\theld, err = pinOrdinaryPath(attach, false)","\theld, err := pinOrdinaryPath(attach, false)")
+verify_start=pre.index('func verifyNamespaceCanonicalFixture')
+verify_end=pre.index('func namespaceMandatoryPasses',verify_start)
+pre=pre[:verify_start]+pre[verify_end:]
+pre=replace_once(pre,"\t\"encoding/json\"\n","")
+pre=replace_once(pre,"Schema: \"api-namespace-full-suite-v1\", Mode: \"prebuilt-full-suite\", EvidenceRoot: root,","Schema: \"api-namespace-full-suite-v2\", Mode: \"incoming-go-image-copy\", EvidenceRoot: root,")
+pre=replace_once(pre,"\t\tEnvironment: input.Environment, FixtureSHA256: input.FixtureSHA256,","\t\tEnvironment: input.Environment, ExecutionBinary: input.ExecutionBinary, ExecutionSHA256: input.ExecutionSHA256,")
+pre=replace_once(pre,"observationErr = verifyObservations(root, input.Binary, receipt.RootIdentity, os.Stderr)","observationErr = verifyObservations(root, input.ExecutionBinary, receipt.RootIdentity, os.Stderr)")
+pre=replace_once(pre,"\t\trecord.BinaryUnchanged = hashErr == nil && after == input.ExpectedSHA256\n\t\tstdout, stdoutErr := os.ReadFile(record.StdoutPath)","\t\trecord.BinaryUnchanged = hashErr == nil && after == input.ExpectedSHA256\n\t\texecutionAfter, executionHashErr := namespaceFileHash(input.ExecutionBinary)\n\t\trecord.ExecutionUnchanged = executionHashErr == nil && executionAfter == input.ExpectedSHA256\n\t\tstdout, stdoutErr := os.ReadFile(record.StdoutPath)")
+pre=replace_once(pre,"cause = errors.Join(cause, observationErr, hashErr, stdoutErr, stderrErr, mandatoryErr)","cause = errors.Join(cause, observationErr, hashErr, executionHashErr, stdoutErr, stderrErr, mandatoryErr)")
+pre=replace_once(pre,"!record.SettlementComplete || !record.BinaryUnchanged {","!record.SettlementComplete || !record.BinaryUnchanged || !record.ExecutionUnchanged {")
+helper=(source/'scripts/test-recovery-namespace/helper.ps1').read_bytes()
+assert sha(helper)=='ce20de6a117350681b9db5979a67285b1d8d07ea7937ea912680b4e3d6a6fa32'
+source_map=json.loads((task/'recovery-inputs-v1'/'exact33-gates-plan-v1'/'source33-git-map.json').read_bytes())['files']
+base_paths=['tools/test-recovery-namespace/main_windows.go','scripts/test-recovery-namespace/helper.ps1','internal/process/contained_stream_observed.go','internal/api/secrets_init_recovery_test.go','internal/api/secrets_init_recovery_directory_windows.go','internal/api/main_test.go','internal/api/supervisor_ipc_peer_transport_windows_test.go','internal/api/attach_client_public_cli_receiving_windows_test.go','internal/api/supervisor_stderr_sink_test.go','internal/binaryadmission/windows_pe.go']
+source_inputs=[]
+for rel in base_paths:
+    raw=(source/rel).read_bytes()
+    git=hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()
+    assert git==source_map[rel]['git_blob'],rel
+    source_inputs.append(dict(path=rel,bytes=len(raw),sha256=sha(raw),git_blob=git))
+files={'main_windows.go':main.encode('utf-8'),'prebuilt_windows.go':pre.encode('utf-8'),'helper.ps1':helper}
+delta=''.join(difflib.unified_diff(base_main.decode('utf-8').splitlines(keepends=True),main.splitlines(keepends=True),fromfile='source727/tools/test-recovery-namespace/main_windows.go',tofile='auxiliary-successor33/main_windows.go'))
+delta+=''.join(difflib.unified_diff(base_pre.decode('utf-8').splitlines(keepends=True),pre.splitlines(keepends=True),fromfile='source727/tools/test-recovery-namespace/prebuilt_windows.go',tofile='auxiliary-successor33/prebuilt_windows.go'))
+files['auxiliary-vs-source727.patch']=delta.encode('utf-8')
+files['unchanged-source33-inputs.json']=(json.dumps({'schema':'successor33-namespace-unchanged-inputs-v1','base_commit':'33eaf8af8fc46cb231f48c70f4775922393245b1','successor_commit':None,'expected_successor_tree':'f68f7584dba7744e7607b07f615758f3ff633f54','files':source_inputs},indent=2)+'\n').encode('utf-8')
+for name,data in files.items():
+    with (out/name).open('xb') as f: f.write(data)
+print(json.dumps({name:{'bytes':len(data),'sha256':sha(data)} for name,data in files.items()},indent=2))

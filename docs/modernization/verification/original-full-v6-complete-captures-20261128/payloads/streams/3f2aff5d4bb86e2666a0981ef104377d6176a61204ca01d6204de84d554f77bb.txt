@@ -1,0 +1,70 @@
+=== RUN   TestToolCallParamsAndExtractPathArg
+=== RUN   TestToolCallParamsAndExtractPathArg/gopls_file
+--- PASS: TestToolCallParamsAndExtractPathArg/gopls_file (0.00s)
+=== NAME  TestToolCallParamsAndExtractPathArg
+=== RUN   TestToolCallParamsAndExtractPathArg/gopls_files_first_non-empty
+--- PASS: TestToolCallParamsAndExtractPathArg/gopls_files_first_non-empty (0.00s)
+=== NAME  TestToolCallParamsAndExtractPathArg
+=== RUN   TestToolCallParamsAndExtractPathArg/gopls_dir
+--- PASS: TestToolCallParamsAndExtractPathArg/gopls_dir (0.00s)
+=== NAME  TestToolCallParamsAndExtractPathArg
+=== RUN   TestToolCallParamsAndExtractPathArg/gopls_pathless_workspace
+--- PASS: TestToolCallParamsAndExtractPathArg/gopls_pathless_workspace (0.00s)
+=== NAME  TestToolCallParamsAndExtractPathArg
+=== RUN   TestToolCallParamsAndExtractPathArg/mcp-language-server_filePath
+--- PASS: TestToolCallParamsAndExtractPathArg/mcp-language-server_filePath (0.00s)
+=== NAME  TestToolCallParamsAndExtractPathArg
+=== RUN   TestToolCallParamsAndExtractPathArg/mcp-language-server_pathless_definition
+--- PASS: TestToolCallParamsAndExtractPathArg/mcp-language-server_pathless_definition (0.00s)
+=== NAME  TestToolCallParamsAndExtractPathArg
+=== RUN   TestToolCallParamsAndExtractPathArg/priority_file_before_files
+--- PASS: TestToolCallParamsAndExtractPathArg/priority_file_before_files (0.00s)
+=== NAME  TestToolCallParamsAndExtractPathArg
+--- PASS: TestToolCallParamsAndExtractPathArg (0.00s)
+=== NAME  
+=== RUN   TestToolCallParamsRejectsNonObject
+--- PASS: TestToolCallParamsRejectsNonObject (0.00s)
+=== NAME  
+=== RUN   TestExtractPathArgsReturnsAllFiles
+--- PASS: TestExtractPathArgsReturnsAllFiles (0.00s)
+=== NAME  
+=== RUN   TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups
+--- PASS: TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups (0.01s)
+=== NAME  
+=== RUN   TestRegisteredWorkspace_SameIdentitySizeMtimeEditObservedWithin32Lookups
+--- PASS: TestRegisteredWorkspace_SameIdentitySizeMtimeEditObservedWithin32Lookups (0.01s)
+=== NAME  
+=== RUN   TestRegisteredWorkspace_DoesNotCloneUnrelatedNestedRows
+--- PASS: TestRegisteredWorkspace_DoesNotCloneUnrelatedNestedRows (0.01s)
+=== NAME  
+=== RUN   TestResolveByPath_GoMarkerReturnsCanonicalRootWithoutRegistration
+--- PASS: TestResolveByPath_GoMarkerReturnsCanonicalRootWithoutRegistration (0.01s)
+=== NAME  
+=== RUN   TestResolveByPath_NestedLanguageMarkerWins
+--- PASS: TestResolveByPath_NestedLanguageMarkerWins (0.00s)
+=== NAME  
+=== RUN   TestResolveByPath_RustCargoTomlMatchesExistingRegistration
+--- PASS: TestResolveByPath_RustCargoTomlMatchesExistingRegistration (0.01s)
+=== NAME  
+=== RUN   TestResolveByPath_MatchesLegacySymlinkWorkspaceKey
+--- PASS: TestResolveByPath_MatchesLegacySymlinkWorkspaceKey (0.01s)
+=== NAME  
+=== RUN   TestResolveByPath_RegisteredMatchIsLanguageSpecific
+--- PASS: TestResolveByPath_RegisteredMatchIsLanguageSpecific (0.01s)
+=== NAME  
+=== RUN   TestResolveByPath_GitFallbackWhenNoLanguageMarkerExists
+--- PASS: TestResolveByPath_GitFallbackWhenNoLanguageMarkerExists (0.00s)
+=== NAME  
+=== RUN   TestResolveByPath_NoMarkerOrGitReturnsWorkspaceNotFound
+--- PASS: TestResolveByPath_NoMarkerOrGitReturnsWorkspaceNotFound (0.00s)
+=== NAME  
+=== RUN   TestResolveByPath_RefreshesRegistryOnMtimeAdvance
+--- PASS: TestResolveByPath_RefreshesRegistryOnMtimeAdvance (0.01s)
+=== NAME  
+=== RUN   TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock
+--- PASS: TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock (0.01s)
+=== NAME  
+=== RUN   TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock
+--- PASS: TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock (0.31s)
+=== NAME  
+PASS

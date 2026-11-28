@@ -1,0 +1,27 @@
+{"Action":"start","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver","Test":"TestPlainPairsRequireSettledFailureThenSameGenerationRecovery"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver","Test":"TestPlainPairsRequireSettledFailureThenSameGenerationRecovery","Output":"=== RUN   TestPlainPairsRequireSettledFailureThenSameGenerationRecovery\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver","Test":"TestPlainPairsRequireSettledFailureThenSameGenerationRecovery","Output":"--- PASS: TestPlainPairsRequireSettledFailureThenSameGenerationRecovery (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver","Test":"TestPlainPairsRequireSettledFailureThenSameGenerationRecovery"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver","Test":"TestPairRejectsHealthyOnlyWrongIdentityAndMissingFailure"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver","Test":"TestPairRejectsHealthyOnlyWrongIdentityAndMissingFailure","Output":"=== RUN   TestPairRejectsHealthyOnlyWrongIdentityAndMissingFailure\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver","Test":"TestPairRejectsHealthyOnlyWrongIdentityAndMissingFailure","Output":"--- PASS: TestPairRejectsHealthyOnlyWrongIdentityAndMissingFailure (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver","Test":"TestPairRejectsHealthyOnlyWrongIdentityAndMissingFailure"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver","Test":"TestFocusOnlyFixtureRows"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver","Test":"TestFocusOnlyFixtureRows","Output":"=== RUN   TestFocusOnlyFixtureRows\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver","Test":"TestFocusOnlyFixtureRows","Output":"--- PASS: TestFocusOnlyFixtureRows (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver","Test":"TestFocusOnlyFixtureRows"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver","Test":"TestFocusedReceiptExcludesUnrelatedDiagnosticAndClientRawData"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver","Test":"TestFocusedReceiptExcludesUnrelatedDiagnosticAndClientRawData","Output":"=== RUN   TestFocusedReceiptExcludesUnrelatedDiagnosticAndClientRawData\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver","Test":"TestFocusedReceiptExcludesUnrelatedDiagnosticAndClientRawData","Output":"--- PASS: TestFocusedReceiptExcludesUnrelatedDiagnosticAndClientRawData (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver","Test":"TestFocusedReceiptExcludesUnrelatedDiagnosticAndClientRawData"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver","Test":"TestFocusedPlainStatusDoesNotInventScanOnlyGeneration"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver","Test":"TestFocusedPlainStatusDoesNotInventScanOnlyGeneration","Output":"=== RUN   TestFocusedPlainStatusDoesNotInventScanOnlyGeneration\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver","Test":"TestFocusedPlainStatusDoesNotInventScanOnlyGeneration","Output":"--- PASS: TestFocusedPlainStatusDoesNotInventScanOnlyGeneration (0.00s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver","Test":"TestFocusedPlainStatusDoesNotInventScanOnlyGeneration"}
+{"Action":"run","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver","Test":"TestClosedWitnessIsDurableAndRedactedBeforeRelease"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver","Test":"TestClosedWitnessIsDurableAndRedactedBeforeRelease","Output":"=== RUN   TestClosedWitnessIsDurableAndRedactedBeforeRelease\n","OutputType":"frame"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver","Test":"TestClosedWitnessIsDurableAndRedactedBeforeRelease","Output":"--- PASS: TestClosedWitnessIsDurableAndRedactedBeforeRelease (0.01s)\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver","Test":"TestClosedWitnessIsDurableAndRedactedBeforeRelease"}
+{"Action":"output","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver","Output":"PASS\n","OutputType":"frame"}
+{"Action":"pass","Package":"mcp-local-hub/internal/e2e/scan_readiness_fixture/driver"}

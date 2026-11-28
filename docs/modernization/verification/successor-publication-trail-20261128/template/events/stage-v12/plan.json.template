@@ -1,0 +1,115 @@
+{
+  "run": "runs/cache-acceptance-stage-20261128-v12",
+  "source": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128",
+  "head": "33eaf8af8fc46cb231f48c70f4775922393245b1",
+  "environment": {
+    "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_NO_REPLACE_OBJECTS": "1",
+    "GIT_NO_LAZY_FETCH": "1"
+  },
+  "observed_files": [
+    "internal/cli/upgrade_gui_qualified_fixture_windows_test.go",
+    "internal/cli/windows_canonical_entry_gui_native_replay_windows_test.go",
+    "internal/cli/supervisor_launch_successor_runtime_windows_test.go",
+    "internal/cli/windows_product_preflight_original_windows_test.go",
+    "internal/cli/attach_client_real_supervisor_windows_test.go",
+    "internal/process/run_strictly_contained_windows_test.go",
+    "internal/process/jobobject_windows_test.go",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\recovery-inputs-v1\\source33-successor-test-fixes-v1\\successor.patch",
+    "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\gofmt.exe"
+  ],
+  "steps": [
+    {
+      "name": "starting-worktree-state",
+      "argv": [
+        "git",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "gofmt-read-only-check",
+      "argv": [
+        "@@RECOVERY_GO_DISTRIBUTION_ROOT_JSON@@\\ucrt64\\lib\\go\\bin\\gofmt.exe",
+        "-l",
+        "internal/cli/upgrade_gui_qualified_fixture_windows_test.go",
+        "internal/cli/windows_canonical_entry_gui_native_replay_windows_test.go",
+        "internal/cli/supervisor_launch_successor_runtime_windows_test.go",
+        "internal/cli/windows_product_preflight_original_windows_test.go",
+        "internal/cli/attach_client_real_supervisor_windows_test.go",
+        "internal/process/run_strictly_contained_windows_test.go",
+        "internal/process/jobobject_windows_test.go"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "test-patch-whitespace",
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "stage-seven-reviewed-test-files",
+      "argv": [
+        "git",
+        "add",
+        "--",
+        "internal/cli/upgrade_gui_qualified_fixture_windows_test.go",
+        "internal/cli/windows_canonical_entry_gui_native_replay_windows_test.go",
+        "internal/cli/supervisor_launch_successor_runtime_windows_test.go",
+        "internal/cli/windows_product_preflight_original_windows_test.go",
+        "internal/cli/attach_client_real_supervisor_windows_test.go",
+        "internal/process/run_strictly_contained_windows_test.go",
+        "internal/process/jobobject_windows_test.go"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "staged-name-status",
+      "argv": [
+        "git",
+        "diff",
+        "--cached",
+        "--name-status"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "reviewed-staged-tree",
+      "argv": [
+        "git",
+        "write-tree"
+      ],
+      "timeout": 30,
+      "stdout_contains": [
+        "f68f7584dba7744e7607b07f615758f3ff633f54"
+      ]
+    },
+    {
+      "name": "staged-stat",
+      "argv": [
+        "git",
+        "diff",
+        "--cached",
+        "--stat"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "staged-worktree-state",
+      "argv": [
+        "git",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all"
+      ],
+      "timeout": 30
+    }
+  ]
+}

@@ -1,0 +1,248 @@
+#!/usr/bin/env python3
+"""Read archive members and explicit data encodings; never execute recovered code."""
+import ast, base64, bz2, collections, gzip, hashlib, io, json, lzma, pathlib, re, sys, tarfile, time, zipfile, zlib
+
+ROOT = pathlib.Path("{CURRENT_WORKSPACE}/library-recovery-next")
+ORIGINAL = ROOT / "checkpoint-original/mcp-residual-ad-checkpoint-363b-v1.zip"
+PRIOR = pathlib.Path("{CURRENT_WORKSPACE}/nested-recovery-next/inputs.json")
+LIMIT = {"compressed": 64*1024**2, "member": 32*1024**2, "expanded": 256*1024**2, "archive_depth": 6, "json_depth": 12, "objects": 20000, "seconds": 50}
+TARGET = json.loads(PRIOR.read_text())["targets"]
+NEEDLES = {**TARGET, "container": "b-full-route-successor-candidate-v1", "schema": "canonical-source-manifest-v5", "extension": "GO_CONTROLLER_EXTENSION"}
+PATTERN = re.compile(b"|".join(re.escape(x.encode()) for x in NEEDLES.values()))
+PATH_PATTERN = re.compile(r"(?:b-full-route|canonical-source|receiv|template|stagi|stage|ordinary|patch)", re.I)
+B64 = re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{96,}={0,2}(?![A-Za-z0-9+/=])")
+BEGIN = time.monotonic()
+seen_archive = set(json.loads(PRIOR.read_text())["seen_archive_sha256"])
+seen_data = set()
+queued = collections.deque()
+report = {"schema":"library-checkpoint-data-scan-v1", "limits":LIMIT, "archive_path":str(ORIGINAL), "targets":TARGET, "coverage":{"expanded_bytes":0,"objects_processed":0,"unique_data":0,"duplicate_data":0,"root_members_read":0,"root_directories":0,"archives_opened":0,"json_documents":0,"json_strings":0,"python_ast_files":0,"python_constants":0,"base64_decoded":0,"compressed_streams_decoded":0,"maximum_archive_depth":0,"maximum_data_depth":0}, "exact_byte_hits":[], "text_hits":[], "path_candidates":[], "archives":[], "skipped":[], "errors":[], "derived_edges":[], "root_members":[]}
+hits_seen=set()
+def error(label, stage, exc):
+    report["errors"].append({"path":label,"stage":stage,"type":type(exc).__name__,"message":str(exc)[:240]})
+def skip(label, reason, **extra):
+    report["skipped"].append({"path":label,"reason":reason,**extra})
+def expired():
+    return time.monotonic()-BEGIN > LIMIT["seconds"]
+def examine(data, label, origin):
+    digest=hashlib.sha256(data).hexdigest()
+    for target, value in TARGET.items():
+        if digest == value:
+            dest=ROOT/"exact-matches"/(target+"-"+digest)
+            dest.parent.mkdir(exist_ok=True)
+            dest.write_bytes(data)
+            report["exact_byte_hits"].append({"target":target,"path":label,"bytes":len(data),"sha256":digest,"origin":origin,"saved_path":str(dest)})
+    for match in PATTERN.finditer(data):
+        needle=match.group().decode()
+        key=(digest,needle,match.start())
+        if key in hits_seen: continue
+        hits_seen.add(key)
+        if len(report["text_hits"]) < 2000:
+            report["text_hits"].append({"path":label,"sha256":digest,"bytes":len(data),"needle":needle,"byte_offset":match.start(),"context":data[max(0,match.start()-200):match.end()+300].decode("utf-8","replace"),"origin":origin})
+        else:
+            skip(label,"text_hit_output_cap",cap=2000)
+            break
+    return digest
+def enqueue(data, label, ad=0, dd=0, origin="member", charge=True):
+    if len(data)>LIMIT["member"] and origin!="root":
+        skip(label,"member_bytes",bytes=len(data));return
+    if dd>LIMIT["json_depth"]:
+        skip(label,"data_depth",depth=dd);return
+    digest=examine(data,label,origin)
+    if digest in seen_data:
+        report["coverage"]["duplicate_data"]+=1;return
+    if charge and report["coverage"]["expanded_bytes"]+len(data)>LIMIT["expanded"]:
+        skip(label,"expanded_budget",bytes=len(data));return
+    seen_data.add(digest)
+    if charge: report["coverage"]["expanded_bytes"]+=len(data)
+    queued.append((data,label,ad,dd,origin,digest))
+    report["coverage"]["unique_data"]+=1
+    if origin not in ("member","root") and len(report["derived_edges"])<10000:
+        report["derived_edges"].append({"path":label,"origin":origin,"bytes":len(data),"sha256":digest,"archive_depth":ad,"data_depth":dd})
+def string_value(value,label,ad,dd,origin):
+    try: data=value.encode("utf-8")
+    except UnicodeEncodeError: return
+    examine(data,label,origin)
+    if len(data)>=128 and (("\n" in value) or value.lstrip().startswith(("{","["))):
+        enqueue(data,label,ad,dd,origin)
+    for m in B64.finditer(value):
+        token=m.group()
+        try: raw=base64.b64decode(token,validate=True)
+        except Exception: continue
+        report["coverage"]["base64_decoded"]+=1
+        enqueue(raw,label+"#base64@"+str(m.start()),ad,dd+1,"base64")
+def json_walk(obj,label,ad,dd):
+    if dd>LIMIT["json_depth"]:
+        skip(label,"json_depth",depth=dd);return
+    if isinstance(obj,str):
+        report["coverage"]["json_strings"]+=1
+        string_value(obj,label,ad,dd,"json-string")
+    elif isinstance(obj,list):
+        for i,v in enumerate(obj):
+            if expired(): return
+            json_walk(v,label+"/"+str(i),ad,dd+1)
+    elif isinstance(obj,dict):
+        for k,v in obj.items():
+            if expired(): return
+            json_walk(v,label+"/"+str(k).replace("~","~0").replace("/","~1"),ad,dd+1)
+def bounded_stream(data,label,kind,ad,dd):
+    if ad>=LIMIT["archive_depth"]:
+        skip(label,"archive_depth",depth=ad);return
+    try:
+        if kind=="zlib":
+            dec=zlib.decompressobj()
+            out=dec.decompress(data,LIMIT["member"]+1)
+            if len(out)>LIMIT["member"] or not dec.eof:
+                skip(label,"zlib_output_cap_or_incomplete",decoded_bytes=len(out),eof=dec.eof);return
+        else:
+            stream_reader = gzip.GzipFile(fileobj=io.BytesIO(data),mode="rb") if kind=="gzip" else {"xz":lzma.LZMAFile,"bzip2":bz2.BZ2File}[kind](io.BytesIO(data),"rb")
+            with stream_reader as stream:
+                out=stream.read(LIMIT["member"]+1)
+            if len(out)>LIMIT["member"]:
+                skip(label,kind+"_output_cap",decoded_bytes=len(out));return
+        report["coverage"]["compressed_streams_decoded"]+=1
+        enqueue(out,label+"#"+kind,ad+1,dd+1,kind)
+    except Exception as exc:
+        error(label,kind,exc)
+def archive(data,label,ad,dd,digest,kind):
+    if digest in seen_archive:
+        skip(label,"prior_archive_sha256",sha256=digest);return
+    if ad>=LIMIT["archive_depth"]:
+        skip(label,"archive_depth",depth=ad);return
+    seen_archive.add(digest)
+    report["coverage"]["archives_opened"]+=1
+    row={"path":label,"bytes":len(data),"sha256":digest,"kind":kind,"depth":ad,"members_read":0}
+    report["archives"].append(row)
+    try:
+        if kind=="zip":
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+                infos=z.infolist()
+                row["entries"]=len(infos)
+                row["declared_expanded_bytes"]=sum(i.file_size for i in infos)
+                for i in infos:
+                    if expired(): skip(label+"!"+i.filename,"time_budget");continue
+                    child=label+"!"+i.filename
+                    if i.is_dir():
+                        if ad==0: report["coverage"]["root_directories"]+=1
+                        continue
+                    if PATH_PATTERN.search(i.filename):
+                        report["path_candidates"].append({"path":child,"bytes":i.file_size,"compressed_bytes":i.compress_size})
+                    if i.file_size>LIMIT["member"]:
+                        skip(child,"member_bytes",bytes=i.file_size);continue
+                    if report["coverage"]["expanded_bytes"]+i.file_size>LIMIT["expanded"]:
+                        skip(child,"expanded_budget",bytes=i.file_size);continue
+                    try: member=z.read(i)
+                    except Exception as exc: error(child,"zip_read_crc",exc);continue
+                    row["members_read"]+=1
+                    if ad==0:
+                        report["coverage"]["root_members_read"]+=1
+                        report["root_members"].append({"path":i.filename,"bytes":len(member),"sha256":hashlib.sha256(member).hexdigest()})
+                    enqueue(member,child,ad+1,dd,"member")
+        else:
+            with tarfile.open(fileobj=io.BytesIO(data),mode="r:") as tar:
+                for i in tar:
+                    child=label+"!"+i.name
+                    if expired(): skip(child,"time_budget");continue
+                    if not i.isfile():
+                        skip(child,"non_regular_tar_member",type=repr(i.type));continue
+                    if i.size>LIMIT["member"]:
+                        skip(child,"member_bytes",bytes=i.size);continue
+                    if report["coverage"]["expanded_bytes"]+i.size>LIMIT["expanded"]:
+                        skip(child,"expanded_budget",bytes=i.size);continue
+                    try: member=tar.extractfile(i).read(LIMIT["member"]+1)
+                    except Exception as exc: error(child,"tar_read",exc);continue
+                    row["members_read"]+=1
+                    enqueue(member,child,ad+1,dd,"member")
+    except Exception as exc: error(label,kind,exc)
+def process(data,label,ad,dd,origin,digest):
+    c=report["coverage"]
+    c["objects_processed"]+=1
+    c["maximum_archive_depth"]=max(c["maximum_archive_depth"],ad)
+    c["maximum_data_depth"]=max(c["maximum_data_depth"],dd)
+    if data.startswith((b"PK\x03\x04",b"PK\x05\x06",b"PK\x07\x08")):
+        archive(data,label,ad,dd,digest,"zip");return
+    if len(data)>262 and data[257:262]==b"ustar":
+        archive(data,label,ad,dd,digest,"tar");return
+    if data.startswith(b"\x1f\x8b"):
+        bounded_stream(data,label,"gzip",ad,dd);return
+    if data.startswith(b"\xfd7zXZ\x00"):
+        bounded_stream(data,label,"xz",ad,dd);return
+    if data.startswith(b"BZh"):
+        bounded_stream(data,label,"bzip2",ad,dd);return
+    if len(data)>2 and data[0]==0x78 and (data[0]*256+data[1])%31==0:
+        bounded_stream(data,label,"zlib",ad,dd);return
+    try: text=data.decode("utf-8-sig")
+    except UnicodeDecodeError: return
+    stripped=text.lstrip()
+    is_json=False
+    if stripped.startswith(("{","[")):
+        try:
+            obj=json.loads(text);is_json=True;c["json_documents"]+=1
+            json_walk(obj,label+"#json",ad,dd+1)
+        except (json.JSONDecodeError,RecursionError) as exc:
+            if label.endswith(".json"): error(label,"json_parse",exc)
+    if label.endswith(".jsonl"):
+        for n,line in enumerate(text.splitlines(),1):
+            if expired(): break
+            if not line.strip(): continue
+            try: obj=json.loads(line);c["json_documents"]+=1;json_walk(obj,label+"#jsonl/"+str(n),ad,dd+1)
+            except (json.JSONDecodeError,RecursionError) as exc: error(label+"#line"+str(n),"jsonl_parse",exc)
+    if label.endswith(".py") or stripped.startswith(("#!/usr/bin/env python","from __future__ import")):
+        try:
+            tree=ast.parse(text)
+            c["python_ast_files"]+=1
+            for node in ast.walk(tree):
+                if expired(): break
+                if isinstance(node,ast.Constant) and isinstance(node.value,(str,bytes)):
+                    c["python_constants"]+=1
+                    pos=label+"#ast/"+str(getattr(node,"lineno",0))+":"+str(getattr(node,"col_offset",0))
+                    if isinstance(node.value,str): string_value(node.value,pos,ad,dd+1,"python-string")
+                    else:
+                        enqueue(node.value,pos,ad,dd+1,"python-bytes")
+                        try: string_value(node.value.decode("ascii"),pos,ad,dd+1,"python-bytes-ascii")
+                        except UnicodeDecodeError: pass
+        except (SyntaxError,ValueError,RecursionError) as exc: error(label,"python_ast",exc)
+    if not is_json:
+        for m in B64.finditer(text):
+            if expired(): break
+            try: raw=base64.b64decode(m.group(),validate=True)
+            except Exception: continue
+            c["base64_decoded"]+=1
+            enqueue(raw,label+"#text-base64@"+str(m.start()),ad,dd+1,"base64")
+    # Fenced text is hashed exactly as delimited; no newline normalization.
+    fence=re.compile(r"(?:^|\n)" + chr(96)*3 + r"[^\n]*\n(.*?)\n" + chr(96)*3 + r"(?:\n|$)",re.S)
+    for i,m in enumerate(fence.finditer(text)):
+        payload=m.group(1)
+        for suffix,kind in [("","fenced-body"),("\n","fenced-body-with-delimiter-newline")]:
+            value=(payload+suffix).encode("utf-8")
+            examine(value,label+"#fence/"+str(i)+"/"+kind,kind)
+acquisition=json.loads((ROOT/"checkpoint-acquisition.json").read_text())
+report["archive_sha256"]=acquisition["actual_sha256"]
+report["archive_bytes"]=acquisition["actual_bytes"]
+report["prior_archive_count"]=len(seen_archive)
+report["inputs"]=[]
+if sys.argv[1:]:
+    previous=json.loads((ROOT/"checkpoint-scan-report.json").read_text())
+    seen_data.update(x["sha256"] for x in previous["root_members"]+previous["derived_edges"])
+    report["previous_expanded_bytes"]=previous["coverage"]["expanded_bytes"]
+    report["coverage"]["expanded_bytes"]=report["previous_expanded_bytes"]
+for input_path in (list(map(pathlib.Path,sys.argv[1:])) or [ORIGINAL]):
+    raw=input_path.read_bytes()
+    report["inputs"].append({"path":str(input_path),"bytes":len(raw),"sha256":hashlib.sha256(raw).hexdigest()})
+    if len(raw)>LIMIT["compressed"]: skip(str(input_path),"compressed_input_limit",bytes=len(raw))
+    else: enqueue(raw,input_path.name,0,0,"root" if input_path==ORIGINAL else "recovered-envelope",input_path!=ORIGINAL)
+while queued and not expired() and report["coverage"]["objects_processed"]<LIMIT["objects"]:
+    process(*queued.popleft())
+if queued:
+    report["queued_not_processed"]=[{"path":v[1],"bytes":len(v[0]),"origin":v[4]} for v in queued]
+    report["stop_reason"]="time_budget" if expired() else "object_budget"
+else:
+    report["queued_not_processed"]=[]
+    report["stop_reason"]="queue_exhausted"
+report["elapsed_seconds"]=round(time.monotonic()-BEGIN,3)
+report["coverage_complete_within_declared_decoders"]=not report["skipped"] and not report["errors"] and not queued
+report["decoders"]=["zip regular member bytes + CRC on read","plain ustar","gzip/xz/bzip2/zlib bounded stream","UTF-8 JSON object/list string values","JSONL","Python AST Constant str/bytes","contiguous standard base64 >=96 chars","Markdown fenced content exact delimited body and body plus delimiter newline"]
+report["not_covered"]=["arbitrary encodings or obfuscation","nonliteral computed Python data","concatenation of independent transport chunks without known framing","encrypted archives","unparsed binary structures","historical Library versions"]
+report["no_recovered_source_executed"]=True
+(ROOT/("checkpoint-decoded-envelopes-scan-report.json" if sys.argv[1:] else "checkpoint-scan-report.json")).write_text(json.dumps(report,ensure_ascii=False,indent=2)+"\n")
+print(json.dumps({k:report[k] for k in ["archive_sha256","archive_bytes","coverage","exact_byte_hits","elapsed_seconds","stop_reason"]},ensure_ascii=False,indent=2))
+print(json.dumps({"text_hits":len(report["text_hits"]),"path_candidates":len(report["path_candidates"]),"skipped":len(report["skipped"]),"errors":len(report["errors"]),"queued_not_processed":len(report["queued_not_processed"])},ensure_ascii=False))

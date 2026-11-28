@@ -1,0 +1,82 @@
+=== RUN   TestWindowsProcessOwnerBorrowProfileIsExactAndAdditive
+=== RUN   TestWindowsProcessOwnerBorrowProfileIsExactAndAdditive/legacy13
+--- PASS: TestWindowsProcessOwnerBorrowProfileIsExactAndAdditive/legacy13 (0.00s)
+=== NAME  TestWindowsProcessOwnerBorrowProfileIsExactAndAdditive
+=== RUN   TestWindowsProcessOwnerBorrowProfileIsExactAndAdditive/member17
+--- PASS: TestWindowsProcessOwnerBorrowProfileIsExactAndAdditive/member17 (0.00s)
+=== NAME  TestWindowsProcessOwnerBorrowProfileIsExactAndAdditive
+=== RUN   TestWindowsProcessOwnerBorrowProfileIsExactAndAdditive/borrow18
+--- PASS: TestWindowsProcessOwnerBorrowProfileIsExactAndAdditive/borrow18 (0.00s)
+=== NAME  TestWindowsProcessOwnerBorrowProfileIsExactAndAdditive
+--- PASS: TestWindowsProcessOwnerBorrowProfileIsExactAndAdditive (0.00s)
+=== NAME  
+=== RUN   TestWindowsProcessOwnerBorrowProfileRejectsPartialMixedAndUnknownSets
+=== RUN   TestWindowsProcessOwnerBorrowProfileRejectsPartialMixedAndUnknownSets/duplicate
+--- PASS: TestWindowsProcessOwnerBorrowProfileRejectsPartialMixedAndUnknownSets/duplicate (0.00s)
+=== NAME  TestWindowsProcessOwnerBorrowProfileRejectsPartialMixedAndUnknownSets
+=== RUN   TestWindowsProcessOwnerBorrowProfileRejectsPartialMixedAndUnknownSets/reordered
+--- PASS: TestWindowsProcessOwnerBorrowProfileRejectsPartialMixedAndUnknownSets/reordered (0.00s)
+=== NAME  TestWindowsProcessOwnerBorrowProfileRejectsPartialMixedAndUnknownSets
+=== RUN   TestWindowsProcessOwnerBorrowProfileRejectsPartialMixedAndUnknownSets/unknown
+--- PASS: TestWindowsProcessOwnerBorrowProfileRejectsPartialMixedAndUnknownSets/unknown (0.00s)
+=== NAME  TestWindowsProcessOwnerBorrowProfileRejectsPartialMixedAndUnknownSets
+=== RUN   TestWindowsProcessOwnerBorrowProfileRejectsPartialMixedAndUnknownSets/nil
+--- PASS: TestWindowsProcessOwnerBorrowProfileRejectsPartialMixedAndUnknownSets/nil (0.00s)
+=== NAME  TestWindowsProcessOwnerBorrowProfileRejectsPartialMixedAndUnknownSets
+=== RUN   TestWindowsProcessOwnerBorrowProfileRejectsPartialMixedAndUnknownSets/partial
+--- PASS: TestWindowsProcessOwnerBorrowProfileRejectsPartialMixedAndUnknownSets/partial (0.00s)
+=== NAME  TestWindowsProcessOwnerBorrowProfileRejectsPartialMixedAndUnknownSets
+=== RUN   TestWindowsProcessOwnerBorrowProfileRejectsPartialMixedAndUnknownSets/mixed-without-members
+--- PASS: TestWindowsProcessOwnerBorrowProfileRejectsPartialMixedAndUnknownSets/mixed-without-members (0.00s)
+=== NAME  TestWindowsProcessOwnerBorrowProfileRejectsPartialMixedAndUnknownSets
+=== RUN   TestWindowsProcessOwnerBorrowProfileRejectsPartialMixedAndUnknownSets/extra
+--- PASS: TestWindowsProcessOwnerBorrowProfileRejectsPartialMixedAndUnknownSets/extra (0.00s)
+=== NAME  TestWindowsProcessOwnerBorrowProfileRejectsPartialMixedAndUnknownSets
+--- PASS: TestWindowsProcessOwnerBorrowProfileRejectsPartialMixedAndUnknownSets (0.00s)
+=== NAME  
+=== RUN   TestWindowsProcessOwnerExportProfilesV1
+=== RUN   TestWindowsProcessOwnerExportProfilesV1/owner-v1
+--- PASS: TestWindowsProcessOwnerExportProfilesV1/owner-v1 (0.00s)
+=== NAME  TestWindowsProcessOwnerExportProfilesV1
+=== RUN   TestWindowsProcessOwnerExportProfilesV1/owner-v1-members-v1
+--- PASS: TestWindowsProcessOwnerExportProfilesV1/owner-v1-members-v1 (0.00s)
+=== NAME  TestWindowsProcessOwnerExportProfilesV1
+--- PASS: TestWindowsProcessOwnerExportProfilesV1 (0.00s)
+=== NAME  
+=== RUN   TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets
+=== RUN   TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets/mh_members_close1
+--- PASS: TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets/mh_members_close1 (0.00s)
+=== NAME  TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets
+=== RUN   TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets/mh_members_revalidate1
+--- PASS: TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets/mh_members_revalidate1 (0.00s)
+=== NAME  TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets
+=== RUN   TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets/legacy_subset
+--- PASS: TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets/legacy_subset (0.00s)
+=== NAME  TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets
+=== RUN   TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets/reordered
+--- PASS: TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets/reordered (0.00s)
+=== NAME  TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets
+=== RUN   TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets/extra
+--- PASS: TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets/extra (0.00s)
+=== NAME  TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets
+=== RUN   TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets/mh_members_observe1
+--- PASS: TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets/mh_members_observe1 (0.00s)
+=== NAME  TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets
+=== RUN   TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets/nil
+--- PASS: TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets/nil (0.00s)
+=== NAME  TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets
+=== RUN   TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets/empty
+--- PASS: TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets/empty (0.00s)
+=== NAME  TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets
+=== RUN   TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets/member_subset
+--- PASS: TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets/member_subset (0.00s)
+=== NAME  TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets
+=== RUN   TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets/duplicate
+--- PASS: TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets/duplicate (0.00s)
+=== NAME  TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets
+=== RUN   TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets/unknown
+--- PASS: TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets/unknown (0.00s)
+=== NAME  TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets
+--- PASS: TestWindowsProcessOwnerExportProfilesRejectUnrecognizedSets (0.00s)
+=== NAME  
+PASS

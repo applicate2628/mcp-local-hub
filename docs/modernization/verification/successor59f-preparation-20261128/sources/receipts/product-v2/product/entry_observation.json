@@ -1,0 +1,9 @@
+{
+  "schema": "windows-canonical-entry-build-observation-v1",
+  "build_id": "85abd999a2fb449d9ce6b2a0c1aa791c",
+  "registry_projection_sha256": "d0f7737456d44b5c3b84b699c7623a00c08e8b00f504c2eef83a460adddf2604",
+  "canonical_entry_sha256": "f1be7e81c0d82e6d61b8f636c9c3632073e33221cc251a5936bc51890aa1805e",
+  "product_sha256": "87754b24016dc201e178fb37ecec0a5af52db70e55ed46c0436d219814e0a7a2",
+  "identity_sha256": "f7efd7f6388ec8b74b57eeaa2af5afd9094c65affcc82eff57ca86a9157905bc",
+  "source_epoch": "861852f807c36673755014ef4657bf10252b4e75505bc8b73819bcf8cded7a3a"
+}

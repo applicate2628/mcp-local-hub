@@ -1,0 +1,24 @@
+{
+  "schema": "closed-successor-trail-disclosure-review-v1",
+  "host_data_treatment": "Actual host paths replaced by explicit operator-supplied role markers only. No encoded path, default original value, hidden payload, approval token or policy change is introduced.",
+  "roles": [
+    "git_installation_home",
+    "orchestrarium_installation_root",
+    "approved_work_area",
+    "go_distribution_root",
+    "native_user_profile",
+    "native_powershell_work_area",
+    "windows_system_root",
+    "program_files_32",
+    "program_files_64"
+  ],
+  "closed_native_numeric_identifiers_preserved": true,
+  "scope_includes_only_closed_historical_operations": true,
+  "active_product_continuation_outputs_read": false,
+  "old_unknown_captures_read": false,
+  "raw_original_operator_roles_published": false,
+  "absolute_host_path_pattern_findings": 0,
+  "personal_sid_pattern_findings": 0,
+  "private_value_literal_findings": 0,
+  "standalone_reproduction_uses_explicit_values_and_exact_original_hashes": true
+}

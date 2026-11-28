@@ -1,0 +1,767 @@
+=== RUN   TestApplyOwnersUsesFirstMatchAndMetricCeiling
+--- PASS: TestApplyOwnersUsesFirstMatchAndMetricCeiling (0.00s)
+=== NAME  
+=== RUN   TestApplyOwnersRejectsUnmatched
+--- PASS: TestApplyOwnersRejectsUnmatched (0.00s)
+=== NAME  
+=== RUN   TestLoadPolicyAcceptsVersionOne
+--- PASS: TestLoadPolicyAcceptsVersionOne (0.00s)
+=== NAME  
+=== RUN   TestLoadPolicyRejectsMissingBudgets
+--- PASS: TestLoadPolicyRejectsMissingBudgets (0.00s)
+=== NAME  
+=== RUN   TestLoadPolicyRejectsUnknownFields
+--- PASS: TestLoadPolicyRejectsUnknownFields (0.00s)
+=== NAME  
+=== RUN   TestLoadPolicyRejectsEmptyConstructorSymbol
+--- PASS: TestLoadPolicyRejectsEmptyConstructorSymbol (0.00s)
+=== NAME  
+=== RUN   TestLoadOwnersRejectsIncompleteRule
+--- PASS: TestLoadOwnersRejectsIncompleteRule (0.00s)
+=== NAME  
+=== RUN   TestRenderJSONIsDeterministic
+--- PASS: TestRenderJSONIsDeterministic (0.00s)
+=== NAME  
+=== RUN   TestRenderMarkdownLinksSummaryAndEscapesTables
+--- PASS: TestRenderMarkdownLinksSummaryAndEscapesTables (0.00s)
+=== NAME  
+=== RUN   TestRuleAllowedGlobalRequiresPolicyRegex
+--- PASS: TestRuleAllowedGlobalRequiresPolicyRegex (0.00s)
+=== NAME  
+=== RUN   TestRuleBlankInterfaceAssertionIsNotMutableGlobal
+--- PASS: TestRuleBlankInterfaceAssertionIsNotMutableGlobal (0.00s)
+=== NAME  
+=== RUN   TestRuleGenericPackageDetectedWithoutImports
+--- PASS: TestRuleGenericPackageDetectedWithoutImports (0.00s)
+=== NAME  
+=== RUN   TestRuleAPIConstructorResolvesAliasAndIgnoresOtherPackage
+--- PASS: TestRuleAPIConstructorResolvesAliasAndIgnoresOtherPackage (0.00s)
+=== NAME  
+=== RUN   TestRuleTestHookIgnoredInTestFile
+--- PASS: TestRuleTestHookIgnoredInTestFile (0.00s)
+=== NAME  
+=== RUN   TestRuleGeneratedFileExcludedFromGlobalsCommentsAndBudget
+--- PASS: TestRuleGeneratedFileExcludedFromGlobalsCommentsAndBudget (0.00s)
+=== NAME  
+=== RUN   TestRuleGoStatementsCaptureEnclosingFunctionAndCall
+--- PASS: TestRuleGoStatementsCaptureEnclosingFunctionAndCall (0.00s)
+=== NAME  
+=== RUN   TestRuleHistoryCommentAllowedOnlyByGlob
+--- PASS: TestRuleHistoryCommentAllowedOnlyByGlob (0.00s)
+=== NAME  
+=== RUN   TestRuleEmbeddedDocumentThreshold
+--- PASS: TestRuleEmbeddedDocumentThreshold (0.00s)
+=== NAME  
+=== RUN   TestRuleFileBudgetUsesStableClassEvidence
+--- PASS: TestRuleFileBudgetUsesStableClassEvidence (0.00s)
+=== NAME  
+=== RUN   TestScanDetectsEveryArchitectureCategory
+--- PASS: TestScanDetectsEveryArchitectureCategory (0.00s)
+=== NAME  
+=== RUN   TestFingerprintIgnoresLineMovement
+--- PASS: TestFingerprintIgnoresLineMovement (0.00s)
+=== NAME  
+=== RUN   TestScanIsDeterministic
+--- PASS: TestScanIsDeterministic (0.00s)
+=== NAME  
+=== RUN   TestVerifyRejectsNewViolation
+--- PASS: TestVerifyRejectsNewViolation (0.00s)
+=== NAME  
+=== RUN   TestVerifyRejectsMetricGrowth
+--- PASS: TestVerifyRejectsMetricGrowth (0.00s)
+=== NAME  
+=== RUN   TestVerifyRejectsExpiredEntry
+--- PASS: TestVerifyRejectsExpiredEntry (0.00s)
+=== NAME  
+=== RUN   TestVerifyRejectsStaleBaselineEntry
+--- PASS: TestVerifyRejectsStaleBaselineEntry (0.00s)
+=== NAME  
+=== RUN   TestVerifyRejectsUnownedEntry
+--- PASS: TestVerifyRejectsUnownedEntry (0.00s)
+=== NAME  
+=== RUN   TestVerifyAcceptsExactBaseline
+--- PASS: TestVerifyAcceptsExactBaseline (0.00s)
+=== NAME  
+=== RUN   TestVerifyRequiresWorkerRegistry
+--- PASS: TestVerifyRequiresWorkerRegistry (0.00s)
+=== NAME  
+=== RUN   TestTestOnlyBuildSourceRequiresConfiguredTagReference
+--- PASS: TestTestOnlyBuildSourceRequiresConfiguredTagReference (0.00s)
+=== NAME  
+=== RUN   TestTestOnlyBuildSourceRecognizesConjunction
+--- PASS: TestTestOnlyBuildSourceRecognizesConjunction (0.00s)
+=== NAME  
+=== RUN   TestScanRejectsMissingConfiguredSourceRoot
+--- PASS: TestScanRejectsMissingConfiguredSourceRoot (0.00s)
+=== NAME  
+=== RUN   TestScanRejectsNonDirectoryConfiguredSourceRoot
+--- PASS: TestScanRejectsNonDirectoryConfiguredSourceRoot (0.00s)
+=== NAME  
+=== RUN   TestConstructorRuleIgnoresShadowedImportAlias
+--- PASS: TestConstructorRuleIgnoresShadowedImportAlias (0.00s)
+=== NAME  
+=== RUN   TestConstructorRuleDetectsDotImportedConstructor
+--- PASS: TestConstructorRuleDetectsDotImportedConstructor (0.00s)
+=== NAME  
+=== RUN   TestLoadBaselineCanonicalizesFingerprint
+--- PASS: TestLoadBaselineCanonicalizesFingerprint (0.00s)
+=== NAME  
+=== RUN   TestLoadWorkersCanonicalizesFingerprint
+--- PASS: TestLoadWorkersCanonicalizesFingerprint (0.00s)
+=== NAME  
+=== RUN   TestGenericPackageExternalTestEmitsOneFinding
+--- PASS: TestGenericPackageExternalTestEmitsOneFinding (0.00s)
+=== NAME  
+=== RUN   TestTestOnlyBuildTagExcludesProductionRules
+--- PASS: TestTestOnlyBuildTagExcludesProductionRules (0.00s)
+=== NAME  
+=== RUN   TestAlternativeProductionBuildDoesNotBecomeTestOnly
+--- PASS: TestAlternativeProductionBuildDoesNotBecomeTestOnly (0.00s)
+=== NAME  
+=== RUN   TestExplicitArchitectureFeatureTagCanBeEnabledThroughTags
+--- PASS: TestExplicitArchitectureFeatureTagCanBeEnabledThroughTags (0.00s)
+=== NAME  
+=== RUN   TestUnresolvedConstructorReferencesAreCounted
+--- PASS: TestUnresolvedConstructorReferencesAreCounted (0.00s)
+=== NAME  
+=== RUN   TestNestedProductionHookFieldsAreDetected
+--- PASS: TestNestedProductionHookFieldsAreDetected (0.00s)
+=== NAME  
+=== RUN   TestConstructorUseInsideDefiningPackageIsDetected
+--- PASS: TestConstructorUseInsideDefiningPackageIsDetected (0.00s)
+=== NAME  
+=== RUN   TestPolicyRejectsDuplicateConstructorRules
+=== RUN   TestPolicyRejectsDuplicateConstructorRules/api
+--- PASS: TestPolicyRejectsDuplicateConstructorRules/api (0.00s)
+=== NAME  TestPolicyRejectsDuplicateConstructorRules
+=== RUN   TestPolicyRejectsDuplicateConstructorRules/production
+--- PASS: TestPolicyRejectsDuplicateConstructorRules/production (0.00s)
+=== NAME  TestPolicyRejectsDuplicateConstructorRules
+--- PASS: TestPolicyRejectsDuplicateConstructorRules (0.00s)
+=== NAME  
+=== RUN   TestUnixBackslashPathRemainsDistinct
+    codex_round10_test.go:132: backslash is a path separator on Windows
+--- SKIP: TestUnixBackslashPathRemainsDistinct (0.00s)
+=== NAME  
+=== RUN   TestRepeatedHistoryCommentsAreCounted
+--- PASS: TestRepeatedHistoryCommentsAreCounted (0.00s)
+=== NAME  
+=== RUN   TestLocalEmbeddedDocumentsAreQualifiedByFunction
+--- PASS: TestLocalEmbeddedDocumentsAreQualifiedByFunction (0.00s)
+=== NAME  
+=== RUN   TestExplicitARM64VersionTagsCanBeEnabledThroughTags
+--- PASS: TestExplicitARM64VersionTagsCanBeEnabledThroughTags (0.00s)
+=== NAME  
+=== RUN   TestRenderMarkdownEscapesBackslashBeforePipe
+--- PASS: TestRenderMarkdownEscapesBackslashBeforePipe (0.00s)
+=== NAME  
+=== RUN   TestEmbeddedDocumentResolvesIntegerToStringConversion
+--- PASS: TestEmbeddedDocumentResolvesIntegerToStringConversion (0.00s)
+=== NAME  
+=== RUN   TestPackageStringEvaluationKeysAreSorted
+--- PASS: TestPackageStringEvaluationKeysAreSorted (0.00s)
+=== NAME  
+=== RUN   TestFunctionSignatureNestedTypesAreInspectedForProductionHooks
+--- PASS: TestFunctionSignatureNestedTypesAreInspectedForProductionHooks (0.00s)
+=== NAME  
+=== RUN   TestEmbeddedDocumentResolvesIotaStringConversion
+--- PASS: TestEmbeddedDocumentResolvesIotaStringConversion (0.00s)
+=== NAME  
+=== RUN   TestPolicyRejectsDuplicateHistoryPatterns
+--- PASS: TestPolicyRejectsDuplicateHistoryPatterns (0.00s)
+=== NAME  
+=== RUN   TestUnusedConfiguredTestTagsDoNotPreventTestOnlyClassification
+--- PASS: TestUnusedConfiguredTestTagsDoNotPreventTestOnlyClassification (0.00s)
+=== NAME  
+=== RUN   TestWorkerOccurrencesAreNumberedInOneTraversalOrder
+--- PASS: TestWorkerOccurrencesAreNumberedInOneTraversalOrder (0.00s)
+=== NAME  
+=== RUN   TestImplicitRepeatedConstEmbeddedDocumentsAreScanned
+--- PASS: TestImplicitRepeatedConstEmbeddedDocumentsAreScanned (0.00s)
+=== NAME  
+=== RUN   TestGenericTypeArgumentsAreInspectedForProductionHooks
+--- PASS: TestGenericTypeArgumentsAreInspectedForProductionHooks (0.00s)
+=== NAME  
+=== RUN   TestEmbeddedMarkdownMarkersRecognizeAllATXHeadingLevels
+--- PASS: TestEmbeddedMarkdownMarkersRecognizeAllATXHeadingLevels (0.00s)
+=== NAME  
+=== RUN   TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag
+=== RUN   TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/amd64.foo
+--- PASS: TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/amd64.foo (0.00s)
+=== NAME  TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag
+=== RUN   TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/amd64.v99
+--- PASS: TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/amd64.v99 (0.00s)
+=== NAME  TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag
+=== RUN   TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/arm.8
+--- PASS: TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/arm.8 (0.00s)
+=== NAME  TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag
+=== RUN   TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/ppc64.power11
+--- PASS: TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/ppc64.power11 (0.00s)
+=== NAME  TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag
+=== RUN   TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/riscv64.rva21u64
+--- PASS: TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/riscv64.rva21u64 (0.00s)
+=== NAME  TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag
+=== RUN   TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_amd64.v2
+--- PASS: TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_amd64.v2 (0.00s)
+=== NAME  TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag
+=== RUN   TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_arm.7
+--- PASS: TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_arm.7 (0.00s)
+=== NAME  TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag
+=== RUN   TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_ppc64.power10
+--- PASS: TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_ppc64.power10 (0.00s)
+=== NAME  TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag
+=== RUN   TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_riscv64.rva23u64
+--- PASS: TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag/known_riscv64.rva23u64 (0.00s)
+=== NAME  TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag
+--- PASS: TestUnknownArchitectureFeatureSpellingRemainsCustomBuildTag (0.00s)
+=== NAME  
+=== RUN   TestUnknownArchitectureFeatureSpellingMayBeConfiguredAsCustomTestTag
+--- PASS: TestUnknownArchitectureFeatureSpellingMayBeConfiguredAsCustomTestTag (0.00s)
+=== NAME  
+=== RUN   TestEmbeddedDocumentResolvesDefinedIntegerConversion
+--- PASS: TestEmbeddedDocumentResolvesDefinedIntegerConversion (0.00s)
+=== NAME  
+=== RUN   TestSiblingBlockEmbeddedDocumentsHaveDistinctSymbols
+--- PASS: TestSiblingBlockEmbeddedDocumentsHaveDistinctSymbols (0.00s)
+=== NAME  
+=== RUN   TestPolicyRejectsBoringCryptoAsTestOnlyTag
+--- PASS: TestPolicyRejectsBoringCryptoAsTestOnlyTag (0.00s)
+=== NAME  
+=== RUN   TestDescendantTestdataIsSkippedButExplicitRootIsScanned
+--- PASS: TestDescendantTestdataIsSkippedButExplicitRootIsScanned (0.00s)
+=== NAME  
+=== RUN   TestWorkerEvidencePreservesLiteralBackslashes
+--- PASS: TestWorkerEvidencePreservesLiteralBackslashes (0.00s)
+=== NAME  
+=== RUN   TestEmbeddedDocumentResolvesImportedStringType
+--- PASS: TestEmbeddedDocumentResolvesImportedStringType (0.00s)
+=== NAME  
+=== RUN   TestEmbeddedDocumentResolvesImportedIntegerType
+--- PASS: TestEmbeddedDocumentResolvesImportedIntegerType (0.00s)
+=== NAME  
+=== RUN   TestEmbeddedDocumentResolvesImportedStringConstant
+--- PASS: TestEmbeddedDocumentResolvesImportedStringConstant (0.00s)
+=== NAME  
+=== RUN   TestEmbeddedMarkdownRecognizesTildeFenceAndSetextHeading
+--- PASS: TestEmbeddedMarkdownRecognizesTildeFenceAndSetextHeading (0.00s)
+=== NAME  
+=== RUN   TestGo126TargetMatrixMatchesToolchain
+--- PASS: TestGo126TargetMatrixMatchesToolchain (0.00s)
+=== NAME  
+=== RUN   TestHistoricalFilenameTagsRemainRecognizedWithoutExpandingTargets
+--- PASS: TestHistoricalFilenameTagsRemainRecognizedWithoutExpandingTargets (0.00s)
+=== NAME  
+=== RUN   TestGo126FeatureModesMatchToolchain
+--- PASS: TestGo126FeatureModesMatchToolchain (0.00s)
+=== NAME  
+=== RUN   TestKnownBrokenGoTargetsParticipateInOverlap
+--- PASS: TestKnownBrokenGoTargetsParticipateInOverlap (0.00s)
+=== NAME  
+=== RUN   TestExplicitTestdataRootWinsOverBroaderSourceRoot
+--- PASS: TestExplicitTestdataRootWinsOverBroaderSourceRoot (0.00s)
+=== NAME  
+=== RUN   TestDescendantVendorIsSkippedButExplicitRootIsScanned
+--- PASS: TestDescendantVendorIsSkippedButExplicitRootIsScanned (0.00s)
+=== NAME  
+=== RUN   TestExplicitVendorRootPreservesCustomDescendantExclusions
+--- PASS: TestExplicitVendorRootPreservesCustomDescendantExclusions (0.00s)
+=== NAME  
+=== RUN   TestNormalizeEvidencePreservesSourceBackslashes
+--- PASS: TestNormalizeEvidencePreservesSourceBackslashes (0.00s)
+=== NAME  
+=== RUN   TestImportedTypeResolutionRejectsShadowedAlias
+--- PASS: TestImportedTypeResolutionRejectsShadowedAlias (0.00s)
+=== NAME  
+=== RUN   TestTargetSpecificPackageConflictCoversBrokenPorts
+--- PASS: TestTargetSpecificPackageConflictCoversBrokenPorts (0.00s)
+=== NAME  
+=== RUN   TestExplicitAutomaticTagsMayBeSuppliedThroughTags
+=== RUN   TestExplicitAutomaticTagsMayBeSuppliedThroughTags/goos
+--- PASS: TestExplicitAutomaticTagsMayBeSuppliedThroughTags/goos (0.00s)
+=== NAME  TestExplicitAutomaticTagsMayBeSuppliedThroughTags
+=== RUN   TestExplicitAutomaticTagsMayBeSuppliedThroughTags/goarch
+--- PASS: TestExplicitAutomaticTagsMayBeSuppliedThroughTags/goarch (0.00s)
+=== NAME  TestExplicitAutomaticTagsMayBeSuppliedThroughTags
+=== RUN   TestExplicitAutomaticTagsMayBeSuppliedThroughTags/unix
+--- PASS: TestExplicitAutomaticTagsMayBeSuppliedThroughTags/unix (0.00s)
+=== NAME  TestExplicitAutomaticTagsMayBeSuppliedThroughTags
+=== RUN   TestExplicitAutomaticTagsMayBeSuppliedThroughTags/compiler
+--- PASS: TestExplicitAutomaticTagsMayBeSuppliedThroughTags/compiler (0.00s)
+=== NAME  TestExplicitAutomaticTagsMayBeSuppliedThroughTags
+=== RUN   TestExplicitAutomaticTagsMayBeSuppliedThroughTags/cgo
+--- PASS: TestExplicitAutomaticTagsMayBeSuppliedThroughTags/cgo (0.00s)
+=== NAME  TestExplicitAutomaticTagsMayBeSuppliedThroughTags
+=== RUN   TestExplicitAutomaticTagsMayBeSuppliedThroughTags/release
+--- PASS: TestExplicitAutomaticTagsMayBeSuppliedThroughTags/release (0.00s)
+=== NAME  TestExplicitAutomaticTagsMayBeSuppliedThroughTags
+=== RUN   TestExplicitAutomaticTagsMayBeSuppliedThroughTags/architecture_feature
+--- PASS: TestExplicitAutomaticTagsMayBeSuppliedThroughTags/architecture_feature (0.00s)
+=== NAME  TestExplicitAutomaticTagsMayBeSuppliedThroughTags
+--- PASS: TestExplicitAutomaticTagsMayBeSuppliedThroughTags (0.01s)
+=== NAME  
+=== RUN   TestFilenamePlatformConstraintsHonorAdditionalTags
+--- PASS: TestFilenamePlatformConstraintsHonorAdditionalTags (0.00s)
+=== NAME  
+=== RUN   TestNegatedExplicitAutomaticTagHonorsTagsOverride
+--- PASS: TestNegatedExplicitAutomaticTagHonorsTagsOverride (0.00s)
+=== NAME  
+=== RUN   TestVerifyAcceptsWorkerClassifiedOnlyInRegistry
+--- PASS: TestVerifyAcceptsWorkerClassifiedOnlyInRegistry (0.00s)
+=== NAME  
+=== RUN   TestGeneratedMarkerInsideBlockCommentDoesNotSuppressProductionRules
+--- PASS: TestGeneratedMarkerInsideBlockCommentDoesNotSuppressProductionRules (0.00s)
+=== NAME  
+=== RUN   TestBuildDirectiveInsideBlockCommentDoesNotMarkFileTestOnly
+--- PASS: TestBuildDirectiveInsideBlockCommentDoesNotMarkFileTestOnly (0.00s)
+=== NAME  
+=== RUN   TestScanRejectsPolicyModuleMismatch
+--- PASS: TestScanRejectsPolicyModuleMismatch (0.00s)
+=== NAME  
+=== RUN   TestUnaliasedLocalImportUsesDeclaredPackageName
+--- PASS: TestUnaliasedLocalImportUsesDeclaredPackageName (0.00s)
+=== NAME  
+=== RUN   TestExternalConstructorPackageRequiresExplicitAlias
+--- PASS: TestExternalConstructorPackageRequiresExplicitAlias (0.00s)
+=== NAME  
+=== RUN   TestExplicitExternalConstructorAliasStillMatchesCalls
+--- PASS: TestExplicitExternalConstructorAliasStillMatchesCalls (0.00s)
+=== NAME  
+=== RUN   TestConfiguredSourceRootSymlinkIsRejected
+--- PASS: TestConfiguredSourceRootSymlinkIsRejected (0.00s)
+=== NAME  
+=== RUN   TestLeadingBlockCommentBeforeBuildConstraintRemainsTestOnly
+--- PASS: TestLeadingBlockCommentBeforeBuildConstraintRemainsTestOnly (0.00s)
+=== NAME  
+=== RUN   TestWrappedConstructorCalleesAreDetected
+--- PASS: TestWrappedConstructorCalleesAreDetected (0.00s)
+=== NAME  
+=== RUN   TestRootPackageImportRuleMatchesDotSelector
+--- PASS: TestRootPackageImportRuleMatchesDotSelector (0.00s)
+=== NAME  
+=== RUN   TestGenericPackageNamesAreTrimmedAndValidated
+--- PASS: TestGenericPackageNamesAreTrimmedAndValidated (0.00s)
+=== NAME  
+=== RUN   TestReportRootUsesFilesystemPathSemantics
+--- PASS: TestReportRootUsesFilesystemPathSemantics (0.00s)
+=== NAME  
+=== RUN   TestSourceRootRejectsSymlinkedAncestor
+--- PASS: TestSourceRootRejectsSymlinkedAncestor (0.00s)
+=== NAME  
+=== RUN   TestPolicyRejectsInvalidConstructorSymbol
+--- PASS: TestPolicyRejectsInvalidConstructorSymbol (0.00s)
+=== NAME  
+=== RUN   TestConstructorFunctionValueReferenceIsDetected
+--- PASS: TestConstructorFunctionValueReferenceIsDetected (0.00s)
+=== NAME  
+=== RUN   TestPlatformPackageNamesCanOverlapThroughAdditionalTags
+--- PASS: TestPlatformPackageNamesCanOverlapThroughAdditionalTags (0.00s)
+=== NAME  
+=== RUN   TestBuildCompatibilityUsesValidTargetAndCompilerDimensions
+--- PASS: TestBuildCompatibilityUsesValidTargetAndCompilerDimensions (0.00s)
+=== NAME  
+=== RUN   TestGoIgnoredSourceNamesAreNotScanned
+--- PASS: TestGoIgnoredSourceNamesAreNotScanned (0.00s)
+=== NAME  
+=== RUN   TestSymlinkedRepositoryRootIsRejected
+--- PASS: TestSymlinkedRepositoryRootIsRejected (0.00s)
+=== NAME  
+=== RUN   TestEffectiveBuildConstraintTreatsExplicitPlatformTagAsProductionAlternative
+--- PASS: TestEffectiveBuildConstraintTreatsExplicitPlatformTagAsProductionAlternative (0.00s)
+=== NAME  
+=== RUN   TestEffectiveBuildConstraintRetainsRealPlatformAlternative
+--- PASS: TestEffectiveBuildConstraintRetainsRealPlatformAlternative (0.00s)
+=== NAME  
+=== RUN   TestGlobCharacterClassesMatchPolicyPaths
+--- PASS: TestGlobCharacterClassesMatchPolicyPaths (0.00s)
+=== NAME  
+=== RUN   TestEmbeddedDocumentResolvesNamedStringConstants
+--- PASS: TestEmbeddedDocumentResolvesNamedStringConstants (0.00s)
+=== NAME  
+=== RUN   TestEmbeddedDocumentResolvesLocalNamedStringConstants
+--- PASS: TestEmbeddedDocumentResolvesLocalNamedStringConstants (0.00s)
+=== NAME  
+=== RUN   TestEmbeddedDocumentResolvesSiblingPackageConstants
+--- PASS: TestEmbeddedDocumentResolvesSiblingPackageConstants (0.00s)
+=== NAME  
+=== RUN   TestPolicyRejectsMalformedGlobClass
+--- PASS: TestPolicyRejectsMalformedGlobClass (0.00s)
+=== NAME  
+=== RUN   TestWorkerDeadlineWhitespaceIsCanonicalizedAndAccepted
+--- PASS: TestWorkerDeadlineWhitespaceIsCanonicalizedAndAccepted (0.00s)
+=== NAME  
+=== RUN   TestPolicyRejectsReservedTestOnlyBuildTags
+=== RUN   TestPolicyRejectsReservedTestOnlyBuildTags/linux
+--- PASS: TestPolicyRejectsReservedTestOnlyBuildTags/linux (0.00s)
+=== NAME  TestPolicyRejectsReservedTestOnlyBuildTags
+=== RUN   TestPolicyRejectsReservedTestOnlyBuildTags/amd64
+--- PASS: TestPolicyRejectsReservedTestOnlyBuildTags/amd64 (0.00s)
+=== NAME  TestPolicyRejectsReservedTestOnlyBuildTags
+=== RUN   TestPolicyRejectsReservedTestOnlyBuildTags/gc
+--- PASS: TestPolicyRejectsReservedTestOnlyBuildTags/gc (0.00s)
+=== NAME  TestPolicyRejectsReservedTestOnlyBuildTags
+=== RUN   TestPolicyRejectsReservedTestOnlyBuildTags/cgo
+--- PASS: TestPolicyRejectsReservedTestOnlyBuildTags/cgo (0.00s)
+=== NAME  TestPolicyRejectsReservedTestOnlyBuildTags
+=== RUN   TestPolicyRejectsReservedTestOnlyBuildTags/go1.23
+--- PASS: TestPolicyRejectsReservedTestOnlyBuildTags/go1.23 (0.00s)
+=== NAME  TestPolicyRejectsReservedTestOnlyBuildTags
+=== RUN   TestPolicyRejectsReservedTestOnlyBuildTags/goexperiment.regabi
+--- PASS: TestPolicyRejectsReservedTestOnlyBuildTags/goexperiment.regabi (0.00s)
+=== NAME  TestPolicyRejectsReservedTestOnlyBuildTags
+=== RUN   TestPolicyRejectsReservedTestOnlyBuildTags/amd64.v3
+--- PASS: TestPolicyRejectsReservedTestOnlyBuildTags/amd64.v3 (0.00s)
+=== NAME  TestPolicyRejectsReservedTestOnlyBuildTags
+--- PASS: TestPolicyRejectsReservedTestOnlyBuildTags (0.00s)
+=== NAME  
+=== RUN   TestZeroLengthHistoryRegexProducesFinding
+--- PASS: TestZeroLengthHistoryRegexProducesFinding (0.00s)
+=== NAME  
+=== RUN   TestProductionTypeFieldsAndInterfaceMethodsAreCheckedForTestHooks
+--- PASS: TestProductionTypeFieldsAndInterfaceMethodsAreCheckedForTestHooks (0.00s)
+=== NAME  
+=== RUN   TestOwnersRejectMalformedGlobClass
+--- PASS: TestOwnersRejectMalformedGlobClass (0.00s)
+=== NAME  
+=== RUN   TestScanRejectsProgrammaticMalformedGlobClass
+--- PASS: TestScanRejectsProgrammaticMalformedGlobClass (0.00s)
+=== NAME  
+=== RUN   TestProductionPackageNameEndingTestIsIndexed
+--- PASS: TestProductionPackageNameEndingTestIsIndexed (0.00s)
+=== NAME  
+=== RUN   TestScanRejectsEmptyProgrammaticSourceRoots
+--- PASS: TestScanRejectsEmptyProgrammaticSourceRoots (0.00s)
+=== NAME  
+=== RUN   TestStringEvaluationPreservesASTSourceSpans
+--- PASS: TestStringEvaluationPreservesASTSourceSpans (0.00s)
+=== NAME  
+=== RUN   TestEmbeddedDocumentResolvesAdditionalTagCompatibleBuildVariant
+--- PASS: TestEmbeddedDocumentResolvesAdditionalTagCompatibleBuildVariant (0.00s)
+=== NAME  
+=== RUN   TestRepeatedConstructorCallsIncreaseRatchetedMetric
+--- PASS: TestRepeatedConstructorCallsIncreaseRatchetedMetric (0.00s)
+=== NAME  
+=== RUN   TestUnicodeLiteralGlobMatchesImportRule
+--- PASS: TestUnicodeLiteralGlobMatchesImportRule (0.00s)
+=== NAME  
+=== RUN   TestPolicyRejectsInvalidConstructorImportPaths
+=== RUN   TestPolicyRejectsInvalidConstructorImportPaths/example.com/api/
+--- PASS: TestPolicyRejectsInvalidConstructorImportPaths/example.com/api/ (0.00s)
+=== NAME  TestPolicyRejectsInvalidConstructorImportPaths
+=== RUN   TestPolicyRejectsInvalidConstructorImportPaths/example.com/new_api
+--- PASS: TestPolicyRejectsInvalidConstructorImportPaths/example.com/new_api (0.00s)
+=== NAME  TestPolicyRejectsInvalidConstructorImportPaths
+=== RUN   TestPolicyRejectsInvalidConstructorImportPaths//absolute
+--- PASS: TestPolicyRejectsInvalidConstructorImportPaths//absolute (0.00s)
+=== NAME  TestPolicyRejectsInvalidConstructorImportPaths
+=== RUN   TestPolicyRejectsInvalidConstructorImportPaths/example.com//api
+--- PASS: TestPolicyRejectsInvalidConstructorImportPaths/example.com//api (0.00s)
+=== NAME  TestPolicyRejectsInvalidConstructorImportPaths
+=== RUN   TestPolicyRejectsInvalidConstructorImportPaths/CON/pkg
+--- PASS: TestPolicyRejectsInvalidConstructorImportPaths/CON/pkg (0.00s)
+=== NAME  TestPolicyRejectsInvalidConstructorImportPaths
+=== RUN   TestPolicyRejectsInvalidConstructorImportPaths/example.com/foo~1
+--- PASS: TestPolicyRejectsInvalidConstructorImportPaths/example.com/foo~1 (0.00s)
+=== NAME  TestPolicyRejectsInvalidConstructorImportPaths
+--- PASS: TestPolicyRejectsInvalidConstructorImportPaths (0.00s)
+=== NAME  
+=== RUN   TestUnresolvedExternalConstructorCallsAreCounted
+--- PASS: TestUnresolvedExternalConstructorCallsAreCounted (0.00s)
+=== NAME  
+=== RUN   TestExplicitGoReleaseTagCanBeEnabledThroughTags
+--- PASS: TestExplicitGoReleaseTagCanBeEnabledThroughTags (0.00s)
+=== NAME  
+=== RUN   TestGoBuildDirectiveWithoutBlankLineIsApplied
+--- PASS: TestGoBuildDirectiveWithoutBlankLineIsApplied (0.00s)
+=== NAME  
+=== RUN   TestEmbeddedDocumentResolvesDefinedStringConversion
+--- PASS: TestEmbeddedDocumentResolvesDefinedStringConversion (0.00s)
+=== NAME  
+=== RUN   TestOwnersRejectUnknownViolationKind
+--- PASS: TestOwnersRejectUnknownViolationKind (0.00s)
+=== NAME  
+=== RUN   TestRenderMarkdownUsesSafeCodeSpanForRoot
+--- PASS: TestRenderMarkdownUsesSafeCodeSpanForRoot (0.00s)
+=== NAME  
+=== RUN   TestBuildCompatibilitySolvesMoreThanTenCustomTags
+--- PASS: TestBuildCompatibilitySolvesMoreThanTenCustomTags (0.00s)
+=== NAME  
+=== RUN   TestConstraintSATPrunesLargeDisjunction
+--- PASS: TestConstraintSATPrunesLargeDisjunction (0.00s)
+=== NAME  
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-0
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-0 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-1
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-1 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-2
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-2 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-3
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-3 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-4
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-4 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-5
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-5 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-6
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/linux-amd64/tags-6 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-0
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-0 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-1
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-1 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-2
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-2 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-3
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-3 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-4
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-4 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-5
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-5 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-6
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/windows-arm64/tags-6 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-0
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-0 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-1
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-1 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-2
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-2 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-3
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-3 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-4
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-4 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-5
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-5 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-6
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/darwin-arm64/tags-6 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-0
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-0 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-1
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-1 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-2
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-2 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-3
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-3 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-4
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-4 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-5
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-5 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-6
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/android-arm64/tags-6 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-0
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-0 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-1
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-1 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-2
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-2 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-3
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-3 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-4
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-4 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-5
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-5 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-6
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/ios-arm64/tags-6 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-0
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-0 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-1
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-1 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-2
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-2 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-3
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-3 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-4
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-4 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-5
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-5 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-6
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/illumos-amd64/tags-6 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-0
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-0 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-1
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-1 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-2
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-2 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-3
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-3 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-4
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-4 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-5
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-5 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+=== RUN   TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-6
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild/js-wasm/tags-6 (0.00s)
+=== NAME  TestFilenameBuildConstraintMatchesGoBuild
+--- PASS: TestFilenameBuildConstraintMatchesGoBuild (0.04s)
+=== NAME  
+=== RUN   TestFilenameAndDirectiveShareTagIdentity
+=== RUN   TestFilenameAndDirectiveShareTagIdentity/windows
+--- PASS: TestFilenameAndDirectiveShareTagIdentity/windows (0.00s)
+=== NAME  TestFilenameAndDirectiveShareTagIdentity
+=== RUN   TestFilenameAndDirectiveShareTagIdentity/!windows
+--- PASS: TestFilenameAndDirectiveShareTagIdentity/!windows (0.00s)
+=== NAME  TestFilenameAndDirectiveShareTagIdentity
+=== RUN   TestFilenameAndDirectiveShareTagIdentity/windows_||_linux
+--- PASS: TestFilenameAndDirectiveShareTagIdentity/windows_||_linux (0.00s)
+=== NAME  TestFilenameAndDirectiveShareTagIdentity
+=== RUN   TestFilenameAndDirectiveShareTagIdentity/!(windows_&&_arm64)
+--- PASS: TestFilenameAndDirectiveShareTagIdentity/!(windows_&&_arm64) (0.00s)
+=== NAME  TestFilenameAndDirectiveShareTagIdentity
+--- PASS: TestFilenameAndDirectiveShareTagIdentity (0.00s)
+=== NAME  
+=== RUN   TestScanDoesNotMutateCallerPolicySlices
+--- PASS: TestScanDoesNotMutateCallerPolicySlices (0.00s)
+=== NAME  
+=== RUN   TestScanRejectsEmptyProgrammaticRoot
+--- PASS: TestScanRejectsEmptyProgrammaticRoot (0.00s)
+=== NAME  
+=== RUN   TestRepositoryArchitectureContracts
+=== RUN   TestRepositoryArchitectureContracts/validators
+=== RUN   TestRepositoryArchitectureContracts/validators/valid
+--- PASS: TestRepositoryArchitectureContracts/validators/valid (0.00s)
+=== NAME  TestRepositoryArchitectureContracts/validators
+=== RUN   TestRepositoryArchitectureContracts/validators/wp-cycle
+--- PASS: TestRepositoryArchitectureContracts/validators/wp-cycle (0.00s)
+=== NAME  TestRepositoryArchitectureContracts/validators
+=== RUN   TestRepositoryArchitectureContracts/validators/mixed-cycle
+--- PASS: TestRepositoryArchitectureContracts/validators/mixed-cycle (0.00s)
+=== NAME  TestRepositoryArchitectureContracts/validators
+=== RUN   TestRepositoryArchitectureContracts/validators/self-package-gate
+--- PASS: TestRepositoryArchitectureContracts/validators/self-package-gate (0.00s)
+=== NAME  TestRepositoryArchitectureContracts/validators
+=== RUN   TestRepositoryArchitectureContracts/validators/pr-cycle
+--- PASS: TestRepositoryArchitectureContracts/validators/pr-cycle (0.00s)
+=== NAME  TestRepositoryArchitectureContracts/validators
+=== RUN   TestRepositoryArchitectureContracts/validators/unknown-pr
+--- PASS: TestRepositoryArchitectureContracts/validators/unknown-pr (0.00s)
+=== NAME  TestRepositoryArchitectureContracts/validators
+--- PASS: TestRepositoryArchitectureContracts/validators (0.00s)
+=== NAME  TestRepositoryArchitectureContracts
+=== RUN   TestRepositoryArchitectureContracts/traceability
+--- PASS: TestRepositoryArchitectureContracts/traceability (0.00s)
+=== NAME  TestRepositoryArchitectureContracts
+=== RUN   TestRepositoryArchitectureContracts/policy
+--- PASS: TestRepositoryArchitectureContracts/policy (0.00s)
+=== NAME  TestRepositoryArchitectureContracts
+=== RUN   TestRepositoryArchitectureContracts/baseline
+--- PASS: TestRepositoryArchitectureContracts/baseline (0.05s)
+=== NAME  TestRepositoryArchitectureContracts
+--- PASS: TestRepositoryArchitectureContracts (0.05s)
+=== NAME  
+=== RUN   TestLoadPolicyRejectsTrailingDocument
+--- PASS: TestLoadPolicyRejectsTrailingDocument (0.00s)
+=== NAME  
+=== RUN   TestLoadPolicyRejectsSourceRootEscape
+--- PASS: TestLoadPolicyRejectsSourceRootEscape (0.00s)
+=== NAME  
+=== RUN   TestGeneratedMarkerBeforePackageIsRecognized
+--- PASS: TestGeneratedMarkerBeforePackageIsRecognized (0.00s)
+=== NAME  
+=== RUN   TestEmbeddedDocumentAggregatesStringConcatenation
+--- PASS: TestEmbeddedDocumentAggregatesStringConcatenation (0.00s)
+=== NAME  
+=== RUN   TestWorkersIgnoreTestAndGeneratedFiles
+--- PASS: TestWorkersIgnoreTestAndGeneratedFiles (0.00s)
+=== NAME  
+=== RUN   TestWorkerRuleDistinguishesAnonymousWorkersInOneFunction
+--- PASS: TestWorkerRuleDistinguishesAnonymousWorkersInOneFunction (0.00s)
+=== NAME  
+=== RUN   TestVerifyAcceptsLegacyWorkerInBaseline
+--- PASS: TestVerifyAcceptsLegacyWorkerInBaseline (0.00s)
+=== NAME  
+=== RUN   TestVerifyRejectsWorkerInBaselineAndRegistry
+--- PASS: TestVerifyRejectsWorkerInBaselineAndRegistry (0.00s)
+=== NAME  
+=== RUN   TestGlobTrailingDoubleStarMatchesPackageRoot
+--- PASS: TestGlobTrailingDoubleStarMatchesPackageRoot (0.00s)
+=== NAME  
+=== RUN   TestImportRuleUsesRepositoryRelativeLocalImportPath
+--- PASS: TestImportRuleUsesRepositoryRelativeLocalImportPath (0.00s)
+=== NAME  
+=== RUN   TestFileBudgetFingerprintSurvivesThresholdClassChange
+--- PASS: TestFileBudgetFingerprintSurvivesThresholdClassChange (0.00s)
+=== NAME  
+=== RUN   TestLoadPolicyRejectsEmbeddedParentTraversal
+--- PASS: TestLoadPolicyRejectsEmbeddedParentTraversal (0.00s)
+=== NAME  
+=== RUN   TestWorkerFingerprintsDistinguishMethodsWithSameName
+--- PASS: TestWorkerFingerprintsDistinguishMethodsWithSameName (0.00s)
+=== NAME  
+=== RUN   TestRuleDetectsProductionTestHookMethod
+--- PASS: TestRuleDetectsProductionTestHookMethod (0.00s)
+=== NAME  
+=== RUN   TestLoadBaselineRejectsMissingGeneratedFrom
+--- PASS: TestLoadBaselineRejectsMissingGeneratedFrom (0.00s)
+=== NAME  
+=== RUN   TestLoadBaselineRejectsFingerprintMismatch
+--- PASS: TestLoadBaselineRejectsFingerprintMismatch (0.00s)
+=== NAME  
+=== RUN   TestLoadPolicyRejectsEmptyImportRule
+--- PASS: TestLoadPolicyRejectsEmptyImportRule (0.00s)
+=== NAME  
+=== RUN   TestWorkerFingerprintsDistinguishPackageLevelFunctionLiterals
+--- PASS: TestWorkerFingerprintsDistinguishPackageLevelFunctionLiterals (0.00s)
+=== NAME  
+=== RUN   TestGlobPatternsUsedByRepositoryPolicy
+--- PASS: TestGlobPatternsUsedByRepositoryPolicy (0.00s)
+=== NAME  
+=== RUN   TestLoadPolicyRejectsEmptyRegexPattern
+--- PASS: TestLoadPolicyRejectsEmptyRegexPattern (0.00s)
+=== NAME  
+=== RUN   TestBoringCryptoLegacyAliasSharesToolTagState
+--- PASS: TestBoringCryptoLegacyAliasSharesToolTagState (0.00s)
+=== NAME  
+=== RUN   TestCgoTagHonorsTargetSupport
+--- PASS: TestCgoTagHonorsTargetSupport (0.00s)
+=== NAME  
+=== RUN   TestBuildCompatibleLocalConstantShadowsDotImport
+--- PASS: TestBuildCompatibleLocalConstantShadowsDotImport (0.00s)
+=== NAME  
+=== RUN   TestAdditionalTagCompatibleLocalConstantShadowsDotImport
+--- PASS: TestAdditionalTagCompatibleLocalConstantShadowsDotImport (0.00s)
+=== NAME  
+PASS

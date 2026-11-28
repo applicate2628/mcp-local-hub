@@ -1,0 +1,82 @@
+{
+  "schema": "cli-shared-foreign-test-image-candidate-v1",
+  "status": "DRAFT_NOT_APPLIED_NOT_EXECUTED",
+  "base": {
+    "commit": "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8",
+    "tree": "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1",
+    "file_count": 3369,
+    "source_input_sha256": "e8c3fc2f577a130f92ba4eee7f8eee7153afc032dee909557cf1156890917c06"
+  },
+  "expected_tree": "5be2e2ef1f006da03a8ff7ed993b5e649d619116",
+  "paths": [
+    {
+      "path": "internal/cli/process_identity_match_windows_test.go",
+      "base_sha256": "64c5e6a5d499529c617ca32d0e8eb572c4f3d7e8b0f37a7397193f6095103936",
+      "base_git_blob": "37f22c85350aab49185355c0485338fb16bc46cc",
+      "after_sha256": "e97fd7cc9cc9d9dfe09643c8e03334bd6f7f3e663b07a7f0fe711f0ef974708f",
+      "after_git_blob": "059eec22dc7701ed8f1a1d2f2baac82962d815df",
+      "after_bytes": 4645
+    },
+    {
+      "path": "internal/cli/settings_registry_test.go",
+      "base_sha256": "30e22d1588509cfe025126a7a5356253e6f7e4b4b6d1440c0b12377e29283e9e",
+      "base_git_blob": "b7ac3ac94b837e46f6a754377d8af92c17ae38bc",
+      "after_sha256": "40de5fd188c8c94ec67e4fd852d89b0122aee602c3dde91fd8f8ceb2e4c7854a",
+      "after_git_blob": "563e80dff195deb1378e45431c0b374aa0a25012",
+      "after_bytes": 32273
+    }
+  ],
+  "scope": "test-only; share one ordinary image copy between two existing negative identity cases",
+  "preserved": [
+    "Two named root tests remain separate",
+    "Each root starts its own original exec.Cmd and native process",
+    "Existing original Kill and Cmd.Wait calls unchanged",
+    "PID executable and current-running state assertions unchanged",
+    "Helper sentinel and selected helper argv unchanged",
+    "Existing helper 60s sleep and parent 5s identity deadline unchanged",
+    "Existing TestMain root hardening and post-m.Run cleanup unchanged",
+    "No build tags, command arguments, tests, source behavior or timeout changed"
+  ],
+  "changes": [
+    "One sync.Once memoizes copy result and any construction error",
+    "Original incoming image is copied with io.Copy to one fresh exclusive ordinary file under hardened package TestMain root",
+    "No hard links, prepared Product substitution or copied image from a different Source",
+    "Fresh processes share this completed file until existing package cleanup"
+  ],
+  "qualification": {
+    "go_build": false,
+    "go_vet": false,
+    "go_test": false,
+    "gofmt": false,
+    "native_execution": false,
+    "source_mutation": false,
+    "performance_improvement_measured": false,
+    "full_five_minute_success_predicted": false
+  },
+  "historical_input": {
+    "source": "727d66753814dc218e26d699e57402db2d13190a",
+    "stdout_sha256": "d680bab54bba9cd6043a1f46359076d650a08d9061d550ceee54bff8019f787f",
+    "tests": [
+      {
+        "name": "TestPidMatchesMcphub_RejectsForeignPathSameBasename",
+        "printed_seconds": 26.91
+      },
+      {
+        "name": "TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID",
+        "printed_seconds": 19.03
+      }
+    ],
+    "limitation": "No stage timings; sum is whole-test time, not measured copy cost"
+  },
+  "required_acceptance_commands": [
+    "go build ./... && go vet ./... && go test -count=1 -timeout 5m ./...",
+    "go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/"
+  ],
+  "checks": {
+    "read_only_symbol_search": "No prior definitions of the three introduced identifiers in received isolated Source59f internal/cli/*.go",
+    "caller_inventory": "Exactly two copyCurrentTestBinaryAs callers, both passing mcphub.exe",
+    "base_tree_reconstructed_from_all_3369_git_entries": true,
+    "base_and_after_blob_hashes_computed_as_git_objects": true,
+    "original_native_or_unknown_resources_touched": false
+  }
+}

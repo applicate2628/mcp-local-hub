@@ -1,0 +1,22 @@
+{
+  "schema": "literal-successor-preparation-v1",
+  "status": "PREPARED_NOT_EXECUTED",
+  "manifest": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-prepared-v1\\runtime-manifest.json",
+    "sha256": "bb532e4fec38ea60cad8a105ed2fad7495ee76440f9546a5100802f604fd0f7d"
+  },
+  "launch_argv": [
+    "@@RECOVERY_USER_PROFILE_JSON@@\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+    "-I",
+    "-S",
+    "-B",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-prepared-v1\\launch_successor.py",
+    "--manifest",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-successor33-v1\\runtime-prepared-v1\\runtime-manifest.json",
+    "--manifest-sha256",
+    "bb532e4fec38ea60cad8a105ed2fad7495ee76440f9546a5100802f604fd0f7d"
+  ],
+  "reviewed": true,
+  "source_mutation_performed": false,
+  "native_or_test_commands_started": false
+}

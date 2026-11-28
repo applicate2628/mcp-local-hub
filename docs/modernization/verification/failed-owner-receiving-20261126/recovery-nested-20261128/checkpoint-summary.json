@@ -1,0 +1,300 @@
+{
+  "schema": "checkpoint-recovery-public-summary-v1",
+  "date": "2026-11-28",
+  "status": "NEW_PRECISE_SOURCE_PATHS_AND_MANIFEST_SIZE; NO_VERIFIED_TARGET_BYTES_RECOVERED",
+  "source": {
+    "current_version_number": 0,
+    "file_name": "mcp-residual-ad-checkpoint-363b-v1.zip",
+    "bytes": 37455817,
+    "sha256": "912e9cff2f5105364aa664c11e5ba20c88048b78111eab99f6e3334f820642d0",
+    "prior_search_seen_sha256_match": false,
+    "prior_search_comparison_set": {
+      "spec_bytes": 11524,
+      "spec_sha256": "84301391384853cd9e21bb6d9e9d18dc15204b365de87afe1e032d7e90a0b1f4",
+      "json_pointer": "/seen_archive_sha256",
+      "members": 57,
+      "meaning": "Only this retained prior-search seen-hash set; not all historical checkpoint references"
+    },
+    "matches_historical_s16_pin": true
+  },
+  "discovery": {
+    "original_search_queries": 5,
+    "original_ranked_rows": 30,
+    "original_distinct_files": 26,
+    "original_second_search_has_next_cursor": true,
+    "followup_search_queries": 1,
+    "followup_query": "title exact quoted receive_fresh_full_inputs_v1.py",
+    "followup_direct_results": 0,
+    "followup_fuzzy_results": 1,
+    "followup_relevant_results": 0,
+    "followup_has_next_cursor": false,
+    "total_queries": 6,
+    "exhaustive_library_search_claimed": false
+  },
+  "target_identity_references": [
+    {
+      "target": "receiver_current",
+      "path": "b-five-test-source-ordinary-type-candidate-v1/after/receive_fresh_full_inputs_v1.py",
+      "bytes": 125176,
+      "sha256": "1f45b3ef0e9184cc66be002cb918eb38dad0560e86e0a4a2d5c31658f44c2891",
+      "source_member": "b-current-role-split-source-integration-independent-review-v1/local-validation.json",
+      "json_pointer": "/connected_source_pins/0",
+      "target_bytes_present": false,
+      "nature": "Referenced full byte pin in preserved primary receipt"
+    },
+    {
+      "target": "receiver_preimage",
+      "path": "b-five-test-source-admission-candidate-v2/receive_fresh_full_inputs_v1.py",
+      "bytes": 125057,
+      "sha256": "4cdb508e655527b0372a5726f2753f6163ee50ed25b52546ff86e85682a6185a",
+      "source_member": "b-functional-product-source-admission-b8d-independent-review-v1/review.json",
+      "json_pointer": "/inputs/0",
+      "target_bytes_present": false,
+      "nature": "Referenced full byte pin in preserved primary receipt"
+    },
+    {
+      "target": "receiver_patch",
+      "path": null,
+      "candidate_container": "b-five-test-source-ordinary-type-candidate-v1",
+      "bytes": 1099,
+      "sha256": "e724dc749ac82517d2af3553fa558388f59371a0a2c0330af4a0db60738a31d5",
+      "source_member": "b-five-test-source-ordinary-type-independent-review-v1/review.json",
+      "companion_size_source": "b-five-test-source-ordinary-type-independent-review-v1/README.md",
+      "target_bytes_present": false,
+      "nature": "Exact patch hash and byte length are documented; precise patch filename is not present in inspected records"
+    },
+    {
+      "target": "canonical_manifest",
+      "path": "b-full-route-successor-candidate-v1/candidate/canonical-source-manifest-v5.json",
+      "bytes": 1348,
+      "sha256": "e74ff2ed872591e32b5fdd948d90959b9a564843534f1c46621dc6a409bf47c3",
+      "source_member": "checkpoint-plan-363b-v1/external-references.json",
+      "json_pointer": "/map_v3_summary_evidence_references/48",
+      "included_payload": false,
+      "historical_local_exact_pin_verified": true,
+      "target_bytes_present": false,
+      "schema_contents_verified": false
+    }
+  ],
+  "connected_source_references": [
+    {
+      "role": "source_receiver",
+      "path": "b-five-test-source-ordinary-type-candidate-v1/after/receive_fresh_full_inputs_v1.py",
+      "bytes": 125176,
+      "sha256": "1f45b3ef0e9184cc66be002cb918eb38dad0560e86e0a4a2d5c31658f44c2891"
+    },
+    {
+      "role": "private_producer",
+      "path": "b-full-route-successor-candidate-v1/preparation-before/private_builder_current.py",
+      "bytes": 83879,
+      "sha256": "7dee97ed13a1ac838fa01ec32a88bd4a433873cd1dabb92cc161e385c27bae73"
+    },
+    {
+      "role": "private_receiver",
+      "path": "b-full-route-successor-candidate-v1/current-full-before/private_migration_receiving_current.py",
+      "bytes": 26572,
+      "sha256": "bb10ffaaf9579041b1ee66cbf928d1026f3ef1606700ec6f3540a1309d4e5467"
+    },
+    {
+      "role": "driver",
+      "path": "b-current-role-review-v1/after/run_literal_go_gate_ready_v1.py",
+      "bytes": 56043,
+      "sha256": "abf72cc401d18286977ddf72b2ee71357f717e5e509ca4b203b98d57fd449566"
+    },
+    {
+      "role": "adapter",
+      "path": "b-current-role-review-v1/after/literal_go_exec_adapter_ready_v1.py",
+      "bytes": 67840,
+      "sha256": "79c760a0e855381808712a8a8afe8ea65be25913c5c716b754df24b884ceb1e1"
+    },
+    {
+      "role": "terminal",
+      "path": "b-current-launcher-terminal-five-candidate-v1/after/launch_literal_final_v17.py",
+      "bytes": 28978,
+      "sha256": "0e2306e607bbdc840525a897f4c9485861ec1d18eec2f3a600e54ac4b029d87b"
+    }
+  ],
+  "producer_binding_limits": [
+    "Private producer7dee/private receiverbb10/driverabf72/adapter79c7/terminal0e23 are connected-input references, not newly recovered source bytes.",
+    "Private artifact issuer identity does not prove it generates canonical-source-manifest-v5.",
+    "No serialization recipe for e74ff manifest was found or synthesized."
+  ],
+  "template9315": {
+    "full_sha256": null,
+    "bytes": null,
+    "path": null,
+    "selected_records_checked": 24,
+    "selected_token_patterns": [
+      "9315",
+      "GO_CONTROLLER_EXTENSION"
+    ],
+    "selected_token_matches": [],
+    "blob_hash_prefix_matches": [],
+    "blob_hash_prefix_scope": "Root member identities and derived queued-data identities retained by bounded scan; not all arbitrary substrings/encodings.",
+    "qualified": false
+  },
+  "controller_composition": {
+    "exact12file_composition_recovered": false,
+    "canonical_manifest_payload_excluded": true,
+    "ordinary_review_12_package_files_are_not_controller_composition": true,
+    "role_integration13_candidate_files_are_not_controller_composition": true,
+    "old_fixture_manifest_77ab_is_not_current_canonical_manifest": true,
+    "synthetic_sources_substituted": false
+  },
+  "archive_coverage": {
+    "root_entries": 682,
+    "root_members_read": 682,
+    "root_declared_expanded_bytes": 77673369,
+    "outer_manifest_validation": {
+      "manifest_entries": 681,
+      "archive_entries": 682,
+      "mismatches": [],
+      "archive_members_not_in_manifest": [
+        "CHECKPOINT-MANIFEST.json"
+      ]
+    },
+    "bounded_decoder_coverage": {
+      "expanded_bytes": 165038542,
+      "objects_processed": 603,
+      "unique_data": 603,
+      "duplicate_data": 396,
+      "root_members_read": 682,
+      "root_directories": 0,
+      "archives_opened": 1,
+      "json_documents": 1027,
+      "json_strings": 427979,
+      "python_ast_files": 53,
+      "python_constants": 10493,
+      "base64_decoded": 143,
+      "compressed_streams_decoded": 12,
+      "maximum_archive_depth": 2,
+      "maximum_data_depth": 7
+    },
+    "limits": {
+      "compressed": 67108864,
+      "member": 33554432,
+      "expanded": 268435456,
+      "archive_depth": 6,
+      "json_depth": 12,
+      "objects": 20000,
+      "seconds": 50
+    },
+    "stop_reason": "queue_exhausted",
+    "queued_not_processed": 0,
+    "skipped": [],
+    "initial_decoder_errors": [
+      {
+        "path": "mcp-residual-ad-checkpoint-363b-v1.zip!b-functional-product-materialization-execution-v1/m7/normal-receiving-tool.json#json/poll/content/0/text#base64@168",
+        "stage": "xz",
+        "type": "EOFError",
+        "message": "Compressed file ended before the end-of-stream marker was reached"
+      },
+      {
+        "path": "mcp-residual-ad-checkpoint-363b-v1.zip!b-functional-product-scalar-commit-execution-v1/normal-receiving-tool.json#json/poll/content/0/text#base64@168",
+        "stage": "xz",
+        "type": "EOFError",
+        "message": "Compressed file ended before the end-of-stream marker was reached"
+      }
+    ],
+    "decoder_error_resolution": "Two poll text streams contain one raw LF inside explicit xz+base64 data. Strict embedded JSON fails at character1048576. Parsing control character as string data, removing only ASCII whitespace and validating decoded length+SHA proves exact streams. Both were already decoded through their unwrapped result/content fields in the initial pass.",
+    "resolved_envelopes": [
+      {
+        "member": "b-functional-product-materialization-execution-v1/m7/normal-receiving-tool.json",
+        "text_chars": 1202050,
+        "transformation": "JSONDecoder(strict=False) for raw control character in embedded envelope; remove only ASCII space/tab/CR/LF from explicitly declared base64 data; validate base64 and exact decoded bytes+SHA256",
+        "keys": [
+          "codec",
+          "bytes",
+          "sha256",
+          "data"
+        ],
+        "codec": "xz+base64",
+        "declared_bytes": 6619665,
+        "declared_sha256": "e3de50e5f659b10978d52e3a14d97151206357db65640eb49f2d75fb77247c82",
+        "payload_chars": 1201825,
+        "nonalphabet_char_counts": {
+          "\n": 1
+        },
+        "nonalphabet_positions": [
+          1048448
+        ],
+        "compressed_bytes": 901368,
+        "compressed_sha256": "e92fe7ae6ce5154f8f1068e59cc0a36367b42e3fa012eb533fa2302f20170228",
+        "decoded_bytes": 6619665,
+        "eof": true,
+        "unused_data_bytes": 0,
+        "decoded_sha256": "e3de50e5f659b10978d52e3a14d97151206357db65640eb49f2d75fb77247c82",
+        "size_match": true,
+        "sha_match": true,
+        "saved_path": "{CURRENT_WORKSPACE}/library-recovery-next/decoded-envelopes/e3de50e5f659b10978d52e3a14d97151206357db65640eb49f2d75fb77247c82"
+      },
+      {
+        "member": "b-functional-product-scalar-commit-execution-v1/normal-receiving-tool.json",
+        "text_chars": 2035818,
+        "transformation": "JSONDecoder(strict=False) for raw control character in embedded envelope; remove only ASCII space/tab/CR/LF from explicitly declared base64 data; validate base64 and exact decoded bytes+SHA256",
+        "keys": [
+          "codec",
+          "bytes",
+          "sha256",
+          "data"
+        ],
+        "codec": "xz+base64",
+        "declared_bytes": 7313595,
+        "declared_sha256": "977cf98a45d58050935fdfad0df62852356bc828e67edb0bfdbc66170d37cedb",
+        "payload_chars": 2035593,
+        "nonalphabet_char_counts": {
+          "\n": 1
+        },
+        "nonalphabet_positions": [
+          1048448
+        ],
+        "compressed_bytes": 1526692,
+        "compressed_sha256": "c0b53d7e654c6f1cb7ec2ca5d76194c388756ff76c9d77d45044527fa2e3b09f",
+        "decoded_bytes": 7313595,
+        "eof": true,
+        "unused_data_bytes": 0,
+        "decoded_sha256": "977cf98a45d58050935fdfad0df62852356bc828e67edb0bfdbc66170d37cedb",
+        "size_match": true,
+        "sha_match": true,
+        "saved_path": "{CURRENT_WORKSPACE}/library-recovery-next/decoded-envelopes/977cf98a45d58050935fdfad0df62852356bc828e67edb0bfdbc66170d37cedb"
+      }
+    ],
+    "exact_byte_hits": [],
+    "no_recovered_source_executed": true,
+    "decoders": [
+      "zip regular member bytes + CRC on read",
+      "plain ustar",
+      "gzip/xz/bzip2/zlib bounded stream",
+      "UTF-8 JSON object/list string values",
+      "JSONL",
+      "Python AST Constant str/bytes",
+      "contiguous standard base64 >=96 chars",
+      "Markdown fenced content exact delimited body and body plus delimiter newline"
+    ],
+    "not_covered": [
+      "arbitrary encodings or obfuscation",
+      "nonliteral computed Python data",
+      "concatenation of independent transport chunks without known framing",
+      "encrypted archives",
+      "unparsed binary structures",
+      "historical Library versions"
+    ]
+  },
+  "preserved_evidence": {
+    "selected_primary_members": 24,
+    "selected_index": "source-evidence.json#/checkpoint_selected_members",
+    "public_primary_files": [
+      "primary/local-validation.json",
+      "primary/ordinary-review.json",
+      "primary/ordinary-review-README.md",
+      "primary/product-source-admission-review.json",
+      "primary/external-references.json",
+      "primary/CHECKPOINT-MANIFEST.json",
+      "primary/CHECKPOINT.md"
+    ],
+    "original_checkpoint_retained": true,
+    "raw_search_records_public": false,
+    "reason": "Unrelated fuzzy results omitted; original retained records are not global absence evidence"
+  },
+  "conclusion": "B remains open. Exact receiver/current or preimage+patch, canonical manifest and full-identity template were not recovered. Data read and earlier fixture results do not qualify production execution."
+}

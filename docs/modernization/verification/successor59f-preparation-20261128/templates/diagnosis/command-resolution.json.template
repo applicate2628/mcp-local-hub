@@ -1,0 +1,96 @@
+{
+  "schema": "successor-product-command-resolution-data-v1",
+  "original_plan_sha256": "99333ab4cb43f9a01720c70e567782475065b0f7077d70a3f157dca475c9c15a",
+  "original_config_sha256": "e60e717eeb3727acad953c54df08fa0fb1da893f48dcc2d0d5e0d1782c5580bb",
+  "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\pub666-recovered-20261128",
+  "PATH": "@@RECOVERY_HISTORICAL_WORK_AREA_JSON@@\\bns26\\pwsh7;@@RECOVERY_GIT_INSTALLATION_JSON@@\\cmd;@@RECOVERY_GIT_INSTALLATION_JSON@@\\mingw64\\bin;@@RECOVERY_GIT_INSTALLATION_JSON@@\\usr\\bin;@@RECOVERY_MSYS_UCRT64_ROOT_JSON@@\\lib\\go\\bin;@@RECOVERY_MSYS_UCRT64_ROOT_JSON@@\\bin;@@RECOVERY_WINDOWS_DIRECTORY_JSON@@\\System32;@@RECOVERY_WINDOWS_DIRECTORY_JSON@@;@@RECOVERY_WINDOWS_DIRECTORY_JSON@@\\System32\\WindowsPowerShell\\v1.0",
+  "PATHEXT": ".COM;.EXE;.BAT;.CMD",
+  "pwsh_version": "7.7.0",
+  "result": [
+    {
+      "name": "go",
+      "pair_type": "System.Object[]",
+      "pair_count": 2,
+      "name_type": "System.String",
+      "expected_type": "System.String",
+      "expected": "@@RECOVERY_MSYS_UCRT64_ROOT_JSON@@\\lib\\go\\bin\\go.exe",
+      "expected_full_path": "@@RECOVERY_MSYS_UCRT64_ROOT_JSON@@\\lib\\go\\bin\\go.exe",
+      "application_count": 2,
+      "source_value_type": "System.Object[]",
+      "sources": [
+        "@@RECOVERY_MSYS_UCRT64_ROOT_JSON@@\\lib\\go\\bin\\go.exe",
+        "@@RECOVERY_MSYS_UCRT64_ROOT_JSON@@\\bin\\go.exe"
+      ],
+      "original_string_conversion": "@@RECOVERY_MSYS_UCRT64_ROOT_JSON@@\\lib\\go\\bin\\go.exe @@RECOVERY_MSYS_UCRT64_ROOT_JSON@@\\bin\\go.exe",
+      "original_full_path_conversion": "@@RECOVERY_MSYS_UCRT64_ROOT_JSON@@\\lib\\go\\bin\\go.exe @@RECOVERY_MSYS_UCRT64_ROOT_JSON@@\\bin\\go.exe",
+      "original_conversion_error": null,
+      "applications": [
+        {
+          "name": "go.exe",
+          "command_type": "Application",
+          "source": "@@RECOVERY_MSYS_UCRT64_ROOT_JSON@@\\lib\\go\\bin\\go.exe",
+          "definition": "@@RECOVERY_MSYS_UCRT64_ROOT_JSON@@\\lib\\go\\bin\\go.exe",
+          "path": "@@RECOVERY_MSYS_UCRT64_ROOT_JSON@@\\lib\\go\\bin\\go.exe"
+        },
+        {
+          "name": "go.exe",
+          "command_type": "Application",
+          "source": "@@RECOVERY_MSYS_UCRT64_ROOT_JSON@@\\bin\\go.exe",
+          "definition": "@@RECOVERY_MSYS_UCRT64_ROOT_JSON@@\\bin\\go.exe",
+          "path": "@@RECOVERY_MSYS_UCRT64_ROOT_JSON@@\\bin\\go.exe"
+        }
+      ],
+      "plain_command_count": 1,
+      "plain_types": [
+        "Application"
+      ],
+      "invocation_resolver": {
+        "name": "go.exe",
+        "command_type": "Application",
+        "source": "@@RECOVERY_MSYS_UCRT64_ROOT_JSON@@\\lib\\go\\bin\\go.exe",
+        "definition": "@@RECOVERY_MSYS_UCRT64_ROOT_JSON@@\\lib\\go\\bin\\go.exe",
+        "path": "@@RECOVERY_MSYS_UCRT64_ROOT_JSON@@\\lib\\go\\bin\\go.exe"
+      }
+    },
+    {
+      "name": "git",
+      "pair_type": "System.Object[]",
+      "pair_count": 2,
+      "name_type": "System.String",
+      "expected_type": "System.String",
+      "expected": "@@RECOVERY_GIT_INSTALLATION_JSON@@\\cmd\\git.exe",
+      "expected_full_path": "@@RECOVERY_GIT_INSTALLATION_JSON@@\\cmd\\git.exe",
+      "application_count": 1,
+      "source_value_type": "System.String",
+      "sources": [
+        "@@RECOVERY_GIT_INSTALLATION_JSON@@\\cmd\\git.exe"
+      ],
+      "original_string_conversion": "@@RECOVERY_GIT_INSTALLATION_JSON@@\\cmd\\git.exe",
+      "original_full_path_conversion": "@@RECOVERY_GIT_INSTALLATION_JSON@@\\cmd\\git.exe",
+      "original_conversion_error": null,
+      "applications": [
+        {
+          "name": "git.exe",
+          "command_type": "Application",
+          "source": "@@RECOVERY_GIT_INSTALLATION_JSON@@\\cmd\\git.exe",
+          "definition": "@@RECOVERY_GIT_INSTALLATION_JSON@@\\cmd\\git.exe",
+          "path": "@@RECOVERY_GIT_INSTALLATION_JSON@@\\cmd\\git.exe"
+        }
+      ],
+      "plain_command_count": 1,
+      "plain_types": [
+        "Application"
+      ],
+      "invocation_resolver": {
+        "name": "git.exe",
+        "command_type": "Application",
+        "source": "@@RECOVERY_GIT_INSTALLATION_JSON@@\\cmd\\git.exe",
+        "definition": "@@RECOVERY_GIT_INSTALLATION_JSON@@\\cmd\\git.exe",
+        "path": "@@RECOVERY_GIT_INSTALLATION_JSON@@\\cmd\\git.exe"
+      }
+    }
+  ],
+  "go_git_or_product_invoked": false,
+  "source_or_cache_modified": false,
+  "acceptance_qualification_granted": false
+}

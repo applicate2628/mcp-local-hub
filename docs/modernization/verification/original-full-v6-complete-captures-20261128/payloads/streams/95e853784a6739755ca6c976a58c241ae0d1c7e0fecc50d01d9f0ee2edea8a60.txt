@@ -1,0 +1,28 @@
+=== RUN   TestRustOwnerBuildBindingClassifiesAbsentMark
+=== RUN   TestRustOwnerBuildBindingClassifiesAbsentMark/absent
+--- PASS: TestRustOwnerBuildBindingClassifiesAbsentMark/absent (0.00s)
+=== NAME  TestRustOwnerBuildBindingClassifiesAbsentMark
+=== RUN   TestRustOwnerBuildBindingClassifiesAbsentMark/short
+--- PASS: TestRustOwnerBuildBindingClassifiesAbsentMark/short (0.00s)
+=== NAME  TestRustOwnerBuildBindingClassifiesAbsentMark
+=== RUN   TestRustOwnerBuildBindingClassifiesAbsentMark/uppercase
+--- PASS: TestRustOwnerBuildBindingClassifiesAbsentMark/uppercase (0.00s)
+=== NAME  TestRustOwnerBuildBindingClassifiesAbsentMark
+=== RUN   TestRustOwnerBuildBindingClassifiesAbsentMark/non-hex
+--- PASS: TestRustOwnerBuildBindingClassifiesAbsentMark/non-hex (0.00s)
+=== NAME  TestRustOwnerBuildBindingClassifiesAbsentMark
+=== RUN   TestRustOwnerBuildBindingClassifiesAbsentMark/whitespace
+--- PASS: TestRustOwnerBuildBindingClassifiesAbsentMark/whitespace (0.00s)
+=== NAME  TestRustOwnerBuildBindingClassifiesAbsentMark
+=== RUN   TestRustOwnerBuildBindingClassifiesAbsentMark/canonical
+--- PASS: TestRustOwnerBuildBindingClassifiesAbsentMark/canonical (0.00s)
+=== NAME  TestRustOwnerBuildBindingClassifiesAbsentMark
+--- PASS: TestRustOwnerBuildBindingClassifiesAbsentMark (0.00s)
+=== NAME  
+=== RUN   TestValidateRustOwnerBuildMark
+--- PASS: TestValidateRustOwnerBuildMark (0.00s)
+=== NAME  
+=== RUN   TestRustOwnerBuildBindingRejectsUnmarkedAndMalformed
+--- PASS: TestRustOwnerBuildBindingRejectsUnmarkedAndMalformed (0.00s)
+=== NAME  
+PASS

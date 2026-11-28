@@ -1,0 +1,217 @@
+"""Fresh exact tracked Source export for the reviewed Product-only continuation.
+DATA copies and existing private-directory identity/ACL observations only.
+Existing private scopes are never created, repaired, or recursively changed here.
+"""
+import sys
+sys.dont_write_bytecode = True
+import argparse
+import contextlib
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import types
+
+TASK = Path(r"@@RECOVERY_APPROVED_WORK_AREA_RAW@@\mcp-acceptance-rebuild-20261127-v1")
+INPUTS = TASK / "inputs-successor33-v1"
+CANDIDATE = INPUTS / "product-continuation-v2"
+SOURCE = Path(r"@@RECOVERY_APPROVED_WORK_AREA_RAW@@\pub666-recovered-20261128")
+OUTPUT = TASK / "successor-product-only-inputs-v2"
+COMMIT = "59f618ebfbf6d9f52c6994d68586e3c2ebc202a8"
+TREE = "03e8488a44e67f1ea7e8dc2ef0ece53fee5ae8e1"
+NATIVE_PARENT = SOURCE / ".scratch" / "qualified-successor-native-product"
+REPARSE = 0x400
+ROOT_RECEIVING = {"path": str(INPUTS / "producer-candidate" / "successor-product-helper-inputs-v1-root-receiving.json"),
+    "sha256": "6e8568fd054048a082fe48feea83069e5759289b733294e534169d2fd5b77743"}
+PREPARATION = {"path": str(TASK / "successor-product-helper-inputs-v1" / "source-helper-preparation.json"),
+    "sha256": "90417ae2198018c16e9e4c990dd1844d3600ec07dc95a126dff41a20ebb3e970"}
+HELPERS = {"path": str(INPUTS / "producer-candidate" / "compiled-helpers-v1-receiving.json"),
+    "sha256": "4778c49ae9d57f83a6e0eb4227b294a4ce459f20cf760c05ddf1fbbbdb7f0e2c"}
+PRIVATE_SCOPE = {"path": str(INPUTS / "producer-candidate" / "private_producer_scope.py"),
+    "sha256": "60a63b06447b9e836db5be06a534aa3d00ae518e041aeef91750fdd044590108"}
+GIT_MAP = {"path": str(INPUTS / "source-binding" / "source59f-git-map.json"),
+    "sha256": "2f85b5e27243da8c853f20600df576b51fd60fea2fa420509a331b538dc8c547"}
+
+def need(ok, message):
+    if not ok:
+        raise RuntimeError(message)
+
+
+def ordinary(path, directory=False):
+    path = Path(path)
+    need(path.is_absolute() and ".." not in path.parts, "absolute clean path required")
+    for item in (*reversed(path.parents), path):
+        info = item.lstat()
+        need(not info.st_file_attributes & REPARSE and not stat.S_ISLNK(info.st_mode),
+             "reparse path refused: " + str(item))
+        need(stat.S_ISDIR(info.st_mode) if item != path or directory else stat.S_ISREG(info.st_mode),
+             "ordinary path type differs: " + str(item))
+    return path
+
+
+def digest(raw):
+    return hashlib.sha256(raw).hexdigest()
+
+
+def pinned(pair):
+    need(isinstance(pair, dict) and re.fullmatch("[0-9a-f]{64}", pair.get("sha256", "")),
+         "exact input pair required")
+    raw = ordinary(pair["path"]).read_bytes()
+    need(digest(raw) == pair["sha256"], "input bytes differ: " + pair["path"])
+    return raw
+
+
+def write_new(path, raw):
+    ordinary(path.parent, True)
+    with path.open("xb") as stream:
+        stream.write(raw)
+        stream.flush()
+        os.fsync(stream.fileno())
+    need(path.read_bytes() == raw, "new bytes differ")
+
+
+def write_json(path, value):
+    write_new(path, (json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8"))
+
+
+def artifact(path):
+    path = ordinary(path)
+    raw = path.read_bytes()
+    return {"path": str(path), "sha256": digest(raw), "bytes": len(raw)}
+
+
+def source_rows(source, git):
+    result = {}
+    for relative, sha in sorted(source["files"].items()):
+        name = Path(relative)
+        need(not name.is_absolute() and ".." not in name.parts
+             and git["files"][relative]["mode"] in ("100644", "100755"), "ordinary tracked Source row required")
+        path = ordinary(SOURCE / name)
+        raw = path.read_bytes()
+        blob = hashlib.sha1(b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw).hexdigest()
+        need(digest(raw) == sha and blob == git["files"][relative]["git_blob"],
+             "tracked Source byte/blob mismatch: " + relative)
+        result[relative] = raw
+    return result
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--config-sha256", required=True)
+    args = parser.parse_args()
+    need(os.name == "nt", "existing native Windows DATA environment required")
+    need(args.config == CANDIDATE / "product-build-config-v2.json", "fixed new Product configuration required")
+    config_pair = {"path": str(args.config), "sha256": args.config_sha256}
+    cfg = json.loads(pinned(config_pair))
+    need(cfg.get("schema") == "successor-product-build-config-v1"
+         and cfg.get("source_root") == str(SOURCE) and cfg.get("source_commit") == COMMIT
+         and cfg.get("source_tree") == TREE and cfg.get("source_file_count") == 3369
+         and cfg.get("output_root") == str(OUTPUT) and cfg.get("export_root") == str(OUTPUT / "source")
+         and cfg.get("marked_output") == str(OUTPUT / "marked-bundle")
+         and cfg.get("marked_receipt_root") == str(OUTPUT / "marked-inputs")
+         and cfg.get("native_receipt_root") == str(OUTPUT / "native-inputs")
+         and cfg.get("native_output") == str(NATIVE_PARENT / "bundle"), "fixed final Source and fresh Product roles required")
+    source = json.loads(pinned(cfg["source_map"]))
+    git = json.loads(pinned(GIT_MAP))
+    publisher = json.loads(pinned(cfg["source_snapshot"]))
+    need(source.get("schema") == "source59f-actual-byte-inputs-v1"
+         and source.get("source_root") == str(SOURCE) and source.get("commit") == COMMIT
+         and source.get("tree") == TREE and source.get("tracked_files") == 3369
+         and source.get("git_map_sha256") == GIT_MAP["sha256"]
+         and git.get("schema") == "exact-source-git-map-v1"
+         and git.get("commit") == COMMIT and git.get("tree") == TREE
+         and len(source.get("files", {})) == 3369 and set(source["files"]) == set(git["files"]),
+         "complete exact original byte/blob source maps required")
+    need(publisher == {"schema": "reused-graphify-source-snapshot-v1",
+                       "files": {p: {"sha256": sha} for p, sha in source["files"].items()}},
+         "marked publisher snapshot differs from the complete Source map")
+    received = json.loads(pinned(ROOT_RECEIVING))
+    preparation = json.loads(pinned(PREPARATION))
+    helpers = json.loads(pinned(HELPERS))
+    need(received.get("schema") == "successor-product-helper-root-receiving-v1"
+         and received.get("status") == "FAIL" and received.get("closure") == "CLOSED"
+         and received.get("physical_complete") is True and received.get("actual_commands") == 10
+         and received.get("input_files_verified") == 3398 and received.get("input_issues") == []
+         and received.get("original_status_changed") is False
+         and all(row.get("command_passed") is True and row.get("closure") == "CLOSED"
+                 and row.get("exit_code") == 0 for row in received["commands"][:9]),
+         "the failed overall phase and successful original staging closure must remain distinct")
+    need(preparation.get("schema") == "successor-source-helper-preparation-v1"
+         and preparation.get("status") == "STAGED_DATA_ONLY" and preparation.get("source_commit") == COMMIT
+         and preparation.get("source_tree") == TREE and preparation.get("tracked_source_mutated") is False,
+         "original private parent creation is unbound")
+    need(helpers.get("schema") == "successor-compiled-helper-receiving-v1"
+         and helpers.get("status") == "COMPILED_DATA_ONLY" and helpers.get("source_commit") == COMMIT
+         and helpers.get("source_tree") == TREE and helpers.get("root_receiving") == ROOT_RECEIVING
+         and helpers.get("original_producer_status") == "FAIL"
+         and helpers.get("original_producer_closure") == "CLOSED"
+         and helpers.get("product_inputs_received") is False, "six helper results must keep their separate original scope")
+    ordinary(OUTPUT, True)
+    ordinary(SOURCE, True)
+    for key in ("export_root", "marked_output", "marked_receipt_root", "native_receipt_root", "native_output"):
+        need(not os.path.lexists(cfg[key]), "future Product role already exists: " + key)
+
+    # Reuse only the existing pinned read-only observation functions. No create,
+    # ACL setter, recursion, repair or Source staging method is called.
+    scope = types.ModuleType("original_private_scope_readonly")
+    scope.__file__ = PRIVATE_SCOPE["path"]
+    exec(compile(pinned(PRIVATE_SCOPE), scope.__file__, "exec"), scope.__dict__)
+    need(scope.ARTIFACTS == SOURCE / ".scratch", "original private artifact root differs")
+    observed = {}
+    with contextlib.ExitStack() as original_directories:
+        for role, path in (("parent", SOURCE / ".scratch"), ("native_product", NATIVE_PARENT)):
+            ordinary(path, True)
+            original = preparation["scope_security"][role]
+            need(original.get("scope") == str(path) and original.get("existing_objects_mutated") is False
+                 and original.get("recursive_acl_operations") is False and len(original.get("directories", [])) == 1,
+                 "original private scope inventory differs")
+            prior = original["directories"][0]
+            need(prior.get("path") == str(path) and prior.get("created_exclusively") is True,
+                 "original private directory creation is unproved")
+            handle = original_directories.enter_context(scope.open_directory(path))
+            identity = scope.directory_identity(handle)
+            security = scope.security_receipt(handle, prior["owner_sid"])
+            need(all(identity[key] == prior[key] for key in ("volume_serial", "file_index"))
+                 and all(security[key] == prior[key] for key in ("owner_sid", "dacl_protected", "rules", "sddl")),
+                 "existing original private directory identity or ACL changed")
+            observed[role] = {"path": str(path), **identity, **security}
+        need(not any(NATIVE_PARENT.iterdir()), "original private native Product parent must still be empty")
+        rows = source_rows(source, git)
+        export = Path(cfg["export_root"])
+        export.mkdir()
+        for relative, raw in rows.items():
+            target = export / Path(relative)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            write_new(target, raw)
+        exported = {}
+        for path in export.rglob("*"):
+            ordinary(path, path.is_dir())
+            if path.is_file():
+                exported[path.relative_to(export).as_posix()] = digest(path.read_bytes())
+        need(exported == source["files"], "fresh export differs from the complete tracked source bytes")
+        need(source_rows(source, git) == rows, "original tracked source changed during DATA copy")
+        need(not any(NATIVE_PARENT.iterdir()), "native Product parent changed during source export")
+    for pair in (config_pair, cfg["source_map"], cfg["source_snapshot"], GIT_MAP,
+                 ROOT_RECEIVING, PREPARATION, HELPERS, PRIVATE_SCOPE):
+        pinned(pair)
+    result = {"schema": "successor-product-source-export-v2", "status": "EXPORTED_DATA_ONLY",
+        "source_commit": COMMIT, "source_tree": TREE, "source_file_count": 3369,
+        "export_root": str(export), "all_export_source_bytes_equal": True,
+        "config": config_pair, "source_map": cfg["source_map"], "source_git_map": GIT_MAP,
+        "publisher_snapshot": cfg["source_snapshot"], "original_preparation": PREPARATION,
+        "original_closed_receiving": ROOT_RECEIVING, "compiled_helper_receiving": HELPERS,
+        "existing_private_parent_observations": observed, "original_native_parent_empty": True,
+        "read_only_directory_handles_closed": True, "existing_acl_changed": False,
+        "tracked_source_mutated": False, "helper_binaries_rebuilt": False,
+        "failed_phase_cache_reused": False, "native_builds_or_tests_executed": False,
+        "qualification_passed": False}
+    write_json(OUTPUT / "product-source-export.json", result)
+    print(json.dumps({"status": result["status"], "tracked_files": 3369,
+                      "source_commit": COMMIT, "private_native_parent_empty": True}, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()

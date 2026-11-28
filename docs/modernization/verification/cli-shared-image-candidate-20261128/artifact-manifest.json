@@ -1,0 +1,30 @@
+{
+  "schema": "cli-shared-foreign-test-image-artifacts-v1",
+  "status": "DRAFT_NOT_APPLIED_NOT_EXECUTED",
+  "files": {
+    ".gitattributes": {
+      "bytes": 8,
+      "sha256": "705fd4d6451a31d36b3df7de96f83f30ac976c9b4a6d1e51671d8e2f33e2d0da"
+    },
+    "afterimages/internal/cli/process_identity_match_windows_test.go": {
+      "bytes": 4645,
+      "sha256": "e97fd7cc9cc9d9dfe09643c8e03334bd6f7f3e663b07a7f0fe711f0ef974708f"
+    },
+    "afterimages/internal/cli/settings_registry_test.go": {
+      "bytes": 32273,
+      "sha256": "40de5fd188c8c94ec67e4fd852d89b0122aee602c3dde91fd8f8ceb2e4c7854a"
+    },
+    "evidence.json": {
+      "bytes": 3752,
+      "sha256": "2f1c40f5911fe3fdd1f73163e8a7e4cf6211ad136f3ac278ba2aab77600766c3"
+    },
+    "README.md": {
+      "bytes": 5716,
+      "sha256": "79e6206f285f3dbe5d3629ae82314277f0a577ecf867ac1bd3c3491714f23d99"
+    },
+    "share-foreign-test-image.patch": {
+      "bytes": 4778,
+      "sha256": "6fcaeef69bc366541e8c5658c6dcef71f4bd5a84c110868db11d44866dc0d61a"
+    }
+  }
+}

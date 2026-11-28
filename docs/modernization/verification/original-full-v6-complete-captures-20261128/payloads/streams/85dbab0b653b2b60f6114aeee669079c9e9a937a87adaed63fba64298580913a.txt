@@ -1,0 +1,3 @@
+TestAllowedHost_Loopback
+TestAllowedOrigin_Loopback
+TestAllowedHost_PortIndependence

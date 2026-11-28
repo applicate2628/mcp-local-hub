@@ -1,0 +1,14 @@
+{
+    "schema":  "original-cache-warm-original-parent-v1",
+    "plan_sha256":  "bf28e617ee0e319ec4c085d13ee0c16b7536552bac92f28070138835d8286fb6",
+    "same_process_start_object":  true,
+    "original_pid":  93652,
+    "exit_code":  0,
+    "wait_returned":  true,
+    "original_process_object_disposed":  true,
+    "new_job_or_tree_wait":  false,
+    "create_no_window":  true,
+    "wait_errors":  [
+
+                    ]
+}
