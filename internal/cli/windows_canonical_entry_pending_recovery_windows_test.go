@@ -66,7 +66,7 @@ func canonicalPendingValidationFixture(t *testing.T, phase WindowsProductRecover
 	raw := writeCanonicalPendingValidationJournal(t, root, j)
 	journalPath := filepath.Join(root, WindowsProductRecoveryFileLeafV3)
 	files[journalPath] = raw
-	return windowsProductRecoveryRequest{Context: context.Background(), StateDir: root, ProductPath: j.Product.Target, CanonicalEntryPath: j.EntrySet.CanonicalEntry.Target, IdentityPath: j.EntrySet.Identity.Target, LegacyWindowlessPath: j.LegacyWindowless.Target}, j, files
+	return windowsProductRecoveryRequest{JournalAllowance: productJournalFixtureAllowance(), Context: context.Background(), StateDir: root, ProductPath: j.Product.Target, CanonicalEntryPath: j.EntrySet.CanonicalEntry.Target, IdentityPath: j.EntrySet.Identity.Target, LegacyWindowlessPath: j.LegacyWindowless.Target}, j, files
 }
 
 func writeCanonicalPendingValidationJournal(t *testing.T, stateDir string, j windowsProductRecoveryJournalV3) []byte {
@@ -77,7 +77,7 @@ func writeCanonicalPendingValidationJournal(t *testing.T, stateDir string, j win
 	}
 	// Use production publication and admission, including the Windows file DACL.
 	// Validation keeps its default inode-anchored reader without a test bypass.
-	if err := persistEncodedWindowsProductRecoveryJournalV3(filepath.Join(stateDir, WindowsProductRecoveryFileLeafV3), j, raw, api.WriteStateFileBytesAtomic, api.ReadStateFileInodeAnchored); err != nil {
+	if err := persistEncodedWindowsProductRecoveryJournalV3(productJournalFixtureContext(), productJournalFixtureAllowance(), filepath.Join(stateDir, WindowsProductRecoveryFileLeafV3), j, raw, api.WriteStateFileBytesAtomic, api.ReadStateFileInodeAnchored); err != nil {
 		t.Fatal(err)
 	}
 	return raw

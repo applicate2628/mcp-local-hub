@@ -9,9 +9,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"sync"
 	"time"
 
+	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/binaryadmission"
 )
 
@@ -31,38 +34,126 @@ type windowsCanonicalRecoveryPurpose string
 const (
 	canonicalRecoveryRollback         windowsCanonicalRecoveryPurpose = "rollback"
 	canonicalRecoveryCommittedCleanup windowsCanonicalRecoveryPurpose = "committed-forward"
+	canonicalRecoveryRollbackCleanup  windowsCanonicalRecoveryPurpose = "rollback-cleanup"
 )
 
 type windowsCanonicalJournalRecoverySource struct {
-	purpose           windowsCanonicalRecoveryPurpose
-	directory         *binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1
-	directoryAbsence  *binaryadmission.WindowsCanonicalEntryPayloadDirectoryAbsenceObservationV1
-	authorizedAbsence map[string]bool
-	self              *windowsCanonicalJournalRecoverySource
-	req               windowsProductRecoveryRequest
-	deps              windowsProductRecoveryDeps
-	journal           windowsProductRecoveryJournalV3
-	raw               []byte
-	path              string
-	active            bool
-	prior, successor  binaryadmission.WindowsCanonicalRecoveryLocationsV1
+	beforeCurrentInverse     func(context.Context) error
+	memberDirectories        []*binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1
+	memberDirectorySnapshots map[*binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1]binaryadmission.WindowsCanonicalEntryMemberDirectorySnapshotV2
+	memberResults            []binaryadmission.WindowsCanonicalEntryMoveResultV1
+	memberErrors             []error
+	purpose                  windowsCanonicalRecoveryPurpose
+	directory                *binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1
+	directoryAbsence         *binaryadmission.WindowsCanonicalEntryPayloadDirectoryAbsenceObservationV1
+	authorizedAbsence        map[string]bool
+	self                     *windowsCanonicalJournalRecoverySource
+	req                      windowsProductRecoveryRequest
+	deps                     windowsProductRecoveryDeps
+	journal                  windowsProductRecoveryJournalV3
+	raw                      []byte
+	path                     string
+	active                   bool
+	prior, successor         binaryadmission.WindowsCanonicalRecoveryLocationsV1
 }
 
 func (s *windowsCanonicalJournalRecoverySource) ValidateOriginalRecovery(ctx context.Context) error {
-	if s == nil || s.self != s || !s.active || ctx == nil {
-		return ErrWindowsProductRecoveryIdentity
+	if err := s.validateOriginalRecoveryState(ctx); err != nil {
+		return err
 	}
-	if s.purpose == canonicalRecoveryCommittedCleanup && s.journal.Phase != WindowsProductRecoveryCommitDecided && s.journal.Phase != WindowsProductRecoverySettledCommit {
-		return ErrWindowsProductRecoveryIdentity
-	}
-	current, err := s.deps.ReadJournal(s.path)
+	current, err := s.deps.readJournalContext(ctx, s.path)
 	if err != nil {
 		return err
 	}
 	if !bytes.Equal(current, s.raw) {
 		return fmt.Errorf("%w: original recovery journal changed", ErrWindowsProductRecoveryIdentity)
 	}
+	return ctx.Err()
+}
+
+func (s *windowsCanonicalJournalRecoverySource) validateOriginalRecoveryState(ctx context.Context) error {
+	if s == nil || s.self != s || !s.active || ctx == nil {
+		return ErrWindowsProductRecoveryIdentity
+	}
+	if s.purpose == canonicalRecoveryCommittedCleanup && s.journal.Phase != WindowsProductRecoveryCommitDecided && s.journal.Phase != WindowsProductRecoverySettledCommit {
+		return ErrWindowsProductRecoveryIdentity
+	}
+	if s.journal.EntryBundle != nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		switch s.purpose {
+		case canonicalRecoveryCommittedCleanup:
+		case canonicalRecoveryRollback:
+			if s.journal.Phase == WindowsProductRecoveryCommitDecided || s.journal.Phase == WindowsProductRecoverySettledCommit {
+				return ErrWindowsProductRecoveryIdentity
+			}
+		case canonicalRecoveryRollbackCleanup:
+			state := s.journal.EntryBundle.Bundle.Disposition.State
+			if s.journal.Phase == WindowsProductRecoveryCommitDecided || s.journal.Phase == WindowsProductRecoverySettledCommit || (state != "rolled-back" && state != "cleanup-pending" && state != "settled") {
+				return ErrWindowsProductRecoveryIdentity
+			}
+		default:
+			return ErrWindowsProductRecoveryIdentity
+		}
+	}
 	return nil
+}
+
+// The checker is live state validation for one synchronous read-only operation.
+// Filesystem currentness is received by full protected reads at both boundaries;
+// this is neither an atomic journal snapshot nor credit for any native effect.
+func (s *windowsCanonicalJournalRecoverySource) WithCanonicalRecoveryReadScope(ctx context.Context, body func(func(context.Context) error) error) error {
+	if err := s.ValidateOriginalRecovery(ctx); err != nil {
+		return err
+	}
+	if body == nil || s.journal.EntryBundle == nil {
+		return ErrWindowsProductRecoveryIdentity
+	}
+	version, phase, purpose := s.journal.EntryBundle, s.journal.Phase, s.purpose
+	var mu sync.Mutex
+	active := true
+	var checkErr error
+	defer func() {
+		mu.Lock()
+		active = false
+		mu.Unlock()
+	}()
+	state := func(useCtx context.Context) error {
+		if err := s.validateOriginalRecoveryState(useCtx); err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if s.req.Context == nil {
+			return ErrWindowsProductRecoveryIdentity
+		}
+		if err := s.req.Context.Err(); err != nil {
+			return err
+		}
+		if s.journal.EntryBundle != version || s.journal.Phase != phase || s.purpose != purpose {
+			return ErrWindowsProductRecoveryIdentity
+		}
+		return nil
+	}
+	check := func(useCtx context.Context) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if !active {
+			return ErrWindowsProductRecoveryIdentity
+		}
+		err := state(useCtx)
+		checkErr = errors.Join(checkErr, err)
+		return checkErr
+	}
+	bodyErr := body(check)
+	mu.Lock()
+	active = false
+	stateErr := state(ctx)
+	receivedCheckErr := checkErr
+	mu.Unlock()
+	return errors.Join(bodyErr, receivedCheckErr, stateErr, s.ValidateOriginalRecovery(ctx))
 }
 
 func (s *windowsCanonicalJournalRecoverySource) WithOriginalRecoveryInput(ctx context.Context, side binaryadmission.WindowsCanonicalRecoverySideV1, use func(binaryadmission.WindowsCanonicalRecoveryTargetsV1, binaryadmission.WindowsCanonicalRecoveryLocationsV1) error) error {
@@ -93,7 +184,16 @@ func canonicalRecoveryArtifact(member windowsProductRecoveryArtifactV3) windowsP
 	return windowsProductPairRecoveryArtifact{Target: member.Target, PriorPresent: member.PriorPresent, PriorSHA256: member.PriorSHA256, NewSHA256: member.NewSHA256, BaselineAsideBasenames: recoveryAsideBasenames(member.BaselineAsides)}
 }
 
-func prepareCanonicalRecoverySource(req windowsProductRecoveryRequest, d windowsProductRecoveryDeps, path string, j windowsProductRecoveryJournalV3, purpose windowsCanonicalRecoveryPurpose) (*windowsCanonicalJournalRecoverySource, error) {
+func prepareCanonicalRecoverySource(req windowsProductRecoveryRequest, d windowsProductRecoveryDeps, path string, j windowsProductRecoveryJournalV3, purpose windowsCanonicalRecoveryPurpose) (result *windowsCanonicalJournalRecoverySource, retErr error) {
+	if req.journalReadEvidence == nil {
+		req.journalReadEvidence = &windowsProductJournalReadEvidence{}
+	}
+	defer func() { retErr = withWindowsProductJournalEvidence(retErr, req.journalReadEvidence) }()
+	d.journal = windowsProductJournalBinding{ctx: req.Context, allowance: req.JournalAllowance, evidence: req.journalReadEvidence, phase: func() string { return string(j.Phase) }}
+	d = withWindowsProductRecoveryDefaults(d)
+	if j.EntryBundle != nil {
+		return prepareCurrentCanonicalRecoverySource(req, d, path, j, purpose)
+	}
 	raw, err := d.ReadJournal(path)
 	if err != nil {
 		return nil, err
@@ -283,7 +383,7 @@ func (s *windowsCanonicalJournalRecoverySource) persistCleanupState(side, member
 		return ErrWindowsProductRecoveryIdentity
 	}
 	arm.Cleanup[index].State = state
-	if err := persistWindowsProductRecoveryJournalV3(s.path, next, s.deps.WriteJournal, s.deps.ReadJournal); err != nil {
+	if err := persistWindowsProductRecoveryJournalV3(context.WithoutCancel(s.req.Context), s.req.JournalAllowance, s.path, next, s.deps.WriteJournal, s.deps.ReadJournal); err != nil {
 		return err
 	}
 	raw, err := s.deps.ReadJournal(s.path)
@@ -380,6 +480,9 @@ func (s *windowsCanonicalJournalRecoverySource) acquireDirectory(ctx context.Con
 // Validation borrows the same original objects as rollback, but never moves or
 // disposes them, settles runtime, or discards the retained task store.
 func validateCanonicalEntryPendingRecovery(req windowsProductRecoveryRequest, d windowsProductRecoveryDeps, j windowsProductRecoveryJournalV3) (retErr error) {
+	if j.EntryBundle != nil {
+		return validateCurrentCanonicalEntryPendingRecovery(req, d, j)
+	}
 	source, err := prepareCanonicalRecoverySource(req, d, filepath.Join(req.StateDir, WindowsProductRecoveryFileLeafV3), j, canonicalRecoveryRollback)
 	if err != nil {
 		return err
@@ -464,6 +567,9 @@ func validateCanonicalEntryPendingRecovery(req windowsProductRecoveryRequest, d 
 }
 
 func rollbackCanonicalEntryRecovery(req windowsProductRecoveryRequest, d windowsProductRecoveryDeps, path string, j windowsProductRecoveryJournalV3, tasks WindowsProductTaskTxn) (result *WindowsProductPairRecoverySettled, retErr error) {
+	if j.EntryBundle != nil {
+		return rollbackCurrentCanonicalEntryRecovery(req, d, path, j, tasks)
+	}
 	source, err := prepareCanonicalRecoverySource(req, d, path, j, canonicalRecoveryRollback)
 	if err != nil {
 		return nil, err
@@ -599,7 +705,7 @@ func rollbackCanonicalEntryRecovery(req windowsProductRecoveryRequest, d windows
 			j.EntrySet.PayloadDirectory.Absence = source.directoryAbsence
 		} else {
 			j.EntrySet.PayloadDirectory.State = "dispose_intent"
-			if err := persistWindowsProductRecoveryJournalV3(path, j, d.WriteJournal, d.ReadJournal); err != nil {
+			if err := persistWindowsProductRecoveryJournalV3(context.WithoutCancel(req.Context), req.JournalAllowance, path, j, d.WriteJournal, d.ReadJournal); err != nil {
 				return nil, err
 			}
 			current, err := d.ReadJournal(path)
@@ -623,7 +729,7 @@ func rollbackCanonicalEntryRecovery(req windowsProductRecoveryRequest, d windows
 	}
 	j.Phase = WindowsProductRecoverySettledRollback
 	j.TaskSetSHA256 = ""
-	if err := persistWindowsProductRecoveryJournalV3(path, j, d.WriteJournal, d.ReadJournal); err != nil {
+	if err := persistWindowsProductRecoveryJournalV3(context.WithoutCancel(req.Context), req.JournalAllowance, path, j, d.WriteJournal, d.ReadJournal); err != nil {
 		return nil, err
 	}
 	if err := d.DiscardTaskStore(j.Tasks); err != nil {
@@ -636,6 +742,20 @@ func rollbackCanonicalEntryRecovery(req windowsProductRecoveryRequest, d windows
 }
 
 func readRecoveryCanonicalEntrySet(ctx context.Context, j windowsProductRecoveryJournalV3, d windowsProductRecoveryDeps) error {
+	if j.EntryBundle != nil {
+		targets, err := binaryadmission.CanonicalEntryTargetsV2(j.EntryBundle.CanonicalEntry.Target)
+		if err != nil {
+			return err
+		}
+		actual, err := d.AdmitEntryBundle(ctx, targets, j.EntryBundle.Expected)
+		if err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(actual, j.EntryBundle.Expected) {
+			return errors.New("current complete cohort recovery readback differs")
+		}
+		return nil
+	}
 	if j.EntrySet == nil {
 		return nil
 	}
@@ -648,6 +768,20 @@ func readRecoveryCanonicalEntrySet(ctx context.Context, j windowsProductRecovery
 }
 
 func resolveCanonicalRecoveryRequest(req *windowsProductRecoveryRequest, j windowsProductRecoveryJournalV3) error {
+	if j.EntryBundle != nil {
+		if j.EntrySet != nil {
+			return ErrWindowsProductRecoveryIdentity
+		}
+		targets, err := binaryadmission.CanonicalEntryTargetsV2(j.EntryBundle.CanonicalEntry.Target)
+		if err != nil {
+			return err
+		}
+		if req.CanonicalEntryPath != "" && !sameWindowsRecoveryPath(req.CanonicalEntryPath, targets.CanonicalEntryPath) || req.IdentityPath != "" && !sameWindowsRecoveryPath(req.IdentityPath, targets.IdentityPath) || !sameWindowsRecoveryPath(req.ProductPath, targets.CanonicalEntryPath) && !sameWindowsRecoveryPath(req.ProductPath, targets.ProductPath) {
+			return ErrWindowsProductRecoveryIdentity
+		}
+		req.CanonicalEntryPath, req.ProductPath, req.IdentityPath = targets.CanonicalEntryPath, targets.ProductPath, targets.IdentityPath
+		return nil
+	}
 	if j.EntrySet == nil {
 		if req.CanonicalEntryPath != "" {
 			req.ProductPath = req.CanonicalEntryPath
@@ -674,6 +808,9 @@ func resolveCanonicalRecoveryRequest(req *windowsProductRecoveryRequest, j windo
 }
 
 func cleanupColdCanonicalOriginals(req windowsProductRecoveryRequest, d windowsProductRecoveryDeps, path string, j *windowsProductRecoveryJournalV3) (retErr error) {
+	if j.EntryBundle != nil {
+		return cleanupColdCurrentCanonicalOriginals(req, d, path, j)
+	}
 	source, err := prepareCanonicalRecoverySource(req, d, path, *j, canonicalRecoveryCommittedCleanup)
 	if err != nil {
 		return err
@@ -749,4 +886,813 @@ func cleanupColdCanonicalOriginals(req windowsProductRecoveryRequest, d windowsP
 		return err
 	}
 	return source.directory.Close()
+}
+
+func cloneCurrentRecoveryJournal(j windowsProductRecoveryJournalV3) (windowsProductRecoveryJournalV3, error) {
+	raw, err := encodeWindowsProductRecoveryJournalV3(j)
+	if err != nil {
+		return windowsProductRecoveryJournalV3{}, err
+	}
+	return decodeWindowsProductRecoveryJournalV3(raw)
+}
+
+// These two callback boundaries lend detached data, never the accepted graph.
+func (s *windowsCanonicalJournalRecoverySource) acquireCurrentSuccessorQuiescence(ctx context.Context, successor *binaryadmission.WindowsCanonicalEntryRecoverySetV2) (*windowsProductSuccessorQuiescence, error) {
+	journal, err := cloneCurrentRecoveryJournal(s.journal)
+	if err != nil {
+		return nil, err
+	}
+	return s.req.AcquireSuccessorQuiescence(ctx, journal, s, successor)
+}
+
+func (s *windowsCanonicalJournalRecoverySource) recoverCurrentPriorSettlementOriginal(ctx context.Context, runtime *binaryadmission.WindowsCanonicalEntryPriorRuntimeV1) error {
+	journal, err := cloneCurrentRecoveryJournal(s.journal)
+	if err != nil {
+		return err
+	}
+	return s.req.RecoverPriorSettlementOriginal(ctx, journal, runtime)
+}
+
+func prepareCurrentCanonicalRecoverySource(req windowsProductRecoveryRequest, d windowsProductRecoveryDeps, path string, j windowsProductRecoveryJournalV3, purpose windowsCanonicalRecoveryPurpose) (result *windowsCanonicalJournalRecoverySource, retErr error) {
+	if req.journalReadEvidence == nil {
+		req.journalReadEvidence = &windowsProductJournalReadEvidence{}
+	}
+	defer func() { retErr = withWindowsProductJournalEvidence(retErr, req.journalReadEvidence) }()
+	d.journal = windowsProductJournalBinding{ctx: req.Context, allowance: req.JournalAllowance, evidence: req.journalReadEvidence, phase: func() string { return string(j.Phase) }}
+	d = withWindowsProductRecoveryDefaults(d)
+	if req.Context == nil || j.EntryBundle == nil || j.EntrySet != nil {
+		return nil, ErrWindowsProductRecoveryIdentity
+	}
+	raw, err := d.ReadJournal(path)
+	if err != nil {
+		return nil, err
+	}
+	decoded, err := decodeWindowsProductRecoveryJournalV3(raw)
+	if err != nil {
+		return nil, err
+	}
+	left, err := encodeWindowsProductRecoveryJournalV3(decoded)
+	if err != nil {
+		return nil, err
+	}
+	right, err := encodeWindowsProductRecoveryJournalV3(j)
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(left, right) {
+		return nil, ErrWindowsProductRecoveryIdentity
+	}
+	s := &windowsCanonicalJournalRecoverySource{req: req, deps: d, journal: decoded, raw: append([]byte(nil), raw...), path: path, active: true, purpose: purpose, memberDirectorySnapshots: map[*binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1]binaryadmission.WindowsCanonicalEntryMemberDirectorySnapshotV2{}}
+	s.self = s
+	if err := s.ValidateOriginalRecovery(req.Context); err != nil {
+		s.active = false
+		return nil, err
+	}
+	if purpose == canonicalRecoveryCommittedCleanup {
+		if err := readRecoveryCanonicalEntrySet(req.Context, decoded, d); err != nil {
+			s.active = false
+			return nil, err
+		}
+	}
+	return s, nil
+}
+
+func (s *windowsCanonicalJournalRecoverySource) WithOriginalMemberRecoveryInput(ctx context.Context, side binaryadmission.WindowsCanonicalRecoverySideV1, use func(binaryadmission.WindowsCanonicalEntryMembersRecoveryInputV2) error) error {
+	if err := s.ValidateOriginalRecovery(ctx); err != nil {
+		return err
+	}
+	if use == nil || s.journal.EntryBundle == nil || (string(side) != "prior" && string(side) != "successor") {
+		return ErrWindowsProductRecoveryIdentity
+	}
+	input, err := projectCurrentRecoveryJournal(s.journal, binaryadmission.WindowsCanonicalEntryRecoveryPurposeV2(s.purpose))
+	if err != nil {
+		return err
+	}
+	// Exactly one synchronous callback receives a detached projection. Its row
+	// order, unknown flags/statuses and nullable diagnostic strings stay intact.
+	err = use(input)
+	return errors.Join(err, s.ValidateOriginalRecovery(ctx))
+}
+
+func (s *windowsCanonicalJournalRecoverySource) OriginalMemberDirectories(ctx context.Context) ([]*binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1, error) {
+	if err := s.ValidateOriginalRecovery(ctx); err != nil {
+		return nil, err
+	}
+	if s.journal.EntryBundle == nil {
+		return nil, ErrWindowsProductRecoveryIdentity
+	}
+	return append([]*binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1{}, s.memberDirectories...), nil
+}
+
+func (s *windowsCanonicalJournalRecoverySource) registerCurrentDirectories(owners []*binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1) error {
+	var causes []error
+	for _, owner := range owners {
+		if owner == nil {
+			continue
+		}
+		known := false
+		for _, prior := range s.memberDirectories {
+			if prior == owner {
+				known = true
+				break
+			}
+		}
+		if !known {
+			s.memberDirectories = append(s.memberDirectories, owner)
+		}
+		original, err := owner.SnapshotForEntryMembersV2()
+		causes = append(causes, err)
+		// The original snapshot remains ordering data when validation fails.
+		// It supplies no journal, borrow or disposal authority.
+		if original.Schema != binaryadmission.WindowsCanonicalEntryMemberDirectorySchemaV2 || original.Root == "" || !currentEntryRelative(original.RelativePath) {
+			causes = append(causes, fmt.Errorf("%w: current directory ordering metadata unavailable", ErrWindowsProductRecoveryIdentity))
+			continue
+		}
+		if previous, ok := s.memberDirectorySnapshots[owner]; ok {
+			if previous != original {
+				causes = append(causes, ErrWindowsProductRecoveryIdentity)
+			}
+			continue
+		}
+		if s.memberDirectorySnapshots == nil {
+			s.memberDirectorySnapshots = map[*binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1]binaryadmission.WindowsCanonicalEntryMemberDirectorySnapshotV2{}
+		}
+		s.memberDirectorySnapshots[owner] = original
+	}
+	return errors.Join(causes...)
+}
+
+func (s *windowsCanonicalJournalRecoverySource) acquireCurrentSide(ctx context.Context, side binaryadmission.WindowsCanonicalRecoverySideV1) (*binaryadmission.WindowsCanonicalEntryRecoverySetV2, error) {
+	owner, err := binaryadmission.AcquireWindowsCanonicalEntryForRecoveryV2(ctx, s, side)
+	if err != nil {
+		s.memberErrors = append(s.memberErrors, err)
+	}
+	if owner != nil {
+		err = errors.Join(err, s.registerCurrentDirectories(owner.Directories()))
+	} else if err == nil {
+		err = errors.New("current original recovery returned no native owner")
+	}
+	return owner, err
+}
+
+func (s *windowsCanonicalJournalRecoverySource) persistCurrent(next windowsProductRecoveryJournalV3) error {
+	if err := s.ValidateOriginalRecovery(context.WithoutCancel(s.req.Context)); err != nil {
+		return err
+	}
+	owned, err := cloneCurrentRecoveryJournal(next)
+	if err != nil {
+		return err
+	}
+	raw, err := encodeWindowsProductRecoveryJournalV3(owned)
+	if err != nil {
+		return err
+	}
+	if err := persistEncodedWindowsProductRecoveryJournalV3(context.WithoutCancel(s.req.Context), s.req.JournalAllowance, s.path, owned, raw, s.deps.WriteJournal, s.deps.ReadJournal); err != nil {
+		return err
+	}
+	s.journal = owned
+	s.raw = append([]byte(nil), raw...)
+	return nil
+}
+
+func (s *windowsCanonicalJournalRecoverySource) closeCurrentMembers(owners ...*binaryadmission.WindowsCanonicalEntryRecoverySetV2) error {
+	var causes []error
+	for _, owner := range owners {
+		if owner == nil {
+			continue
+		}
+		// Adopt any remaining directories before the first member close. A
+		// repeated finalizer can run after those same directories have closed.
+		if !owner.Disposition().CloseEntered {
+			causes = append(causes, s.registerCurrentDirectories(owner.Directories()))
+		}
+		err := owner.Close()
+		causes = append(causes, err)
+		if err != nil {
+			s.memberErrors = append(s.memberErrors, err)
+		}
+	}
+	return errors.Join(causes...)
+}
+
+func (s *windowsCanonicalJournalRecoverySource) closeCurrentDirectories() error {
+	var causes []error
+	for _, owner := range orderedOriginalMemberDirectories(s.memberDirectories, s.memberDirectorySnapshots) {
+		if owner != nil {
+			err := owner.Close()
+			causes = append(causes, err)
+			if err != nil {
+				s.memberErrors = append(s.memberErrors, err)
+			}
+		}
+	}
+	return errors.Join(causes...)
+}
+
+func currentRecoveryMember(ctx context.Context, owner *binaryadmission.WindowsCanonicalEntryRecoverySetV2, member string) (binaryadmission.WindowsCanonicalEntryMemberEvidenceV2, bool, error) {
+	if owner == nil {
+		return binaryadmission.WindowsCanonicalEntryMemberEvidenceV2{}, false, ErrWindowsProductRecoveryIdentity
+	}
+	members, err := owner.Members(ctx)
+	if err != nil {
+		return binaryadmission.WindowsCanonicalEntryMemberEvidenceV2{}, false, err
+	}
+	for _, value := range members {
+		if value.Member == member {
+			return value, true, nil
+		}
+	}
+	return binaryadmission.WindowsCanonicalEntryMemberEvidenceV2{}, false, nil
+}
+
+func (s *windowsCanonicalJournalRecoverySource) moveCurrentRecoveryOriginal(ctx context.Context, owner *binaryadmission.WindowsCanonicalEntryRecoverySetV2, prior bool, member, destination string) error {
+	if err := s.ValidateOriginalRecovery(ctx); err != nil {
+		return err
+	}
+	observation, present, err := currentRecoveryMember(ctx, owner, member)
+	if err != nil {
+		return err
+	}
+	if !present {
+		return errors.New("current recovery move has no original member")
+	}
+	plan := currentEntryMember(s.journal.EntryBundle, member)
+	if plan == nil {
+		return ErrWindowsProductRecoveryIdentity
+	}
+	expected := plan.Staged
+	if prior {
+		expected = plan.Prior
+	}
+	if expected == nil || observation.NativeIdentity != expected.NativeIdentity || observation.File.SHA256 != expected.File.SHA256 || observation.Size != expected.Size || observation.Attributes != expected.Attributes {
+		return ErrWindowsProductRecoveryIdentity
+	}
+	next, err := cloneCurrentRecoveryJournal(s.journal)
+	if err != nil {
+		return err
+	}
+	next.EntryBundle.Moves = append(next.EntryBundle.Moves, windowsCanonicalEntryMoveRecordV2{Member: member, Prior: prior, SourceRelative: observation.File.Path, DestinationRelative: destination})
+	index := len(next.EntryBundle.Moves) - 1
+	if err := s.persistCurrent(next); err != nil {
+		return err
+	}
+	if s.beforeCurrentInverse != nil {
+		if err := s.beforeCurrentInverse(ctx); err != nil {
+			return err
+		}
+	}
+	actual, callErr := owner.MoveOriginal(ctx, member, destination)
+	s.memberResults = append(s.memberResults, actual)
+	s.memberErrors = append(s.memberErrors, callErr)
+	next, cloneErr := cloneCurrentRecoveryJournal(s.journal)
+	if cloneErr != nil {
+		return errors.Join(callErr, actual.Error, actual.CloseError, cloneErr)
+	}
+	record := currentMoveRecord(actual, prior, observation.File.Path, destination)
+	record.Member = member
+	next.EntryBundle.Moves[index] = record
+	received := canonicalEntryMoveResultError(actual, callErr, member, destination)
+	if actual.SourceRelative != "" && actual.SourceRelative != observation.File.Path {
+		received = errors.Join(received, ErrWindowsProductRecoveryIdentity)
+	}
+	return errors.Join(received, s.persistCurrent(next))
+}
+
+func currentCleanupIndex(e *windowsCanonicalEntrySetJournalV2, side, member string) int {
+	for i := range e.Cleanup {
+		if e.Cleanup[i].Side == side && e.Cleanup[i].Member == member {
+			return i
+		}
+	}
+	return -1
+}
+
+func (s *windowsCanonicalJournalRecoverySource) cleanupCurrentSide(ctx context.Context, owner *binaryadmission.WindowsCanonicalEntryRecoverySetV2, prior bool) error {
+	side := "unused-successor"
+	if prior {
+		side = "prior"
+	}
+	purpose := binaryadmission.WindowsCanonicalEntryRecoveryPurposeV2(s.purpose)
+	if purpose != binaryadmission.WindowsCanonicalRecoveryCommittedForwardV2 && purpose != binaryadmission.WindowsCanonicalRecoveryRollbackCleanupV2 {
+		return ErrWindowsProductRecoveryIdentity
+	}
+	if prior && purpose == binaryadmission.WindowsCanonicalRecoveryRollbackCleanupV2 {
+		return ErrWindowsProductRecoveryIdentity
+	}
+	plans := append([]windowsCanonicalEntryMemberJournalV2(nil), s.journal.EntryBundle.Bundle.Members...)
+	for _, plan := range plans {
+		expected := plan.Staged
+		if prior {
+			expected = plan.Prior
+		}
+		if expected == nil {
+			continue
+		}
+		observation, present, err := currentRecoveryMember(ctx, owner, plan.Member)
+		if err != nil {
+			return err
+		}
+		index := currentCleanupIndex(s.journal.EntryBundle, side, plan.Member)
+		if !present {
+			if index < 0 {
+				return errors.New("missing current original has no durable cleanup intent")
+			}
+			row := s.journal.EntryBundle.Cleanup[index]
+			if row.Purpose != purpose || row.TransactionID != s.journal.TransactionID || (row.State != "discard_intent" && row.State != "absence_received") {
+				return ErrWindowsProductRecoveryIdentity
+			}
+			// Ready native acquisition/Members received this exact purpose-bound
+			// absence. No unavailable historical syscall/status is fabricated.
+			if row.State != "absence_received" {
+				next, err := cloneCurrentRecoveryJournal(s.journal)
+				if err != nil {
+					return err
+				}
+				next.EntryBundle.Cleanup[index].State = "absence_received"
+				if err := s.persistCurrent(next); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		if observation.File.Path == plan.Member {
+			if !prior {
+				continue
+			}
+			return errors.New("committed prior original remains at a protected final name")
+		}
+		if observation.NativeIdentity != expected.NativeIdentity || observation.File.SHA256 != expected.File.SHA256 {
+			return ErrWindowsProductRecoveryIdentity
+		}
+		next, err := cloneCurrentRecoveryJournal(s.journal)
+		if err != nil {
+			return err
+		}
+		if index < 0 {
+			next.EntryBundle.Cleanup = append(next.EntryBundle.Cleanup, windowsCanonicalEntryCleanupV2{TransactionID: next.TransactionID, Side: side, Member: plan.Member, SourceRelative: observation.File.Path, ExpectedSHA256: expected.File.SHA256, State: "retained", Purpose: purpose})
+			index = len(next.EntryBundle.Cleanup) - 1
+		} else {
+			row := next.EntryBundle.Cleanup[index]
+			if row.SourceRelative != observation.File.Path || row.Purpose != purpose || row.State == "absence_received" {
+				return ErrWindowsProductRecoveryIdentity
+			}
+		}
+		next.EntryBundle.Cleanup[index].State = "discard_intent"
+		if err := s.persistCurrent(next); err != nil {
+			return err
+		}
+		actual, callErr := owner.DiscardOriginal(ctx, plan.Member, observation.File.Path)
+		s.memberResults = append(s.memberResults, actual)
+		s.memberErrors = append(s.memberErrors, callErr)
+		next, cloneErr := cloneCurrentRecoveryJournal(s.journal)
+		if cloneErr != nil {
+			return errors.Join(callErr, actual.Error, actual.CloseError, cloneErr)
+		}
+		if actual.Applied && actual.Readback {
+			next.EntryBundle.Cleanup[index].State = "absence_received"
+		}
+		if err := errors.Join(canonicalEntryDiscardResultError(actual, callErr, plan.Member, observation.File.Path), s.persistCurrent(next)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *windowsCanonicalJournalRecoverySource) settleCurrentDirectories(ctx context.Context, dispose bool) error {
+	var causes []error
+	effectsHeld := false
+	var closeErrors []error
+	for _, owner := range orderedOriginalMemberDirectories(s.memberDirectories, s.memberDirectorySnapshots) {
+		if owner == nil {
+			continue
+		}
+		original, known := s.memberDirectorySnapshots[owner]
+		if dispose && !effectsHeld && known && original.Created {
+			index := -1
+			for i := range s.journal.EntryBundle.Bundle.Directories {
+				if s.journal.EntryBundle.Bundle.Directories[i].Original == original {
+					index = i
+					break
+				}
+			}
+			var effectErr error
+			if index < 0 {
+				effectErr = ErrWindowsProductRecoveryIdentity
+			} else if s.journal.EntryBundle.Bundle.Directories[index].State != "absence_received" {
+				next, err := cloneCurrentRecoveryJournal(s.journal)
+				effectErr = err
+				if effectErr == nil {
+					next.EntryBundle.Bundle.Directories[index].State = "dispose_intent"
+					effectErr = s.persistCurrent(next)
+				}
+				if effectErr == nil {
+					actual, callErr := owner.DisposeOriginalIfEmpty(ctx)
+					s.memberResults = append(s.memberResults, actual)
+					s.memberErrors = append(s.memberErrors, callErr)
+					next, err := cloneCurrentRecoveryJournal(s.journal)
+					if err != nil {
+						effectErr = errors.Join(callErr, actual.Error, actual.CloseError, err)
+					} else {
+						record := currentNativeResultRecord(actual)
+						next.EntryBundle.Bundle.Directories[index].Disposition = &record
+						if actual.Applied && actual.Readback {
+							next.EntryBundle.Bundle.Directories[index].State = "absence_received"
+						}
+						effectErr = errors.Join(canonicalEntryDiscardResultError(actual, callErr, actual.Member, original.RelativePath), s.persistCurrent(next))
+					}
+				}
+			}
+			if effectErr != nil {
+				causes = append(causes, effectErr)
+				effectsHeld = true
+			}
+		}
+		if err := owner.Close(); err != nil {
+			causes = append(causes, err)
+			closeErrors = append(closeErrors, err)
+			s.memberErrors = append(s.memberErrors, err)
+			effectsHeld = true
+		}
+	}
+	if closeErr := errors.Join(closeErrors...); closeErr != nil {
+		next, err := cloneCurrentRecoveryJournal(s.journal)
+		if err == nil {
+			rendered := closeErr.Error()
+			next.EntryBundle.Bundle.Disposition.CloseError = &rendered
+			next.EntryBundle.Bundle.Disposition.OriginalOwnerPending = true
+			err = s.persistCurrent(next)
+		}
+		causes = append(causes, err)
+	}
+	return errors.Join(causes...)
+}
+
+func validateCurrentCanonicalEntryPendingRecovery(req windowsProductRecoveryRequest, d windowsProductRecoveryDeps, j windowsProductRecoveryJournalV3) (retErr error) {
+	s, err := prepareCurrentCanonicalRecoverySource(req, d, filepath.Join(req.StateDir, WindowsProductRecoveryFileLeafV3), j, currentRollbackRecoveryPurpose(j))
+	if err != nil {
+		return err
+	}
+	var prior, successor *binaryadmission.WindowsCanonicalEntryRecoverySetV2
+	defer func() {
+		retErr = errors.Join(retErr, s.closeCurrentMembers(prior, successor), s.closeCurrentDirectories())
+		s.active = false
+	}()
+	prior, err = s.acquireCurrentSide(req.Context, binaryadmission.WindowsCanonicalRecoveryPriorV1)
+	if err != nil {
+		return err
+	}
+	successor, err = s.acquireCurrentSide(req.Context, binaryadmission.WindowsCanonicalRecoverySuccessorV1)
+	if err != nil {
+		return err
+	}
+	view, err := prior.RuntimeProduct(req.Context)
+	if err != nil {
+		return err
+	}
+	expected := j.EntryBundle.PriorRuntime
+	if expected != nil {
+		if expected.Present != (view != nil) {
+			return ErrWindowsProductRecoveryIdentity
+		}
+		if view != nil {
+			artifact := view.Artifact()
+			if artifact.SHA256 != expected.SHA256 || artifact.Role != binaryadmission.WindowsArtifactRoleProduct || artifact.Subsystem != binaryadmission.WindowsGUISubsystem {
+				return ErrWindowsProductRecoveryIdentity
+			}
+			if err := view.ValidateOriginal(req.Context); err != nil {
+				return err
+			}
+		}
+	}
+	legacy := windowsProductPairRecoveryArtifact{Target: j.LegacyWindowless.Target, PriorPresent: j.LegacyWindowless.PriorPresent, PriorSHA256: j.LegacyWindowless.PriorSHA256, BaselineAsideBasenames: recoveryAsideBasenames(j.LegacyWindowless.BaselineAsides)}
+	if _, err := inspectWindowsProductLegacyRecoveryArtifact(legacy, d); err != nil {
+		return err
+	}
+	if j.Phase == WindowsProductRecoverySettledRollback {
+		return s.ValidateOriginalRecovery(req.Context)
+	}
+	if d.ReopenEntryBundleTasks == nil {
+		return errors.Join(ErrWindowsProductRecoveryIdentity, errors.New("current task recovery projection unavailable"))
+	}
+	targets, err := binaryadmission.CanonicalEntryTargetsV2(j.EntryBundle.CanonicalEntry.Target)
+	if err != nil {
+		return err
+	}
+	tasks, err := d.ReopenEntryBundleTasks(req.Context, j.Tasks, targets)
+	if tasks != nil {
+		defer func() { retErr = errors.Join(retErr, tasks.Close()) }()
+	}
+	if err != nil {
+		return err
+	}
+	if tasks == nil {
+		return ErrWindowsProductRecoveryIdentity
+	}
+	return s.ValidateOriginalRecovery(req.Context)
+}
+
+func currentRollbackRecoveryPurpose(j windowsProductRecoveryJournalV3) windowsCanonicalRecoveryPurpose {
+	if j.EntryBundle != nil {
+		switch j.EntryBundle.Bundle.Disposition.State {
+		case "rolled-back", "cleanup-pending", "settled":
+			return canonicalRecoveryRollbackCleanup
+		}
+	}
+	return canonicalRecoveryRollback
+}
+
+func cleanupColdCurrentCanonicalOriginals(req windowsProductRecoveryRequest, d windowsProductRecoveryDeps, path string, j *windowsProductRecoveryJournalV3) (retErr error) {
+	s, err := prepareCurrentCanonicalRecoverySource(req, d, path, *j, canonicalRecoveryCommittedCleanup)
+	if err != nil {
+		return err
+	}
+	var prior, successor *binaryadmission.WindowsCanonicalEntryRecoverySetV2
+	defer func() {
+		retErr = errors.Join(retErr, s.closeCurrentMembers(prior, successor), s.closeCurrentDirectories())
+		*j = s.journal
+		s.active = false
+	}()
+	prior, err = s.acquireCurrentSide(req.Context, binaryadmission.WindowsCanonicalRecoveryPriorV1)
+	if err != nil {
+		return err
+	}
+	successor, err = s.acquireCurrentSide(req.Context, binaryadmission.WindowsCanonicalRecoverySuccessorV1)
+	if err != nil {
+		return err
+	}
+	ctx := context.WithoutCancel(req.Context)
+	if err := s.cleanupCurrentSide(ctx, prior, true); err != nil {
+		return err
+	}
+	if err := s.cleanupCurrentSide(ctx, successor, false); err != nil {
+		return err
+	}
+	if err := s.closeCurrentMembers(prior, successor); err != nil {
+		return err
+	}
+	return s.settleCurrentDirectories(ctx, false)
+}
+
+// This is a detached data projection only. The private fenced source validates
+// original bytes/phase/purpose before calling it; it cannot issue a native owner.
+func projectCurrentRecoveryJournal(j windowsProductRecoveryJournalV3, purpose binaryadmission.WindowsCanonicalEntryRecoveryPurposeV2) (binaryadmission.WindowsCanonicalEntryMembersRecoveryInputV2, error) {
+	var result binaryadmission.WindowsCanonicalEntryMembersRecoveryInputV2
+	if j.EntryBundle == nil || j.EntrySet != nil {
+		return result, ErrWindowsProductRecoveryIdentity
+	}
+	switch purpose {
+	case binaryadmission.WindowsCanonicalRecoveryRollbackV2, binaryadmission.WindowsCanonicalRecoveryCommittedForwardV2, binaryadmission.WindowsCanonicalRecoveryRollbackCleanupV2:
+	default:
+		return result, ErrWindowsProductRecoveryIdentity
+	}
+	e := j.EntryBundle
+	targets, err := binaryadmission.CanonicalEntryTargetsV2(e.CanonicalEntry.Target)
+	if err != nil {
+		return result, err
+	}
+	text := func(value *string) *string {
+		if value == nil {
+			return nil
+		}
+		copy := *value
+		return &copy
+	}
+	result = binaryadmission.WindowsCanonicalEntryMembersRecoveryInputV2{Targets: targets, BeforeKind: e.Bundle.BeforeKind, Expected: e.Expected, TransactionID: j.TransactionID, Purpose: purpose}
+	result.Expected.IdentityBytes = append([]byte(nil), e.Expected.IdentityBytes...)
+	result.Expected.RuntimePayloadBytes = append([]byte(nil), e.Expected.RuntimePayloadBytes...)
+	result.Expected.BundleInventory = append([]binaryadmission.RuntimeObjectV1(nil), e.Expected.BundleInventory...)
+	for i := range result.Expected.BundleInventory {
+		if value := result.Expected.BundleInventory[i].Size; value != nil {
+			copy := *value
+			result.Expected.BundleInventory[i].Size = &copy
+		}
+	}
+	if e.Bundle.Members != nil {
+		result.Members = make([]binaryadmission.WindowsCanonicalEntryMemberRecoveryPlanV2, len(e.Bundle.Members))
+	}
+	for i, row := range e.Bundle.Members {
+		result.Members[i] = row
+		if row.Prior != nil {
+			value := *row.Prior
+			result.Members[i].Prior = &value
+		}
+		if row.Staged != nil {
+			value := *row.Staged
+			result.Members[i].Staged = &value
+		}
+		if row.PriorAbsence != nil {
+			value := *row.PriorAbsence
+			result.Members[i].PriorAbsence = &value
+		}
+		result.Members[i].PriorAsideRelative = text(row.PriorAsideRelative)
+		result.Members[i].SuccessorAsideRelative = text(row.SuccessorAsideRelative)
+	}
+	if e.Moves != nil {
+		result.Moves = make([]binaryadmission.WindowsCanonicalEntryMemberMoveRecordV2, len(e.Moves))
+	}
+	for i, row := range e.Moves {
+		result.Moves[i] = row
+		result.Moves[i].Error = text(row.Error)
+		result.Moves[i].CloseError = text(row.CloseError)
+	}
+	if e.Bundle.Directories != nil {
+		result.Directories = make([]binaryadmission.WindowsCanonicalEntryMemberDirectoryRecordV2, len(e.Bundle.Directories))
+	}
+	for i, row := range e.Bundle.Directories {
+		result.Directories[i] = row
+		if row.Disposition != nil {
+			copy := *row.Disposition
+			copy.Error = text(copy.Error)
+			copy.CloseError = text(copy.CloseError)
+			result.Directories[i].Disposition = &copy
+		}
+	}
+	if e.Cleanup != nil {
+		result.Cleanup = append([]binaryadmission.WindowsCanonicalEntryMemberCleanupRecordV2{}, e.Cleanup...)
+	}
+	return result, nil
+}
+
+// Cold current recovery retains the same source/native union and receives
+// absence/reservations before the first inverse intent or native file effect.
+func rollbackCurrentCanonicalEntryRecovery(req windowsProductRecoveryRequest, d windowsProductRecoveryDeps, path string, j windowsProductRecoveryJournalV3, tasks WindowsProductTaskTxn) (result *WindowsProductPairRecoverySettled, retErr error) {
+	s, err := prepareCurrentCanonicalRecoverySource(req, d, path, j, currentRollbackRecoveryPurpose(j))
+	if err != nil {
+		return nil, err
+	}
+	var prior, successor *binaryadmission.WindowsCanonicalEntryRecoverySetV2
+	var q *windowsProductSuccessorQuiescence
+	defer func() {
+		if q != nil {
+			retErr = errors.Join(retErr, q.Close())
+		}
+		retErr = errors.Join(retErr, s.closeCurrentMembers(prior, successor), s.closeCurrentDirectories())
+		s.active = false
+	}()
+	prior, err = s.acquireCurrentSide(req.Context, binaryadmission.WindowsCanonicalRecoveryPriorV1)
+	if err != nil {
+		return nil, err
+	}
+	successor, err = s.acquireCurrentSide(req.Context, binaryadmission.WindowsCanonicalRecoverySuccessorV1)
+	if err != nil {
+		return nil, err
+	}
+	if prior == nil || successor == nil {
+		return nil, ErrWindowsProductRecoveryIdentity
+	}
+	// A durable completed inverse may resume its selected cleanup without
+	// inventing a new absence lease or rerunning predecessor startup.
+	if s.purpose != canonicalRecoveryRollbackCleanup {
+		if req.AcquireSuccessorQuiescence == nil {
+			return nil, fmt.Errorf("%w: current successor quiescence factory unavailable", ErrWindowsProductRecoveryPending)
+		}
+		q, err = s.acquireCurrentSuccessorQuiescence(req.Context, successor)
+		if err != nil || q == nil {
+			return nil, errors.Join(ErrWindowsProductRecoveryPending, err, errors.New("current successor quiescence unavailable"))
+		}
+		if err = q.VerifyForInverse(req.Context); err != nil {
+			return nil, errors.Join(ErrWindowsProductRecoveryPending, err)
+		}
+		s.beforeCurrentInverse = q.VerifyForInverse
+		next, err := cloneCurrentRecoveryJournal(s.journal)
+		if err != nil {
+			return nil, err
+		}
+		next.EntryBundle.Bundle.Disposition.State = "rollback-pending"
+		if err = s.persistCurrent(next); err != nil {
+			return nil, err
+		}
+		if err = q.VerifyForInverse(req.Context); err != nil {
+			return nil, errors.Join(ErrWindowsProductRecoveryPending, err)
+		}
+		keys := currentPromotionOrder(s.journal.EntryBundle, false)
+		for i := len(keys) - 1; i >= 0; i-- {
+			key := keys[i]
+			actual, present, err := currentRecoveryMember(req.Context, successor, key)
+			if err != nil {
+				return nil, err
+			}
+			if !present {
+				return nil, errors.New("rollback-needed successor original is missing")
+			}
+			if actual.File.Path != key {
+				continue
+			}
+			row := currentEntryMember(s.journal.EntryBundle, key)
+			if row == nil || row.SuccessorAsideRelative == nil {
+				return nil, ErrWindowsProductRecoveryIdentity
+			}
+			if err = q.VerifyForInverse(req.Context); err != nil {
+				return nil, errors.Join(ErrWindowsProductRecoveryPending, err)
+			}
+			if err = s.moveCurrentRecoveryOriginal(req.Context, successor, false, key, *row.SuccessorAsideRelative); err != nil {
+				return nil, errors.Join(ErrWindowsProductRecoveryPending, err)
+			}
+		}
+		keys = currentPromotionOrder(s.journal.EntryBundle, true)
+		for i := len(keys) - 1; i >= 0; i-- {
+			key := keys[i]
+			actual, present, err := currentRecoveryMember(req.Context, prior, key)
+			if err != nil {
+				return nil, err
+			}
+			if !present {
+				return nil, errors.New("rollback-needed prior original is missing")
+			}
+			if actual.File.Path == key {
+				continue
+			}
+			if err = q.VerifyForInverse(req.Context); err != nil {
+				return nil, errors.Join(ErrWindowsProductRecoveryPending, err)
+			}
+			if err = s.moveCurrentRecoveryOriginal(req.Context, prior, true, key, key); err != nil {
+				return nil, errors.Join(ErrWindowsProductRecoveryPending, err)
+			}
+		}
+		// This transaction never authored runtime intent/settings/OFF bytes:
+		// the no-change intent case still releases the actual held lease. The
+		// original prior-runtime owner receives any selected runtime duty later.
+		if err = q.WithIntentInverse(req.Context, func(*api.StateFileObservedLease) error { return nil }); err != nil {
+			return nil, errors.Join(ErrWindowsProductRecoveryPending, err)
+		}
+		s.beforeCurrentInverse = nil
+		if tasks != nil {
+			if err = tasks.RestoreImport(); err != nil {
+				return nil, errors.Join(ErrWindowsProductPairRecoveryRollback, err)
+			}
+		} else if s.journal.Phase != WindowsProductRecoverySettledRollback {
+			return nil, ErrWindowsProductRecoveryIdentity
+		}
+		legacy := windowsProductPairRecoveryArtifact{Target: s.journal.LegacyWindowless.Target, PriorPresent: s.journal.LegacyWindowless.PriorPresent, PriorSHA256: s.journal.LegacyWindowless.PriorSHA256, BaselineAsideBasenames: recoveryAsideBasenames(s.journal.LegacyWindowless.BaselineAsides)}
+		legacyState, err := inspectWindowsProductLegacyRecoveryArtifact(legacy, d)
+		if err != nil {
+			return nil, err
+		}
+		if err = restoreWindowsProductLegacyRecoveryArtifact(legacy, legacyState, d); err != nil {
+			return nil, err
+		}
+		for _, receipt := range []windowsProductPairRecoveryReceipt{s.journal.Receipts.V3, s.journal.Receipts.V2} {
+			if err = restoreWindowsProductPairRecoveryReceipt(receipt, pairRecoveryDepsFromProduct(d)); err != nil {
+				return nil, err
+			}
+		}
+		if err = q.Close(); err != nil {
+			return nil, errors.Join(ErrWindowsProductRecoveryPending, err)
+		}
+		if req.RecoverPriorSettlementOriginal == nil {
+			return nil, fmt.Errorf("%w: original prior runtime settlement callback unavailable", ErrWindowsProductRecoveryPending)
+		}
+		view, err := prior.RuntimeProduct(req.Context)
+		if err != nil {
+			return nil, err
+		}
+		if err = s.ValidateOriginalRecovery(req.Context); err != nil {
+			return nil, err
+		}
+		if err = s.recoverCurrentPriorSettlementOriginal(req.Context, view); err != nil {
+			return nil, err
+		}
+		next, err = cloneCurrentRecoveryJournal(s.journal)
+		if err != nil {
+			return nil, err
+		}
+		next.EntryBundle.Bundle.Disposition.State = "rolled-back"
+		if err = s.persistCurrent(next); err != nil {
+			return nil, err
+		}
+		s.purpose = canonicalRecoveryRollbackCleanup
+	}
+	ctx := context.WithoutCancel(req.Context)
+	if err = s.cleanupCurrentSide(ctx, successor, false); err != nil {
+		return nil, errors.Join(ErrWindowsProductCleanupPending, err)
+	}
+	if err = s.closeCurrentMembers(prior, successor); err != nil {
+		return nil, err
+	}
+	if err = s.settleCurrentDirectories(ctx, true); err != nil {
+		return nil, err
+	}
+	next, err := cloneCurrentRecoveryJournal(s.journal)
+	if err != nil {
+		return nil, err
+	}
+	next.Phase = WindowsProductRecoverySettledRollback
+	next.TaskSetSHA256 = ""
+	next.EntryBundle.Bundle.Disposition.State = "settled"
+	next.EntryBundle.Bundle.Disposition.OriginalOwnerPending = false
+	next.EntryBundle.Bundle.Disposition.DispositionPending = false
+	if err = s.persistCurrent(next); err != nil {
+		return nil, err
+	}
+	if tasks != nil {
+		if err = tasks.DiscardRecoveryStore(); err != nil {
+			return nil, err
+		}
+	} else if err = d.DiscardTaskStore(next.Tasks); err != nil {
+		return nil, err
+	}
+	if err = d.RemoveJournal(path); err != nil {
+		return nil, err
+	}
+	return &WindowsProductPairRecoverySettled{TransactionID: next.TransactionID, Outcome: WindowsProductPairRecoverySettledRollback}, nil
 }

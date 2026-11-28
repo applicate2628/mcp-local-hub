@@ -5,6 +5,7 @@ package api
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"time"
 	"unsafe"
@@ -31,6 +32,23 @@ func observeSupervisorStatusServerIdentityV1(conn net.Conn, checked bool) (Super
 		return zero, fmt.Errorf("query supervisor pipe server PID: %w", err)
 	}
 	return observeSupervisorProcessIdentityV1(int(pid), checked)
+}
+
+// ObserveSupervisorIPCClientIdentityV1 reads the peer of this same accepted
+// connection, including checked release of temporary native handles.
+func ObserveSupervisorIPCClientIdentityV1(conn net.Conn) (SupervisorProcessIdentityV1, error) {
+	fdConn, ok := conn.(interface{ Fd() uintptr })
+	if !ok {
+		return SupervisorProcessIdentityV1{}, fmt.Errorf("supervisor pipe connection does not expose a kernel handle")
+	}
+	var pid uint32
+	if err := windows.GetNamedPipeClientProcessId(windows.Handle(fdConn.Fd()), &pid); err != nil {
+		return SupervisorProcessIdentityV1{}, fmt.Errorf("query supervisor pipe client PID: %w", err)
+	}
+	if pid == 0 {
+		return SupervisorProcessIdentityV1{}, fmt.Errorf("supervisor pipe client has no PID")
+	}
+	return observeSupervisorProcessIdentityV1(int(pid), true)
 }
 
 // ObserveSupervisorProcessIdentityV1 observes native process data. It conveys no
@@ -143,4 +161,9 @@ func supervisorStatusTokenIntegrityRID(token windows.Token) (uint32, error) {
 		return 0, fmt.Errorf("supervisor integrity SID has no RID")
 	}
 	return sid.SubAuthority(uint32(count - 1)), nil
+}
+
+func aggregateRoutePeerClosed(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, windows.ERROR_BROKEN_PIPE) ||
+		errors.Is(err, windows.ERROR_NO_DATA) || errors.Is(err, windows.ERROR_PIPE_NOT_CONNECTED)
 }

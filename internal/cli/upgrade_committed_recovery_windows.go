@@ -26,6 +26,9 @@ import (
 )
 
 type upgradeCommittedRecoveryDeps struct {
+	ReadJournal      func(context.Context, string, WindowsProductJournalAllowance) ([]byte, *api.StateFileReadObservation, error)
+	AcquireExecuting func(context.Context) (*binaryadmission.WindowsCanonicalEntrySetV2, error)
+	currentRegistry  bool
 	AdmitProduct    func(binaryadmission.WindowsArtifact) (binaryadmission.WindowsArtifact, error)
 	BuildInfo       func() (string, string, string)
 	Recover         func(windowsProductRecoveryRequest) (*WindowsProductPairRecoverySettled, error)
@@ -71,7 +74,11 @@ const (
 	upgradePendingTransactionDifferent upgradePendingRecoveryResult = "TRANSACTION_DIFFERENT"
 )
 
-const currentPendingRuntimeStage = "current runtime receiving unconfirmed"
+const (
+	currentPendingRuntimeStage      = "current runtime receiving unconfirmed"
+	priorGUISettlementStage         = "prior GUI settlement unconfirmed"
+	currentSuccessorQuiescenceStage = "current successor quiescence unavailable"
+)
 
 func (e *upgradeCommittedCommandError) Error() string {
 	message := e.id + ": " + e.stage
@@ -81,7 +88,7 @@ func (e *upgradeCommittedCommandError) Error() string {
 			message += "; last_failed_predicate=" + health.predicate
 		}
 	}
-	if e.stage == "recover pending prior settlement" || e.stage == currentPendingRuntimeStage {
+	if e.stage == "recover pending prior settlement" || e.stage == currentPendingRuntimeStage || e.stage == priorGUISettlementStage {
 		switch e.pendingResult {
 		case upgradePendingResultMissing, upgradePendingOutcomeDifferent, upgradePendingTransactionDifferent:
 			message += "; recovery_result=" + string(e.pendingResult)
@@ -94,6 +101,9 @@ func (e *upgradeCommittedCommandError) Error() string {
 						message += "; reservation_step=" + string(prior.reservationStep)
 						if prior.reservationStep == upgradeGUIReservationSecondAbsence && prior.reservationRelease != nil {
 							message += "; reservation_cleanup=RELEASE_FAILED"
+						}
+						if prior.reservationStep == upgradeGUIReservationFirstAbsence || prior.reservationStep == upgradeGUIReservationSecondAbsence {
+							message += pendingReservationAbsenceProjection(prior.reservationAbsence)
 						}
 					} else {
 						message += "; reservation_step=UNCLASSIFIED"
@@ -113,10 +123,36 @@ func (e *upgradeCommittedCommandError) Error() string {
 	if e.runtime != nil || e.stage == currentPendingRuntimeStage {
 		message += pendingRuntimeProjection(e.cause, e.runtime)
 	}
+	if e.stage == currentSuccessorQuiescenceStage || e.stage == priorGUISettlementStage ||
+		e.stage == currentPendingRuntimeStage || e.stage == "recover pending prior settlement" {
+		var acquisition *windowsProductQuiescenceAcquisitionError
+		if errors.As(e.cause, &acquisition) && acquisition != nil && isWindowsProductQuiescenceAcquisitionStage(acquisition.stage) {
+			message += "; quiescence_stage=" + string(acquisition.stage)
+		}
+	}
 	return message
 }
 func (e *upgradeCommittedCommandError) Unwrap() error     { return e.cause }
 func (e *upgradeCommittedCommandError) FailureID() string { return e.id }
+
+// Only the failed absence callback's top-level typed observation can
+// classify its check. Other causes stay in the original error chain.
+func pendingReservationAbsenceProjection(cause error) string {
+	absence, ok := cause.(*windowsProductAbsenceError)
+	if !ok || absence == nil || !isWindowsProductAbsenceCheck(absence.check) {
+		return ""
+	}
+	message := "; absence_check=" + string(absence.check)
+	switch {
+	case errors.Is(absence.cause, context.DeadlineExceeded):
+		message += "; absence_reason=DEADLINE_EXCEEDED"
+	case errors.Is(absence.cause, context.Canceled):
+		message += "; absence_reason=CANCELED"
+	case errors.Is(absence.cause, api.ErrProbeTimeout):
+		message += "; absence_reason=PROBE_TIMEOUT"
+	}
+	return message
+}
 
 // pendingRuntimeProjection is the shared closed-field owner. It never renders
 // private cause text or manufactures a snapshot when original receiving is nil.
@@ -135,14 +171,24 @@ func pendingRuntimeProjection(cause error, receiving *pendingRuntimeReceiving) s
 	return message
 }
 
-// This is the ordinary Product recovery return boundary. Only retained typed
-// current-pending failures receive the existing safe recovery projection.
+// At the ordinary Product recovery boundary, classified pending failures use
+// the same closed diagnostic fields as the dedicated recovery commands.
 func ordinaryWindowsProductRecoveryError(cause error) error {
 	var current *pendingRuntimeError
 	if errors.As(cause, &current) && current != nil {
 		projected := committedRecoveryCommandError("E_WINDOWS_PRODUCT_RECOVERY_PENDING", currentPendingRuntimeStage, cause)
 		projected.runtime = current.receiving
 		cause = projected
+	} else {
+		var prior *upgradeGUIPriorSettlementError
+		if errors.As(cause, &prior) && prior != nil && isUpgradeGUIPriorOperation(prior.operation) {
+			cause = committedRecoveryCommandError("E_WINDOWS_PRODUCT_RECOVERY_PENDING", priorGUISettlementStage, cause)
+		} else {
+			var acquisition *windowsProductQuiescenceAcquisitionError
+			if errors.As(cause, &acquisition) && acquisition != nil {
+				cause = committedRecoveryCommandError("E_WINDOWS_PRODUCT_RECOVERY_PENDING", currentSuccessorQuiescenceStage, cause)
+			}
+		}
 	}
 	return fmt.Errorf("v0.5 upgrade: recover Windows product pair: %w", cause)
 }
@@ -190,6 +236,10 @@ func runWindowsProductRecoveryCommand(cmd *cobra.Command, policy windowsRecovery
 	if runtime.GOARCH != "amd64" {
 		return errors.New(policy.prefix() + "_NOT_ADMITTED: Windows amd64 Product is required")
 	}
+	currentRegistry, err := windowsProductUsesCurrentRegistry()
+	if err != nil {
+		return committedRecoveryCommandError(policy.prefix()+"_NOT_ADMITTED", "receive compiled Product registry", err)
+	}
 	executor, canonical, err := resolveUpgradeSelfPaths()
 	if err != nil {
 		return committedRecoveryCommandError(policy.prefix()+"_NOT_ADMITTED", "resolve Product paths", err)
@@ -199,6 +249,14 @@ func runWindowsProductRecoveryCommand(cmd *cobra.Command, policy windowsRecovery
 		return committedRecoveryCommandError(policy.prefix()+"_NOT_ADMITTED", "resolve Product state", err)
 	}
 	return runWindowsProductRecoveryCommandWithDeps(cmd, stateDir, executor, canonical, policy, upgradeCommittedRecoveryDeps{
+		currentRegistry: currentRegistry,
+		AcquireExecuting: func(ctx context.Context) (*binaryadmission.WindowsCanonicalEntrySetV2, error) {
+			input, ok := windowsRecoveryInputFromContext(ctx)
+			if !ok || input.bindingErr != nil {
+				return nil, errors.Join(input.bindingErr, errors.New("executing-entry native lender unavailable"))
+			}
+			return binaryadmission.AcquireExecutingWindowsCanonicalEntrySetV2(ctx, input.binding)
+		},
 		AdmitProduct: binaryadmission.AdmitWindowsRole,
 		BuildInfo:    buildinfo.Get,
 		Recover:      reconcileWiredWindowsProductRecovery,
@@ -208,7 +266,6 @@ func runWindowsProductRecoveryCommand(cmd *cobra.Command, policy windowsRecovery
 		ValidatePending: validateWiredWindowsProductPendingRecovery,
 	})
 }
-
 func readCommittedRecoveryRegular(path string) ([]byte, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -289,12 +346,14 @@ func runCommittedRecoveryWindowsWithDeps(cmd *cobra.Command, stateDir, executor,
 }
 
 func runWindowsProductRecoveryCommandWithDeps(cmd *cobra.Command, stateDir, executor, canonical string, policy windowsRecoveryCommandPolicy, deps upgradeCommittedRecoveryDeps) (retErr error) {
+	evidence := &windowsProductJournalReadEvidence{}
 	prefix := policy.prefix()
 	failureID, failureStage := prefix+"_NOT_ADMITTED", "initialize recovery"
 	var pendingResult upgradePendingRecoveryResult
 	var runtimeReceiving *pendingRuntimeReceiving
 	defer func() {
 		if retErr != nil {
+			retErr = withWindowsProductJournalEvidence(retErr, evidence)
 			projected := committedRecoveryCommandError(failureID, failureStage, retErr)
 			projected.pendingResult = pendingResult
 			projected.runtime = runtimeReceiving
@@ -313,6 +372,13 @@ func runWindowsProductRecoveryCommandWithDeps(cmd *cobra.Command, stateDir, exec
 		deps.LstatJournal = os.Lstat
 	}
 	ctx := cmd.Context()
+	allowance, err := resolveWindowsProductJournalAllowance()
+	if err != nil {
+		return err
+	}
+	if deps.ReadJournal == nil {
+		deps.ReadJournal = readWindowsProductRecoveryJournal
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -352,14 +418,50 @@ func runWindowsProductRecoveryCommandWithDeps(cmd *cobra.Command, stateDir, exec
 	}()
 
 	failureID, failureStage = "E_WINDOWS_PRODUCT_RECOVERY_IDENTITY", "admit recovery executor"
-	execIdentity, sidecarSHA, err := admitCommittedRecoveryExecutor(executor, deps.AdmitProduct, deps.BuildInfo)
-	if err != nil {
-		return fmt.Errorf("%w: %w", ErrWindowsProductRecoveryIdentity, err)
+	var execIdentity binaryadmission.WindowsArtifact
+	var sidecarSHA string
+	var executing *binaryadmission.WindowsCanonicalEntrySetV2
+	if deps.currentRegistry {
+		if deps.AcquireExecuting == nil {
+			return errors.Join(ErrWindowsProductRecoveryIdentity, errors.New("current recovery executor owner unavailable"))
+		}
+		executing, err = deps.AcquireExecuting(ctx)
+		if executing != nil {
+			defer func() {
+				if executing != nil {
+					retErr = errors.Join(retErr, executing.Close())
+				}
+			}()
+		}
+		if err != nil || executing == nil {
+			return errors.Join(ErrWindowsProductRecoveryIdentity, err, errors.New("current recovery executor owner unavailable"))
+		}
+		snapshot, err := executing.Snapshot()
+		if err != nil {
+			return errors.Join(ErrWindowsProductRecoveryIdentity, err)
+		}
+		execIdentity, sidecarSHA = snapshot.ProductArtifact, snapshot.Identity.SHA256
+		version, commit, date := deps.BuildInfo()
+		if !sameWindowsRecoveryPath(executor, snapshot.Product.Path) ||
+			!sameWindowsRecoveryPath(execIdentity.Path, snapshot.Product.Path) ||
+			execIdentity.Role != binaryadmission.WindowsArtifactRoleProduct ||
+			execIdentity.Subsystem != binaryadmission.WindowsGUISubsystem || execIdentity.Machine != 0x8664 ||
+			execIdentity.SHA256 == "" || execIdentity.SHA256 != snapshot.Product.SHA256 || sidecarSHA == "" ||
+			version != execIdentity.Version || commit != execIdentity.Commit || date != execIdentity.BuildDate ||
+			version == "dev" || commit == "unknown" || date == "unknown" {
+			return errors.Join(ErrWindowsProductRecoveryIdentity, errors.New("held current recovery executor identity differs"))
+		}
+	} else {
+		execIdentity, sidecarSHA, err = admitCommittedRecoveryExecutor(executor, deps.AdmitProduct, deps.BuildInfo)
+		if err != nil {
+			return fmt.Errorf("%w: %w", ErrWindowsProductRecoveryIdentity, err)
+		}
 	}
 	failureID, failureStage = "E_WINDOWS_PRODUCT_RECOVERY_IDENTITY", "inspect committed journal"
 	v3Path := filepath.Join(stateDir, WindowsProductRecoveryFileLeafV3)
-	raw, err := readCommittedRecoveryRegular(v3Path)
-	if errors.Is(err, os.ErrNotExist) {
+	raw, journalOriginal, err := deps.ReadJournal(ctx, v3Path, allowance)
+	evidence.retain(windowsProductJournalReadOutcome{phase: "command-admission", path: v3Path, allowance: allowance, original: journalOriginal, readError: err})
+	if windowsProductJournalCleanAbsence(err) {
 		failureID = prefix + "_NOT_ADMITTED"
 		return fmt.Errorf("%w: no V3 recovery journal: %w", ErrUpgradeCommittedRecoveryNotAdmitted, err)
 	}
@@ -383,7 +485,17 @@ func runWindowsProductRecoveryCommandWithDeps(cmd *cobra.Command, stateDir, exec
 	failureStage = "verify committed Product targets and receipt"
 	legacy := scheduler.WindowsLegacyEntrypointPath(canonical)
 	product := canonical
-	if journal.EntrySet != nil {
+	if journal.EntryBundle != nil {
+		if !deps.currentRegistry {
+			return errors.Join(ErrWindowsProductRecoveryIdentity, errors.New("current recovery journal requires a held V2 executor"))
+		}
+		targets, targetErr := binaryadmission.CanonicalEntryTargetsV2(canonical)
+		if targetErr != nil || !sameWindowsRecoveryPath(journal.EntryBundle.CanonicalEntry.Target, targets.CanonicalEntryPath) ||
+			!sameWindowsRecoveryPath(journal.EntryBundle.Expected.Identity.Path, targets.IdentityPath) {
+			return errors.Join(ErrWindowsProductRecoveryIdentity, targetErr, errors.New("current journal target paths differ"))
+		}
+		product = targets.ProductPath
+	} else if journal.EntrySet != nil {
 		targets, targetErr := binaryadmission.CanonicalEntryTargetsV1(canonical)
 		if targetErr != nil || !sameWindowsRecoveryPath(journal.EntrySet.CanonicalEntry.Target, targets.CanonicalEntryPath) ||
 			!sameWindowsRecoveryPath(journal.EntrySet.Identity.Target, targets.IdentityPath) {
@@ -399,12 +511,18 @@ func runWindowsProductRecoveryCommandWithDeps(cmd *cobra.Command, stateDir, exec
 	if policy == windowsRecoveryCommandPending && journal.PreSettlement.GUIOwner == windowsProductGUIOwnerConfirmedPresent {
 		runtimeReceiving = new(pendingRuntimeReceiving)
 	}
-	req := windowsProductRecoveryRuntimeRequest(ctx, stateDir, canonical, legacy)
-	if journal.EntrySet != nil {
-		req, err = windowsCanonicalEntryRecoveryRuntimeRequest(ctx, stateDir, canonical, legacy)
+	req := windowsProductRecoveryRuntimeRequestWithJournal(ctx, stateDir, canonical, legacy, allowance, evidence)
+	if hasCanonicalEntryArm(journal) {
+		req, err = windowsCanonicalEntryRecoveryRequestForDomain(ctx, stateDir, canonical, legacy, journal.EntryBundle != nil, allowance, evidence)
 		if err != nil {
 			return fmt.Errorf("%w: recovery target paths: %w", ErrWindowsProductRecoveryIdentity, err)
 		}
+	}
+	lendsExecuting := journal.EntryBundle != nil && journal.Phase != WindowsProductRecoveryCommitDecided &&
+		journal.Phase != WindowsProductRecoverySettledCommit && currentRollbackRecoveryPurpose(journal) == canonicalRecoveryRollback
+	if lendsExecuting {
+		// Lend the same original received during executor admission.
+		bindWindowsProductSuccessorQuiescence(&req, executing)
 	}
 	if policy == windowsRecoveryCommandPending {
 		req.PendingRuntime = runtimeReceiving
@@ -416,7 +534,8 @@ func runWindowsProductRecoveryCommandWithDeps(cmd *cobra.Command, stateDir, exec
 		if err := deps.ValidatePending(req, journal); err != nil {
 			return err
 		}
-		reread, err := readCommittedRecoveryRegular(v3Path)
+		reread, subsequentOriginal, err := deps.ReadJournal(ctx, v3Path, allowance)
+		evidence.retain(windowsProductJournalReadOutcome{phase: "command-admission-recheck", path: v3Path, allowance: allowance, original: subsequentOriginal, readError: err})
 		if err != nil || !bytes.Equal(reread, raw) {
 			return fmt.Errorf("%w: admitted journal changed", ErrWindowsProductRecoveryIdentity)
 		}
@@ -443,6 +562,15 @@ func runWindowsProductRecoveryCommandWithDeps(cmd *cobra.Command, stateDir, exec
 	if policy == windowsRecoveryCommandPending {
 		failureStage = "recover pending prior settlement"
 		pendingResult = upgradePendingOwnerError
+	}
+	if executing != nil && !lendsExecuting {
+		// No lender is needed here. Receive the read guards' close before
+		// entering recovery, where they could conflict with the original moves.
+		closeErr := executing.Close()
+		executing = nil
+		if closeErr != nil {
+			return errors.Join(ErrWindowsProductRecoveryIdentity, closeErr)
+		}
 	}
 	settled, err := deps.Recover(req)
 	if err != nil {

@@ -408,16 +408,54 @@ func runCreatorClosureSourceUnit(t *testing.T, nonzero creatorExitObservation) {
 			}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		done := make(chan *CreatorSettlement, 2)
-		errs := make(chan error, 2)
-		go func() { s, e := p.WaitCreatorClosure(ctx); done <- s; errs <- e }()
-		<-entered
-		go func() { s, e := p.WaitCreatorClosure(ctx); done <- s; errs <- e }()
+		done := make(chan struct{})
+		var first *CreatorSettlement
+		var firstErr error
+		defer func() {
+			cancel()
+			select {
+			case <-release:
+			default:
+				close(release)
+			}
+			<-done
+		}()
+		go func() {
+			defer close(done)
+			first, firstErr = p.WaitCreatorClosure(ctx)
+		}()
+		select {
+		case <-entered:
+		case <-done:
+			t.Fatalf("first closure returned before observation: proof=%v err=%v", first, firstErr)
+		case <-ctx.Done():
+			t.Fatalf("first closure did not enter observation: %v", ctx.Err())
+		}
+
+		// The source-only owner refuses a concurrent closure while its first
+		// observation is still active; only completed closure can supply a cache.
+		second, secondErr := p.WaitCreatorClosure(ctx)
+		_, unavailable := secondErr.(*creatorClosureUnavailableError)
+		if second != nil || !unavailable || ctx.Err() != nil {
+			t.Fatalf("concurrent admission: proof=%v err=%T %v context=%v", second, secondErr, secondErr, ctx.Err())
+		}
+		if c.waits.Load() != 1 || c.observations.Load() != 1 || c.closes.Load() != 0 || c.terminations.Load() != 0 {
+			t.Fatalf("concurrent refusal changed ownership: waits=%d observations=%d closes=%d terminations=%d", c.waits.Load(), c.observations.Load(), c.closes.Load(), c.terminations.Load())
+		}
 		close(release)
-		first, second := <-done, <-done
-		if <-errs != nil || <-errs != nil || first == nil || second != first || c.waits.Load() != 1 || c.observations.Load() != 1 || c.closes.Load() != 1 {
-			t.Fatal("concurrent observation duplicated ownership")
+		select {
+		case <-done:
+		case <-ctx.Done():
+			t.Fatalf("first closure did not complete after release: %v", ctx.Err())
+		}
+		if first == nil || firstErr != nil {
+			t.Fatalf("first closure after release: proof=%v err=%v", first, firstErr)
+		}
+		if again, err := p.WaitCreatorClosure(ctx); err != nil || again != first {
+			t.Fatalf("completed closure cache: first=%p again=%p err=%v", first, again, err)
+		}
+		if c.waits.Load() != 1 || c.observations.Load() != 1 || c.closes.Load() != 1 || c.terminations.Load() != 0 {
+			t.Fatalf("cached closure repeated ownership activity: waits=%d observations=%d closes=%d terminations=%d", c.waits.Load(), c.observations.Load(), c.closes.Load(), c.terminations.Load())
 		}
 	})
 	t.Run("pending-wait-cancel-retains-owner", func(t *testing.T) {

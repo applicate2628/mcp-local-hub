@@ -170,7 +170,7 @@ Run "mcphub" with no arguments to start the hub and open the GUI.` + windowsCons
 		newIntentCollapseCmd(),
 		newStrictModeCmd(),
 		newRepairStateDACLCmd(),
-		newHubMcpCmd(),
+		newHubMcpCmdWithWindowsCanonicalEntryInput(input),
 		newAdoptProvenanceCmd(),
 		newMigrateLegacyCmd(),
 		newTrayCmd(),

@@ -24,6 +24,9 @@ func AcquireWindowsCanonicalEntrySetV1(context.Context, WindowsCanonicalEntrySet
 func (*WindowsCanonicalEntrySetV1) Snapshot() (WindowsCanonicalEntrySetSnapshotV1, error) {
 	return WindowsCanonicalEntrySetSnapshotV1{}, errWindowsCanonicalEntryUnsupported
 }
+func (*WindowsCanonicalEntrySetV1) VerifyLegacyProductBuild(context.Context) error {
+	return errWindowsCanonicalEntryUnsupported
+}
 func (*WindowsCanonicalEntrySetV1) VerifyUnchanged() error {
 	return errWindowsCanonicalEntryUnsupported
 }
