@@ -6,6 +6,7 @@ import (
 	"errors"
 	"mcp-local-hub/internal/process"
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 )
@@ -48,26 +49,47 @@ func parseOriginalLoopbackTCPRows(raw []byte) ([]OriginalLoopbackTCPRowV1, error
 	if len(raw) == 0 || len(raw) > 64<<20 || strings.ContainsRune(string(raw), 0) {
 		return nil, errors.New("ORIGINAL_TCP_ROW_FRAME_INVALID")
 	}
+	const (
+		englishTitle  = "Active Connections"
+		englishHeader = "Proto Local Address Foreign Address State PID"
+		// Observed Russian netstat labels in OEM code page 866:
+		// "Активные подключения" and
+		// "Имя Локальный адрес Внешний адрес Состояние PID".
+		// Match their exact bytes without guessing or decoding other locales.
+		russianOEMTitle  = "\x80\xaa\xe2\xa8\xa2\xad\xeb\xa5 \xaf\xae\xa4\xaa\xab\xee\xe7\xa5\xad\xa8\xef"
+		russianOEMHeader = "\x88\xac\xef \x8b\xae\xaa\xa0\xab\xec\xad\xeb\xa9 \xa0\xa4\xe0\xa5\xe1 \x82\xad\xa5\xe8\xad\xa8\xa9 \xa0\xa4\xe0\xa5\xe1 \x91\xae\xe1\xe2\xae\xef\xad\xa8\xa5 PID"
+	)
 	rows := []OriginalLoopbackTCPRowV1{}
 	seen := map[string]bool{}
 	header := false
+	expectedHeader := ""
 	for line := range strings.SplitSeq(string(raw), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) == 0 {
 			continue
 		}
-		if len(fields) == 2 && fields[0] == "Active" && fields[1] == "Connections" {
-			continue
-		}
-		if fields[0] == "Proto" {
-			if strings.Join(fields, " ") != "Proto Local Address Foreign Address State PID" {
-				return nil, errors.New("ORIGINAL_TCP_ROW_HEADER_UNSUPPORTED")
-			}
-			header = true
-			continue
-		}
 		if !header {
-			return nil, errors.New("ORIGINAL_TCP_ROW_FRAME_UNRECOGNIZED")
+			switch line := strings.Join(fields, " "); line {
+			case englishTitle, russianOEMTitle:
+				if expectedHeader != "" {
+					return nil, errors.New("ORIGINAL_TCP_ROW_FRAME_INVALID")
+				}
+				expectedHeader = englishHeader
+				if line == russianOEMTitle {
+					expectedHeader = russianOEMHeader
+				}
+			case englishHeader, russianOEMHeader:
+				if expectedHeader != "" && line != expectedHeader {
+					return nil, errors.New("ORIGINAL_TCP_ROW_HEADER_UNSUPPORTED")
+				}
+				header = true
+			default:
+				if fields[0] == "Proto" {
+					return nil, errors.New("ORIGINAL_TCP_ROW_HEADER_UNSUPPORTED")
+				}
+				return nil, errors.New("ORIGINAL_TCP_ROW_FRAME_UNRECOGNIZED")
+			}
+			continue
 		}
 		if fields[0] == "UDP" {
 			if len(fields) != 4 {
@@ -119,17 +141,34 @@ func parseOriginalTCPEndpoint(value string) (string, uint16, error) {
 	if err != nil {
 		return "", 0, errors.New("ORIGINAL_TCP_ROW_ADDRESS_INVALID")
 	}
-	address := net.ParseIP(host)
-	if address == nil {
+	if zoneStart := strings.IndexByte(host, '%'); zoneStart >= 0 {
+		zone := host[zoneStart+1:]
+		if len(zone) == 0 || len(zone) > 10 {
+			return "", 0, errors.New("ORIGINAL_TCP_ROW_ADDRESS_INVALID")
+		}
+		for i := 0; i < len(zone); i++ {
+			if zone[i] < '0' || zone[i] > '9' {
+				return "", 0, errors.New("ORIGINAL_TCP_ROW_ADDRESS_INVALID")
+			}
+		}
+		if _, err := strconv.ParseUint(zone, 10, 32); err != nil {
+			return "", 0, errors.New("ORIGINAL_TCP_ROW_ADDRESS_INVALID")
+		}
+	}
+	address, err := netip.ParseAddr(host)
+	if err != nil {
 		return "", 0, errors.New("ORIGINAL_TCP_ROW_ADDRESS_INVALID")
 	}
 	number, err := strconv.ParseUint(portText, 10, 16)
 	if err != nil {
 		return "", 0, errors.New("ORIGINAL_TCP_ROW_PORT_INVALID")
 	}
-	// IPv6/non-loopback rows are parsed but cannot enter this explicitly IPv4
-	// original-endpoint evidence. They are not converted to a wildcard owner.
+	// Keep IPv6 spelling (including mapped IPv4) out of positive IPv4
+	// ownership. Normalize only unspecified IPv6 for wildcard refusal.
 	if strings.Contains(host, ":") {
+		if address.WithZone("").IsUnspecified() {
+			return "::", uint16(number), nil
+		}
 		return host, uint16(number), nil
 	}
 	return address.String(), uint16(number), nil
