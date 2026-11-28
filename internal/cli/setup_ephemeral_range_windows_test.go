@@ -192,74 +192,95 @@ func TestRunSetupEphemeralRangeStep_FixRequiresElevation(t *testing.T) {
 	}
 }
 
-// TestSetupCommand_EphemeralRangeStepRunsBeforeWatchdogElevationGate is the F1
-// (round-5 bot) ordering regression. `mcphub setup --fix-ephemeral-range` needs an
-// elevated ADMIN shell (its netsh mutation requires admin), but the watchdog step
-// REFUSES an elevated setup (plan §42) and returns early. Ordered AFTER the watchdog
-// gate, the advertised host remedy never ran in the one context it requires. This
-// test drives the full `setup` command in an elevated shell with an overlapping
-// dynamic range and asserts the ephemeral-range fix runs BEFORE the watchdog gate's
-// refusal (which still surfaces as the command error).
-//
-// NON-VACUITY: revert the F1 reorder (put runSetupEphemeralRangeStep back AFTER
-// runSetupWatchdogForSetup) and the watchdog refusal returns before the ephemeral
-// step — order becomes just [watchdog] and the "ephemeral first" assertion fails.
+// TestSetupCommand_EphemeralRangeStepRunsBeforeWatchdogElevationGate keeps
+// the explicitly requested repair while rejecting unrelated elevated setup.
 func TestSetupCommand_EphemeralRangeStepRunsBeforeWatchdogElevationGate(t *testing.T) {
 	resetEphemeralRangeCache(t)
-	setEphemeralProbeForTest(t, netshDynamicPortWidened, nil) // overlap → the fix fires when elevated
-
-	// Elevated shell: the watchdog gate refuses an elevated setup (the real §42
-	// behavior) — but --fix-ephemeral-range needs exactly this elevated admin shell.
-	prevElev := setupIsElevatedFn
+	setEphemeralProbeForTest(t, netshDynamicPortWidened, nil)
+	prevElev, prevSet := setupIsElevatedFn, setEphemeralTCPRange
 	setupIsElevatedFn = func() (bool, error) { return true, nil }
-	t.Cleanup(func() { setupIsElevatedFn = prevElev })
+	t.Cleanup(func() { setupIsElevatedFn, setEphemeralTCPRange = prevElev, prevSet })
 
 	var order []string
-	prevSet := setEphemeralTCPRange
 	setEphemeralTCPRange = func(start, num int) ([]byte, error) {
 		order = append(order, "ephemeral")
 		return []byte("Ok."), nil
 	}
-	t.Cleanup(func() { setEphemeralTCPRange = prevSet })
+	stubSetupElevationEffects(t, &order)
+	cmd := newSetupCmdReal()
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stdout)
+	cmd.SetArgs([]string{"--fix-ephemeral-range"})
+	if err := cmd.Execute(); !errors.Is(err, errSetupRequiresUnelevated) {
+		t.Fatalf("expected setup elevation refusal after explicit repair, got %v", err)
+	}
+	if strings.Join(order, ",") != "ephemeral" || !strings.Contains(stdout.String(), "AFTER") {
+		t.Fatalf("want only the explicit repair, got order=%v output=%q", order, stdout.String())
+	}
+}
 
-	origBootstrap := setupBootstrapFn
-	origRouter := setupLSPClientRouterFn
-	origWatchdog := setupWatchdogFn
+func stubSetupElevationEffects(t *testing.T, order *[]string) {
+	t.Helper()
+	bootstrap, router, watchdog := setupBootstrapFn, setupLSPClientRouterFn, setupWatchdogFn
 	t.Cleanup(func() {
-		setupBootstrapFn = origBootstrap
-		setupLSPClientRouterFn = origRouter
-		setupWatchdogFn = origWatchdog
+		setupBootstrapFn, setupLSPClientRouterFn, setupWatchdogFn = bootstrap, router, watchdog
 	})
-	setupBootstrapFn = func(io.Writer) error { return nil }
+	setupBootstrapFn = func(io.Writer) error {
+		*order = append(*order, "canonical/PATH")
+		return nil
+	}
 	setupLSPClientRouterFn = func(bool) (*api.LSPClientRouterReport, error) {
+		*order = append(*order, "clients")
 		return &api.LSPClientRouterReport{}, nil
 	}
-	// The watchdog step REFUSES an elevated setup (plan §42) — model that refusal.
 	setupWatchdogFn = func(io.Writer, bool) error {
-		order = append(order, "watchdog")
-		return errors.New("mcphub setup must run un-elevated (plan §42); use --allow-elevated to override")
+		*order = append(*order, "scheduler")
+		return nil
 	}
+}
 
-	cmd := newSetupCmdReal()
-	var stdout, stderr bytes.Buffer
-	cmd.SetOut(&stdout)
-	cmd.SetErr(&stderr)
-	cmd.SetArgs([]string{"--fix-ephemeral-range"})
-	if err := cmd.Execute(); err == nil {
-		t.Fatal("expected the watchdog elevation refusal to surface as a command error")
-	}
-
-	// The ephemeral-range fix MUST have run FIRST — before the watchdog gate refused.
-	if len(order) < 1 || order[0] != "ephemeral" {
-		t.Fatalf("step order = %v, want the ephemeral-range fix to run FIRST (before the watchdog elevation gate)", order)
-	}
-	// And the watchdog gate still ran + refused (the reorder did not swallow it).
-	if len(order) != 2 || order[1] != "watchdog" {
-		t.Fatalf("step order = %v, want [ephemeral watchdog]", order)
-	}
-	// The elevated netsh mutation actually printed its before/after (the fix executed).
-	if !strings.Contains(stdout.String(), "AFTER") {
-		t.Fatalf("ephemeral-range fix did not print its before/after; stdout:\n%s", stdout.String())
+func TestSetupCommand_AdmissionBeforeSideEffects(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		elevated     bool
+		detectionErr error
+		wantOrder    string
+	}{
+		{name: "elevated", elevated: true, wantOrder: "elevation"},
+		{name: "unknown", detectionErr: errors.New("test elevation error"), wantOrder: "elevation"},
+		{name: "ordinary", wantOrder: "elevation,canonical/PATH,clients,port probe,scheduler"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			resetEphemeralRangeCache(t)
+			var order []string
+			elev, probe := setupIsElevatedFn, queryEphemeralTCPRange
+			t.Cleanup(func() { setupIsElevatedFn, queryEphemeralTCPRange = elev, probe })
+			setupIsElevatedFn = func() (bool, error) {
+				order = append(order, "elevation")
+				return tt.elevated, tt.detectionErr
+			}
+			queryEphemeralTCPRange = func() ([]byte, error) {
+				order = append(order, "port probe")
+				return nil, errors.New("test: no system probe")
+			}
+			stubSetupElevationEffects(t, &order)
+			cmd := newSetupCmdReal()
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs([]string{})
+			err := cmd.Execute()
+			if tt.wantOrder == "elevation" {
+				if !errors.Is(err, errSetupRequiresUnelevated) {
+					t.Fatalf("expected elevation refusal, got %v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(order, ","); got != tt.wantOrder {
+				t.Fatalf("order = %q, want %q", got, tt.wantOrder)
+			}
+		})
 	}
 }
 

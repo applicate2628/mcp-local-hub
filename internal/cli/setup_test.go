@@ -191,8 +191,16 @@ func setupTrustedRootTestEnv(t *testing.T) string {
 	return path
 }
 
+func stubUnelevatedSetup(t *testing.T) {
+	t.Helper()
+	prev := setupIsElevatedFn
+	setupIsElevatedFn = func() (bool, error) { return false, nil }
+	t.Cleanup(func() { setupIsElevatedFn = prev })
+}
+
 func runSetupCmd(t *testing.T, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
+	stubUnelevatedSetup(t)
 	cmd := newSetupCmdReal()
 	var out, errBuf bytes.Buffer
 	cmd.SetOut(&out)
@@ -309,6 +317,7 @@ func TestSetupCommand_TrustedRootIdempotentRebless(t *testing.T) {
 }
 
 func TestSetupCommand_ContinuesToWatchdogWhenLSPRouterWiringFails(t *testing.T) {
+	stubUnelevatedSetup(t)
 	origBootstrap := setupBootstrapFn
 	origRouter := setupLSPClientRouterFn
 	origWatchdog := setupWatchdogFn
