@@ -1,13 +1,11 @@
 package api
 
 import (
-	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -125,48 +123,16 @@ func qualifyGraphifyProjectService(p ProjectServiceExecutionProfile, prepared Pr
 	}
 	// Verify the selected known source cut before ZIP decompression. Unknown
 	// compressed input is refused; no arbitrary expansion ceiling is introduced.
-	if strings.ToUpper(ManifestHashContent(launcher.Raw)) != "F9FC52BE9AA3BB13B3D06DF0B7870CC60594DB850DABA8C7B7F096EC9112D298" ||
+	if ManifestHashContent(launcher.Raw) != graphifyOriginalLauncherSHA256 ||
 		strings.ToUpper(ManifestHashContent(files[ProjectServiceProviderEntry].Raw)) != "E1C99599A6DEB978DADBB74484F73F57E02EE3816695DA44E033F994AAA53D17" ||
 		strings.ToUpper(ManifestHashContent(files[ProjectServiceProviderPaths].Raw)) != "D19D1B5FF3BF061081B5FB4FDB8008CEAFE09D17782C34A3A74FFB6EEAD78023" {
 		return "", errors.New("PROJECT_SERVICE_GRAPHIFY_SOURCE_CUT_CHANGED")
 	}
-	archive, err := zip.NewReader(bytes.NewReader(launcher.Raw), int64(len(launcher.Raw)))
+	selectedInterpreter, err := GraphifyOriginalLauncherInterpreter(launcher.Raw)
 	if err != nil {
-		return "", errors.New("PROJECT_SERVICE_GRAPHIFY_LAUNCHER_ZIP_UNQUALIFIED")
+		return "", err
 	}
-	var entry []byte
-	for _, member := range archive.File {
-		if member.Name != "__main__.py" {
-			continue
-		}
-		if entry != nil {
-			return "", errors.New("PROJECT_SERVICE_GRAPHIFY_ENTRY_AMBIGUOUS")
-		}
-		reader, openErr := member.Open()
-		if openErr != nil {
-			return "", openErr
-		}
-		raw, readErr := io.ReadAll(reader)
-		closeErr := reader.Close()
-		if err := errors.Join(readErr, closeErr); err != nil {
-			return "", err
-		}
-		entry = raw
-	}
-	if !bytes.Contains(entry, []byte("from graphify.serve import _main")) {
-		return "", errors.New("PROJECT_SERVICE_GRAPHIFY_MCP_ENTRY_UNQUALIFIED")
-	}
-	zipStart := bytes.Index(launcher.Raw, []byte{'P', 'K', 3, 4})
-	if zipStart < 0 {
-		return "", errors.New("PROJECT_SERVICE_GRAPHIFY_LAUNCHER_CONTEXT_UNAVAILABLE")
-	}
-	shebang := bytes.LastIndex(launcher.Raw[:zipStart], []byte("#!"))
-	if shebang < 0 {
-		return "", errors.New("PROJECT_SERVICE_GRAPHIFY_INTERPRETER_UNAVAILABLE")
-	}
-	line := strings.SplitN(string(launcher.Raw[shebang+2:zipStart]), string(byte(10)), 2)[0]
-	selectedInterpreter := strings.Trim(strings.TrimSpace(line), string(byte(34)))
-	if !filepath.IsAbs(selectedInterpreter) || !sameProjectServicePath(selectedInterpreter, interpreter.Observation.path) {
+	if !sameProjectServicePath(selectedInterpreter, interpreter.Observation.path) {
 		return "", errors.New("PROJECT_SERVICE_GRAPHIFY_SELECTED_INTERPRETER_CHANGED")
 	}
 	venv := filepath.Dir(filepath.Dir(interpreter.Observation.path))

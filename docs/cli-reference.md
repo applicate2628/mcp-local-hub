@@ -44,19 +44,32 @@ after that projection is correct. A second identical apply is an already-adopted
 no-op. Use `mcphub de-adopt <manifest-name> --yes` to restore the captured
 pre-adopt client state.
 
-Graphify `graphifyy==0.9.53` uses one named identity per fixed graph and
-environment profile. The existing entry must launch `graphify-mcp <graph-json>`;
-do not reuse one entry name for multiple graph files. For example:
+Graphify Project Service support uses an existing local Graphify MCP installation
+and a named Codex project stdio entry for the intended graph. MCPHub does not
+bundle Graphify. A Graphify plugin entry is distinct from the original local
+stdio launch; this command does not install or convert the plugin. Keep each
+project and graph tied to its original configured entry.
+
+From a shell, preview an explicit stopped definition, then repeat the same
+command with `--yes` to apply it:
 
 ```text
-mcphub adopt graphify-project-a --client codex-cli --port <port> --clients codex-cli,claude-code
-mcphub adopt graphify-project-a --client codex-cli --port <port> --clients codex-cli,claude-code --yes
+mcphub adopt graphify-project-a --client codex-cli --project-source "<absolute-project-root>" --project-service graphify --project-service-intent define-stopped --action-timeout 30s
+mcphub adopt graphify-project-a --client codex-cli --project-source "<absolute-project-root>" --project-service graphify --project-service-intent define-stopped --action-timeout 30s --yes
 ```
 
-The generated manifest preserves that entry's exact command, arguments, and
-environment. Graphify's optional per-call `project_path` remains an upstream
-tool argument; MCPHub neither filters it nor treats it as a new authorization
-boundary. No shared graph manifest or dynamic graph pool is shipped.
+For an existing stopped definition, preview attaching that named project entry.
+Apply only after reviewing the preview:
+
+```text
+mcphub adopt graphify-project-a --client codex-cli --project-source "<absolute-project-root>" --project-service graphify --project-service-intent attach-target --action-timeout 30s
+```
+
+Use the same identity with `detach-target` to remove its binding or `retire` to
+retire the managed definition; preview each operation before using `--yes`.
+Project Service mode is not legacy adoption and does not accept `--name`,
+`--clients`, or `--provider-plugin`. An installed migration still needs validation
+with the original Graphify package, project data, and clients, including rollback.
 
 Scholar Search is adopted once per exact environment profile. Its enabled entry
 must use the complete compatible launch recipe
