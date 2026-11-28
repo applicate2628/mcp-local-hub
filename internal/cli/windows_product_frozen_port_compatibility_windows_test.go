@@ -76,7 +76,7 @@ func TestWindowsProductFrozenPortCompatibility(t *testing.T) {
 				return append([]byte(nil), captured...), nil
 			}
 			journalPath := filepath.Join(dir, WindowsProductRecoveryFileLeafV3)
-			err := persistWindowsProductRecoveryJournalV3(journalPath, journal, write, read)
+			err := persistWindowsProductRecoveryJournalV3(t.Context(), productJournalFixtureAllowance(), journalPath, journal, write, read)
 			raw := append([]byte(nil), captured...)
 			if tc.wantErr != "" {
 				if err == nil || err.Error() != tc.wantErr || raw != nil || writeCalls != 0 || readCalls != 0 {
@@ -94,7 +94,7 @@ func TestWindowsProductFrozenPortCompatibility(t *testing.T) {
 			if (decoded.FrozenPorts == nil) != (tc.rows == nil) {
 				t.Fatal("nil/empty port presence changed")
 			}
-			err = persistWindowsProductRecoveryJournalV3(journalPath, decoded, write, read)
+			err = persistWindowsProductRecoveryJournalV3(t.Context(), productJournalFixtureAllowance(), journalPath, decoded, write, read)
 			again := captured
 			if err != nil || !bytes.Equal(raw, again) {
 				t.Fatalf("codec round trip bytes differ: %v", err)

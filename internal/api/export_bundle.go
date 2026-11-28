@@ -4,6 +4,7 @@ package api
 import (
 	"archive/zip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 var mcphubVersionForBundle = func() string { return "dev" }
@@ -56,13 +59,11 @@ func WriteConfigBundle(w io.Writer) error {
 	// PR #51 originally referenced secrets.json — the file never existed,
 	// so the bundle silently shipped without secrets. Fixed via Codex
 	// bot PR #93 finding (closed in favor of this in-PR fix).
-	for _, item := range []struct{ src, name string }{
-		{filepath.Join(dataDir, "secrets.age"), "secrets.age"},
-		{filepath.Join(dataDir, "gui-preferences.yaml"), "gui-preferences.yaml"},
-	} {
-		if err := addFileIfExists(zw, item.src, item.name); err != nil {
-			return fmt.Errorf("add %s: %w", item.name, err)
-		}
+	if err := addFileIfExists(zw, filepath.Join(dataDir, "secrets.age"), "secrets.age"); err != nil {
+		return fmt.Errorf("add secrets.age: %w", err)
+	}
+	if err := addPortableSettingsIfExists(zw, filepath.Join(dataDir, "gui-preferences.yaml")); err != nil {
+		return fmt.Errorf("add gui-preferences.yaml: %w", err)
 	}
 	// State-dir files.
 	if err := addFileIfExists(zw, filepath.Join(stateDir, "workspaces.yaml"), "workspaces.yaml"); err != nil {
@@ -97,6 +98,32 @@ func addFileIfExists(zw *zip.Writer, src, dstName string) error {
 		}
 		return err
 	}
+	return addBundleFileBytes(zw, dstName, data)
+}
+
+func addPortableSettingsIfExists(zw *zip.Writer, path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	raw, err := decodeSingleSettingsDocument(data)
+	if err != nil {
+		return err
+	}
+	if _, exists := raw[hubProjectAuthoritySettingsKey]; exists {
+		delete(raw, hubProjectAuthoritySettingsKey)
+		data, err = yaml.Marshal(raw)
+		if err != nil {
+			return errors.New("cannot encode portable settings content")
+		}
+	}
+	return addBundleFileBytes(zw, filepath.Base(path), data)
+}
+
+func addBundleFileBytes(zw *zip.Writer, dstName string, data []byte) error {
 	fh, err := zw.Create(dstName)
 	if err != nil {
 		return err

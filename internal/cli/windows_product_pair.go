@@ -338,6 +338,7 @@ type windowsProductPreSettlementV3 struct {
 }
 
 type windowsProductRecoveryJournalV3 struct {
+	EntryBundle             *windowsCanonicalEntrySetJournalV2       `json:"-"`
 	EntrySet                *windowsCanonicalEntrySetJournalV1       `json:"entry_set,omitempty"`
 	Schema                  string                                   `json:"schema"`
 	TransactionID           string                                   `json:"transaction_id"`
@@ -388,6 +389,7 @@ type UpgradeReceiptRetiredV3 struct {
 // UpgradeReceiptV3 is the only receipt written by the single-product
 // transaction. V1 and V2 remain read-only compatibility shapes.
 type UpgradeReceiptV3 struct {
+	EntryBundle   *windowsCanonicalEntrySetReceiptV2 `json:"-"`
 	EntrySet      *windowsCanonicalEntrySetReceiptV1 `json:"entry_set,omitempty"`
 	Schema        string                             `json:"schema"`
 	TransactionID string                             `json:"transaction_id"`
@@ -407,13 +409,18 @@ type UpgradeReceipt struct {
 }
 
 func DecodeUpgradeReceipt(raw []byte) (UpgradeReceipt, error) {
-	var header struct {
-		Schema string `json:"schema"`
-	}
-	if err := json.Unmarshal(raw, &header); err != nil {
+	schemaRaw, err := uniqueCanonicalEntryRecordMember(raw, "schema")
+	if err != nil {
 		return UpgradeReceipt{}, fmt.Errorf("decode upgrade receipt schema: %w", err)
 	}
-	switch header.Schema {
+	if len(schemaRaw) == 0 {
+		return UpgradeReceipt{}, errors.New("decode upgrade receipt schema: schema required")
+	}
+	var schema string
+	if err := json.Unmarshal(schemaRaw, &schema); err != nil {
+		return UpgradeReceipt{}, fmt.Errorf("decode upgrade receipt schema: %w", err)
+	}
+	switch schema {
 	case UpgradeReceiptSchemaV1:
 		var v1 UpgradeReceiptV1
 		if err := json.Unmarshal(raw, &v1); err != nil {
@@ -432,9 +439,6 @@ func DecodeUpgradeReceipt(raw []byte) (UpgradeReceipt, error) {
 		}
 		return UpgradeReceipt{V2: &v2}, nil
 	case UpgradeReceiptSchemaV3:
-		if err := validateCanonicalEntryArmJSON(raw); err != nil {
-			return UpgradeReceipt{}, err
-		}
 		var v3 UpgradeReceiptV3
 		if err := json.Unmarshal(raw, &v3); err != nil {
 			return UpgradeReceipt{}, err
@@ -444,7 +448,7 @@ func DecodeUpgradeReceipt(raw []byte) (UpgradeReceipt, error) {
 		}
 		return UpgradeReceipt{V3: &v3}, nil
 	default:
-		return UpgradeReceipt{}, fmt.Errorf("unsupported upgrade receipt schema %q", header.Schema)
+		return UpgradeReceipt{}, fmt.Errorf("unsupported upgrade receipt schema %q", schema)
 	}
 }
 
@@ -455,7 +459,7 @@ func validateUpgradeReceiptV3(receipt UpgradeReceiptV3) error {
 	if receipt.Mode != WindowsProductPairModeSetup && receipt.Mode != WindowsProductPairModeCanonicalize && receipt.Mode != WindowsProductPairModeUpgrade {
 		return errors.New("decode upgrade-receipt-v3: invalid mode")
 	}
-	if (receipt.Admission != UpgradeAdmissionLocalProductV3 && receipt.Admission != UpgradeAdmissionCanonicalEntryProductV1) ||
+	if (receipt.Admission != UpgradeAdmissionLocalProductV3 && receipt.Admission != UpgradeAdmissionCanonicalEntryProductV1 && receipt.Admission != UpgradeAdmissionCanonicalEntryProductV2) ||
 		receipt.Artifact.Role != binaryadmission.WindowsArtifactRoleProduct ||
 		receipt.Artifact.Subsystem != binaryadmission.WindowsGUISubsystem ||
 		receipt.Artifact.Machine == 0 ||
@@ -512,16 +516,19 @@ type WindowsProductTaskTxn interface {
 }
 
 type WindowsProductCommitted struct {
-	EntrySet      *windowsCanonicalEntrySetReceiptV1
-	Schema        string
-	Outcome       WindowsProductPairOutcome
-	Artifact      binaryadmission.WindowsArtifact
-	TaskSetSHA256 string
-	ReceiptSHA256 string
-	EventSHA256   string
+	journalReadEvidence *windowsProductJournalReadEvidence
+	EntryBundle         *windowsCanonicalEntrySetReceiptV2
+	EntrySet            *windowsCanonicalEntrySetReceiptV1
+	Schema              string
+	Outcome             WindowsProductPairOutcome
+	Artifact            binaryadmission.WindowsArtifact
+	TaskSetSHA256       string
+	ReceiptSHA256       string
+	EventSHA256         string
 }
 
 type WindowsProductCommitEvent struct {
+	EntryBundle   *windowsCanonicalEntrySetReceiptV2
 	EntrySet      *windowsCanonicalEntrySetReceiptV1
 	Schema        string
 	TransactionID string
@@ -534,6 +541,9 @@ type WindowsProductCommitEvent struct {
 }
 
 type WindowsProductTxnDeps struct {
+	journal                windowsProductJournalBinding
+	journalReaderDefault   bool
+	AdmitEntryBundle       func(context.Context, binaryadmission.WindowsCanonicalEntrySetTargetsV2, binaryadmission.WindowsCanonicalEntrySetSnapshotV2) (binaryadmission.WindowsCanonicalEntrySetSnapshotV2, error)
 	AdmitEntrySet          func(context.Context, binaryadmission.WindowsCanonicalEntrySetTargetsV1, binaryadmission.WindowsCanonicalEntrySetSnapshotV1) (binaryadmission.WindowsCanonicalEntrySetSnapshotV1, error)
 	AdmitProduct           func(binaryadmission.WindowsArtifact) (binaryadmission.WindowsArtifact, error)
 	AdmitLegacyWindowless  func(binaryadmission.WindowsArtifact) (binaryadmission.WindowsArtifact, error)
@@ -561,6 +571,9 @@ type WindowsProductTxnDeps struct {
 }
 
 type WindowsProductTxnOpts struct {
+	JournalAllowance     WindowsProductJournalAllowance
+	journalReadEvidence  *windowsProductJournalReadEvidence
+	EntryBundle          *stagedWindowsCanonicalEntrySetV2
 	Context              context.Context
 	EntrySet             *stagedWindowsCanonicalEntrySetV1
 	CanonicalEntryPath   string
@@ -581,6 +594,10 @@ type WindowsProductTxnOpts struct {
 }
 
 type windowsProductPreparedTxn struct {
+	journalAllowance      WindowsProductJournalAllowance
+	journalContext        context.Context
+	entryBundle           *windowsCanonicalEntryBundlePreparedV2
+	journalWriterEntered  bool
 	entrySet              *windowsCanonicalEntrySetPrepared
 	deps                  WindowsProductTxnDeps
 	staged                binaryadmission.WindowsArtifact
@@ -602,10 +619,11 @@ type windowsProductPreparedTxn struct {
 // WindowsProductTxn is the sole V3 writer for canonical product, task,
 // recovery, receipt, cleanup, and committed-event state.
 type WindowsProductTxn struct {
-	Opts             WindowsProductTxnOpts
-	prepared         *windowsProductPreparedTxn
-	prepareError     error
-	constructorStore interface{ Close() error }
+	journalReadEvidence *windowsProductJournalReadEvidence
+	Opts                WindowsProductTxnOpts
+	prepared            *windowsProductPreparedTxn
+	prepareError        error
+	constructorStore    interface{ Close() error }
 }
 
 // inspectWindowsProductRecoveryLeaves observes both exact Product recovery
@@ -635,6 +653,9 @@ func inspectWindowsProductRecoveryLeaves(stateDir string) (present bool, err err
 }
 
 func (t *WindowsProductTxn) Close() (retErr error) {
+	if t != nil && t.Opts.EntryBundle != nil {
+		defer func() { retErr = errors.Join(retErr, closeCurrentEntryOwners(t.Opts.EntryBundle)) }()
+	}
 	if t != nil && t.Opts.EntrySet != nil && t.Opts.EntrySet.original != nil {
 		defer func() {
 			if t.Opts.EntrySet.prior != nil {
@@ -667,6 +688,11 @@ func (t *WindowsProductTxn) Close() (retErr error) {
 }
 
 func (t *WindowsProductTxn) Prepare() (retErr error) {
+	defer func() {
+		if t != nil {
+			retErr = withWindowsProductJournalEvidence(retErr, t.journalReadEvidence)
+		}
+	}()
 	if t == nil {
 		return errors.New("Windows product transaction is required")
 	}
@@ -674,9 +700,16 @@ func (t *WindowsProductTxn) Prepare() (retErr error) {
 		return t.prepareError
 	}
 	if t.prepared != nil {
-		return nil
+		return requireWindowsProductWithoutBackendHold(t.prepared.journalContext, t.Opts.StateDir)
+	}
+	binding := t.journalBinding()
+	if err := validateWindowsProductJournalOperation(binding.ctx, binding.allowance); err != nil {
+		return err
 	}
 	o := t.Opts
+	if o.EntrySet != nil && o.EntryBundle != nil {
+		return errors.New("legacy and current original entry stages coexist")
+	}
 	if o.StateDir == "" && o.ReceiptV3Path != "" {
 		o.StateDir = filepath.Dir(o.ReceiptV3Path)
 	}
@@ -694,6 +727,10 @@ func (t *WindowsProductTxn) Prepare() (retErr error) {
 	if o.Mode != WindowsProductPairModeSetup && o.Mode != WindowsProductPairModeCanonicalize && o.Mode != WindowsProductPairModeUpgrade {
 		return errors.New("Windows product transaction: valid caller mode is required")
 	}
+	if err := requireWindowsProductWithoutBackendHold(binding.ctx, o.StateDir); err != nil {
+		return err
+	}
+	o.Deps.journal = binding
 	d := withWindowsProductDefaults(o.Deps)
 	if d.PublishCommitted == nil {
 		return errors.New("Windows product transaction: committed publisher is required")
@@ -701,7 +738,18 @@ func (t *WindowsProductTxn) Prepare() (retErr error) {
 	var staged binaryadmission.WindowsArtifact
 	var productPrior productPairFileSnapshot
 	var err error
-	if o.EntrySet != nil {
+	if o.EntryBundle != nil {
+		if o.Context == nil || o.EntryBundle.original == nil {
+			return errors.New("original current context and stage required")
+		}
+		snapshot, readErr := o.EntryBundle.original.Snapshot()
+		if readErr != nil {
+			return readErr
+		}
+		staged = snapshot.ProductArtifact
+		staged.Path = o.StagedProduct
+		productPrior, err = currentPriorSnapshot(o.Context, o.EntryBundle, o.ProductPath)
+	} else if o.EntrySet != nil {
 		if o.Context == nil || o.EntrySet.original == nil {
 			return errors.New("original complete-set context and stage are required")
 		}
@@ -763,8 +811,12 @@ func (t *WindowsProductTxn) Prepare() (retErr error) {
 	if err != nil {
 		return err
 	}
+	bundleState, bundleArm, err := prepareCanonicalEntryBundle(o, id)
+	if err != nil {
+		return err
+	}
 	productAsides := []windowsProductRecoveryAsideV3{}
-	if entryArm == nil || entryArm.PayloadDirectory.PriorPresent {
+	if bundleArm == nil && (entryArm == nil || entryArm.PayloadDirectory.PriorPresent) {
 		productAsides, err = snapshotWindowsProductAsides(o.ProductPath, d)
 		if err != nil {
 			return fmt.Errorf("inventory canonical product asides: %w", err)
@@ -778,12 +830,15 @@ func (t *WindowsProductTxn) Prepare() (retErr error) {
 	if entryState != nil {
 		productDisposition = windowsCanonicalSetDisposition(productPrior, entryState, staged.SHA256)
 	}
+	if bundleArm != nil {
+		productDisposition = currentBundleDisposition(bundleArm)
+	}
 
 	disposition := windowsProductPairDispositionV1{
 		CLI:        productDisposition,
 		Windowless: windowsProductTargetIdentical,
 	}
-	if entryState != nil && o.Mode != WindowsProductPairModeUpgrade {
+	if (entryState != nil || bundleState != nil) && o.Mode != WindowsProductPairModeUpgrade {
 		if windowsProductPairDispositionNeedsReplacement(disposition) {
 			return ErrWindowsProductPairReplacementRequiresUpgrade
 		}
@@ -793,8 +848,9 @@ func (t *WindowsProductTxn) Prepare() (retErr error) {
 		entryArm.PayloadDirectory.CreationEntered = true
 	}
 	journal := windowsProductRecoveryJournalV3{
-		EntrySet: entryArm,
-		Schema:   WindowsProductRecoverySchemaV3, TransactionID: id,
+		EntryBundle: bundleArm,
+		EntrySet:    entryArm,
+		Schema:      WindowsProductRecoverySchemaV3, TransactionID: id,
 		Phase: WindowsProductRecoveryPrepared, Mode: o.Mode,
 		Product: windowsProductRecoveryArtifactV3{
 			Target: o.ProductPath, PriorPresent: productPrior.present,
@@ -830,9 +886,10 @@ func (t *WindowsProductTxn) Prepare() (retErr error) {
 	}
 	t.Opts = o
 	t.prepared = &windowsProductPreparedTxn{
+		journalAllowance: binding.allowance, journalContext: binding.ctx,
 		deps: d, staged: staged, productPrior: productPrior, legacyPrior: legacyPrior,
 		receiptV3Prior: v3Prior, receiptV2Prior: v2Prior, journal: journal,
-		disposition: disposition, entrySet: entryState,
+		disposition: disposition, entrySet: entryState, entryBundle: bundleState,
 	}
 	transferred := false
 	defer func() {
@@ -842,16 +899,59 @@ func (t *WindowsProductTxn) Prepare() (retErr error) {
 		if entryState != nil {
 			retErr = errors.Join(retErr, t.settleUnpublishedCanonicalPreparation(transferred))
 		}
+		if bundleState != nil {
+			retErr = errors.Join(retErr, t.settleUnpublishedCurrentPreparation(transferred))
+		}
 		// A failed preparation keeps its error but never arms GUI stop or
 		// promotion. Native owners were released above; durable recovery inputs
 		// remain available through the journal to a fresh recovery owner.
 		t.prepareError = retErr
-		t.prepared = nil
+		if bundleState == nil {
+			t.prepared = nil
+		}
 	}()
+	if bundleState != nil {
+		if err := t.receiveOriginalMemberDirectories(); err != nil {
+			return err
+		}
+		attempt := t.prepared.journal
+		arm := *attempt.EntryBundle
+		arm.Bundle.Disposition.State = "transferred"
+		arm.Bundle.Disposition.Transferred = true
+		attempt.EntryBundle = &arm
+		frozen, err := encodeWindowsProductRecoveryJournalV3(attempt)
+		if err != nil {
+			return err
+		}
+		if err := admitWindowsProductRecoveryJournalBytes(binding.ctx, binding.allowance, frozen); err != nil {
+			return err
+		}
+		bundleState.firstJournalBytes = append([]byte(nil), frozen...)
+		snapshot, err := o.EntryBundle.original.TakeForTransaction(o.Context, o.CanonicalEntryPath)
+		if err != nil {
+			return err
+		}
+		transferred = true
+		t.prepared.journal.EntryBundle.Bundle.Disposition = arm.Bundle.Disposition
+		if !reflect.DeepEqual(snapshot, bundleState.snapshot) {
+			return errors.New("current stage changed during original disposition transfer")
+		}
+		if err := o.Context.Err(); err != nil {
+			return err
+		}
+	}
 	if entryState != nil {
 		if err := t.receiveOriginalPayloadDirectory(); err != nil {
 			return err
 		}
+		frozen, err := encodeWindowsProductRecoveryJournalV3(t.prepared.journal)
+		if err != nil {
+			return err
+		}
+		if err := admitWindowsProductRecoveryJournalBytes(binding.ctx, binding.allowance, frozen); err != nil {
+			return err
+		}
+
 		snapshot, paths, err := o.EntrySet.original.TakeForTransaction(o.Context, o.CanonicalEntryPath)
 		if err != nil {
 			return err
@@ -867,10 +967,21 @@ func (t *WindowsProductTxn) Prepare() (retErr error) {
 	if err := t.persistProductJournal(); err != nil {
 		return fmt.Errorf("%w: prepare V3 journal: %w", ErrWindowsProductPairRecoveryPrepare, err)
 	}
+	if bundleState != nil {
+		if err := o.Context.Err(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
 func (t *WindowsProductTxn) Run(ctx context.Context) (result WindowsProductCommitted, retErr error) {
+	defer func() {
+		if t != nil {
+			result.journalReadEvidence = t.journalReadEvidence
+			retErr = withWindowsProductJournalEvidence(retErr, t.journalReadEvidence)
+		}
+	}()
 	var tasks WindowsProductTaskTxn
 	if t != nil {
 		tasks = t.Opts.Tasks
@@ -923,7 +1034,11 @@ func (t *WindowsProductTxn) Run(ctx context.Context) (result WindowsProductCommi
 	if err := t.ensureCanonicalPayloadDirectory(); err != nil {
 		return WindowsProductCommitted{}, t.rollback(err)
 	}
-	if windowsProductTargetDisposition(p.productPrior, p.staged.SHA256) != windowsProductTargetIdentical {
+	if p.entryBundle != nil {
+		if err := t.promoteCurrentEntryBundle(ctx); err != nil {
+			return WindowsProductCommitted{}, t.rollback(err)
+		}
+	} else if windowsProductTargetDisposition(p.productPrior, p.staged.SHA256) != windowsProductTargetIdentical {
 		promotion, err := t.promoteProductOriginal(ctx)
 		p.productPromotion = rollbackProductPairPromotion(promotion, p.productPrior)
 		if err != nil {
@@ -933,11 +1048,13 @@ func (t *WindowsProductTxn) Run(ctx context.Context) (result WindowsProductCommi
 			return WindowsProductCommitted{}, t.rollback(fmt.Errorf("verify retained product prior: %w", err))
 		}
 	}
-	if err := fault(WindowsProductStageProductPromoted); err != nil {
-		return WindowsProductCommitted{}, t.rollback(err)
+	if p.entryBundle == nil {
+		if err := fault(WindowsProductStageProductPromoted); err != nil {
+			return WindowsProductCommitted{}, t.rollback(err)
+		}
 	}
 	readBack := p.staged
-	if p.entrySet == nil {
+	if p.entrySet == nil && p.entryBundle == nil {
 		var err error
 		readBack, err = p.deps.AdmitProduct(binaryadmission.WindowsArtifact{Path: o.ProductPath, Role: binaryadmission.WindowsArtifactRoleProduct, SHA256: p.staged.SHA256})
 		if err != nil || !sameWindowsProductIdentity(p.staged, readBack) {
@@ -1085,10 +1202,15 @@ func withWindowsProductDefaults(d WindowsProductTxnDeps) WindowsProductTxnDeps {
 	if d.AdmitEntrySet == nil {
 		d.AdmitEntrySet = readCanonicalEntrySet
 	}
+	if d.AdmitEntryBundle == nil {
+		d.AdmitEntryBundle = readCanonicalEntryBundle
+	}
 	pair := withWindowsProductPairDefaults(WindowsProductPairTxnDeps{
-		Promote: d.Promote, RestorePromotion: d.RestorePromotion,
+		journal: d.journal, journalReaderDefault: d.journalReaderDefault,
+		ReadRecoveryJournal: d.ReadRecoveryJournal,
+		Promote:             d.Promote, RestorePromotion: d.RestorePromotion,
 		WriteReceipt: d.WriteReceipt, ReadReceipt: d.ReadReceipt,
-		WriteRecoveryJournal: d.WriteRecoveryJournal, ReadRecoveryJournal: d.ReadRecoveryJournal,
+		WriteRecoveryJournal:  d.WriteRecoveryJournal,
 		RemoveRecoveryJournal: d.RemoveRecoveryJournal,
 		ListGeneratedAsides:   d.ListGeneratedAsides, Now: d.Now,
 	})
@@ -1104,6 +1226,7 @@ func withWindowsProductDefaults(d WindowsProductTxnDeps) WindowsProductTxnDeps {
 	d.ReadReceipt = pair.ReadReceipt
 	d.WriteRecoveryJournal = pair.WriteRecoveryJournal
 	d.ReadRecoveryJournal = pair.ReadRecoveryJournal
+	d.journalReaderDefault = pair.journalReaderDefault
 	d.RemoveRecoveryJournal = pair.RemoveRecoveryJournal
 	d.ListGeneratedAsides = pair.ListGeneratedAsides
 	d.Now = pair.Now
@@ -1219,7 +1342,13 @@ func (t *WindowsProductTxn) persistProductJournal() error {
 	if err != nil {
 		return err
 	}
-	if err := persistEncodedWindowsProductRecoveryJournalV3(filepath.Join(t.Opts.StateDir, WindowsProductRecoveryFileLeafV3), p.journal, raw, p.deps.WriteRecoveryJournal, p.deps.ReadRecoveryJournal); err != nil {
+	if p.entryBundle != nil && !p.journalWriterEntered {
+		if !bytes.Equal(raw, p.entryBundle.firstJournalBytes) {
+			return errors.New("first current journal differs from bytes frozen before Take")
+		}
+		p.journalWriterEntered = true
+	}
+	if err := persistEncodedWindowsProductRecoveryJournalV3(p.journalContext, p.journalAllowance, filepath.Join(t.Opts.StateDir, WindowsProductRecoveryFileLeafV3), p.journal, raw, p.deps.WriteRecoveryJournal, p.deps.ReadRecoveryJournal); err != nil {
 		return err
 	}
 	p.lastJournalBytes = append([]byte(nil), raw...)
@@ -1308,6 +1437,9 @@ func (t *WindowsProductTxn) rollback(trigger error) error {
 			return errors.Join(trigger, fmt.Errorf("%w: settle transaction-created successor before inverse: %w", ErrWindowsProductRecoveryPending, err))
 		}
 		p.successorLaunch = nil
+	}
+	if p.entryBundle != nil {
+		return t.rollbackCurrentEntryBundle(trigger)
 	}
 	if err := t.withdrawCanonicalSuccessorEntry(); err != nil {
 		return errors.Join(trigger, fmt.Errorf("%w: withdraw canonical entry: %w", ErrWindowsProductRecoveryPending, err))
@@ -1429,6 +1561,15 @@ func verifyBoundWindowsProductFile(path string, prior productPairFileSnapshot, t
 
 func (t *WindowsProductTxn) finishProductCommit(_ context.Context, artifact binaryadmission.WindowsArtifact, forwardReplay bool) (WindowsProductCommitted, error) {
 	o, p := t.Opts, t.prepared
+	if p.entryBundle != nil {
+		p.journal.EntryBundle.Bundle.Disposition.State = "committed"
+		if err := t.cleanupCurrentEntryFiles(true, true); err != nil {
+			return WindowsProductCommitted{}, errors.Join(ErrWindowsProductCleanupPending, err)
+		}
+		if err := closeCurrentEntryOwners(o.EntryBundle); err != nil {
+			return WindowsProductCommitted{}, errors.Join(ErrWindowsProductCleanupPending, err)
+		}
+	}
 	if p.entrySet != nil {
 		if err := t.cleanupCanonicalOwnedFiles(true); err != nil {
 			return WindowsProductCommitted{}, fmt.Errorf("%w: original native cleanup: %w", ErrWindowsProductCleanupPending, err)
@@ -1440,6 +1581,19 @@ func (t *WindowsProductTxn) finishProductCommit(_ context.Context, artifact bina
 	if p.entrySet != nil && p.entrySet.directory != nil {
 		if err := p.entrySet.directory.Close(); err != nil {
 			return WindowsProductCommitted{}, fmt.Errorf("%w: original payload directory close: %w", ErrWindowsProductCleanupPending, err)
+		}
+	}
+	if p.journal.EntryBundle != nil {
+		targets, err := binaryadmission.CanonicalEntryTargetsV2(p.journal.EntryBundle.CanonicalEntry.Target)
+		if err != nil {
+			return WindowsProductCommitted{}, err
+		}
+		actual, err := p.deps.AdmitEntryBundle(context.WithoutCancel(o.Context), targets, p.journal.EntryBundle.Expected)
+		if err != nil {
+			return WindowsProductCommitted{}, err
+		}
+		if !reflect.DeepEqual(actual, p.journal.EntryBundle.Expected) {
+			return WindowsProductCommitted{}, errors.New("current committed cohort readback differs")
 		}
 	}
 	if p.journal.EntrySet != nil {
@@ -1474,6 +1628,10 @@ func (t *WindowsProductTxn) finishProductCommit(_ context.Context, artifact bina
 		},
 		TaskSetSHA256: p.journal.TaskSetSHA256, Retired: retired, InstalledAt: now,
 	}
+	if p.journal.EntryBundle != nil {
+		receipt.Admission = UpgradeAdmissionCanonicalEntryProductV2
+		receipt.EntryBundle = currentEntrySetReceipt(p.journal)
+	}
 	if p.journal.EntrySet != nil {
 		receipt.Admission = UpgradeAdmissionCanonicalEntryProductV1
 		receipt.EntrySet = canonicalEntrySetReceipt(p.journal)
@@ -1505,20 +1663,26 @@ func (t *WindowsProductTxn) finishProductCommit(_ context.Context, artifact bina
 	}
 	receiptDigest := fmt.Sprintf("%x", sha256.Sum256(readBack))
 	event := WindowsProductCommitEvent{
-		EntrySet: receipt.EntrySet,
-		Schema:   UpgradeReceiptSchemaV3, TransactionID: p.journal.TransactionID,
+		EntrySet: receipt.EntrySet, EntryBundle: receipt.EntryBundle,
+		Schema: UpgradeReceiptSchemaV3, TransactionID: p.journal.TransactionID,
 		Mode: o.Mode, Artifact: receipt.Artifact, TaskSetSHA256: p.journal.TaskSetSHA256,
 		Retired: retired, ReceiptSHA256: receiptDigest, InstalledAt: now,
 	}
 	eventDigest, err := p.deps.PublishCommitted(event)
 	committed := WindowsProductCommitted{
-		Schema: UpgradeReceiptSchemaV3, Outcome: WindowsProductPairCommittedOutcome,
+		journalReadEvidence: t.journalReadEvidence,
+		Schema:              UpgradeReceiptSchemaV3, Outcome: WindowsProductPairCommittedOutcome,
 		Artifact: artifact, TaskSetSHA256: p.journal.TaskSetSHA256,
-		ReceiptSHA256: receiptDigest, EventSHA256: eventDigest,
+		ReceiptSHA256: receiptDigest, EventSHA256: eventDigest, EntrySet: receipt.EntrySet, EntryBundle: receipt.EntryBundle,
 	}
 	if err != nil {
 		committed.Outcome = WindowsProductPairCommittedObservabilityFailed
 		return committed, fmt.Errorf("%w: receipt_sha256=%s: %w", ErrWindowsProductPairCommittedObservabilityFailed, receiptDigest, err)
+	}
+	if p.journal.EntryBundle != nil {
+		p.journal.EntryBundle.Bundle.Disposition.State = "settled"
+		p.journal.EntryBundle.Bundle.Disposition.OriginalOwnerPending = false
+		p.journal.EntryBundle.Bundle.Disposition.DispositionPending = false
 	}
 	p.journal.Phase = WindowsProductRecoverySettledCommit
 	if err := t.persistProductJournal(); err != nil {
@@ -1537,6 +1701,9 @@ func (t *WindowsProductTxn) finishProductCommit(_ context.Context, artifact bina
 }
 
 func cleanupWindowsProductTransactionFiles(o WindowsProductTxnOpts, p *windowsProductPreparedTxn, forwardReplay bool) error {
+	if p.journal.EntryBundle != nil {
+		return cleanupCurrentEntryLegacyFiles(o, p, forwardReplay)
+	}
 	if p.journal.EntrySet != nil {
 		return cleanupCanonicalEntryLegacyFiles(o, p, forwardReplay)
 	}
@@ -1660,6 +1827,8 @@ type WindowsProductPairPromotion struct {
 }
 
 type WindowsProductPairTxnDeps struct {
+	journal               windowsProductJournalBinding
+	journalReaderDefault  bool
 	AdmitPair             func(cli, windowless binaryadmission.WindowsArtifact) (binaryadmission.WindowsProductPair, error)
 	Promote               func(src, dst, newSHA256 string) (WindowsProductPairPromotion, error)
 	RestorePromotion      func(WindowsProductPairPromotion) (string, error)
@@ -1712,6 +1881,9 @@ func inspectWindowsProductPreflight(txn *WindowsProductTxn) (windowsProductPairP
 		return windowsProductPairPreflightV1{}, errors.New("Windows product transaction is required")
 	}
 	o := txn.Opts
+	if o.EntryBundle != nil {
+		return inspectCurrentEntryPreflight(o)
+	}
 	if o.EntrySet != nil {
 		return inspectWindowsCanonicalEntryPreflight(o)
 	}
@@ -1979,8 +2151,9 @@ func withWindowsProductPairDefaults(d WindowsProductPairTxnDeps) WindowsProductP
 	if d.WriteRecoveryJournal == nil {
 		d.WriteRecoveryJournal = api.WriteStateFileBytesAtomic
 	}
-	if d.ReadRecoveryJournal == nil {
-		d.ReadRecoveryJournal = api.ReadStateFileInodeAnchored
+	if d.ReadRecoveryJournal == nil || d.journalReaderDefault {
+		d.ReadRecoveryJournal = d.journal.reader
+		d.journalReaderDefault = true
 	}
 	if d.RemoveRecoveryJournal == nil {
 		d.RemoveRecoveryJournal = func(path string) error {
@@ -2046,6 +2219,9 @@ func persistWindowsProductPairRecoveryJournal(path string, journal windowsProduc
 		return err
 	}
 	raw = append(raw, '\n')
+	if err := admitWindowsProductRecoveryJournalBytes(d.journal.ctx, d.journal.allowance, raw); err != nil {
+		return err
+	}
 	if err := d.WriteRecoveryJournal(path, raw); err != nil {
 		return err
 	}
@@ -2129,9 +2305,6 @@ func decodeWindowsProductPairRecoveryJournalV2(raw []byte) (windowsProductPairRe
 }
 
 func decodeWindowsProductRecoveryJournalV3(raw []byte) (windowsProductRecoveryJournalV3, error) {
-	if err := validateCanonicalEntryArmJSON(raw); err != nil {
-		return windowsProductRecoveryJournalV3{}, err
-	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	var journal windowsProductRecoveryJournalV3
@@ -2435,15 +2608,18 @@ func encodeWindowsProductRecoveryJournalV3(journal windowsProductRecoveryJournal
 	return append(raw, '\n'), nil
 }
 
-func persistWindowsProductRecoveryJournalV3(path string, journal windowsProductRecoveryJournalV3, write func(string, []byte) error, read func(string) ([]byte, error)) error {
+func persistWindowsProductRecoveryJournalV3(ctx context.Context, allowance WindowsProductJournalAllowance, path string, journal windowsProductRecoveryJournalV3, write func(string, []byte) error, read func(string) ([]byte, error)) error {
 	raw, err := encodeWindowsProductRecoveryJournalV3(journal)
 	if err != nil {
 		return err
 	}
-	return persistEncodedWindowsProductRecoveryJournalV3(path, journal, raw, write, read)
+	return persistEncodedWindowsProductRecoveryJournalV3(ctx, allowance, path, journal, raw, write, read)
 }
 
-func persistEncodedWindowsProductRecoveryJournalV3(path string, journal windowsProductRecoveryJournalV3, raw []byte, write func(string, []byte) error, read func(string) ([]byte, error)) error {
+func persistEncodedWindowsProductRecoveryJournalV3(ctx context.Context, allowance WindowsProductJournalAllowance, path string, journal windowsProductRecoveryJournalV3, raw []byte, write func(string, []byte) error, read func(string) ([]byte, error)) error {
+	if err := admitWindowsProductRecoveryJournalBytes(ctx, allowance, raw); err != nil {
+		return err
+	}
 	if err := write(path, raw); err != nil {
 		return err
 	}

@@ -215,6 +215,89 @@ func TestCodexConfiguredSourceIssuesAndReentersBoundFactory(t *testing.T) {
 	})
 }
 
+func TestCodexConfiguredSourceReceivesSameProjectSharedStdioTarget(t *testing.T) {
+	client, readIO, _, globalPath, _ := configuredSourceFixture(t)
+	project, bound := client.projectCodex()
+	if !bound {
+		t.Fatal("fixture project owner is unbound")
+	}
+	const projectON = "[mcp_servers.graphify]\nenabled = true\n"
+	const unrelated = "\n# Keep the unrelated entry byte-for-byte.\n[mcp_servers.unrelated]\ncommand = 'synthetic-other'\nenabled = false\n"
+	target := MCPEntry{Name: "graphify", RelayExePath: "mcphub", RelayURL: "http://127.0.0.1:9125/mcp/graphify"}
+
+	globalBytes, err := os.ReadFile(globalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	globalBefore := string(globalBytes) + unrelated
+	if err := os.WriteFile(globalPath, []byte(globalBefore), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(project.path, []byte(projectON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// The fixture still checks the owner's native getter invocation. Supply
+	// only its captured JSON, since launching Codex is outside this test.
+	native := strings.Replace(configuredStdioFixture, `"enabled":false`, `"enabled":true`, 1)
+	baseRun := readIO.run
+	readIO.run = func(ctx context.Context, invocation process.StrictRunInvocation) (process.StrictRunResult, error) {
+		result, err := baseRun(ctx, invocation)
+		result.Stdout.Prefix = []byte(native)
+		result.Stdout.Bytes = len(result.Stdout.Prefix)
+		return result, err
+	}
+	original, err := client.readConfiguredProjectProfile(t.Context(), target.Name, readIO)
+	if err != nil || original == nil {
+		t.Fatalf("read original configured source: %v", err)
+	}
+	if enabled, err := original.ConfiguredEnabled(); err != nil || !enabled {
+		t.Fatalf("original configured fixture did not retain project ON: %v", err)
+	}
+
+	globalRelay := strings.Replace(globalBefore, "command = 'synthetic-reader'\n",
+		fmt.Sprintf("command = 'mcphub'\nargs = ['relay', '--url', %q]\n", target.RelayURL), 1)
+	if err := os.WriteFile(globalPath, []byte(globalRelay), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	native = strings.Replace(native, `"command":"synthetic-reader","args":[]`,
+		fmt.Sprintf(`"command":"mcphub","args":["relay","--url",%q]`, target.RelayURL), 1)
+
+	fresh, err := client.readConfiguredProjectProfile(t.Context(), target.Name, readIO)
+	if err != nil || fresh == nil {
+		t.Fatalf("read fresh relay source: %v", err)
+	}
+	if got, err := original.receiveConfiguredSharedStdioTarget(fresh, target); err != nil || got != fresh {
+		t.Fatalf("same-project PATH relay readback refused: %v", err)
+	}
+	verifyConfig := func(path, want string) {
+		t.Helper()
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(raw) != want {
+			t.Fatal("received readback changed configuration bytes")
+		}
+	}
+	verifyConfig(globalPath, globalRelay)
+	verifyConfig(project.path, projectON)
+
+	changedProject := projectON + "\n# Project bytes changed without changing the configured flag.\n"
+	if err := os.WriteFile(project.path, []byte(changedProject), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	drifted, err := client.readConfiguredProjectProfile(t.Context(), target.Name, readIO)
+	if err != nil || drifted == nil {
+		t.Fatalf("read fresh changed-project source: %v", err)
+	}
+	if got, err := original.receiveConfiguredSharedStdioTarget(drifted, target); got != nil || !errors.Is(err, ErrProjectClientPlanStale) {
+		t.Fatalf("changed project bytes did not refuse as stale: %v", err)
+	}
+	verifyConfig(globalPath, globalRelay)
+	verifyConfig(project.path, changedProject)
+}
+
 func configuredNPMFixture(t *testing.T, readIO codexConfiguredReadIO) (string, string, string) {
 	t.Helper()
 	native, err := readIO.lookup("codex")

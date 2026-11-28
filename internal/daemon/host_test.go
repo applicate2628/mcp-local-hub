@@ -331,17 +331,66 @@ time.sleep(0.5)
 	}
 }
 
-// host rewrites ids internally to route them to one shared subprocess.
-//
-// The echo subprocess returns the request unchanged — so we can assert that
-// the id we sent is the id we got back, per-client.
+func TestStdioResponseID(t *testing.T) {
+	tests := []struct {
+		name       string
+		line       string
+		wantID     int64
+		isResponse bool
+	}{
+		{
+			name:       "null result",
+			line:       `{"jsonrpc":"2.0","id":7,"result":null}`,
+			wantID:     7,
+			isResponse: true,
+		},
+		{
+			name:       "error reply",
+			line:       `{"jsonrpc":"2.0","id":8,"error":{"code":-32601,"message":"Method not found"}}`,
+			wantID:     8,
+			isResponse: true,
+		},
+		{
+			name: "backend request",
+			line: `{"jsonrpc":"2.0","id":"backend","method":"ping"}`,
+		},
+		{
+			name: "notification",
+			line: `{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		},
+		{
+			name: "unsupported protocol version",
+			line: `{"jsonrpc":"1.0","id":9,"result":{}}`,
+		},
+		{
+			name: "unknown request ID",
+			line: `{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"Parse error"}}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			id, isResponse, err := stdioResponseID([]byte(tt.line))
+			if err != nil || id != tt.wantID || isResponse != tt.isResponse {
+				t.Fatalf("stdioResponseID = (%d, %t, %v), want (%d, %t, nil)", id, isResponse, err, tt.wantID, tt.isResponse)
+			}
+		})
+	}
+}
+
+// TestHostHTTPIDMultiplexing verifies that each caller gets back its original
+// id after the subprocess responds to the Hub-assigned id.
 func TestHostHTTPIDMultiplexing(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	h, err := NewStdioHost(HostConfig{
-		Command: echoSubprocCommand(t),
-		Args:    echoSubprocArgs(),
+		Command: daemonTestPython(t),
+		Args: []string{"-u", "-c", `import json, sys
+for line in sys.stdin:
+    request = json.loads(line)
+    if "id" in request:
+        print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": {}}), flush=True)
+`},
 	})
 	if err != nil {
 		t.Fatalf("NewStdioHost: %v", err)
