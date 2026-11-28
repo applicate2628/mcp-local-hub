@@ -1,0 +1,415 @@
+{
+  "schema": 1,
+  "component": "reader",
+  "physical_source_commit": "858812988833a84368c60fba1540ae601155fa71",
+  "physical_source_tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+  "overlay_paths": 13,
+  "runner_sha256": "1008740b5420f9a85b1ae2aa9e62ab1691d12f228eec0cbcaaba7d1e32fa7560",
+  "manifest_sha256": {
+    "control": "ea610e8cda77d2ebe2cf4accbfd7298443a679dc4d12cbe49ab28ee40a1363fc",
+    "candidate": "65629214015168b755c9729bd6c83936832e10deaa51a7e3021cbdd6a1f10bb3"
+  },
+  "phases": [
+    {
+      "phase": "reader-build",
+      "receipt_path": "qualification/raw/reader-build/receipt.json",
+      "receipt_sha256": "1882bcef8c737b6e6891ca522f53dbd726ca4188f6eab5546bebb588699d7e77",
+      "started_moscow": "2026-11-22T13:41:59.752495+03:00",
+      "finished_moscow": "2026-11-22T13:42:34.853044+03:00",
+      "source_admission": {
+        "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+        "matched_files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "2086845d9b610a74da049e4524af48df4b0d07458f31b3ad82a42739015c8345",
+        "inventory_schema": "ls-tree order; JSON compact ASCII rows [relative_path, git_blob, byte_length]"
+      },
+      "commands": [
+        {
+          "label": "reader-build-format",
+          "executable": "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+          "args": [
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\intent_audit_caller_oracle_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\main_helper_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\main_helper_dispatch_validation_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\managed_backend_install.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\managed_backend_reader_failures_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\secrets_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_common.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_failures_posix_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_failures_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_failures_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_posix.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_windows.go"
+          ],
+          "exit_code": 0,
+          "seconds": 0.020813099923543632,
+          "settled": true,
+          "timed_out": false
+        },
+        {
+          "label": "reader-build",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "build",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\evidence\\reader-build\\overlay.json",
+            "-p=2",
+            "./..."
+          ],
+          "exit_code": 0,
+          "seconds": 26.74871069996152,
+          "settled": true,
+          "timed_out": false
+        }
+      ]
+    },
+    {
+      "phase": "reader-candidate",
+      "receipt_path": "qualification/raw/reader-candidate/receipt.json",
+      "receipt_sha256": "df39040621fad825ab672287200656841a57587a2f8b5a4ea1b5ecd19046cc2d",
+      "started_moscow": "2026-11-22T13:40:48.818451+03:00",
+      "finished_moscow": "2026-11-22T13:41:46.610340+03:00",
+      "source_admission": {
+        "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+        "matched_files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "2086845d9b610a74da049e4524af48df4b0d07458f31b3ad82a42739015c8345",
+        "inventory_schema": "ls-tree order; JSON compact ASCII rows [relative_path, git_blob, byte_length]"
+      },
+      "commands": [
+        {
+          "label": "reader-candidate-format",
+          "executable": "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+          "args": [
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\intent_audit_caller_oracle_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\main_helper_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\main_helper_dispatch_validation_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\managed_backend_install.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\managed_backend_reader_failures_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\secrets_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_common.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_failures_posix_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_failures_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_failures_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_posix.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_windows.go"
+          ],
+          "exit_code": 0,
+          "seconds": 0.019430799991823733,
+          "settled": true,
+          "timed_out": false
+        },
+        {
+          "label": "reader-candidate",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\evidence\\reader-candidate\\overlay.json",
+            "-p=2",
+            "-race",
+            "-count=1",
+            "-timeout=90s",
+            "-json",
+            "-run",
+            "^(TestReadStateBeneathRootRetainsPrimaryAndCloseFailures|TestReadStateBeneathRootParentCloseConsumedOnce|TestStateReadBeneathRootAbsenceRequiresOnlyMissing|TestReadStateBeneathRootMissingRetainsParentCloseFailure|TestCompleteStateReadCloseZeroesBytes|TestPrepareOwnedBackendCompensationRejectsIncompleteAbsence|TestAcquireNoManagedBackendConsumersRetainsReadCloseFailure|TestReadClientConfigBackupBeneathRootNoFollowPolicy)$",
+            "./internal/api"
+          ],
+          "exit_code": 0,
+          "seconds": 49.78169899992645,
+          "settled": true,
+          "timed_out": false,
+          "terminal_counts": {
+            "pass": 31,
+            "fail": 0,
+            "skip": 0
+          },
+          "test_counts": {
+            "pass": 30,
+            "fail": 0,
+            "skip": 0
+          },
+          "package_counts": {
+            "pass": 1,
+            "fail": 0,
+            "skip": 0
+          },
+          "root_passes": [
+            "TestPrepareOwnedBackendCompensationRejectsIncompleteAbsence",
+            "TestAcquireNoManagedBackendConsumersRetainsReadCloseFailure",
+            "TestReadClientConfigBackupBeneathRootNoFollowPolicy",
+            "TestReadStateBeneathRootRetainsPrimaryAndCloseFailures",
+            "TestReadStateBeneathRootParentCloseConsumedOnce",
+            "TestStateReadBeneathRootAbsenceRequiresOnlyMissing",
+            "TestReadStateBeneathRootMissingRetainsParentCloseFailure",
+            "TestCompleteStateReadCloseZeroesBytes"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "reader-control",
+      "receipt_path": "qualification/raw/reader-control/receipt.json",
+      "receipt_sha256": "a539740d4d6d64ec98846c24ce069770db594722ee8c1e98ec114137d64bb32f",
+      "started_moscow": "2026-11-22T13:39:33.036300+03:00",
+      "finished_moscow": "2026-11-22T13:40:37.241356+03:00",
+      "source_admission": {
+        "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+        "matched_files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "2086845d9b610a74da049e4524af48df4b0d07458f31b3ad82a42739015c8345",
+        "inventory_schema": "ls-tree order; JSON compact ASCII rows [relative_path, git_blob, byte_length]"
+      },
+      "commands": [
+        {
+          "label": "reader-control-format",
+          "executable": "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+          "args": [
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\control\\candidate\\internal\\api\\intent_audit_caller_oracle_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\control\\candidate\\internal\\api\\main_helper_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\control\\candidate\\internal\\api\\main_helper_dispatch_validation_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\control\\candidate\\internal\\api\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\control\\candidate\\internal\\api\\managed_backend_install.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\control\\candidate\\internal\\api\\managed_backend_reader_failures_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\control\\candidate\\internal\\api\\secrets_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\control\\candidate\\internal\\api\\state_read_beneath_root_common.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\control\\candidate\\internal\\api\\state_read_beneath_root_failures_posix_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\control\\candidate\\internal\\api\\state_read_beneath_root_failures_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\control\\candidate\\internal\\api\\state_read_beneath_root_failures_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\control\\candidate\\internal\\api\\state_read_beneath_root_posix.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\control\\candidate\\internal\\api\\state_read_beneath_root_windows.go"
+          ],
+          "exit_code": 0,
+          "seconds": 0.02029949997086078,
+          "settled": true,
+          "timed_out": false
+        },
+        {
+          "label": "reader-control",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\evidence\\reader-control\\overlay.json",
+            "-p=2",
+            "-race",
+            "-count=1",
+            "-timeout=90s",
+            "-json",
+            "-run",
+            "^(TestReadStateBeneathRootRetainsPrimaryAndCloseFailures|TestReadStateBeneathRootParentCloseConsumedOnce|TestPrepareOwnedBackendCompensationRejectsIncompleteAbsence|TestAcquireNoManagedBackendConsumersRetainsReadCloseFailure)$/^(stat-and-both-closes|missing-and-close-failure-preserves-empty-root)$",
+            "./internal/api"
+          ],
+          "exit_code": 1,
+          "seconds": 55.27395260008052,
+          "settled": true,
+          "timed_out": false,
+          "terminal_counts": {
+            "pass": 0,
+            "fail": 7,
+            "skip": 0
+          },
+          "test_counts": {
+            "pass": 0,
+            "fail": 6,
+            "skip": 0
+          },
+          "package_counts": {
+            "pass": 0,
+            "fail": 1,
+            "skip": 0
+          },
+          "root_passes": []
+        }
+      ]
+    },
+    {
+      "phase": "reader-format",
+      "receipt_path": "qualification/raw/reader-format/receipt.json",
+      "receipt_sha256": "24b457faa9aba00626d9dff9500fc22dd97b66219ef7086efcec50044d87b7af",
+      "started_moscow": "2026-11-22T13:38:55.108471+03:00",
+      "finished_moscow": "2026-11-22T13:39:03.641137+03:00",
+      "source_admission": {
+        "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+        "matched_files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "2086845d9b610a74da049e4524af48df4b0d07458f31b3ad82a42739015c8345",
+        "inventory_schema": "ls-tree order; JSON compact ASCII rows [relative_path, git_blob, byte_length]"
+      },
+      "commands": [
+        {
+          "label": "reader-version",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "version"
+          ],
+          "exit_code": 0,
+          "seconds": 0.026038700016215444,
+          "settled": true,
+          "timed_out": false
+        },
+        {
+          "label": "reader-format",
+          "executable": "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+          "args": [
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\intent_audit_caller_oracle_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\main_helper_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\main_helper_dispatch_validation_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\managed_backend_install.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\managed_backend_reader_failures_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\secrets_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_common.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_failures_posix_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_failures_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_failures_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_posix.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_windows.go"
+          ],
+          "exit_code": 0,
+          "seconds": 0.02059119998011738,
+          "settled": true,
+          "timed_out": false
+        }
+      ]
+    },
+    {
+      "phase": "reader-linux-compile",
+      "receipt_path": "qualification/raw/reader-linux-compile/receipt.json",
+      "receipt_sha256": "03a8725d11f95751575c4a3f8d0b7e23f07867b0a3b4ba4bb78de547a8be797f",
+      "started_moscow": "2026-11-22T13:45:15.817887+03:00",
+      "finished_moscow": "2026-11-22T13:46:04.121683+03:00",
+      "source_admission": {
+        "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+        "matched_files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "2086845d9b610a74da049e4524af48df4b0d07458f31b3ad82a42739015c8345",
+        "inventory_schema": "ls-tree order; JSON compact ASCII rows [relative_path, git_blob, byte_length]"
+      },
+      "commands": [
+        {
+          "label": "reader-linux-compile-format",
+          "executable": "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+          "args": [
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\intent_audit_caller_oracle_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\main_helper_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\main_helper_dispatch_validation_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\managed_backend_install.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\managed_backend_reader_failures_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\secrets_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_common.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_failures_posix_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_failures_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_failures_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_posix.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_windows.go"
+          ],
+          "exit_code": 0,
+          "seconds": 0.018809900037012994,
+          "settled": true,
+          "timed_out": false
+        },
+        {
+          "label": "reader-linux-compile",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\evidence\\reader-linux-compile\\overlay.json",
+            "-p=2",
+            "-c",
+            "-o",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\evidence\\reader-linux-compile\\reader-linux-compile.exe",
+            "./internal/api"
+          ],
+          "exit_code": 0,
+          "seconds": 39.41600949992426,
+          "settled": true,
+          "timed_out": false,
+          "compile_output_observed_by_runner": {
+            "path": "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\evidence\\reader-linux-compile\\reader-linux-compile.exe",
+            "bytes": 49690620,
+            "sha256": "a655baf38218b16c729db21769e8036cc5bfba95c944c8a65fa06af6972ecde7"
+          },
+          "compile_output_exported_or_executed": false
+        }
+      ]
+    },
+    {
+      "phase": "reader-vet",
+      "receipt_path": "qualification/raw/reader-vet/receipt.json",
+      "receipt_sha256": "c542bd28cac21a17901a8f18dbad437637e45ecac9f32025d00ad172d39aa56b",
+      "started_moscow": "2026-11-22T13:43:12.140757+03:00",
+      "finished_moscow": "2026-11-22T13:43:47.521455+03:00",
+      "source_admission": {
+        "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+        "matched_files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "2086845d9b610a74da049e4524af48df4b0d07458f31b3ad82a42739015c8345",
+        "inventory_schema": "ls-tree order; JSON compact ASCII rows [relative_path, git_blob, byte_length]"
+      },
+      "commands": [
+        {
+          "label": "reader-vet-format",
+          "executable": "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+          "args": [
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\intent_audit_caller_oracle_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\main_helper_dispatch_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\main_helper_dispatch_validation_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\main_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\managed_backend_install.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\managed_backend_reader_failures_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\secrets_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_common.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_failures_posix_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_failures_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_failures_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_posix.go",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\reader-qualification\\candidate\\candidate\\internal\\api\\state_read_beneath_root_windows.go"
+          ],
+          "exit_code": 0,
+          "seconds": 0.01955560001078993,
+          "settled": true,
+          "timed_out": false
+        },
+        {
+          "label": "reader-vet",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "vet",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\evidence\\reader-vet\\overlay.json",
+            "-p=2",
+            "./..."
+          ],
+          "exit_code": 0,
+          "seconds": 26.909773700055666,
+          "settled": true,
+          "timed_out": false
+        }
+      ]
+    }
+  ],
+  "raw_archive": {
+    "path": "raw-evidence.tar.gz",
+    "bytes": 2089967,
+    "sha256": "36667a5b1f1ebe90d274779a285f31114412f2af75a3f852d16c6e9cec4dbabf",
+    "git_blob": "8a8f2c264824288aed3a7970bb55bcd6b1a0bd5a",
+    "indexed_files": 1297,
+    "total_regular_members": 1298
+  },
+  "full_default_tests": "NOT_RUN",
+  "full_tagged_tests": "NOT_RUN",
+  "external_exact_published_head_review": "PENDING",
+  "standalone_published_tree_tested": false,
+  "whole_process_tree_deadline_or_settlement_proven": false
+}
