@@ -196,3 +196,65 @@ func TestSupervisorLivenessSweepSkipsUnusedPortOwnerSnapshot(t *testing.T) {
 		})
 	}
 }
+
+func TestSupervisorLivenessMonitorCancelsInFlightPortOwnerSnapshot(t *testing.T) {
+	stateDir, tracker, meta := seedRunningDaemons(t, 1)
+	installProductionPortOwnerProbeForSweep(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	entered := make(chan context.Context, 4)
+	release := make(chan struct{})
+	returned := make(chan error, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		startSupervisorLivenessMonitor(ctx, stateDir, sweepIntentFromMeta(meta), tracker, api.NewEventLoop(4), nil, nil, nil, func(probeCtx context.Context) (map[int]int, error) {
+			entered <- probeCtx
+			select {
+			case <-probeCtx.Done():
+				returned <- probeCtx.Err()
+				return nil, probeCtx.Err()
+			case <-release:
+				return nil, errors.New("fixture released after cancellation check")
+			}
+		})
+	}()
+	joined := false
+	defer func() {
+		cancel()
+		close(release)
+		if !joined {
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Error("monitor did not join after fixture release")
+			}
+		}
+	}()
+	var probeCtx context.Context
+	select {
+	case probeCtx = <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("monitor did not call snapshot")
+	}
+	cancel()
+	if !errors.Is(probeCtx.Err(), context.Canceled) {
+		t.Fatalf("in-flight snapshot context after owner cancellation = %v; want context.Canceled", probeCtx.Err())
+	}
+	select {
+	case err := <-returned:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("snapshot returned %v; want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("snapshot did not return on cancellation")
+	}
+	select {
+	case <-done:
+		joined = true
+	case <-time.After(2 * time.Second):
+		t.Fatal("monitor did not return after snapshot cancellation")
+	}
+	if len(entered) != 0 {
+		t.Fatal("monitor issued another snapshot after cancellation")
+	}
+}

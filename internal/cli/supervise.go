@@ -1477,7 +1477,7 @@ func runSuperviseWithIPCOptions(ctx context.Context, noIPC bool, strictMode bool
 		}
 		go func() {
 			defer guardSupervisorGoroutine(events, "supervisor-liveness-monitor", "")
-			startSupervisorLivenessMonitor(loopCtx.Done(), stateDir, intent, runtimeTracker, loop, events, squatterReapFn, f3StoppedFn)
+			startSupervisorLivenessMonitor(loopCtx, stateDir, intent, runtimeTracker, loop, events, squatterReapFn, f3StoppedFn, api.LoopbackPortOwnersSnapshotContext)
 		}()
 		// F2: quarantine parole monitor. A threshold-quarantined daemon used to
 		// stay dead "until supervisor restart"; this ticks the in-memory parole
