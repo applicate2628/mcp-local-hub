@@ -113,9 +113,25 @@ type mcpHTTPQualificationOwner struct {
 	snapshot                          MCPHTTPQualificationSnapshot
 }
 
+// http.Transport retains context values but detaches the request deadline and
+// cancellation before dialing. Bind each POST or DELETE to its own owner/budget.
+type mcpQualificationRequestContextKey struct{}
+type mcpQualificationRequestContext struct {
+	owner    *mcpHTTPQualificationOwner
+	original context.Context
+}
+
 func qualificationSHA(raw []byte) string { v := sha256.Sum256(raw); return hex.EncodeToString(v[:]) }
 func qualificationDigest(v string) bool  { b, e := hex.DecodeString(v); return e == nil && len(b) == 32 }
 func (b MCPHTTPQualificationBinding) validate(ctx context.Context, endpoint string) error {
+	if err := b.validateBinding(ctx, endpoint); err != nil {
+		return err
+	}
+	return b.EndpointSource.ValidateOriginalEndpoint(ctx, b.EndpointSHA256, b.HostStartSHA256)
+}
+
+// Static binding checks grant no live endpoint or native-close authority.
+func (b MCPHTTPQualificationBinding) validateBinding(ctx context.Context, endpoint string) error {
 	if ctx == nil || ctx.Err() != nil {
 		return errors.New("MCP_QUALIFICATION_CONTEXT_INVALID")
 	}
@@ -134,7 +150,7 @@ func (b MCPHTTPQualificationBinding) validate(ctx context.Context, endpoint stri
 	if e != nil || u.Scheme != "http" || u.User != nil || u.Hostname() != "127.0.0.1" || u.Port() == "" || u.Path != "/mcp" || u.RawQuery != "" || u.Fragment != "" || qualificationSHA([]byte(endpoint)) != b.EndpointSHA256 {
 		return errors.New("MCP_QUALIFICATION_ENDPOINT_INVALID")
 	}
-	return b.EndpointSource.ValidateOriginalEndpoint(ctx, endpoint, b.HostStartSHA256)
+	return nil
 }
 func qualificationBindingSHA(b MCPHTTPQualificationBinding) string {
 	raw, _ := json.Marshal(struct{ OperationID, QualificationID, RequestIdentitySHA256, GenerationID, SourceSHA256, HostStartSHA256, EndpointSHA256 string }{b.OperationID, b.QualificationID, b.RequestIdentitySHA256, b.GenerationID, b.SourceSHA256, b.HostStartSHA256, b.EndpointSHA256})
@@ -152,44 +168,7 @@ func (r *HTTPToStdioRelay) QualifyMCPObserved(ctx context.Context, b MCPHTTPQual
 	o := &mcpHTTPQualificationOwner{relay: r, binding: b}
 	o.snapshot = MCPHTTPQualificationSnapshot{Schema: "mcp-http-qualification-v1", Version: 1, BindingSHA256: qualificationBindingSHA(b), Bodies: []MCPHTTPBodyObservation{}, Connections: []MCPHTTPConnectionObservation{}}
 	o.transport = &http.Transport{Proxy: nil, DisableKeepAlives: true, ForceAttemptHTTP2: false}
-	o.transport.DialContext = func(c context.Context, network, address string) (net.Conn, error) {
-		o.mu.Lock()
-		if o.closing {
-			o.mu.Unlock()
-			return nil, errors.New("MCP_QUALIFICATION_TRANSPORT_CLOSING")
-		}
-		o.activeDials++
-		o.mu.Unlock()
-		raw, e := (&net.Dialer{}).DialContext(c, network, address)
-		o.mu.Lock()
-		defer o.mu.Unlock()
-		o.activeDials--
-		if raw == nil {
-			return nil, e
-		}
-		conn := &mcpObservedConnection{Conn: raw, idle: make(chan struct{})}
-		close(conn.idle)
-		o.conns = append(o.conns, conn)
-		// Return from metadata exclusion before membership/scanner IO.
-		o.mu.Unlock()
-		local, localOK := raw.LocalAddr().(*net.TCPAddr)
-		remote, remoteOK := raw.RemoteAddr().(*net.TCPAddr)
-		if e == nil && localOK && remoteOK && local.IP.To4() != nil && remote.IP.To4() != nil {
-			actual := &MCPHTTPOriginalConnection{owner: o, connection: conn, local: *local, remote: *remote, bindingSHA: qualificationBindingSHA(b)}
-			actual.local.IP = append(net.IP(nil), local.IP...)
-			actual.remote.IP = append(net.IP(nil), remote.IP...)
-			e = b.EndpointSource.ValidateOriginalConnection(c, actual)
-		} else if e == nil {
-			e = errors.New("MCP_QUALIFICATION_CONNECTION_ADDRESS_UNQUALIFIED")
-		}
-		if e != nil {
-			e = errors.Join(e, conn.Close())
-			o.mu.Lock()
-			return nil, e
-		}
-		o.mu.Lock()
-		return conn, nil
-	}
+	o.transport.DialContext = o.dialContext
 	o.client = &http.Client{Transport: o.transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	r.qualification = o
 	r.qualificationMu.Unlock()
@@ -256,6 +235,64 @@ func (r *HTTPToStdioRelay) QualifyMCPObserved(ctx context.Context, b MCPHTTPQual
 	return observation, nil
 }
 
+func (o *mcpHTTPQualificationOwner) dialContext(c context.Context, network, address string) (net.Conn, error) {
+	o.mu.Lock()
+	if o.closing {
+		o.mu.Unlock()
+		return nil, errors.New("MCP_QUALIFICATION_TRANSPORT_CLOSING")
+	}
+	o.activeDials++
+	o.mu.Unlock()
+	// Validation and failure-close remain owned until this callback returns.
+	defer func() { o.mu.Lock(); o.activeDials--; o.mu.Unlock() }()
+
+	if c == nil {
+		return nil, errors.New("MCP_QUALIFICATION_REQUEST_CONTEXT_UNBOUND")
+	}
+	request, ok := c.Value(mcpQualificationRequestContextKey{}).(mcpQualificationRequestContext)
+	if !ok || request.owner != o || request.original == nil {
+		return nil, errors.New("MCP_QUALIFICATION_REQUEST_CONTEXT_UNBOUND")
+	}
+	end, ok := request.original.Deadline()
+	if !ok {
+		return nil, errors.New("MCP_QUALIFICATION_REQUEST_DEADLINE_REQUIRED")
+	}
+	dialCtx, cancel := context.WithDeadline(c, end)
+	stop := context.AfterFunc(request.original, cancel)
+	defer func() { stop(); cancel() }()
+	if err := request.original.Err(); err != nil {
+		return nil, err
+	}
+	if err := dialCtx.Err(); err != nil {
+		return nil, err
+	}
+
+	raw, e := (&net.Dialer{}).DialContext(dialCtx, network, address)
+	if raw == nil {
+		return nil, e
+	}
+	conn := &mcpObservedConnection{Conn: raw, idle: make(chan struct{})}
+	close(conn.idle)
+	o.mu.Lock()
+	o.conns = append(o.conns, conn)
+	o.mu.Unlock()
+	local, localOK := raw.LocalAddr().(*net.TCPAddr)
+	remote, remoteOK := raw.RemoteAddr().(*net.TCPAddr)
+	b := o.binding
+	if e == nil && localOK && remoteOK && local.IP.To4() != nil && remote.IP.To4() != nil {
+		actual := &MCPHTTPOriginalConnection{owner: o, connection: conn, local: *local, remote: *remote, bindingSHA: qualificationBindingSHA(b)}
+		actual.local.IP = append(net.IP(nil), local.IP...)
+		actual.remote.IP = append(net.IP(nil), remote.IP...)
+		e = b.EndpointSource.ValidateOriginalConnection(dialCtx, actual)
+	} else if e == nil {
+		e = errors.New("MCP_QUALIFICATION_CONNECTION_ADDRESS_UNQUALIFIED")
+	}
+	if e != nil {
+		return nil, errors.Join(e, conn.Close())
+	}
+	return conn, nil
+}
+
 func (o *mcpHTTPQualificationOwner) exchange(ctx context.Context, method, id string, params any, notification bool) (result json.RawMessage, retErr error) {
 	msg := struct {
 		JSONRPC string          `json:"jsonrpc"`
@@ -275,6 +312,7 @@ func (o *mcpHTTPQualificationOwner) exchange(ctx context.Context, method, id str
 	if e != nil {
 		return nil, e
 	}
+	request = request.WithContext(context.WithValue(ctx, mcpQualificationRequestContextKey{}, mcpQualificationRequestContext{o, ctx}))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json, text/event-stream")
 	if sid := o.relay.getSessionID(); sid != "" {
@@ -427,6 +465,7 @@ func (r *HTTPToStdioRelay) CloseSessionObserved(ctx context.Context) (*MCPHTTPQu
 		if err == nil {
 			req, e := http.NewRequestWithContext(ctx, http.MethodDelete, r.URL, nil)
 			if e == nil {
+				req = req.WithContext(context.WithValue(ctx, mcpQualificationRequestContextKey{}, mcpQualificationRequestContext{o, ctx}))
 				req.Header.Set(mcpSessionIDHeader, sid)
 				req.Header.Set("MCP-Protocol-Version", o.snapshot.ProtocolVersion)
 			}
@@ -516,7 +555,9 @@ func (o *MCPHTTPQualificationObservation) Validate(ctx context.Context, b MCPHTT
 	if o == nil || o.owner == nil || !reflect.DeepEqual(o.owner.binding, b) {
 		return errors.New("MCP_QUALIFICATION_BINDING_DRIFT")
 	}
-	if e := b.validate(ctx, o.owner.relay.URL); e != nil {
+	// The completed exchange retains its binding. HTTPHost separately receives
+	// the original endpoint's closure before the API receives qualification.
+	if e := b.validateBinding(ctx, o.owner.relay.URL); e != nil {
 		return e
 	}
 	return o.ReceiveClose(ctx, o.owner.close)
@@ -538,7 +579,7 @@ type mcpObservedConnection struct {
 	net.Conn
 	mu                         sync.Mutex
 	active                     int
-	idle                       chan struct{}
+	idle, closeDone            chan struct{}
 	closing, attempted, closed bool
 	closeErr                   error
 }
@@ -589,24 +630,40 @@ func (c *mcpObservedConnection) Close() error {
 	}
 	c.attempted = true
 	c.closing = true
+	c.closeDone = make(chan struct{})
 	c.mu.Unlock()
 	e := c.Conn.Close()
 	c.mu.Lock()
 	c.closeErr = e
 	c.closed = e == nil
+	close(c.closeDone)
 	c.mu.Unlock()
 	return e
 }
 func (c *mcpObservedConnection) closeObserved(ctx context.Context) (MCPHTTPConnectionObservation, error) {
 	e := c.Close()
 	c.mu.Lock()
-	idle := c.idle
+	idle, closeDone := c.idle, c.closeDone
 	c.mu.Unlock()
-	select {
-	case <-idle:
-	case <-ctx.Done():
-		e = errors.Join(e, ctx.Err())
+	if _, finite := ctx.Deadline(); !finite {
+		e = errors.Join(e, errors.New("MCP_QUALIFICATION_CLEANUP_DEADLINE_REQUIRED"))
+	} else {
+		// The transport may already own Close. Receive that same call's
+		// terminal result before treating idle Read/Write activity as closure.
+		select {
+		case <-closeDone:
+			c.mu.Lock()
+			e = c.closeErr
+			c.mu.Unlock()
+		case <-ctx.Done():
+		}
+		select {
+		case <-idle:
+		case <-ctx.Done():
+		}
 	}
+	// A ready close/idle channel must not bypass canceled or expired receiving.
+	e = errors.Join(e, ctx.Err())
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	v := MCPHTTPConnectionObservation{CloseAttempted: c.attempted, Closed: c.closed, IOComplete: c.active == 0}
