@@ -24,6 +24,7 @@
 param(
     [switch]$PrintPlanJson,
     [switch]$TestStateIsolatedProduct,
+    [switch]$CanonicalEntryCommandTestProduct,
     [ValidateSet("amd64", "arm64")]
     [string]$WindowsTargetArch,
     [string]$OutputDirectory = "bin",
@@ -42,6 +43,9 @@ $buildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 $releaseTupleSupplied = -not [string]::IsNullOrWhiteSpace($ReleaseVersion) -or
     -not [string]::IsNullOrWhiteSpace($ReleaseCommit) -or
     -not [string]::IsNullOrWhiteSpace($ReleaseBuildDate)
+if ($CanonicalEntryCommandTestProduct -and -not $TestStateIsolatedProduct) {
+    throw "CanonicalEntryCommandTestProduct requires TestStateIsolatedProduct"
+}
 if ($TestStateIsolatedProduct -and $releaseTupleSupplied) {
     throw "TestStateIsolatedProduct does not accept release metadata"
 }
@@ -151,13 +155,19 @@ $entryRelativePath = [string]$registryLaunchers[0].filename
 $canonicalEntryReverseProjection = "../" + $entryRelativePath
 $unreceivedEntryHash = "<actual-launcher-sha256>"
 $templateComments = [string](Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $PSScriptRoot "cmd/mcphub/versioninfo.json") | ConvertFrom-Json).StringFileInfo.Comments
+$canonicalCommandTestPackage = "./internal/cli"
+$canonicalCommandFixtureName = "windows-canonical-command-test-fixture.json"
 $artifacts = @(
     foreach ($artifact in $contract.artifacts) {
         if ($artifact.subsystem -notin @(2, 3)) {
             throw "unsupported PE subsystem $($artifact.subsystem) for role $($artifact.role)"
         }
         $flags = @()
-        if ($artifact.role -eq "product") {
+        $artifactSource = [string]$artifact.source
+        if ($CanonicalEntryCommandTestProduct -and $artifact.role -ceq "product") {
+            $artifactSource = $canonicalCommandTestPackage
+        }
+        if ($artifact.role -eq "product" -and -not $CanonicalEntryCommandTestProduct) {
             $flags += "-X main.version=$version"
             $flags += "-X main.commit=$commit"
             $flags += "-X main.buildDate=$buildDate"
@@ -168,7 +178,7 @@ $artifacts = @(
         if ($artifact.role -ceq "launcher") {
             $flags += "-X main.productRelativePath=$productRelativePath"
             $flags += "-X main.publicEntrySetBuildID=$entrySetBuildID"
-        } elseif ($artifact.role -ceq "product") {
+        } elseif ($artifact.role -ceq "product" -and -not $CanonicalEntryCommandTestProduct) {
             $flags += "-X main.entrySetBuildID=$entrySetBuildID"
             $flags += "-X main.expectedCanonicalEntrySHA256=$unreceivedEntryHash"
             $flags += "-X main.canonicalEntryReverseProjection=$canonicalEntryReverseProjection"
@@ -196,7 +206,7 @@ $artifacts = @(
         [ordered]@{
             role = [string]$artifact.role
             filename = [string]$artifact.filename
-            source = [string]$artifact.source
+            source = $artifactSource
             subsystem = [int]$artifact.subsystem
             productMetadata = [bool]$artifact.productMetadata
             npmPayload = [bool]$artifact.npmPayload
@@ -268,6 +278,9 @@ if ($null -ne $publisherSource) {
 if ($TestStateIsolatedProduct) {
     $buildTags = @("test_state_path_env")
 }
+$canonicalCommandFixturePath = if ($CanonicalEntryCommandTestProduct) {
+    [IO.Path]::GetFullPath((Join-Path $outDir $canonicalCommandFixtureName))
+} else { $null }
 $plan = [ordered]@{
     schemaVersion = 3
     testOnly = [bool]$TestStateIsolatedProduct
@@ -286,6 +299,11 @@ $plan = [ordered]@{
     entrySetAdmissionCommand = $entrySetAdmissionCommand
     retiredOutputFiles = $retiredOutputFiles
 }
+if ($CanonicalEntryCommandTestProduct) {
+    $plan.canonicalEntryCommandTestProduct = $true
+    $plan.testProductPackage = $canonicalCommandTestPackage
+    $plan.canonicalCommandFixture = $canonicalCommandFixturePath
+}
 if ($null -ne $publisherSource) {
     $plan.publisherSource = [ordered]@{
         source_epoch = [string]$publisherSource.source_epoch
@@ -299,6 +317,9 @@ if ($PrintPlanJson) {
     exit 0
 }
 
+if ($CanonicalEntryCommandTestProduct -and (Test-Path -LiteralPath $canonicalCommandFixturePath)) {
+    throw "Canonical command fixture output must not already exist: $canonicalCommandFixturePath"
+}
 if (-not (Test-Path $outDir)) {
     New-Item -ItemType Directory -Path $outDir | Out-Null
 }
@@ -397,7 +418,11 @@ try {
         }
         $outFile = Join-Path $outDir $artifact.filename
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $outFile) | Out-Null
-        $buildArgs = @("build", "-trimpath")
+        $buildArgs = if ($CanonicalEntryCommandTestProduct -and $artifact.role -ceq "product") {
+            @("test", "-c", "-trimpath")
+        } else {
+            @("build", "-trimpath")
+        }
         if ($TestStateIsolatedProduct -and $artifact.role -eq "product") {
             $buildArgs += @("-tags", $buildTags[0])
         }
@@ -569,6 +594,7 @@ if ([string]$identity.sha256 -cne $candidateHash) {
     $identityManifestPath,
     $identityLine + [char]10,
     (New-Object Text.UTF8Encoding($false)))
+$identityHash = (Get-FileHash -LiteralPath $identityManifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
 
 $entrySetValidatorArgs = @($entrySetAdmissionCommand.argv)
 $entrySetRows = @(& go @entrySetValidatorArgs)
@@ -579,7 +605,7 @@ if ($entrySetResult.schema -cne "windows-canonical-entry-build-observation-v1" -
     $entrySetResult.build_id -cne $entrySetBuildID -or
     $entrySetResult.canonical_entry_sha256 -cne $plan.canonicalEntry.expectedCanonicalEntrySHA256 -or
     $entrySetResult.product_sha256 -cne $candidateHash -or
-    $entrySetResult.identity_sha256 -cne (Get-FileHash -LiteralPath $identityManifestPath -Algorithm SHA256).Hash.ToLowerInvariant()) {
+    $entrySetResult.identity_sha256 -cne $identityHash) {
     throw "Actual portable entry-set observation does not match this original build"
 }
 if ($null -ne $publisherSource -and $entrySetResult.source_epoch -cne [string]$publisherSource.source_epoch) {
@@ -588,7 +614,7 @@ if ($null -ne $publisherSource -and $entrySetResult.source_epoch -cne [string]$p
 foreach ($artifact in $artifacts) {
     $outFile = Join-Path $outDir $artifact.filename
     if (-not (Test-Path -LiteralPath $outFile -PathType Leaf)) {
-        Write-Error "$outFile missing after build — check Defender exclusions (see INSTALL.md)."
+        Write-Error "$outFile missing after build - check Defender exclusions (see INSTALL.md)."
         exit 1
     }
 }
@@ -603,10 +629,30 @@ $expectedExecutables = @($artifacts | ForEach-Object { $_.filename } | Sort-Obje
 if (-not [string]::Equals(($mcpHubExecutables -join [char]0), ($expectedExecutables -join [char]0), [StringComparison]::Ordinal)) {
     throw "Windows output must contain exactly the registry's CUI and GUI executable paths"
 }
+if ($CanonicalEntryCommandTestProduct) {
+    if (Test-Path -LiteralPath $canonicalCommandFixturePath) {
+        throw "Canonical command fixture output appeared before issuance"
+    }
+    $fixtureInput = [ordered]@{
+        product_root = [IO.Path]::GetFullPath($outDir)
+        source_epoch = ""
+        product_version = $version
+        build_id = $entrySetBuildID
+        reverse_projection = $canonicalEntryReverseProjection
+        canonical_entry_sha256 = $plan.canonicalEntry.expectedCanonicalEntrySHA256
+        product_sha256 = $candidateHash
+        identity_sha256 = $identityHash
+    }
+    [IO.File]::WriteAllText(
+        $canonicalCommandFixturePath,
+        (($fixtureInput | ConvertTo-Json -Compress) + [char]10),
+        (New-Object Text.UTF8Encoding($false)))
+}
 if ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT) {
     Write-Host "==> Product VERSIONINFO resources:"
     foreach ($artifact in $productArtifacts) {
         (Get-Item (Join-Path $outDir $artifact.filename)).VersionInfo | Format-List ProductVersion,PrivateBuild,SpecialBuild,InternalName,OriginalFilename
     }
 }
+if ($CanonicalEntryCommandTestProduct) { Write-Host "canonicalCommandFixture=$canonicalCommandFixturePath" }
 Write-Host "==> Done. Complete canonical entry-set build observation passed; identity manifest=$identityManifestPath version=$version commit=$commit buildDate=$buildDate."

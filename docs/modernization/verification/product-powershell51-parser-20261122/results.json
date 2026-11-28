@@ -1,0 +1,240 @@
+{
+  "schema": 1,
+  "status": "NATIVE_PARSER_REGRESSION_QUALIFIED_NOT_FULL_BUILDER",
+  "repository": "applicate2628/mcp-local-hub",
+  "pr": 657,
+  "source_parent": "477f6e3f66eca482e2267351af3535c62db8ebb2",
+  "parent_builder_git_blob": "b624db22af0582295081b483234914b484ca5add",
+  "master_composition_base": "75dbc6406123e22468f168b861d5e0622c9d5769",
+  "production_paths": [
+    "build.ps1"
+  ],
+  "production_change": {
+    "line": 617,
+    "old_unicode": "U+2014",
+    "old_utf8_hex": "e28094",
+    "new_ascii": "-",
+    "new_hex": "2d",
+    "added_lines": 1,
+    "removed_lines": 1,
+    "source_versions_preserved": {
+      "published": "0.4.60",
+      "candidate": "0.4.60",
+      "composition": "0.4.65"
+    },
+    "inventory_guard_byte_identical": true,
+    "inventory_guard_sha256": "9db765887cb33f71ff0b146d684068b0f68b110c2e33ee0f937ad011897257a5"
+  },
+  "inputs": [
+    {
+      "path": "inputs/published-477f/build.ps1",
+      "bytes": 35904,
+      "sha256": "bc55dd0815e95c6dc5a19513f07e6a8b5eab636382a16e9940e28b209dd1b8f2",
+      "git_blob": "b624db22af0582295081b483234914b484ca5add"
+    },
+    {
+      "path": "inputs/candidate/build.ps1",
+      "bytes": 35902,
+      "sha256": "b52b2676ce02d61d6549091c224dfb65c7bbf747ee1698094a3e1a266c474d90",
+      "git_blob": "0027986c32d8266f626f633c9e7776661570d75d"
+    },
+    {
+      "path": "inputs/composition/build.ps1",
+      "bytes": 35902,
+      "sha256": "e811e4549672ec4cc3ea72e59b3fa6f0235191137e41007a3600edf0f6354fa8",
+      "git_blob": "3484e518390c29f34e4fe3bd86edacbaed139c08"
+    }
+  ],
+  "harness": {
+    "bytes": 2660,
+    "sha256": "5312338621f991d12adb56ba0dcfca6bd5fd7ca479358a034fb4a84b30ba5def"
+  },
+  "runner": {
+    "bytes": 11621,
+    "sha256": "6033b0e96f5fdc73ba3589b7f467047256d2e3fbc0cb97369be15b68ea049c55"
+  },
+  "execution": {
+    "started_utc": "2026-11-22T14:52:35.043403+00:00",
+    "finished_utc": "2026-11-22T14:52:38.284671+00:00",
+    "powershell_version": "5.1.26100.10068",
+    "powershell_edition": "Desktop",
+    "powershell_sha256_before": "95ce2acbc6cd9d7f4a22759d39a8d40fc2a53ceeecf068ef856849f0d2076961",
+    "powershell_sha256_after": "95ce2acbc6cd9d7f4a22759d39a8d40fc2a53ceeecf068ef856849f0d2076961",
+    "default_code_page": 1251,
+    "culture": "ru-RU",
+    "python_version": "3.15.2 (tags/v3.15.2:5e58eaa, Oct 25 2026, 17:27:03) [MSC v.1951 64 bit (AMD64)]",
+    "policy_before": {
+      "version": "5.1.26100.10068",
+      "edition": "Desktop",
+      "code_page": 1251,
+      "effective": "Unrestricted",
+      "scopes": [
+        {
+          "scope": "MachinePolicy",
+          "policy": "Undefined"
+        },
+        {
+          "scope": "UserPolicy",
+          "policy": "Undefined"
+        },
+        {
+          "scope": "Process",
+          "policy": "Undefined"
+        },
+        {
+          "scope": "CurrentUser",
+          "policy": "Unrestricted"
+        },
+        {
+          "scope": "LocalMachine",
+          "policy": "Undefined"
+        }
+      ]
+    },
+    "policy_after": {
+      "version": "5.1.26100.10068",
+      "edition": "Desktop",
+      "code_page": 1251,
+      "effective": "Unrestricted",
+      "scopes": [
+        {
+          "scope": "MachinePolicy",
+          "policy": "Undefined"
+        },
+        {
+          "scope": "UserPolicy",
+          "policy": "Undefined"
+        },
+        {
+          "scope": "Process",
+          "policy": "Undefined"
+        },
+        {
+          "scope": "CurrentUser",
+          "policy": "Unrestricted"
+        },
+        {
+          "scope": "LocalMachine",
+          "policy": "Undefined"
+        }
+      ]
+    },
+    "policy_changed": false,
+    "direct_children_waited": 5,
+    "timeouts": 0,
+    "whole_process_tree_settlement_observed": false,
+    "source_and_harness_hashes_before_after_equal": true,
+    "builder_executed": false,
+    "go_node_product_install_scheduler_executed": false,
+    "receipt": {
+      "path": "evidence/receipt.json",
+      "bytes": 12820,
+      "sha256": "33c550cae82a82f847181c684644b12d4d89bd258b66476cbb6dcfa66db78b52"
+    },
+    "cases": [
+      {
+        "label": "published-control",
+        "exit_code": 1,
+        "parser_error_count": 3,
+        "parser_error_ids": [
+          "TerminatorExpectedAtEndOfString",
+          "MissingEndCurlyBrace",
+          "MissingEndCurlyBrace"
+        ],
+        "parser_errors": [
+          {
+            "id": "TerminatorExpectedAtEndOfString",
+            "message": "The string is missing the terminator: '.",
+            "start_line": 630,
+            "start_column": 60,
+            "end_line": 659,
+            "end_column": 1
+          },
+          {
+            "id": "MissingEndCurlyBrace",
+            "message": "Missing closing '}' in statement block or type definition.",
+            "start_line": 616,
+            "start_column": 64,
+            "end_line": 616,
+            "end_column": 65
+          },
+          {
+            "id": "MissingEndCurlyBrace",
+            "message": "Missing closing '}' in statement block or type definition.",
+            "start_line": 614,
+            "start_column": 35,
+            "end_line": 614,
+            "end_column": 36
+          }
+        ],
+        "source_sha256": "bc55dd0815e95c6dc5a19513f07e6a8b5eab636382a16e9940e28b209dd1b8f2",
+        "source_bytes": 35904,
+        "raw_stdout": {
+          "path": "evidence/published-control.stdout",
+          "bytes": 1260,
+          "sha256": "6a2b34f11165bc93ed89c5dc3017cfc134a8850dee62dcb527e3ac93514baf9f"
+        },
+        "stderr_bytes": 0
+      },
+      {
+        "label": "publication-candidate",
+        "exit_code": 0,
+        "parser_error_count": 0,
+        "parser_error_ids": [],
+        "parser_errors": [],
+        "source_sha256": "b52b2676ce02d61d6549091c224dfb65c7bbf747ee1698094a3e1a266c474d90",
+        "source_bytes": 35902,
+        "raw_stdout": {
+          "path": "evidence/publication-candidate.stdout",
+          "bytes": 659,
+          "sha256": "82c24499ba18c07cf374a839e30ec2232bbdd75533a96b9564767c2e7b9f6c7d"
+        },
+        "stderr_bytes": 0
+      },
+      {
+        "label": "current-source-composition",
+        "exit_code": 0,
+        "parser_error_count": 0,
+        "parser_error_ids": [],
+        "parser_errors": [],
+        "source_sha256": "e811e4549672ec4cc3ea72e59b3fa6f0235191137e41007a3600edf0f6354fa8",
+        "source_bytes": 35902,
+        "raw_stdout": {
+          "path": "evidence/current-source-composition.stdout",
+          "bytes": 661,
+          "sha256": "f1f6579090673eca60858b5fa0f32f5997d6c93a8f9adb36e40ef111f749c2a8"
+        },
+        "stderr_bytes": 0
+      }
+    ]
+  },
+  "prior_transport_failure": {
+    "path": "transport/launcher-failure.json",
+    "classification": "CMD quoting failure before Python/PowerShell/parser execution",
+    "qualification_started": false,
+    "recovered_using": "Plain unquoted known executable and script paths, as authorized by the coordinator",
+    "counted_as_parser_negative_control": false
+  },
+  "evidence": {
+    "file": "raw-evidence.zip",
+    "bytes": 43049,
+    "sha256": "464b2f1ced2a63c8d1e4b8eab9d2a9d4c844b726723352628be159b7350c9f8c",
+    "indexed_files": 21,
+    "archive_files": 22,
+    "all_indexed_hashes_and_lengths_verified": true,
+    "byte_exact_remote_export_sha256": "31e06758c1451e87fb93a0d04a53ce35fc3344398e934e6bc92fed1900ffe275",
+    "remote_payload_files": 17,
+    "local_provenance_files_added": 4,
+    "native_binaries_included": false
+  },
+  "limits": [
+    "Native Parser.ParseFile on the recorded Windows PowerShell 5.1/code-page-1251 host only.",
+    "No builder statement, Go, Node, native Product, installation or Task Scheduler operation was executed.",
+    "The current-source composition is a builder input; no new version 0.4.65 Product was issued or qualified.",
+    "The published diagnostic fix keeps version 0.4.60; no source version was rewritten to imply current-source acceptance.",
+    "No fresh inventory comparison run or full default/tagged Go run is claimed.",
+    "Initial transport failure remains separate from the genuine published-source parser negative control.",
+    "Five direct PowerShell children were waited; complete operating-system process-tree settlement was not independently observed.",
+    "External exact-head review and full product acceptance remain open."
+  ]
+}
