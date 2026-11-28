@@ -1,0 +1,387 @@
+diff --git a/internal/cli/supervise_respawn_arm_gen_test.go b/internal/cli/supervise_respawn_arm_gen_test.go
+index 62aafa1987c0593351228d4c34d299d9254d36d7..708409f19958636b503d6bb5d6310ca5ca18557a 100644
+--- a/internal/cli/supervise_respawn_arm_gen_test.go
++++ b/internal/cli/supervise_respawn_arm_gen_test.go
+@@ -87,19 +87,26 @@ func TestRespawnArmGen_NormalBackoffFiresEachArm(t *testing.T) {
+ 
+ 	const backoff = 50 * time.Millisecond
+ 
+-	// Arm → fire → re-arm → fire. The first timer fully fires (and would drive the
+-	// transition) before the second arm, so the second arm is the latest at its own
+-	// fire time. Neither is superseded.
+-	ctrl.armRespawnBackoffTimer(d, d.TaskName, backoff)
+-	time.Sleep(4 * backoff)
+-	if got := spawns.Load(); got != 1 {
+-		t.Fatalf("first arm did not fire: %d spawns, want 1", got)
++	spawned := make(chan int32, 2)
++	ctrl.spawn = func(api.SupervisorDaemon) error {
++		spawned <- spawns.Add(1)
++		return nil
+ 	}
+ 
+-	ctrl.armRespawnBackoffTimer(d, d.TaskName, backoff)
+-	time.Sleep(4 * backoff)
+-	if got := spawns.Load(); got != 2 {
+-		t.Fatalf("normal backoff re-arm was wrongly dropped by the generation guard: %d spawns, want 2 (the guard must only drop genuinely-superseded coincident timers)", got)
++	// Observe each actual spawn before re-arming. Elapsed sleep time alone cannot
++	// establish timer delivery or completion of the preceding event-log write.
++	for want := int32(1); want <= 2; want++ {
++		ctrl.armRespawnBackoffTimer(d, d.TaskName, backoff)
++		select {
++		case got := <-spawned:
++			if got != want {
++				t.Fatalf("arm %d produced spawn count %d, want %d", want, got, want)
++			}
++		case <-time.After(5 * time.Second):
++			// This bounds a missing callback without treating scheduling latency as
++			// proof that the generation guard rejected the arm.
++			t.Fatalf("arm %d did not reach the spawn callback: %d spawns, want %d", want, spawns.Load(), want)
++		}
+ 	}
+ }
+ 
+diff --git a/internal/cli/supervise_test.go b/internal/cli/supervise_test.go
+index a127781048624324139185ffa592e185010a6ed9..7885008429d09bdd0fbd74583b35a67eddf1f8c4 100644
+--- a/internal/cli/supervise_test.go
++++ b/internal/cli/supervise_test.go
+@@ -1302,10 +1302,11 @@ func (f *fakeQuiesceDrainer) Drain(ctx context.Context, timeoutMs int) QuiesceRe
+ // + a cleanup function that triggers graceful exit. The bufio.Reader
+ // is positioned past the hello frame so callers can immediately send
+ // IPC requests.
+-func startSuperviseForIPCTest(t *testing.T, tmpHome string) (net.Conn, *bufio.Reader, func()) {
++func startSuperviseForIPCTest(t *testing.T, tmpHome string) (net.Conn, *bufio.Reader, <-chan error, func()) {
+ 	t.Helper()
+ 	exitCh := make(chan struct{}, 1)
+ 	cleanupExit := setSuperviseTestExitCh(exitCh)
++	ctx, cancel := context.WithCancel(context.Background())
+ 
+ 	cmd := newSuperviseCmd()
+ 	cmd.SetArgs([]string{})
+@@ -1313,53 +1314,63 @@ func startSuperviseForIPCTest(t *testing.T, tmpHome string) (net.Conn, *bufio.Re
+ 	cmd.SilenceUsage = true
+ 
+ 	done := make(chan error, 1)
+-	go func() { done <- cmd.Execute() }()
++	returned := make(chan struct{})
++	var conn net.Conn
++	cleanup := sync.OnceFunc(func() {
++		if conn != nil {
++			_ = conn.Close()
++		}
++		cancel()
++		// The command owns process-global test seams and stderr redirection.
++		// Keep them intact until its original invocation has returned.
++		<-returned
++		cleanupExit()
++	})
++	t.Cleanup(cleanup)
++	ready := false
++	defer func() {
++		if !ready {
++			cleanup()
++		}
++	}()
++	go func() {
++		defer close(returned)
++		done <- cmd.ExecuteContext(ctx)
++		close(done)
++	}()
+ 
+ 	sidecar := filepath.Join(tmpHome, "supervisor.lock.owner.json")
+ 	if !waitForFile(sidecar, 3*time.Second) {
+-		cleanupExit()
+ 		t.Fatalf("supervisor.lock.owner.json never appeared under %s", tmpHome)
+ 	}
+ 
+ 	pipePath := defaultPipePathOS(tmpHome)
+-	var conn net.Conn
+ 	var dialErr error
+ 	dialDeadline := time.Now().Add(3 * time.Second)
+ 	for time.Now().Before(dialDeadline) {
++		select {
++		case <-returned:
++			t.Fatalf("supervise returned before IPC readiness: %v", <-done)
++		default:
++		}
+ 		conn, dialErr = dialSuperviseIPC(pipePath)
+ 		if dialErr == nil {
+ 			break
+ 		}
+ 		time.Sleep(50 * time.Millisecond)
+ 	}
+-	if dialErr != nil {
+-		cleanupExit()
++	if conn == nil {
+ 		t.Fatalf("dial supervise IPC: %v", dialErr)
+ 	}
+ 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+ 
+ 	reader := bufio.NewReader(conn)
+ 	if _, err := reader.ReadString('\n'); err != nil {
+-		_ = conn.Close()
+-		cleanupExit()
+ 		t.Fatalf("read hello: %v", err)
+ 	}
+ 	waitForSupervisorReadyIPC(t, conn, reader)
+-
+-	cleanup := func() {
+-		_ = conn.Close()
+-		select {
+-		case exitCh <- struct{}{}:
+-		default:
+-		}
+-		select {
+-		case <-done:
+-		case <-time.After(3 * time.Second):
+-			t.Log("supervise did not exit on test-exit signal within 3s")
+-		}
+-		cleanupExit()
+-	}
+-	return conn, reader, cleanup
++	ready = true
++	return conn, reader, done, cleanup
+ }
+ 
+ func waitForSupervisorReadyIPC(t *testing.T, conn net.Conn, reader *bufio.Reader) {
+@@ -1479,7 +1490,7 @@ func TestSupervise_IPC_QuiesceTimersTwoFrames(t *testing.T) {
+ 	})
+ 	defer restoreFactory()
+ 
+-	conn, reader, cleanup := startSuperviseForIPCTest(t, tmpHome)
++	conn, reader, _, cleanup := startSuperviseForIPCTest(t, tmpHome)
+ 	defer cleanup()
+ 
+ 	req := api.IPCRequest{ID: 42, Cmd: "quiesce-timers", Args: map[string]any{"timeout_ms": 30000}}
+@@ -1555,7 +1566,7 @@ func TestSupervise_IPC_QuiesceTimersDrainTimeout(t *testing.T) {
+ 	})
+ 	defer restoreFactory()
+ 
+-	conn, reader, cleanup := startSuperviseForIPCTest(t, tmpHome)
++	conn, reader, _, cleanup := startSuperviseForIPCTest(t, tmpHome)
+ 	defer cleanup()
+ 
+ 	req := api.IPCRequest{ID: 99, Cmd: "quiesce-timers", Args: map[string]any{"timeout_ms": 100}}
+@@ -1605,55 +1616,8 @@ func TestSupervise_IPC_ExitGracefulInitiates(t *testing.T) {
+ 	tmpHome := apitest.HardenedTempDir(t)
+ 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
+ 
+-	// We do NOT install the test-exit channel — the IPC exit verb
+-	// itself must drive shutdown. Set it up just so cleanup can stop
+-	// the supervisor if the verb misfires.
+-	exitCh := make(chan struct{}, 1)
+-	cleanupExit := setSuperviseTestExitCh(exitCh)
+-	defer cleanupExit()
+-
+-	cmd := newSuperviseCmd()
+-	cmd.SetArgs([]string{})
+-	cmd.SilenceErrors = true
+-	cmd.SilenceUsage = true
+-
+-	done := make(chan error, 1)
+-	go func() { done <- cmd.Execute() }()
+-
+-	sidecar := filepath.Join(tmpHome, "supervisor.lock.owner.json")
+-	if !waitForFile(sidecar, 3*time.Second) {
+-		select {
+-		case exitCh <- struct{}{}:
+-		default:
+-		}
+-		t.Fatalf("sidecar never appeared")
+-	}
+-
+-	pipePath := defaultPipePathOS(tmpHome)
+-	var conn net.Conn
+-	var dialErr error
+-	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); {
+-		conn, dialErr = dialSuperviseIPC(pipePath)
+-		if dialErr == nil {
+-			break
+-		}
+-		time.Sleep(50 * time.Millisecond)
+-	}
+-	if dialErr != nil {
+-		select {
+-		case exitCh <- struct{}{}:
+-		default:
+-		}
+-		t.Fatalf("dial: %v", dialErr)
+-	}
+-	defer conn.Close()
+-	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+-
+-	reader := bufio.NewReader(conn)
+-	if _, err := reader.ReadString('\n'); err != nil {
+-		t.Fatalf("read hello: %v", err)
+-	}
+-	waitForSupervisorReadyIPC(t, conn, reader)
++	conn, reader, done, cleanup := startSuperviseForIPCTest(t, tmpHome)
++	defer cleanup()
+ 
+ 	req := api.IPCRequest{ID: 43, Cmd: "exit", Args: map[string]any{"graceful": true, "timeout_ms": 5000}}
+ 	reqBody, _ := json.Marshal(req)
+@@ -1684,13 +1648,6 @@ func TestSupervise_IPC_ExitGracefulInitiates(t *testing.T) {
+ 			t.Fatalf("supervise exited with err: %v", err)
+ 		}
+ 	case <-time.After(3 * time.Second):
+-		// Fall back: trigger test-exit so cleanup doesn't hang the
+-		// test binary, but flag the timeout as a failure first.
+-		select {
+-		case exitCh <- struct{}{}:
+-		default:
+-		}
+-		<-done
+ 		t.Fatal("supervisor did not exit within 3s after IPC exit{graceful:true}")
+ 	}
+ }
+@@ -1802,7 +1759,7 @@ func TestSupervise_IPC_VersionPinning(t *testing.T) {
+ 	tmpHome := apitest.HardenedTempDir(t)
+ 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
+ 
+-	conn, reader, cleanup := startSuperviseForIPCTest(t, tmpHome)
++	conn, reader, _, cleanup := startSuperviseForIPCTest(t, tmpHome)
+ 	defer cleanup()
+ 
+ 	req := api.IPCRequest{Version: 2, ID: 7, Cmd: "status"}
+diff --git a/internal/cli/supervisor_controller_orphan_reap_test.go b/internal/cli/supervisor_controller_orphan_reap_test.go
+index 14abb540847502c65473ed2a75446e34a73d16d3..57937cb9ea9c2c20afb498cfef0a75cbf414f2cf 100644
+--- a/internal/cli/supervisor_controller_orphan_reap_test.go
++++ b/internal/cli/supervisor_controller_orphan_reap_test.go
+@@ -34,6 +34,7 @@ import (
+ // off-loop refreshSupervisorIntent → on-loop handleReapScan handoff and the
+ // timer → on-loop handleReapFollowup handoff that the fix introduced.
+ type reapTestHarness struct {
++	t              *testing.T
+ 	ctrl           *supervisorController
+ 	tracker        *DaemonRuntimeTracker
+ 	loop           *api.EventLoop
+@@ -91,10 +92,10 @@ func newReapTestHarness(t *testing.T) *reapTestHarness {
+ 	terminatedPIDs := make(chan int, 8)
+ 
+ 	ctx, cancel := context.WithCancel(context.Background())
+-	t.Cleanup(cancel)
+ 
+ 	loop := api.NewEventLoop(64)
+ 	h := &reapTestHarness{
++		t:              t,
+ 		tracker:        tracker,
+ 		loop:           loop,
+ 		spawnCalls:     &spawnCalls,
+@@ -163,7 +164,15 @@ func newReapTestHarness(t *testing.T) *reapTestHarness {
+ 	}
+ 	// Register the controller handler and start the real loop.
+ 	loop.RegisterHandler(h.ctrl.handleLoopEvent)
+-	go loop.Run(ctx)
++	loopDone := make(chan struct{})
++	t.Cleanup(func() {
++		cancel()
++		<-loopDone
++	})
++	go func() {
++		defer close(loopDone)
++		loop.Run(ctx)
++	}()
+ 	return h
+ }
+ 
+@@ -179,6 +188,7 @@ func (noopReapTimer) Stop() bool { return true }
+ // event. After it returns the loop is idle and the test goroutine may read
+ // ctrl/tracker state race-free.
+ func (h *reapTestHarness) sync() {
++	h.t.Helper()
+ 	done := make(chan struct{})
+ 	h.loop.Post(api.LoopEvent{
+ 		Kind: evReapBarrier,
+@@ -187,7 +197,7 @@ func (h *reapTestHarness) sync() {
+ 	select {
+ 	case <-done:
+ 	case <-time.After(5 * time.Second):
+-		panic("reap test harness sync timed out (loop wedged?)")
++		h.t.Fatal("reap test harness sync timed out (loop wedged?)")
+ 	}
+ }
+ 
+diff --git a/internal/cli/upgrade_gui_fence_windows_test.go b/internal/cli/upgrade_gui_fence_windows_test.go
+index a6eee65676940097de514fac4327a76bc437a837..638ccc42dfbff11c7c9c711720388525f7b2f900 100644
+--- a/internal/cli/upgrade_gui_fence_windows_test.go
++++ b/internal/cli/upgrade_gui_fence_windows_test.go
+@@ -166,9 +166,7 @@ func TestUpgradeCurrentAutorunOffSettlesBeforeOuterFenceRelease(t *testing.T) {
+ 			var output bytes.Buffer
+ 			cmd.SetOut(&output)
+ 			settings := api.SettingsPath()
+-			if err := os.MkdirAll(filepath.Dir(settings), 0o700); err != nil {
+-				t.Fatal(err)
+-			}
++			apitest.HardenedDir(t, filepath.Dir(settings))
+ 			before := []byte("gui.autorun_enabled: \"false\"\nother.preference: retained\n")
+ 			writeStateSidecarBytes(t, settings, before)
+ 			backend := &fakeAutostartBackend{installed: true}
+diff --git a/internal/cli/upgrade_gui_qualified_fixture_windows_test.go b/internal/cli/upgrade_gui_qualified_fixture_windows_test.go
+index 63c46dba0f02b3a1eb100dac73ba28125c01e4ee..647c9568e0a5d8a82cff0ba60316cadfd5079259 100644
+--- a/internal/cli/upgrade_gui_qualified_fixture_windows_test.go
++++ b/internal/cli/upgrade_gui_qualified_fixture_windows_test.go
+@@ -13,8 +13,10 @@ import (
+ 	"os"
+ 	"os/exec"
+ 	"path/filepath"
++	"strings"
+ 	"testing"
+ 	"time"
++	"unsafe"
+ 
+ 	"golang.org/x/sys/windows"
+ 
+@@ -119,6 +121,43 @@ type qualifiedUpgradeGUICommandFixture struct {
+ 	successorStarts, successorReady int
+ }
+ 
++func copyQualifiedUpgradeGUIProduct(t *testing.T, source, target string) {
++	t.Helper()
++	// Go file operations handle long paths; keep that behavior for the native copy.
++	toUTF16 := func(path string) *uint16 {
++		if !strings.HasPrefix(path, `\\?\`) {
++			absolute, err := filepath.Abs(path)
++			if err != nil {
++				t.Fatal(err)
++			}
++			if strings.HasPrefix(absolute, `\\`) {
++				path = `\\?\UNC\` + absolute[2:]
++			} else {
++				path = `\\?\` + absolute
++			}
++		}
++		encoded, err := windows.UTF16PtrFromString(path)
++		if err != nil {
++			t.Fatal(err)
++		}
++		return encoded
++	}
++	sourceUTF16, targetUTF16 := toUTF16(source), toUTF16(target)
++	copyFile := windows.NewLazySystemDLL("kernel32.dll").NewProc("CopyFileW")
++	if err := copyFile.Find(); err != nil {
++		t.Fatal(err)
++	}
++	// TRUE requires a fresh target and leaves the qualified source independent.
++	result, _, err := copyFile.Call(uintptr(unsafe.Pointer(sourceUTF16)), uintptr(unsafe.Pointer(targetUTF16)), 1)
++	if result == 0 {
++		t.Fatalf("copy qualified Product into fixture: %v", err)
++	}
++	// CopyFileW preserves attributes; restore the writable mode of os.WriteFile.
++	if err := os.Chmod(target, 0o700); err != nil {
++		t.Fatal(err)
++	}
++}
++
+ func newQualifiedUpgradeGUICommandFixture(t *testing.T) *qualifiedUpgradeGUICommandFixture {
+ 	t.Helper()
+ 	built := loadWindowsCanonicalEntryFixture(t, "MCPHUB_CANONICAL_COMMAND_FIXTURE_REQUIRED")
+@@ -150,9 +189,7 @@ func newQualifiedUpgradeGUICommandFixture(t *testing.T) *qualifiedUpgradeGUIComm
+ 	if err != nil || fmt.Sprintf("%x", sha256.Sum256(f.priorBytes)) != built.Input.ProductSHA256 {
+ 		t.Fatalf("read original test Product bytes: %v", err)
+ 	}
+-	if err := os.WriteFile(f.target, f.priorBytes, 0o700); err != nil {
+-		t.Fatal(err)
+-	}
++	copyQualifiedUpgradeGUIProduct(t, executable, f.target)
+ 	writeStateSidecarBytes(t, filepath.Join(f.stateDir, "supervisor-intent.json"), []byte(`{"version":1,"updated_at":"2026-09-28T00:00:00Z","daemons":[],"strict_mode":false}`))
+ 	targets, err := binaryadmission.CanonicalEntryTargetsV1(f.target)
+ 	if err != nil {

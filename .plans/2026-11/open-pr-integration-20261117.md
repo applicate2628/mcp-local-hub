@@ -1,5 +1,27 @@
 # План повышения качества и сокращения очереди PR mcp-local-hub
 
+<!-- recovered-original-cli-history-20261128:start -->
+<a id="recovered-original-cli-history-20261128"></a>
+## Восстановлены исходные два коммита и история 717 CLI-корней — 28 ноября 2026, UTC
+
+**Два ранее не найденных коммита восстановлены точно:** `06f77b3856e43ec5e8e3736123aedb896ae58817` и следующий `33eaf8af8fc46cb231f48c70f4775922393245b1`. Их исходные commit objects и полные patches сохранены в [капсуле восстановленных CLI-коммитов](../../docs/modernization/verification/recovered-cli-commits-20261128/README.md). Цепочка начинается от опубликованного #666 `5ad374eb60cadb8ad56ea167e3fb06edb44bdc18`; пересоздание исходных Git-идентичностей проверено. Это сохранение и восстановление кода, а не новая полная квалификация ветки. Продвижение кода #666 остаётся отдельным действием после необходимых gates.
+
+**Исходная история 717 восстановлена и заново проверена как данные: 712 PASS + 5 SKIP.** [Полный ledger, parser, четыре исходных запуска на трёх ревизиях и квитанция DATA-проверки](../../docs/modernization/verification/historical-cli717-recovery-20261128/README.md) сохранены отдельно. Новый `historical-cli717-readback-v1` завершён PASS/CLOSED: parent 0.4083255 с, exit 0, `physical_complete=true`; execution SHA-256 `9152d690d4a3a61e4a5dd1ea132440a8c238af1dd07286b933a2705e41843d59`. Точный ledger SHA-256 `bd67d058b2fcbed6796a04411c31d0b44ce90b62fa73d1778d59bbbded537baf`. Product и Go-тесты в DATA-проверке не запускались; допуска к исходным Source/cache она не выдаёт.
+
+**Отдельно восстановлены независимые исходные снимки.** `original-source-restore-v2` завершён PASS/CLOSED: девять команд, parent 47.3590603 с, exit 0; parent SHA-256 `665099615fc911e5db3eef74de7c28e06ea35fcece33d290f5d0439fb3268f20`, execution `890fecd2b2a4e7a1acf36b0d5f3fb7135518d7eeb32498c8610bd7f0965ac4e5`. Новые роли `source-original727d` и `source-original3ebe` имеют независимые Git-объекты, без alternates/hardlinks и зависимости от прежней конфигурации; каждый tracked-файл и пустой status проверены.
+
+| Роль | Точный commit / tree | Файлов | SHA-256 полученного manifest |
+|---|---|---:|---|
+| Source для исходной полной приёмки | `727d66753814dc218e26d699e57402db2d13190a` / `d959ed0a4f8ab02947aec7569f3c0535a3cff533` | 3509 | `a3483e469b606fa297a4b33698cd22db7bf25493023f3117feeafb52bb9db5f1` |
+| Исходный Product Source | `3ebe335a2f666a5279d7fafc31a6f4dc3feedff4` / `67c13b8fc1317b4fd60e3135a3eb8a376fe01817` | 3508 | `c63d8b13331a752c85c5e62f4c4ce0a2ee19cc0c129c83b4dd6ed99fbd944b46` |
+
+Это приёмка восстановления файлов; новые build/full результаты здесь не заявлены. Исходные working tree и cache при восстановлении не читались. Старый `original-source-restore-v1` Bootstrap HOLD/UNKNOWN и прежний full-v9 Source/cache postclosure NOT_RUN сохраняются отдельно. Публичная воспроизводимая дельта полного Source ещё готовится.
+
+Оба первоначальных адресных FAIL и незавершённое наблюдение корня сохранены. Последующие PASS на других ревизиях не превращают историю в один полный успешный прогон. **Полная приёмка остаётся открытой:** окончательный Source, текущий CLI inventory и безопасный cache handoff, 14 migration + 2 canonical controls в обоих режимах, обе обязательные полные команды, три stderr-сценария и исходный оставшийся expected-refusal control ещё требуют собственных результатов.
+
+Прежние утверждения об отсутствии двух объектов и неполученной истории ниже относятся к более раннему поиску в тогда доступной области. Они сохранены как история; новая найденная область и полученные байты описаны в двух капсулах выше. Весь прежний отчёт на опубликованном `513898c2029fb29dd7f15ce3598f518e42666f7b`, включая независимое продолжение A–D и старые full-v8/full-v9 FAIL/UNKNOWN, сохранён побайтно удалением только этой вставки. Слияние не выполнялось.
+<!-- recovered-original-cli-history-20261128:end -->
+
 <!-- cache-acceptance-recovery-20261128:start -->
 <a id="cache-acceptance-recovery-20261128"></a>
 ## Восстановление Source4 и полной приёмки — 28 ноября 2026, UTC

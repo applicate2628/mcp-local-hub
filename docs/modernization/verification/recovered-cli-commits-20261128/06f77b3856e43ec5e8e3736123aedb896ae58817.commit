@@ -1,0 +1,16 @@
+tree 645fd0dd7281cbf66a334500fe8aa31cd9469885
+parent 5ad374eb60cadb8ad56ea167e3fb06edb44bdc18
+author applicate2628 <dima_den@inbox.ru> 1795727519 +0300
+committer applicate2628 <dima_den@inbox.ru> 1795727519 +0300
+
+test(cli): settle fixture workers and prepare independent upgrade images
+
+Join supervisor command and controller lifetimes before fixture cleanup,
+observe the normal respawn through the existing spawn seam, and copy the
+qualified executable into an independent native fixture file with Windows
+long-path handling. Harden the separately created settings parent with the
+existing test helper.
+
+Preserve assertions, deadlines, production behavior and the existing public
+baseline. Scope this commit to five test files; complete regression and
+exact-public-source runtime qualification remain pending.
