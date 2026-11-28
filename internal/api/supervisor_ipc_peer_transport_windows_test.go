@@ -20,6 +20,8 @@ import (
 
 	"github.com/Microsoft/go-winio"
 	"golang.org/x/sys/windows"
+
+	"mcp-local-hub/internal/process"
 )
 
 const peerTransportChildEnv = "MCPHUB_TEST_PEER_TRANSPORT_CHILD"
@@ -109,7 +111,8 @@ func startPeerTransportChild(t *testing.T, stateDir, expectedAddress string, exp
 		t.Fatal(err)
 	}
 	cmd := exec.Command(exe, "-test.run=^TestSupervisorPeerNativeTransportChild$")
-	// No SysProcAttr or breakaway flags: the children inherit Root's managed Job.
+	process.NoConsole(cmd)
+	// No breakaway flags: the children inherit Root's managed Job.
 	for _, entry := range os.Environ() {
 		key, _, _ := strings.Cut(entry, "=")
 		if !strings.EqualFold(key, "MCPHUB_STATE_DIR_OVERRIDE") && !strings.EqualFold(key, peerTransportChildEnv) && !strings.EqualFold(key, callerStartTimeChildStateDirEnv) {

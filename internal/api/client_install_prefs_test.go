@@ -16,6 +16,7 @@ import (
 	"github.com/gofrs/flock"
 
 	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/process"
 )
 
 // tempPrefsPath returns a gui-preferences.yaml path inside a fresh temp dir.
@@ -271,6 +272,7 @@ func TestLSPRouterClientToggleZeroGUIPortCompletes(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestLSPRouterClientToggleZeroGUIPortCompletes$")
+			process.NoConsole(cmd)
 			cmd.Env = lspRouterToggleZeroPortChildEnvironment(os.Environ(), mode, runtime.GOOS == "windows")
 			out, err := cmd.CombinedOutput()
 			if ctx.Err() == context.DeadlineExceeded {
@@ -475,6 +477,7 @@ func TestLSPRouterToggleZeroPortChildPreservesMalformedGORACEDiagnostic(t *testi
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^$")
+	process.NoConsole(cmd)
 	cmd.Env = lspRouterToggleZeroPortChildEnvironment(env, "race-diagnostic", runtime.GOOS == "windows")
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {

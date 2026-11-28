@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"mcp-local-hub/internal/process"
 )
 
 func TestSecureCreateClientConfigParentDir_WindowsRefusesVerifiedComponentJunctionSwap(t *testing.T) {
@@ -83,6 +85,7 @@ func TestSecureCreateClientConfigParentDir_WindowsStrictRefusesBroadenedExisting
 
 func createJunctionForTest(link, target string) error {
 	cmd := exec.Command("cmd", "/c", "mklink", "/J", link, target)
+	process.NoConsole(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("mklink /J: %w: %s", err, strings.TrimSpace(string(out)))

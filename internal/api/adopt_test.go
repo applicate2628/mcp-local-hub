@@ -182,7 +182,7 @@ args = ["version"]
 		EntryName:    entry,
 		Client:       "codex-cli",
 		ManifestName: entry,
-		Port:         9308,
+		Port:         nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 	})
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan: %v", err)
@@ -200,8 +200,8 @@ args = ["version"]
 	if err != nil {
 		t.Fatalf("ParseManifest: %v\n%s", err, manifestBytes)
 	}
-	if m.Name != entry || m.Transport != config.TransportStdioBridge || m.Daemons[0].Port != 9308 {
-		t.Fatalf("manifest = name %q transport %q port %d, want %q stdio-bridge 9308", m.Name, m.Transport, m.Daemons[0].Port, entry)
+	if m.Name != entry || m.Transport != config.TransportStdioBridge || m.Daemons[0].Port != plan.Port {
+		t.Fatalf("manifest = name %q transport %q port %d, want %q stdio-bridge %d", m.Name, m.Transport, m.Daemons[0].Port, entry, plan.Port)
 	}
 	if len(m.ClientBindings) != 1 || m.ClientBindings[0].Client != "codex-cli" {
 		t.Fatalf("client_bindings = %#v, want only codex-cli", m.ClientBindings)
@@ -234,8 +234,8 @@ args = ["version"]
 		t.Fatalf("foreign mcp_servers.keep table was not preserved: %#v", servers)
 	}
 	adopted := servers[entry].(map[string]any)
-	if adopted["url"] != "http://127.0.0.1:9308/mcp" {
-		t.Fatalf("adopted url = %#v, want http://127.0.0.1:9308/mcp", adopted["url"])
+	if wantURL := fmt.Sprintf("http://127.0.0.1:%d/mcp", plan.Port); adopted["url"] != wantURL {
+		t.Fatalf("adopted url = %#v, want %s", adopted["url"], wantURL)
 	}
 	if _, hasCommand := adopted["command"]; hasCommand {
 		t.Fatalf("adopted entry still has command: %#v", adopted)
@@ -261,7 +261,7 @@ args = ["version"]
 		EntryName:    entry,
 		Client:       "codex-cli",
 		ManifestName: entry,
-		Port:         9324,
+		Port:         nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 		Clients:      []string{"codex-cli"},
 	})
 	if err != nil {
@@ -296,7 +296,7 @@ command = "go"
 args = ["version"]
 `, entry))
 			plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
-				EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9325 + i, Clients: []string{"codex-cli"},
+				EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()), Clients: []string{"codex-cli"},
 			})
 			if err != nil {
 				t.Fatalf("BuildAdoptPlan: %v", err)
@@ -364,7 +364,7 @@ args = ["version"]
 	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
 		EntryName: entry,
 		Client:    "codex-cli",
-		Port:      9318,
+		Port:      nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 	})
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan: %v", err)
@@ -459,7 +459,7 @@ args = ["version"]
 		EntryName:    entry,
 		Client:       "codex-cli",
 		ManifestName: entry,
-		Port:         9315,
+		Port:         nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 		Clients:      []string{"claude-code", "codex-cli"},
 	})
 	if err != nil {
@@ -511,7 +511,7 @@ VISIBLE = "not-secret"
 		EntryName:    entry,
 		Client:       "codex-cli",
 		ManifestName: entry,
-		Port:         9309,
+		Port:         nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 	})
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan: %v", err)
@@ -958,7 +958,7 @@ args = ["version"]
 		EntryName:    entry,
 		Client:       "codex-cli",
 		ManifestName: entry,
-		Port:         9316,
+		Port:         nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 		Clients:      []string{"codex-cli"},
 	})
 	if err != nil {
@@ -978,7 +978,7 @@ args = ["version"]
 		EntryName:    entry,
 		Client:       "codex-cli",
 		ManifestName: entry,
-		Port:         9316,
+		Port:         plan.Port,
 		Clients:      []string{"codex-cli"},
 	}); err != nil {
 		t.Fatalf("BuildAdoptPlan after failed adopt: %v", err)
@@ -1059,7 +1059,7 @@ API_TOKEN = "`+literalToken+`"
 		EntryName:    entry,
 		Client:       "codex-cli",
 		ManifestName: entry,
-		Port:         9310,
+		Port:         nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 	})
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan: %v", err)
@@ -1541,7 +1541,7 @@ args = ["version"]
 		EntryName:    entry,
 		Client:       "codex-cli",
 		ManifestName: entry,
-		Port:         9312,
+		Port:         nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 		Clients:      []string{"codex-cli"},
 	})
 	if err != nil {

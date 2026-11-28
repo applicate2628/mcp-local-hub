@@ -1,0 +1,41 @@
+{
+  "group": "api",
+  "source_parent": "858812988833a84368c60fba1540ae601155fa71",
+  "source_parent_tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+  "files": [
+    {
+      "path": "internal/api/intent_audit_caller_oracle_test.go",
+      "bytes": 5807,
+      "sha256": "266da232a605029cb2eb65cf57dcf80ca0d629a4259d6a021b48958d786fe365",
+      "git_blob": "f28b37e15208970e4f1ab1339b30446eae72bc0f"
+    },
+    {
+      "path": "internal/api/main_helper_dispatch_test.go",
+      "bytes": 4137,
+      "sha256": "3f9e37d635d2942fd0f967a11d107fe7657c35fab976d524176d15006299fd95",
+      "git_blob": "05c3c8d831013ebd4114dcb372d55137132ce606"
+    },
+    {
+      "path": "internal/api/main_helper_dispatch_validation_test.go",
+      "bytes": 6651,
+      "sha256": "bcc4636ea0a3c260015e155ed1d8ad2dc287dea93dc2d29b33c3d45bc56d09fd",
+      "git_blob": "86b8a81a3bd8cb0219bd99f8a4aba5899f792bb0"
+    },
+    {
+      "path": "internal/api/main_test.go",
+      "bytes": 16576,
+      "sha256": "2c93ff894595a54b13f4409492a807aae3dba3dda5145af22b191b2bbd8b4cd1",
+      "git_blob": "665f48f9d658fed3708700a30c3d60df3a979bcd"
+    },
+    {
+      "path": "internal/api/secrets_test.go",
+      "bytes": 48066,
+      "sha256": "ad1f93d38e8c4ff3d369779223a7bf4f7686947135a76706bf45494bbc771e79",
+      "git_blob": "ce45e86c6df0cda46e38240dadb03b64b9830b05"
+    }
+  ],
+  "publication_status": "Code commit is retained as the parent of the containing evidence publication",
+  "code_commit": "4177993228bd70c95d61f0e35fe1d8f5b5f2f1ee",
+  "code_tree": "c5a9a64048cf567cf37770d32d148967a0296198",
+  "qualification": "Physical source_parent with exact overlays; no standalone published-head test claim"
+}

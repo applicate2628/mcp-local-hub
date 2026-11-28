@@ -210,6 +210,7 @@ func TestAttachExisting_PublicCLIReceiving(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, bin, args...)
+		process.NoConsole(cmd)
 		cmd.Env = os.Environ()
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr

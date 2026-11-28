@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/process"
 )
 
 const canonicalManifestDirHelperEnv = "MCPHUB_TEST_CANONICAL_MANIFEST_DIR_HELPER"
@@ -46,6 +48,7 @@ func TestCanonicalManifestDirIgnoresExecutableContextAndExistence(t *testing.T) 
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		cmd := exec.CommandContext(ctx, invokingExecutable, "-test.run=^TestCanonicalManifestDirHelperProcess$")
+		process.NoConsole(cmd)
 		cmd.Env = append(os.Environ(), canonicalManifestDirHelperEnv+"="+canonicalExecutable)
 		output, runErr := cmd.CombinedOutput()
 		cancel()

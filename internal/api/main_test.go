@@ -12,6 +12,10 @@ import (
 	"mcp-local-hub/internal/clients"
 )
 
+// apiTestMainRoot owns immutable fixtures shared by tests only while m.Run is
+// active. Their lifetime ends with the existing package-root cleanup below.
+var apiTestMainRoot string
+
 // TestMain installs the supervisor IPC test-pipe discriminator for the whole
 // internal/api test binary. Without it, SupervisorIPCAddress resolves the
 // kernel-authoritative user SID first (supervisor_ipc_address_windows.go) and
@@ -63,14 +67,36 @@ import (
 // os.Exit-safety: defers do NOT run after os.Exit, so cleanup is performed
 // explicitly after capturing m.Run()'s exit code.
 func TestMain(m *testing.M) {
+	dispatch := classifyAPITestHelperDispatch(os.Args, os.Getenv)
+	if dispatch.invalid {
+		_, _ = os.Stderr.WriteString("internal/api TestMain: invalid helper invocation\n")
+		os.Exit(3)
+	}
+
 	// caller_start_time oracle child fast-path. Sentinel-gated, short-circuits
 	// BEFORE m.Run() so the child never runs the suite. It emits one
 	// intent-audit row into a parent-chosen state dir after a deliberate delay,
 	// giving TestIntentAudit_CallerStartTimeAgainstIndependentOracle a process
 	// start time it can check against the PARENT's clock rather than against
 	// the helper under test. Body lives in intent_audit_caller_oracle_test.go.
-	if stateDir := os.Getenv(callerStartTimeChildStateDirEnv); stateDir != "" {
-		runCallerStartTimeOracleChild(stateDir)
+	if dispatch.callerStartTimeStateDir != "" {
+		runCallerStartTimeOracleChild(dispatch.callerStartTimeStateDir)
+		_, _ = os.Stderr.WriteString("internal/api TestMain: caller-start-time helper returned unexpectedly\n")
+		os.Exit(3)
+	}
+
+	// Helpers own only their parent-supplied files or loopback listener. Run
+	// exactly the admitted test before allocating the package fixture: these
+	// children can exit or be reaped without returning through its cleanup.
+	if dispatch.runSelectedTest {
+		code := m.Run()
+		if dispatch.mustExit {
+			_, _ = os.Stderr.WriteString("internal/api TestMain: non-returning helper returned unexpectedly\n")
+			if code == 0 {
+				code = 3
+			}
+		}
+		os.Exit(code)
 	}
 
 	EnableSupervisorIPCTestPipeIsolation()
@@ -246,7 +272,9 @@ func TestMain(m *testing.M) {
 	// internal/clients/config_path_sandbox_audit.go.
 	auditRestore := clients.EnforceSandboxedConfigPaths(tmp)
 
+	apiTestMainRoot = tmp
 	code := m.Run()
+	apiTestMainRoot = ""
 
 	if escapes := auditRestore(); escapes > 0 && code == 0 {
 		code = 1

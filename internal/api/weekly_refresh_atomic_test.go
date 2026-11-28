@@ -26,6 +26,7 @@ import (
 	"github.com/gofrs/flock"
 	"gopkg.in/yaml.v3"
 
+	"mcp-local-hub/internal/process"
 	"mcp-local-hub/internal/scheduler"
 )
 
@@ -772,6 +773,7 @@ func weeklyTypedAPIInventory(t *testing.T) weeklyTypedInventory {
 	}
 	arguments = append(arguments, ".")
 	command := exec.Command(goTool, arguments...)
+	process.HideToolConsole(command)
 	command.Dir = source.sourceDir
 	output, err := command.Output()
 	if err != nil {

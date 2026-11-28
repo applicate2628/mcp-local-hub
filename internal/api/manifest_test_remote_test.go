@@ -435,10 +435,19 @@ func TestSendRemoteInitialize_DisplayURLScrubsExpandedFromError(t *testing.T) {
 // to distinguish context.DeadlineExceeded / net.Error.Timeout for
 // retry/UX decisions.
 func TestSendRemoteInitialize_ScrubbedErrorPreservesChain(t *testing.T) {
+	releaseHandler := make(chan struct{})
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(2 * time.Second)
+		fallback := time.NewTimer(2 * time.Second)
+		defer fallback.Stop()
+		select {
+		case <-releaseHandler:
+		case <-fallback.C:
+		}
 	}))
-	defer srv.Close()
+	defer func() {
+		close(releaseHandler)
+		srv.Close()
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	display := "https://example.com/${secret:TOKEN}/mcp"
@@ -457,11 +466,20 @@ func TestSendRemoteInitialize_ScrubbedErrorPreservesChain(t *testing.T) {
 }
 
 func TestSendRemoteInitialize_RespectsContextDeadline(t *testing.T) {
+	releaseHandler := make(chan struct{})
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(2 * time.Second)
+		fallback := time.NewTimer(2 * time.Second)
+		defer fallback.Stop()
+		select {
+		case <-releaseHandler:
+		case <-fallback.C:
+		}
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
 	}))
-	defer srv.Close()
+	defer func() {
+		close(releaseHandler)
+		srv.Close()
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	start := time.Now()

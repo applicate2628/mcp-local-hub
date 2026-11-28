@@ -33,7 +33,7 @@ url = "http://127.0.0.1:9999/mcp"
 	}
 
 	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9381,
+		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 		CodexProjectRoot: projectRoot, CodexWorkingDir: projectRoot,
 	})
 	if err != nil {
@@ -77,7 +77,7 @@ url = "http://127.0.0.1:9999/mcp"
 	}
 	api := NewAPI()
 	plan, err := api.BuildAdoptPlan(AdoptOpts{
-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9382,
+		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 		CodexProjectRoot: projectRoot, CodexWorkingDir: projectRoot,
 	})
 	if err != nil {
@@ -110,7 +110,7 @@ url = "http://127.0.0.1:9999/mcp"
 		t.Fatalf("read global Codex config before repeat: %v", err)
 	}
 	repeat, err := api.BuildAdoptPlan(AdoptOpts{
-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9382,
+		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: plan.Port,
 		CodexProjectRoot: projectRoot, CodexWorkingDir: projectRoot,
 	})
 	if err != nil {
@@ -165,7 +165,7 @@ url = "http://127.0.0.1:9999/mcp"
 	}
 	api := NewAPI()
 	plan, err := api.BuildAdoptPlan(AdoptOpts{
-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9383,
+		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 		CodexProjectRoot: projectRoot, CodexWorkingDir: projectRoot,
 	})
 	if err != nil {
@@ -210,7 +210,7 @@ url = "http://127.0.0.1:9999/mcp"
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9384, CodexProjectRoot: projectRoot, CodexWorkingDir: projectRoot})
+	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()), CodexProjectRoot: projectRoot, CodexWorkingDir: projectRoot})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ url = "http://127.0.0.1:9999/mcp"
 		t.Fatal(err)
 	}
 	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9385,
+		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 		CodexProjectRoot: projectRoot, CodexWorkingDir: projectRoot,
 	})
 	if err != nil {
@@ -289,7 +289,7 @@ url = "http://127.0.0.1:9999/mcp"
 }
 
 func TestAdoptNonCodexCompatibilityMatrixDoesNotEmitHSettlement(t *testing.T) {
-	for index, clientName := range []string{"claude-code", "cursor"} {
+	for _, clientName := range []string{"claude-code", "cursor"} {
 		t.Run(clientName, func(t *testing.T) {
 			entry := "noncodex-h4-" + strings.ReplaceAll(clientName, "-", "")
 			_, _, stateRoot := setupAdoptTestEnv(t, entry, `[mcp_servers.unrelated]
@@ -307,7 +307,7 @@ args = ["version"]
 			if err := os.WriteFile(client.ConfigPath(), seed, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			port := 9391 + index
+			port := nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())
 			plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
 				EntryName: entry, Client: clientName, ManifestName: entry, Port: port, Clients: []string{clientName},
 			})

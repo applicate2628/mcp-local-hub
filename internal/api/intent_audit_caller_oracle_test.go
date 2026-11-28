@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/process"
 )
 
 // callerStartTimeChildStateDirEnv, when set, makes this test binary act as a
@@ -80,7 +82,8 @@ func TestIntentAudit_CallerStartTimeAgainstIndependentOracle(t *testing.T) {
 	// The oracle sample. Taken as late as possible before spawn.
 	before := time.Now().UTC()
 
-	cmd := exec.Command(os.Args[0], "-test.run=TestIntentAudit_CallerStartTimeAgainstIndependentOracle")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestIntentAudit_CallerStartTimeAgainstIndependentOracle$")
+	process.NoConsole(cmd)
 	cmd.Env = append(os.Environ(),
 		callerStartTimeChildStateDirEnv+"="+stateDir,
 		callerStartTimeChildDelayEnv+"="+strconv.Itoa(int(childDelay/time.Millisecond)),

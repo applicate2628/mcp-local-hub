@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/process"
 )
 
 func TestToolCatalog_KnownKinds(t *testing.T) {
@@ -188,6 +190,7 @@ func captureToolsList(t *testing.T, bin string, args []string, workspace string)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
+	process.HideToolConsole(cmd)
 	// Override CommandContext's default Cancel (a parent-only Process.Kill). On the
 	// ctx deadline, reap the whole process TREE while the root PID is still alive to
 	// anchor taskkill /T's walk — the default kills the root FIRST, after which /T

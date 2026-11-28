@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+
+	"mcp-local-hub/internal/process"
 )
 
 func TestUpgradeFenceTryAcquireBusyThenReacquiresFromInertLeaf(t *testing.T) {
@@ -118,6 +120,7 @@ func TestUpgradeFenceReacquiresAfterHolderProcessDeath(t *testing.T) {
 
 	stateDir := t.TempDir()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestUpgradeFenceReacquiresAfterHolderProcessDeath$")
+	process.NoConsole(cmd)
 	cmd.Env = append(os.Environ(),
 		"MCPHUB_TEST_UPGRADE_FENCE_HOLDER=1",
 		"MCPHUB_TEST_UPGRADE_FENCE_STATE_DIR="+stateDir,

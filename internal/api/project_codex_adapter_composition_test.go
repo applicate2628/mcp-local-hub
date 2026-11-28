@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/process"
 )
 
 // Catches production composition falling back to the adjacent project path
@@ -223,7 +224,9 @@ func (f *projectCodexCompositionFixture) assertForeignExact(t *testing.T, stage 
 
 func createProjectCodexCompositionLink(link, target string) error {
 	if runtime.GOOS == "windows" {
-		output, err := exec.Command("cmd.exe", "/d", "/c", "mklink", "/J", link, target).CombinedOutput()
+		cmd := exec.Command("cmd.exe", "/d", "/c", "mklink", "/J", link, target)
+		process.NoConsole(cmd)
+		output, err := cmd.CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("mklink /J: %w: %s", err, strings.TrimSpace(string(output)))
 		}

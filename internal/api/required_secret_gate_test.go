@@ -108,11 +108,10 @@ func TestRequiredSecretGate_BlocksInstallWithEmptyVault(t *testing.T) {
 // installs (Preflight passes / Ready=true). The vault is seeded with the
 // required key, so the gate is satisfied.
 func TestRequiredSecretGate_SecretSetNoBlock(t *testing.T) {
-	// seedDefaultSecretForTest redirects LOCALAPPDATA/XDG_DATA_HOME to a temp dir
-	// and seeds the vault with the key. preparePreflightBinaryChecks stubs the
-	// canonical mcphub binary + mcphubShortName→"go" so the launcher checks pass.
+	// Isolate the unrelated launcher and port requirements, then seed the real
+	// vault so this test exercises required-secret admission.
+	setupAdmissionParityTest(t)
 	seedDefaultSecretForTest(t, "acedata_api_token", "live-token-value")
-	preparePreflightBinaryChecks(t)
 
 	m := sunoStyleManifest()
 
@@ -290,8 +289,8 @@ func TestRequiredSecretGate_ReadinessBlockingParity(t *testing.T) {
 // TestRequiredSecretGate_ReadinessReadyWhenSet is the parity companion: with the
 // secret SET, the required row is OK and Ready=true (the gate is satisfied).
 func TestRequiredSecretGate_ReadinessReadyWhenSet(t *testing.T) {
+	setupAdmissionParityTest(t)
 	seedDefaultSecretForTest(t, "acedata_api_token", "live-token-value")
-	preparePreflightBinaryChecks(t)
 
 	m := sunoStyleManifest()
 	rep := CheckServerReadiness(m)

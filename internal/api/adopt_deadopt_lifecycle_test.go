@@ -50,7 +50,7 @@ args = ["version"]
 	}
 
 	// 1. ADOPT.
-	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9308})
+	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())})
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan: %v", err)
 	}

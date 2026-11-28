@@ -203,7 +203,7 @@ MODE = "project"
 
 func TestPrintAdoptPlanProjectSourceUsesProjectTargetText(t *testing.T) {
 	fixture := newProjectAdoptPlanFixture(t, "project-preview", "[mcp_servers.graphify]\ncommand = \"graphify\"\nargs = [\"--mcp\"]\n")
-	plan, err := NewAPI().BuildAdoptPlan(projectAdoptPlanOpts(fixture, "graphify", 9308))
+	plan, err := NewAPI().BuildAdoptPlan(projectAdoptPlanOpts(fixture, "graphify", nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())))
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan(project): %v", err)
 	}
@@ -234,11 +234,11 @@ func TestBuildAdoptPlanProjectSourceDerivesDistinctSameNameIdentities(t *testing
 	const body = "[mcp_servers.graphify]\ncommand = \"graphify\"\nargs = [\"--mcp\"]\n"
 	fixtureA := newProjectAdoptPlanFixture(t, "project-a", body)
 	fixtureB := newProjectAdoptPlanFixture(t, "project-b", body)
-	planA, err := NewAPI().BuildAdoptPlan(projectAdoptPlanOpts(fixtureA, "graphify", 9305))
+	planA, err := NewAPI().BuildAdoptPlan(projectAdoptPlanOpts(fixtureA, "graphify", nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())))
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan(project A): %v", err)
 	}
-	planB, err := NewAPI().BuildAdoptPlan(projectAdoptPlanOpts(fixtureB, "graphify", 9306))
+	planB, err := NewAPI().BuildAdoptPlan(projectAdoptPlanOpts(fixtureB, "graphify", nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())))
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan(project B): %v", err)
 	}
@@ -308,7 +308,7 @@ func TestBuildAdoptPlanGlobalLegacyBehaviorRemainsUnchanged(t *testing.T) {
 		EntryName:    "global-demo",
 		Client:       "codex-cli",
 		ManifestName: "global-demo",
-		Port:         9304,
+		Port:         nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 		Clients:      []string{"codex-cli"},
 		ScanOpts: ScanOpts{ConfigPaths: map[string]string{
 			"codex-cli": globalConfig,
