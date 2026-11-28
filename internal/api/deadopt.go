@@ -411,7 +411,8 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 		return nil, fmt.Errorf("de-adopt refused: manifest %q has no executable provenance", plan.ManifestName)
 	}
 
-	if adoptRecordHasSharedStdioTarget(*plan.provenance) {
+	sharedStdio := adoptRecordHasSharedStdioTarget(*plan.provenance)
+	if sharedStdio {
 		if _, _, err := ResolveCodexSharedStdioActionContext(opts.Context, nil); err != nil {
 			return nil, err
 		}
@@ -442,7 +443,11 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 	// order, so the lease is always released before caller I/O or event-log I/O.
 	defer func() {
 		if narration.Len() != 0 {
-			_, _ = callerWriter.Write(narration.Bytes())
+			if sharedStdio {
+				err = errors.Join(err, writeDeAdoptSharedStdioNarration(callerWriter, narration.Bytes()))
+			} else {
+				_, _ = callerWriter.Write(narration.Bytes())
+			}
 		}
 		for _, emit := range pendingEvents {
 			emit()
@@ -930,6 +935,31 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 	})
 	fmt.Fprintf(w, "De-adopted manifest %q: restored=%d accepted=%d failed=%d.\n", plan.ManifestName, len(report.Restored), len(report.Accepted), len(report.Failed))
 	return report, nil
+}
+
+// deAdoptCallerDeliveryError keeps caller-controlled writer diagnostics private
+// while preserving the original error for local errors.Is and errors.As checks.
+type deAdoptCallerDeliveryError struct {
+	cause error
+}
+
+func (deAdoptCallerDeliveryError) Error() string { return "de-adopt caller narration delivery failed" }
+
+func (e deAdoptCallerDeliveryError) Unwrap() error { return e.cause }
+
+func (e deAdoptCallerDeliveryError) Format(s fmt.State, _ rune) {
+	fmt.Fprint(s, e.Error())
+}
+
+func writeDeAdoptSharedStdioNarration(w io.Writer, narration []byte) error {
+	n, err := w.Write(narration)
+	if err == nil && n != len(narration) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		return newAdoptStageError("result-publication", "committed_unverified", deAdoptCallerDeliveryError{cause: err})
+	}
+	return nil
 }
 
 // executeProviderRecoveryDeAdopt owns the explicit operator recovery path for

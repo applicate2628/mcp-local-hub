@@ -32,6 +32,8 @@ type SupervisorIntentFile struct {
 	// supervisor-intent files written before owner-mode support decode as the
 	// historic GUI owner. New writes record an explicit value.
 	OwnerMode OwnerMode `json:"owner_mode,omitempty"`
+	// BackendRunHold belongs only to the intentional supervisor lifecycle owner.
+	BackendRunHold SupervisorBackendRunHold `json:"backend_run_hold,omitzero"`
 
 	// Stops is the v0.6 Phase 4-E dual-intent collapse target: the
 	// per-task operator-stop / quarantine override sub-block that used
@@ -255,6 +257,24 @@ func ReadSupervisorIntent(path string) (*SupervisorIntentFile, error) {
 	return f, err
 }
 
+// ReadSupervisorIntentIfPresentObserved accepts only a qualified missing leaf
+// as absence. A caller that requires exclusion holds the original intent lease.
+func ReadSupervisorIntentIfPresentObserved(ctx context.Context, path string) (*SupervisorIntentFile, error) {
+	cap := stateFileReadCapBytes(path)
+	raw, reader, err := ReadStateFileInodeAnchoredObserved(ctx, path, cap)
+	if err != nil {
+		if absenceErr := reader.ValidateAbsence(ctx, path, StateFileReadLeafNotFound); absenceErr != nil {
+			return nil, errors.Join(err, absenceErr)
+		}
+		return nil, nil
+	}
+	if err := reader.Validate(ctx, path, cap, raw, stateFileReadObservationDigest(raw)); err != nil {
+		return nil, err
+	}
+	intent, _, err := decodeSupervisorIntentFile(path, raw)
+	return intent, err
+}
+
 var ErrSupervisorRuntimeIntentUnavailable = errors.New("current supervisor runtime intent unavailable")
 
 // SupervisorRuntimeIntent is one operation-local observation, never persisted.
@@ -359,6 +379,11 @@ func decodeOriginalSupervisorIntentFile(path string, raw []byte) (*SupervisorInt
 	if err := json.Unmarshal(raw, &f); err != nil {
 		return nil, fmt.Errorf("decode %s: %w", path, err)
 	}
+	if !f.BackendRunHold.IsZero() {
+		if err := validateSupervisorBackendHoldDocument(raw); err != nil {
+			return nil, err
+		}
+	}
 	if err := validatePreparedSupervisorIntent(&f); err != nil {
 		return nil, err
 	}
@@ -427,6 +452,11 @@ func WriteSupervisorIntent(path string, f *SupervisorIntentFile) (err error) {
 }
 
 func marshalSupervisorIntent(f *SupervisorIntentFile) ([]byte, error) {
+	if f != nil && !f.BackendRunHold.IsZero() {
+		if err := f.BackendRunHold.validate(); err != nil {
+			return nil, err
+		}
+	}
 	if f != nil && f.SerenaPreparedConsumers != nil {
 		f.SerenaPreparedConsumers.canonicalize()
 	}
@@ -725,6 +755,22 @@ func UnifiedStopsFile(supervisorIntent *SupervisorIntentFile, _ *DaemonIntentFil
 // without the lock loses the cross-process write serialization
 // WriteStateFileAtomic otherwise provides.
 func writeSupervisorIntentLockHeld(path string, f *SupervisorIntentFile) error {
+	if f == nil {
+		return fmt.Errorf("nil supervisor intent")
+	}
+	var hold SupervisorBackendRunHold
+	if _, statErr := os.Lstat(path); statErr == nil {
+		current, err := ReadSupervisorIntent(path)
+		if err != nil {
+			return err
+		}
+		hold = current.BackendRunHold
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return statErr
+	}
+	if err := preserveSupervisorBackendRunHold(hold, f); err != nil {
+		return err
+	}
 	raw, err := marshalNextSupervisorIntent(f)
 	if err != nil {
 		return err
@@ -733,6 +779,15 @@ func writeSupervisorIntentLockHeld(path string, f *SupervisorIntentFile) error {
 		return fmt.Errorf("mkdir: %w", err)
 	}
 	return secureWriteStateFileWithOperatorOpt(path, raw)
+}
+
+func cloneSupervisorIntentReplacement(current, desired *SupervisorIntentFile) (*SupervisorIntentFile, error) {
+	replacement := cloneSupervisorIntentFile(desired)
+	replacement.IntentGeneration = current.IntentGeneration
+	if err := preserveSupervisorBackendRunHold(current.BackendRunHold, replacement); err != nil {
+		return nil, err
+	}
+	return replacement, nil
 }
 
 func marshalNextSupervisorIntent(f *SupervisorIntentFile) ([]byte, error) {

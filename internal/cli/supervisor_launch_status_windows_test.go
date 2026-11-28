@@ -22,6 +22,7 @@ import (
 	"golang.org/x/sys/windows"
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/apitest"
+	"mcp-local-hub/internal/process"
 )
 
 const supervisorPeerSenderChildEnv = "MCPHUB_TEST_PEER_SENDER_CHILD"
@@ -360,6 +361,7 @@ func startSupervisorPeerSenderFixture(t *testing.T, ctx context.Context, deadlin
 		t.Fatal(err)
 	}
 	cmd := exec.Command(exe, "-test.run=^TestSupervisorPeerSenderChild$")
+	process.NoConsole(cmd)
 	cmd.Env = append(os.Environ(), supervisorPeerSenderChildEnv+"=1")
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	input, err := cmd.StdinPipe()

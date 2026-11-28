@@ -83,7 +83,15 @@ var reservedDaemonOverlayControlVars = []string{
 	daemonOverlayPathEnvVar,
 }
 
+var errPreparedDaemonRequiresSerena = errors.New("prepared daemon launch requires Serena")
+
 func newDaemonCmdReal() *cobra.Command {
+	return newDaemonCmdWithLaunchBarrier(nil)
+}
+
+// beforeEffects is an operation-local barrier immediately before daemon launch
+// preparation. Tests use it to verify the refusal boundary without launching.
+func newDaemonCmdWithLaunchBarrier(beforeEffects func() error) *cobra.Command {
 	var preparedTask preparedTaskFlag
 	var preparedDeadline preparedDeadlineFlag
 	var server, daemonName string
@@ -117,11 +125,19 @@ need to call this manually.
 See also: install, logs, restart, status.`,
 		RunE: func(cmd *cobra.Command, args []string) (err error) {
 			if preparedTask.count != 0 || preparedDeadline.count != 0 {
+				if server != api.SerenaServerName {
+					return errPreparedDaemonRequiresSerena
+				}
 				start, cancel, contextErr := preparedFlagContext(cmd.Context(), &preparedTask, &preparedDeadline)
 				if contextErr != nil {
 					return contextErr
 				}
 				defer cancel()
+				if beforeEffects != nil {
+					if err := beforeEffects(); err != nil {
+						return err
+					}
+				}
 				a := api.NewAPIWithSerenaPreparation(newSerenaPreparationAssembly())
 				launch, launchErr := a.ObservePreparedSerenaLaunch(start, preparedTask.value)
 				if launchErr != nil {
@@ -139,64 +155,27 @@ See also: install, logs, restart, status.`,
 			if server == "" || daemonName == "" {
 				return fmt.Errorf("--server and --daemon are required")
 			}
-			// DM-3: capture launch failure into the daemon log file. Without
-			// this wrap, pre-child errors (manifest open/parse, env resolve,
-			// host construction, port bind, etc.) only reach mcphub's own
-			// stderr — which Task Scheduler does NOT preserve. last_result=1
-			// with no log entry leaves the user with no way to diagnose
-			// (this happened with serena: never figured out the cause). The
-			// wrap appends a timestamped diagnostic line so the cause
-			// survives in the standard daemon log path. logPath must be
-			// computed BEFORE the manifest load so manifest-open failures
-			// also reach the log.
+			m, spec, launchContext, err := selectFixedDaemonLaunch(cmd.Context(), server, daemonName)
+			if errors.Is(err, config.ErrInvalidDaemonMCPStdioState) ||
+				errors.Is(err, config.ErrAmbiguousDaemonMCPStdioState) ||
+				errors.Is(err, daemon.ErrIsolatedStdioUnavailable) {
+				return err
+			}
+			if beforeEffects != nil {
+				if barrierErr := beforeEffects(); barrierErr != nil {
+					return barrierErr
+				}
+			}
+			// DM-3 preserves ordinary manifest and launch failures. Refused
+			// protected selections return before this file diagnostic is armed.
 			logPath := filepath.Join(logBaseDir(), server+"-"+daemonName+".log")
 			defer func() {
 				if err != nil {
 					writeLaunchFailure(logPath, server, daemonName, err)
 				}
 			}()
-			// Validate the requested name before any path resolution.
-			// Without this, a disk-fallback path that joins `server`
-			// into a filesystem location would re-open the manifest-
-			// name confused-deputy hardening from PR #51 S4.
-			if err := api.CheckManifestName(server); err != nil {
-				return err
-			}
-			// Load manifest bytes embed-first with disk fallback so a
-			// GUI-created manifest can be installed and launched
-			// immediately without rebuild. The fallback goes through
-			// api.NewAPI().ManifestGet, which itself runs
-			// CheckManifestName and the embed-first/disk-fallback
-			// composition in one place. After parse, cross-check that
-			// the manifest's own `name` field equals the requested
-			// server: a disk manifest at servers/<server>/manifest.yaml
-			// could legally name itself something else, and trusting
-			// that name in scheduler/log paths would split-brain disk
-			// vs embed lookups.
-			raw, err := api.NewAPI().ManifestGet(server)
-			if err != nil {
-				return fmt.Errorf("load manifest %s: %w", server, err)
-			}
-			launchContext, err := daemon.CaptureStdioLaunchContext(cmd.Context())
 			if err != nil {
 				return err
-			}
-			m, err := launchContext.ParseManifest(bytes.NewReader([]byte(raw)))
-			if err != nil {
-				return err
-			}
-			if m.Name != server {
-				return fmt.Errorf("manifest name %q does not match requested server %q (refuse to launch with mismatched identity)", m.Name, server)
-			}
-			var spec *config.DaemonSpec
-			for i := range m.Daemons {
-				if m.Daemons[i].Name == daemonName {
-					spec = &m.Daemons[i]
-					break
-				}
-			}
-			if spec == nil {
-				return fmt.Errorf("no daemon %q in %s manifest", daemonName, server)
 			}
 			// Resolve env. A vault that EXISTS but is unreadable is fatal ONLY
 			// when this manifest actually uses secret refs — a secretless
@@ -386,6 +365,33 @@ See also: install, logs, restart, status.`,
 	// stuck/quarantined daemon, then force a respawn through the supervisor.
 	c.AddCommand(newDaemonRecoverCmd())
 	return c
+}
+
+// selectFixedDaemonLaunch reads the selected manifest and settles descriptor
+// refusal before the caller can reach any launch preparation.
+func selectFixedDaemonLaunch(ctx context.Context, server, daemonName string) (*config.ServerManifest, *config.DaemonSpec, *daemon.StdioLaunchContext, error) {
+	if err := api.CheckManifestName(server); err != nil {
+		return nil, nil, nil, err
+	}
+	raw, err := api.NewAPI().ManifestGet(server)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("load manifest %s: %w", server, err)
+	}
+	launchContext, err := daemon.CaptureStdioLaunchContext(ctx)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	m, spec, err := launchContext.ParseFixedDaemonLaunchManifest(bytes.NewReader([]byte(raw)), server, daemonName)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if m.Name != server {
+		return nil, nil, nil, fmt.Errorf("manifest name %q does not match requested server %q (refuse to launch with mismatched identity)", m.Name, server)
+	}
+	if spec == nil {
+		return nil, nil, nil, fmt.Errorf("no daemon %q in %s manifest", daemonName, server)
+	}
+	return m, spec, launchContext, nil
 }
 
 // cstLaunchCapabilityConfig admits only the exact supervisor-tracked CST host.

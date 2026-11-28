@@ -1,6 +1,8 @@
 package api
 
 import (
+	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -240,5 +242,98 @@ func TestParseCatalog_NativeHTTPEntryAllowedWithCommand(t *testing.T) {
 	}
 	if cat.Entries[0].Transport != "native-http" {
 		t.Errorf("transport round-trip failed: %q", cat.Entries[0].Transport)
+	}
+}
+
+// TestParseCatalog_ManagedRecipeCodec exercises selector compatibility in fresh catalogs.
+func TestParseCatalog_ManagedRecipeCodec(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		raw     string
+		wantErr bool
+	}{
+		{"schema zero", `{"schema_version":"0","entries":[]}`, true},
+		{"ordinary v3 entry", `{"schema_version":"3","entries":[{"id":"ordinary","name":"Ordinary","transport":"stdio","command":"npx"}]}`, false},
+		{"official selector", `{"schema_version":"3","entries":[{"id":"trail-code","name":"Trail","transport":"stdio","managed_recipe":"official-trail"}]}`, false},
+		{"docs-only v2 behavior carries forward", `{"schema_version":"3","entries":[],"docs_only":[{"id":"manual","name":"Manual","homepage":"https://example.com","summary":"Manual setup"}]}`, false},
+		{"selector empty", `{"schema_version":"3","entries":[{"id":"trail-code","name":"Trail","transport":"stdio","managed_recipe":""}]}`, true},
+		{"selector null", `{"schema_version":"3","entries":[{"id":"trail-code","name":"Trail","transport":"stdio","managed_recipe":null}]}`, true},
+		{"unknown recipe", `{"schema_version":"3","entries":[{"id":"trail-code","name":"Trail","transport":"stdio","managed_recipe":"other"}]}`, true},
+		{"malformed selector type", `{"schema_version":"3","entries":[{"id":"trail-code","name":"Trail","transport":"stdio","managed_recipe":{}}]}`, true},
+		{"selector on schema two", `{"schema_version":"2","entries":[{"id":"trail-code","name":"Trail","transport":"stdio","managed_recipe":"official-trail"}]}`, true},
+		{"non stdio selector", `{"schema_version":"3","entries":[{"id":"trail-code","name":"Trail","transport":"native-http","managed_recipe":"official-trail"}]}`, true},
+		{"command override", `{"schema_version":"3","entries":[{"id":"trail-code","name":"Trail","transport":"stdio","managed_recipe":"official-trail","command":"npx"}]}`, true},
+		{"empty command key override", `{"schema_version":"3","entries":[{"id":"trail-code","name":"Trail","transport":"stdio","managed_recipe":"official-trail","command":""}]}`, true},
+		{"args override", `{"schema_version":"3","entries":[{"id":"trail-code","name":"Trail","transport":"stdio","managed_recipe":"official-trail","args":[]}]}`, true},
+		{"env override", `{"schema_version":"3","entries":[{"id":"trail-code","name":"Trail","transport":"stdio","managed_recipe":"official-trail","env":{}}]}`, true},
+		{"folded selector", `{"schema_version":"3","ENTRIES":[{"id":"trail-code","name":"Trail","transport":"stdio","MANAGED_RECIPE":"official-trail"}]}`, false},
+		{"folded null override", `{"schema_version":"3","entries":[{"id":"trail-code","name":"Trail","transport":"stdio","managed_recipe":"official-trail","argſ":null}]}`, true},
+		{"null entry retains override", `{"schema_version":"3","entries":[{"id":"trail-code","name":"Trail","transport":"stdio","managed_recipe":"official-trail","env":null}],"entries":[null]}`, true},
+		{"empty entries reset", `{"schema_version":"3","entries":[{"command":null}],"entries":[],"entries":[{"id":"trail-code","name":"Trail","transport":"stdio","managed_recipe":"official-trail"}]}`, false},
+		{"null entries reset", `{"schema_version":"3","entries":[{"command":null}],"entries":null,"entries":[{"id":"trail-code","name":"Trail","transport":"stdio","managed_recipe":"official-trail"}]}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseMarketplaceCatalog([]byte(tc.raw))
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("ParseMarketplaceCatalog error = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestParseCatalog_RejectsDuplicateEntriesPresenceMismatch verifies that a
+// repeated entries array retains selector presence when it reuses entries.
+func TestParseCatalog_RejectsDuplicateEntriesPresenceMismatch(t *testing.T) {
+	raw := `{"schema_version":"3","entries":[{"id":"trail-code","name":"Trail","transport":"stdio","managed_recipe":null,"command":"candidate-command"}],"entries":[{}]}`
+	parsers := map[string]func([]byte) (*MarketplaceCatalog, error){
+		"fetch":  ParseMarketplaceCatalog,
+		"strict": ParseMarketplaceCatalogStrict,
+	}
+	for name, parse := range parsers {
+		t.Run(name, func(t *testing.T) {
+			cat, err := parse([]byte(raw))
+			if err == nil || cat != nil || !strings.Contains(err.Error(), "managed_recipe cannot be null") {
+				t.Fatalf("duplicate entries member accepted: catalog=%+v err=%v", cat, err)
+			}
+		})
+	}
+}
+
+// TestParseCatalog_RejectsNullFinalManagedRecipe checks that a final raw null
+// selector cannot retain the typed value from an earlier duplicate member.
+func TestParseCatalog_RejectsNullFinalManagedRecipe(t *testing.T) {
+	raw := `{"schema_version":"3","entries":[{"id":"trail-code","name":"Trail","transport":"stdio","managed_recipe":"official-trail","managed_recipe":null}]}`
+	cat, err := ParseMarketplaceCatalog([]byte(raw))
+	if err == nil || cat != nil || !strings.Contains(err.Error(), "managed_recipe cannot be null") {
+		t.Fatalf("null final selector accepted: catalog=%+v err=%v", cat, err)
+	}
+}
+
+func TestParseCatalog_OrdinaryDuplicateMemberSemantics(t *testing.T) {
+	const valid = `{"schema_version":"2","schema_version":null,"entries":[{"id":"x","name":"X","transport":"stdio","command":"npx","command":null}],"entries":[{}]}`
+	const invalid = `{"schema_version":"2","entries":[{"id":"x","name":"X","transport":"stdio","command":{},"command":"npx"}],"entries":[{}]}`
+	var typed MarketplaceCatalog
+	var want *json.UnmarshalTypeError
+	if err := json.NewDecoder(strings.NewReader(invalid)).Decode(&typed); !errors.As(err, &want) {
+		t.Fatalf("invalid fixture must produce a typed error: %v", err)
+	}
+	for _, tc := range []struct {
+		name  string
+		parse func([]byte) (*MarketplaceCatalog, error)
+	}{
+		{"fetch", ParseMarketplaceCatalog},
+		{"strict", ParseMarketplaceCatalogStrict},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cat, err := tc.parse([]byte(valid))
+			if err != nil || cat == nil || cat.SchemaVersion != "2" || len(cat.Entries) != 1 || cat.Entries[0].Command != "npx" {
+				t.Fatalf("ordinary values lost in duplicate members: catalog=%+v err=%v", cat, err)
+			}
+			cat, err = tc.parse([]byte(invalid))
+			var got *json.UnmarshalTypeError
+			if cat != nil || !errors.As(err, &got) || *got != *want || err.Error() != "decode catalog: "+want.Error() {
+				t.Fatalf("catalog=%+v error=%v typed error=%+v, want original typed error %+v", cat, err, got, want)
+			}
+		})
 	}
 }
